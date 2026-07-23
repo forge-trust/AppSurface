@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.PackageIndex;
 
@@ -29,7 +30,8 @@ internal interface ICoverageCliConsumerProofWorkflow
 /// <remarks>
 /// <para>
 /// The proof runs before package publication. It selects the already validated CLI <c>.nupkg</c>, installs it with a
-/// local-first NuGet configuration, creates a clean xUnit fixture plus an excluded failing sentinel, and executes <c>coverage run</c>,
+/// local-first NuGet configuration, creates a clean xUnit fixture plus an excluded failing sentinel, and executes healthy,
+/// warning, watchdog-failure, ordinary-failure, and fully disabled <c>coverage run</c> scenarios before exercising
 /// <c>coverage merge</c>, a passing <c>coverage gate</c>, and an intentionally failing <c>coverage gate</c>.
 /// </para>
 /// <para>
@@ -200,10 +202,40 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             return BuildReport(context, commands, artifacts);
         }
 
+        if (!await RunRequiredAsync(ToolCommand(
+            context,
+            ["coverage", "run", "--help"],
+            "appsurface coverage run --help",
+            "checking packaged watchdog option discovery")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        var coverageRunHelp = commands[^1];
+        var coverageRunHelpText = coverageRunHelp.StandardOutput + Environment.NewLine + coverageRunHelp.StandardError;
+        var missingWatchdogOptions = new[] { "--watchdog", "--heartbeat-interval", "--no-progress-timeout" }
+            .Where(option => !coverageRunHelpText.Contains(option, StringComparison.Ordinal))
+            .ToArray();
+        if (missingWatchdogOptions.Length > 0)
+        {
+            commands[^1] = coverageRunHelp with
+            {
+                Succeeded = false,
+                FailureReason = $"Packaged coverage run help omitted watchdog option(s): {string.Join(", ", missingWatchdogOptions)}."
+            };
+            return BuildReport(context, commands, artifacts);
+        }
+
         var coverageMergedDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-merged");
         if (!await RunRequiredAsync(ToolCommand(
             context,
-            ["coverage", "run", "--solution", solutionPath, "--exclude-test-project", "**/Smoke.Browser.Tests.csproj", "--include", "[Smoke]*", "--output", coverageMergedDirectory],
+            [
+                "coverage", "run",
+                "--solution", solutionPath,
+                "--exclude-test-project", "**/Smoke.Browser.Tests.csproj",
+                "--include", "[Smoke]*",
+                "--output", coverageMergedDirectory,
+            ],
             "appsurface coverage run",
             "running packaged coverage CLI")))
         {
@@ -230,7 +262,206 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
 
         artifacts.AddRange(CheckCoverageRunArtifacts(coverageMergedDirectory));
         artifacts.Add(CheckExcludedProjectArtifacts(coverageMergedDirectory, "Smoke.Browser.Tests"));
-        if (artifacts.Any(artifact => !artifact.Exists))
+        if (artifacts.Any(artifact => !artifact.Satisfied))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        string fixtureOutputDirectory;
+        try
+        {
+            fixtureOutputDirectory = ResolveFixtureOutputDirectory(Path.Join(fixtureDirectory, "Smoke.Tests"));
+        }
+        catch (InvalidOperationException)
+        {
+            commands[^1] = coverageRunCommand with
+            {
+                Succeeded = false,
+                FailureReason = "Coverage run did not produce one unambiguous Smoke.Tests test-host output directory."
+            };
+            return BuildReport(context, commands, artifacts);
+        }
+
+        var quietTrigger = Path.Join(fixtureOutputDirectory, "watchdog-quiet.trigger");
+        var noisyTrigger = Path.Join(fixtureOutputDirectory, "watchdog-noisy.trigger");
+        var failureTrigger = Path.Join(fixtureOutputDirectory, "ordinary-failure.trigger");
+        Directory.CreateDirectory(fixtureOutputDirectory);
+        await File.WriteAllTextAsync(quietTrigger, string.Empty, cancellationToken);
+        var watchdogWarnDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-watchdog-warn");
+        var watchdogWarnResult = await RunCommandAsync(
+            ToolCommand(
+                context,
+                [
+                    "coverage", "run",
+                    "--test-project", Path.Join(fixtureDirectory, "Smoke.Tests", "Smoke.Tests.csproj"),
+                    "--output", watchdogWarnDirectory,
+                    "--no-build", "--no-restore",
+                    "--watchdog", "warn",
+                    "--heartbeat-interval", "100ms",
+                    "--no-progress-timeout", "1s",
+                ],
+                "appsurface coverage run watchdog warn",
+                "verifying packaged heartbeat and warning evidence"),
+            logsDirectory,
+            commands.Count + 1,
+            ExpectedCommandExitCode.Zero,
+            cancellationToken);
+        commands.Add(RequireOutput(
+            watchdogWarnResult,
+            ["Coverage heartbeat:", "Coverage watchdog warning:"],
+            "Warn-mode proof did not emit both a heartbeat and a warning."));
+        var watchdogWarnArtifact = CheckWatchdogArtifact(
+            Path.Join(watchdogWarnDirectory, "coverage-watchdog.json"),
+            "coverage run watchdog warning incident",
+            "warning",
+            "warn",
+            diagnosticCode: null,
+            cleanupOutcomes: [("not-requested", null)]);
+        artifacts.Add(watchdogWarnArtifact);
+        if (!commands[^1].Succeeded || !watchdogWarnArtifact.Satisfied)
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        var watchdogFailDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-watchdog-fail");
+        var watchdogFailResult = await RunCommandAsync(
+            ToolCommand(
+                context,
+                [
+                    "coverage", "run",
+                    "--test-project", Path.Join(fixtureDirectory, "Smoke.Tests", "Smoke.Tests.csproj"),
+                    "--output", watchdogFailDirectory,
+                    "--no-build", "--no-restore",
+                    "--watchdog", "fail",
+                    "--heartbeat-interval", "100ms",
+                    "--no-progress-timeout", "1s",
+                ],
+                "appsurface coverage run watchdog fail",
+                "verifying packaged no-progress exit 124"),
+            logsDirectory,
+            commands.Count + 1,
+            ExpectedCommandExitCode.Watchdog,
+            cancellationToken);
+        commands.Add(RequireOutput(
+            watchdogFailResult,
+            ["ASCOV121"],
+            "Fail-mode proof exited 124 without the ASCOV121 diagnostic."));
+        var watchdogArtifact = CheckWatchdogArtifact(
+            Path.Join(watchdogFailDirectory, "coverage-watchdog.json"),
+            "coverage run watchdog terminal incident",
+            "terminated",
+            "fail",
+            diagnosticCode: "ASCOV121",
+            cleanupOutcomes:
+            [
+                ("complete", null),
+                ("failed", "kill-failed"),
+                ("deadline-exceeded", "cleanup-incomplete"),
+                ("deadline-exceeded", "root-timeout"),
+                ("deadline-exceeded", "kill-failed"),
+            ]);
+        artifacts.Add(watchdogArtifact);
+        if (!commands[^1].Succeeded || !watchdogArtifact.Satisfied)
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        File.Delete(quietTrigger);
+        await File.WriteAllTextAsync(noisyTrigger, string.Empty, cancellationToken);
+        var watchdogNoisyDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-watchdog-noisy");
+        var watchdogNoisyResult = await RunCommandAsync(
+            ToolCommand(
+                context,
+                [
+                    "coverage", "run",
+                    "--test-project", Path.Join(fixtureDirectory, "Smoke.Tests", "Smoke.Tests.csproj"),
+                    "--output", watchdogNoisyDirectory,
+                    "--no-build", "--no-restore",
+                    "--watchdog", "fail",
+                    "--heartbeat-interval", "100ms",
+                    "--no-progress-timeout", "2s",
+                ],
+                "appsurface coverage run watchdog noisy",
+                "verifying raw process output rearms the packaged watchdog"),
+            logsDirectory,
+            commands.Count + 1,
+            ExpectedCommandExitCode.Zero,
+            cancellationToken);
+        File.Delete(noisyTrigger);
+        commands.Add(RequireOutput(
+            RejectOutput(
+                watchdogNoisyResult,
+                ["Coverage watchdog warning:", "ASCOV121"],
+                "Noisy-output proof was incorrectly classified as stalled."),
+            ["Coverage heartbeat:"],
+            "Noisy-output proof did not emit a heartbeat."));
+        artifacts.Add(CheckAbsentArtifact(
+            Path.Join(watchdogNoisyDirectory, "coverage-watchdog.json"),
+            "noisy coverage run produced no watchdog incident"));
+        if (!commands[^1].Succeeded || artifacts.Any(artifact => !artifact.Satisfied))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        await File.WriteAllTextAsync(failureTrigger, string.Empty, cancellationToken);
+        var ordinaryFailureDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-ordinary-failure");
+        var ordinaryFailureResult = await RunCommandAsync(
+            ToolCommand(
+                context,
+                [
+                    "coverage", "run",
+                    "--test-project", Path.Join(fixtureDirectory, "Smoke.Tests", "Smoke.Tests.csproj"),
+                    "--output", ordinaryFailureDirectory,
+                    "--no-build", "--no-restore",
+                    "--watchdog", "fail",
+                    "--heartbeat-interval", "100ms",
+                    "--no-progress-timeout", "30s",
+                ],
+                "appsurface coverage run ordinary failure",
+                "verifying ordinary test failures remain distinct from watchdog termination"),
+            logsDirectory,
+            commands.Count + 1,
+            ExpectedCommandExitCode.OrdinaryFailure,
+            cancellationToken);
+        File.Delete(failureTrigger);
+        commands.Add(ordinaryFailureResult);
+        artifacts.Add(CheckAbsentArtifact(
+            Path.Join(ordinaryFailureDirectory, "coverage-watchdog.json"),
+            "ordinary coverage failure produced no watchdog incident"));
+        if (!ordinaryFailureResult.Succeeded || artifacts.Any(artifact => !artifact.Satisfied))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        await File.WriteAllTextAsync(quietTrigger, string.Empty, cancellationToken);
+        var watchdogOffDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-watchdog-off");
+        var watchdogOffResult = await RunCommandAsync(
+            ToolCommand(
+                context,
+                [
+                    "coverage", "run",
+                    "--test-project", Path.Join(fixtureDirectory, "Smoke.Tests", "Smoke.Tests.csproj"),
+                    "--output", watchdogOffDirectory,
+                    "--no-build", "--no-restore",
+                    "--watchdog", "off",
+                    "--heartbeat-interval", "0",
+                    "--no-progress-timeout", "1s",
+                ],
+                "appsurface coverage run watchdog off",
+                "verifying the packaged compatibility escape hatch"),
+            logsDirectory,
+            commands.Count + 1,
+            ExpectedCommandExitCode.Zero,
+            cancellationToken);
+        File.Delete(quietTrigger);
+        commands.Add(RejectOutput(
+            watchdogOffResult,
+            ["Coverage heartbeat:", "Coverage watchdog warning:", "ASCOV121"],
+            "Disabled-watchdog proof unexpectedly emitted watchdog output."));
+        artifacts.Add(CheckAbsentArtifact(
+            Path.Join(watchdogOffDirectory, "coverage-watchdog.json"),
+            "disabled watchdog produced no incident artifact"));
+        if (!commands[^1].Succeeded || artifacts.Any(artifact => !artifact.Satisfied))
         {
             return BuildReport(context, commands, artifacts);
         }
@@ -248,7 +479,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         }
 
         artifacts.AddRange(CheckCoverageMergeArtifacts(coverageFanInDirectory));
-        if (artifacts.Any(artifact => !artifact.Exists))
+        if (artifacts.Any(artifact => !artifact.Satisfied))
         {
             return BuildReport(context, commands, artifacts);
         }
@@ -265,7 +496,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         }
 
         artifacts.AddRange(CheckCoverageGateArtifacts(passingGateDirectory, "passing gate"));
-        if (artifacts.Any(artifact => !artifact.Exists))
+        if (artifacts.Any(artifact => !artifact.Satisfied))
         {
             return BuildReport(context, commands, artifacts);
         }
@@ -286,7 +517,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
 
         var failingGateArtifactsMissing = artifacts
             .Where(artifact => artifact.Description.StartsWith("failing gate ", StringComparison.Ordinal)
-                && !artifact.Exists)
+                && !artifact.Satisfied)
             .ToArray();
         if (failingGateArtifactsMissing.Length > 0)
         {
@@ -430,6 +661,39 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             """;
     }
 
+    /// <summary>Resolves the built test-host directory used by the generated watchdog fixture.</summary>
+    /// <param name="projectDirectory">Generated test project directory containing the build output tree.</param>
+    /// <returns>The single directory containing both the project assembly and dependency manifest.</returns>
+    /// <exception cref="ArgumentException"><paramref name="projectDirectory" /> is empty or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The build produced no matching test-host output directory or more than one unambiguous candidate.
+    /// </exception>
+    /// <remarks>
+    /// The proof discovers the actual output instead of assuming a configuration or target framework, so template
+    /// framework changes cannot silently disconnect trigger files from <see cref="AppContext.BaseDirectory" />.
+    /// </remarks>
+    internal static string ResolveFixtureOutputDirectory(string projectDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectDirectory);
+        var projectName = Path.GetFileName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectDirectory)));
+        var outputRoot = Path.Join(projectDirectory, "bin");
+        if (!Directory.Exists(outputRoot))
+        {
+            throw new InvalidOperationException("The fixture build output directory does not exist.");
+        }
+
+        var candidates = Directory
+            .EnumerateFiles(outputRoot, $"{projectName}.deps.json", SearchOption.AllDirectories)
+            .Select(Path.GetDirectoryName)
+            .Where(directory => directory is not null && File.Exists(Path.Join(directory, $"{projectName}.dll")))
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            .Cast<string>()
+            .ToArray();
+        return candidates.Length == 1
+            ? candidates[0]
+            : throw new InvalidOperationException("The fixture build output directory is missing or ambiguous.");
+    }
+
     /// <summary>
     /// Deletes and recreates the isolated coverage proof workspace after rejecting unsafe deletion targets.
     /// </summary>
@@ -539,14 +803,24 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         await File.WriteAllTextAsync(stdoutPath, result.StandardOutput, cancellationToken);
         await File.WriteAllTextAsync(stderrPath, result.StandardError, cancellationToken);
 
-        var succeeded = expectedExitCode == ExpectedCommandExitCode.Zero
-            ? result.ExitCode == 0
-            : result.ExitCode != 0;
+        var succeeded = expectedExitCode switch
+        {
+            ExpectedCommandExitCode.Zero => result.ExitCode == 0,
+            ExpectedCommandExitCode.NonZero => result.ExitCode != 0,
+            ExpectedCommandExitCode.Watchdog => result.ExitCode == 124,
+            ExpectedCommandExitCode.OrdinaryFailure => result.ExitCode != 0 && result.ExitCode != 124,
+            _ => false,
+        };
         var failureReason = succeeded
             ? string.Empty
-            : expectedExitCode == ExpectedCommandExitCode.Zero
-                ? $"Expected exit code 0, got {result.ExitCode}."
-                : $"Expected a non-zero exit code, got {result.ExitCode}.";
+            : expectedExitCode switch
+            {
+                ExpectedCommandExitCode.Zero => $"Expected exit code 0, got {result.ExitCode}.",
+                ExpectedCommandExitCode.NonZero => $"Expected a non-zero exit code, got {result.ExitCode}.",
+                ExpectedCommandExitCode.Watchdog => $"Expected watchdog exit code 124, got {result.ExitCode}.",
+                ExpectedCommandExitCode.OrdinaryFailure => $"Expected a non-watchdog failure exit code, got {result.ExitCode}.",
+                _ => $"Unexpected expected-exit classification '{expectedExitCode}'.",
+            };
 
         return new CoverageCliConsumerProofCommandResult(
             request.OperationName,
@@ -554,7 +828,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             request.Arguments,
             request.WorkingDirectory,
             result.ExitCode,
-            expectedExitCode == ExpectedCommandExitCode.NonZero,
+            expectedExitCode != ExpectedCommandExitCode.Zero,
             succeeded,
             failureReason,
             stopwatch.Elapsed,
@@ -588,7 +862,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
     {
         return new ExternalCommandRequest(
             "dotnet",
-            ["tool", "run", CliCommandName, .. arguments],
+            ["tool", "run", CliCommandName, "--", .. arguments],
             context.FixtureDirectory,
             operationName,
             timeoutDescription,
@@ -606,6 +880,22 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         Directory.CreateDirectory(libraryDirectory);
         Directory.CreateDirectory(testDirectory);
         Directory.CreateDirectory(excludedTestDirectory);
+
+        var testProjectPath = Path.Join(testDirectory, "Smoke.Tests.csproj");
+        if (File.Exists(testProjectPath))
+        {
+            var testProject = await File.ReadAllTextAsync(testProjectPath, cancellationToken);
+            const string noisyTarget = """
+                  <Target Name="NoisyStuckOperation" BeforeTargets="VSTest" Condition="Exists('$(TargetDir)watchdog-noisy.trigger')">
+                    <Exec Condition="'$(OS)' == 'Windows_NT'" Command="powershell -NoProfile -Command &quot;1..30 | ForEach-Object { Write-Output 'observable fixture activity'; Start-Sleep -Milliseconds 100 }&quot;" />
+                    <Exec Condition="'$(OS)' != 'Windows_NT'" Command="/bin/sh -c &quot;for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do echo observable fixture activity; sleep 0.1; done&quot;" />
+                  </Target>
+                """;
+            await File.WriteAllTextAsync(
+                testProjectPath,
+                testProject.Replace("</Project>", noisyTarget + Environment.NewLine + "</Project>", StringComparison.Ordinal),
+                cancellationToken);
+        }
 
         await File.WriteAllTextAsync(
             Path.Join(libraryDirectory, "Calculator.cs"),
@@ -663,6 +953,25 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
                 {
                     Assert.Equal(expected, Calculator.Sign(value));
                 }
+
+                [Fact]
+                public async Task QuietOperation_AllowsWatchdogProof()
+                {
+                    if (File.Exists(Path.Join(AppContext.BaseDirectory, "watchdog-quiet.trigger")))
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(3));
+                    }
+                }
+
+                [Fact]
+                public void OrdinaryFailure_RemainsAnOrdinaryFailure()
+                {
+                    if (File.Exists(Path.Join(AppContext.BaseDirectory, "ordinary-failure.trigger")))
+                    {
+                        Assert.Fail("Intentional package-proof failure.");
+                    }
+                }
+
             }
             """,
             cancellationToken);
@@ -734,6 +1043,71 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         return new CoverageCliConsumerProofArtifactCheck(description, path, File.Exists(path));
     }
 
+    private static CoverageCliConsumerProofArtifactCheck CheckWatchdogArtifact(
+        string path,
+        string description,
+        string outcome,
+        string watchdogMode,
+        string? diagnosticCode,
+        IReadOnlyCollection<(string Status, string? Detail)> cleanupOutcomes)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+            var root = document.RootElement;
+            var actualDiagnostic = root.GetProperty("diagnosticCode");
+            var diagnosticMatches = diagnosticCode is null
+                ? actualDiagnostic.ValueKind == JsonValueKind.Null
+                : string.Equals(actualDiagnostic.GetString(), diagnosticCode, StringComparison.Ordinal);
+            var cleanup = root.GetProperty("cleanup");
+            var actualCleanupStatus = cleanup.GetProperty("status").GetString();
+            var actualCleanupDetailElement = cleanup.GetProperty("detail");
+            var actualCleanupDetail = actualCleanupDetailElement.ValueKind == JsonValueKind.Null
+                ? null
+                : actualCleanupDetailElement.GetString();
+            var cleanupMatches = cleanupOutcomes.Any(expected =>
+                string.Equals(actualCleanupStatus, expected.Status, StringComparison.Ordinal)
+                && string.Equals(actualCleanupDetail, expected.Detail, StringComparison.Ordinal));
+            var valid = root.GetProperty("schemaVersion").GetInt32() == 1
+                && string.Equals(root.GetProperty("outcome").GetString(), outcome, StringComparison.Ordinal)
+                && string.Equals(root.GetProperty("watchdogMode").GetString(), watchdogMode, StringComparison.Ordinal)
+                && diagnosticMatches
+                && cleanupMatches;
+            return new CoverageCliConsumerProofArtifactCheck(description, path, valid);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            return new CoverageCliConsumerProofArtifactCheck(description, path, Satisfied: false);
+        }
+    }
+
+    private static CoverageCliConsumerProofArtifactCheck CheckAbsentArtifact(string path, string description)
+    {
+        return new CoverageCliConsumerProofArtifactCheck(description, path, !File.Exists(path));
+    }
+
+    private static CoverageCliConsumerProofCommandResult RequireOutput(
+        CoverageCliConsumerProofCommandResult result,
+        IReadOnlyList<string> requiredFragments,
+        string failureReason)
+    {
+        var combinedOutput = result.StandardOutput + Environment.NewLine + result.StandardError;
+        return result.Succeeded && requiredFragments.All(fragment => combinedOutput.Contains(fragment, StringComparison.Ordinal))
+            ? result
+            : result with { Succeeded = false, FailureReason = result.Succeeded ? failureReason : result.FailureReason };
+    }
+
+    private static CoverageCliConsumerProofCommandResult RejectOutput(
+        CoverageCliConsumerProofCommandResult result,
+        IReadOnlyList<string> rejectedFragments,
+        string failureReason)
+    {
+        var combinedOutput = result.StandardOutput + Environment.NewLine + result.StandardError;
+        return result.Succeeded && rejectedFragments.All(fragment => !combinedOutput.Contains(fragment, StringComparison.Ordinal))
+            ? result
+            : result with { Succeeded = false, FailureReason = result.Succeeded ? failureReason : result.FailureReason };
+    }
+
     private static CoverageCliConsumerProofArtifactCheck CheckGlob(
         string directory,
         string childPattern,
@@ -768,7 +1142,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         var firstFailure = failedCommand?.FailureReason;
         if (string.IsNullOrWhiteSpace(firstFailure))
         {
-            firstFailure = artifacts.FirstOrDefault(artifact => !artifact.Exists)?.Description;
+            firstFailure = artifacts.FirstOrDefault(artifact => !artifact.Satisfied)?.Description;
         }
 
         return new CoverageCliConsumerProofReport(
@@ -852,7 +1226,9 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
     private enum ExpectedCommandExitCode
     {
         Zero,
-        NonZero
+        NonZero,
+        Watchdog,
+        OrdinaryFailure,
     }
 }
 
@@ -897,7 +1273,7 @@ internal sealed record CoverageCliConsumerProofSelectedArtifact(
 /// <param name="FixtureNuGetConfigPath">NuGet config used for fixture dependencies.</param>
 /// <param name="LogsDirectory">Directory containing per-command stdout/stderr logs.</param>
 /// <param name="Commands">Executed command ledger.</param>
-/// <param name="Artifacts">Produced and missing artifact checks.</param>
+/// <param name="Artifacts">Artifact presence, absence, and content contract checks.</param>
 /// <param name="FirstFailure">First failure summary, or empty when the proof passed.</param>
 /// <param name="ReproduceCommand">Command that reruns the package verifier with the same proof workspace.</param>
 internal sealed record CoverageCliConsumerProofReport(
@@ -918,7 +1294,7 @@ internal sealed record CoverageCliConsumerProofReport(
     /// </summary>
     internal bool Succeeded => string.IsNullOrWhiteSpace(FirstFailure)
         && Commands.All(command => command.Succeeded)
-        && Artifacts.All(artifact => artifact.Exists);
+        && Artifacts.All(artifact => artifact.Satisfied);
 
     internal static CoverageCliConsumerProofReport Failed(
         string packageVersion,
@@ -978,8 +1354,8 @@ internal sealed record CoverageCliConsumerProofCommandResult(
 /// </summary>
 /// <param name="Description">Artifact role.</param>
 /// <param name="Path">Expected or produced artifact path.</param>
-/// <param name="Exists">Whether the artifact exists.</param>
-internal sealed record CoverageCliConsumerProofArtifactCheck(string Description, string Path, bool Exists);
+/// <param name="Satisfied">Whether the presence, absence, or content check matched its declared contract.</param>
+internal sealed record CoverageCliConsumerProofArtifactCheck(string Description, string Path, bool Satisfied);
 
 /// <summary>
 /// Runtime paths shared across the packaged coverage CLI consumer proof.
@@ -1088,7 +1464,7 @@ internal static class CoverageCliConsumerProofReportRenderer
             }
         }
 
-        var missingArtifacts = report.Artifacts.Where(artifact => !artifact.Exists).ToArray();
+        var failedArtifactChecks = report.Artifacts.Where(artifact => !artifact.Satisfied).ToArray();
         builder.AppendLine();
         builder.AppendLine("## Artifacts");
         if (report.Artifacts.Count == 0)
@@ -1103,7 +1479,7 @@ internal static class CoverageCliConsumerProofReportRenderer
             builder.AppendLine("| --- | --- | --- |");
             foreach (var artifact in report.Artifacts)
             {
-                builder.AppendLine($"| `{(artifact.Exists ? "produced" : "missing")}` | `{EscapeCode(artifact.Description)}` | `{artifact.Path}` |");
+                builder.AppendLine($"| `{(artifact.Satisfied ? "passed" : "failed")}` | `{EscapeCode(artifact.Description)}` | `{artifact.Path}` |");
             }
         }
 
@@ -1117,11 +1493,11 @@ internal static class CoverageCliConsumerProofReportRenderer
             AppendExcerpt(builder, "stderr", command.StandardError);
         }
 
-        if (missingArtifacts.Length > 0)
+        if (failedArtifactChecks.Length > 0)
         {
             builder.AppendLine();
-            builder.AppendLine("## Missing artifacts");
-            foreach (var artifact in missingArtifacts)
+            builder.AppendLine("## Failed artifact checks");
+            foreach (var artifact in failedArtifactChecks)
             {
                 builder.AppendLine($"- `{artifact.Description}` at `{artifact.Path}`");
             }

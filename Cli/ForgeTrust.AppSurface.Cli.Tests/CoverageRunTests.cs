@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
 using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Cli;
@@ -759,6 +762,29 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldRejectTruncatedSolutionListBeforeUsingAnIncompleteProjectSet()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var solution = repo.WriteFile("Sample.slnx", "<Solution />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            SlnListOutput = "tests/Sample.Tests/Sample.Tests.csproj",
+            SlnOutputTruncated = true,
+        };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(SolutionPath: solution);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+
+        Assert.Contains("ASCOV102", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("project discovery output exceeded the safety limit", exception.Message, StringComparison.Ordinal);
+        Assert.Single(runner.Commands);
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldRejectMissingSolutionPath()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -892,6 +918,23 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public void ValidateBootstrap_ShouldRejectBlankFileRootAndHome()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-bootstrap-");
+        var file = repo.WriteFile("coverage-output.txt", "not a directory");
+        using var current = PushCurrentDirectory(repo.Path);
+
+        Assert.Contains("blank", Assert.Throws<CommandException>(() => CoverageRunOutputGuard.ValidateBootstrap(" ")).Message, StringComparison.Ordinal);
+        Assert.Contains("points to a file", Assert.Throws<CommandException>(() => CoverageRunOutputGuard.ValidateBootstrap(file)).Message, StringComparison.Ordinal);
+        Assert.Contains("filesystem root", Assert.Throws<CommandException>(() => CoverageRunOutputGuard.ValidateBootstrap(Path.GetPathRoot(repo.Path)!)).Message, StringComparison.Ordinal);
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrWhiteSpace(home) && !string.Equals(Path.GetPathRoot(home), home, StringComparison.Ordinal))
+        {
+            Assert.Contains("user home directory", Assert.Throws<CommandException>(() => CoverageRunOutputGuard.ValidateBootstrap(home)).Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldRejectUnsafeOutputPaths()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -969,6 +1012,16 @@ public sealed class CoverageRunTests
         var oldJson = repo.WriteFile("TestResults/coverage-merged/slow-test-diagnostics.json", "{}");
         var oldGateMarkdown = repo.WriteFile("TestResults/coverage-merged/coverage-gate.md", "old gate");
         var oldGateJson = repo.WriteFile("TestResults/coverage-merged/coverage-gate.json", "{}");
+        var stagedSummary = repo.WriteFile($"TestResults/coverage-merged/.summary.txt.{Guid.NewGuid():N}.tmp", "staged summary");
+        var summaryBackup = repo.WriteFile($"TestResults/coverage-merged/.summary.txt.{Guid.NewGuid():N}.watchdog-backup", "summary backup");
+        var diagnosticsStaging = Path.Join(
+            repo.Path,
+            "TestResults",
+            "coverage-merged",
+            $".slow-test-diagnostics.{Guid.NewGuid():N}.tmp");
+        Directory.CreateDirectory(diagnosticsStaging);
+        File.WriteAllText(Path.Join(diagnosticsStaging, "partial.json"), "{}");
+        var unrelatedTemporary = repo.WriteFile("TestResults/coverage-merged/.custom.tmp", "not ours");
         using var current = PushCurrentDirectory(repo.Path);
         var workflow = CreateWorkflow(new RecordingCoverageRunProcessRunner(), new RecordingReportGenerator());
         using var console = new FakeInMemoryConsole();
@@ -983,6 +1036,10 @@ public sealed class CoverageRunTests
         Assert.False(File.Exists(oldJson));
         Assert.False(File.Exists(oldGateMarkdown));
         Assert.False(File.Exists(oldGateJson));
+        Assert.False(File.Exists(stagedSummary));
+        Assert.False(File.Exists(summaryBackup));
+        Assert.False(Directory.Exists(diagnosticsStaging));
+        Assert.True(File.Exists(unrelatedTemporary));
     }
 
     [Fact]
@@ -994,6 +1051,13 @@ public sealed class CoverageRunTests
         var oldCoverage = repo.WriteFile("TestResults/coverage-merged/coverage.cobertura.xml", "old coverage");
         var oldGate = repo.WriteFile("TestResults/coverage-merged/coverage-gate.json", "{}");
         var oldProjectArtifact = repo.WriteFile("TestResults/coverage-merged/projects/old/coverage.cobertura.xml", "old project");
+        var stagedCoverage = repo.WriteFile($"TestResults/coverage-merged/.coverage.json.{Guid.NewGuid():N}.tmp", "{}");
+        var diagnosticsStaging = Path.Join(
+            repo.Path,
+            "TestResults",
+            "coverage-merged",
+            $".slow-test-diagnostics.{Guid.NewGuid():N}.tmp");
+        Directory.CreateDirectory(diagnosticsStaging);
         using var current = PushCurrentDirectory(repo.Path);
         var workflow = CreateWorkflow(new RecordingCoverageRunProcessRunner(), new RecordingReportGenerator());
         using var console = new FakeInMemoryConsole();
@@ -1005,6 +1069,8 @@ public sealed class CoverageRunTests
         Assert.False(File.Exists(oldJunit));
         Assert.False(File.Exists(oldGate));
         Assert.False(File.Exists(oldProjectArtifact));
+        Assert.False(File.Exists(stagedCoverage));
+        Assert.False(Directory.Exists(diagnosticsStaging));
         Assert.NotEqual("old coverage", File.ReadAllText(oldCoverage));
         Assert.True(File.Exists(Path.Join(result.OutputDirectory, ".appsurface-coverage-output")));
     }
@@ -1079,9 +1145,8 @@ public sealed class CoverageRunTests
         Assert.True(result.Success);
         Assert.Contains("Slow-test diagnostics failed", console.ReadErrorString(), StringComparison.Ordinal);
         var timings = File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json"));
-        Assert.Contains("\"warningCount\": 1", timings, StringComparison.Ordinal);
-        Assert.Contains("\"metadataComplete\": false", timings, StringComparison.Ordinal);
-        Assert.Contains("\"parserStatus\": \"diagnosticsFailed\"", timings, StringComparison.Ordinal);
+        Assert.Contains("\"diagnostics\": null", timings, StringComparison.Ordinal);
+        Assert.DoesNotContain("diagnosticsFailed", timings, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1101,7 +1166,8 @@ public sealed class CoverageRunTests
         Assert.True(result.Success);
         Assert.Contains("Slow-test diagnostics failed", console.ReadErrorString(), StringComparison.Ordinal);
         var timings = File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json"));
-        Assert.Contains("\"parserStatus\": \"diagnosticsFailed\"", timings, StringComparison.Ordinal);
+        Assert.Contains("\"diagnostics\": null", timings, StringComparison.Ordinal);
+        Assert.DoesNotContain("diagnosticsFailed", timings, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1453,9 +1519,14 @@ public sealed class CoverageRunTests
 
         Assert.True(result.Success);
         var tests = runner.Commands.Where(command => command.Arguments.FirstOrDefault() == "test").ToArray();
-        Assert.Equal([first, second, browser], tests.Select(command => command.Arguments[1]).ToArray());
-        Assert.True(tests[2].StartedAt >= tests[0].FinishedAt);
-        Assert.True(tests[2].StartedAt >= tests[1].FinishedAt);
+        Assert.Equal(
+            [browser, first, second],
+            tests.Select(command => command.Arguments[1]).Order(StringComparer.Ordinal).ToArray());
+        var browserTest = Assert.Single(tests, command => command.Arguments[1] == browser);
+        var firstTest = Assert.Single(tests, command => command.Arguments[1] == first);
+        var secondTest = Assert.Single(tests, command => command.Arguments[1] == second);
+        Assert.True(browserTest.StartedAt >= firstTest.FinishedAt);
+        Assert.True(browserTest.StartedAt >= secondTest.FinishedAt);
         Assert.Contains("(exclusive)", console.ReadOutputString(), StringComparison.Ordinal);
     }
 
@@ -1986,6 +2057,303 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public void CoverageRunCommand_ShouldExposeDocumentedWatchdogDefaults()
+    {
+        var command = new CoverageRunCommand(
+            CreateWorkflow(new RecordingCoverageRunProcessRunner(), new RecordingReportGenerator()));
+
+        Assert.Equal("warn", command.Watchdog);
+        Assert.Equal("30s", command.HeartbeatInterval);
+        Assert.Equal("10m", command.NoProgressTimeout);
+    }
+
+    [Theory]
+    [InlineData("warn", "500ms", "1s")]
+    [InlineData("FAIL", "30s", "10m")]
+    [InlineData("Off", "0", "1h")]
+    public async Task ExecuteAsync_ShouldAcceptDocumentedWatchdogOptions(
+        string watchdog,
+        string heartbeatInterval,
+        string noProgressTimeout)
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var command = new CoverageRunCommand(CreateWorkflow(runner, new RecordingReportGenerator()))
+        {
+            TestProjects = [project],
+            DryRun = true,
+            Watchdog = watchdog,
+            HeartbeatInterval = heartbeatInterval,
+            NoProgressTimeout = noProgressTimeout,
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console, CancellationToken.None);
+
+        Assert.Empty(runner.Commands);
+        Assert.Contains("  Output:", console.ReadOutputString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("terminate")]
+    [InlineData(" warn ")]
+    public async Task ExecuteAsync_ShouldRejectInvalidWatchdogMode(string watchdog)
+    {
+        var runner = new RecordingCoverageRunProcessRunner();
+        var command = new CoverageRunCommand(CreateWorkflow(runner, new RecordingReportGenerator()))
+        {
+            Watchdog = watchdog,
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--watchdog must be warn, fail, or off", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(runner.Commands);
+    }
+
+    [Theory]
+    [InlineData("heartbeat", "-1s")]
+    [InlineData("heartbeat", "1.5s")]
+    [InlineData("heartbeat", "30S")]
+    [InlineData("heartbeat", " 30s")]
+    [InlineData("heartbeat", "721h")]
+    [InlineData("timeout", "0")]
+    [InlineData("timeout", "+1s")]
+    [InlineData("timeout", "1 s")]
+    [InlineData("timeout", "30d")]
+    [InlineData("timeout", "721h")]
+    public async Task ExecuteAsync_ShouldRejectInvalidWatchdogDuration(string option, string duration)
+    {
+        var runner = new RecordingCoverageRunProcessRunner();
+        var command = new CoverageRunCommand(CreateWorkflow(runner, new RecordingReportGenerator()));
+        if (option == "heartbeat")
+        {
+            command.HeartbeatInterval = duration;
+        }
+        else
+        {
+            command.NoProgressTimeout = duration;
+        }
+
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        var optionName = option == "heartbeat" ? "--heartbeat-interval" : "--no-progress-timeout";
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Contains($"{optionName} has an invalid duration", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Use an integer duration such as 500ms, 30s, 10m, or 1h", exception.Message, StringComparison.Ordinal);
+        if (option == "timeout" && duration == "0")
+        {
+            Assert.Contains("This timeout must be greater than 0", exception.Message, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.DoesNotContain("greater than 0", exception.Message, StringComparison.Ordinal);
+        }
+
+        Assert.Empty(runner.Commands);
+    }
+
+    [Fact]
+    public async Task RunAsync_WarnWatchdog_ShouldPersistIncidentAndPreserveSuccess()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-watchdog-warn-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var releaseProject = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        runner.TestBlockers[project] = releaseProject;
+        using var console = new FakeInMemoryConsole();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        var request = CreateRequest(
+            TestProjects: [project],
+            Watchdog: new CoverageRunWatchdogOptions(
+                CoverageRunWatchdogMode.Warn,
+                TimeSpan.FromMilliseconds(20),
+                TimeSpan.FromMilliseconds(50)));
+
+        var artifact = Path.Join(repo.Path, "TestResults", "coverage-merged", "coverage-watchdog.json");
+        var execution = workflow.RunAsync(request, console, CancellationToken.None);
+        try
+        {
+            await WaitForAsync(
+                () => console.ReadOutputString().Contains("Coverage watchdog warning", StringComparison.Ordinal),
+                "The watchdog warning was not written.");
+            releaseProject.TrySetResult();
+            var result = await execution;
+
+            Assert.True(result.Success);
+            Assert.True(File.Exists(artifact));
+            Assert.Contains("\"outcome\": \"warning\"", File.ReadAllText(artifact), StringComparison.Ordinal);
+            Assert.Contains("Coverage watchdog warning", console.ReadOutputString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            releaseProject.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_FailWatchdog_ShouldReturn124AndPersistTerminalIncident()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-watchdog-fail-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        runner.TestDelays[project] = TimeSpan.FromSeconds(30);
+        using var console = new FakeInMemoryConsole();
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        var request = CreateRequest(
+            TestProjects: [project],
+            Watchdog: new CoverageRunWatchdogOptions(
+                CoverageRunWatchdogMode.Fail,
+                TimeSpan.FromMilliseconds(20),
+                TimeSpan.FromMilliseconds(50)));
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+
+        Assert.Equal(124, exception.ExitCode);
+        Assert.Contains("ASCOV121", exception.Message, StringComparison.Ordinal);
+        var artifact = Path.Join(repo.Path, "TestResults", "coverage-merged", "coverage-watchdog.json");
+        Assert.True(File.Exists(artifact));
+        var json = File.ReadAllText(artifact);
+        Assert.Contains("\"outcome\": \"terminated\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"diagnosticCode\": \"ASCOV121\"", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_FailWatchdog_ShouldWinWhenTheProcessRunnerIgnoresCancellation()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-watchdog-terminal-race-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var releaseMerge = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reportGenerator = new RecordingReportGenerator
+        {
+            Blocker = releaseMerge,
+            IgnoreCancellation = true,
+        };
+        using var console = new FakeInMemoryConsole();
+        var workflow = CreateWorkflow(runner, reportGenerator);
+        var request = CreateRequest(
+            TestProjects: [project],
+            Watchdog: new CoverageRunWatchdogOptions(
+                CoverageRunWatchdogMode.Fail,
+                TimeSpan.Zero,
+                TimeSpan.FromMilliseconds(50)));
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<CommandException>(
+                () => workflow.RunAsync(request, console, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5)));
+
+            Assert.Equal(124, exception.ExitCode);
+            Assert.Contains("ASCOV121", exception.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                nameof(CoverageRunWatchdogRuntime.CompleteAsync),
+                exception.StackTrace ?? string.Empty,
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            releaseMerge.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task Watchdog_ShouldStillClassifyFailureWhenConsoleOutputNeverCompletes()
+    {
+        using var blockedOutput = new NeverCompletingWriteStream();
+        using var console = new FakeConsole(Stream.Null, blockedOutput, blockedOutput);
+        try
+        {
+            await using var watchdog = new CoverageRunWatchdogRuntime(
+                console,
+                TimeProvider.System,
+                new CoverageRunWatchdogOptions(
+                    CoverageRunWatchdogMode.Fail,
+                    TimeSpan.FromMilliseconds(10),
+                    TimeSpan.FromMilliseconds(40)),
+                CancellationToken.None,
+                consoleTimeout: TimeSpan.FromMilliseconds(15));
+            watchdog.Register(
+                new CoverageRunWatchdogOperation("project:blocked-console", CoverageRunWatchdogOperationKind.Project),
+                CoverageRunWatchdogOperationState.Running);
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => Task.Delay(Timeout.InfiniteTimeSpan, watchdog.RunCancellationToken).WaitAsync(TimeSpan.FromSeconds(2)));
+            var exception = await Assert.ThrowsAsync<CommandException>(watchdog.ThrowIfWatchdogTerminalAsync);
+
+            Assert.Equal(124, exception.ExitCode);
+            Assert.Contains("ASCOV121", exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            blockedOutput.Release();
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldSurfaceWatchdogFailureWhenOrdinaryWorkflowOutputNeverCompletes()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-watchdog-blocked-output-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        runner.TestDelays[project] = TimeSpan.FromSeconds(30);
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        var request = CreateRequest(
+            TestProjects: [project],
+            Watchdog: new CoverageRunWatchdogOptions(
+                CoverageRunWatchdogMode.Fail,
+                TimeSpan.FromMilliseconds(10),
+                TimeSpan.FromMilliseconds(50)));
+        using var blockedOutput = new NeverCompletingWriteStream();
+        using var console = new FakeConsole(Stream.Null, blockedOutput, blockedOutput);
+        try
+        {
+            var exception = await Assert.ThrowsAsync<CommandException>(
+                () => workflow.RunAsync(request, console, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5)));
+
+            Assert.Equal(124, exception.ExitCode);
+            Assert.Contains("ASCOV121", exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            blockedOutput.Release();
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldPreserveExternalCancellationClaimedDuringFinalOutput()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-external-cancel-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        using var cancellation = new CancellationTokenSource();
+        using var output = new TriggeringWriteStream("Coverage artifacts:", cancellation.Cancel);
+        using var console = new FakeConsole(Stream.Null, output, Stream.Null);
+        var workflow = CreateWorkflow(new RecordingCoverageRunProcessRunner(), new RecordingReportGenerator());
+        var request = CreateRequest(TestProjects: [project]);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => workflow.RunAsync(request, console, cancellation.Token));
+
+        Assert.True(output.Triggered);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ShouldNormalizeAndForwardRepeatedProjectExclusions()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -2341,6 +2709,69 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task CliWrapCoverageRunProcessRunner_ShouldExposeStructuredLifecycleAndBytes()
+    {
+        var runner = new CliWrapCoverageRunProcessRunner();
+        Process? process = null;
+        var observedBytes = 0;
+        var completed = false;
+        var request = new CoverageRunProcessRequest(
+            "dotnet",
+            ["--version"],
+            Directory.GetCurrentDirectory(),
+            ObserveOutput: bytes => observedBytes += bytes,
+            ProcessStarted: started => process = started,
+            ProcessCompleted: () => completed = true);
+
+        var result = await runner.RunAsync(request, CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.NotNull(process);
+        Assert.True(observedBytes > 0);
+        Assert.True(completed);
+    }
+
+    [Fact]
+    public async Task CliWrapCoverageRunProcessRunner_ShouldIgnoreEvidenceCallbackFailures()
+    {
+        var runner = new CliWrapCoverageRunProcessRunner();
+        var request = new CoverageRunProcessRequest(
+            "dotnet",
+            ["--version"],
+            Directory.GetCurrentDirectory(),
+            ObserveOutput: _ => throw new InvalidOperationException("observe failed"),
+            ProcessStarted: _ => throw new InvalidOperationException("start failed"),
+            ProcessCompleted: () => throw new InvalidOperationException("complete failed"));
+
+        var result = await runner.RunAsync(request, CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.NotEmpty(result.Output);
+    }
+
+    [Theory]
+    [InlineData("output")]
+    [InlineData("started")]
+    [InlineData("completed")]
+    public async Task CliWrapCoverageRunProcessRunner_ShouldPropagateFatalEvidenceCallbackFailures(string callback)
+    {
+        var runner = new CliWrapCoverageRunProcessRunner();
+        OutOfMemoryException Fatal() => new($"fatal {callback} callback failure");
+        var request = new CoverageRunProcessRequest(
+            "dotnet",
+            ["--version"],
+            Directory.GetCurrentDirectory(),
+            ObserveOutput: callback == "output" ? _ => throw Fatal() : null,
+            ProcessStarted: callback == "started" ? _ => throw Fatal() : null,
+            ProcessCompleted: callback == "completed" ? () => throw Fatal() : null);
+
+        var exception = await Assert.ThrowsAsync<OutOfMemoryException>(
+            () => runner.RunAsync(request, CancellationToken.None));
+
+        Assert.Equal($"fatal {callback} callback failure", exception.Message);
+    }
+
+    [Fact]
     public async Task CliWrapCoverageRunProcessRunner_ShouldWrapStartFailureInDiagnostic()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -2381,19 +2812,284 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task CliWrapCoverageRunProcessRunner_ShouldBoundBufferedOutput()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var runner = new CliWrapCoverageRunProcessRunner();
+        var fileName = OperatingSystem.IsWindows() ? "powershell.exe" : "/bin/sh";
+        IReadOnlyList<string> arguments = OperatingSystem.IsWindows()
+            ? ["-NoProfile", "-Command", "[Console]::Out.Write(('x' * 1100000))"]
+            : ["-c", "yes x | head -c 1100000"];
+
+        var result = await runner.RunAsync(
+            fileName,
+            arguments,
+            repo.Path,
+            CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.True(result.OutputTruncated);
+        Assert.InRange(Encoding.UTF8.GetByteCount(result.Output), 1024 * 1024, 2 * 1024 * 1024);
+    }
+
+    [Fact]
     public async Task CliWrapCoverageRunProcessRunner_ShouldCancelAndKillProcessTree()
     {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var runner = new CliWrapCoverageRunProcessRunner();
+        using var console = new FakeInMemoryConsole();
+        using var safetyCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var bootstrapDirectory = Path.Join(repo.Path, "watchdog-bootstrap");
+        var watchdog = new CoverageRunWatchdogRuntime(
+            console,
+            TimeProvider.System,
+            new CoverageRunWatchdogOptions(
+                CoverageRunWatchdogMode.Fail,
+                TimeSpan.FromMilliseconds(20),
+                TimeSpan.FromMilliseconds(100)),
+            safetyCancellation.Token,
+            bootstrapDirectory: bootstrapDirectory);
+        var outputFile = Path.Join(repo.Path, "child-process.log");
+        var childProcessIdFile = Path.Join(repo.Path, "child-process.pid");
+        var grandchildProcessIdFile = Path.Join(repo.Path, "grandchild-process.pid");
+        var fileName = OperatingSystem.IsWindows() ? "powershell.exe" : "/bin/sh";
+        IReadOnlyList<string> arguments;
         if (OperatingSystem.IsWindows())
+        {
+            var escapedChildProcessIdFile = childProcessIdFile.Replace("'", "''", StringComparison.Ordinal);
+            var escapedGrandchildProcessIdFile = grandchildProcessIdFile.Replace("'", "''", StringComparison.Ordinal);
+            var grandchildCommand = $"Set-Content -LiteralPath '{escapedGrandchildProcessIdFile}' -Value $PID; Start-Sleep -Seconds 15";
+            var grandchildEncodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(grandchildCommand));
+            var childCommand = $"Set-Content -LiteralPath '{escapedChildProcessIdFile}' -Value $PID; & powershell.exe -NoProfile -EncodedCommand '{grandchildEncodedCommand}'";
+            var childEncodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(childCommand));
+            var rootCommand = $"& powershell.exe -NoProfile -EncodedCommand '{childEncodedCommand}'";
+            arguments = ["-NoProfile", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(rootCommand))];
+        }
+        else
+        {
+            var childScript = repo.WriteFile(
+                "child.sh",
+                """
+                echo $$ > "$1"
+                sleep 15 &
+                grandchild_pid=$!
+                echo "$grandchild_pid" > "$2"
+                wait "$grandchild_pid"
+                echo child-complete
+                """);
+            arguments =
+            [
+                "-c",
+                "/bin/sh \"$1\" \"$2\" \"$3\" >/dev/null 2>&1; echo root-complete",
+                "coverage-watchdog-root",
+                childScript,
+                childProcessIdFile,
+                grandchildProcessIdFile,
+            ];
+        }
+
+        var request = watchdog.CreateProcessRequest(
+            fileName,
+            arguments,
+            repo.Path,
+            "project:0",
+            new CoverageRunSafeCommand(Path.GetFileNameWithoutExtension(fileName), []),
+            outputFile);
+
+        var execution = runner.RunAsync(request, watchdog.RunCancellationToken);
+        int? childProcessId = null;
+        int? grandchildProcessId = null;
+        var processCleanupVerified = false;
+        try
+        {
+            var childProcessIdTask = WaitForProcessIdAsync(childProcessIdFile, "child");
+            var grandchildProcessIdTask = WaitForProcessIdAsync(grandchildProcessIdFile, "grandchild");
+            await Task.WhenAll(childProcessIdTask, grandchildProcessIdTask);
+            childProcessId = await childProcessIdTask;
+            grandchildProcessId = await grandchildProcessIdTask;
+            Assert.NotEqual(childProcessId, grandchildProcessId);
+            // The PID files prove creation, but macOS may not expose the complete parent/child
+            // topology to Process.Kill(true) immediately. Start the watchdog clock only after
+            // the ordinary nested fixture has had a bounded stabilization window.
+            await Task.Delay(100);
+            watchdog.Register(
+                new CoverageRunWatchdogOperation("project:0", CoverageRunWatchdogOperationKind.Project),
+                CoverageRunWatchdogOperationState.Running);
+
+            var exception = await watchdog.TerminalTask.WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.Equal(124, exception.ExitCode);
+            await WaitForProcessExitAsync(childProcessId.Value, "child");
+            await WaitForProcessExitAsync(grandchildProcessId.Value, "grandchild");
+            processCleanupVerified = true;
+            using (var artifact = JsonDocument.Parse(
+                await File.ReadAllBytesAsync(Path.Join(bootstrapDirectory, "coverage-watchdog.json"))))
+            {
+                var cleanupStatus = artifact.RootElement.GetProperty("cleanup").GetProperty("status").GetString();
+                Assert.True(cleanupStatus is "complete" or "failed");
+            }
+
+            try
+            {
+                var result = await execution.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.NotEqual(0, result.ExitCode);
+            }
+            catch (OperationCanceledException)
+            {
+                // CliWrap may observe cancellation before the explicitly killed root exits.
+            }
+            catch (TimeoutException) when (OperatingSystem.IsMacOS())
+            {
+                // Process.Kill(true) does not guarantee that every platform-specific process
+                // observation completes with the tree request. Descendant exit is asserted above;
+                // keep the fixture bounded if CliWrap's macOS completion remains pending.
+            }
+        }
+        finally
+        {
+            var safetyCancellationDispatch = safetyCancellation.CancelAsync();
+            _ = safetyCancellationDispatch.ContinueWith(
+                static completed => _ = completed.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+            await Task.WhenAny(safetyCancellationDispatch, Task.Delay(TimeSpan.FromSeconds(2)));
+            try
+            {
+                await execution.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when cleanup or the safety deadline cancels the fixture.
+            }
+            catch (TimeoutException)
+            {
+                // A platform tree-kill call may remain blocked; fixture PID cleanup below is bounded.
+            }
+            finally
+            {
+                if (!processCleanupVerified)
+                {
+                    TryKillFixtureProcess(childProcessId);
+                    TryKillFixtureProcess(grandchildProcessId);
+                }
+
+                try
+                {
+                    await watchdog.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (TimeoutException) when (OperatingSystem.IsMacOS())
+                {
+                    // A platform tree-kill request can outlive the verified descendant exits.
+                    // Keep the fixture teardown bounded after emergency cancellation.
+                }
+            }
+        }
+    }
+
+    private static void TryKillFixtureProcess(int? processId)
+    {
+        if (processId is null)
         {
             return;
         }
 
-        using var repo = TempDirectory.Create("appsurface-coverage-run-");
-        var runner = new CliWrapCoverageRunProcessRunner();
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        try
+        {
+            using var process = Process.GetProcessById(processId.Value);
+            // Both fixture descendants are tracked and cleaned independently. Avoid tree
+            // discovery here so best-effort teardown cannot re-enter the behavior under test
+            // for an already-terminated or zombie process on Unix.
+            process.Kill(entireProcessTree: false);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            // The watchdog already cleaned the fixture, or the platform cannot inspect it.
+        }
+    }
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => runner.RunAsync("/bin/sh", ["-c", "sleep 30"], repo.Path, cancellation.Token));
+    private static async Task<int> WaitForProcessIdAsync(string outputFile, string role)
+    {
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            if (File.Exists(outputFile))
+            {
+                var line = (await File.ReadAllLinesAsync(outputFile))
+                    .Select(value => value.Trim())
+                    .FirstOrDefault(value => int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out _));
+                if (int.TryParse(line, NumberStyles.None, CultureInfo.InvariantCulture, out var processId))
+                {
+                    return processId;
+                }
+            }
+
+            await Task.Delay(50);
+        }
+
+        throw new TimeoutException($"The {role} process did not report its process identifier.");
+    }
+
+    private static async Task WaitForAsync(Func<bool> condition, string timeoutMessage)
+    {
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            if (condition())
+            {
+                return;
+            }
+
+            await Task.Delay(50);
+        }
+
+        throw new TimeoutException(timeoutMessage);
+    }
+
+    private static async Task WaitForProcessExitAsync(int processId, string role)
+    {
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(processId);
+                if (process.HasExited || (!OperatingSystem.IsWindows() && await IsZombieProcessAsync(processId)))
+                {
+                    return;
+                }
+            }
+            catch (ArgumentException)
+            {
+                return;
+            }
+
+            await Task.Delay(50);
+        }
+
+        Assert.Fail($"The {role} process {processId.ToString(CultureInfo.InvariantCulture)} remained alive after tree cancellation.");
+    }
+
+    private static async Task<bool> IsZombieProcessAsync(int processId)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "ps",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            },
+        };
+        process.StartInfo.ArgumentList.Add("-o");
+        process.StartInfo.ArgumentList.Add("stat=");
+        process.StartInfo.ArgumentList.Add("-p");
+        process.StartInfo.ArgumentList.Add(processId.ToString(CultureInfo.InvariantCulture));
+        if (!process.Start())
+        {
+            return false;
+        }
+
+        var state = await process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        return state.TrimStart().StartsWith('Z');
     }
 
     private static async Task AssertUnsafeOutputAsync(
@@ -2466,7 +3162,8 @@ public sealed class CoverageRunTests
         CoverageRunTestResultFormat TestResults = CoverageRunTestResultFormat.None,
         bool SlowTestDiagnostics = false,
         bool Clean = true,
-        string Verbosity = "minimal")
+        string Verbosity = "minimal",
+        CoverageRunWatchdogOptions? Watchdog = null)
         => new(
             SolutionPath,
             TestProjects ?? [],
@@ -2490,7 +3187,8 @@ public sealed class CoverageRunTests
             TestResults,
             SlowTestDiagnostics,
             Clean,
-            Verbosity);
+            Verbosity,
+            Watchdog ?? CoverageRunWatchdogOptions.Default);
 
     private static IDisposable PushCurrentDirectory(string path)
     {
@@ -2507,6 +3205,7 @@ public sealed class CoverageRunTests
         public bool WriteCoverageFiles { get; init; } = true;
         public bool WriteJunitFiles { get; init; } = true;
         public int SlnExitCode { get; init; }
+        public bool SlnOutputTruncated { get; init; }
         public int BuildExitCode { get; init; }
         public int TestExitCode { get; init; }
         public string TestOutput { get; init; } = "test output";
@@ -2517,8 +3216,34 @@ public sealed class CoverageRunTests
             </testsuite>
             """;
         public Dictionary<string, TimeSpan> TestDelays { get; } = [];
+        public Dictionary<string, TaskCompletionSource> TestBlockers { get; } = [];
         public HashSet<string> ProjectsWithoutCoverage { get; } = [];
         public List<RecordedCommand> Commands { get; } = [];
+
+        public async Task<CoverageRunProcessResult> RunAsync(
+            CoverageRunProcessRequest request,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var result = await RunAsync(
+                    request.FileName,
+                    request.Arguments,
+                    request.WorkingDirectory,
+                    cancellationToken,
+                    request.OutputFile);
+                if (!string.IsNullOrEmpty(result.Output))
+                {
+                    request.ObserveOutput?.Invoke(Encoding.UTF8.GetByteCount(result.Output));
+                }
+
+                return result;
+            }
+            finally
+            {
+                request.ProcessCompleted?.Invoke();
+            }
+        }
 
         public async Task<CoverageRunProcessResult> RunAsync(
             string fileName,
@@ -2532,7 +3257,7 @@ public sealed class CoverageRunTests
             if (arguments is ["sln", ..])
             {
                 command.Finish();
-                return new CoverageRunProcessResult(SlnExitCode, SlnListOutput);
+                return new CoverageRunProcessResult(SlnExitCode, SlnListOutput, SlnOutputTruncated);
             }
 
             if (arguments.FirstOrDefault() == "build")
@@ -2543,7 +3268,11 @@ public sealed class CoverageRunTests
 
             if (arguments.FirstOrDefault() == "test")
             {
-                if (TestDelays.TryGetValue(arguments[1], out var delay))
+                if (TestBlockers.TryGetValue(arguments[1], out var blocker))
+                {
+                    await blocker.Task.WaitAsync(cancellationToken);
+                }
+                else if (TestDelays.TryGetValue(arguments[1], out var delay))
                 {
                     await Task.Delay(delay, cancellationToken);
                 }
@@ -2584,11 +3313,69 @@ public sealed class CoverageRunTests
         }
     }
 
+    private sealed class NeverCompletingWriteStream : Stream
+    {
+        private readonly TaskCompletionSource _write = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => 0;
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public void Release() => _write.TrySetResult();
+        public override void Write(byte[] buffer, int offset, int count) => _write.Task.GetAwaiter().GetResult();
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => _write.Task;
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => new(_write.Task);
+    }
+
+    private sealed class TriggeringWriteStream : MemoryStream
+    {
+        private readonly string _trigger;
+        private readonly Action _onTrigger;
+
+        public TriggeringWriteStream(string trigger, Action onTrigger)
+        {
+            _trigger = trigger;
+            _onTrigger = onTrigger;
+        }
+
+        public bool Triggered { get; private set; }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            base.Write(buffer, offset, count);
+            CheckTrigger();
+        }
+
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            base.Write(buffer);
+            CheckTrigger();
+        }
+
+        private void CheckTrigger()
+        {
+            if (Triggered || !Encoding.UTF8.GetString(ToArray()).Contains(_trigger, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            Triggered = true;
+            _onTrigger();
+        }
+    }
+
     private sealed class RecordingReportGenerator : ICoverageRunReportGenerator
     {
         public List<string> CoverageFiles { get; } = [];
         public int ExitCode { get; init; }
         public bool WriteMergedCoverage { get; init; } = true;
+        public TaskCompletionSource? Blocker { get; init; }
+        public bool IgnoreCancellation { get; init; }
         public string MergedCoverage { get; init; } = "<coverage lines-covered=\"8\" lines-valid=\"10\" branches-covered=\"2\" branches-valid=\"4\" />";
 
         public async Task<CoverageRunMergeResult> MergeAsync(
@@ -2597,6 +3384,18 @@ public sealed class CoverageRunTests
             CancellationToken cancellationToken)
         {
             CoverageFiles.AddRange(coverageFiles);
+            if (Blocker is not null)
+            {
+                if (IgnoreCancellation)
+                {
+                    await Blocker.Task;
+                }
+                else
+                {
+                    await Blocker.Task.WaitAsync(cancellationToken);
+                }
+            }
+
             Directory.CreateDirectory(outputDirectory);
             var cobertura = Path.Join(outputDirectory, "Cobertura.xml");
             var summary = Path.Join(outputDirectory, "Summary.txt");

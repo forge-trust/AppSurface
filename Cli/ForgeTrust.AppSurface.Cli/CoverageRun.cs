@@ -12,7 +12,6 @@ using CliFx;
 using CliFx.Binding;
 using CliFx.Infrastructure;
 using CliWrap;
-using CliWrap.Buffered;
 using CliWrap.Exceptions;
 using CliCommand = CliWrap.Cli;
 
@@ -186,6 +185,24 @@ internal sealed partial class CoverageRunCommand : ICommand
     [CommandOption("verbosity", Description = "dotnet test verbosity. Defaults to minimal.")]
     public string Verbosity { get; set; } = "minimal";
 
+    /// <summary>
+    /// Gets or sets the interval between orchestration heartbeats. Exact zero disables heartbeat rendering.
+    /// </summary>
+    [CommandOption("heartbeat-interval", Description = "Heartbeat interval using 500ms, 30s, 10m, or 1h syntax. Defaults to 30s; 0 disables heartbeats.")]
+    public string HeartbeatInterval { get; set; } = "30s";
+
+    /// <summary>
+    /// Gets or sets how long an active operation may produce no observable output before classification.
+    /// </summary>
+    [CommandOption("no-progress-timeout", Description = "No-observable-progress timeout using 500ms, 30s, 10m, or 1h syntax. Defaults to 10m and must be greater than 0.")]
+    public string NoProgressTimeout { get; set; } = "10m";
+
+    /// <summary>
+    /// Gets or sets the response to an operation producing no observable progress.
+    /// </summary>
+    [CommandOption("watchdog", Description = "No-progress response: warn, fail, or off. Defaults to warn; off does not disable heartbeats.")]
+    public string Watchdog { get; set; } = "warn";
+
     /// <inheritdoc />
     [ExcludeFromCodeCoverage]
     public async ValueTask ExecuteAsync(IConsole console)
@@ -217,6 +234,8 @@ internal sealed partial class CoverageRunCommand : ICommand
 
     private CoverageRunRequest CreateRequest()
     {
+        var watchdog = ParseWatchdogOptions();
+
         if (Parallelism <= 0)
         {
             throw CoverageRunDiagnostics.Create(
@@ -299,7 +318,53 @@ internal sealed partial class CoverageRunCommand : ICommand
             testResults,
             SlowTestDiagnostics,
             !NoClean,
-            Verbosity);
+            Verbosity,
+            watchdog);
+    }
+
+    private CoverageRunWatchdogOptions ParseWatchdogOptions()
+    {
+        var mode = Watchdog?.ToLowerInvariant() switch
+        {
+            "warn" => CoverageRunWatchdogMode.Warn,
+            "fail" => CoverageRunWatchdogMode.Fail,
+            "off" => CoverageRunWatchdogMode.Off,
+            _ => throw CoverageRunDiagnostics.Create(
+                "ASCOV101",
+                "--watchdog must be warn, fail, or off.",
+                $"Received {QuoteOptionValue(Watchdog)}.",
+                "Use --watchdog warn, --watchdog fail, or --watchdog off.",
+                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog"),
+        };
+
+        var heartbeat = ParseWatchdogDuration("--heartbeat-interval", HeartbeatInterval, allowZero: true);
+        var timeout = ParseWatchdogDuration("--no-progress-timeout", NoProgressTimeout, allowZero: false);
+        return new CoverageRunWatchdogOptions(mode, heartbeat, timeout).Validate();
+    }
+
+    private static TimeSpan ParseWatchdogDuration(string option, string? value, bool allowZero)
+    {
+        var parsed = CoverageRunWatchdogDuration.TryParse(value, out var duration);
+        if (parsed && (allowZero || duration > TimeSpan.Zero))
+        {
+            return duration;
+        }
+
+        var zeroDetail = !allowZero && parsed && duration == TimeSpan.Zero
+            ? " This timeout must be greater than 0."
+            : string.Empty;
+        throw CoverageRunDiagnostics.Create(
+            "ASCOV101",
+            $"{option} has an invalid duration.",
+            $"Received {QuoteOptionValue(value)}.{zeroDetail}",
+            $"Use an integer duration such as 500ms, 30s, 10m, or 1h{(allowZero ? ", or use 0 to disable heartbeats" : string.Empty)}.",
+            "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog");
+    }
+
+    private static string QuoteOptionValue(string? value)
+    {
+        var bounded = value is null ? "<null>" : value.Length <= 64 ? value : value[..64] + "...";
+        return JsonSerializer.Serialize(bounded);
     }
 
     private CoverageRunScheduleMode ParseScheduleMode()
@@ -377,6 +442,7 @@ internal sealed partial class CoverageRunCommand : ICommand
 /// <param name="SlowTestDiagnostics">Whether slow-test diagnostic artifacts should be written.</param>
 /// <param name="Clean">Whether AppSurface-owned output is cleaned before writing new artifacts.</param>
 /// <param name="Verbosity">Verbosity forwarded to <c>dotnet test</c>.</param>
+/// <param name="Watchdog">No-observable-progress watchdog settings.</param>
 internal sealed record CoverageRunRequest(
     string? SolutionPath,
     IReadOnlyList<string> TestProjects,
@@ -400,7 +466,8 @@ internal sealed record CoverageRunRequest(
     CoverageRunTestResultFormat TestResults,
     bool SlowTestDiagnostics,
     bool Clean,
-    string Verbosity);
+    string Verbosity,
+    CoverageRunWatchdogOptions? Watchdog = null);
 
 /// <summary>
 /// Scheduling modes supported by <c>coverage run</c>.
@@ -501,11 +568,62 @@ internal sealed class CoverageRunWorkflow
         }
 
         var currentDirectory = Path.GetFullPath(Directory.GetCurrentDirectory());
-        var resolution = await ResolveProjectsAsync(request, currentDirectory, cancellationToken);
         var outputDirectory = ResolveUserPath(request.OutputDirectory, currentDirectory);
-        var schedulePlan = await CreateSchedulePlanAsync(request, resolution, outputDirectory, currentDirectory, cancellationToken);
+        CoverageRunOutputGuard.ValidateBootstrap(outputDirectory);
+        await using var watchdog = new CoverageRunWatchdogRuntime(
+            console,
+            _timeProvider,
+            request.Watchdog ?? CoverageRunWatchdogOptions.Default,
+            cancellationToken);
 
-        await PrintDiscoveryAsync(console, request, resolution, outputDirectory, schedulePlan);
+        try
+        {
+            var runTask = RunCoreAsync(request, currentDirectory, outputDirectory, watchdog);
+            var completed = await Task.WhenAny(runTask, watchdog.TerminalTask);
+            if (completed == watchdog.TerminalTask)
+            {
+                ObserveFault(runTask);
+                throw await watchdog.TerminalTask;
+            }
+
+            var result = await runTask;
+            await watchdog.CompleteAsync();
+            return result;
+        }
+        catch (Exception exception)
+        {
+            if (!watchdog.IsTerminalException(exception))
+            {
+                await watchdog.CompleteAsync();
+            }
+
+            throw;
+        }
+    }
+
+    private static void ObserveFault(Task task)
+        => _ = task.ContinueWith(
+            static completed => _ = completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+    private async Task<CoverageRunResult> RunCoreAsync(
+        CoverageRunRequest request,
+        string currentDirectory,
+        string outputDirectory,
+        CoverageRunWatchdogRuntime watchdog)
+    {
+        var runToken = watchdog.RunCancellationToken;
+        const string discoveryOperation = CoverageRunWatchdogOperationIds.Discovery;
+        watchdog.Register(
+            new CoverageRunWatchdogOperation(discoveryOperation, CoverageRunWatchdogOperationKind.Discovery),
+            CoverageRunWatchdogOperationState.Running);
+        var resolution = await ResolveProjectsAsync(request, currentDirectory, watchdog, runToken);
+        watchdog.Transition(discoveryOperation, CoverageRunWatchdogOperationState.Complete);
+        var schedulePlan = await CreateSchedulePlanAsync(request, resolution, outputDirectory, currentDirectory, runToken);
+
+        await PrintDiscoveryAsync(watchdog, request, resolution, outputDirectory, schedulePlan);
         if (request.DryRun)
         {
             CoverageRunOutputGuard.Validate(outputDirectory, resolution.SolutionDirectory, resolution.Projects);
@@ -513,10 +631,11 @@ internal sealed class CoverageRunWorkflow
         }
 
         CoverageRunOutputGuard.Prepare(outputDirectory, resolution.SolutionDirectory, resolution.Projects, request.Clean);
+        await watchdog.BindCanonicalOutputAsync(outputDirectory);
         var runStarted = _timeProvider.GetTimestamp();
-        var build = await BuildIfNeededAsync(request, resolution, console, cancellationToken);
-        var projectResults = await RunScheduledProjectsAsync(request, resolution, schedulePlan, outputDirectory, build.TestsShouldSkipBuild, console, cancellationToken);
-        await ReplayLogsAsync(projectResults, console, cancellationToken);
+        var build = await BuildIfNeededAsync(request, resolution, watchdog, runToken);
+        var projectResults = await RunScheduledProjectsAsync(request, resolution, schedulePlan, outputDirectory, build.TestsShouldSkipBuild, watchdog, runToken);
+        await ReplayLogsAsync(projectResults, watchdog, runToken);
 
         var coverageFiles = Directory.Exists(Path.Join(outputDirectory, "projects"))
             ? Directory.EnumerateFiles(Path.Join(outputDirectory, "projects"), "coverage.cobertura.xml", SearchOption.AllDirectories).ToArray()
@@ -544,18 +663,28 @@ internal sealed class CoverageRunWorkflow
                 projectResults.Select(result => result.LogFile).FirstOrDefault(File.Exists));
         }
 
+        const string diagnosticsOperation = CoverageRunWatchdogOperationIds.Diagnostics;
+        watchdog.Register(
+            new CoverageRunWatchdogOperation(diagnosticsOperation, CoverageRunWatchdogOperationKind.Diagnostics),
+            CoverageRunWatchdogOperationState.Running);
         var diagnostics = await RunSlowTestDiagnosticsAsync(
             request,
             outputDirectory,
             projectResults,
             () => ElapsedSeconds(runStarted),
-            console,
-            cancellationToken);
+            watchdog,
+            runToken);
+        watchdog.Transition(diagnosticsOperation, CoverageRunWatchdogOperationState.Complete);
 
         var mergeStarted = _timeProvider.GetTimestamp();
         var mergeDirectory = Path.Join(outputDirectory, "reportgenerator");
         Directory.CreateDirectory(mergeDirectory);
-        var merge = await _reportGenerator.MergeAsync(coverageFiles, mergeDirectory, cancellationToken);
+        const string mergeOperation = CoverageRunWatchdogOperationIds.Merge;
+        watchdog.Register(
+            new CoverageRunWatchdogOperation(mergeOperation, CoverageRunWatchdogOperationKind.Merge),
+            CoverageRunWatchdogOperationState.Running);
+        var merge = await _reportGenerator.MergeAsync(coverageFiles, mergeDirectory, watchdog, runToken);
+        watchdog.Transition(mergeOperation, CoverageRunWatchdogOperationState.Complete);
         var mergeSeconds = ElapsedSeconds(mergeStarted);
         if (merge.ExitCode != 0 || !File.Exists(merge.CoberturaPath))
         {
@@ -567,14 +696,22 @@ internal sealed class CoverageRunWorkflow
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
         }
 
+        const string artifactsOperation = CoverageRunWatchdogOperationIds.Artifacts;
+        watchdog.Register(
+            new CoverageRunWatchdogOperation(artifactsOperation, CoverageRunWatchdogOperationKind.Artifacts),
+            CoverageRunWatchdogOperationState.Running);
         var mergedCoveragePath = Path.Join(outputDirectory, "coverage.cobertura.xml");
-        File.Copy(merge.CoberturaPath, mergedCoveragePath, overwrite: true);
+        await CopyStagedFileAsync(merge.CoberturaPath, mergedCoveragePath, watchdog, runToken);
         if (File.Exists(merge.SummaryPath))
         {
-            File.Copy(merge.SummaryPath, Path.Join(outputDirectory, "reportgenerator-summary.txt"), overwrite: true);
+            await CopyStagedFileAsync(
+                merge.SummaryPath,
+                Path.Join(outputDirectory, "reportgenerator-summary.txt"),
+                watchdog,
+                runToken);
         }
 
-        await WriteSummaryAsync(outputDirectory, mergedCoveragePath, request, diagnostics, console, cancellationToken);
+        await WriteSummaryAsync(outputDirectory, mergedCoveragePath, request, diagnostics, watchdog, runToken);
         await WriteTimingsAsync(
             request,
             resolution,
@@ -588,10 +725,12 @@ internal sealed class CoverageRunWorkflow
             projectResults,
             schedulePlan,
             diagnostics,
-            cancellationToken);
+            watchdog,
+            runToken);
+        watchdog.Transition(artifactsOperation, CoverageRunWatchdogOperationState.Complete);
 
-        await console.Output.WriteLineAsync($"Coverage artifacts: {outputDirectory}");
-        await console.Output.WriteLineAsync($"Next: appsurface coverage gate --coverage {mergedCoveragePath} --min-line <percent> --min-branch <percent>");
+        await watchdog.WriteOutputLineAsync($"Coverage artifacts: {outputDirectory}");
+        await watchdog.WriteOutputLineAsync($"Next: appsurface coverage gate --coverage {mergedCoveragePath} --min-line <percent> --min-branch <percent>");
 
         var failureLogPath = projectResults.FirstOrDefault(result => result.ExitCode != 0)?.LogFile;
         return new CoverageRunResult(projectResults.All(result => result.ExitCode == 0), outputDirectory, mergedCoveragePath, failureLogPath);
@@ -600,6 +739,7 @@ internal sealed class CoverageRunWorkflow
     private async Task<CoverageProjectResolution> ResolveProjectsAsync(
         CoverageRunRequest request,
         string currentDirectory,
+        CoverageRunWatchdogRuntime watchdog,
         CancellationToken cancellationToken)
     {
         var exclusionPatterns = CoverageProjectExclusionMatcher.NormalizePatterns(request.ExcludeTestProjects);
@@ -628,7 +768,13 @@ internal sealed class CoverageRunWorkflow
 
         var solutionPath = ResolveSolutionPath(request.SolutionPath, currentDirectory);
         var solutionDirectory = Path.GetDirectoryName(solutionPath) ?? currentDirectory;
-        var list = await _processRunner.RunAsync("dotnet", ["sln", solutionPath, "list"], solutionDirectory, cancellationToken);
+        var discoveryRequest = watchdog.CreateProcessRequest(
+            "dotnet",
+            ["sln", solutionPath, "list"],
+            solutionDirectory,
+            CoverageRunWatchdogOperationIds.Discovery,
+            new CoverageRunSafeCommand("dotnet", ["sln", "list"]));
+        var list = await _processRunner.RunAsync(discoveryRequest, cancellationToken);
         if (list.ExitCode != 0)
         {
             throw CoverageRunDiagnostics.Create(
@@ -636,6 +782,16 @@ internal sealed class CoverageRunWorkflow
                 "Failed to list solution projects.",
                 $"dotnet sln exited with {list.ExitCode.ToString(CultureInfo.InvariantCulture)}.",
                 "Pass --test-project for explicit project selection, or fix the solution file.",
+                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+        }
+
+        if (list.OutputTruncated)
+        {
+            throw CoverageRunDiagnostics.Create(
+                "ASCOV102",
+                "Solution project discovery output exceeded the safety limit.",
+                "dotnet sln produced more than 1 MiB on standard output or standard error, so the project list may be incomplete.",
+                "Pass --test-project for explicit project selection, or reduce unexpected dotnet sln diagnostic output before rerunning.",
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
         }
 
@@ -1167,13 +1323,13 @@ internal sealed class CoverageRunWorkflow
     private async Task<CoverageRunBuildResult> BuildIfNeededAsync(
         CoverageRunRequest request,
         CoverageProjectResolution resolution,
-        IConsole console,
+        CoverageRunWatchdogRuntime watchdog,
         CancellationToken cancellationToken)
     {
         var shouldBuild = request.Build || (!request.NoBuild && resolution.SolutionPath is not null && request.TestProjects.Count == 0);
         if (!shouldBuild)
         {
-            await console.Output.WriteLineAsync(request.NoBuild
+            await watchdog.WriteOutputLineAsync(request.NoBuild
                 ? "Build: skipped by --no-build; test projects will run with --no-build."
                 : "Build: skipped; test projects will build as needed.");
             return new CoverageRunBuildResult(0, request.NoBuild);
@@ -1181,10 +1337,14 @@ internal sealed class CoverageRunWorkflow
 
         if (resolution.SolutionPath is null)
         {
-            return new CoverageRunBuildResult(await BuildExplicitProjectsAsync(request, resolution, console, cancellationToken), TestsShouldSkipBuild: true);
+            return new CoverageRunBuildResult(await BuildExplicitProjectsAsync(request, resolution, watchdog, cancellationToken), TestsShouldSkipBuild: true);
         }
 
-        await console.Output.WriteLineAsync($"Building {resolution.SolutionPath}...");
+        const string buildOperation = CoverageRunWatchdogOperationIds.Build;
+        watchdog.Register(
+            new CoverageRunWatchdogOperation(buildOperation, CoverageRunWatchdogOperationKind.Build),
+            CoverageRunWatchdogOperationState.Running);
+        await watchdog.WriteOutputLineAsync($"Building {resolution.SolutionPath}...");
         var started = _timeProvider.GetTimestamp();
         var args = new List<string> { "build", resolution.SolutionPath, "--configuration", request.Configuration, "-v", "minimal" };
         if (request.NoRestore)
@@ -1192,8 +1352,16 @@ internal sealed class CoverageRunWorkflow
             args.Add("--no-restore");
         }
 
-        var result = await _processRunner.RunAsync("dotnet", args, resolution.SolutionDirectory, cancellationToken);
-        await console.Output.WriteAsync(result.Output);
+        var processRequest = watchdog.CreateProcessRequest(
+            "dotnet",
+            args,
+            resolution.SolutionDirectory,
+            buildOperation,
+            new CoverageRunSafeCommand(
+                "dotnet",
+                request.NoRestore ? ["build", "--configuration", "-v", "--no-restore"] : ["build", "--configuration", "-v"]));
+        var result = await _processRunner.RunAsync(processRequest, cancellationToken);
+        await watchdog.WriteOutputAsync(result.Output);
         if (result.ExitCode != 0)
         {
             throw CoverageRunDiagnostics.Create(
@@ -1204,16 +1372,21 @@ internal sealed class CoverageRunWorkflow
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
         }
 
+        watchdog.Transition(buildOperation, CoverageRunWatchdogOperationState.Complete);
         return new CoverageRunBuildResult(ElapsedSeconds(started), TestsShouldSkipBuild: true);
     }
 
     private async Task<long> BuildExplicitProjectsAsync(
         CoverageRunRequest request,
         CoverageProjectResolution resolution,
-        IConsole console,
+        CoverageRunWatchdogRuntime watchdog,
         CancellationToken cancellationToken)
     {
-        await console.Output.WriteLineAsync($"Building {resolution.Projects.Count.ToString(CultureInfo.InvariantCulture)} selected test project(s)...");
+        const string buildOperation = CoverageRunWatchdogOperationIds.Build;
+        watchdog.Register(
+            new CoverageRunWatchdogOperation(buildOperation, CoverageRunWatchdogOperationKind.Build),
+            CoverageRunWatchdogOperationState.Running);
+        await watchdog.WriteOutputLineAsync($"Building {resolution.Projects.Count.ToString(CultureInfo.InvariantCulture)} selected test project(s)...");
         var started = _timeProvider.GetTimestamp();
         foreach (var project in resolution.Projects)
         {
@@ -1223,8 +1396,16 @@ internal sealed class CoverageRunWorkflow
                 args.Add("--no-restore");
             }
 
-            var result = await _processRunner.RunAsync("dotnet", args, resolution.SolutionDirectory, cancellationToken);
-            await console.Output.WriteAsync(result.Output);
+            var processRequest = watchdog.CreateProcessRequest(
+                "dotnet",
+                args,
+                resolution.SolutionDirectory,
+                buildOperation,
+                new CoverageRunSafeCommand(
+                    "dotnet",
+                    request.NoRestore ? ["build", "--configuration", "-v", "--no-restore"] : ["build", "--configuration", "-v"]));
+            var result = await _processRunner.RunAsync(processRequest, cancellationToken);
+            await watchdog.WriteOutputAsync(result.Output);
             if (result.ExitCode != 0)
             {
                 throw CoverageRunDiagnostics.Create(
@@ -1236,6 +1417,7 @@ internal sealed class CoverageRunWorkflow
             }
         }
 
+        watchdog.Transition(buildOperation, CoverageRunWatchdogOperationState.Complete);
         return ElapsedSeconds(started);
     }
 
@@ -1245,18 +1427,31 @@ internal sealed class CoverageRunWorkflow
         CoverageRunSchedulePlan schedulePlan,
         string outputDirectory,
         bool skipBuildDuringTests,
-        IConsole console,
+        CoverageRunWatchdogRuntime watchdog,
         CancellationToken cancellationToken)
     {
         var results = new CoverageProjectRunResult[resolution.Projects.Count];
         var active = new List<Task<CoverageProjectRunResult>>();
+
+        foreach (var entry in schedulePlan.Entries)
+        {
+            var log = $"projects/{entry.Project.Slug}/dotnet-test.log";
+            watchdog.Register(
+                new CoverageRunWatchdogOperation(
+                    ProjectOperationId(entry),
+                    CoverageRunWatchdogOperationKind.Project,
+                    entry.ExecutionIndex,
+                    entry.Project.RelativePath,
+                    log),
+                CoverageRunWatchdogOperationState.Queued);
+        }
 
         foreach (var entry in schedulePlan.Entries.OrderBy(entry => entry.ExecutionIndex))
         {
             if (entry.Project.IsExclusive)
             {
                 await DrainActiveAsync(active, results);
-                results[entry.OriginalIndex] = await RunProjectAsync(request, resolution, outputDirectory, entry, skipBuildDuringTests, console, cancellationToken);
+                results[entry.OriginalIndex] = await RunProjectAsync(request, resolution, outputDirectory, entry, skipBuildDuringTests, watchdog, cancellationToken);
                 continue;
             }
 
@@ -1265,7 +1460,7 @@ internal sealed class CoverageRunWorkflow
                 await DrainOneAsync(active, results);
             }
 
-            active.Add(RunProjectAsync(request, resolution, outputDirectory, entry, skipBuildDuringTests, console, cancellationToken));
+            active.Add(RunProjectAsync(request, resolution, outputDirectory, entry, skipBuildDuringTests, watchdog, cancellationToken));
         }
 
         await DrainActiveAsync(active, results);
@@ -1294,7 +1489,7 @@ internal sealed class CoverageRunWorkflow
         string outputDirectory,
         CoverageRunScheduleEntry entry,
         bool skipBuildDuringTests,
-        IConsole console,
+        CoverageRunWatchdogRuntime watchdog,
         CancellationToken cancellationToken)
     {
         var project = entry.Project;
@@ -1303,21 +1498,33 @@ internal sealed class CoverageRunWorkflow
         Directory.CreateDirectory(projectOutputDirectory);
         var logFile = Path.Join(projectOutputDirectory, "dotnet-test.log");
         var started = _timeProvider.GetTimestamp();
+        var operationId = ProjectOperationId(entry);
+        watchdog.Transition(operationId, CoverageRunWatchdogOperationState.Running);
 
-        await console.Output.WriteLineAsync(
+        await watchdog.WriteOutputLineAsync(
             $"[{entry.ExecutionIndex + 1}/{resolution.Projects.Count}] starting {project.RelativePath}{(project.IsExclusive ? " (exclusive)" : string.Empty)}");
 
         var testResults = CreateTestResultArtifacts(request, outputDirectory, project, index);
         var args = CreateTestArguments(request, project, projectOutputDirectory, testResults, skipBuildDuringTests);
-        var processResult = await _processRunner.RunAsync("dotnet", args, resolution.SolutionDirectory, cancellationToken, outputFile: logFile);
+        var processRequest = watchdog.CreateProcessRequest(
+            "dotnet",
+            args,
+            resolution.SolutionDirectory,
+            operationId,
+            new CoverageRunSafeCommand("dotnet", CreateSafeTestCommandOptions(request, skipBuildDuringTests)),
+            logFile);
+        var processResult = await _processRunner.RunAsync(processRequest, cancellationToken);
+        watchdog.Transition(operationId, CoverageRunWatchdogOperationState.Finalizing);
         var seconds = ElapsedSeconds(started);
 
-        await console.Output.WriteLineAsync(
+        await watchdog.WriteOutputLineAsync(
             $"[{entry.ExecutionIndex + 1}/{resolution.Projects.Count}] finished {project.RelativePath} in {seconds}s (exit {processResult.ExitCode})");
         if (processResult.ExitCode != 0)
         {
-            await console.Error.WriteLineAsync($"Test run failed for {project.RelativePath}; log: {logFile}");
+            await watchdog.WriteErrorLineAsync($"Test run failed for {project.RelativePath}; log: {logFile}");
         }
+
+        watchdog.Transition(operationId, CoverageRunWatchdogOperationState.Complete);
 
         return new CoverageProjectRunResult(
             index,
@@ -1330,6 +1537,32 @@ internal sealed class CoverageRunWorkflow
             processResult.ExitCode,
             logFile,
             testResults);
+    }
+
+    private static string ProjectOperationId(CoverageRunScheduleEntry entry)
+        => $"project:{entry.ExecutionIndex.ToString(CultureInfo.InvariantCulture)}";
+
+    private static IReadOnlyList<string> CreateSafeTestCommandOptions(
+        CoverageRunRequest request,
+        bool skipBuildDuringTests)
+    {
+        var options = new List<string> { "test", "--configuration", "-v" };
+        if (request.NoRestore)
+        {
+            options.Add("--no-restore");
+        }
+
+        if (skipBuildDuringTests)
+        {
+            options.Add("--no-build");
+        }
+
+        if (request.Loggers.Count > 0 || request.TestResults == CoverageRunTestResultFormat.Junit)
+        {
+            options.Add("--logger");
+        }
+
+        return options;
     }
 
     private static IReadOnlyList<string> CreateTestArguments(
@@ -1406,24 +1639,24 @@ internal sealed class CoverageRunWorkflow
         };
     }
 
-    private static async Task ReplayLogsAsync(IReadOnlyList<CoverageProjectRunResult> results, IConsole console, CancellationToken cancellationToken)
+    private static async Task ReplayLogsAsync(IReadOnlyList<CoverageProjectRunResult> results, CoverageRunWatchdogRuntime watchdog, CancellationToken cancellationToken)
     {
         foreach (var result in results.OrderBy(result => result.Index))
         {
-            await console.Output.WriteLineAsync($"--- BEGIN {result.Project.RelativePath} ---");
+            await watchdog.WriteOutputLineAsync($"--- BEGIN {result.Project.RelativePath} ---");
             if (File.Exists(result.LogFile))
             {
                 const int maxReplayCharacters = 80_000;
                 var log = await ReadLogPrefixAsync(result.LogFile, maxReplayCharacters, cancellationToken);
                 if (!string.IsNullOrEmpty(log.Text))
                 {
-                    await console.Output.WriteAsync(log.Truncated
+                    await watchdog.WriteOutputAsync(log.Truncated
                         ? log.Text + Environment.NewLine + "[log truncated; see full log on disk]" + Environment.NewLine
                         : log.Text);
                 }
             }
 
-            await console.Output.WriteLineAsync($"--- END {result.Project.RelativePath} (exit {result.ExitCode}) ---");
+            await watchdog.WriteOutputLineAsync($"--- END {result.Project.RelativePath} (exit {result.ExitCode}) ---");
         }
     }
 
@@ -1452,52 +1685,52 @@ internal sealed class CoverageRunWorkflow
     }
 
     private static async Task PrintDiscoveryAsync(
-        IConsole console,
+        CoverageRunWatchdogRuntime watchdog,
         CoverageRunRequest request,
         CoverageProjectResolution resolution,
         string outputDirectory,
         CoverageRunSchedulePlan schedulePlan)
     {
-        await console.Output.WriteLineAsync($"Coverage run inputs");
-        await console.Output.WriteLineAsync($"  Solution: {resolution.SolutionPath ?? "(explicit test projects)"}");
-        await console.Output.WriteLineAsync($"  Output: {outputDirectory}");
-        await console.Output.WriteLineAsync($"  Configuration: {request.Configuration}");
-        await console.Output.WriteLineAsync($"  Parallelism: {request.Parallelism.ToString(CultureInfo.InvariantCulture)}");
-        await console.Output.WriteLineAsync($"  Schedule: {schedulePlan.Mode}");
+        await watchdog.WriteOutputLineAsync($"Coverage run inputs");
+        await watchdog.WriteOutputLineAsync($"  Solution: {resolution.SolutionPath ?? "(explicit test projects)"}");
+        await watchdog.WriteOutputLineAsync($"  Output: {outputDirectory}");
+        await watchdog.WriteOutputLineAsync($"  Configuration: {request.Configuration}");
+        await watchdog.WriteOutputLineAsync($"  Parallelism: {request.Parallelism.ToString(CultureInfo.InvariantCulture)}");
+        await watchdog.WriteOutputLineAsync($"  Schedule: {schedulePlan.Mode}");
         if (!string.Equals(schedulePlan.TimingSource.Kind, "none", StringComparison.Ordinal))
         {
-            await console.Output.WriteLineAsync($"  Schedule timings: {schedulePlan.TimingSource.Status} {schedulePlan.TimingSource.Path}");
+            await watchdog.WriteOutputLineAsync($"  Schedule timings: {schedulePlan.TimingSource.Status} {schedulePlan.TimingSource.Path}");
         }
 
-        await console.Output.WriteLineAsync($"  Include: {request.IncludeFilter ?? "(Coverlet default)"}");
-        await console.Output.WriteLineAsync($"  Exclude: {request.ExcludeFilter}");
-        await console.Output.WriteLineAsync($"  Managed test results: {DescribeTestResults(request)}");
-        await console.Output.WriteLineAsync($"Discovered {resolution.Projects.Count.ToString(CultureInfo.InvariantCulture)} test project(s).");
+        await watchdog.WriteOutputLineAsync($"  Include: {request.IncludeFilter ?? "(Coverlet default)"}");
+        await watchdog.WriteOutputLineAsync($"  Exclude: {request.ExcludeFilter}");
+        await watchdog.WriteOutputLineAsync($"  Managed test results: {DescribeTestResults(request)}");
+        await watchdog.WriteOutputLineAsync($"Discovered {resolution.Projects.Count.ToString(CultureInfo.InvariantCulture)} test project(s).");
 
         foreach (var warning in schedulePlan.Warnings)
         {
-            await console.Error.WriteLineAsync(warning);
+            await watchdog.WriteErrorLineAsync(warning);
         }
 
         foreach (var project in resolution.Projects)
         {
-            await console.Output.WriteLineAsync(
+            await watchdog.WriteOutputLineAsync(
                 $"  include {(project.IsExclusive ? "exclusive" : "parallel ")} {project.RelativePath} -> projects/{project.Slug}");
         }
 
-        await console.Output.WriteLineAsync("Planned execution order:");
+        await watchdog.WriteOutputLineAsync("Planned execution order:");
         foreach (var entry in schedulePlan.Entries.OrderBy(entry => entry.ExecutionIndex))
         {
             var scheduled = entry.ScheduledSeconds.HasValue
                 ? $" scheduled {entry.ScheduledSeconds.Value.ToString(CultureInfo.InvariantCulture)}s"
                 : string.Empty;
-            await console.Output.WriteLineAsync(
+            await watchdog.WriteOutputLineAsync(
                 $"  execution {entry.ExecutionIndex + 1}: original {entry.OriginalIndex + 1} {(entry.Project.IsExclusive ? "exclusive" : "parallel ")} {entry.Project.RelativePath} ({entry.ScheduleReason}{scheduled})");
         }
 
         foreach (var skipped in resolution.SkippedProjects)
         {
-            await console.Output.WriteLineAsync($"  skip {skipped.ProjectPath}: {skipped.Reason}");
+            await watchdog.WriteOutputLineAsync($"  skip {skipped.ProjectPath}: {skipped.Reason}");
         }
     }
 
@@ -1506,7 +1739,7 @@ internal sealed class CoverageRunWorkflow
         string coveragePath,
         CoverageRunRequest request,
         CoverageRunSlowTestDiagnosticsRun? diagnostics,
-        IConsole console,
+        CoverageRunWatchdogRuntime watchdog,
         CancellationToken cancellationToken)
     {
         using var stream = File.OpenRead(coveragePath);
@@ -1548,8 +1781,77 @@ internal sealed class CoverageRunWorkflow
                 """);
         }
 
-        await File.WriteAllTextAsync(Path.Join(outputDirectory, "summary.txt"), summary, cancellationToken);
-        await console.Output.WriteLineAsync(summary);
+        await WriteStagedTextAsync(
+            Path.Join(outputDirectory, "summary.txt"),
+            summary,
+            watchdog,
+            cancellationToken);
+        await watchdog.WriteOutputLineAsync(summary);
+    }
+
+    private static async Task CopyStagedFileAsync(
+        string sourcePath,
+        string destinationPath,
+        CoverageRunWatchdogRuntime watchdog,
+        CancellationToken cancellationToken)
+    {
+        var stagedPath = CreateStagedPath(destinationPath);
+        try
+        {
+            await using (var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 16 * 1024, FileOptions.Asynchronous))
+            await using (var destination = new FileStream(
+                stagedPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                16 * 1024,
+                FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                await source.CopyToAsync(destination, cancellationToken);
+                await destination.FlushAsync(cancellationToken);
+            }
+
+            watchdog.CommitStagedFile(stagedPath, destinationPath);
+        }
+        finally
+        {
+            TryDeleteStagedFile(stagedPath);
+        }
+    }
+
+    private static async Task WriteStagedTextAsync(
+        string destinationPath,
+        string content,
+        CoverageRunWatchdogRuntime watchdog,
+        CancellationToken cancellationToken)
+    {
+        var stagedPath = CreateStagedPath(destinationPath);
+        try
+        {
+            await File.WriteAllTextAsync(stagedPath, content, cancellationToken);
+            watchdog.CommitStagedFile(stagedPath, destinationPath);
+        }
+        finally
+        {
+            TryDeleteStagedFile(stagedPath);
+        }
+    }
+
+    private static string CreateStagedPath(string destinationPath)
+        => Path.Join(
+            Path.GetDirectoryName(Path.GetFullPath(destinationPath))!,
+            $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.tmp");
+
+    private static void TryDeleteStagedFile(string stagedPath)
+    {
+        try
+        {
+            File.Delete(stagedPath);
+        }
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
+        {
+            // Staged cleanup is best effort; the unique path is never a canonical artifact.
+        }
     }
 
     private static decimal ReadDecimal(XElement root, string name)
@@ -1575,6 +1877,7 @@ internal sealed class CoverageRunWorkflow
         IReadOnlyList<CoverageProjectRunResult> projectResults,
         CoverageRunSchedulePlan schedulePlan,
         CoverageRunSlowTestDiagnosticsRun? diagnostics,
+        CoverageRunWatchdogRuntime watchdog,
         CancellationToken cancellationToken)
     {
         var testResultArtifacts = projectResults
@@ -1673,7 +1976,11 @@ internal sealed class CoverageRunWorkflow
         };
 
         var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
-        await File.WriteAllTextAsync(Path.Join(outputDirectory, "timings.json"), json + Environment.NewLine, cancellationToken);
+        await WriteStagedTextAsync(
+            Path.Join(outputDirectory, "timings.json"),
+            json + Environment.NewLine,
+            watchdog,
+            cancellationToken);
     }
 
     private static string ResolveParserStatus(
@@ -1693,7 +2000,7 @@ internal sealed class CoverageRunWorkflow
         string outputDirectory,
         IReadOnlyList<CoverageProjectRunResult> projectResults,
         Func<long> getTotalSeconds,
-        IConsole console,
+        CoverageRunWatchdogRuntime watchdog,
         CancellationToken cancellationToken)
     {
         if (!request.SlowTestDiagnostics)
@@ -1702,36 +2009,62 @@ internal sealed class CoverageRunWorkflow
         }
 
         var diagnosticStarted = _timeProvider.GetTimestamp();
+        var markdownPath = Path.Join(outputDirectory, CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName);
+        var jsonPath = Path.Join(outputDirectory, CoverageRunSlowTestDiagnosticsWriter.JsonFileName);
+        var stagedMarkdownPath = CreateStagedPath(markdownPath);
+        var stagedJsonPath = CreateStagedPath(jsonPath);
+
+        async Task<CoverageRunSlowTestDiagnosticsRun?> WarnAsync(Exception exception)
+        {
+            var aggregationSeconds = ElapsedSeconds(diagnosticStarted);
+            await watchdog.WriteErrorLineAsync(FormattableString.Invariant(
+                $"Slow-test diagnostics failed after {aggregationSeconds}s ({CalculateAggregationPercent(aggregationSeconds, getTotalSeconds()):0.00}% overhead): {exception.Message}"));
+            return null;
+        }
+
         try
         {
-            var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync(projectResults, cancellationToken);
-            var diagnostics = await CoverageRunSlowTestDiagnosticsWriter.WriteAsync(
-                outputDirectory,
-                report,
-                () => ElapsedSeconds(diagnosticStarted),
-                aggregationSeconds => CalculateAggregationPercent(aggregationSeconds, getTotalSeconds()),
-                cancellationToken);
+            CoverageRunSlowTestDiagnosticsRun diagnostics;
+            try
+            {
+                var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync(projectResults, cancellationToken);
+                diagnostics = await CoverageRunSlowTestDiagnosticsWriter.WriteAsync(
+                    stagedMarkdownPath,
+                    stagedJsonPath,
+                    outputDirectory,
+                    report,
+                    () => ElapsedSeconds(diagnosticStarted),
+                    aggregationSeconds => CalculateAggregationPercent(aggregationSeconds, getTotalSeconds()),
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or XmlException)
+            {
+                return await WarnAsync(ex);
+            }
 
-            await console.Output.WriteLineAsync(FormattableString.Invariant(
+            // Commit failure is not a diagnostics-parser warning: allowing the run to continue
+            // could publish summaries that claim a Markdown/JSON pair which was only partially promoted.
+            try
+            {
+                watchdog.CommitStagedFiles(
+                    [
+                        (stagedMarkdownPath, diagnostics.MarkdownPath),
+                        (stagedJsonPath, diagnostics.JsonPath),
+                    ]);
+            }
+            catch (CoverageRunStagedCommitPreflightException ex)
+            {
+                return await WarnAsync(ex);
+            }
+
+            await watchdog.WriteOutputLineAsync(FormattableString.Invariant(
                 $"Slow-test diagnostics: {diagnostics.MarkdownPath} ({diagnostics.AggregationSeconds}s, {diagnostics.AggregationPercent:0.00}% overhead)"));
             return diagnostics;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or XmlException)
+        finally
         {
-            var aggregationSeconds = ElapsedSeconds(diagnosticStarted);
-            var diagnostics = new CoverageRunSlowTestDiagnosticsRun(
-                Path.Join(outputDirectory, CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName),
-                Path.Join(outputDirectory, CoverageRunSlowTestDiagnosticsWriter.JsonFileName),
-                aggregationSeconds,
-                CalculateAggregationPercent(aggregationSeconds, getTotalSeconds()),
-                WarningCount: 1,
-                MetadataComplete: false,
-                projectResults
-                    .SelectMany(result => result.TestResults)
-                    .ToDictionary(artifact => artifact.Path, _ => "diagnosticsFailed", StringComparer.Ordinal));
-            await console.Error.WriteLineAsync(FormattableString.Invariant(
-                $"Slow-test diagnostics failed after {diagnostics.AggregationSeconds}s ({diagnostics.AggregationPercent:0.00}% overhead): {ex.Message}"));
-            return diagnostics;
+            TryDeleteStagedFile(stagedMarkdownPath);
+            TryDeleteStagedFile(stagedJsonPath);
         }
     }
 
@@ -2194,14 +2527,51 @@ internal interface ICoverageRunProcessRunner
         string workingDirectory,
         CancellationToken cancellationToken,
         string? outputFile = null);
+
+    /// <summary>
+    /// Runs a structured coverage process request with optional lifecycle observation.
+    /// </summary>
+    /// <param name="request">Structured process request.</param>
+    /// <param name="cancellationToken">Cancellation token that should terminate the process tree.</param>
+    /// <returns>Process exit code and captured output.</returns>
+    Task<CoverageRunProcessResult> RunAsync(
+        CoverageRunProcessRequest request,
+        CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// Structured request for a process owned by the coverage workflow.
+/// </summary>
+/// <param name="FileName">Executable name or path.</param>
+/// <param name="Arguments">Argument tokens passed without shell interpolation.</param>
+/// <param name="WorkingDirectory">Working directory for the child process.</param>
+/// <param name="OutputFile">Optional log file receiving standard output and error.</param>
+/// <param name="ObserveOutput">Bounded observer invoked after each positive raw-byte read.</param>
+/// <param name="ProcessStarted">Observer receiving the callback-delivered root process.</param>
+/// <param name="ProcessCompleted">Observer invoked after CliWrap and its pipe drains complete.</param>
+internal sealed record CoverageRunProcessRequest(
+    string FileName,
+    IReadOnlyList<string> Arguments,
+    string WorkingDirectory,
+    string? OutputFile = null,
+    Action<int>? ObserveOutput = null,
+    Action<Process>? ProcessStarted = null,
+    Action? ProcessCompleted = null);
+
+/// <summary>
+/// Privacy-minimized command metadata persisted in watchdog evidence.
+/// </summary>
+/// <param name="Executable">Logical executable alias, never an absolute path.</param>
+/// <param name="Options">Command verb and switch names without values.</param>
+internal sealed record CoverageRunSafeCommand(string Executable, IReadOnlyList<string> Options);
 
 /// <summary>
 /// Result of running a coverage workflow process.
 /// </summary>
 /// <param name="ExitCode">Child process exit code.</param>
 /// <param name="Output">Captured standard output followed by captured standard error.</param>
-internal sealed record CoverageRunProcessResult(int ExitCode, string Output);
+/// <param name="OutputTruncated">Whether either captured stream exceeded the one-mebibyte safety limit.</param>
+internal sealed record CoverageRunProcessResult(int ExitCode, string Output, bool OutputTruncated = false);
 
 /// <summary>
 /// Default process runner used by the public coverage command.
@@ -2213,6 +2583,8 @@ internal sealed record CoverageRunProcessResult(int ExitCode, string Output);
 /// </remarks>
 internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunner
 {
+    private const int MaximumBufferedBytesPerStream = 1024 * 1024;
+
     /// <inheritdoc />
     public async Task<CoverageRunProcessResult> RunAsync(
         string fileName,
@@ -2220,12 +2592,26 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         string workingDirectory,
         CancellationToken cancellationToken,
         string? outputFile = null)
+        => await RunAsync(
+            new CoverageRunProcessRequest(
+                fileName,
+                arguments,
+                workingDirectory,
+                outputFile),
+            cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<CoverageRunProcessResult> RunAsync(
+        CoverageRunProcessRequest request,
+        CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         try
         {
-            return outputFile is null
-                ? await RunBufferedAsync(fileName, arguments, workingDirectory, cancellationToken)
-                : await RunStreamingAsync(fileName, arguments, workingDirectory, outputFile, cancellationToken);
+            return request.OutputFile is null
+                ? await RunBufferedAsync(request, cancellationToken)
+                : await RunStreamingAsync(request, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -2233,46 +2619,56 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         }
         catch (Exception ex) when (IsCommandLaunchFailure(ex))
         {
-            if (outputFile is not null)
+            if (request.OutputFile is not null)
             {
                 await TryAppendFailureLogAsync(
-                    outputFile,
-                    $"Failed to start command '{fileName}': {ex.Message}{Environment.NewLine}",
+                    request.OutputFile,
+                    $"Failed to start command '{request.FileName}': {ex.Message}{Environment.NewLine}",
                     cancellationToken);
             }
 
             throw CoverageRunDiagnostics.Create(
                 "ASCOV110",
                 "Failed to start dotnet.",
-                $"Command: {fileName}. {ex.Message}",
+                $"Command: {request.FileName}. {ex.Message}",
                 "Verify the .NET SDK is installed and available on PATH.",
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+        }
+        finally
+        {
+            InvokeObserver(request.ProcessCompleted);
         }
     }
 
     private static async Task<CoverageRunProcessResult> RunBufferedAsync(
-        string fileName,
-        IReadOnlyList<string> arguments,
-        string workingDirectory,
+        CoverageRunProcessRequest request,
         CancellationToken cancellationToken)
     {
-        BufferedCommandResult result = await CliCommand.Wrap(fileName)
-            .WithArguments(arguments)
-            .WithWorkingDirectory(workingDirectory)
+        await using var standardOutput = new MemoryStream();
+        await using var standardError = new MemoryStream();
+        var standardOutputTruncated = false;
+        var standardErrorTruncated = false;
+        var result = await CliCommand.Wrap(request.FileName)
+            .WithArguments(request.Arguments)
+            .WithWorkingDirectory(request.WorkingDirectory)
             .WithValidation(CommandResultValidation.None)
-            .ExecuteBufferedAsync(cancellationToken);
-        var output = result.StandardOutput + result.StandardError;
+            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(source, standardOutput, request.ObserveOutput, () => standardOutputTruncated = true, token)))
+            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(source, standardError, request.ObserveOutput, () => standardErrorTruncated = true, token)))
+            .ExecuteAsync(
+                _ => { },
+                process => InvokeObserver(request.ProcessStarted, process),
+                cancellationToken,
+                cancellationToken);
+        var output = Encoding.UTF8.GetString(standardOutput.ToArray()) + Encoding.UTF8.GetString(standardError.ToArray());
 
-        return new CoverageRunProcessResult(result.ExitCode, output);
+        return new CoverageRunProcessResult(result.ExitCode, output, standardOutputTruncated || standardErrorTruncated);
     }
 
     private static async Task<CoverageRunProcessResult> RunStreamingAsync(
-        string fileName,
-        IReadOnlyList<string> arguments,
-        string workingDirectory,
-        string outputFile,
+        CoverageRunProcessRequest request,
         CancellationToken cancellationToken)
     {
+        var outputFile = request.OutputFile!;
         var directory = Path.GetDirectoryName(outputFile);
         if (!string.IsNullOrEmpty(directory))
         {
@@ -2288,13 +2684,17 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
             useAsync: true);
         using var writeGate = new SemaphoreSlim(1, 1);
 
-        var result = await CliCommand.Wrap(fileName)
-            .WithArguments(arguments)
-            .WithWorkingDirectory(workingDirectory)
+        var result = await CliCommand.Wrap(request.FileName)
+            .WithArguments(request.Arguments)
+            .WithWorkingDirectory(request.WorkingDirectory)
             .WithValidation(CommandResultValidation.None)
-            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, token)))
-            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, token)))
-            .ExecuteAsync(cancellationToken);
+            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, request.ObserveOutput, token)))
+            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, request.ObserveOutput, token)))
+            .ExecuteAsync(
+                _ => { },
+                process => InvokeObserver(request.ProcessStarted, process),
+                cancellationToken,
+                cancellationToken);
 
         return new CoverageRunProcessResult(result.ExitCode, string.Empty);
     }
@@ -2303,6 +2703,7 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         Stream source,
         Stream target,
         SemaphoreSlim writeGate,
+        Action<int>? observeOutput,
         CancellationToken cancellationToken)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
@@ -2315,6 +2716,8 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
                 {
                     return;
                 }
+
+                InvokeObserver(observeOutput, read);
 
                 await writeGate.WaitAsync(cancellationToken);
                 try
@@ -2330,6 +2733,67 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static async Task CopyPipeToBufferAsync(
+        Stream source,
+        MemoryStream target,
+        Action<int>? observeOutput,
+        Action markTruncated,
+        CancellationToken cancellationToken)
+    {
+        var buffer = ArrayPool<byte>.Shared.Rent(81920);
+        try
+        {
+            while (true)
+            {
+                var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
+                if (read == 0)
+                {
+                    return;
+                }
+
+                InvokeObserver(observeOutput, read);
+                var remaining = MaximumBufferedBytesPerStream - checked((int)target.Length);
+                if (remaining > 0)
+                {
+                    await target.WriteAsync(buffer.AsMemory(0, Math.Min(read, remaining)), cancellationToken);
+                }
+
+                if (read > remaining)
+                {
+                    markTruncated();
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static void InvokeObserver(Action? observer)
+    {
+        try
+        {
+            observer?.Invoke();
+        }
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
+        {
+            // Lifecycle observers are evidence-only and must not fault process drainage.
+        }
+    }
+
+    private static void InvokeObserver<T>(Action<T>? observer, T value)
+    {
+        try
+        {
+            observer?.Invoke(value);
+        }
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
+        {
+            // Lifecycle observers are evidence-only and must not fault process drainage.
         }
     }
 
@@ -2386,6 +2850,14 @@ internal interface ICoverageRunReportGenerator
         IReadOnlyList<string> coverageFiles,
         string outputDirectory,
         CancellationToken cancellationToken);
+
+    /// <summary>Runs ReportGenerator with coverage-run watchdog process supervision.</summary>
+    Task<CoverageRunMergeResult> MergeAsync(
+        IReadOnlyList<string> coverageFiles,
+        string outputDirectory,
+        CoverageRunWatchdogRuntime watchdog,
+        CancellationToken cancellationToken)
+        => MergeAsync(coverageFiles, outputDirectory, cancellationToken);
 }
 
 /// <summary>
@@ -2420,14 +2892,41 @@ internal sealed class CoverageRunReportGenerator : ICoverageRunReportGenerator
         IReadOnlyList<string> coverageFiles,
         string outputDirectory,
         CancellationToken cancellationToken)
+        => await MergeCoreAsync(coverageFiles, outputDirectory, watchdog: null, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<CoverageRunMergeResult> MergeAsync(
+        IReadOnlyList<string> coverageFiles,
+        string outputDirectory,
+        CoverageRunWatchdogRuntime watchdog,
+        CancellationToken cancellationToken)
+        => await MergeCoreAsync(coverageFiles, outputDirectory, watchdog, cancellationToken);
+
+    private async Task<CoverageRunMergeResult> MergeCoreAsync(
+        IReadOnlyList<string> coverageFiles,
+        string outputDirectory,
+        CoverageRunWatchdogRuntime? watchdog,
+        CancellationToken cancellationToken)
     {
         var reportGeneratorDll = _locator.ResolveReportGeneratorDll();
         var reports = string.Join(';', coverageFiles);
-        var result = await _processRunner.RunAsync(
-            "dotnet",
-            [reportGeneratorDll, $"-reports:{reports}", $"-targetdir:{outputDirectory}", "-reporttypes:Cobertura;TextSummary"],
-            Directory.GetCurrentDirectory(),
-            cancellationToken);
+        var arguments = new[]
+        {
+            reportGeneratorDll,
+            $"-reports:{reports}",
+            $"-targetdir:{outputDirectory}",
+            "-reporttypes:Cobertura;TextSummary",
+        };
+        var result = watchdog is null
+            ? await _processRunner.RunAsync("dotnet", arguments, Directory.GetCurrentDirectory(), cancellationToken)
+            : await _processRunner.RunAsync(
+                watchdog.CreateProcessRequest(
+                    "dotnet",
+                    arguments,
+                    Directory.GetCurrentDirectory(),
+                    CoverageRunWatchdogOperationIds.Merge,
+                    new CoverageRunSafeCommand("reportgenerator", ["-reports", "-targetdir", "-reporttypes"])),
+                cancellationToken);
 
         return new CoverageRunMergeResult(
             result.ExitCode,
@@ -2557,6 +3056,45 @@ internal static class CoverageRunOutputGuard
 {
     private const string MarkerFileName = ".appsurface-coverage-output";
 
+    /// <summary>
+    /// Performs only non-mutating checks available before solution discovery supplies project directories.
+    /// </summary>
+    public static void ValidateBootstrap(string outputDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(outputDirectory))
+        {
+            throw UnsafeOutput("--output was blank.");
+        }
+
+        var output = Path.GetFullPath(outputDirectory);
+        if (File.Exists(output))
+        {
+            throw UnsafeOutput($"--output points to a file: {output}");
+        }
+
+        var comparison = GetPathComparison();
+        var trimmedOutput = Trim(output);
+        var root = Path.GetPathRoot(output);
+        if (!string.IsNullOrWhiteSpace(root) && string.Equals(trimmedOutput, Trim(root), comparison))
+        {
+            throw UnsafeOutput("--output must not be a filesystem root.");
+        }
+
+        if (string.Equals(trimmedOutput, Trim(Path.GetFullPath(Directory.GetCurrentDirectory())), comparison))
+        {
+            throw UnsafeOutput("--output must not be the current working directory.");
+        }
+
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrWhiteSpace(home) && string.Equals(trimmedOutput, Trim(home), comparison))
+        {
+            throw UnsafeOutput("--output must not be the user home directory.");
+        }
+
+        // Project-aware and existing-content ownership checks run only after discovery. Performing
+        // them here would either weaken the project-directory guard or replace its actionable cause.
+    }
+
     public static void Validate(
         string outputDirectory,
         string solutionDirectory,
@@ -2674,11 +3212,13 @@ internal static class CoverageRunOutputGuard
         if (Directory.Exists(path))
         {
             return string.Equals(name, "projects", StringComparison.Ordinal)
-                || string.Equals(name, "reportgenerator", StringComparison.Ordinal);
+                || string.Equals(name, "reportgenerator", StringComparison.Ordinal)
+                || IsOwnedSlowTestDiagnosticsStagingDirectory(name);
         }
 
         return string.Equals(name, "coverage.cobertura.xml", StringComparison.Ordinal)
             || string.Equals(name, "coverage.json", StringComparison.Ordinal)
+            || string.Equals(name, "coverage-watchdog.json", StringComparison.Ordinal)
             || string.Equals(name, "coverage-gate.json", StringComparison.Ordinal)
             || string.Equals(name, "coverage-gate.md", StringComparison.Ordinal)
             || string.Equals(name, "summary.txt", StringComparison.Ordinal)
@@ -2686,6 +3226,7 @@ internal static class CoverageRunOutputGuard
             || string.Equals(name, "reportgenerator-summary.txt", StringComparison.Ordinal)
             || string.Equals(name, CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName, StringComparison.Ordinal)
             || string.Equals(name, CoverageRunSlowTestDiagnosticsWriter.JsonFileName, StringComparison.Ordinal)
+            || IsOwnedStagedArtifact(name)
             || name.StartsWith("junit-", StringComparison.Ordinal) && name.EndsWith(".xml", StringComparison.Ordinal)
             || name.StartsWith("test-results-", StringComparison.Ordinal) && name.EndsWith(".xml", StringComparison.Ordinal);
     }
@@ -2696,6 +3237,7 @@ internal static class CoverageRunOutputGuard
             {
                 "coverage.cobertura.xml",
                 "coverage.json",
+                "coverage-watchdog.json",
                 "coverage-gate.json",
                 "coverage-gate.md",
                 "summary.txt",
@@ -2720,12 +3262,67 @@ internal static class CoverageRunOutputGuard
             File.Delete(testResultFile);
         }
 
-        foreach (var path in new[] { "projects", "reportgenerator" }
-            .Select(directory => Path.Join(output, directory))
+        foreach (var stagedFile in Directory.EnumerateFiles(output, ".*", SearchOption.TopDirectoryOnly)
+            .Where(path => IsOwnedStagedArtifact(Path.GetFileName(path))))
+        {
+            File.Delete(stagedFile);
+        }
+
+        foreach (var path in Directory.EnumerateDirectories(output, "*", SearchOption.TopDirectoryOnly)
+            .Where(path => string.Equals(Path.GetFileName(path), "projects", StringComparison.Ordinal)
+                || string.Equals(Path.GetFileName(path), "reportgenerator", StringComparison.Ordinal)
+                || IsOwnedSlowTestDiagnosticsStagingDirectory(Path.GetFileName(path)))
             .Where(Directory.Exists))
         {
             Directory.Delete(path, recursive: true);
         }
+    }
+
+    private static bool IsOwnedStagedArtifact(string name)
+    {
+        foreach (var prefix in new[]
+            {
+                "coverage.cobertura.xml",
+                "coverage.json",
+                "coverage-watchdog.json",
+                "coverage-gate.json",
+                "coverage-gate.md",
+                "summary.txt",
+                "timings.json",
+                "reportgenerator-summary.txt",
+                CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName,
+                CoverageRunSlowTestDiagnosticsWriter.JsonFileName,
+            }.Select(canonicalName => $".{canonicalName}."))
+        {
+            if (!name.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var suffix = name.EndsWith(".tmp", StringComparison.Ordinal)
+                ? ".tmp"
+                : name.EndsWith(".watchdog-backup", StringComparison.Ordinal)
+                    ? ".watchdog-backup"
+                    : null;
+            if (suffix is null)
+            {
+                continue;
+            }
+
+            var identifier = name[prefix.Length..^suffix.Length];
+            return Guid.TryParseExact(identifier, "N", out _);
+        }
+
+        return false;
+    }
+
+    private static bool IsOwnedSlowTestDiagnosticsStagingDirectory(string name)
+    {
+        const string prefix = ".slow-test-diagnostics.";
+        const string suffix = ".tmp";
+        return name.StartsWith(prefix, StringComparison.Ordinal)
+            && name.EndsWith(suffix, StringComparison.Ordinal)
+            && Guid.TryParseExact(name[prefix.Length..^suffix.Length], "N", out _);
     }
 
     private static CommandException UnsafeOutput(string cause)
@@ -2756,7 +3353,8 @@ internal static class CoverageRunDiagnostics
         string cause,
         string fix,
         string docs,
-        string? logPath = null)
+        string? logPath = null,
+        int exitCode = 1)
     {
         var builder = new StringBuilder();
         builder.Append(code).Append(' ').Append(problem);
@@ -2768,6 +3366,6 @@ internal static class CoverageRunDiagnostics
             builder.Append(" Log: ").Append(logPath);
         }
 
-        return new CommandException(builder.ToString());
+        return new CommandException(builder.ToString(), exitCode, showHelp: false);
     }
 }
