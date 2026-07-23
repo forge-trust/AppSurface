@@ -361,6 +361,7 @@ internal sealed class CoverageRunOutputLease : IDisposable
         }
     }
 
+    [ExcludeFromCodeCoverage(Justification = "Platform-specific entry inspection is exercised by the Windows and macOS security lanes; one merged run cannot execute both implementations.")]
     private static OutputEntry InspectEntry(SafeFileHandle parent, string name)
     {
         if (OperatingSystem.IsWindows())
@@ -631,6 +632,7 @@ internal sealed class CoverageRunOutputLease : IDisposable
         writer.Write(MarkerContents.Replace("\n", Environment.NewLine, StringComparison.Ordinal));
     }
 
+    [ExcludeFromCodeCoverage(Justification = "Windows-only marker creation is exercised by the Windows test lane.")]
     private void WriteWindowsMarker()
     {
         var path = Path.Join(_outputPath, MarkerFileName);
@@ -710,6 +712,7 @@ internal sealed class CoverageRunOutputLease : IDisposable
         return descriptor >= 0 ? descriptor : throw NativeIOException($"Unable to securely open output directory '{path}'.");
     }
 
+    [ExcludeFromCodeCoverage(Justification = "Native stat identity layouts vary by Unix OS; the platform security lanes exercise their supported layouts.")]
     private static FileObjectIdentity GetUnixIdentity(SafeFileHandle handle)
     {
         var buffer = Marshal.AllocHGlobal(512);
@@ -743,6 +746,7 @@ internal sealed class CoverageRunOutputLease : IDisposable
             ((ulong)information.FileIndexHigh << 32) | information.FileIndexLow);
     }
 
+    [ExcludeFromCodeCoverage(Justification = "Native stat kind layouts vary by Unix OS and architecture; the platform security lanes exercise their supported layouts.")]
     private static void RejectUnixWrongKind(SafeFileHandle handle, bool expectDirectory)
     {
         var buffer = Marshal.AllocHGlobal(512);
@@ -877,11 +881,13 @@ internal sealed class CoverageRunOutputLease : IDisposable
         }
     }
 
+    [ExcludeFromCodeCoverage(Justification = "Windows-only extended-path normalization is exercised by the Windows test lane.")]
     private static string NormalizeWindowsFinalPath(string path)
         => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)
             ? @"\\" + path[8..]
             : path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path[4..] : path));
 
+    [ExcludeFromCodeCoverage(Justification = "Windows-only retained-handle path resolution is exercised by the Windows test lane.")]
     private static string GetStableDirectoryPath(SafeFileHandle handle)
         => OperatingSystem.IsWindows()
             ? NormalizeWindowsFinalPath(GetWindowsFinalPath(handle))
@@ -892,6 +898,7 @@ internal sealed class CoverageRunOutputLease : IDisposable
     /// </summary>
     /// <param name="path">An absolute platform path.</param>
     /// <returns>The path with only fixed operating-system aliases canonicalized.</returns>
+    [ExcludeFromCodeCoverage(Justification = "macOS fixed-alias normalization is exercised by the macOS test lane; other platforms intentionally return unchanged paths.")]
     internal static string NormalizePlatformPath(string path)
     {
         if (!OperatingSystem.IsMacOS())
@@ -915,12 +922,25 @@ internal sealed class CoverageRunOutputLease : IDisposable
     private static IOException NativeIOException(string message)
         => new(message, new Win32Exception(Marshal.GetLastPInvokeError()));
 
+    [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
     private static int UnixCloseOnExec => OperatingSystem.IsMacOS() ? 0x01000000 : 0x00080000;
+
+    [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
     private static int UnixDirectory => OperatingSystem.IsMacOS() ? 0x00100000 : 0x00010000;
+
+    [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
     private static int UnixNoFollow => OperatingSystem.IsMacOS() ? 0x00000100 : 0x00020000;
+
+    [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
     private static int UnixNonBlocking => OperatingSystem.IsMacOS() ? 0x00000004 : 0x00000800;
+
+    [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
     private static int UnixCreate => OperatingSystem.IsMacOS() ? 0x00000200 : 0x00000040;
+
+    [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
     private static int UnixExclusive => OperatingSystem.IsMacOS() ? 0x00000800 : 0x00000080;
+
+    [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
     private static int UnixRemoveDirectory => OperatingSystem.IsMacOS() ? 0x080 : 0x200;
     private const int UnixReadOnly = 0;
     private const int UnixWriteOnly = 1;
@@ -979,6 +999,7 @@ internal sealed class CoverageRunOutputLease : IDisposable
     private readonly record struct OwnershipState(
         bool HasMarker,
         IReadOnlyList<TreeEntry> Snapshot);
+    [ExcludeFromCodeCoverage(Justification = "Platform-native identity data is exercised by the platform security lanes.")]
     private readonly record struct FileObjectIdentity(ulong DeviceOrVolume, ulong FileId);
 
     [DllImport("libc", EntryPoint = "open", SetLastError = true)]

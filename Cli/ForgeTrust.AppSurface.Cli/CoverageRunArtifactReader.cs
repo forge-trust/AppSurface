@@ -295,6 +295,7 @@ internal static class CoverageRunArtifactReader
         return new SafeFileHandle((nint)descriptor, ownsHandle: true);
     }
 
+    [ExcludeFromCodeCoverage(Justification = "Native stat layouts vary by Unix OS and architecture; the platform security lanes exercise their supported layouts.")]
     private static bool UnixHandleIsRegularFile(SafeFileHandle handle)
     {
         var buffer = Marshal.AllocHGlobal(512);
@@ -463,9 +464,16 @@ internal static class CoverageRunArtifactReader
             Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar,
             comparison);
 
+    [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
     private static int UnixOpenCloseOnExec => OperatingSystem.IsMacOS() ? 0x01000000 : 0x00080000;
+
+    [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
     private static int UnixOpenDirectory => OperatingSystem.IsMacOS() ? 0x00100000 : 0x00010000;
+
+    [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
     private static int UnixOpenNoFollow => OperatingSystem.IsMacOS() ? 0x00000100 : 0x00020000;
+
+    [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
     private static int UnixOpenNonBlocking => OperatingSystem.IsMacOS() ? 0x00000004 : 0x00000800;
     private const int UnixOpenReadOnly = 0;
 
@@ -496,6 +504,7 @@ internal static class CoverageRunArtifactReader
     /// </summary>
     /// <param name="VolumeSerialNumber">The serial number of the volume containing the object.</param>
     /// <param name="FileId">The file identifier reported for the opened object.</param>
+    [ExcludeFromCodeCoverage(Justification = "Windows-only identity data is exercised by the Windows test lane.")]
     internal readonly record struct WindowsFileIdentity(uint VolumeSerialNumber, ulong FileId);
 
     /// <summary>
@@ -505,6 +514,7 @@ internal static class CoverageRunArtifactReader
     /// <param name="Identity">The identity captured from the opened directory handle.</param>
     internal readonly record struct WindowsDirectoryIdentity(string Path, WindowsFileIdentity Identity);
 
+    [ExcludeFromCodeCoverage(Justification = "Windows-only retained directory state is exercised by the Windows test lane.")]
     private sealed record WindowsOpenedDirectory(
         WindowsDirectoryIdentity Identity,
         SafeFileHandle Handle);

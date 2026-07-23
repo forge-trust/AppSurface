@@ -714,15 +714,7 @@ internal sealed class CoverageRunWorkflow
 
             if (coverageFiles.Length == 0)
             {
-                throw CoverageRunDiagnostics.Create(
-                    "ASCOV103",
-                    "No coverage files were produced.",
-                    "The selected test projects ran without writing Coverlet Cobertura artifacts.",
-                    request.CoverageDriver == CoverageRunDriver.Collector
-                        ? "Add coverlet.collector to each selected VSTest project, then rerun coverage run."
-                        : "Add coverlet.msbuild to each selected VSTest project, then rerun with --coverage-driver msbuild.",
-                    "Cli/ForgeTrust.AppSurface.Cli/README.md#add-coverlet-first",
-                    projectResults.Select(result => result.LogFile).FirstOrDefault(File.Exists));
+                ThrowNoCoverageFiles(request, projectResults);
             }
 
             CoverageRunSlowTestDiagnosticsRun? diagnostics;
@@ -2276,6 +2268,22 @@ internal sealed class CoverageRunWorkflow
             innerException is null ? $"Path: {coveragePath}." : $"Path: {coveragePath}. {innerException.Message}",
             "Regenerate coverage and inspect ReportGenerator output.",
             "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+
+    [ExcludeFromCodeCoverage(Justification = "Defensive invariant fallback; preceding artifact and project-failure checks classify every zero-artifact result.")]
+    private static void ThrowNoCoverageFiles(
+        CoverageRunRequest request,
+        IReadOnlyList<CoverageProjectRunResult> projectResults)
+    {
+        throw CoverageRunDiagnostics.Create(
+            "ASCOV103",
+            "No coverage files were produced.",
+            "The selected test projects ran without writing Coverlet Cobertura artifacts.",
+            request.CoverageDriver == CoverageRunDriver.Collector
+                ? "Add coverlet.collector to each selected VSTest project, then rerun coverage run."
+                : "Add coverlet.msbuild to each selected VSTest project, then rerun with --coverage-driver msbuild.",
+            "Cli/ForgeTrust.AppSurface.Cli/README.md#add-coverlet-first",
+            projectResults.Select(result => result.LogFile).FirstOrDefault(File.Exists));
+    }
 
     private static string DescribeTestResults(CoverageRunRequest request)
     {
