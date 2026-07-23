@@ -1,0 +1,75 @@
+{
+  "SchemaVersion": 1,
+  "RunId": "20260720T064618Z-16607",
+  "Scenario": "process-loss-reconcilebeforeretry",
+  "Mode": "cold",
+  "DatabaseSource": "postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302",
+  "StartedAtUtc": "2026-07-20T06:46:35.415658+00:00",
+  "ElapsedMilliseconds": 2827,
+  "FinalState": "suspended_reconciliation_required",
+  "Events": [
+    {
+      "Sequence": 1,
+      "Category": "application",
+      "Operation": "schema.apply-and-activate",
+      "Outcome": "compatible",
+      "TransactionBoundary": "migration-owner",
+      "ElapsedMilliseconds": 1293,
+      "SourceElapsedMilliseconds": null
+    },
+    {
+      "Sequence": 2,
+      "Category": "child-process",
+      "Operation": "work.accept",
+      "Outcome": "committed",
+      "TransactionBoundary": "provider-owned",
+      "ElapsedMilliseconds": 1559,
+      "SourceElapsedMilliseconds": 115
+    },
+    {
+      "Sequence": 3,
+      "Category": "child-process",
+      "Operation": "work.discover",
+      "Outcome": "found",
+      "TransactionBoundary": "read-only",
+      "ElapsedMilliseconds": 1559,
+      "SourceElapsedMilliseconds": 118
+    },
+    {
+      "Sequence": 4,
+      "Category": "child-process",
+      "Operation": "work.claim",
+      "Outcome": "committed",
+      "TransactionBoundary": "provider-owned",
+      "ElapsedMilliseconds": 1559,
+      "SourceElapsedMilliseconds": 144
+    },
+    {
+      "Sequence": 5,
+      "Category": "child-process",
+      "Operation": "effect-permit.acquire",
+      "Outcome": "committed",
+      "TransactionBoundary": "provider-owned",
+      "ElapsedMilliseconds": 1559,
+      "SourceElapsedMilliseconds": 155
+    },
+    {
+      "Sequence": 6,
+      "Category": "application",
+      "Operation": "process.force-terminate",
+      "Outcome": "terminated-after-permit",
+      "TransactionBoundary": "none",
+      "ElapsedMilliseconds": 1559,
+      "SourceElapsedMilliseconds": null
+    },
+    {
+      "Sequence": 7,
+      "Category": "recovery",
+      "Operation": "work.reclaim-after-lease-expiry",
+      "Outcome": "suspended-by-provider-safety",
+      "TransactionBoundary": "provider-owned",
+      "ElapsedMilliseconds": 2825,
+      "SourceElapsedMilliseconds": null
+    }
+  ]
+}

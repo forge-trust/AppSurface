@@ -1,0 +1,107 @@
+type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochActivationResult : System.IEquatable<ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochActivationResult>
+  constructor public ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochActivationResult(System.Guid ActiveEpoch, System.DateTimeOffset ActivatedAtUtc)
+  method public ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochActivationResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochActivationResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public System.Void Deconstruct(out System.Guid ActiveEpoch, out System.DateTimeOffset ActivatedAtUtc)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochActivationResult? left, ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochActivationResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochActivationResult? left, ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochActivationResult? right)
+  property public System.DateTimeOffset ActivatedAtUtc { get: public; init: public; }
+  property public System.Guid ActiveEpoch { get: public; init: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochRotationResult : System.IEquatable<ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochRotationResult>
+  constructor public ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochRotationResult(System.Guid PreviousEpoch, System.Guid ActiveEpoch, System.DateTimeOffset RotatedAtUtc)
+  method public ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochRotationResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochRotationResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public System.Void Deconstruct(out System.Guid PreviousEpoch, out System.Guid ActiveEpoch, out System.DateTimeOffset RotatedAtUtc)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochRotationResult? left, ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochRotationResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochRotationResult? left, ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochRotationResult? right)
+  property public System.DateTimeOffset RotatedAtUtc { get: public; init: public; }
+  property public System.Guid ActiveEpoch { get: public; init: public; }
+  property public System.Guid PreviousEpoch { get: public; init: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaApplyResult : System.IEquatable<ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaApplyResult>
+  constructor public ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaApplyResult(System.Int32 previousVersion, System.Int32 currentVersion, System.Collections.Generic.IReadOnlyList<System.Int32> appliedVersions)
+  method public ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaApplyResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaApplyResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaApplyResult? left, ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaApplyResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaApplyResult? left, ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaApplyResult? right)
+  property public System.Collections.Generic.IReadOnlyList<System.Int32> AppliedVersions { get: public; }
+  property public System.Int32 CurrentVersion { get: public; }
+  property public System.Int32 PreviousVersion { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaCompatibility : System.Int32
+  enum-member Compatible = 1
+  enum-member Inconsistent = 4
+  enum-member Missing = 0
+  enum-member StoreTooNew = 3
+  enum-member UpgradeRequired = 2
+type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaException : System.InvalidOperationException, System.Runtime.Serialization.ISerializable
+  constructor public ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaException(ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaStatus status)
+  property public ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaStatus Status { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaStatus : System.IEquatable<ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaStatus>
+  constructor public ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaStatus(ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaCompatibility compatibility, System.Guid storeId, System.Nullable<System.Guid> activeRuntimeEpoch, System.Int32 installedVersion, System.Int32 requiredVersion, System.Int32 minimumReaderVersion, System.Int32 maximumReaderVersion, System.Int32 minimumWriterVersion, System.Int32 maximumWriterVersion, System.Collections.Generic.IReadOnlyList<System.Int32> appliedVersions, System.Collections.Generic.IReadOnlyList<System.Int32> pendingVersions, System.String? problem)
+  method public ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaStatus <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaStatus? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaStatus? left, ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaStatus? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaStatus? left, ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaStatus? right)
+  property public ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaCompatibility Compatibility { get: public; }
+  property public System.Boolean IsCompatible { get: public; }
+  property public System.Collections.Generic.IReadOnlyList<System.Int32> AppliedVersions { get: public; }
+  property public System.Collections.Generic.IReadOnlyList<System.Int32> PendingVersions { get: public; }
+  property public System.Guid StoreId { get: public; }
+  property public System.Int32 InstalledVersion { get: public; }
+  property public System.Int32 MaximumReaderVersion { get: public; }
+  property public System.Int32 MaximumWriterVersion { get: public; }
+  property public System.Int32 MinimumReaderVersion { get: public; }
+  property public System.Int32 MinimumWriterVersion { get: public; }
+  property public System.Int32 RequiredVersion { get: public; }
+  property public System.Nullable<System.Guid> ActiveRuntimeEpoch { get: public; }
+  property public System.String? Problem { get: public; }
+type public interface ForgeTrust.AppSurface.Durable.PostgreSql.IDurableRuntimeSchemaManager
+  method public abstract System.String GenerateScript(System.Int32 fromVersion = 0)
+  method public abstract System.Threading.Tasks.ValueTask ValidateAsync(System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochActivationResult> InitializeRuntimeEpochAsync(System.Guid initialEpoch, System.String actorId, System.String reasonCode, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochRotationResult> RotateRuntimeEpochAsync(System.Guid expectedActiveEpoch, System.Guid newActiveEpoch, System.String actorId, System.String reasonCode, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaApplyResult> ApplyAsync(System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaStatus> GetStatusAsync(System.Threading.CancellationToken cancellationToken = default)
+type public interface ForgeTrust.AppSurface.Durable.PostgreSql.IDurableWorkTransactionWriter
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableWorkAcceptance>> EnqueueAsync(Npgsql.NpgsqlTransaction transaction, ForgeTrust.AppSurface.Durable.DurableWorkRequest request, System.Threading.CancellationToken cancellationToken = default)
+type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableRuntimeSchemaManager : ForgeTrust.AppSurface.Durable.PostgreSql.IDurableRuntimeSchemaManager
+  constructor public ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableRuntimeSchemaManager(Npgsql.NpgsqlDataSource dataSource)
+  method public System.String GenerateScript(System.Int32 fromVersion = 0)
+  method public System.Threading.Tasks.ValueTask ValidateAsync(System.Threading.CancellationToken cancellationToken = default)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochActivationResult> InitializeRuntimeEpochAsync(System.Guid initialEpoch, System.String actorId, System.String reasonCode, System.Threading.CancellationToken cancellationToken = default)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochRotationResult> RotateRuntimeEpochAsync(System.Guid expectedActiveEpoch, System.Guid newActiveEpoch, System.String actorId, System.String reasonCode, System.Threading.CancellationToken cancellationToken = default)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaApplyResult> ApplyAsync(System.Threading.CancellationToken cancellationToken = default)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaStatus> GetStatusAsync(System.Threading.CancellationToken cancellationToken = default)
+  property public static System.Int32 RequiredVersion { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWakeNotificationMode : System.Int32
+  enum-member Disabled = 0
+  enum-member Enabled = 1
+type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkClient : ForgeTrust.AppSurface.Durable.IDurableWorkClient
+  constructor public ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkClient(Npgsql.NpgsqlDataSource dataSource, ForgeTrust.AppSurface.Durable.IDurableWorkRegistry workRegistry, ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkOptions options)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableWorkAcceptance>> EnqueueAsync(ForgeTrust.AppSurface.Durable.DurableWorkRequest request, System.Threading.CancellationToken cancellationToken = default)
+type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkOptions : System.IEquatable<ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkOptions>
+  constructor public ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkOptions(System.Guid runtimeEpoch, System.Guid expectedStoreId, ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWakeNotificationMode wakeNotificationMode = ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWakeNotificationMode.Disabled)
+  method public ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkOptions <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkOptions? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkOptions? left, ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkOptions? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkOptions? left, ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkOptions? right)
+  property public ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWakeNotificationMode WakeNotificationMode { get: public; }
+  property public System.Guid ExpectedStoreId { get: public; }
+  property public System.Guid RuntimeEpoch { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkTransactionWriter : ForgeTrust.AppSurface.Durable.PostgreSql.IDurableWorkTransactionWriter
+  constructor public ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkTransactionWriter(Npgsql.NpgsqlDataSource dataSource, ForgeTrust.AppSurface.Durable.IDurableWorkRegistry workRegistry, ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkOptions options)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableWorkAcceptance>> EnqueueAsync(Npgsql.NpgsqlTransaction transaction, ForgeTrust.AppSurface.Durable.DurableWorkRequest request, System.Threading.CancellationToken cancellationToken = default)
