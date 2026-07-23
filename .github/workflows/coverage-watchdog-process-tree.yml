@@ -4,6 +4,11 @@ permissions:
   contents: read
 
 on:
+  # Reusable contract: accepts no inputs, emits no outputs, and runs the
+  # cleanup test on Ubuntu, macOS, and Windows with a 10-minute job timeout.
+  # Failures upload seven-day TestResults diagnostics. On macOS only, a
+  # passing one-test TRX result remains authoritative when VSTest records
+  # success but retains killed descendant pipes past the bounded driver wait.
   workflow_call:
   workflow_dispatch:
 
