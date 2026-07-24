@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+using System.Text.Json;
 using ForgeTrust.AppSurface.Core;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -116,7 +118,12 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.Contains("### `appsurface coverage merge`", readme, StringComparison.Ordinal);
         Assert.Contains("dotnet tool run appsurface coverage run --solution ./MyApp.slnx --dry-run", readme, StringComparison.Ordinal);
         Assert.Contains("dotnet tool run appsurface coverage merge --source ./TestResults/coverage-shards --output ./TestResults/coverage-merged", readme, StringComparison.Ordinal);
-        Assert.Contains("dotnet add tests/MyApp.Tests/MyApp.Tests.csproj package coverlet.msbuild", readme, StringComparison.Ordinal);
+        Assert.Contains("dotnet add tests/MyApp.Tests/MyApp.Tests.csproj package coverlet.collector", readme, StringComparison.Ordinal);
+        Assert.Contains("#### Coverage Driver Selection", readme, StringComparison.Ordinal);
+        Assert.Contains("#### Coverage Run Watchdog", readme, StringComparison.Ordinal);
+        Assert.Contains("--coverage-driver collector|msbuild", readme, StringComparison.Ordinal);
+        Assert.Contains("never silently falls back", readme, StringComparison.Ordinal);
+        Assert.Contains("`ASCOV121`", readme, StringComparison.Ordinal);
         Assert.Contains("package-owned ReportGenerator", readme, StringComparison.Ordinal);
         Assert.Contains("--schedule longest-first", readme, StringComparison.Ordinal);
         Assert.Contains("--schedule-timings ./artifacts/previous-coverage/timings.json", readme, StringComparison.Ordinal);
@@ -139,11 +146,56 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.DoesNotContain("intentionally does not expose run or merge orchestration yet", readme, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void RepositoryLockFiles_ShouldNotRetainDirectMsbuildCoverageReferences()
+    {
+        var repositoryRoot = GetRepositoryRoot();
+        var staleLockFiles = Directory.EnumerateFiles(repositoryRoot, "packages*.lock.json", SearchOption.AllDirectories)
+            .Where(HasDirectMsbuildCoverageReference)
+            .Select(path => Path.GetRelativePath(repositoryRoot, path).Replace('\\', '/'))
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Empty(staleLockFiles);
+    }
+
+    [Fact]
+    public void RepositoryReadme_ShouldDocumentCoverageDriverPrerequisites()
+    {
+        var readme = File.ReadAllText(GetRepositoryReadmePath());
+
+        Assert.Contains("dotnet add tests/MyApp.Tests/MyApp.Tests.csproj package coverlet.collector", readme, StringComparison.Ordinal);
+        Assert.Contains("[coverage driver selection](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection)", readme, StringComparison.Ordinal);
+        Assert.Contains("native Microsoft Testing Platform projects are rejected", readme, StringComparison.Ordinal);
+        Assert.Contains("--coverage-driver msbuild", readme, StringComparison.Ordinal);
+    }
+
+    private static bool HasDirectMsbuildCoverageReference(string path)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        return document.RootElement.GetProperty("dependencies").EnumerateObject()
+            .Where(framework => framework.Value.ValueKind == JsonValueKind.Object)
+            .SelectMany(framework => framework.Value.EnumerateObject())
+            .Any(package => string.Equals(package.Name, "coverlet.msbuild", StringComparison.OrdinalIgnoreCase)
+                && package.Value.TryGetProperty("type", out var type)
+                && type.ValueKind == JsonValueKind.String
+                && string.Equals(type.GetString(), "Direct", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static string GetAppSurfaceCliReadmePath()
     {
         var repositoryRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
         return Path.Join(repositoryRoot, "Cli", "ForgeTrust.AppSurface.Cli", "README.md");
     }
+
+    private static string GetRepositoryReadmePath()
+    {
+        var repositoryRoot = GetRepositoryRoot();
+        return Path.Join(repositoryRoot, "README.md");
+    }
+
+    private static string GetRepositoryRoot([CallerFilePath] string sourceFile = "")
+        => PathUtils.FindRepositoryRoot(Path.GetDirectoryName(sourceFile)!);
 
     private static string GetAppSurfaceAuthReadmePath()
     {

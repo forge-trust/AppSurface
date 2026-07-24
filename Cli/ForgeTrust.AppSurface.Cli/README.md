@@ -171,7 +171,7 @@ appsurface coverage run \
 
 `coverage run` is the public package-consumer coverage orchestrator for private .NET repositories. It supports `.sln` and `.slnx` discovery, repeated `--test-project` selection, a default output directory that matches `coverage gate`, bounded parallel scheduling, per-project logs, stable per-project artifact directories, safe cleanup of AppSurface-owned outputs, managed JUnit test-result artifacts, optional slow-test diagnostics, and a package-owned ReportGenerator merge. Package consumers do not need a separate merge step: the command finishes by writing the merged `coverage.cobertura.xml` artifact. It does not mutate consumer projects, install tools into the consumer repo, read the consumer `.config/dotnet-tools.json`, upload coverage, call GitHub APIs, or store trends.
 
-The v1 contract assumes selected test projects are already instrumented with Coverlet. No managed test result export happens by default. Use `--test-results junit` when AppSurface should own top-level JUnit artifacts, and make sure every selected test project references `JunitXml.TestLogger`. `junit` is the only managed test-result format supported in this release; `trx` and TUnit-compatible parsing are reserved for follow-up work. `--logger` remains raw `dotnet test` pass-through and does not create AppSurface-managed artifacts.
+The v1 contract assumes selected test projects use VSTest and are already instrumented with Coverlet. The default `collector` driver requires one direct `coverlet.collector` reference in every selected project. Native .NET 10 Microsoft Testing Platform execution is intentionally rejected because it uses a different runner and `coverlet.MTP`; see the [.NET test runner selection](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-test) and [Coverlet integration](https://github.com/coverlet-coverage/coverlet) guidance. No managed test result export happens by default. Use `--test-results junit` when AppSurface should own top-level JUnit artifacts, and make sure every selected test project references `JunitXml.TestLogger`. `junit` is the only managed test-result format supported in this release; `trx` and TUnit-compatible parsing are reserved for follow-up work. `--logger` remains raw `dotnet test` pass-through and does not create AppSurface-managed artifacts.
 
 The default schedule is input order. For repositories with enough projects for long-tail timing to matter, pass `--schedule longest-first` so non-exclusive projects with longer prior durations start first within each exclusive-project segment. The first run usually has no timing history and keeps unknown projects in input order; later runs can reuse the previous output directory's `timings.json` automatically.
 
@@ -190,12 +190,26 @@ Use `--dry-run` before the first real CI run to confirm project discovery, exclu
 #### Add Coverlet First
 
 ```bash
-dotnet add tests/MyApp.Tests/MyApp.Tests.csproj package coverlet.msbuild
+dotnet add tests/MyApp.Tests/MyApp.Tests.csproj package coverlet.collector
 dotnet tool run appsurface coverage run --test-project tests/MyApp.Tests/MyApp.Tests.csproj
 dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75
 ```
 
-Add `coverlet.msbuild` to every selected test project that should contribute coverage. `coverage run` passes Coverlet MSBuild properties to `dotnet test`, but it intentionally does not edit project files or add packages on the consumer's behalf.
+Add `coverlet.collector` to every selected VSTest project that should contribute coverage. `coverage run` evaluates direct package references before cleanup, build, or tests, but it intentionally does not edit project files or add packages on the consumer's behalf.
+
+#### Coverage Driver Selection
+
+`--coverage-driver collector|msbuild` selects the VSTest Coverlet integration. `collector` is the immediate default and never silently falls back. Each collector invocation writes into a unique `collector-results/<run-id>/` directory, requires exactly one well-formed `coverage.cobertura.xml`, and atomically replaces the canonical per-project artifact only after validation. This prevents a successful test exit with a missing data collector, stale `--no-clean` output, or multiple attachments from looking like current coverage.
+
+Use `--coverage-driver msbuild` only as an explicit compatibility path for a project that directly references `coverlet.msbuild`. The command prints a reliability warning because VSTest termination can interrupt the MSBuild integration before hit data is persisted. Migrate back to `coverlet.collector` rather than relying on a fallback.
+
+Collector mode owns `--collect`, `--results-directory`, the `--` runsettings separator, coverage runsettings, and `--settings`/`-s`. MSBuild mode owns the Coverlet `/p:` properties. Passing conflicting tokens through `--test-argument` fails before discovery or output mutation. `--include` and `--exclude` map to the selected driver's native configuration.
+
+#### Coverage Run Watchdog
+
+Every discovery, capability preflight, build, test, merge, diagnostics, and artifact phase has its own monotonic progress clock. Positive child-process output bytes and explicit phase transitions count as progress; output from one parallel project never resets another project's clock. `--heartbeat-interval` defaults to `30s` and accepts `0` to disable heartbeats. `--no-progress-timeout` defaults to `10m`. Durations use exactly `0` or a positive lowercase integer followed by `ms`, `s`, `m`, or `h`, with a 30-day maximum; zero is valid only for the heartbeat interval.
+
+`--watchdog warn` is the default: it writes a classified warning and attempts to commit `coverage-watchdog.json`, then lets the run continue. `--watchdog fail` cancels the run, requests whole-process-tree termination through supervisor-owned process leases, applies one bounded cleanup budget, attempts the incident artifact, and exits `124` with `ASCOV121`. The terminal diagnostic reports the artifact path only after atomic commit; `Artifact: unavailable` with `ASCOV122` means termination remains authoritative but no incident artifact was committed. `--watchdog off` disables stall classification but leaves explicitly configured heartbeats available. Watchdog artifacts contain normalized operation metadata, byte counts, safe switch names, and relative project/log paths—not raw output, argument values, environment values, or secrets.
 
 Options:
 
@@ -213,6 +227,7 @@ Options:
 - `--no-build`: Skips the solution build before tests.
 - `--include`: Coverlet include filter. Omit it to use Coverlet's project defaults.
 - `--exclude`: Coverlet exclude filter. Defaults to `[*.Tests]*,[*.IntegrationTests]*`.
+- `--coverage-driver`: VSTest coverage driver, `collector` or `msbuild`. Defaults to `collector`; no fallback occurs.
 - `--dry-run`: Prints discovery, scheduling, and artifact paths without running tests.
 - `--list-projects`: Lists selected and skipped projects without running tests.
 - `--no-discover-exclusive`: Disables automatic exclusive classification for integration or Playwright-shaped projects.
@@ -223,6 +238,9 @@ Options:
 - `--slow-test-diagnostics`: Writes `slow-test-diagnostics.md` and `.json` from managed JUnit results. This implies `--test-results junit`.
 - `--no-clean`: Preserves existing AppSurface-owned output instead of cleaning known coverage artifacts first.
 - `--verbosity`: `dotnet test` verbosity. Defaults to `minimal`.
+- `--heartbeat-interval`: Heartbeat interval. Defaults to `30s`; exact `0` disables heartbeats.
+- `--no-progress-timeout`: Positive per-operation progress timeout. Defaults to `10m`.
+- `--watchdog`: Stall response, `warn`, `fail`, or `off`. Defaults to `warn`.
 
 Duration-aware scheduling keeps exclusive projects as barriers. If discovery returns `A.Tests`, `Browser.IntegrationTests`, and `B.Tests`, `B.Tests` never jumps ahead of the exclusive browser project even when it was slower in the previous run. AppSurface sorts only the non-exclusive segment before each barrier and only the non-exclusive segment after it.
 
@@ -268,15 +286,17 @@ Artifacts are local and private by default:
 
 - `coverage.cobertura.xml`: Merged Cobertura file consumed by `coverage gate`.
 - `summary.txt`: Human-readable merged line and branch coverage summary.
-- `timings.json`: Machine-readable build, test, merge, schedule, managed test-result, diagnostics, artifact, log, and exit-code data. Per-project entries include both `originalIndex` for stable artifact naming and `executionIndex` for the actual launch order.
+- `timings.json`: Machine-readable build, test, merge, schedule, managed test-result, diagnostics, artifact, log, and exit-code data. Per-project entries include both `originalIndex` for stable artifact naming and `executionIndex` for the actual launch order. `executionStatus` is `pending`, `running`, `completed`, `terminated`, or `skipped-after-terminal`; `coverageArtifactStatus` is `produced`, `missing`, `multiple`, `unreadable`, `escaping`, `malformed`, or `skipped-after-terminal`. `coverageFile` is non-null only when the current invocation produced and normalized that artifact, so `--no-clean` cannot make a retained stale file look current. Terminal failures write a best-effort snapshot after launched projects are drained so automation can distinguish work that failed from work that never started.
 - `reportgenerator-summary.txt`: Text summary from the package-owned ReportGenerator merge when available.
 - `junit-coverage-<index>-<project-name-hash>.xml`: AppSurface-managed JUnit test results when `--test-results junit` or `--slow-test-diagnostics` is used.
 - `slow-test-diagnostics.md` and `slow-test-diagnostics.json`: Slow-test evidence, parser warnings, metadata completeness, and diagnostic overhead when `--slow-test-diagnostics` is used.
 - `projects/<project-name-hash>/coverage.cobertura.xml`: Per-project Coverlet Cobertura output.
+- `projects/<project-name-hash>/collector-results/<run-id>/`: Unique raw collector attachment tree retained for diagnosis.
 - `projects/<project-name-hash>/dotnet-test.log`: Full `dotnet test` output for that project.
-- `.appsurface-coverage-output`: Ownership marker that allows future runs to clean only known AppSurface-owned artifacts.
+- `coverage-watchdog.json`: Latest classified watchdog warning or termination, when one occurs.
+- `.appsurface-coverage-output`: Ownership marker containing `AppSurface coverage output directory`; it allows future runs to clean only known AppSurface-owned artifacts.
 
-`coverage run` rejects unsafe output paths such as filesystem roots, the current working directory, the user home directory, the solution directory, test project directories, files, and populated directories that do not carry the AppSurface ownership marker. Use a dedicated artifact directory for CI, for example `TestResults/coverage-merged`.
+`coverage run` rejects unsafe output paths such as filesystem roots, the current working directory, the user home directory, the solution directory, test project directories, files, symbolic links or reparse points in any existing path component or artifact descendant, invalid ownership markers, and populated directories that do not carry the AppSurface ownership marker. An output tree created by an older version without the marker is not inferred to be owned from generic names such as `projects` or `summary.txt`; choose a fresh directory instead of adding a marker to an arbitrary populated tree. Validation is repeated through retained filesystem handles before cleanup so an ancestor replacement fails closed instead of redirecting deletion. This retained-handle guarantee covers output preparation and cleanup; later build, test, and report writes use the prepared path normally, so the output directory and its ancestors must remain trusted for the rest of the invocation. Use a dedicated artifact directory for CI, for example `TestResults/coverage-merged`, and do not replace or relink it while the command is running.
 
 `coverage run`, `coverage merge`, and `coverage gate` are the supported CLI coverage surfaces. The package artifact verifier installs the packed `ForgeTrust.AppSurface.Cli` tool in a clean fixture and proves all three coverage commands, including a deliberately failing gate that must still write reports, before publication. Grouped CLI execution and TRX/TUnit result parsing remain separate follow-up work.
 
@@ -305,6 +325,7 @@ Use this GitHub Actions shape for a private pull request workflow that already h
       TestResults/coverage-merged/junit-*.xml
       TestResults/coverage-merged/slow-test-diagnostics.md
       TestResults/coverage-merged/slow-test-diagnostics.json
+      TestResults/coverage-merged/coverage-watchdog.json
       TestResults/coverage-merged/coverage-gate.json
       TestResults/coverage-merged/coverage-gate.md
       TestResults/coverage-merged/projects/**/dotnet-test.log
@@ -418,7 +439,7 @@ Every `ASCOV###` diagnostic includes the problem, likely cause, exact fix, docs 
 | --- | --- | --- |
 | `ASCOV101` | A command option or project path is invalid. | Correct the option value, pass an existing test project, or use a valid dedicated output path. |
 | `ASCOV102` | Solution discovery or `dotnet sln <solution> list` failed. | Pass a valid `.sln`/`.slnx`, fix the solution file, or use repeated `--test-project`. |
-| `ASCOV103` | No Coverlet Cobertura files were produced. | Add `coverlet.msbuild` to each selected test project, then rerun `coverage run`. |
+| `ASCOV103` | No Coverlet Cobertura files were produced. | Add the package required by the selected driver to every selected VSTest project, then rerun. |
 | `ASCOV104` | ReportGenerator merge failed. | Inspect per-project Cobertura files and rerun with `--dry-run` to verify selected projects. |
 | `ASCOV105` | Discovery selected no test projects, including when exclusions remove every test project. | Narrow `--exclude-test-project`, rename test projects to match `*Tests.csproj`, or use explicit `--test-project` values without exclusions. |
 | `ASCOV106` | The merged Cobertura file is malformed. | Regenerate coverage and inspect ReportGenerator output. |
@@ -426,8 +447,12 @@ Every `ASCOV###` diagnostic includes the problem, likely cause, exact fix, docs 
 | `ASCOV110` | `dotnet build`, `dotnet test`, or process startup failed. | Fix the build/test failure and inspect the listed project log. |
 | `ASCOV111` | An unsupported managed test-result format was requested. | Use `--test-results junit`, omit `--test-results`, or keep custom loggers on `--logger`. |
 | `ASCOV112` | An exclusion pattern matched no discovered test project. | Run with `--list-projects`, then correct or remove each stale `--exclude-test-project` pattern. |
+| `ASCOV113` | The runner or evaluated direct package references are incompatible with the selected driver. | Use VSTest and add `coverlet.collector`, or explicitly select `msbuild` with `coverlet.msbuild`. |
 | `ASCOV114` | The package-owned ReportGenerator dependency was not found. | Restore or reinstall `ForgeTrust.AppSurface.Cli` so its package dependencies are present. |
+| `ASCOV115` | Collector output was missing, multiple, malformed, or escaped its invocation directory. | Inspect the project log and raw collector results, fix the producer, and rerun. |
 | `ASCOV120` | One or more test, merge, or artifact steps failed. | Open `timings.json` and per-project logs listed above, fix failing tests, then rerun. |
+| `ASCOV121` | Fail-mode watchdog termination claimed the run. | Inspect the reported watchdog artifact path and project logs; if the path is unavailable, use the ASCOV122 detail, then fix the stall or tune the timeout and rerun. |
+| `ASCOV122` | A bounded watchdog artifact write or promotion failed. | Use a writable dedicated output directory; the process cancellation outcome remains authoritative. |
 
 ### `appsurface coverage gate`
 

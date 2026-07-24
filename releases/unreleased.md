@@ -11,6 +11,11 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
+- [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection) now defaults to the
+  VSTest `coverlet.collector` driver, validates each selected project's effective test runner and direct package
+  references before cleanup or execution, and normalizes one validated Cobertura attachment per invocation into the
+  stable artifact path. Native Microsoft Testing Platform projects fail preflight because they require `coverlet.MTP`;
+  `--coverage-driver msbuild` remains available only as an explicit compatibility path and emits a reliability warning.
 - The [ASP.NET Core DevAuth example](../examples/auth-aspnetcore-dev-auth/README.md#what-the-verifier-proves) now has deterministic, staged startup proof: synchronous build failures stop immediately, child exits and Kestrel readiness are observed separately, a child-owned listening record gates the real-loopback HTTP workflow, and cleanup targets only the recorded child. A child-scoped standard .NET host setting avoids configuration-reload stalls in restricted file-watcher environments without changing normal example or consumer behavior. Focused in-process host coverage complements rather than replaces the real-socket verifier, and failures preserve only bounded, sanitized, allowlisted evidence. This is a contributor-experience correction; it adds no package API, package or production-host runtime behavior, package version, or release implication.
 - [`ForgeTrust.AppSurface.Web` named canary evaluation](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints) is now available in preview: applications register typed, application-owned proof
   evaluators and explicitly map one fixed protected route family. Completed evaluations add required `name`, `ready`, and
@@ -32,5 +37,8 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## Migration watch
 
+- Existing `appsurface coverage run` consumers that reference `coverlet.msbuild` must replace it with
+  `coverlet.collector`, or explicitly pass `--coverage-driver msbuild` while completing the migration. The command never
+  silently falls back between drivers.
 - Existing hosts that consume `/health` or `/ready` must set `WebOptions.Health.Enabled = true` when upgrading.
 - Hosts using `HostManaged` with a Turbo version other than 8.0.23 own compatibility testing for that version. Turbo 8.0.23 removes upstream-deprecated `Turbo.clearCache()`, `data-turbo-cache="false"`, and legacy form polyfills; these were never AppSurface-defined APIs.
