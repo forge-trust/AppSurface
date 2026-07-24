@@ -4,6 +4,11 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
+- The machine-held `ForgeTrust.AppSurface.Durable.PostgreSql` source preview now persists one-transition durable Flows:
+  migration 0003 adds forced-RLS Flow state, command, history, wait, timer, and payload-free dispatch records; the new
+  `PostgreSqlDurableFlowClient` supplies idempotent start/event/cancel/release operations; and an internal fenced
+  processor proves event/timer races plus atomic child-Work projection through a timed real-PostgreSQL verifier. It
+  still starts no hosted worker, applies no automatic DDL, and remains excluded from publication until later slices.
 - `ForgeTrust.RazorWire` now owns a deterministic Turbo 8.0.23 default: `<rw:scripts />` emits an exact package-carried, same-origin runtime before RazorWire, while explicit custom and host-managed policies cover app-owned same-origin files or fully host-owned URL, integrity, CSP, and load-order requirements. The upgrade from 8.0.12 is API-neutral and carries an explicit upstream-risk review plus focused Drive, Frame, Stream, form, island, and Behavior Kit compatibility evidence.
 - `ForgeTrust.RazorWire` Form Interactions now keeps duplicated mark-for-removal fields model-bindable by restoring the app-authored inactive value, defaulting to `false`, while identity and concurrency fields still clear. Combined duplicate, add, mark-delete, and submit workflows no longer fail with an empty Boolean value.
 

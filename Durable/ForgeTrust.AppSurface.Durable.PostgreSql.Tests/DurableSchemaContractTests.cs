@@ -9,7 +9,7 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 public sealed class DurableSchemaContractTests
 {
     [Fact]
-    public void MigrationCatalog_IsExactlyTwoOrderedChecksummedResources()
+    public void MigrationCatalog_IsExactlyThreeOrderedChecksummedResources()
     {
         var migrations = DurablePostgreSqlMigrationCatalog.Load();
 
@@ -37,6 +37,18 @@ public sealed class DurableSchemaContractTests
                 Assert.Contains("dispatch_global_discovery", second.Sql, StringComparison.Ordinal);
                 Assert.Contains("dispatch_scope_update", second.Sql, StringComparison.Ordinal);
                 Assert.Contains("REVOKE ALL", second.Sql, StringComparison.Ordinal);
+            },
+            third =>
+            {
+                Assert.Equal(3, third.Version);
+                Assert.Equal("flow_protocol", third.Name);
+                Assert.Equal(64, third.Sha256.Length);
+                Assert.Contains("flow_instance", third.Sql, StringComparison.Ordinal);
+                Assert.Contains("flow_command", third.Sql, StringComparison.Ordinal);
+                Assert.Contains("flow_history", third.Sql, StringComparison.Ordinal);
+                Assert.Contains("flow_wait", third.Sql, StringComparison.Ordinal);
+                Assert.Contains("flow_timer", third.Sql, StringComparison.Ordinal);
+                Assert.Contains("flow_dispatch", third.Sql, StringComparison.Ordinal);
             });
         Assert.Equal(migrations.Count, DurablePostgreSqlMigrationCatalog.RequiredVersion);
         Assert.Equal(migrations.Count, PostgreSqlDurableRuntimeSchemaManager.RequiredVersion);
@@ -97,12 +109,16 @@ public sealed class DurableSchemaContractTests
         Assert.True(
             script.IndexOf("0001_work_shared", StringComparison.Ordinal)
             < script.IndexOf("0002_forced_rls", StringComparison.Ordinal));
+        Assert.True(
+            script.IndexOf("0002_forced_rls", StringComparison.Ordinal)
+            < script.IndexOf("0003_flow_protocol", StringComparison.Ordinal));
         Assert.Contains("pg_advisory_lock", script, StringComparison.Ordinal);
         Assert.DoesNotContain("0001_work_shared", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0002_forced_rls", pendingOnly, StringComparison.Ordinal);
+        Assert.Contains("0003_flow_protocol", pendingOnly, StringComparison.Ordinal);
         Assert.DoesNotContain("-- Migration", current, StringComparison.Ordinal);
         Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(-1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(3));
+        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(4));
     }
 
     [Theory]
@@ -319,7 +335,7 @@ public sealed class DurableSchemaContractTests
             recipe,
             StringComparison.Ordinal);
         Assert.Contains(
-            "GRANT SELECT, INSERT ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch",
+           "GRANT SELECT, INSERT ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch, appsurface_durable.flow_instance, appsurface_durable.flow_command, appsurface_durable.flow_history, appsurface_durable.flow_wait, appsurface_durable.flow_timer, appsurface_durable.flow_dispatch",
             recipe,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -331,7 +347,7 @@ public sealed class DurableSchemaContractTests
             recipe,
             StringComparison.Ordinal);
         var revokeBroadUpdate = recipe.IndexOf(
-            "REVOKE UPDATE ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch",
+           "REVOKE UPDATE ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch, appsurface_durable.flow_instance, appsurface_durable.flow_command, appsurface_durable.flow_history, appsurface_durable.flow_wait, appsurface_durable.flow_timer, appsurface_durable.flow_dispatch",
             StringComparison.Ordinal);
         var grantScopedUpdate = recipe.IndexOf(
             "GRANT UPDATE (generation, state, updated_at) ON appsurface_durable.scope",

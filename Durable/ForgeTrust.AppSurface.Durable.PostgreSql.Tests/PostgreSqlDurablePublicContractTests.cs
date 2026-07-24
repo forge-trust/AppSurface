@@ -43,6 +43,49 @@ public sealed class PostgreSqlDurablePublicContractTests
         Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableWorkClient(dataSource, registry, null!));
     }
 
+    [Fact]
+    public void FlowClient_RequiresExplicitDependencies()
+    {
+        using var dataSource = NpgsqlDataSource.Create(
+            "Host=127.0.0.1;Port=5432;Database=durable_contracts;Username=durable");
+        var payloads = new DurablePayloadCodecRegistry();
+        var work = new DurableWorkRegistry([]);
+        var flows = new DurableFlowRegistry([], work, payloads);
+        var options = new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid());
+
+        _ = new PostgreSqlDurableFlowClient(dataSource, flows, payloads, options);
+
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableFlowClient(null!, flows, payloads, options));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableFlowClient(dataSource, null!, payloads, options));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableFlowClient(dataSource, flows, null!, options));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableFlowClient(dataSource, flows, payloads, null!));
+    }
+
+    [Fact]
+    public async Task FlowProcessor_RejectsDiscoveryBoundsBeforeOpeningConnection()
+    {
+        using var dataSource = NpgsqlDataSource.Create(
+            "Host=127.0.0.1;Port=5432;Database=durable_contracts;Username=durable");
+        var payloads = new DurablePayloadCodecRegistry();
+        var work = new DurableWorkRegistry([]);
+        var flows = new DurableFlowRegistry([], work, payloads);
+        var options = new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid());
+        var processor = new PostgreSqlDurableFlowProcessor(
+            dataSource,
+            dataSource,
+            flows,
+            work,
+            payloads,
+            options);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () => await processor.DiscoverAsync(0));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () => await processor.DiscoverAsync(1_001));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new PostgreSqlDurableFlowProcessorSettings(TimeSpan.FromMilliseconds(999)));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new PostgreSqlDurableFlowProcessorSettings(TimeSpan.FromMinutes(16)));
+    }
+
     [Theory]
     [InlineData("LOCALHOST", "localhost")]
     [InlineData(" localhost, 127.0.0.1 ", "localhost,127.0.0.1")]

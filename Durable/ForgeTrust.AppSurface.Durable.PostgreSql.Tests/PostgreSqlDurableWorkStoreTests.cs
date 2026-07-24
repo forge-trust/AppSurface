@@ -376,7 +376,7 @@ public sealed class PostgreSqlDurableWorkStoreTests
             (
                 Mutation: """
                     UPDATE appsurface_durable.store_metadata
-                    SET schema_version = 2,
+                    SET schema_version = 4,
                         minimum_reader_version = 1,
                         maximum_reader_version = 1,
                         minimum_writer_version = 1,
@@ -396,11 +396,11 @@ public sealed class PostgreSqlDurableWorkStoreTests
                 await using var restore = database.DataSource.CreateCommand(
                     """
                     UPDATE appsurface_durable.store_metadata
-                    SET schema_version = 2,
+                    SET schema_version = 3,
                         minimum_reader_version = 1,
-                        maximum_reader_version = 2,
+                        maximum_reader_version = 3,
                         minimum_writer_version = 1,
-                        maximum_writer_version = 2
+                        maximum_writer_version = 3
                     WHERE singleton;
                     """);
                 await restore.ExecuteNonQueryAsync();
@@ -2670,8 +2670,31 @@ public sealed class PostgreSqlDurableWorkStoreTests
             GRANT SELECT, INSERT ON appsurface_durable.work_operator_command TO "{runtimeRole}";
             GRANT UPDATE (status, resulting_state, resulting_revision, completed_at)
                 ON appsurface_durable.work_operator_command TO "{runtimeRole}";
+            GRANT SELECT, INSERT
+                ON appsurface_durable.flow_instance, appsurface_durable.flow_command,
+                   appsurface_durable.flow_history, appsurface_durable.flow_wait,
+                   appsurface_durable.flow_timer, appsurface_durable.flow_dispatch
+                TO "{runtimeRole}";
+            GRANT UPDATE (state, current_node_id, context_contract_id, context_schema_version,
+                context_codec_id, context_payload, context_sha256, context_classification,
+                context_retention, resume_event_name, resume_event_is_timeout,
+                resume_event_contract_id, resume_event_schema_version, resume_event_codec_id,
+                resume_event_payload, resume_event_sha256, resume_event_classification,
+                resume_event_retention, activity_callsite_id, activity_result_contract_id,
+                activity_result_schema_version, activity_result_codec_id, activity_result_payload,
+                activity_result_sha256, activity_result_classification, activity_result_retention,
+                lease_generation, lease_owner, lease_started_at, lease_expires_at, updated_at,
+                cancellation_requested_at, terminal_at, terminal_code, suspension_descriptor,
+                suspended_from_state, revision, scope_generation, runtime_epoch)
+                ON appsurface_durable.flow_instance TO "{runtimeRole}";
+            GRANT UPDATE (state, resolved_revision, resolved_at, suspension_descriptor, updated_at)
+                ON appsurface_durable.flow_wait TO "{runtimeRole}";
+            GRANT UPDATE (state, resolved_at, updated_at)
+                ON appsurface_durable.flow_timer TO "{runtimeRole}";
+            GRANT UPDATE (due_at, state, expected_revision, updated_at)
+                ON appsurface_durable.flow_dispatch TO "{runtimeRole}";
             GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA appsurface_durable TO "{runtimeRole}";
-            GRANT SELECT ON appsurface_durable.dispatch TO "{dispatcherRole}";
+            GRANT SELECT ON appsurface_durable.dispatch, appsurface_durable.flow_dispatch TO "{dispatcherRole}";
             """;
         await using var command = ownerDataSource.CreateCommand(sql);
         await command.ExecuteNonQueryAsync();

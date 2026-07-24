@@ -76,10 +76,10 @@ public sealed class DurableReplayFlowCoverageTests
         Assert.Throws<ArgumentOutOfRangeException>(() => new DurableFlowListRequest(Scope, pageSize: 0));
         Assert.Throws<ArgumentOutOfRangeException>(() => new DurableFlowListRequest(Scope, pageSize: 1_001));
         Assert.Throws<ArgumentException>(() => new DurableFlowListRequest(Scope, continuationToken: "bad\nvalue"));
-        Assert.Throws<ArgumentException>(() => new DurableFlowListRequest(Scope, continuationToken: new string('a', 201)));
+        Assert.Throws<ArgumentException>(() => new DurableFlowListRequest(Scope, continuationToken: new string('a', 513)));
         Assert.Throws<ArgumentNullException>(() => new DurableFlowListResult(null!, null));
         Assert.Throws<ArgumentException>(() => new DurableFlowListResult([], "bad\nvalue"));
-        Assert.Throws<ArgumentException>(() => new DurableFlowListResult([], new string('a', 201)));
+        Assert.Throws<ArgumentException>(() => new DurableFlowListResult([], new string('a', 513)));
         Assert.Throws<ArgumentException>(() => new DurableFlowSnapshot(
             default,
             "approval",

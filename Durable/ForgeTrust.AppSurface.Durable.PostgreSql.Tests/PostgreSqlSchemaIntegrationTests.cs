@@ -42,10 +42,10 @@ public sealed class PostgreSqlSchemaIntegrationTests
             await manager.RotateRuntimeEpochAsync(initialEpoch, Guid.NewGuid(), "tests", "stale-restore"));
         var afterStaleRotation = await manager.GetStatusAsync();
 
-        Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missing.Compatibility);
-        Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missingEpoch.Status.Compatibility);
-        Assert.Equal([1, 2], first.AppliedVersions);
-        Assert.Empty(second.AppliedVersions);
+       Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missing.Compatibility);
+       Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missingEpoch.Status.Compatibility);
+       Assert.Equal([1, 2, 3], first.AppliedVersions);
+       Assert.Empty(second.AppliedVersions);
         Assert.True(compatible.IsCompatible);
         Assert.NotEqual(Guid.Empty, compatible.StoreId);
         Assert.Null(compatible.ActiveRuntimeEpoch);
@@ -90,37 +90,37 @@ public sealed class PostgreSqlSchemaIntegrationTests
     public async Task FailedMigration_RollsBackPartialDdlAndRetriesFromLastCommittedVersion()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var embedded = DurablePostgreSqlMigrationCatalog.Load();
-        var failingMigration = new DurablePostgreSqlMigration(
-            2,
-            "forced_failure",
-            "CREATE TABLE appsurface_durable.rollback_probe (id integer); SELECT 1 / 0;",
-            new string('0', 64));
-        var failingManager = new PostgreSqlDurableRuntimeSchemaManager(
-            database.DataSource,
-            [embedded[0], failingMigration]);
+       var embedded = DurablePostgreSqlMigrationCatalog.Load();
+       var failingMigration = new DurablePostgreSqlMigration(
+           3,
+           "forced_failure",
+           "CREATE TABLE appsurface_durable.rollback_probe (id integer); SELECT 1 / 0;",
+           new string('0', 64));
+       var failingManager = new PostgreSqlDurableRuntimeSchemaManager(
+           database.DataSource,
+           [embedded[0], embedded[1], failingMigration]);
 
-        var exception = await Assert.ThrowsAsync<PostgresException>(async () => await failingManager.ApplyAsync());
+       var exception = await Assert.ThrowsAsync<PostgresException>(async () => await failingManager.ApplyAsync());
 
-        Assert.Equal(PostgresErrorCodes.DivisionByZero, exception.SqlState);
-        await using (var partialDdl = database.DataSource.CreateCommand(
-            "SELECT to_regclass('appsurface_durable.rollback_probe') IS NOT NULL;"))
-        {
-            Assert.False((bool)(await partialDdl.ExecuteScalarAsync())!);
-        }
+       Assert.Equal(PostgresErrorCodes.DivisionByZero, exception.SqlState);
+       await using (var partialDdl = database.DataSource.CreateCommand(
+           "SELECT to_regclass('appsurface_durable.rollback_probe') IS NOT NULL;"))
+       {
+           Assert.False((bool)(await partialDdl.ExecuteScalarAsync())!);
+       }
 
-        var retryManager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        var afterFailure = await retryManager.GetStatusAsync();
-        Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, afterFailure.Compatibility);
-        Assert.Equal(1, afterFailure.InstalledVersion);
-        Assert.Equal([1], afterFailure.AppliedVersions);
+       var retryManager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+       var afterFailure = await retryManager.GetStatusAsync();
+       Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, afterFailure.Compatibility);
+       Assert.Equal(2, afterFailure.InstalledVersion);
+       Assert.Equal([1, 2], afterFailure.AppliedVersions);
 
-        var retry = await retryManager.ApplyAsync();
-        var compatible = await retryManager.GetStatusAsync();
-        Assert.Equal([2], retry.AppliedVersions);
-        Assert.True(compatible.IsCompatible);
-        Assert.Equal([1, 2], compatible.AppliedVersions);
-    }
+       var retry = await retryManager.ApplyAsync();
+       var compatible = await retryManager.GetStatusAsync();
+       Assert.Equal([3], retry.AppliedVersions);
+       Assert.True(compatible.IsCompatible);
+       Assert.Equal([1, 2, 3], compatible.AppliedVersions);
+   }
 
     [Fact]
     public async Task RoleRecipe_RejectsUnsafeRolesAndPrivilegesAndRemovesPreexistingRuntimeOwnership()
@@ -418,7 +418,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
                       <>
                         (
                             service.role_name = 'durable_dispatcher'
-                            AND relation.relname = 'dispatch'
+                            AND relation.relname IN ('dispatch', 'flow_dispatch')
                             AND privilege.privilege_name = 'SELECT'
                             OR service.role_name = 'durable_runtime'
                             AND
@@ -427,13 +427,16 @@ public sealed class PostgreSqlSchemaIntegrationTests
                                 AND relation.relname IN
                                 (
                                     'store_metadata', 'schema_migration', 'scope', 'work', 'dispatch',
-                                    'work_operator_command', 'effect_permit', 'scope_history', 'work_history'
+                                    'work_operator_command', 'effect_permit', 'scope_history', 'work_history',
+                                    'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer',
+                                    'flow_dispatch'
                                 )
                                 OR privilege.privilege_name = 'INSERT'
                                 AND relation.relname IN
                                 (
                                     'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
-                                    'scope_history', 'work_history'
+                                    'scope_history', 'work_history', 'flow_instance', 'flow_command',
+                                    'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch'
                                 )
                             )
                         )
@@ -452,7 +455,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
                       <>
                         (
                             service.role_name = 'durable_dispatcher'
-                            AND column_value.relname = 'dispatch'
+                            AND column_value.relname IN ('dispatch', 'flow_dispatch')
                             AND privilege.privilege_name = 'SELECT'
                             OR service.role_name = 'durable_runtime'
                             AND
@@ -461,13 +464,16 @@ public sealed class PostgreSqlSchemaIntegrationTests
                                 AND column_value.relname IN
                                 (
                                     'store_metadata', 'schema_migration', 'scope', 'work', 'dispatch',
-                                    'work_operator_command', 'effect_permit', 'scope_history', 'work_history'
+                                    'work_operator_command', 'effect_permit', 'scope_history', 'work_history',
+                                    'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer',
+                                    'flow_dispatch'
                                 )
                                 OR privilege.privilege_name = 'INSERT'
                                 AND column_value.relname IN
                                 (
                                     'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
-                                    'scope_history', 'work_history'
+                                    'scope_history', 'work_history', 'flow_instance', 'flow_command',
+                                    'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch'
                                 )
                                 OR privilege.privilege_name = 'UPDATE'
                                 AND
@@ -490,6 +496,30 @@ public sealed class PostgreSqlSchemaIntegrationTests
                                         ('status', 'resulting_state', 'resulting_revision', 'completed_at')
                                     OR column_value.relname = 'effect_permit'
                                     AND column_value.attname IN ('status', 'observed_at', 'details', 'runtime_epoch')
+                                    OR column_value.relname = 'flow_instance'
+                                    AND column_value.attname IN
+                                    (
+                                        'state', 'current_node_id', 'context_contract_id', 'context_schema_version',
+                                        'context_codec_id', 'context_payload', 'context_sha256', 'context_classification',
+                                        'context_retention', 'resume_event_name', 'resume_event_is_timeout',
+                                        'resume_event_contract_id', 'resume_event_schema_version', 'resume_event_codec_id',
+                                        'resume_event_payload', 'resume_event_sha256', 'resume_event_classification',
+                                        'resume_event_retention', 'activity_callsite_id', 'activity_result_contract_id',
+                                        'activity_result_schema_version', 'activity_result_codec_id', 'activity_result_payload',
+                                        'activity_result_sha256', 'activity_result_classification',
+                                        'activity_result_retention', 'lease_generation', 'lease_owner',
+                                        'lease_started_at', 'lease_expires_at', 'updated_at',
+                                        'cancellation_requested_at', 'terminal_at', 'terminal_code',
+                                        'suspension_descriptor', 'suspended_from_state', 'revision',
+                                        'scope_generation', 'runtime_epoch'
+                                    )
+                                    OR column_value.relname = 'flow_wait'
+                                    AND column_value.attname IN
+                                        ('state', 'resolved_revision', 'resolved_at', 'suspension_descriptor', 'updated_at')
+                                    OR column_value.relname = 'flow_timer'
+                                    AND column_value.attname IN ('state', 'resolved_at', 'updated_at')
+                                    OR column_value.relname = 'flow_dispatch'
+                                    AND column_value.attname IN ('due_at', 'state', 'expected_revision', 'updated_at')
                                 )
                             )
                         )
@@ -610,97 +640,97 @@ public sealed class PostgreSqlSchemaIntegrationTests
             async () => await manager.ApplyAsync());
         Assert.Equal(DurableRuntimeSchemaCompatibility.Inconsistent, invalidApply.Status.Compatibility);
 
-        await ExecuteNonQueryAsync(
-            database.DataSource,
-            """
-            UPDATE appsurface_durable.store_metadata
-            SET schema_version = 2,
-                minimum_reader_version = 1,
-                maximum_reader_version = 1,
-                minimum_writer_version = 1,
-                maximum_writer_version = 1
-            WHERE singleton;
-            """);
-        var unsupported = await manager.GetStatusAsync();
-        Assert.Equal(DurableRuntimeSchemaCompatibility.StoreTooNew, unsupported.Compatibility);
-        Assert.Equal(1, unsupported.MaximumReaderVersion);
-        Assert.Equal(1, unsupported.MaximumWriterVersion);
-        var unsupportedValidation = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
-            async () => await manager.ValidateAsync());
-        Assert.Equal(DurableRuntimeSchemaCompatibility.StoreTooNew, unsupportedValidation.Status.Compatibility);
-        var unsupportedApply = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
-            async () => await manager.ApplyAsync());
-        Assert.Equal(DurableRuntimeSchemaCompatibility.StoreTooNew, unsupportedApply.Status.Compatibility);
+       await ExecuteNonQueryAsync(
+           database.DataSource,
+           """
+           UPDATE appsurface_durable.store_metadata
+           SET schema_version = 3,
+               minimum_reader_version = 1,
+               maximum_reader_version = 1,
+               minimum_writer_version = 1,
+               maximum_writer_version = 1
+           WHERE singleton;
+           """);
+       var unsupported = await manager.GetStatusAsync();
+       Assert.Equal(DurableRuntimeSchemaCompatibility.StoreTooNew, unsupported.Compatibility);
+       Assert.Equal(1, unsupported.MaximumReaderVersion);
+       Assert.Equal(1, unsupported.MaximumWriterVersion);
+       var unsupportedValidation = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
+           async () => await manager.ValidateAsync());
+       Assert.Equal(DurableRuntimeSchemaCompatibility.StoreTooNew, unsupportedValidation.Status.Compatibility);
+       var unsupportedApply = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
+           async () => await manager.ApplyAsync());
+       Assert.Equal(DurableRuntimeSchemaCompatibility.StoreTooNew, unsupportedApply.Status.Compatibility);
 
-        await ExecuteNonQueryAsync(
-            database.DataSource,
-            """
-            DELETE FROM appsurface_durable.schema_migration WHERE version = 2;
-            UPDATE appsurface_durable.store_metadata
-            SET schema_version = 1,
-                minimum_reader_version = 1,
-                maximum_reader_version = 1,
-                minimum_writer_version = 1,
-                maximum_writer_version = 1
-            WHERE singleton;
-            """);
-        var upgrade = await manager.GetStatusAsync();
-        Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgrade.Compatibility);
-        Assert.Equal([1], upgrade.AppliedVersions);
-        Assert.Equal([2], upgrade.PendingVersions);
-        var upgradeValidation = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
-            async () => await manager.ValidateAsync());
-        Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgradeValidation.Status.Compatibility);
+       await ExecuteNonQueryAsync(
+           database.DataSource,
+           """
+           DELETE FROM appsurface_durable.schema_migration WHERE version = 3;
+           UPDATE appsurface_durable.store_metadata
+           SET schema_version = 2,
+               minimum_reader_version = 1,
+               maximum_reader_version = 2,
+               minimum_writer_version = 1,
+               maximum_writer_version = 2
+           WHERE singleton;
+           """);
+       var upgrade = await manager.GetStatusAsync();
+       Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgrade.Compatibility);
+       Assert.Equal([1, 2], upgrade.AppliedVersions);
+       Assert.Equal([3], upgrade.PendingVersions);
+       var upgradeValidation = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
+           async () => await manager.ValidateAsync());
+       Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgradeValidation.Status.Compatibility);
 
-        await ExecuteNonQueryAsync(database.DataSource, "DELETE FROM appsurface_durable.store_metadata WHERE singleton;");
-        var missingMetadata = await manager.GetStatusAsync();
-        Assert.Equal(DurableRuntimeSchemaCompatibility.Inconsistent, missingMetadata.Compatibility);
-        Assert.Contains("metadata is missing", missingMetadata.Problem, StringComparison.Ordinal);
-    }
+       await ExecuteNonQueryAsync(database.DataSource, "DELETE FROM appsurface_durable.store_metadata WHERE singleton;");
+       var missingMetadata = await manager.GetStatusAsync();
+       Assert.Equal(DurableRuntimeSchemaCompatibility.Inconsistent, missingMetadata.Compatibility);
+       Assert.Contains("metadata is missing", missingMetadata.Problem, StringComparison.Ordinal);
+   }
 
-    [Fact]
-    public async Task ConcurrentApply_SerializesAndRecordsEachMigrationOnce()
-    {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var first = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        var second = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+   [Fact]
+   public async Task ConcurrentApply_SerializesAndRecordsEachMigrationOnce()
+   {
+       await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+       var first = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+       var second = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
 
-        var results = await Task.WhenAll(first.ApplyAsync().AsTask(), second.ApplyAsync().AsTask())
-            .WaitAsync(TimeSpan.FromSeconds(30));
+       var results = await Task.WhenAll(first.ApplyAsync().AsTask(), second.ApplyAsync().AsTask())
+           .WaitAsync(TimeSpan.FromSeconds(30));
 
-        Assert.Equal([1, 2], results.SelectMany(result => result.AppliedVersions).Order().ToArray());
-        Assert.Contains(results, result => result.AppliedVersions.SequenceEqual([1, 2]));
-        Assert.Contains(results, result => result.AppliedVersions.Count == 0);
-        await using var count = database.DataSource.CreateCommand(
-            "SELECT count(*) FROM appsurface_durable.schema_migration;");
-        Assert.Equal(2, (long)(await count.ExecuteScalarAsync())!);
-    }
+       Assert.Equal([1, 2, 3], results.SelectMany(result => result.AppliedVersions).Order().ToArray());
+       Assert.Contains(results, result => result.AppliedVersions.SequenceEqual([1, 2, 3]));
+       Assert.Contains(results, result => result.AppliedVersions.Count == 0);
+       await using var count = database.DataSource.CreateCommand(
+           "SELECT count(*) FROM appsurface_durable.schema_migration;");
+       Assert.Equal(3, (long)(await count.ExecuteScalarAsync())!);
+   }
 
-    [Fact]
-    public async Task ApplyCancellationWhileWaitingForLock_DoesNotLeakLockAndCanRetry()
-    {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        await using var blocker = await database.DataSource.OpenConnectionAsync();
-        await using (var acquire = new NpgsqlCommand("SELECT pg_advisory_lock(@lock_id);", blocker))
-        {
-            acquire.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
-            await acquire.ExecuteNonQueryAsync();
-        }
+   [Fact]
+   public async Task ApplyCancellationWhileWaitingForLock_DoesNotLeakLockAndCanRetry()
+   {
+       await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+       await using var blocker = await database.DataSource.OpenConnectionAsync();
+       await using (var acquire = new NpgsqlCommand("SELECT pg_advisory_lock(@lock_id);", blocker))
+       {
+           acquire.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+           await acquire.ExecuteNonQueryAsync();
+       }
 
-        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-            await manager.ApplyAsync(cancellation.Token));
+       var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+       using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+       await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+           await manager.ApplyAsync(cancellation.Token));
 
-        await using (var release = new NpgsqlCommand("SELECT pg_advisory_unlock(@lock_id);", blocker))
-        {
-            release.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
-            await release.ExecuteNonQueryAsync();
-        }
+       await using (var release = new NpgsqlCommand("SELECT pg_advisory_unlock(@lock_id);", blocker))
+       {
+           release.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+           await release.ExecuteNonQueryAsync();
+       }
 
-        var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2], applied.AppliedVersions);
-    }
+       var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+       Assert.Equal([1, 2, 3], applied.AppliedVersions);
+   }
 
     [Fact]
     public async Task EpochActivation_WaitsForTheSchemaAdvisoryLock()
@@ -763,11 +793,11 @@ public sealed class PostgreSqlSchemaIntegrationTests
             await release.ExecuteNonQueryAsync();
         }
 
-        var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2], applied.AppliedVersions);
-    }
+       var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+       Assert.Equal([1, 2, 3], applied.AppliedVersions);
+   }
 
-    [Fact]
+   [Fact]
     public async Task ApplyConnectionLossAfterAcquiringLock_PreservesFailureAndCanRetry()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();

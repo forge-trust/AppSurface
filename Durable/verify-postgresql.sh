@@ -5,13 +5,18 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 project="$repo_root/Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj"
 postgres_image="postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302"
 mode="--quick"
+use_flow=false
 evidence_mode=""
 evidence_output=""
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/appsurface-durable-postgresql.XXXXXX")"
 list_log="$work_dir/list-tests.log"
 test_log="$work_dir/test-output.log"
+v2_worktree=""
 
 cleanup() {
+  if [[ -n "$v2_worktree" && -d "$v2_worktree" ]]; then
+    git -C "$repo_root" worktree remove --force "$v2_worktree" >/dev/null 2>&1 || true
+  fi
   if [[ -d "$work_dir" && "$work_dir" == "${TMPDIR:-/tmp}"/appsurface-durable-postgresql.* ]]; then
     rm -rf -- "$work_dir"
   fi
@@ -34,6 +39,10 @@ while [[ $# -gt 0 ]]; do
       mode="$1"
       shift
       ;;
+    --flow)
+      use_flow=true
+      shift
+      ;;
     --evidence-mode)
       [[ $# -ge 2 ]] || fail "--evidence-mode requires cold or warm"
       evidence_mode="$2"
@@ -45,7 +54,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     *)
-      echo "Usage: $0 --quick|--ci [--evidence-mode cold|warm --evidence-output DIR]" >&2
+      echo "Usage: $0 --quick|--ci [--flow] [--evidence-mode cold|warm --evidence-output DIR]" >&2
       exit 2
       ;;
   esac
@@ -103,14 +112,18 @@ if [[ -n "$evidence_mode" || -n "$evidence_output" ]]; then
   done < "$source_file_list" > "$source_hashes"
   source_fingerprint="$(shasum -a 256 "$source_hashes" | awk '{print $1}')"
 
-  scenario_names=(
-    caller-owned-transaction
-    operator-disable-scope
-    process-loss-idempotent
-    process-loss-manualresolution
-    process-loss-providerkeyed
-    process-loss-reconcilebeforeretry
-  )
+  if [[ "$use_flow" == "true" ]]; then
+    scenario_names=(flow-activity-resume flow-event-resume flow-identity-retry flow-scope-disable flow-timer-race)
+  else
+    scenario_names=(
+      caller-owned-transaction
+      operator-disable-scope
+      process-loss-idempotent
+      process-loss-manualresolution
+      process-loss-providerkeyed
+      process-loss-reconcilebeforeretry
+    )
+  fi
   output_names=("${scenario_names[@]}" run)
   for output_name in "${output_names[@]}"; do
     output_file="$evidence_output/$output_name.json"
@@ -124,25 +137,82 @@ fi
 started_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 started_epoch="$(date +%s)"
 
+if [[ "$use_flow" == "true" ]]; then
+  target_test_class="DurableSlice4ReferenceWorkloadTests"
+else
+  target_test_class="DurableSlice3ReferenceWorkloadTests"
+fi
+
 case "$mode" in
   --quick)
     dotnet test "$project" --list-tests \
-      --filter 'FullyQualifiedName~DurableSlice3ReferenceWorkloadTests' >"$list_log" \
+      --filter "FullyQualifiedName~$target_test_class" >"$list_log" \
       || fail "test discovery failed"
-    grep -Fq 'DurableSlice3ReferenceWorkloadTests' "$list_log" \
+    grep -Fq "$target_test_class" "$list_log" \
       || fail "the named reference workload selected zero tests"
     if [[ -n "$evidence_output" ]]; then
       dotnet test "$project" \
-        --filter 'FullyQualifiedName~DurableSlice3ReferenceWorkloadTests' \
+        --filter "FullyQualifiedName~$target_test_class" \
         --logger 'console;verbosity=normal' | tee "$test_log"
     else
       dotnet test "$project" \
-        --filter 'FullyQualifiedName~DurableSlice3ReferenceWorkloadTests' \
+        --filter "FullyQualifiedName~$target_test_class" \
         --logger 'console;verbosity=normal'
     fi
     ;;
   --ci)
-    dotnet test "$project" --logger 'console;verbosity=normal'
+    if [[ "$use_flow" == "true" ]]; then
+      v2_commit="0e57477bab00b1951192c82ca28fdda977da2092"
+      git -C "$repo_root" cat-file -e "$v2_commit^{commit}" \
+        || fail "the pinned v2 compatibility commit $v2_commit is unavailable"
+      v2_worktree="$work_dir/v2-source"
+      git -C "$repo_root" worktree add --detach "$v2_worktree" "$v2_commit" >/dev/null \
+        || fail "the pinned v2 source worktree could not be created"
+      v2_package_version="0.0.0-v2-compat-${started_epoch}"
+      v2_packages="$work_dir/v2-packages"
+      mkdir -p "$v2_packages"
+      v2_provider_project="$v2_worktree/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj"
+      # Preserve the pinned SQL bytes while making their intended manifest names deterministic outside the original checkout.
+      sed -i.bak \
+        's#<EmbeddedResource Include="Migrations/[*].sql" />#<EmbeddedResource Include="$(MSBuildProjectDirectory)/Migrations/*.sql" LogicalName="ForgeTrust.AppSurface.Durable.PostgreSql.Migrations.%(Filename)%(Extension)" />#' \
+        "$v2_provider_project"
+      grep -Fq 'LogicalName="ForgeTrust.AppSurface.Durable.PostgreSql.Migrations.%(Filename)%(Extension)"' \
+        "$v2_provider_project" \
+        || fail "the pinned v2 migration resource normalization did not apply"
+      v2_restore_root="$v2_worktree/Durable/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost.csproj"
+      dotnet restore "$v2_restore_root" \
+        || fail "the pinned v2 dependency graph did not restore"
+      v2_pack_projects=(
+        "$v2_worktree/ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"
+        "$v2_worktree/Workers/ForgeTrust.AppSurface.Workers/ForgeTrust.AppSurface.Workers.csproj"
+        "$v2_worktree/Flow/ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj"
+        "$v2_worktree/Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj"
+        "$v2_worktree/Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj"
+        "$v2_provider_project"
+      )
+      for v2_pack_project in "${v2_pack_projects[@]}"; do
+        dotnet pack "$v2_pack_project" --configuration Release --output "$v2_packages" --no-restore \
+          -p:PackageVersion="$v2_package_version" -p:Version="$v2_package_version" \
+          || fail "a pinned v2 compatibility package did not pack: $v2_pack_project"
+      done
+      v2_harness_project="$repo_root/Durable/compatibility/V2WorkHarness/V2WorkHarness.csproj"
+      v2_harness_bin="$work_dir/v2-harness-bin"
+      dotnet build "$v2_harness_project" --configuration Release \
+        -p:V2PackageVersion="$v2_package_version" \
+        -p:RestoreAdditionalProjectSources="$v2_packages" \
+        -p:BaseOutputPath="$v2_harness_bin/" \
+        -p:BaseIntermediateOutputPath="$work_dir/v2-harness-obj/" \
+        || fail "the tiny harness could not build against the pinned v2 packages"
+      export APPSURFACE_DURABLE_V2_TESTHOST_PATH="$v2_harness_bin/Release/net10.0/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost.dll"
+      export APPSURFACE_REQUIRE_V2_BINARY=true
+      dotnet test "$project" \
+        --filter "FullyQualifiedName~PostgreSqlMixedVersionCompatibilityTests" \
+        --logger 'console;verbosity=normal' \
+        || fail "the pinned v2/current v3 compatibility preflight failed"
+      dotnet test "$project" --logger 'console;verbosity=normal'
+    else
+      dotnet test "$project" --logger 'console;verbosity=normal'
+    fi
     ;;
   *)
     echo "Usage: $0 --quick|--ci [--evidence-mode cold|warm --evidence-output DIR]" >&2
@@ -159,19 +229,27 @@ if [[ -n "$evidence_output" ]]; then
   fi
   [[ "$elapsed_seconds" -le "$threshold_seconds" ]] \
     || fail "$evidence_mode workload took ${elapsed_seconds}s, exceeding the ${threshold_seconds}s readiness target"
-  test_count="$(grep -c 'DurableSlice3ReferenceWorkloadTests' "$list_log" | tr -d ' ')"
-  [[ "$test_count" == "6" ]] || fail "expected exactly 6 discovered reference workload cases, found $test_count"
-  grep -Eq '^Total tests:[[:space:]]+6$' "$test_log" || fail "the evidence run did not execute exactly 6 tests"
-  grep -Eq '^[[:space:]]+Passed:[[:space:]]+6$' "$test_log" || fail "the evidence run did not pass exactly 6 tests"
-
-  scenario_names=(
-    caller-owned-transaction
-    operator-disable-scope
-    process-loss-idempotent
-    process-loss-manualresolution
-    process-loss-providerkeyed
-    process-loss-reconcilebeforeretry
-  )
+  if [[ "$use_flow" == "true" ]]; then
+    expected_test_count=5
+    scenario_names=(flow-activity-resume flow-event-resume flow-identity-retry flow-scope-disable flow-timer-race)
+  else
+    expected_test_count=6
+    scenario_names=(
+      caller-owned-transaction
+      operator-disable-scope
+      process-loss-idempotent
+      process-loss-manualresolution
+      process-loss-providerkeyed
+      process-loss-reconcilebeforeretry
+    )
+  fi
+  test_count="$(grep -c "$target_test_class" "$list_log" | tr -d ' ')"
+  [[ "$test_count" == "$expected_test_count" ]] \
+    || fail "expected exactly $expected_test_count discovered reference workload cases, found $test_count"
+  grep -Eq "^Total tests:[[:space:]]+$expected_test_count$" "$test_log" \
+    || fail "the evidence run did not execute exactly $expected_test_count tests"
+  grep -Eq "^[[:space:]]+Passed:[[:space:]]+$expected_test_count$" "$test_log" \
+    || fail "the evidence run did not pass exactly $expected_test_count tests"
   scenario_hashes="$work_dir/scenario-hashes.txt"
   : > "$scenario_hashes"
   for scenario_name in "${scenario_names[@]}"; do
@@ -187,7 +265,8 @@ if [[ -n "$evidence_output" ]]; then
     printf '%s  %s.json\n' "$scenario_hash" "$scenario_name" >> "$scenario_hashes"
   done
   scenario_count="$(find "$evidence_output" -maxdepth 1 -type f -name '*.json' ! -name 'run.json' | wc -l | tr -d ' ')"
-  [[ "$scenario_count" == "6" ]] || fail "evidence output contains $scenario_count scenario files; expected the exact 6-file set"
+  [[ "$scenario_count" == "$expected_test_count" ]] \
+    || fail "evidence output contains $scenario_count scenario files; expected the exact $expected_test_count-file set"
   scenario_fingerprint="$(shasum -a 256 "$scenario_hashes" | awk '{print $1}')"
   host_os="$(uname -s)"
   host_architecture="$(uname -m)"

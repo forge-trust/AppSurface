@@ -1,7 +1,7 @@
 # ForgeTrust.AppSurface.Durable.PostgreSql
 
 > **Source-only public preview:** this package supplies explicit PostgreSQL schema management and a manually driven Work
-> engine. It is excluded from publish plans until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, and
+> engine, and a Flow engine. It is excluded from publish plans until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, and
 > coordinated operations. It starts no worker or hosted service.
 
 Choose this package when an application must commit its domain mutation and durable Work acceptance in the same
@@ -18,9 +18,10 @@ depends on PostgreSQL.
 
 ## First proof
 
-Run the source-evaluator [`slice 3 reference workload`](../slice3-reference-workload.md). It applies schema explicitly,
-accepts Work atomically with a domain mutation, terminates a separate process at committed checkpoints, and proves safe
-recovery for every provider-safety class. It is not a hosted-runtime demonstration.
+Run the source-evaluator [`slice 3 reference workload`](../slice3-reference-workload.md) or [`slice 4 reference workload`](../slice4-reference-workload.md). They apply schema explicitly,
+accept Work and start Flows atomically with domain mutations, force-terminate a separate process at the committed
+timer-winner checkpoint, verify the remaining recovery boundaries transactionally with fresh processors, and prove safe
+recovery for every provider-safety class and Flow state transition. They are not hosted-runtime demonstrations.
 
 ## Explicit schema and epoch deployment
 
@@ -37,8 +38,7 @@ Runtime mutations take a shared, transaction-scoped advisory fence before valida
 and epoch rotation take the exclusive package lock, so they wait for in-flight runtime transactions and prevent an old
 epoch from committing new durable state after rotation.
 
-Runtime roles never own schema or apply DDL. The package has two migrations: Work/shared state, then forced RLS and
-privilege revocation. Flow, Schedule, and runtime-heartbeat schema belong to slices 4-6. Applied schema is forward-only;
+Runtime roles never own schema or apply DDL. The package has three migrations: Work/shared state (`0001_work_shared.sql`), forced RLS and privilege revocation (`0002_forced_rls.sql`), and Flow protocol persistence (`0003_flow_protocol.sql`). Schedule and runtime-heartbeat schema belong to slices 5-6. Applied schema is forward-only;
 rolling application code back does not authorize destructive schema rollback. Execute generated SQL with a client that
 stops on the first error; `psql` callers must pass `-v ON_ERROR_STOP=1`.
 
@@ -76,10 +76,10 @@ migration owner. Do not place application-owned objects there.
 
 | Principal | Allowed privileges |
 | --- | --- |
-| Dispatcher | Schema `USAGE`; table `SELECT` on `dispatch` only. |
-| Runtime reads | Schema `USAGE`; table `SELECT` on `store_metadata`, `schema_migration`, `scope`, `work`, `dispatch`, `work_operator_command`, `effect_permit`, `scope_history`, and `work_history`. |
-| Runtime inserts | Table `INSERT` on `scope`, `work`, `dispatch`, `work_operator_command`, `effect_permit`, `scope_history`, and `work_history`. |
-| Runtime updates | Column `UPDATE` on `scope(generation, state, updated_at)`, `work(state, due_at, updated_at, terminal_at, cancellation_requested_at, attempt_number, lease_generation, lease_owner, lease_started_at, lease_expires_at, runtime_epoch, revision, result_contract_id, result_schema_version, result_codec_id, result_classification, result_retention_policy_id, result_payload, result_sha256, terminal_code)`, `dispatch(due_at, state, expected_revision, updated_at)`, `work_operator_command(status, resulting_state, resulting_revision, completed_at)`, and `effect_permit(status, observed_at, details, runtime_epoch)`. |
+| Dispatcher | Schema `USAGE`; table `SELECT` on payload-free `dispatch` and `flow_dispatch` only. |
+| Runtime reads | Schema `USAGE`; table `SELECT` on package metadata, scoped Work relations, and all six scoped Flow relations including `flow_dispatch`. |
+| Runtime inserts | Table `INSERT` on scoped Work relations and all six scoped Flow relations. |
+| Runtime updates | Reviewed column-level `UPDATE` on mutable Work, Flow instance/wait/timer, and dispatch fields; no table-wide update grant. |
 | Runtime sequences | `USAGE` and `SELECT` on every sequence in the package schema. |
 
 Neither service credential receives schema `CREATE`, table-wide `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`,
@@ -87,9 +87,27 @@ Neither service credential receives schema `CREATE`, table-wide `UPDATE`, `DELET
 not the reason destructive privileges are safe. The recipe also rejects disabled or unforced RLS and any policy whose
 name, command, role target, permissiveness, `USING`, or `WITH CHECK` expression differs from the reviewed migration.
 
-## Accept Work
+## Options reuse across Work and Flow
 
-Create `PostgreSqlDurableWorkOptions` from the non-empty StoreId and explicitly active epoch returned by deployment:
+Create `PostgreSqlDurableWorkOptions` from the non-empty StoreId and explicitly active epoch returned by deployment. The options object is shared across Work and Flow operations:
+
+<!-- appsurface:snippet id="durable-postgresql-options-reuse" file="Durable/packed-consumers/PostgreSqlProvider/PostgreSqlReadmeProof.cs" marker="durable-postgresql-options-reuse" lang="csharp" -->
+```csharp
+    internal static PostgreSqlDurableWorkOptions CreateSharedOptions(
+        Guid runtimeEpoch,
+        Guid expectedStoreId)
+    {
+        // PostgreSqlDurableWorkOptions is reused directly across Work and Flow operations to guarantee
+        // consistent ExpectedStoreId, active RuntimeEpoch, notification modes, and schema compatibility validation.
+        return new PostgreSqlDurableWorkOptions(
+            runtimeEpoch,
+            expectedStoreId,
+            PostgreSqlDurableWakeNotificationMode.Disabled);
+    }
+```
+<!-- /appsurface:snippet -->
+
+## Accept Work
 
 <!-- appsurface:snippet id="durable-postgresql-accept-work" file="Durable/packed-consumers/PostgreSqlProvider/PostgreSqlReadmeProof.cs" marker="durable-postgresql-accept-work" lang="csharp" -->
 ```csharp
@@ -165,12 +183,12 @@ release rolls back so later proof remains possible.
 Slice 6 must prove the adopter-facing hosting and operator-control boundary before those operations become public API;
 applications must not depend on internal PostgreSQL types in the meantime.
 
-Read the normative [`Work protocol v1`](../work-protocol-v1.md), the
-[`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md), and the
-[`slice 3 reconstruction ledger`](../slice3-reconstruction.md) for exact behavior, safe responses, and lineage.
+Read the normative [`Work protocol v1`](../work-protocol-v1.md), [`Flow protocol v1`](../flow-protocol-v1.md), the
+[`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md), the
+[`slice 3 reconstruction ledger`](../slice3-reconstruction.md), and the [`slice 4 reconstruction ledger`](../slice4-reconstruction.md) for exact behavior, safe responses, and lineage.
 
 ## Release Guidance
 
-From the repository root, `./Durable/verify-postgresql.sh --quick` runs focused local proof and `--ci` runs the strict
-real-PostgreSQL gate. The [`package chooser`](../../packages/README.md) is the generated adoption/publication source, and
+From the repository root, `./Durable/verify-postgresql.sh --quick` runs focused Work proof, `./Durable/verify-postgresql.sh --quick --flow` runs focused Flow proof, and `--ci` / `--ci --flow` run the strict
+real-PostgreSQL gates. The [`package chooser`](../../packages/README.md) is the generated adoption/publication source, and
 the [`release hub`](../../releases/README.md) owns coordinated release policy.

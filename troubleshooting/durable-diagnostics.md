@@ -37,6 +37,40 @@ A reserved code is part of the compatibility namespace, not evidence that the co
 | `ASDUR210` | Release manifest mismatch | Registration differs from recoverable history | Deploy a compatible registration or migrate explicitly |
 | `ASDUR211` | Release state mismatch | Suspended state and wait/timer/child-work truth disagree | Reconcile authoritative truth before release |
 
+### ASDUR202
+
+The Flow has not committed a matching retained wait yet. This commonly occurs while its node is still evaluating.
+Observe the current revision/wait, then retry the exact same request with the same unconsumed command and event
+identities; do not change event semantics between retries.
+
+### ASDUR206
+
+A start command or start idempotency key resolves to different semantic content or to split Flow instances. Retry the
+original start byte-for-byte, or use a new coherent command/idempotency pair. Never choose one conflicting identity as
+the winner.
+
+### ASDUR207
+
+A Flow command/event identity was reused with a changed or unsupported fingerprint, or the two identities resolve to
+different command rows. Stop retrying changed semantics and inspect the original durable outcome.
+
+### ASDUR209
+
+The event name or encoded payload contract differs from the active wait’s exact contract, version, classification, or
+retention identity. Encode the registered contract and retry with the same still-unconsumed identities.
+
+### ASDUR210
+
+The active Flow registration’s authoring model, implementation manifest, or definition fingerprint cannot interpret
+the suspended instance safely. Deploy the exact compatible registration or perform an explicit migration before
+release.
+
+### ASDUR211
+
+The persisted suspension descriptor, wait/timer lineage, or child-Work truth cannot be restored without guessing.
+Reconcile authoritative Work and Flow facts first; cancellation or an explicit evidence-backed repair is safer than a
+force-terminate shortcut.
+
 Schedule contracts reserve `ASDUR301`-`ASDUR307` for invalid definition, missing schedule, revision conflict, command
 conflict, access denial, evaluation incompatibility, and recovery-state mismatch. A provider must map these codes to its
 tested implementation without changing their meanings.
@@ -50,7 +84,19 @@ tested implementation without changing their meanings.
 | `ASDUR104` | Claim lost | Read current Work truth; never execute or complete with the stale claim. |
 | `ASDUR105` | Lease lost | Stop the attempt; it cannot acquire a permit or change current Work. |
 | `ASDUR107` | Scope disabled | Treat the scope as a permanent tombstone; do not recreate it. |
-| `ASDUR108` | Recovery epoch required | Rotate the epoch through deployment tooling after restore before releasing Work. |
+| `ASDUR108` | Recovery epoch required | Rotate the epoch through deployment tooling after restore before releasing Work or Flow. |
+| `ASDUR200` | Flow definition unavailable | Register required flow definition and version before starting or resuming instance. |
+| `ASDUR201` | Flow history incompatible | Definition fingerprint or step code changed; suspend instance and perform explicit migration. |
+| `ASDUR202` | Not waiting yet | Event arrived before instance entered active `waiting_event` state; retry event delivery. |
+| `ASDUR203` | Flow race lost | Optimistic aggregate revision CAS failed; reload instance state before retrying. |
+| `ASDUR204` | Event duplicate | Single-use `event_id` was already consumed; return original delivery result. |
+| `ASDUR205` | Flow access denied | Scope authorization check failed or scope setting missing. |
+| `ASDUR206` | Flow start conflict | `start_idempotency_key` reused with different definition or payload fingerprint. |
+| `ASDUR207` | Flow command conflict | `command_id` reused with different command parameters. |
+| `ASDUR208` | Flow not found | Instance ID does not exist within the specified scope. |
+| `ASDUR209` | Event contract mismatch | Payload schema version or contract ID does not match active wait registration. |
+| `ASDUR210` | Release manifest mismatch | Recovery manifest registration disagrees with persisted history. |
+| `ASDUR211` | Release state mismatch | Suspended state and active wait/timer/work records disagree; reconcile before release. |
 | `ASDUR400` | Durable schema is missing | Apply reviewed forward-only migrations with a migration-owner connection. |
 | `ASDUR401` | Durable schema upgrade is required | Apply every known pending migration before this reader/writer. |
 | `ASDUR402` | Durable schema version is too new or unsupported | Deploy compatible package code; do not bypass supported ranges. |
@@ -60,8 +106,9 @@ After an Npgsql exception, timeout, cancellation, connection loss, or server err
 Diagnostics retain exception type, stack, inner exception, and SQLSTATE, but omit connection strings, credentials,
 parameter values, payloads, and provider responses from the safe outer durable message/status. The retained
 `PostgresException` is server-controlled evidence, not a safe log projection. See the
-[`Work protocol`](../Durable/work-protocol-v1.md#caller-owned-transaction-contract) and
-[`reference workload`](../Durable/slice3-reference-workload.md#failure-interpretation).
+[`Work protocol`](../Durable/work-protocol-v1.md#caller-owned-transaction-contract),
+[`Flow protocol`](../Durable/flow-protocol-v1.md), and
+[`slice 4 reference workload`](../Durable/slice4-reference-workload.md#failure-interpretation).
 
 Use the API method being called as the operation identifier. Ordinary provider failures keep their concrete
 `NpgsqlException` or `PostgresException` type. `DurableRuntimeSchemaException.Status` is the safe schema-status snapshot;
@@ -76,6 +123,6 @@ five-character SQLSTATE. Never log or serialize inner message text, detail, hint
 | `ASDUR404` | Activator stale | Persisted heartbeat and configured stale bound |
 | `ASDUR405` | Worker identity conflict | Persisted process ownership and drain/handoff behavior |
 
-Slice 3 intentionally has no hosted worker runbook or production activation command. Its canonical proof is the
-source-evaluator [reference workload](../Durable/slice3-reference-workload.md), which manually drives protocol operations
+Slices 3 and 4 intentionally have no hosted worker runbook or production activation command. Canonical proofs are the
+source-evaluator [slice 3 reference workload](../Durable/slice3-reference-workload.md) and [slice 4 reference workload](../Durable/slice4-reference-workload.md), which manually drive protocol operations
 against real PostgreSQL.

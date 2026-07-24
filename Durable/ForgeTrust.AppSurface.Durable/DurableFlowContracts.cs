@@ -379,7 +379,9 @@ public sealed record DurableFlowListRequest
     /// Optional old-epoch recovery filter; <see langword="null"/> returns both matching and nonmatching instances.
     /// </param>
     /// <param name="pageSize">Maximum snapshots to return, from 1 through 1,000.</param>
-    /// <param name="continuationToken">Opaque token returned by the prior page, or <see langword="null"/>.</param>
+    /// <param name="continuationToken">
+    /// Opaque token returned by the prior page, limited to 512 characters, or <see langword="null"/>.
+    /// </param>
     public DurableFlowListRequest(
         DurableScopeId scopeId,
         DurableFlowState? state = null,
@@ -404,7 +406,7 @@ public sealed record DurableFlowListRequest
         PageSize = pageSize;
         ContinuationToken = continuationToken is null
             ? null
-            : DurableIdentifier.RequireText(continuationToken, nameof(continuationToken), 200);
+            : DurableIdentifier.RequireText(continuationToken, nameof(continuationToken), 512);
     }
 
     /// <summary>Gets the trusted owning scope.</summary>
@@ -419,7 +421,9 @@ public sealed record DurableFlowListRequest
     /// <summary>Gets the maximum snapshots returned by this page.</summary>
     public int PageSize { get; }
 
-    /// <summary>Gets the opaque continuation token, or <see langword="null"/> for the first page.</summary>
+    /// <summary>
+    /// Gets the opaque continuation token of at most 512 characters, or <see langword="null"/> for the first page.
+    /// </summary>
     public string? ContinuationToken { get; }
 }
 
@@ -433,13 +437,15 @@ public sealed record DurableFlowListResult
         Flows = Array.AsReadOnly(flows.ToArray());
         ContinuationToken = continuationToken is null
             ? null
-            : DurableIdentifier.RequireText(continuationToken, nameof(continuationToken), 200);
+            : DurableIdentifier.RequireText(continuationToken, nameof(continuationToken), 512);
     }
 
     /// <summary>Gets the immutable page of Flow snapshots.</summary>
     public IReadOnlyList<DurableFlowSnapshot> Flows { get; }
 
-    /// <summary>Gets the next opaque continuation token, or <see langword="null"/> on the final page.</summary>
+    /// <summary>
+    /// Gets the next opaque continuation token of at most 512 characters, or <see langword="null"/> on the final page.
+    /// </summary>
     public string? ContinuationToken { get; }
 }
 

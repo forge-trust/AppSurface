@@ -143,10 +143,12 @@ SELECT NOT EXISTS
 SELECT bool_and(
     object.relrowsecurity =
       (object.relname IN
-        ('scope', 'scope_history', 'work', 'work_history', 'dispatch', 'work_operator_command', 'effect_permit'))
+        ('scope', 'scope_history', 'work', 'work_history', 'dispatch', 'work_operator_command', 'effect_permit',
+         'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch'))
     AND object.relforcerowsecurity =
       (object.relname IN
-        ('scope', 'scope_history', 'work', 'work_history', 'dispatch', 'work_operator_command', 'effect_permit')))
+        ('scope', 'scope_history', 'work', 'work_history', 'dispatch', 'work_operator_command', 'effect_permit',
+         'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch')))
   AS durable_rls_flags_are_exact
 FROM pg_catalog.pg_class AS object
 JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
@@ -165,6 +167,27 @@ WITH expected_policy(relation_name, policy_name, command_name, using_expression,
     ('dispatch', 'dispatch_scope_insert', 'a', NULL::text,
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
     ('dispatch', 'dispatch_scope_update', 'w',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('flow_command', 'flow_command_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('flow_dispatch', 'flow_dispatch_global_discovery', 'r', 'true', NULL::text),
+    ('flow_dispatch', 'flow_dispatch_scope_insert', 'a', NULL::text,
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('flow_dispatch', 'flow_dispatch_scope_update', 'w',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('flow_history', 'flow_history_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('flow_instance', 'flow_instance_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('flow_timer', 'flow_timer_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('flow_wait', 'flow_wait_scope_isolation', '*',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
     ('effect_permit', 'effect_permit_scope_isolation', '*',
@@ -269,28 +292,30 @@ SELECT NOT EXISTS
       service.role_name::pg_catalog.name,
       relation.oid,
       privilege.privilege_name)
-    AND NOT
-    (
-      service.role_name = :'dispatcher_role'
-      AND relation.relname = 'dispatch'
-      AND privilege.privilege_name = 'SELECT'
-      OR service.role_name = :'runtime_role'
-      AND
-      (
-        privilege.privilege_name = 'SELECT'
-        AND relation.relname IN
-        (
-          'store_metadata', 'schema_migration', 'scope', 'work', 'dispatch',
-          'work_operator_command', 'effect_permit', 'scope_history', 'work_history'
-        )
-        OR privilege.privilege_name = 'INSERT'
-        AND relation.relname IN
-        (
-          'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
-          'scope_history', 'work_history'
-        )
-      )
-    )
+   AND NOT
+   (
+     service.role_name = :'dispatcher_role'
+     AND relation.relname IN ('dispatch', 'flow_dispatch')
+     AND privilege.privilege_name = 'SELECT'
+     OR service.role_name = :'runtime_role'
+     AND
+     (
+       privilege.privilege_name = 'SELECT'
+       AND relation.relname IN
+       (
+         'store_metadata', 'schema_migration', 'scope', 'work', 'dispatch',
+         'work_operator_command', 'effect_permit', 'scope_history', 'work_history',
+         'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch'
+       )
+       OR privilege.privilege_name = 'INSERT'
+       AND relation.relname IN
+       (
+         'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
+         'scope_history', 'work_history',
+         'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch'
+       )
+     )
+   )
 ) AS service_roles_have_safe_relation_privileges \gset
 \if :service_roles_have_safe_relation_privileges
 \else
@@ -331,48 +356,71 @@ SELECT NOT EXISTS
       column_value.oid,
       column_value.attnum,
       privilege.privilege_name)
-    AND NOT
-    (
-      service.role_name = :'dispatcher_role'
-      AND column_value.relname = 'dispatch'
-      AND privilege.privilege_name = 'SELECT'
-      OR service.role_name = :'runtime_role'
-      AND
-      (
-        privilege.privilege_name = 'SELECT'
-        AND column_value.relname IN
-        (
-          'store_metadata', 'schema_migration', 'scope', 'work', 'dispatch',
-          'work_operator_command', 'effect_permit', 'scope_history', 'work_history'
-        )
-        OR privilege.privilege_name = 'INSERT'
-        AND column_value.relname IN
-        (
-          'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
-          'scope_history', 'work_history'
-        )
-        OR privilege.privilege_name = 'UPDATE'
-        AND
-        (
-          column_value.relname = 'scope'
-          AND column_value.attname IN ('generation', 'state', 'updated_at')
-          OR column_value.relname = 'work'
-          AND column_value.attname IN
-          (
-            'state', 'due_at', 'updated_at', 'terminal_at', 'cancellation_requested_at', 'attempt_number',
-            'lease_generation', 'lease_owner', 'lease_started_at', 'lease_expires_at', 'runtime_epoch', 'revision',
-            'result_contract_id', 'result_schema_version', 'result_codec_id', 'result_classification',
-            'result_retention_policy_id', 'result_payload', 'result_sha256', 'terminal_code'
-          )
-          OR column_value.relname = 'dispatch'
-          AND column_value.attname IN ('due_at', 'state', 'expected_revision', 'updated_at')
-          OR column_value.relname = 'work_operator_command'
-          AND column_value.attname IN ('status', 'resulting_state', 'resulting_revision', 'completed_at')
-          OR column_value.relname = 'effect_permit'
-          AND column_value.attname IN ('status', 'observed_at', 'details', 'runtime_epoch')
-        )
-      )
-    )
+   AND NOT
+   (
+     service.role_name = :'dispatcher_role'
+     AND column_value.relname IN ('dispatch', 'flow_dispatch')
+     AND privilege.privilege_name = 'SELECT'
+     OR service.role_name = :'runtime_role'
+     AND
+     (
+       privilege.privilege_name = 'SELECT'
+       AND column_value.relname IN
+       (
+         'store_metadata', 'schema_migration', 'scope', 'work', 'dispatch',
+         'work_operator_command', 'effect_permit', 'scope_history', 'work_history',
+         'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch'
+       )
+       OR privilege.privilege_name = 'INSERT'
+       AND column_value.relname IN
+       (
+         'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
+         'scope_history', 'work_history',
+         'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch'
+       )
+       OR privilege.privilege_name = 'UPDATE'
+       AND
+       (
+         column_value.relname = 'scope'
+         AND column_value.attname IN ('generation', 'state', 'updated_at')
+         OR column_value.relname = 'work'
+         AND column_value.attname IN
+         (
+           'state', 'due_at', 'updated_at', 'terminal_at', 'cancellation_requested_at', 'attempt_number',
+           'lease_generation', 'lease_owner', 'lease_started_at', 'lease_expires_at', 'runtime_epoch', 'revision',
+           'result_contract_id', 'result_schema_version', 'result_codec_id', 'result_classification',
+           'result_retention_policy_id', 'result_payload', 'result_sha256', 'terminal_code'
+         )
+         OR column_value.relname = 'dispatch'
+         AND column_value.attname IN ('due_at', 'state', 'expected_revision', 'updated_at')
+         OR column_value.relname = 'work_operator_command'
+         AND column_value.attname IN ('status', 'resulting_state', 'resulting_revision', 'completed_at')
+         OR column_value.relname = 'effect_permit'
+         AND column_value.attname IN ('status', 'observed_at', 'details', 'runtime_epoch')
+         OR column_value.relname = 'flow_instance'
+         AND column_value.attname IN
+         (
+           'state', 'current_node_id', 'context_contract_id', 'context_schema_version',
+           'context_codec_id', 'context_payload', 'context_sha256', 'context_classification',
+           'context_retention', 'resume_event_name', 'resume_event_is_timeout',
+           'resume_event_contract_id', 'resume_event_schema_version', 'resume_event_codec_id',
+           'resume_event_payload', 'resume_event_sha256', 'resume_event_classification',
+           'resume_event_retention', 'activity_callsite_id', 'activity_result_contract_id',
+           'activity_result_schema_version', 'activity_result_codec_id', 'activity_result_payload',
+           'activity_result_sha256', 'activity_result_classification', 'activity_result_retention',
+           'lease_generation', 'lease_owner', 'lease_started_at', 'lease_expires_at',
+           'updated_at', 'cancellation_requested_at', 'terminal_at', 'terminal_code',
+           'suspension_descriptor', 'suspended_from_state', 'revision', 'scope_generation', 'runtime_epoch'
+         )
+         OR column_value.relname = 'flow_wait'
+         AND column_value.attname IN ('state', 'resolved_revision', 'resolved_at', 'suspension_descriptor', 'updated_at')
+         OR column_value.relname = 'flow_timer'
+         AND column_value.attname IN ('state', 'resolved_at', 'updated_at')
+         OR column_value.relname = 'flow_dispatch'
+         AND column_value.attname IN ('due_at', 'state', 'expected_revision', 'updated_at')
+       )
+     )
+   )
 ) AS service_roles_have_safe_column_privileges \gset
 \if :service_roles_have_safe_column_privileges
 \else
@@ -422,15 +470,16 @@ SELECT NOT EXISTS
 
 SELECT format('GRANT USAGE ON SCHEMA appsurface_durable TO %I', :'dispatcher_role') \gexec
 SELECT format('GRANT SELECT ON appsurface_durable.dispatch TO %I', :'dispatcher_role') \gexec
+SELECT format('GRANT SELECT ON appsurface_durable.flow_dispatch TO %I', :'dispatcher_role') \gexec
 SELECT format('GRANT USAGE ON SCHEMA appsurface_durable TO %I', :'runtime_role') \gexec
 SELECT format(
     'GRANT SELECT ON appsurface_durable.store_metadata, appsurface_durable.schema_migration TO %I',
     :'runtime_role') \gexec
 SELECT format(
-    'GRANT SELECT, INSERT ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch TO %I',
+    'GRANT SELECT, INSERT ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch, appsurface_durable.flow_instance, appsurface_durable.flow_command, appsurface_durable.flow_history, appsurface_durable.flow_wait, appsurface_durable.flow_timer, appsurface_durable.flow_dispatch TO %I',
     :'runtime_role') \gexec
 SELECT format(
-    'REVOKE UPDATE ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch FROM %I',
+    'REVOKE UPDATE ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch, appsurface_durable.flow_instance, appsurface_durable.flow_command, appsurface_durable.flow_history, appsurface_durable.flow_wait, appsurface_durable.flow_timer, appsurface_durable.flow_dispatch FROM %I',
     :'runtime_role') \gexec
 SELECT format(
     'GRANT UPDATE (generation, state, updated_at) ON appsurface_durable.scope TO %I',
@@ -440,6 +489,18 @@ SELECT format(
     :'runtime_role') \gexec
 SELECT format(
     'GRANT UPDATE (due_at, state, expected_revision, updated_at) ON appsurface_durable.dispatch TO %I',
+    :'runtime_role') \gexec
+SELECT format(
+    'GRANT UPDATE (state, current_node_id, context_contract_id, context_schema_version, context_codec_id, context_payload, context_sha256, context_classification, context_retention, resume_event_name, resume_event_is_timeout, resume_event_contract_id, resume_event_schema_version, resume_event_codec_id, resume_event_payload, resume_event_sha256, resume_event_classification, resume_event_retention, activity_callsite_id, activity_result_contract_id, activity_result_schema_version, activity_result_codec_id, activity_result_payload, activity_result_sha256, activity_result_classification, activity_result_retention, lease_generation, lease_owner, lease_started_at, lease_expires_at, updated_at, cancellation_requested_at, terminal_at, terminal_code, suspension_descriptor, suspended_from_state, revision, scope_generation, runtime_epoch) ON appsurface_durable.flow_instance TO %I',
+    :'runtime_role') \gexec
+SELECT format(
+    'GRANT UPDATE (state, resolved_revision, resolved_at, suspension_descriptor, updated_at) ON appsurface_durable.flow_wait TO %I',
+    :'runtime_role') \gexec
+SELECT format(
+    'GRANT UPDATE (state, resolved_at, updated_at) ON appsurface_durable.flow_timer TO %I',
+    :'runtime_role') \gexec
+SELECT format(
+    'GRANT UPDATE (due_at, state, expected_revision, updated_at) ON appsurface_durable.flow_dispatch TO %I',
     :'runtime_role') \gexec
 SELECT format(
     'GRANT SELECT, INSERT ON appsurface_durable.work_operator_command, appsurface_durable.effect_permit TO %I',

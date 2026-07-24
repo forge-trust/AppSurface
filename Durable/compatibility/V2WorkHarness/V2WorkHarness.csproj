@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>ForgeTrust.AppSurface.Durable.PostgreSql.TestHost</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ForgeTrust.AppSurface.Durable.PostgreSql"
+                      VersionOverride="$(V2PackageVersion)" />
+  </ItemGroup>
+
+</Project>
