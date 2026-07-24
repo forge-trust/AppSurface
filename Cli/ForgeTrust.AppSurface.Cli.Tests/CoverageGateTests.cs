@@ -58,8 +58,8 @@ public sealed class CoverageGateTests
 
         var output = console.ReadOutputString();
         Assert.Contains("Coverage gate PASS", output, StringComparison.Ordinal);
-        Assert.Contains("lines 95.00% >= 90%", output, StringComparison.Ordinal);
-        Assert.Contains("branches 90.00% >= 80%", output, StringComparison.Ordinal);
+        Assert.Contains("lines 95.00% >= 89.5%", output, StringComparison.Ordinal);
+        Assert.Contains("branches 90.00% >= 79.5%", output, StringComparison.Ordinal);
         Assert.True(File.Exists(Path.Join(temp.Path, "coverage-gate.json")));
         Assert.True(File.Exists(Path.Join(temp.Path, "coverage-gate.md")));
     }
@@ -325,7 +325,7 @@ public sealed class CoverageGateTests
         var coverage = temp.WriteCoverage("""
             <coverage line-rate="0.745" branch-rate="0.5" lines-covered="149" lines-valid="200" branches-covered="1" branches-valid="2" />
             """);
-        var request = new CoverageGateRequest(coverage, temp.Path, 75, 40, false, null);
+        var request = new CoverageGateRequest(coverage, temp.Path, 75.5m, 40, false, null, null, 0.5m);
 
         var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
         var markdown = CoverageGateReportWriter.RenderMarkdown(result);
@@ -333,7 +333,7 @@ public sealed class CoverageGateTests
         Assert.False(result.Passed);
         Assert.Equal(74.5m, result.LineCoverage.Percent);
         Assert.Contains("# Coverage Gate: FAIL", markdown, StringComparison.Ordinal);
-        Assert.Contains("| Lines | 74.50% (149/200) | 75% | fail |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Lines | 74.50% (149/200) | 75.5% | fail |", markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2727,6 +2727,133 @@ public sealed class CoverageGateTests
         {
             throw new InvalidOperationException($"git {string.Join(' ', executedArguments)} failed: {standardError}");
         }
+    }
+
+        [Fact]
+    public async Task EvaluateAsync_PassesWhenCoverageIsWithinTolerance()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-tolerance-");
+        var coverage = temp.WriteCoverage("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <coverage lines-covered="95" lines-valid="100" branches-covered="45" branches-valid="50" />
+            """);
+        // 95% line coverage, 95% threshold, 0.5% tolerance => effective = 94.5 => 95 >= 94.5 passes
+        var request = new CoverageGateRequest(coverage, temp.Path, 95, 80, false, null, null, 0.5m);
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+
+        Assert.True(result.Passed);
+        Assert.Equal(95, result.LineCoverage.Percent);
+        Assert.Equal(0.5m, result.TolerancePercent);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ApplyToleranceToConsoleOutput()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-tolerance-console-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="95" lines-valid="100" branches-covered="9" branches-valid="10" />
+            """);
+        var command = new CoverageGateCommand
+        {
+            CoveragePath = coverage,
+            OutputDirectory = temp.Path,
+            MinLine = 95,
+            MinBranch = 80,
+            Tolerance = 0.5m,
+            NoGithubSummary = true
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console, CancellationToken.None);
+
+        var output = console.ReadOutputString();
+        Assert.Contains("Coverage gate PASS", output, StringComparison.Ordinal);
+        Assert.Contains("lines 95.00% >= 94.5%", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ThrowsWhenCoverageBelowThresholdMinusTolerance()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-tolerance-fail-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="93" lines-valid="100" branches-covered="9" branches-valid="10" />
+            """);
+        var command = new CoverageGateCommand
+        {
+            CoveragePath = coverage,
+            OutputDirectory = temp.Path,
+            MinLine = 95,
+            MinBranch = 80,
+            Tolerance = 0.5m,
+            NoGithubSummary = true
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV020", exception.Message, StringComparison.Ordinal);
+        var output = console.ReadOutputString();
+        Assert.Contains("Coverage gate FAIL", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_ToleranceZeroBehavesStrictly()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-zero-tol-");
+        var coverage = temp.WriteCoverage("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <coverage lines-covered="94" lines-valid="100" branches-covered="45" branches-valid="50" />
+            """);
+        var request = new CoverageGateRequest(coverage, temp.Path, 95, 80, false, null, null, 0m);
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+
+        Assert.False(result.Passed);
+        Assert.Equal(0m, result.TolerancePercent);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_ToleranceCanNotExceedThreshold()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-tol-exceed-");
+        var coverage = temp.WriteCoverage("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <coverage lines-covered="10" lines-valid="100" branches-covered="45" branches-valid="50" />
+            """);
+        // 10% coverage, 0.5% threshold, 0.5% tolerance => effective = max(0, 0.5 - 0.5) = 0 => 10 >= 0 passes
+        var request = new CoverageGateRequest(coverage, temp.Path, 0.5m, 80, false, null, null, 0.5m);
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+
+        Assert.True(result.Passed);
+        Assert.Equal(10, result.LineCoverage.Percent);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SupportsCustomToleranceViaCommandLine()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-custom-tol-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="94" lines-valid="100" branches-covered="9" branches-valid="10" />
+            """);
+        var command = new CoverageGateCommand
+        {
+            CoveragePath = coverage,
+            OutputDirectory = temp.Path,
+            MinLine = 95,
+            MinBranch = 80,
+            Tolerance = 1.5m,
+            NoGithubSummary = true
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console, CancellationToken.None);
+
+        var output = console.ReadOutputString();
+        Assert.Contains("Coverage gate PASS", output, StringComparison.Ordinal);
+        Assert.Contains("lines 94.00% >= 93.5%", output, StringComparison.Ordinal);
     }
 
     private sealed class TempDirectory : IDisposable
