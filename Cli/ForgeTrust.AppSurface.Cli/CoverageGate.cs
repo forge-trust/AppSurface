@@ -366,8 +366,8 @@ internal sealed partial class CoverageGateCommand : ICommand
         CoverageGateRequest request)
     {
         var builder = new StringBuilder();
-        var effectiveLineThreshold = Math.Max(0m, request.MinLinePercent - result.TolerancePercent);
-        var effectiveBranchThreshold = Math.Max(0m, request.MinBranchPercent - result.TolerancePercent);
+        var effectiveLineThreshold = CoverageGateEvaluator.GetEffectiveThreshold(request.MinLinePercent, result.TolerancePercent);
+        var effectiveBranchThreshold = CoverageGateEvaluator.GetEffectiveThreshold(request.MinBranchPercent, result.TolerancePercent);
         builder.Append(FormattableString.Invariant(
             $"Coverage gate {status}: lines {result.LineCoverage.Percent:0.00}% >= {effectiveLineThreshold:0.##}%, branches {result.BranchCoverage.Percent:0.00}% >= {effectiveBranchThreshold:0.##}%"));
 
@@ -376,7 +376,7 @@ internal sealed partial class CoverageGateCommand : ICommand
             builder.Append(FormattableString.Invariant($", patch lines {patchCoverage.Percent:0.00}%"));
             if (request.PatchCoverage?.MinPatchLinePercent is { } threshold)
             {
-                var effectivePatchLineThreshold = Math.Max(0m, threshold - result.TolerancePercent);
+                var effectivePatchLineThreshold = CoverageGateEvaluator.GetEffectiveThreshold(threshold, result.TolerancePercent);
                 builder.Append(FormattableString.Invariant($" >= {effectivePatchLineThreshold:0.##}%"));
             }
         }
@@ -386,7 +386,7 @@ internal sealed partial class CoverageGateCommand : ICommand
             builder.Append(FormattableString.Invariant($", patch branches {patchCoverageBranch.Percent:0.00}%"));
             if (request.PatchCoverage?.MinPatchBranchPercent is { } threshold)
             {
-                var effectivePatchBranchThreshold = Math.Max(0m, threshold - result.TolerancePercent);
+                var effectivePatchBranchThreshold = CoverageGateEvaluator.GetEffectiveThreshold(threshold, result.TolerancePercent);
                 builder.Append(FormattableString.Invariant($" >= {effectivePatchBranchThreshold:0.##}%"));
             }
         }
@@ -726,8 +726,8 @@ internal static class CoverageGateEvaluator
                 var patchCoverage = request.PatchCoverage is null
                     ? null
                     : await PatchCoverageEvaluator.EvaluateAsync(request.CoveragePath, request.PatchCoverage, cancellationToken);
-                var effectiveLineThreshold = Math.Max(0m, request.MinLinePercent - request.TolerancePercent);
-                var effectiveBranchThreshold = Math.Max(0m, request.MinBranchPercent - request.TolerancePercent);
+                var effectiveLineThreshold = GetEffectiveThreshold(request.MinLinePercent, request.TolerancePercent);
+                var effectiveBranchThreshold = GetEffectiveThreshold(request.MinBranchPercent, request.TolerancePercent);
                 var passed = lineCoverage.Percent >= effectiveLineThreshold
                     && branchCoverage.Percent >= effectiveBranchThreshold
                     && IsPatchCoveragePassing(patchCoverage?.LineCoverage, request.PatchCoverage?.MinPatchLinePercent, request.TolerancePercent)
@@ -764,7 +764,7 @@ internal static class CoverageGateEvaluator
             return true;
         }
 
-        var effectiveThreshold = Math.Max(0m, threshold.Value - tolerance);
+        var effectiveThreshold = GetEffectiveThreshold(threshold.Value, tolerance);
         return patchCoverage.Percent >= effectiveThreshold;
     }
 
@@ -775,7 +775,7 @@ internal static class CoverageGateEvaluator
             return true;
         }
 
-        var effectiveThreshold = Math.Max(0m, threshold.Value - tolerance);
+        var effectiveThreshold = GetEffectiveThreshold(threshold.Value, tolerance);
         return patchCoverage.Percent >= effectiveThreshold;
     }
 
@@ -785,6 +785,14 @@ internal static class CoverageGateEvaluator
     /// <param name="value">Candidate percentage.</param>
     /// <returns><c>true</c> when <paramref name="value"/> is from 0 through 100.</returns>
     public static bool IsPercentInRange(decimal value) => value is >= 0 and <= 100;
+
+    /// <summary>
+    /// Calculates the minimum percentage required after applying a tolerance margin.
+    /// </summary>
+    /// <param name="threshold">Configured percentage threshold.</param>
+    /// <param name="tolerance">Grace margin to subtract from the configured threshold.</param>
+    /// <returns>The threshold after tolerance, never lower than <c>0</c>.</returns>
+    public static decimal GetEffectiveThreshold(decimal threshold, decimal tolerance) => Math.Max(0m, threshold - tolerance);
 
     private static void ValidateRequest(CoverageGateRequest request)
     {
@@ -1814,12 +1822,24 @@ internal static class CoverageGateReportWriter
         ArgumentNullException.ThrowIfNull(request);
 
         Directory.CreateDirectory(request.OutputDirectory);
+        var effectiveLineThreshold = CoverageGateEvaluator.GetEffectiveThreshold(result.MinLinePercent, result.TolerancePercent);
+        var effectiveBranchThreshold = CoverageGateEvaluator.GetEffectiveThreshold(result.MinBranchPercent, result.TolerancePercent);
+        var effectivePatchLineThreshold = GetEffectiveThreshold(result.MinPatchLinePercent, result.TolerancePercent);
+        var effectivePatchBranchThreshold = GetEffectiveThreshold(result.MinPatchBranchPercent, result.TolerancePercent);
         var json = JsonSerializer.Serialize(
             new
             {
                 passed = result.Passed,
                 coverage = result.CoveragePath,
+                tolerancePercent = result.TolerancePercent,
                 thresholds = new
+                {
+                    line = effectiveLineThreshold,
+                    branch = effectiveBranchThreshold,
+                    patchLine = effectivePatchLineThreshold,
+                    patchBranch = effectivePatchBranchThreshold,
+                },
+                configuredThresholds = new
                 {
                     line = result.MinLinePercent,
                     branch = result.MinBranchPercent,
@@ -1856,6 +1876,7 @@ internal static class CoverageGateReportWriter
         builder.AppendLine($"# Coverage Gate: {status}");
         builder.AppendLine();
         builder.AppendLine($"Cobertura: {EscapeMarkdownCell(result.CoveragePath)}");
+        builder.AppendLine(FormattableString.Invariant($"Tolerance: {result.TolerancePercent:0.##}%"));
         if (result.PatchDiffSource is { } source)
         {
             builder.AppendLine($"Patch source: {EscapeMarkdownCell(GetKindText(source.Kind))}");
@@ -1876,18 +1897,22 @@ internal static class CoverageGateReportWriter
         }
 
         builder.AppendLine();
-        builder.AppendLine("| Metric | Coverage | Threshold | Result |");
+        var effectiveLineThreshold = CoverageGateEvaluator.GetEffectiveThreshold(result.MinLinePercent, result.TolerancePercent);
+        var effectiveBranchThreshold = CoverageGateEvaluator.GetEffectiveThreshold(result.MinBranchPercent, result.TolerancePercent);
+        var effectivePatchLineThreshold = GetEffectiveThreshold(result.MinPatchLinePercent, result.TolerancePercent);
+        var effectivePatchBranchThreshold = GetEffectiveThreshold(result.MinPatchBranchPercent, result.TolerancePercent);
+        builder.AppendLine("| Metric | Coverage | Effective threshold | Result |");
         builder.AppendLine("| --- | ---: | ---: | --- |");
-        AppendMetric(builder, "Lines", result.LineCoverage, result.MinLinePercent);
-        AppendMetric(builder, "Branches", result.BranchCoverage, result.MinBranchPercent);
+        AppendMetric(builder, "Lines", result.LineCoverage, effectiveLineThreshold);
+        AppendMetric(builder, "Branches", result.BranchCoverage, effectiveBranchThreshold);
         if (result.PatchLineCoverage is { } patchCoverage)
         {
-            AppendPatchMetric(builder, patchCoverage, result.MinPatchLinePercent);
+            AppendPatchMetric(builder, patchCoverage, effectivePatchLineThreshold);
         }
 
         if (result.PatchBranchCoverage is { } branchCoverage)
         {
-            AppendPatchMetric(builder, branchCoverage, result.MinPatchBranchPercent);
+            AppendPatchMetric(builder, branchCoverage, effectivePatchBranchThreshold);
         }
 
         return builder.ToString();
@@ -1953,6 +1978,9 @@ internal static class CoverageGateReportWriter
             percent = metric.Percent,
         };
     }
+
+    private static decimal? GetEffectiveThreshold(decimal? threshold, decimal tolerance) =>
+        threshold is { } value ? CoverageGateEvaluator.GetEffectiveThreshold(value, tolerance) : null;
 
     private static void AppendMetric(StringBuilder builder, string label, CoverageMetric metric, decimal threshold)
     {

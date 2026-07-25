@@ -385,7 +385,7 @@ public sealed class CoverageGateTests
         Assert.False(result.Passed);
         Assert.Equal(74.5m, result.LineCoverage.Percent);
         Assert.Contains("# Coverage Gate: FAIL", markdown, StringComparison.Ordinal);
-        Assert.Contains("| Lines | 74.50% (149/200) | 75.5% | fail |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Lines | 74.50% (149/200) | 75% | fail |", markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -403,7 +403,7 @@ public sealed class CoverageGateTests
         Assert.False(result.Passed);
         Assert.Equal(1, result.LineCoverage.Percent);
         Assert.Equal(10, result.BranchCoverage.Percent);
-        Assert.Contains("| Lines | 1.00% (1/100) | 85% | fail |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Lines | 1.00% (1/100) | 84.5% | fail |", markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -423,8 +423,44 @@ public sealed class CoverageGateTests
         Assert.Null(result.LineCoverage.Covered);
         Assert.Null(result.LineCoverage.Valid);
         Assert.Equal(90, result.LineCoverage.Percent);
-        Assert.Contains("| Lines | 90.00% (count unavailable) | 85% | pass |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Lines | 90.00% (count unavailable) | 84.5% | pass |", markdown, StringComparison.Ordinal);
         Assert.Contains("\"covered\": null", File.ReadAllText(Path.Join(temp.Path, "coverage-gate.json")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteAsync_RendersToleranceAdjustedThresholdsInArtifacts()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = Path.Join(temp.Path, "coverage.cobertura.xml");
+        var request = new CoverageGateRequest(coverage, temp.Path, 100, 100, false, null, null, 0.5m);
+        var result = new CoverageGateResult(
+            coverage,
+            new CoverageMetric(199, 200, 99.5m),
+            new CoverageMetric(199, 200, 99.5m),
+            100,
+            100,
+            true,
+            Path.Join(temp.Path, "coverage-gate.json"),
+            Path.Join(temp.Path, "coverage-gate.md"),
+            100,
+            new PatchLineCoverageMetric("origin/main", 2, 2, 1, 99.5m),
+            100,
+            new PatchBranchCoverageMetric("origin/main", 2, 2, 1, 99.5m),
+            null,
+            0.5m);
+
+        await CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None);
+
+        var markdown = File.ReadAllText(result.MarkdownReportPath);
+        var json = File.ReadAllText(result.JsonReportPath);
+        Assert.Contains("Tolerance: 0.5%", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Lines | 99.50% (199/200) | 99.5% | pass |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Branches | 99.50% (199/200) | 99.5% | pass |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Patch lines | 99.50% (1/2 measurable, 2 changed) | 99.5% | pass |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Patch branches | 99.50% (1/2 measurable, 2 changed) | 99.5% | pass |", markdown, StringComparison.Ordinal);
+        Assert.Contains("\"tolerancePercent\": 0.5", json, StringComparison.Ordinal);
+        Assert.Contains("\"thresholds\": {\n    \"line\": 99.5", json, StringComparison.Ordinal);
+        Assert.Contains("\"configuredThresholds\": {\n    \"line\": 100", json, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -486,7 +522,7 @@ public sealed class CoverageGateTests
 
         var markdown = File.ReadAllText(Path.Join(temp.Path, "coverage-gate.md"));
         var json = File.ReadAllText(Path.Join(temp.Path, "coverage-gate.json"));
-        Assert.Contains("| Patch lines | 66.67% (2/3 measurable, 5 changed) | 50% | pass |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Patch lines | 66.67% (2/3 measurable, 5 changed) | 49.5% | pass |", markdown, StringComparison.Ordinal);
         Assert.Contains("\"patchLine\": 50", json, StringComparison.Ordinal);
         Assert.Contains("\"measurable\": 3", json, StringComparison.Ordinal);
     }
@@ -555,8 +591,8 @@ public sealed class CoverageGateTests
         Assert.Equal(3, result.PatchLineCoverage?.CoveredLines);
         Assert.Equal(4, result.PatchBranchCoverage?.MeasurableBranches);
         Assert.Equal(3, result.PatchBranchCoverage?.CoveredBranches);
-        Assert.Contains("| Patch lines | 75.00% (3/4 measurable, 5 changed) | 75% | pass |", markdown, StringComparison.Ordinal);
-        Assert.Contains("| Patch branches | 75.00% (3/4 measurable, 5 changed) | 75% | pass |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Patch lines | 75.00% (3/4 measurable, 5 changed) | 74.5% | pass |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Patch branches | 75.00% (3/4 measurable, 5 changed) | 74.5% | pass |", markdown, StringComparison.Ordinal);
 
         var json = File.ReadAllText(Path.Join(temp.Path, "coverage-gate.json"));
         Assert.Contains("\"patchLine\": 75", json, StringComparison.Ordinal);
@@ -611,8 +647,8 @@ public sealed class CoverageGateTests
         Assert.False(result.Passed);
         Assert.Equal(100, result.PatchLineCoverage?.Percent);
         Assert.Equal(25, result.PatchBranchCoverage?.Percent);
-        Assert.Contains("| Patch lines | 100.00% (2/2 measurable, 2 changed) | 100% | pass |", markdown, StringComparison.Ordinal);
-        Assert.Contains("| Patch branches | 25.00% (1/4 measurable, 2 changed) | 50% | fail |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Patch lines | 100.00% (2/2 measurable, 2 changed) | 99.5% | pass |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Patch branches | 25.00% (1/4 measurable, 2 changed) | 49.5% | fail |", markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -768,7 +804,7 @@ public sealed class CoverageGateTests
 
         Assert.False(result.Passed);
         Assert.Equal(50, result.PatchLineCoverage?.Percent);
-        Assert.Contains("| Patch lines | 50.00% (1/2 measurable, 2 changed) | 75% | fail |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Patch lines | 50.00% (1/2 measurable, 2 changed) | 74.5% | fail |", markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -802,7 +838,7 @@ public sealed class CoverageGateTests
         Assert.Equal(100, result.PatchLineCoverage?.Percent);
         Assert.Equal(0, result.PatchLineCoverage?.MeasurableLines);
         Assert.Contains(
-            "| Patch lines | 100.00% (no measurable changed lines, 2 changed) | 95% | pass |",
+            "| Patch lines | 100.00% (no measurable changed lines, 2 changed) | 94.5% | pass |",
             markdown,
             StringComparison.Ordinal);
     }
@@ -2835,7 +2871,7 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_ApplyToleranceToConsoleOutput()
+    public async Task ExecuteAsync_AppliesToleranceToConsoleOutput()
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-tolerance-console-");
         var coverage = temp.WriteCoverage("""
@@ -2902,7 +2938,7 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
-    public async Task EvaluateAsync_ToleranceCanNotExceedThreshold()
+    public async Task EvaluateAsync_ClampsToleranceAdjustedThresholdAtZero()
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-tol-exceed-");
         var coverage = temp.WriteCoverage("""
