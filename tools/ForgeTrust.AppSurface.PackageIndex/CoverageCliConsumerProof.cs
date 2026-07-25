@@ -284,6 +284,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         }
 
         artifacts.AddRange(CheckCoverageRunArtifacts(coverageMsbuildDirectory, "coverage run msbuild"));
+        artifacts.Add(CheckExcludedProjectArtifacts(coverageMsbuildDirectory, "Smoke.Tests"));
         if (artifacts.Any(artifact => !artifact.Exists))
         {
             return BuildReport(context, commands, artifacts);

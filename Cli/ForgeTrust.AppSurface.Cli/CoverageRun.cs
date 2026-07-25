@@ -2011,6 +2011,7 @@ internal sealed class CoverageRunWorkflow
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
+            // Timings are best-effort and must not replace the run's original terminal failure.
         }
     }
 

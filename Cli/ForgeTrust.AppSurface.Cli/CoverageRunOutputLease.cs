@@ -629,6 +629,11 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         }
 
         using var stream = new FileStream(new SafeFileHandle((nint)markerDescriptor, ownsHandle: true), FileAccess.Write);
+        if (UnixFChmod(markerDescriptor, Convert.ToUInt32("644", 8)) != 0)
+        {
+            throw NativeIOException("Unable to set secure permissions on the coverage ownership marker.");
+        }
+
         using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         writer.Write(MarkerContents.Replace("\n", Environment.NewLine, StringComparison.Ordinal));
     }

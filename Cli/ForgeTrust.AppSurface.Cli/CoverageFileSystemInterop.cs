@@ -54,6 +54,15 @@ internal static partial class CoverageFileSystemInterop
     internal static partial int UnixFStat(int descriptor, nint buffer);
 
     /// <summary>
+    /// Changes the permissions of an open Unix descriptor.
+    /// </summary>
+    /// <param name="descriptor">The open descriptor whose permissions should be changed.</param>
+    /// <param name="mode">The requested Unix permission bits.</param>
+    /// <returns>Zero on success; otherwise <c>-1</c>.</returns>
+    [LibraryImport("libc", EntryPoint = "fchmod", SetLastError = true)]
+    internal static partial int UnixFChmod(int descriptor, uint mode);
+
+    /// <summary>
     /// Opens or creates a Windows file-system object without applying managed path traversal.
     /// </summary>
     /// <param name="fileName">The UTF-16 path to open.</param>

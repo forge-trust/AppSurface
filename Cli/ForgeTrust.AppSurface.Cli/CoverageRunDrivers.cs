@@ -95,11 +95,18 @@ internal static class CoverageRunDriverPreflight
                     result.StandardOutput,
                     requiredPackage,
                     out var hasPackage,
+                    out var hasDuplicatePackage,
                     out var usesMtp,
                     out var targetFrameworks,
                     out var requiresPerFrameworkEvaluation))
             {
                 failures.Add($"{project.RelativePath}: capability evaluation failed");
+                continue;
+            }
+
+            if (hasDuplicatePackage)
+            {
+                failures.Add($"{project.RelativePath}: duplicate direct {requiredPackage}; fix: remove the duplicate PackageReference");
                 continue;
             }
 
@@ -133,9 +140,15 @@ internal static class CoverageRunDriverPreflight
                     cancellationToken);
                 if (innerResult.ExitCode != 0
                     || innerResult.StandardOutput is null
-                    || !TryReadCapabilities(innerResult.StandardOutput, requiredPackage, out var innerHasPackage, out var innerUsesMtp, out _, out _))
+                    || !TryReadCapabilities(innerResult.StandardOutput, requiredPackage, out var innerHasPackage, out var innerHasDuplicatePackage, out var innerUsesMtp, out _, out _))
                 {
                     failures.Add($"{project.RelativePath} [{targetFramework}]: capability evaluation failed");
+                    continue;
+                }
+
+                if (innerHasDuplicatePackage)
+                {
+                    failures.Add($"{project.RelativePath} [{targetFramework}]: duplicate direct {requiredPackage}; fix: remove the duplicate PackageReference");
                     continue;
                 }
 
@@ -293,11 +306,13 @@ internal static class CoverageRunDriverPreflight
         string json,
         string requiredPackage,
         out bool hasPackage,
+        out bool hasDuplicatePackage,
         out bool usesMtp,
         out IReadOnlyList<string> targetFrameworks,
         out bool requiresPerFrameworkEvaluation)
     {
         hasPackage = false;
+        hasDuplicatePackage = false;
         usesMtp = false;
         targetFrameworks = [];
         requiresPerFrameworkEvaluation = false;
@@ -344,7 +359,8 @@ internal static class CoverageRunDriverPreflight
                     && identity.ValueKind == JsonValueKind.String
                     && string.Equals(identity.GetString(), requiredPackage, StringComparison.OrdinalIgnoreCase));
             hasPackage = matches == 1;
-            return matches <= 1;
+            hasDuplicatePackage = matches > 1;
+            return true;
         }
         catch (JsonException)
         {
@@ -443,7 +459,7 @@ internal static class CoverageRunDriverStrategy
             };
             if (!string.IsNullOrWhiteSpace(request.IncludeFilter))
             {
-                args.Add($"/p:Include={request.IncludeFilter}");
+                args.Add($"/p:Include={request.IncludeFilter.Replace(",", "%2c", StringComparison.Ordinal)}");
             }
 
             if (!string.IsNullOrWhiteSpace(request.ExcludeFilter))

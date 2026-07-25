@@ -6414,7 +6414,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 var outputDirectory = ReadOption(request.Arguments, "--output");
                 if (_createCoverageRunArtifacts)
                 {
-                    CreateCoverageRunArtifacts(outputDirectory, createExcludedProjectArtifacts: false);
+                    CreateCoverageRunArtifacts(outputDirectory, createExcludedProjectArtifacts: false, projectName: "Smoke.Msbuild.Tests");
                 }
 
                 return Task.FromResult(new ExternalCommandResult(0, "coverage run msbuild passed", string.Empty));
@@ -6463,9 +6463,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
             return arguments[index + 1];
         }
 
-        private static void CreateCoverageRunArtifacts(string outputDirectory, bool createExcludedProjectArtifacts)
+        private static void CreateCoverageRunArtifacts(string outputDirectory, bool createExcludedProjectArtifacts, string projectName = "Smoke.Tests")
         {
-            var projectDirectory = CombineSafeChildPath(outputDirectory, "projects/Smoke.Tests-123");
+            var projectDirectory = CombineSafeChildPath(outputDirectory, $"projects/{projectName}-123");
             Directory.CreateDirectory(projectDirectory);
             if (createExcludedProjectArtifacts)
             {

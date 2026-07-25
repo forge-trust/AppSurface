@@ -392,7 +392,7 @@ public sealed class CoverageRunTests
         using var console = new FakeInMemoryConsole();
         var request = CreateRequest(
             TestProjects: [project],
-            IncludeFilter: "[Sample]*",
+            IncludeFilter: "[Sample]*,[Sample.Integration]*",
             Loggers: ["trx"],
             TestArguments: ["--filter", "Category=Unit"]);
 
@@ -405,7 +405,7 @@ public sealed class CoverageRunTests
         Assert.Single(reportGenerator.CoverageFiles);
         var testCommand = Assert.Single(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
         Assert.Contains("--logger:trx", testCommand.Arguments);
-        Assert.Contains("/p:Include=[Sample]*", testCommand.Arguments);
+        Assert.Contains("/p:Include=[Sample]*%2c[Sample.Integration]*", testCommand.Arguments);
         Assert.Contains("/p:Exclude=[*.Tests]*%2c[*.IntegrationTests]*", testCommand.Arguments);
         Assert.Contains("--filter", testCommand.Arguments);
         Assert.DoesNotContain("--no-build", testCommand.Arguments);
@@ -3110,7 +3110,6 @@ public sealed class CoverageRunTests
     [InlineData("{ \"Properties\": {}, \"Items\": {} }")]
     [InlineData("{ \"Properties\": [], \"Items\": { \"PackageReference\": [] } }")]
     [InlineData("{ \"Properties\": {}, \"Items\": { \"PackageReference\": {} } }")]
-    [InlineData("{ \"Properties\": {}, \"Items\": { \"PackageReference\": [{ \"Identity\": \"coverlet.collector\" }, { \"Identity\": \"COVERLET.COLLECTOR\" }] } }")]
     public async Task RunAsync_Preflight_ShouldRejectMalformedOrAmbiguousCapabilityOutput(string capabilityOutput)
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -3128,6 +3127,30 @@ public sealed class CoverageRunTests
         Assert.Contains("ASCOV113", exception.Message, StringComparison.Ordinal);
         Assert.Contains("capability evaluation failed", exception.Message, StringComparison.Ordinal);
         Assert.Single(runner.Commands);
+    }
+
+    [Fact]
+    public async Task RunAsync_Preflight_ShouldReportDuplicateRequiredPackageReference()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            CapabilityOutput = """
+                { "Properties": { "TargetFramework": "net10.0" }, "Items": { "PackageReference": [{ "Identity": "coverlet.collector" }, { "Identity": "COVERLET.COLLECTOR" }] } }
+                """,
+        };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("duplicate direct coverlet.collector", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("capability evaluation failed", exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -3655,7 +3678,7 @@ public sealed class CoverageRunTests
         Directory.CreateDirectory(projectOutput);
         var canonical = repo.WriteFile("project/coverage.cobertura.xml", "stale");
         var request = CreateRequest(
-            IncludeFilter: "[Sample]*",
+            IncludeFilter: "[Sample]*,[Sample.Integration]*",
             ExcludeFilter: "[Generated]*,[Legacy]*",
             CoverageDriver: CoverageRunDriver.Msbuild);
 
@@ -3665,7 +3688,7 @@ public sealed class CoverageRunTests
 
         Assert.False(File.Exists(canonical));
         Assert.Null(invocation.RawResultsDirectory);
-        Assert.Contains("/p:Include=[Sample]*", arguments);
+        Assert.Contains("/p:Include=[Sample]*%2c[Sample.Integration]*", arguments);
         Assert.Contains("/p:Exclude=[Generated]*%2c[Legacy]*", arguments);
         Assert.DoesNotContain("--", arguments);
     }

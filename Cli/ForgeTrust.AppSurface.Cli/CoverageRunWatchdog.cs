@@ -825,7 +825,6 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         }
         catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
         {
-            deadline.Cancel();
         }
     }
 
@@ -1267,7 +1266,15 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _stop.Cancel();
-        await _monitor;
+        try
+        {
+            await _monitor;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await _console.WriteCriticalErrorAsync(
+                $"ASCOV122 Coverage watchdog monitor fault was suppressed during cleanup. Cause: {ex.GetType().Name}. Fix: Inspect the coverage run diagnostic output and rerun with a writable dedicated --output directory. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog");
+        }
         var artifactWriteDrained = await DrainArtifactWriteAsync();
         _linkedCancellation.Dispose();
         _watchdogCancellation.Dispose();

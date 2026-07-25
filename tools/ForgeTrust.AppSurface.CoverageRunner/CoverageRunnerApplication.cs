@@ -567,7 +567,8 @@ internal sealed class CoverageRunnerApplication
             return $"multiple Cobertura files were produced ({candidates.Length})";
         }
 
-        var staged = Path.Join(projectOutputDirectory, $".coverage.{Guid.NewGuid():N}.tmp");
+        var canonical = Path.Join(projectOutputDirectory, "coverage.cobertura.xml");
+        var staged = CreateSiblingStagingPath(canonical);
         try
         {
             await using (var output = new FileStream(staged, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true))
@@ -591,7 +592,7 @@ internal sealed class CoverageRunnerApplication
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            File.Move(staged, Path.Join(projectOutputDirectory, "coverage.cobertura.xml"), overwrite: true);
+            File.Move(staged, canonical, overwrite: true);
             return null;
         }
         catch (Exception ex) when (ex is XmlException or InvalidDataException or IOException or UnauthorizedAccessException)
@@ -600,16 +601,7 @@ internal sealed class CoverageRunnerApplication
         }
         finally
         {
-            if (File.Exists(staged))
-            {
-                try
-                {
-                    File.Delete(staged);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                }
-            }
+            TryDeleteStagingFile(staged);
         }
     }
 
