@@ -3201,6 +3201,8 @@ public sealed class CoverageRunTests
 
     private sealed class RecordingCoverageRunProcessRunner : ICoverageRunProcessRunner
     {
+        private readonly object _commandsGate = new();
+
         public string SlnListOutput { get; init; } = string.Empty;
         public bool WriteCoverageFiles { get; init; } = true;
         public bool WriteJunitFiles { get; init; } = true;
@@ -3253,7 +3255,11 @@ public sealed class CoverageRunTests
             string? outputFile = null)
         {
             var command = new RecordedCommand(fileName, arguments.ToArray(), workingDirectory, outputFile, DateTimeOffset.UtcNow);
-            Commands.Add(command);
+            lock (_commandsGate)
+            {
+                Commands.Add(command);
+            }
+
             if (arguments is ["sln", ..])
             {
                 command.Finish();

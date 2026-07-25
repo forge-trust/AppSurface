@@ -401,9 +401,12 @@ public sealed class CoverageRunWatchdogTests
         Assert.Equal(1, artifact.SchemaVersion);
         Assert.Throws<JsonException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize("null"u8));
         Assert.Throws<JsonException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize("{\"schemaVersion\":1}"u8));
+        Assert.Throws<JsonException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize(
+            new byte[CoverageRunWatchdogArtifactSerializer.MaximumBytes + 1]));
         Assert.Throws<ArgumentOutOfRangeException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize(unsupported));
 
         var invalidMode = CreateArtifact([]) with { WatchdogMode = CoverageRunWatchdogMode.Off };
+        var invalidOutcome = CreateArtifact([]) with { Outcome = "unexpected" };
         var invalidCleanup = CreateArtifact([]) with { Cleanup = new CoverageRunWatchdogCleanup("failed", "root-timeout") };
         var invalidPrimary = CreateArtifact([]) with
         {
@@ -412,12 +415,26 @@ public sealed class CoverageRunWatchdogTests
                 State = CoverageRunWatchdogOperationState.Complete,
             },
         };
+        var nullConcurrentOperation = CreateArtifact([null!]);
+        var invalidConcurrentOperation = CreateArtifact(
+            [
+                CreateIncidentOperation("tests/Concurrent.Tests/Concurrent.Tests.csproj") with
+                {
+                    State = CoverageRunWatchdogOperationState.Complete,
+                },
+            ]);
         Assert.Throws<JsonException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize(
             CoverageRunWatchdogArtifactSerializer.Serialize(invalidMode)));
+        Assert.Throws<JsonException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize(
+            CoverageRunWatchdogArtifactSerializer.Serialize(invalidOutcome)));
         Assert.Throws<JsonException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize(
             CoverageRunWatchdogArtifactSerializer.Serialize(invalidCleanup)));
         Assert.Throws<JsonException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize(
             CoverageRunWatchdogArtifactSerializer.Serialize(invalidPrimary)));
+        Assert.Throws<JsonException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize(
+            CoverageRunWatchdogArtifactSerializer.Serialize(nullConcurrentOperation)));
+        Assert.Throws<JsonException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize(
+            CoverageRunWatchdogArtifactSerializer.Serialize(invalidConcurrentOperation)));
 
         var minimalOperation = new CoverageRunWatchdogIncidentOperation(
             CoverageRunWatchdogOperationKind.Project,
@@ -441,6 +458,30 @@ public sealed class CoverageRunWatchdogTests
         var overCapBytes = JsonSerializer.SerializeToUtf8Bytes(overCap, unboundedOptions);
         Assert.True(overCapBytes.Length <= CoverageRunWatchdogArtifactSerializer.MaximumBytes);
         Assert.Throws<JsonException>(() => CoverageRunWatchdogArtifactSerializer.Deserialize(overCapBytes));
+    }
+
+    [Theory]
+    [InlineData("complete", null)]
+    [InlineData("failed", "kill-failed")]
+    [InlineData("deadline-exceeded", "cleanup-incomplete")]
+    [InlineData("deadline-exceeded", "root-timeout")]
+    [InlineData("deadline-exceeded", "kill-failed")]
+    public void ArtifactSerializer_ShouldAcceptValidTerminalCleanup(string status, string? detail)
+    {
+        var artifact = CreateArtifact([]) with
+        {
+            Outcome = "terminated",
+            DiagnosticCode = "ASCOV121",
+            WatchdogMode = CoverageRunWatchdogMode.Fail,
+            Cleanup = new CoverageRunWatchdogCleanup(status, detail),
+        };
+
+        var deserialized = CoverageRunWatchdogArtifactSerializer.Deserialize(
+            CoverageRunWatchdogArtifactSerializer.Serialize(artifact));
+
+        Assert.Equal("terminated", deserialized.Outcome);
+        Assert.Equal(status, deserialized.Cleanup.Status);
+        Assert.Equal(detail, deserialized.Cleanup.Detail);
     }
 
     [Fact]
