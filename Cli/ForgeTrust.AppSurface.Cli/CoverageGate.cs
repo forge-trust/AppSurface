@@ -48,6 +48,14 @@ internal sealed partial class CoverageGateCommand : ICommand
     public decimal MinBranch { get; set; }
 
     /// <summary>
+    /// Gets or sets the coverage tolerance percentage from 0 to 100, applied as a grace margin when
+    /// evaluating whether actual coverage meets the configured thresholds. A tolerance of 0.5 means
+    /// coverage of 99.5% will pass a 100% threshold. Defaults to 0.5.
+    /// </summary>
+    [CommandOption("tolerance", Description = "Coverage tolerance percentage from 0 to 100. Defaults to 0.5.")]
+    public decimal Tolerance { get; set; } = 0.5m;
+
+    /// <summary>
     /// Gets or sets the git ref or commit used to compute changed-line coverage.
     /// </summary>
     [CommandOption("diff-base", Description = "Git ref or commit used with HEAD to estimate changed-line coverage.")]
@@ -158,6 +166,11 @@ internal sealed partial class CoverageGateCommand : ICommand
             throw new CommandException("ASCOV007 --min-branch must be between 0 and 100.");
         }
 
+        if (!CoverageGateEvaluator.IsPercentInRange(Tolerance))
+        {
+            throw new CommandException("ASCOV007 --tolerance must be between 0 and 100.");
+        }
+
         if (MinPatchLine.HasValue && !CoverageGateEvaluator.IsPercentInRange(MinPatchLine.Value))
         {
             throw new CommandException("ASCOV007 --min-patch-line must be between 0 and 100.");
@@ -212,7 +225,8 @@ internal sealed partial class CoverageGateCommand : ICommand
             MinBranch,
             GithubSummary && !NoGithubSummary,
             Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY"),
-            patchCoverage);
+            patchCoverage,
+            Tolerance);
     }
 
     private static string GetFullPathOrThrow(string path, string diagnostic)
@@ -352,15 +366,18 @@ internal sealed partial class CoverageGateCommand : ICommand
         CoverageGateRequest request)
     {
         var builder = new StringBuilder();
+        var effectiveLineThreshold = CoverageGateEvaluator.GetEffectiveThreshold(request.MinLinePercent, result.TolerancePercent);
+        var effectiveBranchThreshold = CoverageGateEvaluator.GetEffectiveThreshold(request.MinBranchPercent, result.TolerancePercent);
         builder.Append(FormattableString.Invariant(
-            $"Coverage gate {status}: lines {result.LineCoverage.Percent:0.00}% >= {request.MinLinePercent:0.##}%, branches {result.BranchCoverage.Percent:0.00}% >= {request.MinBranchPercent:0.##}%"));
+            $"Coverage gate {status}: lines {result.LineCoverage.Percent:0.00}% >= {effectiveLineThreshold:0.##}%, branches {result.BranchCoverage.Percent:0.00}% >= {effectiveBranchThreshold:0.##}%"));
 
         if (result.PatchLineCoverage is { } patchCoverage)
         {
             builder.Append(FormattableString.Invariant($", patch lines {patchCoverage.Percent:0.00}%"));
             if (request.PatchCoverage?.MinPatchLinePercent is { } threshold)
             {
-                builder.Append(FormattableString.Invariant($" >= {threshold:0.##}%"));
+                var effectivePatchLineThreshold = CoverageGateEvaluator.GetEffectiveThreshold(threshold, result.TolerancePercent);
+                builder.Append(FormattableString.Invariant($" >= {effectivePatchLineThreshold:0.##}%"));
             }
         }
 
@@ -369,7 +386,8 @@ internal sealed partial class CoverageGateCommand : ICommand
             builder.Append(FormattableString.Invariant($", patch branches {patchCoverageBranch.Percent:0.00}%"));
             if (request.PatchCoverage?.MinPatchBranchPercent is { } threshold)
             {
-                builder.Append(FormattableString.Invariant($" >= {threshold:0.##}%"));
+                var effectivePatchBranchThreshold = CoverageGateEvaluator.GetEffectiveThreshold(threshold, result.TolerancePercent);
+                builder.Append(FormattableString.Invariant($" >= {effectivePatchBranchThreshold:0.##}%"));
             }
         }
 
@@ -388,6 +406,7 @@ internal sealed partial class CoverageGateCommand : ICommand
 /// <param name="WriteGithubSummary">Whether to append Markdown output to <paramref name="GithubStepSummaryPath"/>.</param>
 /// <param name="GithubStepSummaryPath">Optional GitHub step summary file path.</param>
 /// <param name="PatchCoverage">Optional changed-line coverage request.</param>
+/// <param name="TolerancePercent">Grace margin from 0 through 100 subtracted from every configured threshold before evaluation. Defaults to 0.5.</param>
 internal sealed record CoverageGateRequest(
     string CoveragePath,
     string OutputDirectory,
@@ -395,7 +414,8 @@ internal sealed record CoverageGateRequest(
     decimal MinBranchPercent,
     bool WriteGithubSummary,
     string? GithubStepSummaryPath,
-    CoveragePatchRequest? PatchCoverage = null);
+    CoveragePatchRequest? PatchCoverage = null,
+    decimal TolerancePercent = 0.5m);
 
 /// <summary>
 /// Request for estimating coverage on lines changed by a patch diff source.
@@ -574,6 +594,7 @@ internal sealed record PatchDiffSourceReport(
 /// <param name="MinPatchBranchPercent">Optional minimum accepted changed-branch coverage percentage.</param>
 /// <param name="PatchBranchCoverage">Optional changed-branch coverage metric.</param>
 /// <param name="PatchDiffSource">Optional patch diff source provenance.</param>
+/// <param name="TolerancePercent">Grace margin subtracted from thresholds before evaluation. Defaults to 0.5.</param>
 internal sealed record CoverageGateResult(
     string CoveragePath,
     CoverageMetric LineCoverage,
@@ -587,7 +608,8 @@ internal sealed record CoverageGateResult(
     PatchLineCoverageMetric? PatchLineCoverage = null,
     decimal? MinPatchBranchPercent = null,
     PatchBranchCoverageMetric? PatchBranchCoverage = null,
-    PatchDiffSourceReport? PatchDiffSource = null);
+    PatchDiffSourceReport? PatchDiffSource = null,
+    decimal TolerancePercent = 0.5m);
 
 /// <summary>
 /// One Cobertura coverage metric expressed as optional covered/valid counts and a percentage.
@@ -704,10 +726,12 @@ internal static class CoverageGateEvaluator
                 var patchCoverage = request.PatchCoverage is null
                     ? null
                     : await PatchCoverageEvaluator.EvaluateAsync(request.CoveragePath, request.PatchCoverage, cancellationToken);
-                var passed = lineCoverage.Percent >= request.MinLinePercent
-                    && branchCoverage.Percent >= request.MinBranchPercent
-                    && IsPatchCoveragePassing(patchCoverage?.LineCoverage, request.PatchCoverage?.MinPatchLinePercent)
-                    && IsPatchCoveragePassing(patchCoverage?.BranchCoverage, request.PatchCoverage?.MinPatchBranchPercent);
+                var effectiveLineThreshold = GetEffectiveThreshold(request.MinLinePercent, request.TolerancePercent);
+                var effectiveBranchThreshold = GetEffectiveThreshold(request.MinBranchPercent, request.TolerancePercent);
+                var passed = lineCoverage.Percent >= effectiveLineThreshold
+                    && branchCoverage.Percent >= effectiveBranchThreshold
+                    && IsPatchCoveragePassing(patchCoverage?.LineCoverage, request.PatchCoverage?.MinPatchLinePercent, request.TolerancePercent)
+                    && IsPatchCoveragePassing(patchCoverage?.BranchCoverage, request.PatchCoverage?.MinPatchBranchPercent, request.TolerancePercent);
                 return new CoverageGateResult(
                     request.CoveragePath,
                     lineCoverage,
@@ -721,7 +745,8 @@ internal static class CoverageGateEvaluator
                     patchCoverage?.LineCoverage,
                     request.PatchCoverage?.MinPatchBranchPercent,
                     patchCoverage?.BranchCoverage,
-                    patchCoverage?.SourceReport);
+                    patchCoverage?.SourceReport,
+                    request.TolerancePercent);
             }
         }
         catch (XmlException ex)
@@ -732,24 +757,26 @@ internal static class CoverageGateEvaluator
         throw new CommandException($"ASCOV006 Cobertura file does not contain a <coverage> root element: {request.CoveragePath}");
     }
 
-    private static bool IsPatchCoveragePassing(PatchLineCoverageMetric? patchCoverage, decimal? threshold)
+    private static bool IsPatchCoveragePassing(PatchLineCoverageMetric? patchCoverage, decimal? threshold, decimal tolerance)
     {
         if (patchCoverage is null || threshold is null)
         {
             return true;
         }
 
-        return patchCoverage.Percent >= threshold.Value;
+        var effectiveThreshold = GetEffectiveThreshold(threshold.Value, tolerance);
+        return patchCoverage.Percent >= effectiveThreshold;
     }
 
-    private static bool IsPatchCoveragePassing(PatchBranchCoverageMetric? patchCoverage, decimal? threshold)
+    private static bool IsPatchCoveragePassing(PatchBranchCoverageMetric? patchCoverage, decimal? threshold, decimal tolerance)
     {
         if (patchCoverage is null || threshold is null)
         {
             return true;
         }
 
-        return patchCoverage.Percent >= threshold.Value;
+        var effectiveThreshold = GetEffectiveThreshold(threshold.Value, tolerance);
+        return patchCoverage.Percent >= effectiveThreshold;
     }
 
     /// <summary>
@@ -758,6 +785,14 @@ internal static class CoverageGateEvaluator
     /// <param name="value">Candidate percentage.</param>
     /// <returns><c>true</c> when <paramref name="value"/> is from 0 through 100.</returns>
     public static bool IsPercentInRange(decimal value) => value is >= 0 and <= 100;
+
+    /// <summary>
+    /// Calculates the minimum percentage required after applying a tolerance margin.
+    /// </summary>
+    /// <param name="threshold">Configured percentage threshold.</param>
+    /// <param name="tolerance">Grace margin to subtract from the configured threshold.</param>
+    /// <returns>The threshold after tolerance, never lower than <c>0</c>.</returns>
+    public static decimal GetEffectiveThreshold(decimal threshold, decimal tolerance) => Math.Max(0m, threshold - tolerance);
 
     private static void ValidateRequest(CoverageGateRequest request)
     {
@@ -779,6 +814,11 @@ internal static class CoverageGateEvaluator
         if (!IsPercentInRange(request.MinBranchPercent))
         {
             throw new CommandException("ASCOV007 --min-branch must be between 0 and 100.");
+        }
+
+        if (!IsPercentInRange(request.TolerancePercent))
+        {
+            throw new CommandException("ASCOV007 --tolerance must be between 0 and 100.");
         }
 
         if (request.PatchCoverage is { MinPatchLinePercent: { } minPatchLinePercent }
@@ -1782,17 +1822,29 @@ internal static class CoverageGateReportWriter
         ArgumentNullException.ThrowIfNull(request);
 
         Directory.CreateDirectory(request.OutputDirectory);
+        var effectiveLineThreshold = CoverageGateEvaluator.GetEffectiveThreshold(result.MinLinePercent, result.TolerancePercent);
+        var effectiveBranchThreshold = CoverageGateEvaluator.GetEffectiveThreshold(result.MinBranchPercent, result.TolerancePercent);
+        var effectivePatchLineThreshold = GetEffectiveThreshold(result.MinPatchLinePercent, result.TolerancePercent);
+        var effectivePatchBranchThreshold = GetEffectiveThreshold(result.MinPatchBranchPercent, result.TolerancePercent);
         var json = JsonSerializer.Serialize(
             new
             {
                 passed = result.Passed,
                 coverage = result.CoveragePath,
+                tolerancePercent = result.TolerancePercent,
                 thresholds = new
                 {
                     line = result.MinLinePercent,
                     branch = result.MinBranchPercent,
                     patchLine = result.MinPatchLinePercent,
                     patchBranch = result.MinPatchBranchPercent,
+                },
+                effectiveThresholds = new
+                {
+                    line = effectiveLineThreshold,
+                    branch = effectiveBranchThreshold,
+                    patchLine = effectivePatchLineThreshold,
+                    patchBranch = effectivePatchBranchThreshold,
                 },
                 patchDiffSource = ToJson(result.PatchDiffSource),
                 line = ToJson(result.LineCoverage),
@@ -1824,6 +1876,7 @@ internal static class CoverageGateReportWriter
         builder.AppendLine($"# Coverage Gate: {status}");
         builder.AppendLine();
         builder.AppendLine($"Cobertura: {EscapeMarkdownCell(result.CoveragePath)}");
+        builder.AppendLine(FormattableString.Invariant($"Tolerance: {result.TolerancePercent:0.##}%"));
         if (result.PatchDiffSource is { } source)
         {
             builder.AppendLine($"Patch source: {EscapeMarkdownCell(GetKindText(source.Kind))}");
@@ -1844,18 +1897,22 @@ internal static class CoverageGateReportWriter
         }
 
         builder.AppendLine();
-        builder.AppendLine("| Metric | Coverage | Threshold | Result |");
+        var effectiveLineThreshold = CoverageGateEvaluator.GetEffectiveThreshold(result.MinLinePercent, result.TolerancePercent);
+        var effectiveBranchThreshold = CoverageGateEvaluator.GetEffectiveThreshold(result.MinBranchPercent, result.TolerancePercent);
+        var effectivePatchLineThreshold = GetEffectiveThreshold(result.MinPatchLinePercent, result.TolerancePercent);
+        var effectivePatchBranchThreshold = GetEffectiveThreshold(result.MinPatchBranchPercent, result.TolerancePercent);
+        builder.AppendLine("| Metric | Coverage | Effective threshold | Result |");
         builder.AppendLine("| --- | ---: | ---: | --- |");
-        AppendMetric(builder, "Lines", result.LineCoverage, result.MinLinePercent);
-        AppendMetric(builder, "Branches", result.BranchCoverage, result.MinBranchPercent);
+        AppendMetric(builder, "Lines", result.LineCoverage, effectiveLineThreshold);
+        AppendMetric(builder, "Branches", result.BranchCoverage, effectiveBranchThreshold);
         if (result.PatchLineCoverage is { } patchCoverage)
         {
-            AppendPatchMetric(builder, patchCoverage, result.MinPatchLinePercent);
+            AppendPatchMetric(builder, patchCoverage, effectivePatchLineThreshold);
         }
 
         if (result.PatchBranchCoverage is { } branchCoverage)
         {
-            AppendPatchMetric(builder, branchCoverage, result.MinPatchBranchPercent);
+            AppendPatchMetric(builder, branchCoverage, effectivePatchBranchThreshold);
         }
 
         return builder.ToString();
@@ -1921,6 +1978,9 @@ internal static class CoverageGateReportWriter
             percent = metric.Percent,
         };
     }
+
+    private static decimal? GetEffectiveThreshold(decimal? threshold, decimal tolerance) =>
+        threshold is { } value ? CoverageGateEvaluator.GetEffectiveThreshold(value, tolerance) : null;
 
     private static void AppendMetric(StringBuilder builder, string label, CoverageMetric metric, decimal threshold)
     {
