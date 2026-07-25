@@ -450,6 +450,7 @@ Options:
 - `--coverage`: Cobertura XML file to evaluate. Defaults to `TestResults/coverage-merged/coverage.cobertura.xml`.
 - `--min-line`: Minimum line coverage percentage from `0` through `100`. Defaults to `0`.
 - `--min-branch`: Minimum branch coverage percentage from `0` through `100`. Defaults to `0`.
+- `--tolerance`: Grace margin from `0` through `100` subtracted from every configured overall and patch threshold before evaluation. Defaults to `0.5`.
 - `--diff-base`: Git ref or commit compared with `HEAD` for patch coverage. When set, the command runs `git diff --unified=0 --no-ext-diff --relative <base>...HEAD --` from the repository root.
 - `--diff-file`: Unified diff file for patch coverage. Use this for CI systems that can download a pull request or compare diff without fetching full repository history.
 - `--diff-stdin`: Read unified diff text from stdin. Use this with pipes or redirected input; interactive stdin fails fast so local terminals do not appear hung.
@@ -460,6 +461,8 @@ Options:
 - `--output`: Directory for `coverage-gate.json` and `coverage-gate.md`. Defaults to the coverage file directory.
 - `--github-summary`: Append Markdown to `$GITHUB_STEP_SUMMARY` when it is set. Enabled by default.
 - `--no-github-summary`: Suppress GitHub step summary output.
+
+Use the default tolerance to absorb insignificant coverage-report rounding differences. Set `--tolerance 0` for strict enforcement. The effective threshold is never lower than `0`, and console output shows the effective overall and patch thresholds; invalid tolerance values fail with `ASCOV007` before report generation.
 
 The command accepts Cobertura root attributes such as `line-rate`, `branch-rate`, `lines-covered`, `lines-valid`, `branches-covered`, and `branches-valid`. XML parsing disables DTD processing and external resolution. Coverage counts must be non-negative, covered counts cannot exceed valid counts, rates must be from `0` through `1`, and zero valid line or branch counts fail with `ASCOV006` because a quality gate with no measurable denominator is misleading.
 
@@ -558,7 +561,7 @@ Diagnostics use `ASCOV###` codes so CI logs are searchable:
 | --- | --- | --- |
 | `ASCOV001` | The Cobertura file is missing or `--coverage` is blank. | Produce coverage first or pass the correct file path. |
 | `ASCOV006` | The Cobertura file is malformed or has unsupported/misleading metrics. | Regenerate coverage and verify counts/rates on the root `<coverage>` element. |
-| `ASCOV007` | A threshold is outside the `0` through `100` range. | Correct `--min-line`, `--min-branch`, `--min-patch-line`, or `--min-patch-branch`. |
+| `ASCOV007` | A threshold or tolerance is outside the `0` through `100` range. | Correct `--min-line`, `--min-branch`, `--min-patch-line`, `--min-patch-branch`, or `--tolerance`. |
 | `ASCOV008` | GitHub step summary could not be written. | Check `$GITHUB_STEP_SUMMARY` permissions or add `--no-github-summary`. |
 | `ASCOV009` | The report output path is unsafe. | Use a dedicated artifact directory, not a filesystem root or working directory. |
 | `ASCOV010` | The command could not run or read `git diff` for changed-line coverage. | Fetch the diff base or pass a valid local commit/ref to `--diff-base`. In GitHub pull request workflows using `--diff-base HEAD^1`, set `actions/checkout` to `fetch-depth: 2`; the default depth is `1` and does not include `HEAD^1`. |

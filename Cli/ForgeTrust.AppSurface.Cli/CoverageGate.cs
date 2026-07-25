@@ -166,6 +166,11 @@ internal sealed partial class CoverageGateCommand : ICommand
             throw new CommandException("ASCOV007 --min-branch must be between 0 and 100.");
         }
 
+        if (!CoverageGateEvaluator.IsPercentInRange(Tolerance))
+        {
+            throw new CommandException("ASCOV007 --tolerance must be between 0 and 100.");
+        }
+
         if (MinPatchLine.HasValue && !CoverageGateEvaluator.IsPercentInRange(MinPatchLine.Value))
         {
             throw new CommandException("ASCOV007 --min-patch-line must be between 0 and 100.");
@@ -371,7 +376,8 @@ internal sealed partial class CoverageGateCommand : ICommand
             builder.Append(FormattableString.Invariant($", patch lines {patchCoverage.Percent:0.00}%"));
             if (request.PatchCoverage?.MinPatchLinePercent is { } threshold)
             {
-                builder.Append(FormattableString.Invariant($" >= {threshold:0.##}%"));
+                var effectivePatchLineThreshold = Math.Max(0m, threshold - result.TolerancePercent);
+                builder.Append(FormattableString.Invariant($" >= {effectivePatchLineThreshold:0.##}%"));
             }
         }
 
@@ -380,7 +386,8 @@ internal sealed partial class CoverageGateCommand : ICommand
             builder.Append(FormattableString.Invariant($", patch branches {patchCoverageBranch.Percent:0.00}%"));
             if (request.PatchCoverage?.MinPatchBranchPercent is { } threshold)
             {
-                builder.Append(FormattableString.Invariant($" >= {threshold:0.##}%"));
+                var effectivePatchBranchThreshold = Math.Max(0m, threshold - result.TolerancePercent);
+                builder.Append(FormattableString.Invariant($" >= {effectivePatchBranchThreshold:0.##}%"));
             }
         }
 
@@ -399,6 +406,7 @@ internal sealed partial class CoverageGateCommand : ICommand
 /// <param name="WriteGithubSummary">Whether to append Markdown output to <paramref name="GithubStepSummaryPath"/>.</param>
 /// <param name="GithubStepSummaryPath">Optional GitHub step summary file path.</param>
 /// <param name="PatchCoverage">Optional changed-line coverage request.</param>
+/// <param name="TolerancePercent">Grace margin from 0 through 100 subtracted from every configured threshold before evaluation. Defaults to 0.5.</param>
 internal sealed record CoverageGateRequest(
     string CoveragePath,
     string OutputDirectory,
@@ -586,6 +594,7 @@ internal sealed record PatchDiffSourceReport(
 /// <param name="MinPatchBranchPercent">Optional minimum accepted changed-branch coverage percentage.</param>
 /// <param name="PatchBranchCoverage">Optional changed-branch coverage metric.</param>
 /// <param name="PatchDiffSource">Optional patch diff source provenance.</param>
+/// <param name="TolerancePercent">Grace margin subtracted from thresholds before evaluation. Defaults to 0.5.</param>
 internal sealed record CoverageGateResult(
     string CoveragePath,
     CoverageMetric LineCoverage,
@@ -600,7 +609,6 @@ internal sealed record CoverageGateResult(
     decimal? MinPatchBranchPercent = null,
     PatchBranchCoverageMetric? PatchBranchCoverage = null,
     PatchDiffSourceReport? PatchDiffSource = null,
-    /// <param name="TolerancePercent">Grace margin subtracted from thresholds before evaluation. Defaults to 0.5.</param>
     decimal TolerancePercent = 0.5m);
 
 /// <summary>
@@ -798,6 +806,11 @@ internal static class CoverageGateEvaluator
         if (!IsPercentInRange(request.MinBranchPercent))
         {
             throw new CommandException("ASCOV007 --min-branch must be between 0 and 100.");
+        }
+
+        if (!IsPercentInRange(request.TolerancePercent))
+        {
+            throw new CommandException("ASCOV007 --tolerance must be between 0 and 100.");
         }
 
         if (request.PatchCoverage is { MinPatchLinePercent: { } minPatchLinePercent }
