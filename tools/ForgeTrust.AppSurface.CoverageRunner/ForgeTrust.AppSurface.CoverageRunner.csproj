@@ -5,6 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
@@ -16,6 +17,8 @@
     <!-- Keep the solution coverage gate on the same no-follow artifact reader as the packaged CLI. -->
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunArtifactReader.cs"
              Link="Coverage/CoverageRunArtifactReader.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageFileSystemInterop.cs"
+             Link="Coverage/CoverageFileSystemInterop.cs" />
   </ItemGroup>
 
   <ItemGroup>

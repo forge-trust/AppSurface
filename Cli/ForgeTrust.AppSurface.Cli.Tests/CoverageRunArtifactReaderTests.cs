@@ -9,6 +9,26 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageRunArtifactReaderTests
 {
     [Fact]
+    public void WindowsInteropStructures_ShouldMatchNativeLayouts()
+    {
+        Assert.Equal(8, Marshal.SizeOf<CoverageFileSystemInterop.WindowsFileTime>());
+        Assert.Equal(8, Marshal.SizeOf<CoverageFileSystemInterop.WindowsFileAttributeTagInformation>());
+        Assert.Equal(52, Marshal.SizeOf<CoverageFileSystemInterop.WindowsByHandleFileInformation>());
+        Assert.Equal(
+            28,
+            Marshal.OffsetOf<CoverageFileSystemInterop.WindowsByHandleFileInformation>(
+                nameof(CoverageFileSystemInterop.WindowsByHandleFileInformation.VolumeSerialNumber)).ToInt32());
+        Assert.Equal(
+            44,
+            Marshal.OffsetOf<CoverageFileSystemInterop.WindowsByHandleFileInformation>(
+                nameof(CoverageFileSystemInterop.WindowsByHandleFileInformation.FileIndexHigh)).ToInt32());
+        Assert.Equal(
+            48,
+            Marshal.OffsetOf<CoverageFileSystemInterop.WindowsByHandleFileInformation>(
+                nameof(CoverageFileSystemInterop.WindowsByHandleFileInformation.FileIndexLow)).ToInt32());
+    }
+
+    [Fact]
     public void OpenRegularFile_ShouldReadOrdinaryArtifact()
     {
         using var repo = ArtifactTempDirectory.Create("appsurface-coverage-artifact-");

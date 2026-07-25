@@ -475,6 +475,54 @@ public sealed class CoverageRunWatchdogTests
     }
 
     [Fact]
+    public async Task WarnMode_ShouldUseMinimalArtifactWhenConcurrentIncidentExceedsByteLimit()
+    {
+        using var output = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+        var timeProvider = new FreezableTimeProvider();
+        await using var supervisor = new CoverageRunWatchdogSupervisor(
+            CoverageRunWatchdogMode.Warn,
+            TimeSpan.Zero,
+            TimeSpan.FromMilliseconds(100),
+            console,
+            timeProvider,
+            CancellationToken.None);
+        supervisor.BindOutputDirectory(output.Path);
+        var commandOptions = Enumerable.Range(0, 32)
+            .Select(index => $"--option-{index}-{new string('x', 256)}")
+            .ToArray();
+        var operations = Enumerable.Range(0, 33)
+            .Select(index => supervisor.Start(
+                "project",
+                $"tests/{index}-{new string('p', 1_024)}.csproj",
+                order: index,
+                log: $"logs/{index}-{new string('l', 1_024)}.log",
+                commandOptions: commandOptions))
+            .ToArray();
+
+        try
+        {
+            timeProvider.Release();
+
+            var artifact = Path.Join(output.Path, "coverage-watchdog.json");
+            await WaitForFileAsync(artifact);
+            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(artifact));
+
+            Assert.Equal("artifact-truncated", document.RootElement.GetProperty("cleanup").GetProperty("detail").GetString());
+            Assert.Empty(document.RootElement.GetProperty("concurrentlyStale").EnumerateArray());
+            Assert.Equal(32, document.RootElement.GetProperty("concurrentlyStaleOmitted").GetInt32());
+            Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("primary").GetProperty("command").ValueKind);
+        }
+        finally
+        {
+            foreach (var operation in operations)
+            {
+                operation.Dispose();
+            }
+        }
+    }
+
+    [Fact]
     public async Task ConsoleSink_ShouldBoundBlockedWritesAndKeepOnlyOneWriter()
     {
         using var output = new BlockingWriteStream();

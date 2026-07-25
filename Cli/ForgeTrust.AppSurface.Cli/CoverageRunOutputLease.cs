@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
+using static ForgeTrust.AppSurface.CoverageArtifacts.CoverageFileSystemInterop;
 
 namespace ForgeTrust.AppSurface.Cli;
 
@@ -11,7 +12,7 @@ namespace ForgeTrust.AppSurface.Cli;
 /// inspected and the directory is prepared. The lease prevents pathname validation from being
 /// separated from mutation by an ancestor rename or link replacement.
 /// </summary>
-internal sealed class CoverageRunOutputLease : IDisposable
+internal sealed partial class CoverageRunOutputLease : IDisposable
 {
     private const string MarkerFileName = ".appsurface-coverage-output";
     private const string MarkerContents = "AppSurface coverage output directory\n";
@@ -591,7 +592,7 @@ internal sealed class CoverageRunOutputLease : IDisposable
             }
         }
 
-        var disposition = new WindowsFileDispositionInformation { DeleteFile = true };
+        var disposition = new WindowsFileDispositionInformation { DeleteFile = 1 };
         if (!SetFileInformationByHandle(
             handle,
             WindowsFileDispositionInfo,
@@ -621,7 +622,7 @@ internal sealed class CoverageRunOutputLease : IDisposable
     private static void WriteUnixMarker(int descriptor)
     {
         var flags = UnixWriteOnly | UnixCreate | UnixExclusive | UnixNoFollow | UnixCloseOnExec;
-        var markerDescriptor = OpenAtNative(descriptor, MarkerFileName, flags, Convert.ToUInt32("644", 8));
+        var markerDescriptor = UnixOpenAt(descriptor, MarkerFileName, flags, Convert.ToUInt32("644", 8));
         if (markerDescriptor < 0)
         {
             throw NativeIOException("Unable to securely write the coverage ownership marker.");
@@ -694,7 +695,7 @@ internal sealed class CoverageRunOutputLease : IDisposable
         bool notDirectoryIsMissing = false)
     {
         var flags = UnixReadOnly | UnixCloseOnExec | UnixNoFollow | UnixNonBlocking | (directory ? UnixDirectory : 0);
-        var descriptor = OpenAtNative(parent.DangerousGetHandle().ToInt32(), name, flags, 0);
+        var descriptor = UnixOpenAt(parent.DangerousGetHandle().ToInt32(), name, flags, 0);
         if (descriptor >= 0)
         {
             return new SafeFileHandle((nint)descriptor, ownsHandle: true);
@@ -708,7 +709,7 @@ internal sealed class CoverageRunOutputLease : IDisposable
 
     private static int OpenUnixDirectory(string path)
     {
-        var descriptor = OpenNative(path, UnixReadOnly | UnixCloseOnExec | UnixNoFollow | UnixDirectory | UnixNonBlocking);
+        var descriptor = UnixOpen(path, UnixReadOnly | UnixCloseOnExec | UnixNoFollow | UnixDirectory | UnixNonBlocking);
         return descriptor >= 0 ? descriptor : throw NativeIOException($"Unable to securely open output directory '{path}'.");
     }
 
@@ -718,7 +719,7 @@ internal sealed class CoverageRunOutputLease : IDisposable
         var buffer = Marshal.AllocHGlobal(512);
         try
         {
-            if (FStat(handle.DangerousGetHandle().ToInt32(), buffer) != 0)
+            if (UnixFStat(handle.DangerousGetHandle().ToInt32(), buffer) != 0)
             {
                 throw NativeIOException("Unable to inspect the output directory identity.");
             }
@@ -736,7 +737,7 @@ internal sealed class CoverageRunOutputLease : IDisposable
     [ExcludeFromCodeCoverage(Justification = "Windows-only file identity inspection is exercised by the Windows test lane.")]
     private static FileObjectIdentity GetWindowsIdentity(SafeFileHandle handle)
     {
-        if (!GetFileInformationByHandle(handle, out var information))
+        if (!WindowsGetFileInformationByHandle(handle, out var information))
         {
             throw new IOException("Unable to identify an output entry.", new Win32Exception(Marshal.GetLastPInvokeError()));
         }
@@ -752,7 +753,7 @@ internal sealed class CoverageRunOutputLease : IDisposable
         var buffer = Marshal.AllocHGlobal(512);
         try
         {
-            if (FStat(handle.DangerousGetHandle().ToInt32(), buffer) != 0)
+            if (UnixFStat(handle.DangerousGetHandle().ToInt32(), buffer) != 0)
             {
                 throw NativeIOException("Unable to inspect an output entry.");
             }
@@ -807,7 +808,7 @@ internal sealed class CoverageRunOutputLease : IDisposable
         uint flags = WindowsOpenReparsePoint,
         uint shareMode = WindowsShareRead | WindowsShareWrite)
     {
-        var handle = CreateFile(path, access, shareMode, 0, disposition, flags, 0);
+        var handle = WindowsCreateFile(path, access, shareMode, 0, disposition, flags, 0);
         if (handle.IsInvalid)
         {
             var error = Marshal.GetLastPInvokeError();
@@ -833,7 +834,7 @@ internal sealed class CoverageRunOutputLease : IDisposable
     [ExcludeFromCodeCoverage(Justification = "Windows-only reparse validation is exercised by the Windows test lane.")]
     private static void RejectWindowsReparse(SafeFileHandle handle)
     {
-        if (!GetFileInformationByHandleEx(handle, WindowsFileAttributeTagInfo, out var info, (uint)Marshal.SizeOf<WindowsFileAttributeTagInformation>()))
+        if (!WindowsGetFileInformationByHandleEx(handle, WindowsFileAttributeTagInfo, out var info, (uint)Marshal.SizeOf<WindowsFileAttributeTagInformation>()))
         {
             throw new IOException("Unable to inspect output handle.", new Win32Exception(Marshal.GetLastPInvokeError()));
         }
@@ -847,7 +848,7 @@ internal sealed class CoverageRunOutputLease : IDisposable
     [ExcludeFromCodeCoverage(Justification = "Windows-only object-kind validation is exercised by the Windows test lane.")]
     private static void RejectWindowsWrongKind(SafeFileHandle handle, bool expectDirectory)
     {
-        if (!GetFileInformationByHandleEx(handle, WindowsFileAttributeTagInfo, out var info, (uint)Marshal.SizeOf<WindowsFileAttributeTagInformation>()))
+        if (!WindowsGetFileInformationByHandleEx(handle, WindowsFileAttributeTagInfo, out var info, (uint)Marshal.SizeOf<WindowsFileAttributeTagInformation>()))
         {
             throw new IOException("Unable to inspect output handle.", new Win32Exception(Marshal.GetLastPInvokeError()));
         }
@@ -862,22 +863,21 @@ internal sealed class CoverageRunOutputLease : IDisposable
     [ExcludeFromCodeCoverage(Justification = "Windows-only final path resolution is exercised by the Windows test lane.")]
     private static string GetWindowsFinalPath(SafeFileHandle handle)
     {
-        var builder = new StringBuilder(512);
+        var buffer = new char[512];
         while (true)
         {
-            var length = GetFinalPathNameByHandle(handle, builder, (uint)builder.Capacity, 0);
+            var length = WindowsGetFinalPathNameByHandle(handle, buffer, 0);
             if (length == 0)
             {
                 throw new IOException("Unable to resolve output handle.", new Win32Exception(Marshal.GetLastPInvokeError()));
             }
 
-            if (length < builder.Capacity)
+            if (length < buffer.Length)
             {
-                return builder.ToString();
+                return new string(buffer, 0, checked((int)length));
             }
 
-            builder.EnsureCapacity(checked((int)length + 1));
-            builder.Clear();
+            buffer = new char[checked((int)length + 1)];
         }
     }
 
@@ -966,32 +966,9 @@ internal sealed class CoverageRunOutputLease : IDisposable
     private const int WindowsFileDispositionInfo = 4;
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct WindowsFileAttributeTagInformation
-    {
-        public uint FileAttributes;
-        public uint ReparseTag;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
     private struct WindowsFileDispositionInformation
     {
-        [MarshalAs(UnmanagedType.Bool)]
-        public bool DeleteFile;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct WindowsByHandleFileInformation
-    {
-        public uint FileAttributes;
-        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
-        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
-        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
-        public uint VolumeSerialNumber;
-        public uint FileSizeHigh;
-        public uint FileSizeLow;
-        public uint NumberOfLinks;
-        public uint FileIndexHigh;
-        public uint FileIndexLow;
+        public int DeleteFile;
     }
 
     private sealed record OutputEntry(string Name, bool IsDirectory, FileObjectIdentity Identity);
@@ -1002,87 +979,43 @@ internal sealed class CoverageRunOutputLease : IDisposable
     [ExcludeFromCodeCoverage(Justification = "Platform-native identity data is exercised by the platform security lanes.")]
     private readonly record struct FileObjectIdentity(ulong DeviceOrVolume, ulong FileId);
 
-    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
-    private static extern int OpenNative([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
+    [LibraryImport("libc", EntryPoint = "mkdirat", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int MkdirAt(int directoryDescriptor, string path, uint mode);
 
-    [DllImport("libc", EntryPoint = "openat", SetLastError = true)]
-    private static extern int OpenAtNative(int directoryDescriptor, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags, uint mode);
+    [LibraryImport("libc", EntryPoint = "unlinkat", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int UnlinkAt(int directoryDescriptor, string path, int flags);
 
-    [DllImport("libc", EntryPoint = "mkdirat", SetLastError = true)]
-    private static extern int MkdirAt(int directoryDescriptor, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, uint mode);
-
-    [DllImport("libc", EntryPoint = "unlinkat", SetLastError = true)]
-    private static extern int UnlinkAt(int directoryDescriptor, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
-
-    [DllImport("libc", EntryPoint = "renameat", SetLastError = true)]
-    private static extern int RenameAt(
+    [LibraryImport("libc", EntryPoint = "renameat", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int RenameAt(
         int oldDirectoryDescriptor,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string oldPath,
+        string oldPath,
         int newDirectoryDescriptor,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string newPath);
+        string newPath);
 
-    [DllImport("libc", EntryPoint = "fstat", SetLastError = true)]
-    private static extern int FStat(int descriptor, nint buffer);
+    [LibraryImport("libc", EntryPoint = "dup", SetLastError = true)]
+    private static partial int Duplicate(int descriptor);
 
-    [DllImport("libc", EntryPoint = "dup", SetLastError = true)]
-    private static extern int Duplicate(int descriptor);
+    [LibraryImport("libc", EntryPoint = "fdopendir", SetLastError = true)]
+    private static partial nint FdOpenDirectory(int descriptor);
 
-    [DllImport("libc", EntryPoint = "fdopendir", SetLastError = true)]
-    private static extern nint FdOpenDirectory(int descriptor);
+    [LibraryImport("libc", EntryPoint = "readdir", SetLastError = true)]
+    private static partial nint ReadDirectory(nint directoryStream);
 
-    [DllImport("libc", EntryPoint = "readdir", SetLastError = true)]
-    private static extern nint ReadDirectory(nint directoryStream);
+    [LibraryImport("libc", EntryPoint = "closedir", SetLastError = true)]
+    private static partial int CloseDirectory(nint directoryStream);
 
-    [DllImport("libc", EntryPoint = "closedir", SetLastError = true)]
-    private static extern int CloseDirectory(nint directoryStream);
+    [LibraryImport("libc", EntryPoint = "close", SetLastError = true)]
+    private static partial int Close(int descriptor);
 
-    [DllImport("libc", EntryPoint = "close", SetLastError = true)]
-    private static extern int Close(int descriptor);
-
-    [DllImport("libc", EntryPoint = "lseek", SetLastError = true)]
-    private static extern long Seek(int descriptor, long offset, int origin);
+    [LibraryImport("libc", EntryPoint = "lseek", SetLastError = true)]
+    private static partial long Seek(int descriptor, long offset, int origin);
 
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern SafeFileHandle CreateFile(
-        [MarshalAs(UnmanagedType.LPWStr)] string fileName,
-        uint desiredAccess,
-        uint shareMode,
-        nint securityAttributes,
-        uint creationDisposition,
-        uint flagsAndAttributes,
-        nint templateFile);
-
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", EntryPoint = "SetFileInformationByHandle", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetFileInformationByHandleEx(
-        SafeFileHandle handle,
-        int fileInformationClass,
-        out WindowsFileAttributeTagInformation fileInformation,
-        uint bufferSize);
-
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetFileInformationByHandle(
-        SafeFileHandle handle,
-        out WindowsByHandleFileInformation fileInformation);
-
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetFileInformationByHandle(
+    private static partial bool SetFileInformationByHandle(
         SafeFileHandle handle,
         int fileInformationClass,
         ref WindowsFileDispositionInformation fileInformation,
         uint bufferSize);
-
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", SetLastError = true, CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern uint GetFinalPathNameByHandle(
-        SafeFileHandle handle,
-        StringBuilder path,
-        uint pathLength,
-        uint flags);
 }

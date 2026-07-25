@@ -1,8 +1,8 @@
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
-using System.Text;
 using Microsoft.Win32.SafeHandles;
+using static ForgeTrust.AppSurface.CoverageArtifacts.CoverageFileSystemInterop;
 
 namespace ForgeTrust.AppSurface.CoverageArtifacts;
 
@@ -134,7 +134,7 @@ internal static class CoverageRunArtifactReader
             try
             {
                 RejectWindowsReparseOrWrongKind(file, expectDirectory: false);
-                if (GetFileType(file) != WindowsFileTypeDisk)
+                if (WindowsGetFileType(file) != WindowsFileTypeDisk)
                 {
                     throw new IOException("Collector artifact is not a regular disk file.");
                 }
@@ -263,7 +263,7 @@ internal static class CoverageRunArtifactReader
     [ExcludeFromCodeCoverage(Justification = "Windows-only file identity inspection is exercised by the Windows test lane; Unix coverage runs cannot execute it.")]
     private static WindowsFileIdentity GetWindowsFileIdentity(SafeFileHandle handle)
     {
-        if (!GetFileInformationByHandle(handle, out var information))
+        if (!WindowsGetFileInformationByHandle(handle, out var information))
         {
             throw new IOException("Unable to identify collector artifact directory handle.", new Win32Exception(Marshal.GetLastPInvokeError()));
         }
@@ -275,13 +275,13 @@ internal static class CoverageRunArtifactReader
 
     private static SafeFileHandle OpenUnixHandle(string path, int flags)
     {
-        var descriptor = Open(path, flags);
+        var descriptor = UnixOpen(path, flags);
         return CreateUnixHandle(descriptor, path);
     }
 
     private static SafeFileHandle OpenUnixHandleAt(SafeFileHandle directory, string component, int flags)
     {
-        var descriptor = OpenAt(directory.DangerousGetHandle().ToInt32(), component, flags);
+        var descriptor = UnixOpenAt(directory.DangerousGetHandle().ToInt32(), component, flags);
         return CreateUnixHandle(descriptor, component);
     }
 
@@ -301,7 +301,7 @@ internal static class CoverageRunArtifactReader
         var buffer = Marshal.AllocHGlobal(512);
         try
         {
-            if (FStat(handle.DangerousGetHandle().ToInt32(), buffer) != 0)
+            if (UnixFStat(handle.DangerousGetHandle().ToInt32(), buffer) != 0)
             {
                 throw new IOException("Unable to inspect collector artifact handle.", new Win32Exception(Marshal.GetLastPInvokeError()));
             }
@@ -338,7 +338,7 @@ internal static class CoverageRunArtifactReader
         uint flags,
         uint shareMode = WindowsShareRead | WindowsShareWrite | WindowsShareDelete)
     {
-        var handle = CreateFile(
+        var handle = WindowsCreateFile(
             path,
             WindowsGenericRead,
             shareMode,
@@ -359,7 +359,7 @@ internal static class CoverageRunArtifactReader
     [ExcludeFromCodeCoverage(Justification = "Windows-only reparse inspection is exercised by the Windows test lane; Unix coverage runs cannot execute it.")]
     private static void RejectWindowsReparseOrWrongKind(SafeFileHandle handle, bool expectDirectory)
     {
-        if (!GetFileInformationByHandleEx(handle, WindowsFileAttributeTagInfo, out var information, (uint)Marshal.SizeOf<WindowsFileAttributeTagInformation>()))
+        if (!WindowsGetFileInformationByHandleEx(handle, WindowsFileAttributeTagInfo, out var information, (uint)Marshal.SizeOf<WindowsFileAttributeTagInformation>()))
         {
             throw new IOException("Unable to inspect collector artifact handle.", new Win32Exception(Marshal.GetLastPInvokeError()));
         }
@@ -381,24 +381,21 @@ internal static class CoverageRunArtifactReader
     [ExcludeFromCodeCoverage(Justification = "Windows-only final-path resolution is exercised by the Windows test lane; Unix coverage runs cannot execute it.")]
     private static string GetWindowsFinalPath(SafeFileHandle handle)
     {
-        var capacity = 512;
-        var builder = new StringBuilder(capacity);
+        var buffer = new char[512];
         while (true)
         {
-            builder.EnsureCapacity(capacity);
-            builder.Clear();
-            var length = GetFinalPathNameByHandle(handle, builder, (uint)builder.Capacity, WindowsVolumeNameDos);
+            var length = WindowsGetFinalPathNameByHandle(handle, buffer, WindowsVolumeNameDos);
             if (length == 0)
             {
                 throw new IOException("Unable to resolve collector artifact handle.", new Win32Exception(Marshal.GetLastPInvokeError()));
             }
 
-            if (length < builder.Capacity)
+            if (length < buffer.Length)
             {
-                return builder.ToString();
+                return new string(buffer, 0, checked((int)length));
             }
 
-            capacity = checked((int)length + 1);
+            buffer = new char[checked((int)length + 1)];
         }
     }
 
@@ -477,28 +474,6 @@ internal static class CoverageRunArtifactReader
     private static int UnixOpenNonBlocking => OperatingSystem.IsMacOS() ? 0x00000004 : 0x00000800;
     private const int UnixOpenReadOnly = 0;
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct WindowsFileAttributeTagInformation
-    {
-        public uint FileAttributes;
-        public uint ReparseTag;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct WindowsByHandleFileInformation
-    {
-        public uint FileAttributes;
-        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
-        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
-        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
-        public uint VolumeSerialNumber;
-        public uint FileSizeHigh;
-        public uint FileSizeLow;
-        public uint NumberOfLinks;
-        public uint FileIndexHigh;
-        public uint FileIndexLow;
-    }
-
     /// <summary>
     /// Identifies one Windows file-system object independently of its path.
     /// </summary>
@@ -519,51 +494,4 @@ internal static class CoverageRunArtifactReader
         WindowsDirectoryIdentity Identity,
         SafeFileHandle Handle);
 
-    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
-    private static extern int Open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
-
-    [DllImport("libc", EntryPoint = "openat", SetLastError = true)]
-    private static extern int OpenAt(int directoryDescriptor, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
-
-    [DllImport("libc", EntryPoint = "fstat", SetLastError = true)]
-    private static extern int FStat(int descriptor, nint buffer);
-
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern SafeFileHandle CreateFile(
-        [MarshalAs(UnmanagedType.LPWStr)] string fileName,
-        uint desiredAccess,
-        uint shareMode,
-        nint securityAttributes,
-        uint creationDisposition,
-        uint flagsAndAttributes,
-        nint templateFile);
-
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetFileInformationByHandleEx(
-        SafeFileHandle handle,
-        int fileInformationClass,
-        out WindowsFileAttributeTagInformation fileInformation,
-        uint bufferSize);
-
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetFileInformationByHandle(
-        SafeFileHandle handle,
-        out WindowsByHandleFileInformation fileInformation);
-
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern uint GetFileType(SafeFileHandle handle);
-
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", SetLastError = true, CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern uint GetFinalPathNameByHandle(
-        SafeFileHandle handle,
-        StringBuilder path,
-        uint pathLength,
-        uint flags);
 }
