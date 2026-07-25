@@ -134,11 +134,7 @@ public sealed class CoverageRunArtifactReaderTests
         var releaseBlockedReader = Task.Run(async () =>
         {
             await Task.Delay(TimeSpan.FromSeconds(1));
-            var descriptor = OpenReadWriteNonBlocking(candidate, UnixOpenReadWrite | UnixOpenNonBlocking);
-            if (descriptor >= 0)
-            {
-                Close(descriptor);
-            }
+            using var handle = File.Open(candidate, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
         });
         var stopwatch = Stopwatch.StartNew();
 
@@ -407,19 +403,8 @@ public sealed class CoverageRunArtifactReaderTests
         Assert.False(File.Exists(Path.Join(projectOutput, "coverage.cobertura.xml")));
     }
 
-    private static int UnixOpenNonBlocking => OperatingSystem.IsMacOS() ? 0x00000004 : 0x00000800;
-    private const int UnixOpenReadWrite = 2;
-
     [DllImport("libc", EntryPoint = "mkfifo", SetLastError = true)]
     private static extern int MakeFifo([MarshalAs(UnmanagedType.LPUTF8Str)] string path, uint mode);
-
-    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
-    private static extern int OpenReadWriteNonBlocking(
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
-        int flags);
-
-    [DllImport("libc", EntryPoint = "close", SetLastError = true)]
-    private static extern int Close(int descriptor);
 
     private sealed class ArtifactTempDirectory(string path) : IDisposable
     {

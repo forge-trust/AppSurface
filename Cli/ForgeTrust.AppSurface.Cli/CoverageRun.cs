@@ -2985,7 +2985,7 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         {
             observer(count);
         }
-        catch
+        catch (Exception)
         {
             // Output observation is diagnostic bookkeeping and must never fault process drains.
         }
