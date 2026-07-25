@@ -1834,17 +1834,17 @@ internal static class CoverageGateReportWriter
                 tolerancePercent = result.TolerancePercent,
                 thresholds = new
                 {
-                    line = effectiveLineThreshold,
-                    branch = effectiveBranchThreshold,
-                    patchLine = effectivePatchLineThreshold,
-                    patchBranch = effectivePatchBranchThreshold,
-                },
-                configuredThresholds = new
-                {
                     line = result.MinLinePercent,
                     branch = result.MinBranchPercent,
                     patchLine = result.MinPatchLinePercent,
                     patchBranch = result.MinPatchBranchPercent,
+                },
+                effectiveThresholds = new
+                {
+                    line = effectiveLineThreshold,
+                    branch = effectiveBranchThreshold,
+                    patchLine = effectivePatchLineThreshold,
+                    patchBranch = effectivePatchBranchThreshold,
                 },
                 patchDiffSource = ToJson(result.PatchDiffSource),
                 line = ToJson(result.LineCoverage),

@@ -462,7 +462,7 @@ Options:
 - `--github-summary`: Append Markdown to `$GITHUB_STEP_SUMMARY` when it is set. Enabled by default.
 - `--no-github-summary`: Suppress GitHub step summary output.
 
-Use the default tolerance to absorb insignificant coverage-report rounding differences. Set `--tolerance 0` for strict enforcement. The effective threshold is never lower than `0`, and console output plus Markdown reports show the effective overall and patch thresholds. JSON reports include `tolerancePercent`, effective `thresholds`, and `configuredThresholds` so automated consumers can distinguish the requested gate from the one evaluated; invalid tolerance values fail with `ASCOV007` before report generation.
+Use the default tolerance to absorb insignificant coverage-report rounding differences. Set `--tolerance 0` for strict enforcement. The effective threshold is never lower than `0`, and console output plus Markdown reports show the effective overall and patch thresholds. JSON reports include `tolerancePercent` and `effectiveThresholds`, while preserving configured `thresholds` for existing automation; invalid tolerance values fail with `ASCOV007` before report generation.
 
 The command accepts Cobertura root attributes such as `line-rate`, `branch-rate`, `lines-covered`, `lines-valid`, `branches-covered`, and `branches-valid`. XML parsing disables DTD processing and external resolution. Coverage counts must be non-negative, covered counts cannot exceed valid counts, rates must be from `0` through `1`, and zero valid line or branch counts fail with `ASCOV006` because a quality gate with no measurable denominator is misleading.
 
@@ -474,11 +474,18 @@ Reports are private local artifacts:
 {
   "passed": false,
   "coverage": "/repo/TestResults/coverage-merged/coverage.cobertura.xml",
+  "tolerancePercent": 0.5,
   "thresholds": {
     "line": 95,
     "branch": 85,
     "patchLine": 95,
     "patchBranch": 85
+  },
+  "effectiveThresholds": {
+    "line": 94.5,
+    "branch": 84.5,
+    "patchLine": 94.5,
+    "patchBranch": 84.5
   },
   "patchDiffSource": {
     "kind": "git-base",

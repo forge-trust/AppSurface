@@ -459,8 +459,8 @@ public sealed class CoverageGateTests
         Assert.Contains("| Patch lines | 99.50% (1/2 measurable, 2 changed) | 99.5% | pass |", markdown, StringComparison.Ordinal);
         Assert.Contains("| Patch branches | 99.50% (1/2 measurable, 2 changed) | 99.5% | pass |", markdown, StringComparison.Ordinal);
         Assert.Contains("\"tolerancePercent\": 0.5", json, StringComparison.Ordinal);
-        Assert.Contains("\"thresholds\": {\n    \"line\": 99.5", json, StringComparison.Ordinal);
-        Assert.Contains("\"configuredThresholds\": {\n    \"line\": 100", json, StringComparison.Ordinal);
+        Assert.Contains("\"thresholds\": {\n    \"line\": 100", json, StringComparison.Ordinal);
+        Assert.Contains("\"effectiveThresholds\": {\n    \"line\": 99.5", json, StringComparison.Ordinal);
     }
 
     [Fact]
