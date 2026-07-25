@@ -24,12 +24,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Using Include="ForgeTrust.AppSurface.Testing" />
     <Using Include="Xunit" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../../Auth/ForgeTrust.AppSurface.Auth/ForgeTrust.AppSurface.Auth.csproj" />
     <ProjectReference Include="../../Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj" />
+    <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
     <ProjectReference Include="../ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj" />
   </ItemGroup>
 

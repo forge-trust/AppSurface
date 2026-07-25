@@ -34,6 +34,7 @@
   <ItemGroup>
     <ProjectReference Include="../../Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj" />
+    <ProjectReference Include="../ForgeTrust.AppSurface.Web.Tests.CanaryConsumerFixture/ForgeTrust.AppSurface.Web.Tests.CanaryConsumerFixture.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Web.Tests.SharedErrorPagesFixture/ForgeTrust.AppSurface.Web.Tests.SharedErrorPagesFixture.csproj" />
   </ItemGroup>
 

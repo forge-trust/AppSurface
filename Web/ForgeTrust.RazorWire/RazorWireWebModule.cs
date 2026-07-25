@@ -177,6 +177,7 @@ public class RazorWireWebModule : IAppSurfaceWebModule
         MapEmbeddedAssetFallback(endpoints, "razorwire/razorwire.js");
         MapEmbeddedAssetFallback(endpoints, "razorwire/razorwire.islands.js");
         MapEmbeddedAssetFallback(endpoints, "razorwire/section-copy.js");
+        MapEmbeddedAssetFallback(endpoints, "razorwire/turbo.es2017-umd.js");
 
         endpoints.MapRazorWire();
     }

@@ -25,6 +25,14 @@ public sealed class AppSurfaceCanaryRegistrationOptions
     /// <summary>Gets the mutable registration-time set of lowercase canary metadata tags.</summary>
     public ISet<string> Tags { get; } = new HashSet<string>(StringComparer.Ordinal);
 
+    /// <summary>Gets the mutable registration-time set of detail keys an evaluator may return.</summary>
+    /// <remarks>
+    /// Registration snapshots this set. At most sixteen keys may be declared. Keys use the same 1-64 character,
+    /// lowercase, dot-separated grammar as <see cref="AppSurfaceCanaryResultOptions.AddDetail"/>. Declaration bounds
+    /// response shape; it does not classify, sanitize, or redact the values supplied by an application evaluator.
+    /// </remarks>
+    public ISet<string> AllowedDetailKeys { get; } = new HashSet<string>(StringComparer.Ordinal);
+
     /// <summary>Gets a value indicating whether the marker header is required.</summary>
     public bool MarkerRequired { get; private set; }
 

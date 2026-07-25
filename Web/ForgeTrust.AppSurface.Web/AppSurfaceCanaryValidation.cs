@@ -47,8 +47,10 @@ internal static partial class AppSurfaceCanaryValidation
     /// A descriptor whose tags are deduplicated and stored in ordinal order and whose required-input flags are frozen.
     /// </returns>
     /// <exception cref="ArgumentException">
-    /// The display name is blank, the description exceeds 512 characters, or a tag violates its 1-64 character
-    /// lowercase letter/digit/internal-hyphen grammar.
+    /// The display name is blank, the description exceeds 512 characters, a tag violates its 1-64 character lowercase
+    /// letter/digit/internal-hyphen grammar, more than 16 allowed detail keys are declared, or an allowed detail key is
+    /// null or violates its 1-64 character lowercase dot-separated grammar. These failures use diagnostic
+    /// <c>ASCAN101</c>.
     /// </exception>
     internal static AppSurfaceCanaryDescriptor CreateDescriptor(
         string name,
@@ -77,6 +79,29 @@ internal static partial class AppSurfaceCanaryValidation
             tags.Add(tag);
         }
 
+        if (options.AllowedDetailKeys.Count > AppSurfaceCanaryResultValidation.MaximumDetails)
+        {
+            throw InvalidConfiguration(
+                $"At most {AppSurfaceCanaryResultValidation.MaximumDetails} allowed detail keys may be declared.");
+        }
+
+        var allowedDetailKeys = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var key in options.AllowedDetailKeys)
+        {
+            if (key is null)
+            {
+                throw InvalidConfiguration("Allowed detail keys must not be null.");
+            }
+
+            if (!AppSurfaceCanaryResultValidation.IsValidDetailKey(key))
+            {
+                throw InvalidConfiguration(
+                    "Allowed detail keys must be 1-64 lowercase ASCII characters in dot-separated letter, digit, and internal-hyphen segments.");
+            }
+
+            allowedDetailKeys.Add(key);
+        }
+
         return new AppSurfaceCanaryDescriptor(
             name,
             options.DisplayName,
@@ -84,6 +109,7 @@ internal static partial class AppSurfaceCanaryValidation
             tags.ToArray(),
             options.MarkerRequired,
             options.FreshSinceRequired,
+            allowedDetailKeys,
             evaluatorType);
     }
 

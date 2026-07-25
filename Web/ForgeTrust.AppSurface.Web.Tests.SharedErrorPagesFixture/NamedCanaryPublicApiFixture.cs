@@ -14,6 +14,13 @@ using ForgeTrust.AppSurface.Web;
 
 public sealed class ForwardingCanaryEvaluator : IAppSurfaceCanaryEvaluator
 {
+    /// <summary>The declared result-detail key identifying the forwarding proof kind.</summary>
+    /// <remarks>
+    /// Add this key to <see cref="AppSurfaceCanaryRegistrationOptions.AllowedDetailKeys"/> before returning it through
+    /// <see cref="AppSurfaceCanaryResultOptions.AddDetail(string, string)"/>.
+    /// </remarks>
+    public const string ProofKindDetailKey = "proof.kind";
+
     public ValueTask<AppSurfaceCanaryResult> EvaluateAsync(
         AppSurfaceCanaryEvaluationContext context,
         CancellationToken cancellationToken)
@@ -39,6 +46,7 @@ public sealed class NamedCanaryPublicApiFixture : IAppSurfaceWebModule
             {
                 canary.RequireMarker();
                 canary.RequireFreshSince();
+                canary.AllowedDetailKeys.Add(ForwardingCanaryEvaluator.ProofKindDetailKey);
             });
     }
     // docs:snippet appsurface-canary-registration:end

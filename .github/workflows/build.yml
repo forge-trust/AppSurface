@@ -77,6 +77,9 @@ jobs:
           cache: pnpm
           cache-dependency-path: Web/pnpm-lock.yaml
 
+      - name: Test dormant release-contract classifier
+        run: node --experimental-test-coverage --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 --test .github/scripts/release-contract-v1.test.mjs
+
       - name: Verify generated package chooser
         run: |
           dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --configuration Release --no-restore -- verify
@@ -85,6 +88,7 @@ jobs:
         run: |
           dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify
           dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Durable/ForgeTrust.AppSurface.Durable/README.md
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
           dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Web/ForgeTrust.AppSurface.Web/README.md
 
       - name: Verify packed Durable consumers
@@ -136,6 +140,7 @@ jobs:
         if: ${{ always() && !cancelled() && env.CODECOV_TOKEN_PRESENT == 'true' }}
         with:
           files: 'TestResults/coverage-merged/coverage.cobertura.xml'
+          disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload test results to Codecov

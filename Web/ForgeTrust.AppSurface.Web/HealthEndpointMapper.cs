@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace ForgeTrust.AppSurface.Web;
@@ -40,11 +41,18 @@ internal static class HealthEndpointMapper
         string displayName,
         Func<HealthCheckRegistration, bool> predicate)
     {
+        // Keep this as a RequestDelegate so endpoint construction does not invoke the general route-handler binding
+        // pipeline for a service that can be resolved directly from the request scope.
+        RequestDelegate requestDelegate = httpContext =>
+            WriteHealthResultAsync(
+                httpContext,
+                httpContext.RequestServices.GetRequiredService<HealthCheckService>(),
+                predicate);
+
         endpoints.MapMethods(
                 pattern,
                 [HttpMethods.Get, HttpMethods.Head],
-                (Func<HttpContext, HealthCheckService, Task>)((httpContext, healthCheckService) =>
-                    WriteHealthResultAsync(httpContext, healthCheckService, predicate)))
+                requestDelegate)
             .WithDisplayName(displayName)
             .WithMetadata(new AllowAnonymousAttribute())
             .ExcludeFromDescription();

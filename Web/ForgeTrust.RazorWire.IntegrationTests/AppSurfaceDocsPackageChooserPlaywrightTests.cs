@@ -6,8 +6,8 @@ namespace ForgeTrust.RazorWire.IntegrationTests;
 [Trait("Category", "Integration")]
 public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
 {
-    private const string PackageChooserReleaseNotePath = "/docs/releases/v0.2.0-preview.2";
-    private const string PackageChooserReleaseNoteHeading = "Release 0.2.0-preview.2";
+    private const string PackageChooserReleaseNotePath = "/docs/releases/v0.2.0-preview.4";
+    private const string PackageChooserReleaseNoteHeading = "Release 0.2.0-preview.4";
     private const string WebPackageQuickstartPath = "/docs/start-here/first-success-path#package-first-path";
 
     private readonly AppSurfaceDocsPlaywrightFixture _fixture;

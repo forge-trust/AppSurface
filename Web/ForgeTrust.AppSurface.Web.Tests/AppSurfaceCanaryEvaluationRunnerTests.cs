@@ -163,6 +163,75 @@ public sealed class AppSurfaceCanaryEvaluationRunnerTests
     }
 
     [Fact]
+    public async Task EvaluateAsync_AcceptsOnlyDetailsDeclaredForSelectedCanary()
+    {
+        var evaluator = new RecordingEvaluator
+        {
+            Result = new AppSurfaceCanaryResult(
+                AppSurfaceCanaryStatus.Pass,
+                options => options.AddDetail("proof.kind", "migration"))
+        };
+        await using var fixture = CreateFixture(
+            evaluator,
+            options => options.AllowedDetailKeys.Add("proof.kind"));
+
+        var outcome = await fixture.Runner.EvaluateAsync("proof", null, null, CancellationToken.None);
+
+        Assert.True(outcome.Found);
+        Assert.Equal("migration", outcome.Result!.Details["proof.kind"]);
+        Assert.Equal(1, evaluator.InvocationCount);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_RejectsUndeclaredDetailAfterOneInvocation()
+    {
+        var evaluator = new RecordingEvaluator
+        {
+            Result = new AppSurfaceCanaryResult(
+                AppSurfaceCanaryStatus.Pass,
+                options => options.AddDetail("provider.region", "us-east"))
+        };
+        await using var fixture = CreateFixture(evaluator);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await fixture.Runner.EvaluateAsync("proof", null, null, CancellationToken.None));
+
+        Assert.StartsWith("ASCAN301", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("provider.region", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(1, evaluator.InvocationCount);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_DoesNotShareAllowedKeysAcrossCanaries()
+    {
+        var first = new RecordingEvaluator();
+        var second = new SecondRecordingEvaluator
+        {
+            Result = new AppSurfaceCanaryResult(
+                AppSurfaceCanaryStatus.Pending,
+                options => options.AddDetail("provider.region", "west"))
+        };
+        var services = new ServiceCollection();
+        services.AddSingleton(first);
+        services.AddSingleton(second);
+        services.AddAppSurfaceCanary<RecordingEvaluator>(
+            "proof.one",
+            options => options.AllowedDetailKeys.Add("provider.region"));
+        services.AddAppSurfaceCanary<SecondRecordingEvaluator>("proof.two");
+        await using var provider = services.BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var runner = scope.ServiceProvider.GetRequiredService<AppSurfaceCanaryEvaluationRunner>();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await runner.EvaluateAsync("proof.two", null, null, CancellationToken.None));
+
+        Assert.StartsWith("ASCAN301", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("provider.region", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, first.InvocationCount);
+        Assert.Equal(1, second.InvocationCount);
+    }
+
+    [Fact]
     public async Task EvaluateAsync_PropagatesActivationFailure()
     {
         var services = new ServiceCollection();
@@ -202,12 +271,14 @@ public sealed class AppSurfaceCanaryEvaluationRunnerTests
         Assert.False(fixture.Runner.TryGetDescriptor("Proof", out _));
     }
 
-    private static RunnerFixture CreateFixture<TEvaluator>(TEvaluator evaluator)
+    private static RunnerFixture CreateFixture<TEvaluator>(
+        TEvaluator evaluator,
+        Action<AppSurfaceCanaryRegistrationOptions>? configure = null)
         where TEvaluator : class, IAppSurfaceCanaryEvaluator
     {
         var services = new ServiceCollection();
         services.AddSingleton(evaluator);
-        services.AddAppSurfaceCanary<TEvaluator>("proof");
+        services.AddAppSurfaceCanary<TEvaluator>("proof", configure);
         var provider = services.BuildServiceProvider();
         var scope = provider.CreateAsyncScope();
         var runner = scope.ServiceProvider.GetRequiredService<AppSurfaceCanaryEvaluationRunner>();
@@ -275,6 +346,21 @@ public sealed class AppSurfaceCanaryEvaluationRunnerTests
         {
             LastEvaluatedId = Id;
             return ValueTask.FromResult(new AppSurfaceCanaryResult(AppSurfaceCanaryStatus.Pass));
+        }
+    }
+
+    private sealed class SecondRecordingEvaluator : IAppSurfaceCanaryEvaluator
+    {
+        public AppSurfaceCanaryResult Result { get; init; } = new(AppSurfaceCanaryStatus.Pass);
+
+        public int InvocationCount { get; private set; }
+
+        public ValueTask<AppSurfaceCanaryResult> EvaluateAsync(
+            AppSurfaceCanaryEvaluationContext context,
+            CancellationToken cancellationToken)
+        {
+            InvocationCount++;
+            return ValueTask.FromResult(Result);
         }
     }
 

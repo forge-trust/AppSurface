@@ -5,6 +5,118 @@ namespace ForgeTrust.RazorWire.Tests;
 public class RazorWireOptionsTests
 {
     [Fact]
+    public void TurboRuntimeMode_DefaultsToBundled()
+    {
+        var options = new RazorWireOptions();
+
+        Assert.Equal(RazorWireTurboRuntimeMode.Bundled, options.Turbo.RuntimeMode);
+        Assert.Null(options.Turbo.CustomPath);
+    }
+
+    [Theory]
+    [InlineData(RazorWireTurboRuntimeMode.Bundled)]
+    [InlineData(RazorWireTurboRuntimeMode.HostManaged)]
+    public void Validator_AcceptsModesWithoutCustomPath(RazorWireTurboRuntimeMode runtimeMode)
+    {
+        var options = new RazorWireOptions();
+        options.Turbo.RuntimeMode = runtimeMode;
+
+        var result = new RazorWireOptionsValidator().Validate(Options.DefaultName, options);
+
+        Assert.Same(ValidateOptionsResult.Success, result);
+    }
+
+    [Theory]
+    [InlineData("/assets/turbo.js")]
+    [InlineData("/~vendor/Turbo_8-0.12/turbo.js")]
+    public void Validator_AcceptsValidCustomTurboPath(string customPath)
+    {
+        var options = new RazorWireOptions();
+        options.Turbo.RuntimeMode = RazorWireTurboRuntimeMode.Custom;
+        options.Turbo.CustomPath = customPath;
+
+        var result = new RazorWireOptionsValidator().Validate(Options.DefaultName, options);
+
+        Assert.Same(ValidateOptionsResult.Success, result);
+    }
+
+    [Fact]
+    public void Validator_RejectsUndefinedTurboRuntimeMode()
+    {
+        var options = new RazorWireOptions();
+        options.Turbo.RuntimeMode = (RazorWireTurboRuntimeMode)42;
+
+        var result = new RazorWireOptionsValidator().Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures!,
+            failure => failure.Contains("RazorWireOptions.Turbo.RuntimeMode", StringComparison.Ordinal)
+                       && failure.Contains("Bundled, Custom, or HostManaged", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(RazorWireTurboRuntimeMode.Bundled)]
+    [InlineData(RazorWireTurboRuntimeMode.HostManaged)]
+    public void Validator_RejectsIgnoredCustomPath(RazorWireTurboRuntimeMode runtimeMode)
+    {
+        var options = new RazorWireOptions();
+        options.Turbo.RuntimeMode = runtimeMode;
+        options.Turbo.CustomPath = "/assets/turbo.js";
+
+        var result = new RazorWireOptionsValidator().Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures!, failure => failure.Contains("RazorWireOptions.Turbo.CustomPath", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void Validator_RejectsMissingCustomTurboPath(string? customPath)
+    {
+        var options = new RazorWireOptions();
+        options.Turbo.RuntimeMode = RazorWireTurboRuntimeMode.Custom;
+        options.Turbo.CustomPath = customPath;
+
+        var result = new RazorWireOptionsValidator().Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures!, failure => failure.Contains("CustomPath is required", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(" /assets/turbo.js")]
+    [InlineData("/assets/turbo.js ")]
+    [InlineData("//cdn.example.com/turbo.js")]
+    [InlineData("https://cdn.example.com/turbo.js")]
+    [InlineData("assets/turbo.js")]
+    [InlineData("/")]
+    [InlineData("/assets/")]
+    [InlineData("/assets//turbo.js")]
+    [InlineData("/assets/./turbo.js")]
+    [InlineData("/assets/../turbo.js")]
+    [InlineData("/assets/%74urbo.js")]
+    [InlineData("/assets/turbo\\runtime.js")]
+    [InlineData("/assets/turbo.js?version=8")]
+    [InlineData("/assets/turbo.js#runtime")]
+    [InlineData("/assets/\"turbo.js")]
+    [InlineData("/assets/<turbo>.js")]
+    [InlineData("/assets/turbo&runtime.js")]
+    [InlineData("/assets/turbo\t.js")]
+    public void Validator_RejectsInvalidCustomTurboPathWithoutTrimming(string customPath)
+    {
+        var options = new RazorWireOptions();
+        options.Turbo.RuntimeMode = RazorWireTurboRuntimeMode.Custom;
+        options.Turbo.CustomPath = customPath;
+
+        var result = new RazorWireOptionsValidator().Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures!, failure => failure.Contains("RazorWireOptions.Turbo.CustomPath", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void StreamsAuthorizationMode_DefaultsToDenyAll()
     {
         var options = new RazorWireOptions();

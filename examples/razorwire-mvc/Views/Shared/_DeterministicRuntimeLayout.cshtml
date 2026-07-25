@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - RazorWire runtime proof</title>
+    <rw:scripts behavior-kit="true" />
+    <script>
+        window.__razorWireDeterministicRuntimeSentinel ??= crypto.randomUUID();
+        document.addEventListener("turbo:load", () => {
+            const proof = document.querySelector("[data-deterministic-runtime-proof]");
+            if (!proof) return;
+
+            proof.dataset.renderKind = "turbo:load";
+            proof.textContent = "turbo:load";
+        });
+    </script>
+</head>
+<body>
+    <main>
+        @RenderBody()
+    </main>
+</body>
+</html>

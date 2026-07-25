@@ -45,11 +45,18 @@ internal sealed class PackageIndexSummary
         }
 
         var packages = manifest?.Packages ?? [];
-        return new PackageIndexSummary(packages
-            .Where(package => string.Equals(package.Classification, "public", StringComparison.Ordinal)
-                && string.Equals(package.PublishDecision, "publish", StringComparison.Ordinal))
-            .Select(package => new PackageIndexEntry(package.Project, package.ReleaseNotesPath ?? string.Empty))
-            .ToArray());
+        var publicPublishedPackages = new List<PackageIndexEntry>();
+        foreach (var package in packages.Where(package =>
+                     string.Equals(package.Classification, "public", StringComparison.Ordinal)
+                     && string.Equals(package.PublishDecision, "publish", StringComparison.Ordinal)))
+        {
+            publicPublishedPackages.Add(new PackageIndexEntry(
+                package.Project,
+                package.ReleaseNotesPath ?? string.Empty,
+                package.ReadinessBlocker));
+        }
+
+        return new PackageIndexSummary(publicPublishedPackages);
     }
 }
 
@@ -88,9 +95,17 @@ internal sealed class PackageIndexYamlEntry
     /// Gets the release notes path.
     /// </summary>
     public string? ReleaseNotesPath { get; init; }
+
+    /// <summary>
+    /// Gets the same-repository issue or pull request that blocks publication, when one remains unresolved.
+    /// </summary>
+    public string? ReadinessBlocker { get; init; }
 }
 
 /// <summary>
 /// Package row included in a release manifest.
 /// </summary>
-internal sealed record PackageIndexEntry(string Project, string ReleaseNotesPath);
+/// <param name="Project">Repository-relative package project path. The package index supplies a non-empty path for every row.</param>
+/// <param name="ReleaseNotesPath">Repository-relative release-note path, normalized to an empty string when the YAML value is omitted.</param>
+/// <param name="ReadinessBlocker">Optional same-repository issue or pull-request reference. A non-empty value blocks publication until the package is held or the blocker is cleared.</param>
+internal sealed record PackageIndexEntry(string Project, string ReleaseNotesPath, string? ReadinessBlocker);

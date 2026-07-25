@@ -17,6 +17,6 @@ trust:
   sources:
     - CHANGELOG.md
     - releases/v0.1.0.md
-    - releases/v0.2.0-preview.2.md
+    - releases/v0.2.0-preview.3.md
     - releases/unreleased.md
     - releases/release-authoring-checklist.md

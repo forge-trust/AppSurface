@@ -27,6 +27,17 @@ public class PublicEnumContractTests
     }
 
     [Theory]
+    [InlineData(RazorWireTurboRuntimeMode.Bundled, 0)]
+    [InlineData(RazorWireTurboRuntimeMode.Custom, 1)]
+    [InlineData(RazorWireTurboRuntimeMode.HostManaged, 2)]
+    public void RazorWireTurboRuntimeMode_NumericValues_AreStable(
+        RazorWireTurboRuntimeMode value,
+        int expected)
+    {
+        Assert.Equal(expected, (int)value);
+    }
+
+    [Theory]
     [InlineData(RazorWireHybridCredentialsMode.Auto, 0)]
     [InlineData(RazorWireHybridCredentialsMode.Include, 1)]
     [InlineData(RazorWireHybridCredentialsMode.Omit, 2)]

@@ -1,8 +1,9 @@
 # ForgeTrust.AppSurface.Durable
 
-> **Source-only public preview:** this package is intentionally excluded from all repository publish plans until the
-> PostgreSQL provider milestone supplies conformance and restore evidence. It installs no runtime and starts no hosted
-> service.
+> **Source-only public preview:** the [PostgreSQL source provider](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md)
+> supplies slice-3 Work conformance and restore fencing,
+> but publication remains held until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, and coordinated
+> operations. This package installs no runtime and starts no hosted service.
 
 `ForgeTrust.AppSurface.Durable` is the adopter-facing contract package for durable Work, resumable
 [AppSurface Flow](../../Flow/ForgeTrust.AppSurface.Flow/README.md), schedules, serialization, registration, and clients.
@@ -150,14 +151,14 @@ validation before persistence.
 | Change | Preview policy |
 |---|---|
 | Additive request/result member | Allowed only with a documented default and fingerprint review |
-| Mutation semantics or canonical bytes | Requires a new fingerprint schema id |
+| Mutation semantics or canonical bytes | Before the first supported publication or persisted deployment, v1 may be corrected in place with updated test vectors; afterward, requires a new fingerprint schema id |
 | Payload bytes | Requires a new application contract version |
 | Flow executable behavior | Requires a new implementation version or explicit migration |
 | Schedule dialect semantics | Requires a new dialect/version, never reinterpret persisted occurrences |
 | Provider SPI behavior | Requires provider conformance evidence before adoption |
 
-Diagnostics available now cover contract validation and semantic conflicts. Storage, schema, activation, heartbeat,
-drain, and restore diagnostics are reserved until a provider implements and tests them. See the
+Diagnostics available now cover contract validation, semantic conflicts, and PostgreSQL Work storage, schema,
+activation, and restore failures. Heartbeat, drain, and later hosted-runtime diagnostics remain reserved. See the
 [`ASDURxxx` catalog](../../troubleshooting/durable-diagnostics.md).
 
 ## Release Guidance

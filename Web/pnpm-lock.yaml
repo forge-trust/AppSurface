@@ -33,7 +33,11 @@ importers:
 
   ForgeTrust.AppSurface.Web: {}
 
-  ForgeTrust.RazorWire: {}
+  ForgeTrust.RazorWire:
+    dependencies:
+      '@hotwired/turbo':
+        specifier: 8.0.23
+        version: 8.0.23
 
 packages:
 
@@ -193,6 +197,10 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@hotwired/turbo@8.0.23':
+    resolution: {integrity: sha512-GZ7cijxEZ6Ig71u7rD6LHaRv/wcE/hNsc+nEfiWOkLNqUgLOwo5MNGWOy5ZV9ZUDSiQx1no7YxjTNnT4O6//cQ==}
+    engines: {node: '>= 18'}
+
   esbuild@0.28.1:
     resolution: {integrity: sha512-HrJrvZv5ayxBzPfwphOoNzkzOIIlifzk0KJrGK2c8R4+LKpMtpYLQeUdjnwjWv/LZlkH2laZk+4w78pi99D4Vw==}
     engines: {node: '>=18'}
@@ -285,6 +293,8 @@ snapshots:
 
   '@esbuild/win32-x64@0.28.1':
     optional: true
+
+  '@hotwired/turbo@8.0.23': {}
 
   esbuild@0.28.1:
     optionalDependencies:

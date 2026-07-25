@@ -10,6 +10,8 @@ namespace AppSurfaceBenchmarks;
 
 public class Program
 {
+    private const string ReloadConfigOnChangeEnvironmentVariable = "DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE";
+
     private static int LaunchCount =>
         int.TryParse(Environment.GetEnvironmentVariable("BENCH_LAUNCH_COUNT"), out var n) && n > 0 ? n : 100;
 
@@ -27,10 +29,12 @@ public class Program
             .AddJob(CreateJob("Native", "NATIVE_WEB"))
             .AddJob(CreateJob("Carter", "CARTER_WEB"))
             .AddJob(CreateJob("ABP", "ABP_WEB"))
+            .AddJob(CreateHealthComparisonJob())
             .AddJob(CreateFlowJob())
             .AddFilter(new JobCategoryMatrixFilter(new Dictionary<string, IEnumerable<string>>
             {
                 ["AppSurface.Web"] = ["Minimal API", "Controllers", "Dependency Injection"],
+                ["AppSurface.Web.HealthAB"] = ["AppSurface Health A/B"],
                 ["Native"] = ["Minimal API", "Controllers", "Dependency Injection"],
                 ["Carter"] = ["Minimal API"],
                 ["ABP"] = ["Minimal API", "Controllers", "Dependency Injection"],
@@ -67,6 +71,7 @@ public class Program
             .WithIterationCount(1)
             .WithId(id)
             .WithBaseline(id == "Native")
+            .WithEnvironmentVariable(ReloadConfigOnChangeEnvironmentVariable, "false")
             .WithArguments([new MsBuildArgument($"/p:DefineConstants={define}")]);
     }
 
@@ -79,5 +84,19 @@ public class Program
             .WithIterationCount(8)
             .WithId("Flow")
             .WithArguments([new MsBuildArgument("/p:DefineConstants=FLOW")]);
+    }
+
+    private static Job CreateHealthComparisonJob()
+    {
+        return Job.Default
+            .WithStrategy(RunStrategy.ColdStart)
+            .WithLaunchCount(LaunchCount)
+            .WithWarmupCount(0)
+            .WithIterationCount(1)
+            .WithInvocationCount(1)
+            .WithUnrollFactor(1)
+            .WithId("AppSurface.Web.HealthAB")
+            .WithEnvironmentVariable(ReloadConfigOnChangeEnvironmentVariable, "false")
+            .WithArguments([new MsBuildArgument("/p:DefineConstants=APPSURFACE_WEB")]);
     }
 }

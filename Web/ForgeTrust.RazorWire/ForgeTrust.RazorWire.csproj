@@ -23,6 +23,7 @@
   <ItemGroup>
     <Content Remove="assets\**\*" />
     <None Remove="assets\**\*" />
+    <None Update="THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="" />
   </ItemGroup>
 
   <ItemGroup>
@@ -34,6 +35,7 @@
     <EmbeddedResource Include="wwwroot\razorwire\razorwire.islands.js" LogicalName="RazorWireEmbeddedAssets/razorwire/razorwire.islands.js" />
     <EmbeddedResource Include="wwwroot\razorwire\razorwire.js" LogicalName="RazorWireEmbeddedAssets/razorwire/razorwire.js" />
     <EmbeddedResource Include="wwwroot\razorwire\section-copy.js" LogicalName="RazorWireEmbeddedAssets/razorwire/section-copy.js" />
+    <EmbeddedResource Include="wwwroot\razorwire\turbo.es2017-umd.js" LogicalName="RazorWireEmbeddedAssets/razorwire/turbo.es2017-umd.js" />
   </ItemGroup>
 
   <ItemGroup>

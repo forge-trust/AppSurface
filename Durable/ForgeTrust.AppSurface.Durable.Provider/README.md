@@ -1,7 +1,9 @@
 # ForgeTrust.AppSurface.Durable.Provider
 
-> **Source-only public preview:** this package is intentionally excluded from all repository publish plans until the
-> PostgreSQL provider milestone supplies conformance and restore evidence. It contains SPI contracts, not a runtime.
+> **Source-only public preview:** the
+> [`PostgreSQL source provider`](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md) supplies slice-3 Work conformance
+> and restore fencing, but publication remains held until slices 4-6 prove Flow, Schedule, hosted runtime,
+> drain/recovery, and coordinated operations. This package contains SPI contracts, not a runtime.
 
 `ForgeTrust.AppSurface.Durable.Provider` is the runtime-provider and operator SPI for
 [`ForgeTrust.AppSurface.Durable`](../ForgeTrust.AppSurface.Durable/README.md). It depends on that adopter package; the
@@ -16,6 +18,18 @@ adopter package never depends on Provider. Production providers implement this p
 
 Ordinary applications and reusable modules should reference only `ForgeTrust.AppSurface.Durable`. This package does not
 provide PostgreSQL storage, migrations, polling, schedule execution, hosted services, endpoints, metrics, or tracing.
+
+## Activation and broker evolution
+
+`IDurableRuntimePump` is the common bounded activation primitive for a continuously hosted loop, scheduled job,
+function, HTTP wake-up, or broker notification. A wake-up is advisory: implementations must recover eligible work from
+their authoritative state even when notifications are lost, duplicated, delayed, or reordered.
+
+Do not translate broker receipt into a claim, effect permit, or terminal fact. A wake-only adapter must call the pump
+without carrying application payloads. A future targeted-dispatch or broker-native provider must revalidate its opaque
+reference against authoritative scope, revision, lease, runtime-epoch, and provider-effect state before invoking work.
+Slice 2 leaves that adapter shape open until a concrete broker topology proves the required routing and acknowledgement
+contract.
 
 ## Public API by audience
 
@@ -55,10 +69,11 @@ provider persists the schema id and digest with command outcome truth. A repeate
 
 Before any provider can be published, it must supply storage and migration ownership, polling/schedule execution,
 restore fencing, graceful drain, privacy-bounded diagnostics and telemetry, packed-consumer proof, and conformance tests
-against this SPI. Slice 2 deliberately does not run downstream provider conformance because no provider exists yet.
+against this SPI. Slice 3 supplies source-level PostgreSQL Work conformance; slices 4-6 still own Flow, Schedule, hosted
+activation, drain/recovery, and the coordinated publication gate.
 
 See the [`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md) for currently available contract
-codes and explicitly reserved provider codes.
+and PostgreSQL Work codes plus explicitly reserved hosted-runtime codes.
 
 From the repository root, `./Durable/verify-packed-consumers.sh` packs both held packages and their local dependencies,
 then compiles and runs isolated adopter and provider consumers against only those packages.

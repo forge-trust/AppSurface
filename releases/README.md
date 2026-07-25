@@ -11,7 +11,7 @@ It also acts as a concrete AppSurface Docs example for teams that want stronger 
 ## Start here
 
 - [Package chooser](../packages/README.md) is the fastest install map for deciding which AppSurface package to add first.
-- [v0.2.0-preview.2](./v0.2.0-preview.2.md) is the current package-facing story for the coordinated AppSurface prerelease.
+- [v0.2.0-preview.3](./v0.2.0-preview.3.md) is the current package-facing story for the coordinated AppSurface prerelease.
 - [v0.1.0](./v0.1.0.md) is the canonical archive for the first coordinated stable AppSurface release.
 - The `v0.1.0` release-candidate routes redirect to [v0.1.0](./v0.1.0.md), where the RC dates are recorded.
 - [Unreleased](./unreleased.md) is the living proof artifact for the next coordinated AppSurface version: the current merged-work ledger, not the final tagged narrative.

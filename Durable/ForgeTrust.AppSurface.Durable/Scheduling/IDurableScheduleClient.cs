@@ -614,7 +614,8 @@ public sealed record DurableScheduleListResult
     /// <summary>Initializes one bounded schedule-list page and its optional continuation token.</summary>
     /// <param name="schedules">Payload-free schedules in the current authorized page.</param>
     /// <param name="continuationToken">
-    /// Opaque provider-issued token for the next page, or <see langword="null"/> when this is the last page.
+    /// Opaque provider-issued token for the next page, or <see langword="null"/> when this is the last page. Callers
+    /// must not parse, normalize, or modify a non-null token before supplying it to <see cref="DurableScheduleListRequest"/>.
     /// </param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="continuationToken"/> is invalid.</exception>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="schedules"/> is null.</exception>
@@ -696,6 +697,26 @@ public sealed record DurableScheduleExplainRequest
 public sealed record DurableScheduleExplanation
 {
     /// <summary>Initializes a schedule explanation.</summary>
+    /// <remarks>
+    /// Cron metadata is a discriminated group: Cron explanations must supply <paramref name="cronDialect"/>,
+    /// <paramref name="cronGrammar"/>, and <paramref name="ianaTimeZoneId"/> together; non-Cron explanations must omit
+    /// all three. Callers must not infer Cron semantics from a partial group or attach Cron metadata to another shape.
+    /// </remarks>
+    /// <param name="scheduleId">Schedule identity whose deterministic expansion is being explained.</param>
+    /// <param name="kind">Effective schedule shape.</param>
+    /// <param name="overlapPolicy">Effective overlap policy.</param>
+    /// <param name="misfirePolicy">Effective downtime recovery policy.</param>
+    /// <param name="nextOccurrencesUtc">Upcoming evaluated occurrences; values are normalized to UTC.</param>
+    /// <param name="cronDialect">Required Cron dialect for Cron explanations; otherwise <see langword="null"/>.</param>
+    /// <param name="cronGrammar">Required Cron grammar for Cron explanations; otherwise <see langword="null"/>.</param>
+    /// <param name="ianaTimeZoneId">Required IANA time zone for Cron explanations; otherwise <see langword="null"/>.</param>
+    /// <param name="evaluatorVersion">Optional pinned evaluator version.</param>
+    /// <param name="jitterSeed">Optional deterministic <c>H</c> expansion seed.</param>
+    /// <param name="timeZoneRulesFingerprint">Optional fingerprint of evaluated time-zone rules.</param>
+    /// <param name="notes">Optional privacy-safe explanatory notes.</param>
+    /// <exception cref="ArgumentException">Thrown when identifiers or the Cron metadata group are invalid.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when a required policy or occurrence collection is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when an enum value is undefined.</exception>
     public DurableScheduleExplanation(
         DurableScheduleId scheduleId,
         DurableScheduleKind kind,

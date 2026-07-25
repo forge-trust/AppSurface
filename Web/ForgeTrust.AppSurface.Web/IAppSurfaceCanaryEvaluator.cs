@@ -14,7 +14,7 @@ public interface IAppSurfaceCanaryEvaluator
     /// </summary>
     /// <param name="context">The validated canary name and optional deploy-proof inputs.</param>
     /// <param name="cancellationToken">The request cancellation token.</param>
-    /// <returns>The current status-only canary result.</returns>
+    /// <returns>The current canary status plus any optional validated, bounded evidence.</returns>
     ValueTask<AppSurfaceCanaryResult> EvaluateAsync(
         AppSurfaceCanaryEvaluationContext context,
         CancellationToken cancellationToken);

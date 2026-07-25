@@ -55,6 +55,309 @@ public sealed class AppSurfaceCanaryRegistrationTests
         var result = new AppSurfaceCanaryResult(status);
 
         Assert.Equal(status, result.Status);
+        Assert.Null(result.ObservedAt);
+        Assert.Null(result.MatchedCount);
+        Assert.Null(result.ReasonCode);
+        Assert.Null(result.Summary);
+        Assert.Null(result.CorrelationId);
+        Assert.Empty(result.Details);
+    }
+
+    [Fact]
+    public void Result_SnapshotsConfiguredEvidenceAndNormalizesObservedAt()
+    {
+        AppSurfaceCanaryResultOptions? captured = null;
+        var observedAt = new DateTimeOffset(2026, 7, 16, 1, 2, 3, TimeSpan.FromHours(-4));
+
+        var result = new AppSurfaceCanaryResult(
+            AppSurfaceCanaryStatus.Pending,
+            options =>
+            {
+                captured = options;
+                options.ObservedAt = observedAt;
+                options.MatchedCount = 2;
+                options.ReasonCode = "multiple-matches";
+                options.Summary = "Two operator-safe proofs matched.";
+                options.CorrelationId = "deploy:20260716.1";
+                options.AddDetail("proof.kind", "forwarding");
+                options.AddDetail("provider.region", "us-east");
+            });
+
+        captured!.ObservedAt = DateTimeOffset.MinValue;
+        captured.MatchedCount = 99;
+        captured.ReasonCode = "changed";
+        captured.Summary = "Changed later.";
+        captured.CorrelationId = "changed";
+        captured.AddDetail("changed", "later");
+
+        Assert.Equal(observedAt.ToUniversalTime(), result.ObservedAt);
+        Assert.Equal(2, result.MatchedCount);
+        Assert.Equal("multiple-matches", result.ReasonCode);
+        Assert.Equal("Two operator-safe proofs matched.", result.Summary);
+        Assert.Equal("deploy:20260716.1", result.CorrelationId);
+        Assert.Equal(
+            new Dictionary<string, string>
+            {
+                ["proof.kind"] = "forwarding",
+                ["provider.region"] = "us-east"
+            },
+            result.Details);
+        Assert.False(result.Details.ContainsKey("changed"));
+        Assert.Throws<NotSupportedException>(() =>
+            ((IDictionary<string, string>)result.Details).Add("mutated", "later"));
+    }
+
+    [Fact]
+    public void Result_RejectsNullConfiguration()
+    {
+        var exception = Assert.Throws<ArgumentNullException>(
+            () => new AppSurfaceCanaryResult(AppSurfaceCanaryStatus.Pass, null!));
+
+        Assert.Equal("configure", exception.ParamName);
+    }
+
+    [Fact]
+    public void Result_PropagatesConfigurationException()
+    {
+        var expected = new TestRegistrationException();
+
+        var actual = Assert.Throws<TestRegistrationException>(() =>
+            new AppSurfaceCanaryResult(AppSurfaceCanaryStatus.Pass, _ => throw expected));
+
+        Assert.Same(expected, actual);
+    }
+
+    [Theory]
+    [InlineData("matched-count")]
+    [InlineData("reason-code")]
+    [InlineData("summary")]
+    [InlineData("correlation-id")]
+    public void Result_RejectsInvalidScalarOptions(string field)
+    {
+        var exception = Assert.Throws<ArgumentException>(() =>
+            new AppSurfaceCanaryResult(
+                AppSurfaceCanaryStatus.Fail,
+                options =>
+                {
+                    switch (field)
+                    {
+                        case "matched-count":
+                            options.MatchedCount = -1;
+                            break;
+                        case "reason-code":
+                            options.ReasonCode = "Invalid_Code";
+                            break;
+                        case "summary":
+                            options.Summary = " ";
+                            break;
+                        default:
+                            options.CorrelationId = "-invalid";
+                            break;
+                    }
+                }));
+
+        Assert.Equal("configure", exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("UPPER")]
+    [InlineData("-leading")]
+    [InlineData("trailing-")]
+    [InlineData("two..parts")]
+    [InlineData("under_score")]
+    public void Result_AddDetailRejectsInvalidKey(string key)
+    {
+        var exception = Assert.Throws<ArgumentException>(() =>
+            new AppSurfaceCanaryResult(
+                AppSurfaceCanaryStatus.Pass,
+                options => options.AddDetail(key, "value")));
+
+        Assert.Equal("key", exception.ParamName);
+    }
+
+    [Fact]
+    public void Result_AddDetailRejectsNullKeyAndValue()
+    {
+        Assert.Equal(
+            "key",
+            Assert.Throws<ArgumentNullException>(() =>
+                new AppSurfaceCanaryResult(
+                    AppSurfaceCanaryStatus.Pass,
+                    options => options.AddDetail(null!, "value"))).ParamName);
+        Assert.Equal(
+            "value",
+            Assert.Throws<ArgumentNullException>(() =>
+                new AppSurfaceCanaryResult(
+                    AppSurfaceCanaryStatus.Pass,
+                    options => options.AddDetail("proof.kind", null!))).ParamName);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("line\nbreak")]
+    public void Result_AddDetailRejectsInvalidValue(string value)
+    {
+        var exception = Assert.Throws<ArgumentException>(() =>
+            new AppSurfaceCanaryResult(
+                AppSurfaceCanaryStatus.Pass,
+                options => options.AddDetail("proof.kind", value)));
+
+        Assert.Equal("value", exception.ParamName);
+    }
+
+    [Fact]
+    public void Result_RejectsMalformedUnicodeInSummaryAndDetail()
+    {
+        var malformed = new string((char)0xD800, 1);
+
+        Assert.Equal(
+            "configure",
+            Assert.Throws<ArgumentException>(() =>
+                new AppSurfaceCanaryResult(
+                    AppSurfaceCanaryStatus.Pass,
+                    options => options.Summary = malformed)).ParamName);
+        Assert.Equal(
+            "value",
+            Assert.Throws<ArgumentException>(() =>
+                new AppSurfaceCanaryResult(
+                    AppSurfaceCanaryStatus.Pass,
+                    options => options.AddDetail("proof.kind", malformed))).ParamName);
+    }
+
+    [Fact]
+    public void Result_EnforcesUtf8ByteBoundaries()
+    {
+        var accepted = new string('\u00E9', 64);
+        var rejected = accepted + "a";
+        var maximumLengthKey = new string('a', 64);
+
+        var result = new AppSurfaceCanaryResult(
+            AppSurfaceCanaryStatus.Pass,
+            options => options.AddDetail(maximumLengthKey, accepted));
+        Assert.Equal(accepted, result.Details[maximumLengthKey]);
+
+        Assert.Equal(
+            "value",
+            Assert.Throws<ArgumentException>(() =>
+                new AppSurfaceCanaryResult(
+                    AppSurfaceCanaryStatus.Pass,
+                    options => options.AddDetail("proof.kind", rejected))).ParamName);
+    }
+
+    [Fact]
+    public void Result_AcceptsExactScalarAndCollectionLimits()
+    {
+        var reasonCode = $"a{new string('b', 62)}z";
+        var correlationId = $"a{new string('_', 126)}z";
+        var summary = new string('\u00E9', 128);
+
+        var result = new AppSurfaceCanaryResult(
+            AppSurfaceCanaryStatus.Stale,
+            options =>
+            {
+                options.MatchedCount = 0;
+                options.ReasonCode = reasonCode;
+                options.CorrelationId = correlationId;
+                options.Summary = summary;
+                for (var index = 0; index < 16; index++)
+                {
+                    options.AddDetail($"detail-{index}", "value");
+                }
+            });
+
+        Assert.Equal(reasonCode, result.ReasonCode);
+        Assert.Equal(correlationId, result.CorrelationId);
+        Assert.Equal(summary, result.Summary);
+        Assert.Equal(16, result.Details.Count);
+    }
+
+    [Fact]
+    public void Result_RejectsValuesImmediatelyBeyondScalarLimits()
+    {
+        Assert.Equal(
+            "configure",
+            Assert.Throws<ArgumentException>(() =>
+                new AppSurfaceCanaryResult(
+                    AppSurfaceCanaryStatus.Fail,
+                    options => options.ReasonCode = new string('a', 65))).ParamName);
+        Assert.Equal(
+            "configure",
+            Assert.Throws<ArgumentException>(() =>
+                new AppSurfaceCanaryResult(
+                    AppSurfaceCanaryStatus.Fail,
+                    options => options.CorrelationId = new string('a', 129))).ParamName);
+        Assert.Equal(
+            "configure",
+            Assert.Throws<ArgumentException>(() =>
+                new AppSurfaceCanaryResult(
+                    AppSurfaceCanaryStatus.Fail,
+                    options => options.Summary = new string('\u00E9', 129))).ParamName);
+        Assert.Equal(
+            "key",
+            Assert.Throws<ArgumentException>(() =>
+                new AppSurfaceCanaryResult(
+                    AppSurfaceCanaryStatus.Fail,
+                    options => options.AddDetail(new string('a', 65), "value"))).ParamName);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("UPPER")]
+    [InlineData("-leading")]
+    [InlineData("trailing-")]
+    [InlineData("under_score")]
+    public void Result_RejectsInvalidReasonCodeGrammar(string reasonCode)
+    {
+        var exception = Assert.Throws<ArgumentException>(() =>
+            new AppSurfaceCanaryResult(
+                AppSurfaceCanaryStatus.Fail,
+                options => options.ReasonCode = reasonCode));
+
+        Assert.Equal("configure", exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("-leading")]
+    [InlineData("trailing-")]
+    [InlineData("contains space")]
+    [InlineData("contains/slash")]
+    public void Result_RejectsInvalidCorrelationIdGrammar(string correlationId)
+    {
+        var exception = Assert.Throws<ArgumentException>(() =>
+            new AppSurfaceCanaryResult(
+                AppSurfaceCanaryStatus.Fail,
+                options => options.CorrelationId = correlationId));
+
+        Assert.Equal("configure", exception.ParamName);
+    }
+
+    [Fact]
+    public void Result_RejectsDuplicateAndSeventeenthDetailsImmediately()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            new AppSurfaceCanaryResult(
+                AppSurfaceCanaryStatus.Pass,
+                options =>
+                {
+                    options.AddDetail("duplicate", "one");
+                    options.AddDetail("duplicate", "two");
+                }));
+
+        Assert.Throws<InvalidOperationException>(() =>
+            new AppSurfaceCanaryResult(
+                AppSurfaceCanaryStatus.Pass,
+                options =>
+                {
+                    for (var index = 0; index < 17; index++)
+                    {
+                        options.AddDetail(
+                            $"detail-{index}",
+                            index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    }
+                }));
     }
 
     [Fact]
@@ -99,6 +402,7 @@ public sealed class AppSurfaceCanaryRegistrationTests
         Assert.Empty(canary.Tags);
         Assert.False(canary.MarkerRequired);
         Assert.False(canary.FreshSinceRequired);
+        Assert.Empty(canary.AllowedDetailKeys);
         Assert.Equal(typeof(PassingEvaluator), canary.EvaluatorType);
     }
 
@@ -122,12 +426,17 @@ public sealed class AppSurfaceCanaryRegistrationTests
                 options.RequireMarker();
                 options.RequireFreshSince();
                 options.RequireFreshSince();
+                options.AllowedDetailKeys.Add("provider.region");
+                options.AllowedDetailKeys.Add("proof.kind");
+                options.AllowedDetailKeys.Add("proof.kind");
             });
 
         captured!.DisplayName = "Changed later";
         captured.Description = "Changed later";
         captured.Tags.Clear();
         captured.Tags.Add("changed");
+        captured.AllowedDetailKeys.Clear();
+        captured.AllowedDetailKeys.Add("changed");
 
         var descriptor = GetDescriptor(services);
         Assert.Equal("Deploy proof", descriptor.DisplayName);
@@ -135,6 +444,83 @@ public sealed class AppSurfaceCanaryRegistrationTests
         Assert.Equal(new[] { "deploy", "z-last" }, descriptor.Tags);
         Assert.True(descriptor.MarkerRequired);
         Assert.True(descriptor.FreshSinceRequired);
+        Assert.True(
+            new HashSet<string>(descriptor.AllowedDetailKeys, StringComparer.Ordinal)
+                .SetEquals(new[] { "proof.kind", "provider.region" }));
+        Assert.False(descriptor.AllowedDetailKeys.Contains("changed"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("UPPER")]
+    [InlineData("-leading")]
+    [InlineData("trailing-")]
+    [InlineData("two..parts")]
+    [InlineData("under_score")]
+    public void AddAppSurfaceCanary_InvalidAllowedDetailKeyIsAtomic(string key)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton("existing");
+        var count = services.Count;
+
+        var exception = Assert.Throws<ArgumentException>(() =>
+            services.AddAppSurfaceCanary<PassingEvaluator>(
+                "proof",
+                options => options.AllowedDetailKeys.Add(key)));
+
+        Assert.Equal("configure", exception.ParamName);
+        Assert.StartsWith("ASCAN101", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(count, services.Count);
+    }
+
+    [Fact]
+    public void AddAppSurfaceCanary_NullOrSeventeenthAllowedDetailKeyIsAtomic()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton("existing");
+        var count = services.Count;
+
+        Assert.Equal(
+            "configure",
+            Assert.Throws<ArgumentException>(() =>
+                services.AddAppSurfaceCanary<PassingEvaluator>(
+                    "proof",
+                    options => options.AllowedDetailKeys.Add(null!))).ParamName);
+        Assert.Equal(count, services.Count);
+
+        Assert.Equal(
+            "configure",
+            Assert.Throws<ArgumentException>(() =>
+                services.AddAppSurfaceCanary<PassingEvaluator>(
+                    "proof",
+                    options =>
+                    {
+                        for (var index = 0; index < 17; index++)
+                        {
+                            options.AllowedDetailKeys.Add($"detail-{index}");
+                        }
+                    })).ParamName);
+        Assert.Equal(count, services.Count);
+    }
+
+    [Fact]
+    public void AddAppSurfaceCanary_AcceptsSixteenUniqueAllowedKeysAndDuplicateDeclarations()
+    {
+        var services = new ServiceCollection();
+
+        services.AddAppSurfaceCanary<PassingEvaluator>(
+            "proof",
+            options =>
+            {
+                for (var index = 0; index < 16; index++)
+                {
+                    options.AllowedDetailKeys.Add($"detail-{index}");
+                }
+
+                options.AllowedDetailKeys.Add("detail-0");
+            });
+
+        Assert.Equal(16, GetDescriptor(services).AllowedDetailKeys.Count);
     }
 
     [Theory]

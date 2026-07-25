@@ -269,12 +269,13 @@ public sealed class DurableScheduleClientContractTests
 
         Assert.Empty(result.Schedules);
         Assert.Equal("next", result.ContinuationToken);
+        Assert.Equal(
+            "next",
+            new DurableScheduleListRequest(ScopeId, continuationToken: result.ContinuationToken).ContinuationToken);
         Assert.Null(new DurableScheduleListResult([], null).ContinuationToken);
-        Assert.Throws<ArgumentNullException>(() => new DurableScheduleListResult(null!, null));
         Assert.Throws<ArgumentException>(() => new DurableScheduleListResult([], "bad token"));
-
-        var nextRequest = new DurableScheduleListRequest(ScopeId, continuationToken: result.ContinuationToken);
-        Assert.Equal(result.ContinuationToken, nextRequest.ContinuationToken);
+        Assert.Throws<ArgumentException>(() => new DurableScheduleListResult([], new string('a', 201)));
+        Assert.Throws<ArgumentNullException>(() => new DurableScheduleListResult(null!, null));
     }
 
     [Fact]

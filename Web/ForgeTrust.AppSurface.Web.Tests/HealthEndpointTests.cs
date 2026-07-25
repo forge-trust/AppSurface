@@ -27,8 +27,8 @@ public sealed class HealthEndpointTests
     {
         var options = new HealthOptions();
 
-        Assert.True(HealthOptions.Default.Enabled);
-        Assert.True(options.Enabled);
+        Assert.False(HealthOptions.Default.Enabled);
+        Assert.False(options.Enabled);
         Assert.Equal(AppSurfaceHealthEndpointDefaults.HealthPath, options.HealthPath);
         Assert.Equal(AppSurfaceHealthEndpointDefaults.ReadyPath, options.ReadyPath);
         Assert.Equal(AppSurfaceHealthCheckTags.Ready, options.ReadyTag);
@@ -44,7 +44,7 @@ public sealed class HealthEndpointTests
     [InlineData("/health/{id}")]
     public void HealthOptionsValidator_RejectsUnsafeHealthPaths(string path)
     {
-        var options = new HealthOptions { HealthPath = path };
+        var options = new HealthOptions { Enabled = true, HealthPath = path };
 
         var diagnostics = HealthOptionsValidator.Validate(options);
 
@@ -61,7 +61,7 @@ public sealed class HealthEndpointTests
     [InlineData("/ready/{id}")]
     public void HealthOptionsValidator_RejectsUnsafeReadyPaths(string path)
     {
-        var options = new HealthOptions { ReadyPath = path };
+        var options = new HealthOptions { Enabled = true, ReadyPath = path };
 
         var diagnostics = HealthOptionsValidator.Validate(options);
 
@@ -73,6 +73,7 @@ public sealed class HealthEndpointTests
     {
         var options = new HealthOptions
         {
+            Enabled = true,
             HealthPath = "/Probe",
             ReadyPath = "/probe/"
         };
@@ -85,7 +86,7 @@ public sealed class HealthEndpointTests
     [Fact]
     public void HealthOptionsValidator_RejectsBlankReadyTag()
     {
-        var options = new HealthOptions { ReadyTag = " " };
+        var options = new HealthOptions { Enabled = true, ReadyTag = " " };
 
         var diagnostics = HealthOptionsValidator.Validate(options);
 
@@ -93,7 +94,7 @@ public sealed class HealthEndpointTests
     }
 
     [Fact]
-    public async Task DefaultEndpoints_ReturnHealthy_WhenNoChecksRegistered()
+    public async Task EnabledEndpoints_ReturnHealthy_WhenNoChecksRegistered()
     {
         await using var app = await StartHostAsync();
 
@@ -102,6 +103,18 @@ public sealed class HealthEndpointTests
 
         await AssertProbeResponseAsync(health, HttpStatusCode.OK, "Healthy");
         await AssertProbeResponseAsync(ready, HttpStatusCode.OK, "Healthy");
+    }
+
+    [Fact]
+    public async Task ConfigureOptions_CanEnableHealth_WhenHelperDoesNotSetFlag()
+    {
+        await using var app = await StartHostAsync(
+            configureOptions: options => options.Health.Enabled = true,
+            enableHealth: null);
+
+        using var health = await app.Client.GetAsync(AppSurfaceHealthEndpointDefaults.HealthPath);
+
+        await AssertProbeResponseAsync(health, HttpStatusCode.OK, "Healthy");
     }
 
     [Fact]
@@ -223,15 +236,22 @@ public sealed class HealthEndpointTests
     }
 
     [Fact]
-    public async Task DisabledOptions_RemoveBothEndpoints()
+    public async Task DefaultOptions_DoNotRegisterServicesOrMapEndpoints()
     {
-        await using var app = await StartHostAsync(options => options.Health.Enabled = false);
+        await using var app = await StartHostAsync(enableHealth: null);
 
         using var health = await app.Client.GetAsync(AppSurfaceHealthEndpointDefaults.HealthPath);
         using var ready = await app.Client.GetAsync(AppSurfaceHealthEndpointDefaults.ReadyPath);
 
         Assert.Equal(HttpStatusCode.NotFound, health.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, ready.StatusCode);
+        Assert.DoesNotContain(
+            app.RouteEndpoints,
+            endpoint => endpoint.RoutePattern.RawText == AppSurfaceHealthEndpointDefaults.HealthPath);
+        Assert.DoesNotContain(
+            app.RouteEndpoints,
+            endpoint => endpoint.RoutePattern.RawText == AppSurfaceHealthEndpointDefaults.ReadyPath);
+        Assert.Null(app.Services.GetService<HealthCheckService>());
     }
 
     [Fact]
@@ -429,13 +449,22 @@ public sealed class HealthEndpointTests
         Action<WebOptions>? configureOptions = null,
         Action<IServiceCollection>? configureServices = null,
         Action<IEndpointRouteBuilder>? configureEndpoints = null,
-        Action<IApplicationBuilder>? configureEndpointAwareMiddleware = null)
+        Action<IApplicationBuilder>? configureEndpointAwareMiddleware = null,
+        bool? enableHealth = true)
     {
         var module = new TestWebModule(configureServices, configureEndpoints, configureEndpointAwareMiddleware);
         var startup = new TestWebStartup(module);
-        if (configureOptions is not null)
+        if (enableHealth.HasValue || configureOptions is not null)
         {
-            startup.WithOptions(configureOptions);
+            startup.WithOptions(options =>
+            {
+                if (enableHealth.HasValue)
+                {
+                    options.Health.Enabled = enableHealth.Value;
+                }
+
+                configureOptions?.Invoke(options);
+            });
         }
 
         var context = new StartupContext(["--environment", Environments.Development], module);
@@ -518,6 +547,8 @@ public sealed class HealthEndpointTests
 
     private sealed class RunningApp(IHost host, HttpClient client) : IAsyncDisposable
     {
+        public IServiceProvider Services => host.Services;
+
         public HttpClient Client { get; } = client;
 
         public IReadOnlyList<RouteEndpoint> RouteEndpoints { get; } =

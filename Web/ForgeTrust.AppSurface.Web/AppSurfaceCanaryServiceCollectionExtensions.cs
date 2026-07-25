@@ -15,7 +15,9 @@ public static class AppSurfaceCanaryServiceCollectionExtensions
     /// <typeparam name="TEvaluator">The concrete application-owned evaluator type.</typeparam>
     /// <param name="services">The service collection to update after validation succeeds.</param>
     /// <param name="name">The unique 1-128 character canary name.</param>
-    /// <param name="configure">An optional registration metadata and required-input callback.</param>
+    /// <param name="configure">
+    /// An optional callback that configures registration metadata, required inputs, and allowed result-detail keys.
+    /// </param>
     /// <returns>The original service collection.</returns>
     /// <remarks>
     /// Registration does not expose an HTTP endpoint. Call
@@ -24,7 +26,9 @@ public static class AppSurfaceCanaryServiceCollectionExtensions
     /// concrete type, so singleton, scoped, and transient overrides are supported.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> or <paramref name="name"/> is null.</exception>
-    /// <exception cref="ArgumentException">The name or configured registration metadata is invalid.</exception>
+    /// <exception cref="ArgumentException">
+    /// The name, configured registration metadata, or allowed detail-key declaration is invalid.
+    /// </exception>
     public static IServiceCollection AddAppSurfaceCanary<TEvaluator>(
         this IServiceCollection services,
         string name,

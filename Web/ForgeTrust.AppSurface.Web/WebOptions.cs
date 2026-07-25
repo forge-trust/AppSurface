@@ -56,9 +56,9 @@ public record WebOptions
     /// Gets or sets platform health and readiness probe endpoint configuration.
     /// </summary>
     /// <remarks>
-    /// Health endpoints are enabled by default. AppSurface maps public, minimal <c>/health</c> and <c>/ready</c>
-    /// endpoints for container and service-platform probes. Set <see cref="HealthOptions.Enabled"/> to
-    /// <see langword="false"/> when a host owns probe endpoints directly.
+    /// Health endpoints are disabled by default. Set <see cref="HealthOptions.Enabled"/> to <see langword="true"/> when
+    /// deployment or monitoring infrastructure consumes the public, minimal <c>/health</c> and <c>/ready</c> endpoints.
+    /// Leave the option disabled when the host owns probes directly or does not consume them.
     /// </remarks>
     public HealthOptions Health { get; set; } = new();
 
