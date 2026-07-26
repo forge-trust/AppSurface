@@ -2957,8 +2957,9 @@ public sealed class CoverageRunTests
         Assert.Equal("hello", result.Output);
     }
 
-    [Fact]
-    public async Task CliWrapCoverageRunProcessRunner_ShouldPropagateFatalOutputObserverFailures()
+    [Theory]
+    [MemberData(nameof(FatalOutputObserverFailures))]
+    public async Task CliWrapCoverageRunProcessRunner_ShouldPropagateFatalOutputObserverFailures(Exception expectedException)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -2968,16 +2969,25 @@ public sealed class CoverageRunTests
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
         var runner = new CliWrapCoverageRunProcessRunner();
 
-        await Assert.ThrowsAsync<OutOfMemoryException>(() => runner.RunAsync(
+        var exception = await Assert.ThrowsAnyAsync<Exception>(() => runner.RunAsync(
             new CoverageRunProcessRequest(
                 "/bin/sh",
                 ["-c", "printf hello"],
                 repo.Path,
                 null,
-                _ => throw new OutOfMemoryException("fatal observer failure"),
+                _ => throw expectedException,
                 CoverageRunProcessLease.Detached()),
             CancellationToken.None));
+
+        Assert.Same(expectedException, exception);
     }
+
+    public static TheoryData<Exception> FatalOutputObserverFailures =>
+    [
+        new OutOfMemoryException("fatal observer failure"),
+        new StackOverflowException("fatal observer failure"),
+        new AccessViolationException("fatal observer failure"),
+    ];
 
     private static async Task AssertUnsafeOutputAsync(
         CoverageRunWorkflow workflow,
@@ -3423,6 +3433,28 @@ public sealed class CoverageRunTests
             CancellationToken.None));
 
         Assert.Contains("tests/Sample.Tests/Sample.Tests.csproj [net10.0]: TestingPlatformDotnetTestSupport=true", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_Preflight_ShouldReportTargetFrameworkDuplicateRequiredPackageReference()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = CreateMultiTargetCapabilityRunner();
+        runner.CapabilityOutputsByFramework["net10.0"] = """
+            { "Properties": {}, "Items": { "PackageReference": [{ "Identity": "coverlet.collector" }, { "Identity": "COVERLET.COLLECTOR" }] } }
+            """;
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], DryRun: true, CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("tests/Sample.Tests/Sample.Tests.csproj [net10.0]: duplicate direct coverlet.collector", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("capability evaluation failed", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
