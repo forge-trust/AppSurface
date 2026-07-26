@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -13,6 +14,21 @@ internal sealed partial class PostgreSqlDurableFlowStore
 {
     private static readonly Uri Diagnostics =
         new("https://forge-trust.com/troubleshooting/durable-diagnostics");
+
+    private static readonly FrozenDictionary<string, DurableFlowState> PersistedStates =
+        new Dictionary<string, DurableFlowState>(StringComparer.Ordinal)
+        {
+            ["ready"] = DurableFlowState.Ready,
+            ["evaluating"] = DurableFlowState.Ready,
+            ["waiting_event"] = DurableFlowState.WaitingForEvent,
+            ["waiting_timer"] = DurableFlowState.WaitingForTimer,
+            ["waiting_activity"] = DurableFlowState.WaitingForActivity,
+            ["cancel_pending"] = DurableFlowState.CancelPending,
+            ["completed"] = DurableFlowState.Completed,
+            ["faulted"] = DurableFlowState.Faulted,
+            ["canceled"] = DurableFlowState.Canceled,
+            ["suspended"] = DurableFlowState.Suspended,
+        }.ToFrozenDictionary(StringComparer.Ordinal);
 
     private readonly NpgsqlDataSource _dataSource;
     private readonly Guid _runtimeEpoch;
@@ -92,7 +108,12 @@ internal sealed partial class PostgreSqlDurableFlowStore
                        runtime_epoch
                 FROM appsurface_durable.flow_instance
                 WHERE scope_id = @scope_id
-                  AND (@state IS NULL OR state = @state)
+                  AND
+                  (
+                    @state IS NULL
+                    OR state = @state
+                    OR (@state = 'ready' AND state = 'evaluating')
+                  )
                   AND
                   (
                     @requires_recovery IS NULL
@@ -418,19 +439,33 @@ internal sealed partial class PostgreSqlDurableFlowStore
             var revision = checked(current.Revision + 1);
             var dispatchId = Guid.NewGuid();
             const string winSql = """
+                WITH won_wait AS
+                (
                 UPDATE appsurface_durable.flow_wait
                 SET state = 'event_won', resolved_revision = @revision, resolved_at = clock_timestamp()
-                WHERE wait_id = @wait_id AND state = 'active';
-
+                WHERE wait_id = @wait_id AND state = 'active'
+                RETURNING wait_id
+                ),
+                superseded_timer AS
+                (
                 UPDATE appsurface_durable.flow_timer
                 SET state = 'superseded', resolved_at = clock_timestamp()
-                WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND state = 'scheduled';
-
+                WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id
+                  AND wait_id = @wait_id AND state = 'scheduled'
+                  AND EXISTS (SELECT 1 FROM won_wait)
+                RETURNING timer_id
+                ),
+                terminal_timer_dispatch AS
+                (
                 UPDATE appsurface_durable.flow_dispatch
                 SET state = 'terminal', updated_at = clock_timestamp()
-                WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id
-                  AND kind = 'timer' AND state IN ('available', 'leased');
-
+                WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND kind = 'timer'
+                  AND timer_id IN (SELECT timer_id FROM superseded_timer)
+                  AND state IN ('available', 'leased')
+                RETURNING dispatch_id
+                ),
+                projected_flow AS
+                (
                 UPDATE appsurface_durable.flow_instance
                 SET state = 'ready', revision = @revision, updated_at = clock_timestamp(),
                     runtime_epoch = @runtime_epoch,
@@ -442,15 +477,30 @@ internal sealed partial class PostgreSqlDurableFlowStore
                     resume_event_sha256 = @event_sha256,
                     resume_event_classification = @event_classification,
                     resume_event_retention = @event_retention
-                WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND revision = @prior_revision;
-
+                WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id
+                  AND revision = @prior_revision
+                  AND EXISTS (SELECT 1 FROM won_wait)
+                RETURNING revision
+                ),
+                projected_flow_dispatch AS
+                (
                 INSERT INTO appsurface_durable.flow_dispatch
                     (dispatch_id, scope_id, kind, flow_instance_id, due_at, state, expected_revision, priority)
-                VALUES
-                    (@dispatch_id, @scope_id, 'flow', @flow_instance_id, clock_timestamp(), 'available', @revision, 0)
+                SELECT
+                    @dispatch_id, @scope_id, 'flow', @flow_instance_id,
+                    clock_timestamp(), 'available', @revision, 0
+                FROM projected_flow
                 ON CONFLICT (scope_id, flow_instance_id) WHERE kind = 'flow'
                 DO UPDATE SET due_at = EXCLUDED.due_at, state = 'available',
-                              expected_revision = EXCLUDED.expected_revision, updated_at = clock_timestamp();
+                              expected_revision = EXCLUDED.expected_revision, updated_at = clock_timestamp()
+                RETURNING dispatch_id
+                )
+                SELECT
+                    (SELECT count(*) FROM won_wait),
+                    (SELECT count(*) FROM superseded_timer),
+                    (SELECT count(*) FROM terminal_timer_dispatch),
+                    (SELECT count(*) FROM projected_flow),
+                    (SELECT count(*) FROM projected_flow_dispatch);
                 """;
             await using (var win = new NpgsqlCommand(winSql, connection, transaction))
             {
@@ -463,7 +513,16 @@ internal sealed partial class PostgreSqlDurableFlowStore
                 AddNullablePayloadParameters(win, "event", request.Payload);
                 win.Parameters.AddWithValue("prior_revision", current.Revision);
                 win.Parameters.AddWithValue("dispatch_id", dispatchId);
-                _ = await win.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                await using var result = await win.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+                if (!await result.ReadAsync(cancellationToken).ConfigureAwait(false)
+                    || result.GetInt64(0) != 1
+                    || result.GetInt64(1) != result.GetInt64(2)
+                    || result.GetInt64(3) != 1
+                    || result.GetInt64(4) != 1)
+                {
+                    throw new InvalidOperationException(
+                        "Flow event did not resolve its wait, timer lineage, parent, and dispatch exactly once.");
+                }
             }
 
             await InsertCommandAsync(
@@ -724,6 +783,14 @@ internal sealed partial class PostgreSqlDurableFlowStore
             var revision = checked(current.Revision + 1);
             var terminal = nextState == "canceled";
             const string updateSql = """
+                WITH dispatch_evidence AS MATERIALIZED
+                (
+                    SELECT dispatch_id
+                    FROM appsurface_durable.flow_dispatch
+                    WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id
+                ),
+                projected_flow AS
+                (
                 UPDATE appsurface_durable.flow_instance
                 SET state = @state, revision = @revision, runtime_epoch = @runtime_epoch,
                     cancellation_requested_at =
@@ -733,15 +800,22 @@ internal sealed partial class PostgreSqlDurableFlowStore
                     suspended_from_state = NULL, suspension_descriptor = NULL,
                     lease_owner = NULL, lease_started_at = NULL, lease_expires_at = NULL,
                     updated_at = clock_timestamp()
-                WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND revision = @prior_revision;
-
+                WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND revision = @prior_revision
+                RETURNING revision
+                ),
+                projected_dispatch AS
+                (
                 UPDATE appsurface_durable.flow_dispatch
                 SET state = CASE WHEN @state = 'ready' THEN 'available'
                                  WHEN @state = 'suspended' OR @state = 'cancel_pending' THEN 'suspended'
                                  ELSE 'terminal' END,
                     expected_revision = @revision, updated_at = clock_timestamp()
-                WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id;
-
+                WHERE dispatch_id IN (SELECT dispatch_id FROM dispatch_evidence)
+                  AND EXISTS (SELECT 1 FROM projected_flow)
+                RETURNING dispatch_id
+                ),
+                projected_wait AS
+                (
                 UPDATE appsurface_durable.flow_wait
                 SET state = CASE WHEN @terminal THEN 'canceled'
                                  WHEN @is_release AND state = 'suspended' THEN 'active'
@@ -749,7 +823,15 @@ internal sealed partial class PostgreSqlDurableFlowStore
                     resolved_revision = CASE WHEN @terminal THEN @revision ELSE resolved_revision END,
                     resolved_at = CASE WHEN @terminal THEN clock_timestamp() ELSE resolved_at END
                 WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id
-                  AND state IN ('active', 'suspended');
+                  AND state IN ('active', 'suspended')
+                  AND EXISTS (SELECT 1 FROM projected_flow)
+                RETURNING wait_id
+                )
+                SELECT
+                    (SELECT count(*) FROM projected_flow),
+                    (SELECT count(*) FROM dispatch_evidence),
+                    (SELECT count(*) FROM projected_dispatch),
+                    (SELECT count(*) FROM projected_wait);
                 """;
             await using (var update = new NpgsqlCommand(updateSql, connection, transaction))
             {
@@ -765,7 +847,20 @@ internal sealed partial class PostgreSqlDurableFlowStore
                 update.Parameters.AddWithValue("scope_id", scopeId.Value);
                 update.Parameters.AddWithValue("flow_instance_id", instanceId.Value);
                 update.Parameters.AddWithValue("prior_revision", current.Revision);
-                _ = await update.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                await using var result = await update.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+                var requiresWaitProjection = current.State is
+                    "waiting_event" or "waiting_timer" or "waiting_activity" or "cancel_pending"
+                    || (current.State == "suspended" && linkedChild is not null);
+                if (!await result.ReadAsync(cancellationToken).ConfigureAwait(false)
+                    || result.GetInt64(0) != 1
+                    || result.GetInt64(1) == 0
+                    || result.GetInt64(1) != result.GetInt64(2)
+                    || result.GetInt64(3) > 1
+                    || (requiresWaitProjection && result.GetInt64(3) != 1))
+                {
+                    throw new InvalidOperationException(
+                        "Flow lifecycle command did not project its parent, dispatch, and wait lineage exactly once.");
+                }
             }
 
             await InsertCommandAsync(
@@ -1303,7 +1398,10 @@ internal sealed partial class PostgreSqlDurableFlowStore
         command.Parameters.AddWithValue("outcome", outcome);
         command.Parameters.AddWithValue("resulting_state", resultingState);
         command.Parameters.AddWithValue("resulting_revision", resultingRevision);
-        _ = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        {
+            throw new InvalidOperationException("Flow command evidence was not inserted exactly once.");
+        }
     }
 
     private static async ValueTask AppendHistoryAsync(
@@ -1336,7 +1434,10 @@ internal sealed partial class PostgreSqlDurableFlowStore
         });
         command.Parameters.AddWithValue("node_id", current.CurrentNodeId);
         command.Parameters.AddWithValue("transition_kind", eventType);
-        _ = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        {
+            throw new InvalidOperationException("Flow history evidence was not inserted exactly once.");
+        }
     }
 
     private async ValueTask NotifyAsync(
@@ -1393,19 +1494,10 @@ internal sealed partial class PostgreSqlDurableFlowStore
         _ => throw new ArgumentOutOfRangeException(nameof(state)),
     };
 
-    private static DurableFlowState ParseState(string state) => state switch
-    {
-        "ready" or "evaluating" => DurableFlowState.Ready,
-        "waiting_event" => DurableFlowState.WaitingForEvent,
-        "waiting_timer" => DurableFlowState.WaitingForTimer,
-        "waiting_activity" => DurableFlowState.WaitingForActivity,
-        "cancel_pending" => DurableFlowState.CancelPending,
-        "completed" => DurableFlowState.Completed,
-        "faulted" => DurableFlowState.Faulted,
-        "canceled" => DurableFlowState.Canceled,
-        "suspended" => DurableFlowState.Suspended,
-        _ => throw new InvalidOperationException($"Unknown persisted Flow state '{state}'."),
-    };
+    private static DurableFlowState ParseState(string state) =>
+        PersistedStates.TryGetValue(state, out var parsed)
+            ? parsed
+            : throw new InvalidOperationException($"Unknown persisted Flow state '{state}'.");
 
     private static string FormatClassification(DurableDataClassification classification) => classification switch
     {

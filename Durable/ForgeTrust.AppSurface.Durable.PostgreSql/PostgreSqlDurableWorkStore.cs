@@ -1848,6 +1848,19 @@ internal sealed class PostgreSqlDurableWorkStore
                 ORDER BY flow_instance_id
                 FOR UPDATE
             ),
+            dispatch_evidence AS MATERIALIZED
+            (
+                SELECT dispatch_id
+                FROM appsurface_durable.flow_dispatch AS dispatch
+                WHERE dispatch.scope_id = @scope_id
+                  AND dispatch.state <> 'terminal'
+                  AND EXISTS
+                  (
+                      SELECT 1
+                      FROM flow_evidence AS flow
+                      WHERE flow.flow_instance_id = dispatch.flow_instance_id
+                  )
+            ),
             projected_flow AS
             (
                 UPDATE appsurface_durable.flow_instance AS flow
@@ -1890,8 +1903,8 @@ internal sealed class PostgreSqlDurableWorkStore
                 FROM projected_flow AS flow
                 WHERE dispatch.scope_id = @scope_id
                   AND dispatch.flow_instance_id = flow.flow_instance_id
-                  AND dispatch.state <> 'terminal'
-                RETURNING dispatch.flow_instance_id
+                  AND dispatch.dispatch_id IN (SELECT dispatch_id FROM dispatch_evidence)
+                RETURNING dispatch.flow_instance_id, dispatch.kind
             ),
             historied AS
             (
@@ -1907,6 +1920,9 @@ internal sealed class PostgreSqlDurableWorkStore
             )
             SELECT
                 (SELECT count(*) FROM projected_flow),
+                (SELECT count(*) FROM dispatch_evidence),
+                (SELECT count(*) FROM projected_dispatch),
+                (SELECT count(DISTINCT flow_instance_id) FROM projected_dispatch),
                 (SELECT count(*) FROM historied);
             """;
         await using var command = new NpgsqlCommand(sql, connection, transaction);
@@ -1916,10 +1932,12 @@ internal sealed class PostgreSqlDurableWorkStore
         command.Parameters.AddWithValue("scope_disabled_code", DurableProblemCodes.ScopeDisabled);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
-            || reader.GetInt64(0) != reader.GetInt64(1))
+            || reader.GetInt64(0) != reader.GetInt64(3)
+            || reader.GetInt64(1) != reader.GetInt64(2)
+            || reader.GetInt64(0) != reader.GetInt64(4))
         {
             throw new InvalidOperationException(
-                "Scope disable did not project every authoritative Flow to history exactly once.");
+                "Scope disable did not project every authoritative Flow to dispatch and history exactly once.");
         }
     }
 

@@ -480,6 +480,11 @@ internal sealed partial class PostgreSqlDurableFlowStore
                     null,
                     claim.Revision);
             }
+            if (affected != 3)
+            {
+                throw new InvalidOperationException(
+                    $"Flow suspension expected three writes but PostgreSQL reported {affected}.");
+            }
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return new PostgreSqlFlowProcessingResult(
                 PostgreSqlFlowProcessingOutcome.Suspended,
@@ -768,7 +773,10 @@ internal sealed partial class PostgreSqlDurableFlowStore
             {
                 Value = contract.RetentionPolicyId ?? (object)DBNull.Value,
             });
-            _ = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+            {
+                throw new InvalidOperationException("Flow event wait was not inserted exactly once.");
+            }
         }
 
         if (timerId is null)
@@ -797,7 +805,10 @@ internal sealed partial class PostgreSqlDurableFlowStore
         timer.Parameters.AddWithValue("wait_id", waitId);
         timer.Parameters.AddWithValue("revision", revision);
         timer.Parameters.AddWithValue("duration", decision.Timeout!.Duration);
-        _ = await timer.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        if (await timer.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 2)
+        {
+            throw new InvalidOperationException("Flow timer and dispatch were not inserted exactly once.");
+        }
     }
 
     private static async ValueTask InsertActivityWaitAsync(
@@ -834,7 +845,10 @@ internal sealed partial class PostgreSqlDurableFlowStore
         command.Parameters.AddWithValue(
             "result_contract_version",
             activity.ResultContractVersion.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        _ = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        {
+            throw new InvalidOperationException("Flow activity wait was not inserted exactly once.");
+        }
     }
 
     internal async ValueTask<PostgreSqlFlowProcessingResult> TryResolveTimerAsync(
@@ -850,8 +864,18 @@ internal sealed partial class PostgreSqlDurableFlowStore
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            _ = await ValidateStoreSetScopeAndLockActiveScopeAsync(
+            var scopeGeneration = await ValidateStoreSetScopeAndLockActiveScopeAsync(
                 connection, transaction, candidate.ScopeId, createIfMissing: false, cancellationToken).ConfigureAwait(false);
+            if (scopeGeneration is null)
+            {
+                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                return new PostgreSqlFlowProcessingResult(
+                    PostgreSqlFlowProcessingOutcome.RaceLost,
+                    candidate.ScopeId,
+                    candidate.InstanceId,
+                    null,
+                    candidate.ExpectedRevision);
+            }
             var current = await LockCurrentAsync(
                 connection, transaction, candidate.ScopeId, candidate.InstanceId, cancellationToken).ConfigureAwait(false);
             if (current is null)
@@ -918,29 +942,55 @@ internal sealed partial class PostgreSqlDurableFlowStore
 
             var revision = checked(current.Revision + 1);
             const string resolveSql = """
+                WITH fired_timer AS
+                (
                 UPDATE appsurface_durable.flow_timer
                 SET state = 'fired', resolved_at = clock_timestamp(), updated_at = clock_timestamp()
-                WHERE timer_id = @timer_id AND state = 'scheduled';
-
+                WHERE timer_id = @timer_id AND state = 'scheduled'
+                RETURNING wait_id
+                ),
+                resolved_wait AS
+                (
                 UPDATE appsurface_durable.flow_wait
                 SET state = 'timer_won', resolved_revision = @revision,
                     resolved_at = clock_timestamp(), updated_at = clock_timestamp()
-                WHERE wait_id = @wait_id AND state = 'active';
-
+                WHERE wait_id = @wait_id AND state = 'active'
+                  AND EXISTS (SELECT 1 FROM fired_timer)
+                RETURNING wait_id
+                ),
+                terminal_timer_dispatch AS
+                (
                 UPDATE appsurface_durable.flow_dispatch
                 SET state = 'terminal', updated_at = clock_timestamp()
-                WHERE dispatch_id = @dispatch_id;
-
+                WHERE dispatch_id = @dispatch_id
+                  AND EXISTS (SELECT 1 FROM resolved_wait)
+                RETURNING dispatch_id
+                ),
+                projected_flow AS
+                (
                 UPDATE appsurface_durable.flow_instance
                 SET state = 'ready', revision = @revision, resume_event_name = @event_name,
                     resume_event_is_timeout = true, updated_at = clock_timestamp()
                 WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id
-                  AND revision = @prior_revision;
-
+                  AND revision = @prior_revision
+                  AND EXISTS (SELECT 1 FROM terminal_timer_dispatch)
+                RETURNING revision
+                ),
+                projected_flow_dispatch AS
+                (
                 UPDATE appsurface_durable.flow_dispatch
                 SET state = 'available', due_at = clock_timestamp(), expected_revision = @revision,
                     updated_at = clock_timestamp()
-                WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND kind = 'flow';
+                WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND kind = 'flow'
+                  AND EXISTS (SELECT 1 FROM projected_flow)
+                RETURNING dispatch_id
+                )
+                SELECT
+                    (SELECT count(*) FROM fired_timer),
+                    (SELECT count(*) FROM resolved_wait),
+                    (SELECT count(*) FROM terminal_timer_dispatch),
+                    (SELECT count(*) FROM projected_flow),
+                    (SELECT count(*) FROM projected_flow_dispatch);
                 """;
             await using var resolve = new NpgsqlCommand(resolveSql, connection, transaction);
             resolve.Parameters.AddWithValue("timer_id", candidate.TimerId.Value);
@@ -951,7 +1001,19 @@ internal sealed partial class PostgreSqlDurableFlowStore
             resolve.Parameters.AddWithValue("scope_id", candidate.ScopeId.Value);
             resolve.Parameters.AddWithValue("flow_instance_id", candidate.InstanceId.Value);
             resolve.Parameters.AddWithValue("prior_revision", current.Revision);
-            _ = await resolve.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            await using (var result = await resolve.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (!await result.ReadAsync(cancellationToken).ConfigureAwait(false)
+                    || result.GetInt64(0) != 1
+                    || result.GetInt64(1) != 1
+                    || result.GetInt64(2) != 1
+                    || result.GetInt64(3) != 1
+                    || result.GetInt64(4) != 1)
+                {
+                    throw new InvalidOperationException(
+                        "Timer resolution did not project the timer, wait, dispatches, and parent Flow exactly once.");
+                }
+            }
             await AppendHistoryAsync(
                 connection, transaction, current with { Revision = revision, State = "ready" },
                 "timer_won", commandId: null, cancellationToken).ConfigureAwait(false);
@@ -977,17 +1039,35 @@ internal sealed partial class PostgreSqlDurableFlowStore
         CancellationToken cancellationToken)
     {
         const string sql = """
+            WITH superseded_timer AS
+            (
             UPDATE appsurface_durable.flow_timer
             SET state = 'superseded', resolved_at = clock_timestamp(), updated_at = clock_timestamp()
-            WHERE timer_id = @timer_id AND state = 'scheduled';
+            WHERE timer_id = @timer_id AND state = 'scheduled'
+            RETURNING timer_id
+            ),
+            terminal_dispatch AS
+            (
             UPDATE appsurface_durable.flow_dispatch
             SET state = 'terminal', updated_at = clock_timestamp()
-            WHERE dispatch_id = @dispatch_id;
+            WHERE dispatch_id = @dispatch_id
+            RETURNING dispatch_id
+            )
+            SELECT
+                (SELECT count(*) FROM superseded_timer),
+                (SELECT count(*) FROM terminal_dispatch);
             """;
         await using var command = new NpgsqlCommand(sql, connection, transaction);
         command.Parameters.AddWithValue("timer_id", candidate.TimerId!.Value);
         command.Parameters.AddWithValue("dispatch_id", candidate.DispatchId);
-        _ = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            || reader.GetInt64(0) > 1
+            || reader.GetInt64(1) != 1)
+        {
+            throw new InvalidOperationException(
+                "Timer race loss did not retain exactly one terminal dispatch observation.");
+        }
     }
 
     private static DurableEncodedPayload ReadPayload(

@@ -154,7 +154,7 @@ CREATE TABLE appsurface_durable.flow_command
 );
 
 CREATE INDEX ix_flow_instance_list
-    ON appsurface_durable.flow_instance (scope_id, updated_at DESC, flow_instance_id);
+    ON appsurface_durable.flow_instance (scope_id, updated_at, flow_instance_id);
 
 CREATE UNIQUE INDEX ix_flow_command_start_idempotency
     ON appsurface_durable.flow_command (scope_id, start_idempotency_key)

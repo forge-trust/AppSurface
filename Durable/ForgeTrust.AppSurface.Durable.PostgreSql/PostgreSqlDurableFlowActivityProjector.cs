@@ -20,14 +20,18 @@ internal static class PostgreSqlDurableFlowActivityProjector
             ?? throw new InvalidOperationException("The Work projection transaction is no longer active.");
 
         const string lineageSql = """
-            SELECT flow_instance_id, wait_id, callsite_id
-            FROM appsurface_durable.flow_wait
-            WHERE scope_id = @scope_id AND child_work_id = @work_id
-              AND kind = 'activity' AND state IN ('active', 'suspended');
+            SELECT wait.flow_instance_id, wait.wait_id, wait.callsite_id,
+                   work.result_payload IS NOT NULL
+            FROM appsurface_durable.flow_wait AS wait
+            JOIN appsurface_durable.work AS work
+              ON work.scope_id = wait.scope_id AND work.work_id = wait.child_work_id
+            WHERE wait.scope_id = @scope_id AND wait.child_work_id = @work_id
+              AND wait.kind = 'activity' AND wait.state IN ('active', 'suspended');
             """;
         DurableFlowInstanceId? instanceId = null;
         Guid waitId = default;
         string? callsiteId = null;
+        var hasResultPayload = false;
         await using (var lineage = new NpgsqlCommand(lineageSql, connection, transaction))
         {
             lineage.Parameters.AddWithValue("scope_id", scopeId.Value);
@@ -38,6 +42,7 @@ internal static class PostgreSqlDurableFlowActivityProjector
                 instanceId = new DurableFlowInstanceId(reader.GetString(0));
                 waitId = reader.GetGuid(1);
                 callsiteId = reader.GetString(2);
+                hasResultPayload = reader.GetBoolean(3);
             }
         }
 
@@ -94,7 +99,7 @@ internal static class PostgreSqlDurableFlowActivityProjector
                 or DurableWorkState.Succeeded
                 or DurableWorkState.SucceededAfterCancelRequested;
         var revision = checked(flowRevision + 1);
-        if (succeeded && !canceledParent)
+        if (succeeded && !canceledParent && hasResultPayload)
         {
             await ProjectSuccessAsync(
                 connection,

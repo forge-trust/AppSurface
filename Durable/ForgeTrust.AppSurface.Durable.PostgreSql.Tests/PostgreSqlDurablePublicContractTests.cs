@@ -86,6 +86,41 @@ public sealed class PostgreSqlDurablePublicContractTests
             () => new PostgreSqlDurableFlowProcessorSettings(TimeSpan.FromMinutes(16)));
     }
 
+    [Fact]
+    public void FlowProcessor_RequiresExplicitDependenciesAndAcceptsExplicitConfiguration()
+    {
+        using var dataSource = NpgsqlDataSource.Create(
+            "Host=127.0.0.1;Port=5432;Database=durable_contracts;Username=durable");
+        var payloads = new DurablePayloadCodecRegistry();
+        var work = new DurableWorkRegistry([]);
+        var flows = new DurableFlowRegistry([], work, payloads);
+        var options = new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid());
+        var settings = new PostgreSqlDurableFlowProcessorSettings(TimeSpan.FromMinutes(1));
+
+        _ = new PostgreSqlDurableFlowProcessor(
+            dataSource,
+            dataSource,
+            flows,
+            work,
+            payloads,
+            options,
+            settings,
+            NoOpPostgreSqlDurableFlowBarrierObserver.Instance);
+
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableFlowProcessor(
+            null!, dataSource, flows, work, payloads, options));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableFlowProcessor(
+            dataSource, null!, flows, work, payloads, options));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableFlowProcessor(
+            dataSource, dataSource, null!, work, payloads, options));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableFlowProcessor(
+            dataSource, dataSource, flows, null!, payloads, options));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableFlowProcessor(
+            dataSource, dataSource, flows, work, null!, options));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableFlowProcessor(
+            dataSource, dataSource, flows, work, payloads, null!));
+    }
+
     [Theory]
     [InlineData("LOCALHOST", "localhost")]
     [InlineData(" localhost, 127.0.0.1 ", "localhost,127.0.0.1")]
