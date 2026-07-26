@@ -45,10 +45,12 @@ internal sealed record CoverageRunDriverInvocation(
 /// </param>
 /// <param name="CoverageFile">Canonical absolute Cobertura path when <paramref name="Status"/> is <c>produced</c>.</param>
 /// <param name="Cause">Stable diagnostic detail for a non-produced outcome, otherwise <see langword="null"/>.</param>
+/// <param name="CleanupDiagnostic">Best-effort staged-file cleanup warning that did not change the primary normalization outcome.</param>
 internal sealed record CoverageRunDriverNormalization(
     string Status,
     string? CoverageFile,
-    string? Cause = null);
+    string? Cause = null,
+    string? CleanupDiagnostic = null);
 
 /// <summary>
 /// Validates VSTest engine and direct package capabilities before coverage output is mutated.
@@ -545,12 +547,14 @@ internal static class CoverageRunDriverStrategy
     /// <param name="cancellationToken">Cancellation token for artifact inspection and staging.</param>
     /// <param name="commitGate">Optional gate that must authorize canonical artifact replacement.</param>
     /// <param name="beforeArtifactOpen">Optional test seam invoked after candidate discovery and before the artifact is opened.</param>
+    /// <param name="deleteStagedFile">Optional test seam that replaces deletion of the staged coverage file.</param>
     /// <returns>A stable normalization status and the canonical absolute artifact path only when produced.</returns>
     public static async Task<CoverageRunDriverNormalization> NormalizeDetailedAsync(
         CoverageRunDriverInvocation invocation,
         CancellationToken cancellationToken,
         Action<Action>? commitGate = null,
-        Action? beforeArtifactOpen = null)
+        Action? beforeArtifactOpen = null,
+        Action<string>? deleteStagedFile = null)
     {
         var canonical = Path.Join(invocation.ProjectOutputDirectory, "coverage.cobertura.xml");
         if (invocation.Driver == CoverageRunDriver.Msbuild)
@@ -580,12 +584,14 @@ internal static class CoverageRunDriverStrategy
                 : new CoverageRunDriverNormalization("multiple", null, $"multiple Cobertura files ({candidates.Length})");
         }
 
+        string? staged = null;
+        string? cleanupDiagnostic = null;
         try
         {
             var candidate = candidates[0];
             ValidatePhysicalContainment(rawDirectory, candidate);
             beforeArtifactOpen?.Invoke();
-            var staged = Path.Join(invocation.ProjectOutputDirectory, $".coverage.{Guid.NewGuid():N}.tmp");
+            staged = Path.Join(invocation.ProjectOutputDirectory, $".coverage.{Guid.NewGuid():N}.tmp");
             try
             {
                 await using (var output = new FileStream(staged, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true))
@@ -620,32 +626,34 @@ internal static class CoverageRunDriverStrategy
             }
             finally
             {
-                if (File.Exists(staged))
+                if (staged is { } stagedFile && File.Exists(stagedFile))
                 {
                     try
                     {
-                        File.Delete(staged);
+                        (deleteStagedFile ?? File.Delete)(stagedFile);
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
+                        cleanupDiagnostic = $"ASCOV123 Staged coverage artifact cleanup failed. Cause: {ex.GetType().Name}. The primary normalization outcome was retained; a temporary .coverage file may remain.";
                     }
                 }
             }
 
-            return new CoverageRunDriverNormalization("produced", canonical);
+            return new CoverageRunDriverNormalization("produced", canonical, CleanupDiagnostic: cleanupDiagnostic);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or XmlException or InvalidDataException or CoverageRunArtifactContractException)
         {
             if (ex is CoverageRunArtifactContractException contract)
             {
-                return new CoverageRunDriverNormalization(contract.Status, null, contract.Cause);
+                return new CoverageRunDriverNormalization(contract.Status, null, contract.Cause, cleanupDiagnostic);
             }
 
             var malformed = ex is XmlException or InvalidDataException;
             return new CoverageRunDriverNormalization(
                 malformed ? "malformed" : "unreadable",
                 null,
-                $"{(malformed ? "malformed" : "unreadable")} Cobertura ({ex.GetType().Name})");
+                $"{(malformed ? "malformed" : "unreadable")} Cobertura ({ex.GetType().Name})",
+                cleanupDiagnostic);
         }
     }
 

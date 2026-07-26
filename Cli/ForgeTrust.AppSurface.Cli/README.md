@@ -171,6 +171,8 @@ appsurface coverage run \
 
 `coverage run` is the public package-consumer coverage orchestrator for private .NET repositories. It supports `.sln` and `.slnx` discovery, repeated `--test-project` selection, a default output directory that matches `coverage gate`, bounded parallel scheduling, per-project logs, stable per-project artifact directories, safe cleanup of AppSurface-owned outputs, managed JUnit test-result artifacts, optional slow-test diagnostics, and a package-owned ReportGenerator merge. Package consumers do not need a separate merge step: the command finishes by writing the merged `coverage.cobertura.xml` artifact. It does not mutate consumer projects, install tools into the consumer repo, read the consumer `.config/dotnet-tools.json`, upload coverage, call GitHub APIs, or store trends.
 
+Per-project `coverage-normalization.log` files are the extended diagnostic channel for secondary cleanup warnings. They are deliberately separate from `dotnet-test.log`, which failed runs replay to the console. The same warning appears as `coverageCleanupDiagnostic`, with its `coverageCleanupLog` path, in `timings.json`; `coverageCleanupLog` is `null` when AppSurface could not append the warning. Treat a warning as evidence that a temporary `.coverage.*.tmp` file may remain; the primary normalization outcome and the test result keep their original outcome.
+
 The v1 contract assumes selected test projects use VSTest and are already instrumented with Coverlet. The default `collector` driver requires one direct `coverlet.collector` reference in every selected project. Native .NET 10 Microsoft Testing Platform execution is intentionally rejected because it uses a different runner and `coverlet.MTP`; see the [.NET test runner selection](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-test) and [Coverlet integration](https://github.com/coverlet-coverage/coverlet) guidance. No managed test result export happens by default. Use `--test-results junit` when AppSurface should own top-level JUnit artifacts, and make sure every selected test project references `JunitXml.TestLogger`. `junit` is the only managed test-result format supported in this release; `trx` and TUnit-compatible parsing are reserved for follow-up work. `--logger` remains raw `dotnet test` pass-through and does not create AppSurface-managed artifacts.
 
 The default schedule is input order. For repositories with enough projects for long-tail timing to matter, pass `--schedule longest-first` so non-exclusive projects with longer prior durations start first within each exclusive-project segment. The first run usually has no timing history and keeps unknown projects in input order; later runs can reuse the previous output directory's `timings.json` automatically.
@@ -286,13 +288,14 @@ Artifacts are local and private by default:
 
 - `coverage.cobertura.xml`: Merged Cobertura file consumed by `coverage gate`.
 - `summary.txt`: Human-readable merged line and branch coverage summary.
-- `timings.json`: Machine-readable build, test, merge, schedule, managed test-result, diagnostics, artifact, log, and exit-code data. Per-project entries include both `originalIndex` for stable artifact naming and `executionIndex` for the actual launch order. `executionStatus` is `pending`, `running`, `completed`, `terminated`, or `skipped-after-terminal`; `coverageArtifactStatus` is `produced`, `missing`, `multiple`, `unreadable`, `escaping`, `malformed`, or `skipped-after-terminal`. `coverageFile` is non-null only when the current invocation produced and normalized that artifact, so `--no-clean` cannot make a retained stale file look current. Terminal failures write a best-effort snapshot after launched projects are drained so automation can distinguish work that failed from work that never started.
+- `timings.json`: Machine-readable build, test, merge, schedule, managed test-result, diagnostics, artifact, log, and exit-code data. Per-project entries include both `originalIndex` for stable artifact naming and `executionIndex` for the actual launch order. `executionStatus` is `pending`, `running`, `completed`, `terminated`, or `skipped-after-terminal`; `coverageArtifactStatus` is `produced`, `missing`, `multiple`, `unreadable`, `escaping`, `malformed`, or `skipped-after-terminal`. `coverageCleanupLog` and `coverageCleanupDiagnostic` record a non-fatal staged-file cleanup warning and its dedicated log-append result; the path is `null` if the log append failed. `coverageFile` is non-null only when the current invocation produced and normalized that artifact, so `--no-clean` cannot make a retained stale file look current. Terminal failures write a best-effort snapshot after launched projects are drained so automation can distinguish work that failed from work that never started.
 - `reportgenerator-summary.txt`: Text summary from the package-owned ReportGenerator merge when available.
 - `junit-coverage-<index>-<project-name-hash>.xml`: AppSurface-managed JUnit test results when `--test-results junit` or `--slow-test-diagnostics` is used.
 - `slow-test-diagnostics.md` and `slow-test-diagnostics.json`: Slow-test evidence, parser warnings, metadata completeness, and diagnostic overhead when `--slow-test-diagnostics` is used.
 - `projects/<project-name-hash>/coverage.cobertura.xml`: Per-project Coverlet Cobertura output.
 - `projects/<project-name-hash>/collector-results/<run-id>/`: Unique raw collector attachment tree retained for diagnosis.
 - `projects/<project-name-hash>/dotnet-test.log`: Full `dotnet test` output for that project.
+- `projects/<project-name-hash>/coverage-normalization.log`: Secondary collector-artifact cleanup diagnostics that are intentionally not replayed to the console.
 - `coverage-watchdog.json`: Latest classified watchdog warning or termination, when one occurs.
 - `.appsurface-coverage-output`: Ownership marker containing `AppSurface coverage output directory`; it allows future runs to clean only known AppSurface-owned artifacts.
 
@@ -329,6 +332,7 @@ Use this GitHub Actions shape for a private pull request workflow that already h
       TestResults/coverage-merged/coverage-gate.json
       TestResults/coverage-merged/coverage-gate.md
       TestResults/coverage-merged/projects/**/dotnet-test.log
+      TestResults/coverage-merged/projects/**/coverage-normalization.log
 ```
 
 GitHub's default `pull_request` checkout is the synthetic merge commit. `fetch-depth: 2` brings in the merge commit and its base parent, so `--diff-base HEAD^1` reports the pull request changes as tested by the job without fetching the full repository. If `fetch-depth: 2` is omitted, `actions/checkout` fetches only `HEAD`, `HEAD^1` is unavailable, and the gate fails closed with `ASCOV010`. If a workflow checks out the pull request head instead, use a head-vs-base source for that same tree; do not reuse merge-ref coverage artifacts with a head diff.
@@ -453,6 +457,7 @@ Every `ASCOV###` diagnostic includes the problem, likely cause, exact fix, docs 
 | `ASCOV120` | One or more test, merge, or artifact steps failed. | Open `timings.json` and per-project logs listed above, fix failing tests, then rerun. |
 | `ASCOV121` | Fail-mode watchdog termination claimed the run. | Inspect the reported watchdog artifact path and project logs; if the path is unavailable, use the ASCOV122 detail, then fix the stall or tune the timeout and rerun. |
 | `ASCOV122` | A bounded watchdog artifact write or promotion failed. | Use a writable dedicated output directory; the process cancellation outcome remains authoritative. |
+| `ASCOV123` | A failed collector-artifact normalization also left its staged temporary file behind. | Inspect the project's `coverageCleanupLog` in `timings.json`, then remove the `.coverage.*.tmp` file after confirming no coverage run is active. |
 
 ### `appsurface coverage gate`
 
@@ -574,6 +579,7 @@ Use `coverage gate` after `coverage run`, or after any other private coverage wo
       TestResults/coverage-merged/coverage-gate.json
       TestResults/coverage-merged/coverage-gate.md
       TestResults/coverage-merged/projects/**/dotnet-test.log
+      TestResults/coverage-merged/projects/**/coverage-normalization.log
 ```
 
 For repositories with an existing coverage producer, replace the `coverage run` step and the `--coverage` path with the command and Cobertura file path your test setup actually produces.

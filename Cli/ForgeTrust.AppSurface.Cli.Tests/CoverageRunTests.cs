@@ -1063,6 +1063,7 @@ public sealed class CoverageRunTests
     [InlineData("summary.txt")]
     [InlineData(".appsurface-coverage-output")]
     [InlineData("projects/sample-tests/dotnet-test.log")]
+    [InlineData("projects/sample-tests/coverage-normalization.log")]
     [InlineData("projects/sample-tests/coverage.cobertura.xml")]
     public void OutputGuard_ShouldRejectExistingFixedArtifactSymlink(string relativePath)
     {
@@ -3722,6 +3723,123 @@ public sealed class CoverageRunTests
         Assert.True(produced);
         Assert.Contains("fresh", File.ReadAllText(canonical), StringComparison.Ordinal);
         Assert.Empty(Directory.EnumerateFiles(projectOutput, ".coverage.*.tmp", SearchOption.TopDirectoryOnly));
+    }
+
+    [Fact]
+    public async Task CollectorNormalization_ShouldReportStagedCleanupFailureWithoutChangingPrimaryOutcome()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var projectOutput = Path.Join(repo.Path, "project");
+        var raw = Path.Join(projectOutput, "collector-results", "0123456789abcdef0123456789abcdef");
+        Directory.CreateDirectory(raw);
+        repo.WriteFile("project/collector-results/0123456789abcdef0123456789abcdef/coverage.cobertura.xml", "<coverage marker=\"fresh\" />");
+        var invocation = new CoverageRunDriverInvocation(CoverageRunDriver.Collector, projectOutput, raw, []);
+
+        var result = await CoverageRunDriverStrategy.NormalizeDetailedAsync(
+            invocation,
+            CancellationToken.None,
+            commitGate: _ => throw new IOException("commit failed"),
+            deleteStagedFile: _ => throw new IOException("locked"));
+
+        Assert.Equal("unreadable", result.Status);
+        var cleanupDiagnostic = Assert.IsType<string>(result.CleanupDiagnostic);
+        Assert.Contains("ASCOV123", cleanupDiagnostic, StringComparison.Ordinal);
+        Assert.Contains("IOException", cleanupDiagnostic, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Join(projectOutput, "coverage.cobertura.xml")));
+        Assert.Single(Directory.EnumerateFiles(projectOutput, ".coverage.*.tmp", SearchOption.TopDirectoryOnly));
+    }
+
+    [Fact]
+    public async Task CoverageRunProjectLog_ShouldAppendCleanupDiagnosticWithoutConsoleOutput()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var logFile = repo.WriteFile("project/coverage-normalization.log", "prior diagnostic");
+
+        var result = await CoverageRunProjectLog.AppendCleanupDiagnosticAsync(
+            logFile,
+            "ASCOV123 Staged coverage artifact cleanup failed.",
+            CancellationToken.None);
+
+        Assert.True(result.Written);
+        Assert.Equal("ASCOV123 Staged coverage artifact cleanup failed.", result.Diagnostic);
+        Assert.Contains("[appsurface] ASCOV123 Staged coverage artifact cleanup failed.", File.ReadAllText(logFile), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CoverageRunProjectLog_ShouldRetainDiagnosticWhenTheLogCannotBeAppended()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var blockedPath = repo.WriteFile("blocked", "not a directory");
+
+        var result = await CoverageRunProjectLog.AppendCleanupDiagnosticAsync(
+            Path.Join(blockedPath, "dotnet-test.log"),
+            "ASCOV123 Staged coverage artifact cleanup failed.",
+            CancellationToken.None);
+
+        Assert.False(result.Written);
+        Assert.Contains("ASCOV123", result.Diagnostic, StringComparison.Ordinal);
+        Assert.Contains("DirectoryNotFoundException", result.Diagnostic, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldWriteStagedCleanupDiagnosticToLogAndTimingsWithoutConsoleOutput()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner { CoverageContent = "<not-coverage />" };
+        var workflow = new CoverageRunWorkflow(
+            runner,
+            new RecordingReportGenerator(),
+            TimeProvider.System,
+            deleteStagedCoverageFile: _ => throw new IOException("locked"));
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("ASCOV115", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("ASCOV123", console.ReadOutputString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("ASCOV123", console.ReadErrorString(), StringComparison.Ordinal);
+        var outputDirectory = Path.Join(repo.Path, "TestResults", "coverage-merged");
+        using var timings = System.Text.Json.JsonDocument.Parse(
+            File.ReadAllText(Path.Join(outputDirectory, "timings.json")));
+        var recordedProject = Assert.Single(timings.RootElement.GetProperty("projects").EnumerateArray());
+        var cleanupLog = Assert.IsType<string>(recordedProject.GetProperty("coverageCleanupLog").GetString());
+        Assert.EndsWith("/coverage-normalization.log", cleanupLog, StringComparison.Ordinal);
+        Assert.Contains("ASCOV123", recordedProject.GetProperty("coverageCleanupDiagnostic").GetString(), StringComparison.Ordinal);
+        Assert.Contains("[appsurface] ASCOV123", File.ReadAllText(Path.Join(outputDirectory, cleanupLog)), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldRecordCleanupDiagnosticWithoutLogPathWhenTheDedicatedLogAppendFails()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner { CoverageContent = "<not-coverage />" };
+        var workflow = new CoverageRunWorkflow(
+            runner,
+            new RecordingReportGenerator(),
+            TimeProvider.System,
+            deleteStagedCoverageFile: _ => throw new IOException("locked"),
+            appendCleanupDiagnostic: (_, diagnostic, _) => Task.FromResult(new CoverageRunDiagnosticLogWriteResult($"{diagnostic} Additionally, this warning could not be appended to the per-project log (IOException).", Written: false)));
+        using var console = new FakeInMemoryConsole();
+
+        await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], CoverageDriver: CoverageRunDriver.Collector),
+            console,
+            CancellationToken.None));
+
+        Assert.DoesNotContain("ASCOV123", console.ReadOutputString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("ASCOV123", console.ReadErrorString(), StringComparison.Ordinal);
+        using var timings = System.Text.Json.JsonDocument.Parse(
+            File.ReadAllText(Path.Join(repo.Path, "TestResults", "coverage-merged", "timings.json")));
+        var recordedProject = Assert.Single(timings.RootElement.GetProperty("projects").EnumerateArray());
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, recordedProject.GetProperty("coverageCleanupLog").ValueKind);
+        Assert.Contains("could not be appended", recordedProject.GetProperty("coverageCleanupDiagnostic").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]

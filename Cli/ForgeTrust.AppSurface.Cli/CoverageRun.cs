@@ -553,6 +553,8 @@ internal sealed class CoverageRunWorkflow
     private readonly Func<CancellationToken, Task>? _beforeSlowTestDiagnostics;
     private readonly Action? _summaryStaged;
     private readonly Action? _timingsStaged;
+    private readonly Action<string>? _deleteStagedCoverageFile;
+    private readonly Func<string, string, CancellationToken, Task<CoverageRunDiagnosticLogWriteResult>>? _appendCleanupDiagnostic;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CoverageRunWorkflow"/> class.
@@ -563,13 +565,17 @@ internal sealed class CoverageRunWorkflow
     /// <param name="beforeSlowTestDiagnostics">Optional test seam invoked after the supervised diagnostics operation starts.</param>
     /// <param name="summaryStaged">Optional test seam invoked after the text summary is staged and before its atomic commit.</param>
     /// <param name="timingsStaged">Optional test seam invoked after timings JSON is staged and before its atomic commit.</param>
+    /// <param name="deleteStagedCoverageFile">Optional test seam that replaces staged collector-artifact deletion.</param>
+    /// <param name="appendCleanupDiagnostic">Optional test seam that replaces writing a cleanup diagnostic to its dedicated log.</param>
     public CoverageRunWorkflow(
         ICoverageRunProcessRunner processRunner,
         ICoverageRunReportGenerator reportGenerator,
         TimeProvider timeProvider,
         Func<CancellationToken, Task>? beforeSlowTestDiagnostics = null,
         Action? summaryStaged = null,
-        Action? timingsStaged = null)
+        Action? timingsStaged = null,
+        Action<string>? deleteStagedCoverageFile = null,
+        Func<string, string, CancellationToken, Task<CoverageRunDiagnosticLogWriteResult>>? appendCleanupDiagnostic = null)
     {
         _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
         _reportGenerator = reportGenerator ?? throw new ArgumentNullException(nameof(reportGenerator));
@@ -577,6 +583,8 @@ internal sealed class CoverageRunWorkflow
         _beforeSlowTestDiagnostics = beforeSlowTestDiagnostics;
         _summaryStaged = summaryStaged;
         _timingsStaged = timingsStaged;
+        _deleteStagedCoverageFile = deleteStagedCoverageFile;
+        _appendCleanupDiagnostic = appendCleanupDiagnostic;
     }
 
     /// <summary>
@@ -1681,6 +1689,7 @@ internal sealed class CoverageRunWorkflow
         var projectOutputDirectory = Path.Join(outputDirectory, "projects", project.Slug);
         Directory.CreateDirectory(projectOutputDirectory);
         var logFile = Path.Join(projectOutputDirectory, "dotnet-test.log");
+        var cleanupLogFile = Path.Join(projectOutputDirectory, "coverage-normalization.log");
         var started = _timeProvider.GetTimestamp();
 
         await console.WriteOutputAsync(
@@ -1692,6 +1701,7 @@ internal sealed class CoverageRunWorkflow
         var args = CreateTestArguments(request, project, driverInvocation, testResults, skipBuildDuringTests);
         CoverageRunProcessResult processResult;
         CoverageRunDriverNormalization normalization;
+        string? cleanupLogPath = null;
         using (var operation = supervisor.Start(
                    "project",
                    project.RelativePath,
@@ -1708,7 +1718,20 @@ internal sealed class CoverageRunWorkflow
                 normalization = await CoverageRunDriverStrategy.NormalizeDetailedAsync(
                     driverInvocation,
                     cancellationToken,
-                    supervisor.Commit);
+                    supervisor.Commit,
+                    deleteStagedFile: _deleteStagedCoverageFile);
+                if (normalization.CleanupDiagnostic is not null)
+                {
+                    var cleanupLog = await (_appendCleanupDiagnostic ?? CoverageRunProjectLog.AppendCleanupDiagnosticAsync)(
+                        cleanupLogFile,
+                        normalization.CleanupDiagnostic,
+                        cancellationToken);
+                    normalization = normalization with
+                    {
+                        CleanupDiagnostic = cleanupLog.Diagnostic,
+                    };
+                    cleanupLogPath = cleanupLog.Written ? cleanupLogFile : null;
+                }
             }
             catch (OperationCanceledException)
             {
@@ -1743,7 +1766,9 @@ internal sealed class CoverageRunWorkflow
                 ? null
                 : Path.GetRelativePath(outputDirectory, driverInvocation.RawResultsDirectory).Replace('\\', '/'),
             normalization.Status,
-            normalization.Cause);
+            normalization.Cause,
+            cleanupLogPath,
+            normalization.CleanupDiagnostic);
     }
 
     private static IReadOnlyList<string> CreateTestArguments(
@@ -2135,6 +2160,10 @@ internal sealed class CoverageRunWorkflow
                         invocationDirectory = result?.InvocationDirectory,
                         coverageArtifactStatus = result?.CoverageArtifactStatus ?? "skipped-after-terminal",
                         coverageArtifactCause = result?.CoverageArtifactCause,
+                        coverageCleanupLog = result?.CoverageCleanupLogFile is null
+                            ? null
+                            : ToArtifactPath(outputDirectory, result.CoverageCleanupLogFile),
+                        coverageCleanupDiagnostic = result?.CoverageCleanupDiagnostic,
                         coverageFile = result?.CoverageFile is null
                             ? null
                             : ToArtifactPath(outputDirectory, result.CoverageFile),
@@ -2702,6 +2731,8 @@ internal sealed record CoverageSkippedProject(
 /// <param name="InvocationDirectory">Collector invocation directory relative to the run output, when applicable.</param>
 /// <param name="CoverageArtifactStatus">Current invocation artifact normalization status.</param>
 /// <param name="CoverageArtifactCause">Bounded failure cause when normalization did not produce an artifact.</param>
+/// <param name="CoverageCleanupLogFile">Dedicated non-replayed per-project cleanup diagnostic log, when a warning was recorded.</param>
+/// <param name="CoverageCleanupDiagnostic">Best-effort staged coverage cleanup warning, written to the dedicated diagnostic log without changing the project outcome.</param>
 internal sealed record CoverageProjectRunResult(
     int Index,
     int ExecutionIndex,
@@ -2717,7 +2748,47 @@ internal sealed record CoverageProjectRunResult(
     string? CoverageDriver = null,
     string? InvocationDirectory = null,
     string? CoverageArtifactStatus = null,
-    string? CoverageArtifactCause = null);
+    string? CoverageArtifactCause = null,
+    string? CoverageCleanupLogFile = null,
+    string? CoverageCleanupDiagnostic = null);
+
+/// <summary>
+/// Appends secondary coverage-run diagnostics to a non-replayed project-local log without changing the primary outcome.
+/// </summary>
+internal static class CoverageRunProjectLog
+{
+    /// <summary>
+    /// Appends a staged-artifact cleanup warning and preserves an actionable diagnostic when the log cannot be updated.
+    /// </summary>
+    /// <param name="logFile">AppSurface-owned non-replayed per-project diagnostic log path.</param>
+    /// <param name="diagnostic">Stable cleanup warning to append.</param>
+    /// <param name="cancellationToken">Cancellation token for asynchronous file I/O.</param>
+    /// <returns>The persisted diagnostic and whether it was appended to the requested log.</returns>
+    public static async Task<CoverageRunDiagnosticLogWriteResult> AppendCleanupDiagnosticAsync(
+        string logFile,
+        string diagnostic,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await File.AppendAllTextAsync(logFile, Environment.NewLine + "[appsurface] " + diagnostic + Environment.NewLine, cancellationToken);
+            return new CoverageRunDiagnosticLogWriteResult(diagnostic, Written: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException)
+        {
+            return new CoverageRunDiagnosticLogWriteResult(
+                $"{diagnostic} Additionally, this warning could not be appended to the per-project log ({ex.GetType().Name}).",
+                Written: false);
+        }
+    }
+}
+
+/// <summary>
+/// Result of attempting to append a secondary coverage diagnostic to its dedicated log.
+/// </summary>
+/// <param name="Diagnostic">Original or augmented diagnostic recorded in <c>timings.json</c>.</param>
+/// <param name="Written">Whether the dedicated diagnostic log contains <paramref name="Diagnostic"/>.</param>
+internal sealed record CoverageRunDiagnosticLogWriteResult(string Diagnostic, bool Written);
 
 /// <summary>
 /// Managed test result artifact requested by <c>coverage run</c>.
