@@ -2986,11 +2986,14 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         {
             observer(count);
         }
-        catch (Exception)
+        catch (Exception ex) when (!IsFatalException(ex))
         {
             // Output observation is diagnostic bookkeeping and must never fault process drains.
         }
     }
+
+    private static bool IsFatalException(Exception exception)
+        => exception is OutOfMemoryException or StackOverflowException or AccessViolationException;
 
     private static bool IsCommandLaunchFailure(Exception exception)
     {

@@ -1321,7 +1321,8 @@ public sealed class CoverageRunnerApplicationTests
             destination,
             CancellationToken.None);
 
-        Assert.Contains("numeric coverage attributes", failure, StringComparison.Ordinal);
+        Assert.Equal(CoverageRunnerApplication.CoberturaCommitFailureKind.InvalidCoverageCounts, failure!.Kind);
+        Assert.Contains("numeric coverage attributes", failure.Detail, StringComparison.Ordinal);
         Assert.Contains("previous", File.ReadAllText(destination), StringComparison.Ordinal);
         Assert.Empty(Directory.EnumerateFiles(workspace.Root, ".coverage.cobertura.xml.*.tmp"));
     }
@@ -1361,7 +1362,8 @@ public sealed class CoverageRunnerApplicationTests
             CancellationToken.None,
             () => throw new IOException("simulated commit failure"));
 
-        Assert.Contains("IOException", failure, StringComparison.Ordinal);
+        Assert.Equal(CoverageRunnerApplication.CoberturaCommitFailureKind.Unreadable, failure!.Kind);
+        Assert.Contains("IOException", failure.Detail, StringComparison.Ordinal);
         Assert.Contains("previous", File.ReadAllText(destination), StringComparison.Ordinal);
         Assert.Empty(Directory.EnumerateFiles(workspace.Root, ".coverage.cobertura.xml.*.tmp"));
     }

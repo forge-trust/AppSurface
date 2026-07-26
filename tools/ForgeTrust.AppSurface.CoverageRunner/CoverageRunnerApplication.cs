@@ -709,13 +709,13 @@ internal sealed class CoverageRunnerApplication
         var commitFailure = await CommitCoberturaAsync(mergedCoverage, canonicalCoverage, cancellationToken);
         if (commitFailure is not null)
         {
-            if (commitFailure.Contains("numeric coverage attributes", StringComparison.Ordinal))
+            if (commitFailure.Kind == CoberturaCommitFailureKind.InvalidCoverageCounts)
             {
                 await _standardError.WriteLineAsync($"Failed to parse numeric coverage attributes from {mergedCoverage}");
             }
             else
             {
-                await _standardError.WriteLineAsync($"Merged Cobertura artifact is invalid or could not be committed: {commitFailure}");
+                await _standardError.WriteLineAsync($"Merged Cobertura artifact is invalid or could not be committed: {commitFailure.Detail}");
             }
 
             return 1;
@@ -852,8 +852,8 @@ internal sealed class CoverageRunnerApplication
     /// <param name="destinationPath">Canonical output path to replace.</param>
     /// <param name="cancellationToken">Cancellation token observed before the atomic replacement.</param>
     /// <param name="beforeCommit">Optional test seam invoked after validation and before replacement.</param>
-    /// <returns><see langword="null"/> on success; otherwise a stable failure description.</returns>
-    internal static async Task<string?> CommitCoberturaAsync(
+    /// <returns><see langword="null"/> on success; otherwise a structured stable failure classification and detail.</returns>
+    internal static async Task<CoberturaCommitFailure?> CommitCoberturaAsync(
         string sourcePath,
         string destinationPath,
         CancellationToken cancellationToken,
@@ -876,7 +876,7 @@ internal sealed class CoverageRunnerApplication
                 var root = document.Root;
                 if (root is null || !string.Equals(root.Name.LocalName, "coverage", StringComparison.Ordinal))
                 {
-                    return "the document root is not 'coverage'";
+                    return new(CoberturaCommitFailureKind.InvalidDocument, "the document root is not 'coverage'");
                 }
 
                 if (!HasCoverageCountAttribute(root, "lines-covered")
@@ -884,7 +884,7 @@ internal sealed class CoverageRunnerApplication
                     || !HasCoverageCountAttribute(root, "branches-covered")
                     || !HasCoverageCountAttribute(root, "branches-valid"))
                 {
-                    return "required numeric coverage attributes are missing or invalid";
+                    return new(CoberturaCommitFailureKind.InvalidCoverageCounts, "required numeric coverage attributes are missing or invalid");
                 }
             }
 
@@ -900,7 +900,7 @@ internal sealed class CoverageRunnerApplication
         }
         catch (Exception ex) when (ex is XmlException or InvalidDataException or IOException or UnauthorizedAccessException)
         {
-            return $"the Cobertura file is unreadable or malformed ({ex.GetType().Name})";
+            return new(CoberturaCommitFailureKind.Unreadable, $"the Cobertura file is unreadable or malformed ({ex.GetType().Name})");
         }
         finally
         {
@@ -959,6 +959,28 @@ internal sealed class CoverageRunnerApplication
 
     private static bool HasCoverageCountAttribute(XElement root, string name)
         => ulong.TryParse(root.Attribute(name)?.Value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _);
+
+    /// <summary>
+    /// Classifies a failed Cobertura staging or validation attempt without deriving behavior from diagnostic text.
+    /// </summary>
+    internal enum CoberturaCommitFailureKind
+    {
+        /// <summary>The Cobertura XML shape is not valid for the canonical artifact.</summary>
+        InvalidDocument,
+
+        /// <summary>Required numeric coverage counts are missing or invalid.</summary>
+        InvalidCoverageCounts,
+
+        /// <summary>The source or staged artifact could not be read or committed.</summary>
+        Unreadable,
+    }
+
+    /// <summary>
+    /// Describes a failed Cobertura staging or validation attempt.
+    /// </summary>
+    /// <param name="Kind">Stable failure classification consumed by diagnostics.</param>
+    /// <param name="Detail">Human-readable failure detail.</param>
+    internal sealed record CoberturaCommitFailure(CoberturaCommitFailureKind Kind, string Detail);
 
     private static string CreateSiblingStagingPath(string destinationPath)
     {

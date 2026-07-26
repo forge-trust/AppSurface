@@ -156,7 +156,9 @@ public sealed class AppSurfaceCliReadmeContractTests
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Empty(staleLockFiles);
+        Assert.True(
+            staleLockFiles.Length == 0,
+            "Lock files still declare a direct coverlet.msbuild reference: " + string.Join(", ", staleLockFiles));
     }
 
     [Fact]
@@ -173,7 +175,9 @@ public sealed class AppSurfaceCliReadmeContractTests
     private static bool HasDirectMsbuildCoverageReference(string path)
     {
         using var document = JsonDocument.Parse(File.ReadAllText(path));
-        return document.RootElement.GetProperty("dependencies").EnumerateObject()
+        return document.RootElement.TryGetProperty("dependencies", out var dependencies)
+            && dependencies.ValueKind == JsonValueKind.Object
+            && dependencies.EnumerateObject()
             .Where(framework => framework.Value.ValueKind == JsonValueKind.Object)
             .SelectMany(framework => framework.Value.EnumerateObject())
             .Any(package => string.Equals(package.Name, "coverlet.msbuild", StringComparison.OrdinalIgnoreCase)
