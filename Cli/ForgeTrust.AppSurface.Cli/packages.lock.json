@@ -20,14 +20,6 @@
         "resolved": "5.5.10",
         "contentHash": "jtYGRv212OcCa6NUmHGEGcB3I8OBSpBjeywrivOWUG/VC1/Wb/v1GNP2Larx6yOUIulQveQ27U1R6nSuUSLXrw=="
       },
-      "AngleSharp.Css": {
-        "type": "Transitive",
-        "resolved": "0.17.0",
-        "contentHash": "bg0AcugmX6BFEi/DHG61QrwRU8iuiX4H8LZehdIzYdqOM/dgb3BsCTzNIcc1XADn4+xfQEdVwJYTSwUxroL4vg==",
-        "dependencies": {
-          "AngleSharp": "[0.17.0, 0.18.0)"
-        }
-      },
       "Microsoft.AspNetCore.Razor.Language": {
         "type": "Transitive",
         "resolved": "6.0.36",
@@ -348,13 +340,15 @@
         "type": "Project",
         "dependencies": {
           "Acornima": "[1.6.2, )",
+          "AngleSharp": "[1.5.2, 1.5.2]",
+          "AngleSharp.Css": "[1.0.0-beta.216, 1.0.0-beta.216]",
           "ForgeTrust.AppSurface.Auth": "[0.1.0, )",
           "ForgeTrust.AppSurface.Caching": "[0.1.0, )",
           "ForgeTrust.AppSurface.Config": "[0.1.0, )",
           "ForgeTrust.AppSurface.Intelligence": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web.Tailwind": "[0.1.0, )",
           "ForgeTrust.RazorWire": "[0.1.0, )",
-          "HtmlSanitizer": "[9.0.892, )",
+          "HtmlSanitizer": "[9.1.949-beta, 9.1.949-beta]",
           "Markdig": "[1.2.0, )",
           "Microsoft.CodeAnalysis.CSharp": "[5.0.0, )",
           "TextMateSharp": "[2.0.3, )",
@@ -422,7 +416,7 @@
       "forgetrust.razorwire.cli": {
         "type": "Project",
         "dependencies": {
-          "AngleSharp": "[0.17.1, )",
+          "AngleSharp": "[1.5.2, 1.5.2]",
           "CliFx": "[3.0.0, )",
           "CliWrap": "[3.10.1, )",
           "ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth": "[0.1.0, )",
@@ -440,18 +434,27 @@
       },
       "AngleSharp": {
         "type": "CentralTransitive",
-        "requested": "[0.17.1, )",
-        "resolved": "0.17.1",
-        "contentHash": "5MPI4bbixlwxb0W/smOMeIR+QlxMy5/5jD+WnIAw4pBC+7AhLPe5bS3cLgQMJyvd6q0A48sG+uYOt/ep406GLA=="
+        "requested": "[1.5.2, 1.5.2]",
+        "resolved": "1.5.2",
+        "contentHash": "LVZ7rrr6GHbhERhTgVDarVygl1e6KwE96pronA90LBOMacDhxR4lB+xYLjn/vlnUu+xbOB2RM9fuCPEx5bdyWA=="
+      },
+      "AngleSharp.Css": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.0-beta.216, 1.0.0-beta.216]",
+        "resolved": "1.0.0-beta.216",
+        "contentHash": "RVt/B1pp7HREgerDw8BVZSDC+Uqh+yeL/OGtu57mLLhBBPIQ1oSYrPKOYgdt0EZEK34l7BNCjx4BaQRNRN/ZIw==",
+        "dependencies": {
+          "AngleSharp": "[1.0.0, 2.0.0)"
+        }
       },
       "HtmlSanitizer": {
         "type": "CentralTransitive",
-        "requested": "[9.0.892, )",
-        "resolved": "9.0.892",
-        "contentHash": "zdkMmpNCjTkxna8Y+jmPIFm2st+HjHrf32yNElFYwe7L4GmDm+mdKR6TzDyf6ewJ0RUUz84D4IkHNgrwGi4VbQ==",
+        "requested": "[9.1.949-beta, 9.1.949-beta]",
+        "resolved": "9.1.949-beta",
+        "contentHash": "GVoi7inuj+8UKbxCBbONr1WnUR0kHnUtVLV4FChC2si9kARvoIQ7L5eNu/qlRjfCIBm+ygEbbdEiJ1cO6C+mZg==",
         "dependencies": {
-          "AngleSharp": "[0.17.1]",
-          "AngleSharp.Css": "[0.17.0]"
+          "AngleSharp": "1.5.1",
+          "AngleSharp.Css": "1.0.0-beta.216"
         }
       },
       "Markdig": {
