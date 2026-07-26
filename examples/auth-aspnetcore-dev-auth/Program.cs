@@ -95,3 +95,8 @@ app.MapGet(
 app.MapAppSurfaceDevAuth();
 
 await app.RunAsync();
+
+/// <summary>
+/// Internal entry point used by the focused example host regression tests.
+/// </summary>
+internal partial class Program;

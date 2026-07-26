@@ -278,8 +278,8 @@ packages:
   - project: Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj
     classification: public
     publish_decision: do_not_publish
-    publish_reason: Public-preview source contract held until the PostgreSQL provider milestone supplies conformance and restore evidence.
-    readiness_note: Publication is held until the PostgreSQL provider milestone supplies conformance and restore evidence.
+    publish_reason: Public-preview source contract remains held after the PostgreSQL provider milestone until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, and coordinated operational conformance.
+    readiness_note: Slice 3 supplies PostgreSQL Work conformance; publication remains held for the slices 4-6 coordinated release gate.
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
@@ -300,8 +300,8 @@ packages:
   - project: Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj
     classification: public
     publish_decision: do_not_publish
-    publish_reason: Public-preview source contract held until the PostgreSQL provider milestone supplies conformance and restore evidence.
-    readiness_note: Publication is held until the PostgreSQL provider milestone supplies conformance and restore evidence.
+    publish_reason: Public-preview Provider SPI remains held after the PostgreSQL provider milestone until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, and coordinated operational conformance.
+    readiness_note: Slice 3 supplies PostgreSQL Work conformance; publication remains held for the slices 4-6 coordinated release gate.
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
@@ -316,6 +316,37 @@ packages:
       - ForgeTrust.AppSurface.Durable
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Durable
+  - project: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj
+    classification: public
+    publish_decision: do_not_publish
+    publish_reason: PostgreSQL Work provider held until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, and coordinated operational conformance.
+    readiness_note: Slice 3 is source-only infrastructure conformance with no hosted worker or production activation.
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 48
+    use_when: Evaluate PostgreSQL-backed atomic Work acceptance and manually driven process-loss recovery from source without installing a hosted runtime.
+    includes: Explicit ordered schema management, StoreId and runtime-epoch fencing, caller-owned transaction acceptance, short-transaction Work client, scoped dispatch, leases, effect permits, retries, cancellation, terminal facts, and real PostgreSQL conformance proof.
+    does_not_include: Flow persistence, schedule execution, hosted polling, automatic startup DDL, health/drain hosting, endpoints, telemetry implementation, exactly-once external effects, destructive down migrations, or production support.
+    start_here_path: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
+    recipe_summary: Evaluate the held PostgreSQL source provider only when one database must atomically own domain mutation and durable Work acceptance; slice 3 starts no worker.
+    depends_on:
+      - ForgeTrust.AppSurface.Durable
+      - ForgeTrust.AppSurface.Durable.Provider
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Durable
+      - ForgeTrust.AppSurface.Durable.Provider
+  - project: Durable/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    publish_reason: Child-process crash-conformance helper used only by the PostgreSQL source-provider test suite.
+    product_family: internal_support
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 48
+    note: Internal executable test helper; it is not a hosted runtime, production worker, or package adoption surface.
   - project: Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj
     classification: public
     publish_decision: publish
@@ -323,7 +354,7 @@ packages:
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.2.0-preview.4.md
-    order: 48
+    order: 49
     use_when: Start here for CLI apps and worker-style entry points that should run through the AppSurface startup pipeline with CliFx.
     includes: ConsoleStartup, ConsoleApp, hosted command execution, and CliFx source-generated command discovery through AppSurface modules.
     does_not_include: ASP.NET Core hosting, OpenAPI surfaces, or Razor-based UI composition.

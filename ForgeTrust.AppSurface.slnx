@@ -57,6 +57,8 @@
     <Project Path="Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests.csproj" />
   </Folder>
   <Folder Name="/Durable/">
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj" />
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj" />
     <Project Path="Durable/ForgeTrust.AppSurface.Durable.Provider.Tests/ForgeTrust.AppSurface.Durable.Provider.Tests.csproj" />
     <Project Path="Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj" />
     <Project Path="Durable/ForgeTrust.AppSurface.Durable.Tests/ForgeTrust.AppSurface.Durable.Tests.csproj" />
@@ -66,6 +68,7 @@
     <Project Path="examples/auth-aspire-keycloak-apphost/AuthAspireKeycloakAppHost.csproj" />
     <Project Path="examples/auth-aspire-keycloak-verifier/AuthAspireKeycloakVerifier.csproj" />
     <Project Path="examples/auth-aspire-keycloak-web/AuthAspireKeycloakWeb.csproj" />
+    <Project Path="examples/auth-aspnetcore-dev-auth.tests/AuthAspNetCoreDevAuthExample.Tests.csproj" />
     <Project Path="examples/auth-aspnetcore-dev-auth/AuthAspNetCoreDevAuthExample.csproj" />
     <Project Path="examples/auth-aspnetcore-bridge/AuthAspNetCoreBridgeExample.csproj" />
     <Project Path="examples/auth-aspnetcore-oidc/AuthAspNetCoreOidcExample.csproj" />
