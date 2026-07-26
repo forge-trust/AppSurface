@@ -187,6 +187,7 @@ internal sealed class CoverageRunConsoleSink : IDisposable
         }
         catch (TimeoutException)
         {
+            // The ordered write is still blocked, so fall through to the bounded direct-write fallback.
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

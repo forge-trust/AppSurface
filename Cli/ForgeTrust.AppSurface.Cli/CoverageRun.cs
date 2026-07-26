@@ -1665,6 +1665,12 @@ internal sealed class CoverageRunWorkflow
             state.Result = await task;
             state.Status = "completed";
         }
+        catch (OperationCanceledException ex)
+        {
+            // Preserve cancellation as the terminal outcome after active projects have drained.
+            state.Status = "terminated";
+            terminalFailure ??= ExceptionDispatchInfo.Capture(ex);
+        }
         catch (Exception ex)
         {
             state.Status = "terminated";
