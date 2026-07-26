@@ -2957,6 +2957,28 @@ public sealed class CoverageRunTests
         Assert.Equal("hello", result.Output);
     }
 
+    [Fact]
+    public async Task CliWrapCoverageRunProcessRunner_ShouldPropagateFatalOutputObserverFailures()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var runner = new CliWrapCoverageRunProcessRunner();
+
+        await Assert.ThrowsAsync<OutOfMemoryException>(() => runner.RunAsync(
+            new CoverageRunProcessRequest(
+                "/bin/sh",
+                ["-c", "printf hello"],
+                repo.Path,
+                null,
+                _ => throw new OutOfMemoryException("fatal observer failure"),
+                CoverageRunProcessLease.Detached()),
+            CancellationToken.None));
+    }
+
     private static async Task AssertUnsafeOutputAsync(
         CoverageRunWorkflow workflow,
         IConsole console,

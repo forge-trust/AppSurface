@@ -161,6 +161,24 @@ public sealed class AppSurfaceCliReadmeContractTests
             "Lock files still declare a direct coverlet.msbuild reference: " + string.Join(", ", staleLockFiles));
     }
 
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{ \"dependencies\": [] }")]
+    public void LockFileWithoutObjectDependencies_ShouldNotReportDirectMsbuildReference(string contents)
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, contents);
+
+            Assert.False(HasDirectMsbuildCoverageReference(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public void RepositoryReadme_ShouldDocumentCoverageDriverPrerequisites()
     {

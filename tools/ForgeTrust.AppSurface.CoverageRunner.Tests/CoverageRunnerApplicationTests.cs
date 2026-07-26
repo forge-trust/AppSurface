@@ -1328,6 +1328,25 @@ public sealed class CoverageRunnerApplicationTests
     }
 
     [Fact]
+    public async Task CommitCoberturaAsync_ShouldClassifyUnexpectedDocumentRoot()
+    {
+        using var workspace = TestRepo.Create();
+        var destination = Path.Join(workspace.Root, "coverage.cobertura.xml");
+        var source = Path.Join(workspace.Root, "Cobertura.xml");
+        File.WriteAllText(source, "<not-coverage />");
+
+        var failure = await CoverageRunnerApplication.CommitCoberturaAsync(
+            source,
+            destination,
+            CancellationToken.None);
+
+        Assert.Equal(CoverageRunnerApplication.CoberturaCommitFailureKind.InvalidDocument, failure!.Kind);
+        Assert.Contains("document root", failure.Detail, StringComparison.Ordinal);
+        Assert.False(File.Exists(destination));
+        Assert.Empty(Directory.EnumerateFiles(workspace.Root, ".coverage.cobertura.xml.*.tmp"));
+    }
+
+    [Fact]
     public async Task CommitCoberturaAsync_ShouldPreserveCanonicalAndCleanStagingFileWhenCanceledBeforeCommit()
     {
         using var workspace = TestRepo.Create();
