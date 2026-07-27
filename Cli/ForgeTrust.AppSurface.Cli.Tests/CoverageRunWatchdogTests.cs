@@ -580,6 +580,25 @@ public sealed class CoverageRunWatchdogTests
     }
 
     [Fact]
+    public async Task ConsoleSink_ShouldContinueAfterBoundedOutputWriteTimeout()
+    {
+        using var output = new GatedCaptureWriteStream();
+        using var console = new FakeConsole(Stream.Null, output, Stream.Null);
+        using var sink = new CoverageRunConsoleSink(console, TimeSpan.FromMilliseconds(20));
+
+        var write = sink.WriteOutputAsync("bounded-output");
+        await output.FirstWriteStarted.WaitAsync(TimeSpan.FromSeconds(2));
+
+        await write.WaitAsync(TimeSpan.FromSeconds(1));
+
+        output.ReleaseFirstWrite();
+        await sink.WriteOutputAsync("queue-drained").WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Contains("bounded-output", output.ReadString(), StringComparison.Ordinal);
+        Assert.Contains("queue-drained", output.ReadString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ConsoleSink_ShouldFallbackCriticalErrorWithoutLateDuplicate()
     {
         using var output = new GatedCaptureWriteStream();

@@ -261,11 +261,13 @@ internal sealed class CoverageRunConsoleSink : IDisposable
         {
             await write.WaitAsync(_writeTimeout, cancellationToken);
         }
-        catch (TimeoutException)
+        catch (TimeoutException ex)
         {
+            Trace.WriteLine($"Coverage console write did not complete within {_writeTimeout}. The write remains observed in the background. Cause: {ex.Message}");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Trace.WriteLine($"Coverage console write failed after it entered the output queue. Cause: {ex.GetType().Name}: {ex.Message}");
         }
     }
 
