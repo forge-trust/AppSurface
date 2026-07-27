@@ -9,9 +9,10 @@ namespace ForgeTrust.AppSurface.Aspire.Testing;
 /// <remarks>
 /// Aspire 13.4.4 registers <see cref="IHost"/> as a singleton factory. The factory receives the root provider before
 /// host construction can fail, while <c>DistributedApplicationBuilder.Build()</c> does not otherwise expose that
-/// partial provider. This lease decorates the verified registration shape when it is present. If a consumer-selected
-/// Aspire version changes that shape, installation warns and yields to Aspire without the additional failed-build
-/// cleanup. A successful build transfers provider ownership to the returned distributed application by calling
+/// partial provider. This lease decorates the verified unkeyed registration shape when it is present and ignores
+/// unrelated keyed <see cref="IHost"/> registrations. If a consumer-selected Aspire version changes that shape,
+/// installation warns and yields to Aspire without the additional failed-build cleanup. A successful build transfers
+/// provider ownership to the returned distributed application by calling
 /// <see cref="Release"/>. Non-process-fatal failures dispose the lease immediately; process-fatal failures retain it
 /// for best-effort cleanup when the testing builder is later disposed.
 /// </remarks>
@@ -38,9 +39,9 @@ internal sealed class AspireBuildServiceProviderLease : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        var descriptor = services.LastOrDefault(candidate => candidate.ServiceType == typeof(IHost));
+        var descriptor = services.LastOrDefault(candidate =>
+            candidate.ServiceType == typeof(IHost) && !candidate.IsKeyedService);
         if (descriptor is null ||
-            descriptor.IsKeyedService ||
             descriptor.Lifetime != ServiceLifetime.Singleton ||
             descriptor.ImplementationFactory is null)
         {

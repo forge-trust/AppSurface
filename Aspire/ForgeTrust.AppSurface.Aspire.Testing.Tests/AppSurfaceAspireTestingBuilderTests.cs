@@ -616,6 +616,25 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
     }
 
     [Fact]
+    public async Task ProviderLease_IgnoresKeyedHostRegistrationAfterVerifiedFactory()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(_ => A.Fake<IHost>());
+        services.AddKeyedSingleton<IHost>("host", (_, _) => A.Fake<IHost>());
+        var lease = Assert.IsType<AspireBuildServiceProviderLease>(
+            AspireBuildServiceProviderLease.TryInstall(services));
+        var provider = new SynchronousServiceProviderProbe();
+        var descriptor = Assert.Single(services, candidate =>
+            candidate.ServiceType == typeof(IHost) && !candidate.IsKeyedService);
+
+        _ = Assert.IsAssignableFrom<Func<IServiceProvider, object>>(descriptor.ImplementationFactory)(provider);
+        await lease.DisposeAsync();
+
+        Assert.Single(services, candidate => candidate.ServiceType == typeof(IHost) && candidate.IsKeyedService);
+        Assert.Equal(1, provider.DisposeCount);
+    }
+
+    [Fact]
     public void ProviderLease_NonSingletonHostFactorySkipsCleanup()
     {
         var services = new ServiceCollection();
@@ -642,7 +661,9 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
             AspireBuildServiceProviderLease.TryInstall(services));
         var provider = new SynchronousServiceProviderProbe();
 
-        _ = Assert.IsAssignableFrom<Func<IServiceProvider, object>>(services[^1].ImplementationFactory)(provider);
+        var descriptor = Assert.Single(services, candidate => candidate.ServiceType == typeof(IHost));
+
+        _ = Assert.IsAssignableFrom<Func<IServiceProvider, object>>(descriptor.ImplementationFactory)(provider);
         await lease.DisposeAsync();
 
         Assert.Equal(1, provider.DisposeCount);
@@ -656,7 +677,8 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         var lease = Assert.IsType<AspireBuildServiceProviderLease>(
             AspireBuildServiceProviderLease.TryInstall(services));
         var provider = new SynchronousServiceProviderProbe();
-        var hostFactory = Assert.IsAssignableFrom<Func<IServiceProvider, object>>(services[^1].ImplementationFactory);
+        var descriptor = Assert.Single(services, candidate => candidate.ServiceType == typeof(IHost));
+        var hostFactory = Assert.IsAssignableFrom<Func<IServiceProvider, object>>(descriptor.ImplementationFactory);
 
         _ = hostFactory(provider);
         var exception = Assert.Throws<InvalidOperationException>(() => hostFactory(provider));

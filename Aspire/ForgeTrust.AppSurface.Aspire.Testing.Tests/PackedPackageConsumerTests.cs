@@ -5,6 +5,7 @@ using System.Xml.Linq;
 public sealed class PackedPackageConsumerTests
 {
     private const string PackageVersion = "0.0.0-consumer-override-proof";
+    private const string AspireOverrideVersion = "13.4.6";
 
     [Fact]
     [Trait("Category", "Integration")]
@@ -87,9 +88,9 @@ public sealed class PackedPackageConsumerTests
                   </PropertyGroup>
                   <ItemGroup>
                     <PackageReference Include="ForgeTrust.AppSurface.Aspire.Testing" Version="{{packedPackageVersion}}" />
-                    <PackageReference Include="Aspire.Hosting" Version="13.4.6" />
-                    <PackageReference Include="Aspire.Hosting.AppHost" Version="13.4.6" />
-                    <PackageReference Include="Aspire.Hosting.Testing" Version="13.4.6" />
+                    <PackageReference Include="Aspire.Hosting" Version="{{AspireOverrideVersion}}" />
+                    <PackageReference Include="Aspire.Hosting.AppHost" Version="{{AspireOverrideVersion}}" />
+                    <PackageReference Include="Aspire.Hosting.Testing" Version="{{AspireOverrideVersion}}" />
                   </ItemGroup>
                 </Project>
                 """);
@@ -172,7 +173,12 @@ public sealed class PackedPackageConsumerTests
                 ["build", "Consumer.csproj", "--configfile", nugetConfigPath, "--nologo"]);
             await RunDotNetAsync(
                 consumerDirectory,
-                ["run", "--project", "Consumer.csproj", "--no-build", "--no-restore"]);
+                ["run", "--project", "Consumer.csproj", "--no-build", "--no-restore"],
+                new Dictionary<string, string>
+                {
+                    ["ASPIRE_DCP_PATH"] = "dummy",
+                    ["ASPIRE_DASHBOARD_PATH"] = "dummy"
+                });
         }
         finally
         {
@@ -201,7 +207,10 @@ public sealed class PackedPackageConsumerTests
         return packageVersion;
     }
 
-    private static async Task RunDotNetAsync(string workingDirectory, IReadOnlyList<string> arguments)
+    private static async Task RunDotNetAsync(
+        string workingDirectory,
+        IReadOnlyList<string> arguments,
+        IReadOnlyDictionary<string, string>? environmentVariables = null)
     {
         using var process = new Process
         {
@@ -215,6 +224,14 @@ public sealed class PackedPackageConsumerTests
         };
         process.StartInfo.Environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
         process.StartInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
+        if (environmentVariables is not null)
+        {
+            foreach (var (name, value) in environmentVariables)
+            {
+                process.StartInfo.Environment[name] = value;
+            }
+        }
+
         foreach (var argument in arguments)
         {
             process.StartInfo.ArgumentList.Add(argument);
