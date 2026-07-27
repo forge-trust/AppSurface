@@ -143,6 +143,8 @@ Use this sequence for the coordinated [#678](https://github.com/forge-trust/AppS
 First prove the required asset tools are callable, then create work and artifact directories outside the checkout:
 
 ```bash
+set -euo pipefail
+
 node --version
 pnpm --version
 

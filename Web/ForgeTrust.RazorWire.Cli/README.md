@@ -47,7 +47,7 @@ dnx ForgeTrust.RazorWire.Cli@<version> --yes --source ./artifacts/packages -- ex
 The equivalent SDK spelling is:
 
 ```bash
-dotnet tool execute ForgeTrust.RazorWire.Cli@<version> --yes --source ./artifacts/packages -- export -o ./dist -p ./examples/razorwire-mvc/RazorWireWebExample.csproj
+dotnet tool exec ForgeTrust.RazorWire.Cli@<version> --yes --source ./artifacts/packages -- export -o ./dist -p ./examples/razorwire-mvc/RazorWireWebExample.csproj
 ```
 
 Install an exact local proof artifact into an isolated tool path when you need a stable `razorwire` command for verification:

@@ -692,6 +692,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [InlineData("[1.5.2,2.0.0")]
     [InlineData("[1.5.2,2.0.0,3.0.0)")]
     [InlineData("[1.x,2.0.0)")]
+    [InlineData("1..2")]
     [InlineData("[1.5.2,nope)")]
     [InlineData("[2.0.0,1.5.2)")]
     [InlineData("[1.5.2)")]
@@ -727,7 +728,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Theory]
     [InlineData("1.5.2")]
     [InlineData("1.5.2.3")]
+    [InlineData("[1.5.2]")]
     [InlineData("[1.5.2,)")]
+    [InlineData("(1.5.2,2.0.0)")]
     public void PackageArtifactValidator_AllowsStableAngleSharpRangeFromStablePackage(
         string angleSharpVersion)
     {

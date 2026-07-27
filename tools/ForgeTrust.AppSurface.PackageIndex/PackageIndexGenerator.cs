@@ -811,6 +811,8 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine("First prove the required asset tools are callable, then create work and artifact directories outside the checkout:");
         builder.AppendLine();
         builder.AppendLine("```bash");
+        builder.AppendLine("set -euo pipefail");
+        builder.AppendLine();
         builder.AppendLine("node --version");
         builder.AppendLine("pnpm --version");
         builder.AppendLine();
