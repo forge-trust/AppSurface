@@ -4,6 +4,21 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public class AppSurfaceDocsHtmlSanitizerTests
 {
+    [Theory]
+    [InlineData("text/html", "title")]
+    [InlineData("text/html", "style")]
+    [InlineData("application/xhtml+xml", "title")]
+    [InlineData("application/xhtml+xml", "style")]
+    public void Sanitize_ShouldRemoveAnnotationXmlAttributeBreakoutPayload(string encoding, string rcdataElement)
+    {
+        var sanitizer = new AppSurfaceDocsHtmlSanitizer();
+        var html = $"<math><annotation-xml encoding=\"{encoding}\"><{rcdataElement}><a encoding=\"</{rcdataElement}><img src=x onerror=alert()>\"></annotation-xml></math>";
+
+        var sanitized = sanitizer.Sanitize(html);
+
+        Assert.Equal(string.Empty, sanitized);
+    }
+
     [Fact]
     public void Sanitize_ShouldPreserveCodeHighlighterClassOnlyMarkup()
     {

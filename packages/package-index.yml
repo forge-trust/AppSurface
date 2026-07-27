@@ -437,17 +437,14 @@ packages:
       - ForgeTrust.AppSurface.Deployment
   - project: Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj
     classification: public
-    publish_decision: do_not_publish
-    publish_reason: Public-preview package held until pinned Aspire disposes or exposes partial host state created before a failed host construction.
+    publish_decision: publish
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/unreleased.md
-    readiness_blocker: "#668"
-    readiness_note: Aspire 13.4.4 leaks its partial host service provider when host construction fails after provider creation; publication remains blocked until the pinned dependency disposes or exposes that state.
     order: 61
     use_when: Add this to tests for an AppSurface profile-based AppHost when the resource graph must be created deterministically without invoking the asynchronous AppHost entry point.
-    includes: Typed AppHost, module, and profile selection; shared runtime graph composition; an Aspire-compatible configurable builder; one-build enforcement; and deterministic activation-host cleanup.
+    includes: Typed AppHost, module, and profile selection; shared runtime graph composition; an Aspire-compatible configurable builder; one-build enforcement; deterministic activation-host cleanup; and verified-shape Aspire failed-build provider cleanup with non-blocking compatibility warnings.
     does_not_include: Native AppHost replacement, CliFx option or positional-parameter binding, cross-assembly profiles, readiness policy, higher-level fixtures, or stable diagnostic codes.
     start_here_path: Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Aspire.Testing` to tests for profile-based AppHosts; native AppHosts should continue using Aspire's native testing API.
@@ -601,7 +598,8 @@ packages:
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
     order: 200
-    note: Reusable docs package for harvesting repository docs into an AppSurface Docs UI, with source harvesting, search, release archives, diagnostics, and the dark-family Theme Contract v1 for branded docs chrome. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps.
+    note: >-
+      Reusable docs package for harvesting repository docs into an AppSurface Docs UI, with source harvesting, search, release archives, diagnostics, and the dark-family Theme Contract v1 for branded docs chrome. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps. Its exact coordinated GHSA-pgww-w46g-26qg graph is `AngleSharp` `[1.5.2]`, `HtmlSanitizer` `[9.1.949-beta]`, and `AngleSharp.Css` `[1.0.0-beta.216]`; the beta pair is preview-only. Stable verification requires all three dependencies, rejects missing or malformed ranges and AngleSharp floors below 1.5.2, and blocks the beta pair until [issue #682](https://github.com/forge-trust/AppSurface/issues/682) lands compatible stable versions. The [Docs dependency security boundary](../Web/ForgeTrust.AppSurface.Docs/README.md#dependency-security-boundary) covers rendered package-documentation fragments, not general UGC or host CSP.
     start_here_path: Web/ForgeTrust.AppSurface.Docs/README.md
     start_here_label: AppSurface Docs README
     expected_dependency_package_ids:
@@ -697,11 +695,11 @@ packages:
     classification: excluded
     publish_decision: do_not_publish
     product_family: razorwire
-    publish_reason: "Held out of package publishing until issue #171 lands real .NET tool packaging and stable install guidance."
+    publish_reason: "Held out of package publishing until issue #171 lands real .NET tool packaging and stable install guidance; its proof-only bundled dependency graph is verification evidence, not authorization to publish."
     release_status: excluded
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
     order: 400
-    note: "Held out of the direct-install chooser until issue #171 lands real .NET tool packaging and stable install guidance."
+    note: "Held out of the direct-install chooser with `publish_decision: do_not_publish` until [issue #171](https://github.com/forge-trust/AppSurface/issues/171) lands real .NET tool packaging and stable install guidance. Its proof-only tool package bundles its coordinated dependency graph for artifact verification, but that proof is not authorization to publish it; see the [CLI boundary](../Web/ForgeTrust.RazorWire.Cli/README.md#installation)."
     start_here_path: Web/ForgeTrust.RazorWire.Cli/README.md
     start_here_label: RazorWire CLI README
