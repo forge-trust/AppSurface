@@ -572,6 +572,319 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Equal("ForgeTrust.AppSurface.Web", entry.PackageId);
     }
 
+    [Theory]
+    [InlineData("HtmlSanitizer", "[9.1.949-beta]")]
+    [InlineData("AngleSharp.Css", "[1.0.0-beta.216]")]
+    public void PackageArtifactValidator_RejectsPrereleaseDocsDependencyFromStablePackage(
+        string dependencyId,
+        string dependencyVersion)
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [dependencyId] = dependencyVersion
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+                artifactDirectory,
+                "1.0.0"));
+
+        Assert.Contains("ASPKG139", error.Message, StringComparison.Ordinal);
+        Assert.Contains(dependencyId, error.Message, StringComparison.Ordinal);
+        Assert.Contains(dependencyVersion, error.Message, StringComparison.Ordinal);
+        Assert.Contains("Problem:", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Cause:", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Fix:", error.Message, StringComparison.Ordinal);
+        Assert.Contains("v0.2.0 stable-exit requirement", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Docs: https://github.com/forge-trust/AppSurface/issues/682", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("AngleSharp")]
+    [InlineData("AngleSharp.Css")]
+    [InlineData("HtmlSanitizer")]
+    public void PackageArtifactValidator_RejectsMissingRequiredDocsDependencyFromStablePackage(string missingDependencyId)
+    {
+        var dependencies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["AngleSharp"] = "[1.5.2]",
+            ["AngleSharp.Css"] = "[1.0.0]",
+            ["HtmlSanitizer"] = "[9.2.0]"
+        };
+        dependencies.Remove(missingDependencyId);
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(artifactDirectory, "ForgeTrust.AppSurface.Docs", "1.0.0", dependencies);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+                artifactDirectory,
+                "1.0.0"));
+
+        Assert.Contains("ASPKG139", error.Message, StringComparison.Ordinal);
+        Assert.Contains($"'{missingDependencyId}' at '<missing>'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_RejectsVersionlessRequiredDocsDependencyFromStablePackage()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            EmptyDependencies,
+            dependencyXml: """
+                <dependencies>
+                  <dependency id="AngleSharp" version="[1.5.2]" />
+                  <dependency id="AngleSharp.Css" />
+                  <dependency id="HtmlSanitizer" version="[9.2.0]" />
+                </dependencies>
+                """);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+                artifactDirectory,
+                "1.0.0"));
+
+        Assert.Contains("'AngleSharp.Css' at '<versionless>'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_RejectsVulnerableAngleSharpFloorFromStablePackage()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["AngleSharp"] = "[0.17.1]",
+                ["AngleSharp.Css"] = "[1.0.0]",
+                ["HtmlSanitizer"] = "[9.2.0]"
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+                artifactDirectory,
+                "1.0.0"));
+
+        Assert.Contains("'AngleSharp' at '[0.17.1]'", error.Message, StringComparison.Ordinal);
+        Assert.Contains("below 1.5.2", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("1.5.2+")]
+    [InlineData("1.5.2,2.0.0)")]
+    [InlineData("[1.5.2,2.0.0")]
+    [InlineData("[1.5.2,2.0.0,3.0.0)")]
+    [InlineData("[1.x,2.0.0)")]
+    [InlineData("1..2")]
+    [InlineData("[1.5.2,nope)")]
+    [InlineData("[2.0.0,1.5.2)")]
+    [InlineData("[1.5.2)")]
+    [InlineData("(1.5.2)")]
+    [InlineData("1")]
+    [InlineData("1.5.x")]
+    [InlineData("1.5.2.3.4")]
+    public void PackageArtifactValidator_RejectsMalformedAngleSharpRangeFromStablePackage(
+        string angleSharpVersion)
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["AngleSharp"] = angleSharpVersion,
+                ["AngleSharp.Css"] = "[1.0.0]",
+                ["HtmlSanitizer"] = "[9.2.0]"
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+                artifactDirectory,
+                "1.0.0"));
+
+        Assert.Contains($"'AngleSharp' at '{angleSharpVersion}'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("1.5.2")]
+    [InlineData("1.5.2.3")]
+    [InlineData("[1.5.2]")]
+    [InlineData("[1.5.2,)")]
+    [InlineData("(1.5.2,2.0.0)")]
+    public void PackageArtifactValidator_AllowsStableAngleSharpRangeFromStablePackage(
+        string angleSharpVersion)
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["AngleSharp"] = angleSharpVersion,
+                ["AngleSharp.Css"] = "[1.0.0]",
+                ["HtmlSanitizer"] = "[9.2.0]"
+            });
+
+        var report = new PackageArtifactValidator().Validate(
+            CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+            artifactDirectory,
+            "1.0.0");
+
+        Assert.Single(report.Entries);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_RejectsPrereleaseDocsDependencyFromAnyDependencyGroup()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            EmptyDependencies,
+            dependencyXml: """
+                <dependencies>
+                  <group targetFramework="net10.0">
+                    <dependency id="HtmlSanitizer" version="[9.2.0]" />
+                  </group>
+                  <group targetFramework="net9.0">
+                    <dependency id="HtmlSanitizer" version="[9.1.949-beta]" />
+                  </group>
+                </dependencies>
+                """);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+                artifactDirectory,
+                "1.0.0"));
+
+        Assert.Contains("HtmlSanitizer", error.Message, StringComparison.Ordinal);
+        Assert.Contains("[9.1.949-beta]", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ReportsEveryNonStableDocsDependencyDeterministically()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["HtmlSanitizer"] = "not-a-version",
+                ["AngleSharp.Css"] = "[1.0.0-beta.216]"
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+                artifactDirectory,
+                "1.0.0"));
+
+        var cssIndex = error.Message.IndexOf("'AngleSharp.Css'", StringComparison.Ordinal);
+        var sanitizerIndex = error.Message.IndexOf("'HtmlSanitizer'", StringComparison.Ordinal);
+        Assert.True(cssIndex >= 0);
+        Assert.True(sanitizerIndex > cssIndex);
+        Assert.Contains("not-a-version", error.Message, StringComparison.Ordinal);
+        Assert.Contains("prerelease or malformed", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_AllowsPrereleaseDocsDependenciesForPreviewPackage()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0-preview.1",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["HtmlSanitizer"] = "[9.1.949-beta]",
+                ["AngleSharp.Css"] = "[1.0.0-beta.216]"
+            });
+
+        var report = new PackageArtifactValidator().Validate(
+            CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+            artifactDirectory,
+            "1.0.0-preview.1");
+
+        Assert.Single(report.Entries);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_AllowsStableDocsDependencyGraphForStablePackage()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["AngleSharp"] = "[1.5.2]",
+                ["HtmlSanitizer"] = "[9.2.0]",
+                ["AngleSharp.Css"] = "[1.0.0,2.0.0)"
+            });
+
+        var report = new PackageArtifactValidator().Validate(
+            CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+            artifactDirectory,
+            "1.0.0");
+
+        Assert.Single(report.Entries);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_DoesNotApplyDocsGuardToUnrelatedPackage()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web",
+            "1.0.0",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["HtmlSanitizer"] = "[9.1.949-beta]",
+                ["AngleSharp.Css"] = "[1.0.0-beta.216]"
+            });
+
+        var report = new PackageArtifactValidator().Validate(
+            CreateSinglePackagePlan("ForgeTrust.AppSurface.Web"),
+            artifactDirectory,
+            "1.0.0");
+
+        Assert.Single(report.Entries);
+    }
+
     [Fact]
     public void PackageArtifactValidator_ThrowsWhenToolSettingsCommandDoesNotMatchPlan()
     {
@@ -5923,6 +6236,18 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 "ForgeTrust.AppSurface.Web",
                 PackagePublishDecision.Publish,
                 ["ForgeTrust.AppSurface.Core"],
+                IsTool: false)
+        ]);
+    }
+
+    private static PackagePublishPlan CreateSinglePackagePlan(string packageId)
+    {
+        return new PackagePublishPlan([
+            new PackagePublishPlanEntry(
+                $"{packageId}/{packageId}.csproj",
+                packageId,
+                PackagePublishDecision.Publish,
+                [],
                 IsTool: false)
         ]);
     }
