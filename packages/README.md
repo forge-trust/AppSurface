@@ -113,7 +113,7 @@ Swipe to compare package details on narrow screens.
 
 ### Docs and proof hosts
 
-- `ForgeTrust.AppSurface.Docs`: Reusable docs package for harvesting repository docs into an AppSurface Docs UI, with source harvesting, search, release archives, diagnostics, and the dark-family Theme Contract v1 for branded docs chrome. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps. Release: proof host; not applicable; [notes](../releases/unreleased.md). Start here: [AppSurface Docs README](../Web/ForgeTrust.AppSurface.Docs/README.md)
+- `ForgeTrust.AppSurface.Docs`: Reusable docs package for harvesting repository docs into an AppSurface Docs UI, with source harvesting, search, release archives, diagnostics, and the dark-family Theme Contract v1 for branded docs chrome. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps. Its exact coordinated GHSA-pgww-w46g-26qg graph is `AngleSharp` `[1.5.2]`, `HtmlSanitizer` `[9.1.949-beta]`, and `AngleSharp.Css` `[1.0.0-beta.216]`; the beta pair is preview-only. Stable verification requires all three dependencies, rejects missing or malformed ranges and AngleSharp floors below 1.5.2, and blocks the beta pair until [issue #682](https://github.com/forge-trust/AppSurface/issues/682) lands compatible stable versions. The [Docs dependency security boundary](../Web/ForgeTrust.AppSurface.Docs/README.md#dependency-security-boundary) covers rendered package-documentation fragments, not general UGC or host CSP. Release: proof host; not applicable; [notes](../releases/unreleased.md). Start here: [AppSurface Docs README](../Web/ForgeTrust.AppSurface.Docs/README.md)
 - `ForgeTrust.AppSurface.Docs.Standalone`: Thin export host for serving or exporting AppSurface Docs. Treat it as a proof host and example app, not a package you install into another project. Release: publication held; proof host; not applicable; [notes](../releases/unreleased.md). Start here: [Standalone host README](../Web/ForgeTrust.AppSurface.Docs.Standalone/README.md)
 
 ### Not in the direct-install matrix
@@ -122,7 +122,7 @@ Swipe to compare package details on narrow screens.
 - `ForgeTrust.AppSurface.Durable.PostgreSql.TestHost`: Internal executable test helper; it is not a hosted runtime, production worker, or package adoption surface. Release: publication held; excluded; not applicable; [notes](../releases/unreleased.md).
 - `ForgeTrust.AppSurface.Web.Tailwind.Tasks`: Private compiled MSBuild task used by `ForgeTrust.AppSurface.Web.Tailwind`; consume it only through the packed Tailwind package. Release: publication held; excluded; not applicable; [notes](../releases/unreleased.md).
 - `ForgeTrust.AppSurface.Docs.ConsumerFixture`: Non-packable ASP.NET Core consumer fixture used by AppSurface Docs HTTP and Playwright regression tests. Release: publication held; excluded; not applicable; [notes](../releases/unreleased.md).
-- `ForgeTrust.RazorWire.Cli`: Held out of the direct-install chooser until issue #171 lands real .NET tool packaging and stable install guidance. Release: publication held; excluded; not applicable; [notes](../releases/unreleased.md).
+- `ForgeTrust.RazorWire.Cli`: Held out of the direct-install chooser with `publish_decision: do_not_publish` until [issue #171](https://github.com/forge-trust/AppSurface/issues/171) lands real .NET tool packaging and stable install guidance. Its proof-only tool package bundles its coordinated dependency graph for artifact verification, but that proof is not authorization to publish it; see the [CLI boundary](../Web/ForgeTrust.RazorWire.Cli/README.md#installation). Release: publication held; excluded; not applicable; [notes](../releases/unreleased.md).
 
 ## Maintainer notes
 
@@ -135,6 +135,68 @@ Swipe to compare package details on narrow screens.
 - Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata, project references, Tailwind runtime payloads, or the packaged coverage CLI. This pre-publish workflow installs the packed `ForgeTrust.AppSurface.Cli` tool from local artifacts, runs `coverage run`, `coverage merge`, a passing `coverage gate`, and an intentionally failing `coverage gate`, then writes `coverage-cli-consumer-proof.md` and blocks the publish manifest when the consumer proof fails.
 - Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- gate` before publishing rebrand or release metadata changes.
 - Keep `packages/README.md.yml` hand-authored so AppSurface Docs metadata, trust-bar copy, and section placement stay intentional.
+
+### Issue #678 package proof
+
+Use this sequence for the coordinated [#678](https://github.com/forge-trust/AppSurface/pull/678) parser and sanitizer graph. Run it sequentially: later inspection and install steps consume artifacts produced by earlier steps.
+
+First prove the required asset tools are callable, then create work and artifact directories outside the checkout:
+
+```bash
+set -euo pipefail
+
+node --version
+pnpm --version
+
+APPSURFACE_REPO_ROOT="$(git rev-parse --show-toplevel)"
+APPSURFACE_678_WORK="$(mktemp -d "/tmp/appsurface-678-work.XXXXXX")"
+APPSURFACE_678_ARTIFACTS="$(mktemp -d "/tmp/appsurface-678-artifacts.XXXXXX")"
+APPSURFACE_678_VERSION="0.2.0-preview.678"
+```
+
+Keep both temporary roots external. The repository build intentionally reads its centrally managed versions through `--repo-root`, but temporary consumer projects, tool manifests, and installs must not inherit the checkout's `Directory.Packages.props`; otherwise the proof can fail with unrelated central-package-management errors or accidentally reuse source policy instead of the packed contract. Preserve both paths when a step fails so the report and packages remain inspectable.
+
+Run the authoritative package workflow first:
+
+```bash
+dotnet run --project "$APPSURFACE_REPO_ROOT/tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj" -- \
+  verify-packages \
+  --repo-root "$APPSURFACE_REPO_ROOT" \
+  --package-version "$APPSURFACE_678_VERSION" \
+  --artifacts-output "$APPSURFACE_678_ARTIFACTS" \
+  --artifact-manifest "$APPSURFACE_678_ARTIFACTS/package-artifact-manifest.json" \
+  --report "$APPSURFACE_678_ARTIFACTS/package-validation-report.md" \
+  --coverage-proof-work-dir "$APPSURFACE_678_WORK/coverage-cli-consumer-proof" \
+  --coverage-proof-report "$APPSURFACE_678_ARTIFACTS/coverage-cli-consumer-proof.md"
+unzip -p "$APPSURFACE_678_ARTIFACTS/ForgeTrust.AppSurface.Docs.$APPSURFACE_678_VERSION.nupkg" '*.nuspec'
+```
+
+Inspect `ForgeTrust.AppSurface.Docs.$APPSURFACE_678_VERSION.nupkg` and its single `.nuspec` next. The Docs dependency group must contain exact equality entries for `AngleSharp` `[1.5.2]`, `HtmlSanitizer` `[9.1.949-beta]`, and `AngleSharp.Css` `[1.0.0-beta.216]`; a missing entry, a range, or a different resolved graph fails the proof. The beta pair is valid only for a preview package version. Stable verification fails with `ASPKG139` when any required dependency is missing, versionless, malformed, or prerelease, when the AngleSharp lower bound is below 1.5.2, or until [issue #682](https://github.com/forge-trust/AppSurface/issues/682) supplies compatible stable sanitizer and CSS versions.
+
+Finally prove the excluded RazorWire tool explicitly; `verify-packages` does not select `do_not_publish` entries:
+
+```bash
+mkdir -p "$APPSURFACE_678_ARTIFACTS/razorwire" "$APPSURFACE_678_WORK/razorwire-tool" "$APPSURFACE_678_WORK/razorwire-export"
+dotnet pack "$APPSURFACE_REPO_ROOT/Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj" \
+  --configuration Release --no-restore \
+  --output "$APPSURFACE_678_ARTIFACTS/razorwire" \
+  /p:EnableRazorWireCliToolPackaging=true \
+  /p:PackageVersion="$APPSURFACE_678_VERSION"
+unzip -p "$APPSURFACE_678_ARTIFACTS/razorwire/ForgeTrust.RazorWire.Cli.$APPSURFACE_678_VERSION.nupkg" '*.nuspec'
+dotnet tool install ForgeTrust.RazorWire.Cli \
+  --tool-path "$APPSURFACE_678_WORK/razorwire-tool" \
+  --source "$APPSURFACE_678_ARTIFACTS/razorwire" \
+  --version "$APPSURFACE_678_VERSION"
+"$APPSURFACE_678_WORK/razorwire-tool/razorwire" --help
+"$APPSURFACE_678_WORK/razorwire-tool/razorwire" export --help
+"$APPSURFACE_678_WORK/razorwire-tool/razorwire" export \
+  --project "$APPSURFACE_REPO_ROOT/examples/razorwire-mvc/RazorWireWebExample.csproj" \
+  --mode hybrid \
+  --output "$APPSURFACE_678_WORK/razorwire-export"
+test -f "$APPSURFACE_678_WORK/razorwire-export/index.html"
+```
+
+The tool package must have one `DotnetTool` package type, command `razorwire`, and no NuGet dependency group or `<dependency>` entries: its proof-only package bundles the closure under `tools/**`. Installation, both help surfaces, and the sample hybrid export must succeed. These checks do not change its excluded classification or `publish_decision: do_not_publish`, and the artifact must not be pushed.
 
 ### Redistributed payloads
 

@@ -17,6 +17,20 @@ This is the living release note for the next coordinated AppSurface version afte
 - [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) can now start long-running non-exclusive test projects earlier with `--schedule longest-first`. It reuses prior `timings.json` data when available, preserves integration and Playwright projects as exclusive barriers, supports explicit priority projects, fails invalid explicit timing or priority input before tests run, warns and preserves input order for unmeasured projects when inferred prior timings are missing or unusable, and keeps artifact names stable.
 - [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#exclude-discovered-test-projects) now supports repeatable `--exclude-test-project` segment globs for solution-discovered tests. Exclusions are normalized and case-insensitive, reject stale or malformed patterns before side effects, remain visible in list and dry-run output, preserve solution compilation, and are proven through the packaged CLI consumer with an excluded failing sentinel project.
 - The [ASP.NET Core DevAuth example](../examples/auth-aspnetcore-dev-auth/README.md#what-the-verifier-proves) now has deterministic, staged startup proof: synchronous build failures stop immediately, child exits and Kestrel readiness are observed separately, a child-owned listening record gates the real-loopback HTTP workflow, and cleanup targets only the recorded child. A child-scoped standard .NET host setting avoids configuration-reload stalls in restricted file-watcher environments without changing normal example or consumer behavior. Focused in-process host coverage complements rather than replaces the real-socket verifier, and failures preserve only bounded, sanitized, allowlisted evidence. This is a contributor-experience correction; it adds no package API, package or production-host runtime behavior, package version, or release implication.
+- The coordinated package graph now addresses
+  [GHSA-pgww-w46g-26qg](https://github.com/advisories/GHSA-pgww-w46g-26qg) by pinning AppSurface Docs to exact
+  `AngleSharp` `[1.5.2]`, `HtmlSanitizer` `[9.1.949-beta]`, and `AngleSharp.Css` `[1.0.0-beta.216]`
+  dependencies. This is a dependency-only upgrade: AppSurface Docs public APIs, registration, configuration, and consumer
+  usage are unchanged. The beta sanitizer/CSS pair is intentional only for preview releases; stable package verification
+  rejects either prerelease dependency until
+  [issue #682](https://github.com/forge-trust/AppSurface/issues/682) selects compatible stable versions. The
+  [Docs security boundary](../Web/ForgeTrust.AppSurface.Docs/README.md#dependency-security-boundary) remains narrow:
+  sanitization covers rendered package-documentation fragments, not general UGC or host CSP. The RazorWire CLI also
+  carries the coordinated parser upgrade in its proof-only bundled tool graph, but remains excluded with
+  `publish_decision: do_not_publish`; see its
+  [installation and publication boundary](../Web/ForgeTrust.RazorWire.Cli/README.md#installation). The sanitizer regression
+  proof passed all four Chromium variants: `text/html` and `application/xhtml+xml`, each exercised through `title` and
+  `style` RCDATA handling.
 - [`ForgeTrust.AppSurface.Web` named canary evaluation](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints) is now available in preview: applications register typed, application-owned proof
   evaluators and explicitly map one fixed protected route family. Completed evaluations add required `name`, `ready`, and
   `status` fields plus optional typed evidence, a marker fingerprint, and up to 16 registration-declared bounded details.
