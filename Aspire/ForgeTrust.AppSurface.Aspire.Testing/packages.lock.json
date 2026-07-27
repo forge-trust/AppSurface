@@ -4,7 +4,7 @@
     "net10.0": {
       "Aspire.Hosting": {
         "type": "Direct",
-        "requested": "[13.4.4, 13.4.4]",
+        "requested": "[13.4.4, )",
         "resolved": "13.4.4",
         "contentHash": "LdE2fAaXU9scaUsSHVZb1DdvjNofZM0Yea9KDBlLUMf1x+6SddQf6A/AtzcMclethZunfhs/Rkj+WFXuehlIMA==",
         "dependencies": {
@@ -39,7 +39,7 @@
       },
       "Aspire.Hosting.AppHost": {
         "type": "Direct",
-        "requested": "[13.4.4, 13.4.4]",
+        "requested": "[13.4.4, )",
         "resolved": "13.4.4",
         "contentHash": "cUSc3s0iZ8FTtgJpiBmugSchcQA2qdIQwa/b7GpxbDfBr2no3OANa3pi+FSgqNE3rOkc0IFe9X6cRGaXcDRaLQ==",
         "dependencies": {
@@ -76,7 +76,7 @@
       },
       "Aspire.Hosting.Testing": {
         "type": "Direct",
-        "requested": "[13.4.4, 13.4.4]",
+        "requested": "[13.4.4, )",
         "resolved": "13.4.4",
         "contentHash": "27VC4gqzb6Ln1gAqJKR5O6/Bqe3lP1kNPPZhb7xiG0ChEt1W2ZWv6xMIePIJCKbq2Pb1dASy17L5jtWESpfO5w==",
         "dependencies": {

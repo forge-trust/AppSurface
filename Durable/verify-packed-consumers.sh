@@ -26,6 +26,7 @@ projects=(
   "Workers/ForgeTrust.AppSurface.Workers/ForgeTrust.AppSurface.Workers.csproj"
   "Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj"
   "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj"
+  "Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj"
 )
 
 for project in "${projects[@]}"; do
@@ -60,7 +61,7 @@ export NUGET_PACKAGES="$WORK_DIR/packages"
 export DOTNET_CLI_HOME="$WORK_DIR/dotnet-home"
 mkdir -p "$NUGET_PACKAGES" "$DOTNET_CLI_HOME"
 
-for consumer in Adopter Provider; do
+for consumer in Adopter Provider PostgreSqlProvider; do
   consumer_dir="$WORK_DIR/$consumer"
   cp -R "$ROOT_DIR/Durable/packed-consumers/$consumer" "$consumer_dir"
   mv "$consumer_dir/$consumer.csproj.template" "$consumer_dir/$consumer.csproj"
