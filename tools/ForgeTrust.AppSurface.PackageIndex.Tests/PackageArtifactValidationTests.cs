@@ -686,6 +686,72 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("below 1.5.2", error.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("1.5.2+")]
+    [InlineData("1.5.2,2.0.0)")]
+    [InlineData("[1.5.2,2.0.0")]
+    [InlineData("[1.5.2,2.0.0,3.0.0)")]
+    [InlineData("[1.x,2.0.0)")]
+    [InlineData("[1.5.2,nope)")]
+    [InlineData("[2.0.0,1.5.2)")]
+    [InlineData("[1.5.2)")]
+    [InlineData("(1.5.2)")]
+    [InlineData("1")]
+    [InlineData("1.5.x")]
+    [InlineData("1.5.2.3.4")]
+    public void PackageArtifactValidator_RejectsMalformedAngleSharpRangeFromStablePackage(
+        string angleSharpVersion)
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["AngleSharp"] = angleSharpVersion,
+                ["AngleSharp.Css"] = "[1.0.0]",
+                ["HtmlSanitizer"] = "[9.2.0]"
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+                artifactDirectory,
+                "1.0.0"));
+
+        Assert.Contains($"'AngleSharp' at '{angleSharpVersion}'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("1.5.2")]
+    [InlineData("1.5.2.3")]
+    [InlineData("[1.5.2,)")]
+    public void PackageArtifactValidator_AllowsStableAngleSharpRangeFromStablePackage(
+        string angleSharpVersion)
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["AngleSharp"] = angleSharpVersion,
+                ["AngleSharp.Css"] = "[1.0.0]",
+                ["HtmlSanitizer"] = "[9.2.0]"
+            });
+
+        var report = new PackageArtifactValidator().Validate(
+            CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+            artifactDirectory,
+            "1.0.0");
+
+        Assert.Single(report.Entries);
+    }
+
     [Fact]
     public void PackageArtifactValidator_RejectsPrereleaseDocsDependencyFromAnyDependencyGroup()
     {
