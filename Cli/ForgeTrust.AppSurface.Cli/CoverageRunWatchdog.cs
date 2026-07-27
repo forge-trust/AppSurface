@@ -927,6 +927,8 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         }
         catch (Exception ex) when (ex is TimeoutException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
+            // Best-effort heartbeat write: ignore deadline/cancellation from the bounded wait
+            // when the caller has not requested cancellation.
         }
     }
 
