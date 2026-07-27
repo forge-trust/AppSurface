@@ -67,6 +67,7 @@ internal sealed record DocsSearchIndexMetadata(
 /// <param name="EntryPoints">Namespace README entry-point terms projected for richer search consumers.</param>
 /// <param name="Language">Normalized programming language for generated API documentation.</param>
 /// <param name="LanguageLabel">Reader-facing programming language label for generated API documentation.</param>
+/// <param name="SummaryPresentation">Optional bounded, display-only rich presentation for the raw summary.</param>
 internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("path")] string Path,
@@ -101,7 +102,30 @@ internal sealed record DocsSearchIndexDocument(
     string? Language = null,
     [property: JsonPropertyName("languageLabel")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    string? LanguageLabel = null);
+    string? LanguageLabel = null,
+    [property: JsonPropertyName("summaryPresentation")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<DocsSearchSummaryPresentationNode>? SummaryPresentation = null);
+
+/// <summary>
+/// A bounded, display-only Markdown projection for a docs search-result summary.
+/// </summary>
+/// <remarks>
+/// This representation intentionally exposes only text, strong, emphasis, and code nodes. It is not an HTML or
+/// hyperlink transport and is kept separate from <see cref="DocsSearchIndexDocument.Summary" /> so existing consumers
+/// retain the raw summary text they use for ranking or custom presentation.
+/// </remarks>
+/// <param name="Kind">The display node kind: <c>text</c>, <c>strong</c>, <c>emphasis</c>, or <c>code</c>.</param>
+/// <param name="Text">Leaf text for <c>text</c> and <c>code</c> nodes.</param>
+/// <param name="Children">Child display nodes for <c>strong</c> and <c>emphasis</c> nodes.</param>
+internal sealed record DocsSearchSummaryPresentationNode(
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("text")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? Text = null,
+    [property: JsonPropertyName("children")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<DocsSearchSummaryPresentationNode>? Children = null);
 
 /// <summary>
 /// Search projection for one namespace README entry point.
@@ -2080,6 +2104,7 @@ public class DocAggregator
                     var snippet = TruncateSnippetAtWordBoundary(bodyText, SearchSnippetMaxLength);
                     var title = ResolveSearchIndexTitle(d);
                     var summary = d.Metadata?.Summary ?? snippet;
+                    var summaryPresentation = DocsSearchSummaryPresentationProjector.Project(summary);
 
                     var headings = (d.Outline ?? [])
                         .Select(item => NormalizeSearchText(item.Title))
@@ -2120,7 +2145,8 @@ public class DocAggregator
                         d.Path,
                         entryPoints,
                         codeLanguage,
-                        codeLanguageLabel);
+                        codeLanguageLabel,
+                        summaryPresentation);
                 })
             .Where(r => r is not null)
             .Select(r => r!)

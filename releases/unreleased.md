@@ -4,6 +4,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
+- `ForgeTrust.AppSurface.Docs` search results now render a bounded, safe rich summary presentation for authored Markdown emphasis and inline code while preserving the existing schema-v1 `summary` field, ranking behavior, and legacy-client fallback. The additive optional `summaryPresentation` payload is display-only: it carries no HTML, attributes, or URLs; external clients can ignore it or validate it atomically and fall back to `summary` then `snippet`.
 - `ForgeTrust.RazorWire` now owns a deterministic Turbo 8.0.23 default: `<rw:scripts />` emits an exact package-carried, same-origin runtime before RazorWire, while explicit custom and host-managed policies cover app-owned same-origin files or fully host-owned URL, integrity, CSP, and load-order requirements. The upgrade from 8.0.12 is API-neutral and carries an explicit upstream-risk review plus focused Drive, Frame, Stream, form, island, and Behavior Kit compatibility evidence.
 - `ForgeTrust.RazorWire` Form Interactions now keeps duplicated mark-for-removal fields model-bindable by restoring the app-authored inactive value, defaulting to `false`, while identity and concurrency fields still clear. Combined duplicate, add, mark-delete, and submit workflows no longer fail with an empty Boolean value.
 

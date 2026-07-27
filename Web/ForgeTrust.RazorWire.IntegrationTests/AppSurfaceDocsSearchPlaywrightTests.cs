@@ -550,11 +550,19 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
                     "guide",
                     "Guide",
                     "guide",
-                    "Manage dependencies across AppSurface Docs projects.",
+                    "Manage **dependencies** with `AppSurface Docs`.",
                     component: "AppSurface Docs",
                     audience: "maintainer",
                     status: "stable",
-                    breadcrumbs: ["Guides", "Dependencies"]),
+                    breadcrumbs: ["Guides", "Dependencies"],
+                    summaryPresentation:
+                    [
+                        new { kind = "text", text = "Manage " },
+                        new { kind = "strong", children = new[] { new { kind = "text", text = "dependencies" } } },
+                        new { kind = "text", text = " with " },
+                        new { kind = "code", text = "AppSurface Docs" },
+                        new { kind = "text", text = "." }
+                    ]),
                 SearchDoc(
                     "guides/blank",
                     "Blank Snippet Dependency",
@@ -578,7 +586,15 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
 
         await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Guides");
         await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Dependency Guide");
-        await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Manage dependencies across AppSurface Docs projects.");
+        var richSnippet = page
+            .Locator(".docs-search-result")
+            .Filter(new LocatorFilterOptions { HasTextString = "Dependency Guide" })
+            .Locator(".docs-search-result-snippet");
+        await Assertions.Expect(richSnippet).ToHaveTextAsync("Manage dependencies with AppSurface Docs.");
+        await Assertions.Expect(richSnippet.Locator("strong")).ToHaveTextAsync("dependencies");
+        await Assertions.Expect(richSnippet.Locator("code")).ToHaveTextAsync("AppSurface Docs");
+        Assert.DoesNotContain("**", await richSnippet.InnerTextAsync(), StringComparison.Ordinal);
+        Assert.DoesNotContain("`", await richSnippet.InnerTextAsync(), StringComparison.Ordinal);
         await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Guide");
         await ExpectVisibleTextAsync(page, "#docs-search-page-results", "AppSurface Docs");
         await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Maintainer");
@@ -1092,7 +1108,8 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
         string status = "",
         string bodyText = "",
         string? path = null,
-        string[]? breadcrumbs = null)
+        string[]? breadcrumbs = null,
+        object[]? summaryPresentation = null)
     {
         var resolvedPath = path ?? (id.StartsWith("/docs/", StringComparison.Ordinal)
             ? id
@@ -1118,7 +1135,8 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
             navGroup = breadcrumbs?.FirstOrDefault() ?? string.Empty,
             order = 1,
             relatedPages = Array.Empty<string>(),
-            breadcrumbs = breadcrumbs ?? []
+            breadcrumbs = breadcrumbs ?? [],
+            summaryPresentation
         };
     }
 

@@ -110,10 +110,120 @@ test('createMiniSearchConfiguration includes all searchable and stored fields', 
   });
   assert.equal(config.searchOptions.prefix, true);
   assert.equal(config.searchOptions.fuzzy, 0.1);
+  assert.ok(config.storeFields.includes('summaryPresentation'));
   assert.ok(config.storeFields.includes('breadcrumbs'));
   assert.ok(config.storeFields.includes('status'));
   assert.ok(config.storeFields.includes('language'));
   assert.ok(config.storeFields.includes('languageLabel'));
+});
+
+test('normalizeSearchDocument accepts and normalizes valid summaryPresentation trees', async () => {
+  const { normalizeSearchDocument } = await loadSearchCore();
+
+  const doc = normalizeSearchDocument({
+    id: 'summary-presentation-valid',
+    path: '/docs/summary',
+    title: 'Summary presentation',
+    summaryPresentation: [
+      { kind: 'text', text: 'Start' },
+      { kind: 'strong', children: [{ kind: 'text', text: 'bold' }] },
+      {
+        kind: 'emphasis',
+        children: [
+          { kind: 'code', text: 'code' },
+          { kind: 'text', text: ' after code' }
+        ]
+      }
+    ]
+  });
+
+  assert.deepEqual(doc.summaryPresentation, [
+    { kind: 'text', text: 'Start' },
+    { kind: 'strong', children: [{ kind: 'text', text: 'bold' }] },
+    {
+      kind: 'emphasis',
+      children: [
+        { kind: 'code', text: 'code' },
+        { kind: 'text', text: ' after code' }
+      ]
+    }
+  ]);
+});
+
+test('normalizeSummaryPresentation rejects malformed, extra-key, and blank-leaf trees', async () => {
+  const { normalizeSearchDocument, normalizeSummaryPresentation } = await loadSearchCore();
+
+  assert.equal(normalizeSummaryPresentation([{ kind: 'code', text: '    ' }]), null);
+  assert.equal(normalizeSearchDocument({
+    id: 'summary-presentation-invalid-shape',
+    path: '/docs/summary',
+    title: 'Bad summary presentation',
+    summaryPresentation: [{ kind: 'script', text: 'danger' }]
+  }).summaryPresentation, undefined);
+  assert.equal(normalizeSearchDocument({
+    id: 'summary-presentation-invalid-extra-key',
+    path: '/docs/summary',
+    title: 'Bad summary presentation',
+    summaryPresentation: [{ kind: 'text', text: 'ok', extra: true }]
+  }).summaryPresentation, undefined);
+  assert.equal(normalizeSearchDocument({
+    id: 'summary-presentation-invalid-container-extra-key',
+    path: '/docs/summary',
+    title: 'Bad summary presentation',
+    summaryPresentation: [{ kind: 'strong', children: [{ kind: 'text', text: 'ok' }], style: 'ignored' }]
+  }).summaryPresentation, undefined);
+  assert.equal(normalizeSearchDocument({
+    id: 'summary-presentation-no-wrapper',
+    path: '/docs/summary',
+    title: 'Bad summary presentation',
+    summaryPresentation: { kind: 'text', text: 'root must be array' }
+  }).summaryPresentation, undefined);
+  assert.equal(normalizeSearchDocument({
+    id: 'summary-presentation-text-with-children',
+    path: '/docs/summary',
+    title: 'Bad summary presentation',
+    summaryPresentation: [{ kind: 'text', text: 'text', children: [] }]
+  }).summaryPresentation, undefined);
+});
+
+test('normalizeSummaryPresentation enforces depth and node-count bounds by code points', async () => {
+  const { normalizeSummaryPresentation } = await loadSearchCore();
+
+  let current = { kind: 'text', text: 'leaf' };
+
+  for (let index = 0; index < 8; index += 1) {
+    current = { kind: 'strong', children: [current] };
+  }
+
+  assert.equal(normalizeSummaryPresentation([current]), null);
+
+  current = { kind: 'text', text: 'leaf' };
+  for (let index = 0; index < 7; index += 1) {
+    current = { kind: 'strong', children: [current] };
+  }
+
+  assert.ok(normalizeSummaryPresentation([current]));
+
+  assert.equal(normalizeSummaryPresentation(Array.from({ length: 129 }, () => ({ kind: 'text', text: 'x' }))), null);
+  assert.deepEqual(
+    normalizeSummaryPresentation([
+      { kind: 'text', text: '😀'.repeat(1024) }
+    ]),
+    [{ kind: 'text', text: '😀'.repeat(1024) }]
+  );
+  assert.equal(
+    normalizeSummaryPresentation([
+      { kind: 'text', text: '😀'.repeat(1025) }
+    ]),
+    null
+  );
+  assert.equal(
+    normalizeSummaryPresentation([
+      { kind: 'text', text: '😀'.repeat(512) },
+      { kind: 'code', text: '😀'.repeat(513) }
+    ]),
+    null
+  );
 });
 
 test('rankSearchResults preserves exact lookup matches ahead of broad candidates', async () => {
