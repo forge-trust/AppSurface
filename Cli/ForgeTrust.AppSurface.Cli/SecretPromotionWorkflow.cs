@@ -636,9 +636,9 @@ internal sealed class SecretPromotionWorkflow(
         if (IsLocal(endpoint))
         {
             var localResult = context.Store.Get(IdentityFrom(row, context));
-            if (localResult.Status == LocalSecretResultStatus.Found && localResult.Value is not null)
+            if (localResult.Status == LocalSecretResultStatus.Found)
             {
-                value = localResult.Value;
+                value = localResult.Value ?? string.Empty;
                 return true;
             }
 

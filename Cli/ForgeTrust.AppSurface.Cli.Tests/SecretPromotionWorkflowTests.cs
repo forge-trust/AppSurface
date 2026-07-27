@@ -889,6 +889,37 @@ public sealed class SecretPromotionWorkflowTests
     }
 
     [Fact]
+    public void Apply_LocalFoundNullValue_WritesAnEmptyGooglePayload()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
+        var context = CreateContext(new NullValueMetadataStore());
+        var configPath = temp.WriteFile("promotion.json", LocalToGoogleConfiguration());
+        var planPath = PathUtils.PathUnder(temp.Path, "plan.json");
+        var google = new FakeGoogleClient();
+        google.Secrets["projects/staging/secrets/stripe-api-key"] = false;
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+        workflow.CreatePlan(new SecretPromotionPlanRequest(
+            configPath,
+            "local-to-staging",
+            planPath,
+            false,
+            TimeSpan.FromMinutes(10),
+            context));
+
+        var result = workflow.Apply(new SecretPromotionApplyRequest(
+            configPath,
+            planPath,
+            true,
+            null,
+            null,
+            null,
+            context));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(string.Empty, Assert.Single(google.WrittenValues));
+    }
+
+    [Fact]
     public void Plan_ExistingGoogleDestinationWithReplace_WouldAddVersion()
     {
         using var temp = TestTempDirectory.Create("appsurface-secret-promotion-");
@@ -1668,6 +1699,7 @@ public sealed class SecretPromotionWorkflowTests
         public Dictionary<string, byte[]> Versions { get; } = new(StringComparer.Ordinal);
         public HashSet<string> WrittenVersions { get; } = new(StringComparer.Ordinal);
         public List<string> Writes { get; } = [];
+        public List<string> WrittenValues { get; } = [];
         public int AccessCalls { get; private set; }
         public int SecretProbeCalls { get; private set; }
         public AppSurfaceGoogleSecretWriteResult? WriteOverride { get; set; }
@@ -1707,6 +1739,7 @@ public sealed class SecretPromotionWorkflowTests
             }
 
             Writes.Add(secretResourceName);
+            WrittenValues.Add(value);
             var versionResourceName = $"{secretResourceName}/versions/{Writes.Count}";
             WrittenVersions.Add(versionResourceName);
             return AppSurfaceGoogleSecretWriteResult.Written(secretResourceName, versionResourceName);
@@ -1743,6 +1776,28 @@ public sealed class SecretPromotionWorkflowTests
         public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity) => AppSurfaceLocalSecretResult.Missing(Name);
         public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix) => AppSurfaceLocalSecretListResult.Found([], Name);
         public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) => AppSurfaceLocalSecretResult.Found(string.Empty, Name);
+    }
+
+    private sealed class NullValueMetadataStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore
+    {
+        public string Name => "null-value";
+        public AppSurfaceLocalSecretResult Probe(AppSurfaceLocalSecretIdentity identity) =>
+            AppSurfaceLocalSecretResult.Found(string.Empty, Name);
+
+        public AppSurfaceLocalSecretResult Get(AppSurfaceLocalSecretIdentity identity) =>
+            new(LocalSecretResultStatus.Found, null, null, Name);
+
+        public AppSurfaceLocalSecretResult Set(AppSurfaceLocalSecretIdentity identity, string value) =>
+            AppSurfaceLocalSecretResult.Found(string.Empty, Name);
+
+        public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity) =>
+            AppSurfaceLocalSecretResult.Missing(Name);
+
+        public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix) =>
+            AppSurfaceLocalSecretListResult.Found([], Name);
+
+        public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) =>
+            AppSurfaceLocalSecretResult.Found(string.Empty, Name);
     }
 
     private sealed class ControlledMetadataStore(
