@@ -453,7 +453,7 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
     }
 
     [Fact]
-    public async Task BuildAsync_RealAspireFailureReproducesPinnedPartialHostLeak()
+    public async Task BuildAsync_RealAspireFailureDisposesCapturedPartialHostProvider()
     {
         var actualBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
         {
@@ -474,8 +474,309 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
 
         await Assert.ThrowsAsync<PartialHostBuildException>(() => builder.BuildAsync());
 
-        Assert.False(Assert.IsType<OwnedBuildProbe>(partialHostProbe).IsDisposed);
+        Assert.True(Assert.IsType<OwnedBuildProbe>(partialHostProbe).IsDisposed);
         Assert.Equal(1, activation.DisposeCount);
+    }
+
+    [Fact]
+    public async Task BuildAsync_RealAspireFailureDisposesAsyncOnlyPartialHostService()
+    {
+        var actualBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = [],
+            AssemblyName = typeof(TestAppHost).Assembly.GetName().Name,
+            ProjectDirectory = TestAppHost.ProjectPath,
+            DisableDashboard = true
+        });
+        AsyncOwnedBuildProbe? partialHostProbe = null;
+        actualBuilder.Services.AddSingleton<AsyncOwnedBuildProbe>();
+        actualBuilder.Services.AddSingleton<IHostLifetime>(services =>
+        {
+            partialHostProbe = services.GetRequiredService<AsyncOwnedBuildProbe>();
+            throw new PartialHostBuildException();
+        });
+        var activation = new AsyncOnlyDisposalProbe();
+        var builder = new AppSurfaceAspireProfileTestingBuilder(actualBuilder, activation);
+
+        await Assert.ThrowsAsync<PartialHostBuildException>(() => builder.BuildAsync());
+
+        Assert.True(Assert.IsType<AsyncOwnedBuildProbe>(partialHostProbe).IsDisposed);
+        Assert.Equal(1, activation.DisposeCount);
+    }
+
+    [Fact]
+    public async Task BuildAsync_PartialProviderCleanupFailureDoesNotReplaceBuildFailure()
+    {
+        var disposalOrder = new List<string>();
+        var warnings = new List<string>();
+        var actualBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = [],
+            AssemblyName = typeof(TestAppHost).Assembly.GetName().Name,
+            ProjectDirectory = TestAppHost.ProjectPath,
+            DisableDashboard = true
+        });
+        OrderedThrowingProviderDisposalProbe? partialHostProbe = null;
+        actualBuilder.Services.AddSingleton(_ => new OrderedThrowingProviderDisposalProbe(
+            disposalOrder,
+            new FormattingThrowingCleanupException()));
+        actualBuilder.Services.AddSingleton<IHostLifetime>(services =>
+        {
+            partialHostProbe = services.GetRequiredService<OrderedThrowingProviderDisposalProbe>();
+            throw new PartialHostBuildException();
+        });
+        var activation = new OrderedActivationDisposalProbe(disposalOrder);
+        var builder = new AppSurfaceAspireProfileTestingBuilder(actualBuilder, activation, warnings.Add);
+
+        await Assert.ThrowsAsync<PartialHostBuildException>(() => builder.BuildAsync());
+
+        Assert.Equal(1, Assert.IsType<OrderedThrowingProviderDisposalProbe>(partialHostProbe).DisposeCount);
+        Assert.Equal(["provider", "activation"], disposalOrder);
+        var warning = Assert.Single(warnings);
+        Assert.Contains("partial-provider cleanup failed", warning, StringComparison.Ordinal);
+        Assert.Contains(nameof(FormattingThrowingCleanupException), warning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BuildAsync_SuccessTransfersCapturedProviderOwnershipToApplication()
+    {
+        var actualBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = [],
+            AssemblyName = typeof(TestAppHost).Assembly.GetName().Name,
+            ProjectDirectory = TestAppHost.ProjectPath,
+            DisableDashboard = true
+        });
+        actualBuilder.Services.AddSingleton<OwnedBuildProbe>();
+        var activation = new AsyncOnlyDisposalProbe();
+        var builder = new AppSurfaceAspireProfileTestingBuilder(actualBuilder, activation);
+
+        var application = await builder.BuildAsync();
+        var ownedProbe = application.Services.GetRequiredService<OwnedBuildProbe>();
+
+        Assert.False(ownedProbe.IsDisposed);
+        await application.DisposeAsync();
+        Assert.True(ownedProbe.IsDisposed);
+        await builder.DisposeAsync();
+        Assert.Equal(1, ownedProbe.DisposeCount);
+        Assert.Equal(1, activation.DisposeCount);
+    }
+
+    [Fact]
+    public void ProviderLease_MissingHostRegistrationWarnsAndSkipsCleanup()
+    {
+        var warnings = new List<string>();
+
+        var lease = AspireBuildServiceProviderLease.TryInstall(new ServiceCollection(), warnings.Add);
+
+        Assert.Null(lease);
+        Assert.Contains("Build will continue", Assert.Single(warnings), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BuildAsync_UnexpectedAspireHostRegistrationStillDelegatesBuild()
+    {
+        var actualBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = [],
+            AssemblyName = typeof(TestAppHost).Assembly.GetName().Name,
+            ProjectDirectory = TestAppHost.ProjectPath,
+            DisableDashboard = true
+        });
+        var inner = A.Fake<IDistributedApplicationBuilder>();
+        A.CallTo(() => inner.Services).Returns(new ServiceCollection());
+        A.CallTo(() => inner.Build()).ReturnsLazily(() => actualBuilder.Build());
+        var activation = new AsyncOnlyDisposalProbe();
+        var builder = new AppSurfaceAspireProfileTestingBuilder(
+            inner,
+            activation,
+            _ => throw new CleanupException());
+
+        var application = await builder.BuildAsync();
+
+        Assert.NotNull(application);
+        A.CallTo(() => inner.Build()).MustHaveHappenedOnceExactly();
+        await builder.DisposeAsync();
+        Assert.Equal(1, activation.DisposeCount);
+    }
+
+    [Fact]
+    public void ProviderLease_NullServiceCollectionIsRejected()
+    {
+        Assert.Throws<ArgumentNullException>(() => AspireBuildServiceProviderLease.TryInstall(null!));
+    }
+
+    [Fact]
+    public void ProviderLease_KeyedHostRegistrationSkipsCleanup()
+    {
+        var services = new ServiceCollection();
+        services.AddKeyedSingleton<IHost>("host", (_, _) => A.Fake<IHost>());
+
+        Assert.Null(AspireBuildServiceProviderLease.TryInstall(services));
+    }
+
+    [Fact]
+    public async Task ProviderLease_IgnoresKeyedHostRegistrationAfterVerifiedFactory()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(_ => A.Fake<IHost>());
+        services.AddKeyedSingleton<IHost>("host", (_, _) => A.Fake<IHost>());
+        var lease = Assert.IsType<AspireBuildServiceProviderLease>(
+            AspireBuildServiceProviderLease.TryInstall(services));
+        var provider = new SynchronousServiceProviderProbe();
+        var descriptor = Assert.Single(services, candidate =>
+            candidate.ServiceType == typeof(IHost) && !candidate.IsKeyedService);
+
+        _ = Assert.IsAssignableFrom<Func<IServiceProvider, object>>(descriptor.ImplementationFactory)(provider);
+        await lease.DisposeAsync();
+
+        Assert.Single(services, candidate => candidate.ServiceType == typeof(IHost) && candidate.IsKeyedService);
+        Assert.Equal(1, provider.DisposeCount);
+    }
+
+    [Fact]
+    public void ProviderLease_NonSingletonHostFactorySkipsCleanup()
+    {
+        var services = new ServiceCollection();
+        services.AddTransient(_ => A.Fake<IHost>());
+
+        Assert.Null(AspireBuildServiceProviderLease.TryInstall(services));
+    }
+
+    [Fact]
+    public void ProviderLease_NonFactoryHostRegistrationSkipsCleanup()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<IHost>());
+
+        Assert.Null(AspireBuildServiceProviderLease.TryInstall(services));
+    }
+
+    [Fact]
+    public async Task ProviderLease_DisposesSynchronousCapturedProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(_ => A.Fake<IHost>());
+        var lease = Assert.IsType<AspireBuildServiceProviderLease>(
+            AspireBuildServiceProviderLease.TryInstall(services));
+        var provider = new SynchronousServiceProviderProbe();
+
+        var descriptor = Assert.Single(services, candidate => candidate.ServiceType == typeof(IHost));
+
+        _ = Assert.IsAssignableFrom<Func<IServiceProvider, object>>(descriptor.ImplementationFactory)(provider);
+        await lease.DisposeAsync();
+
+        Assert.Equal(1, provider.DisposeCount);
+    }
+
+    [Fact]
+    public async Task ProviderLease_RepeatedHostFactoryInvocationIsRejected()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(_ => A.Fake<IHost>());
+        var lease = Assert.IsType<AspireBuildServiceProviderLease>(
+            AspireBuildServiceProviderLease.TryInstall(services));
+        var provider = new SynchronousServiceProviderProbe();
+        var descriptor = Assert.Single(services, candidate => candidate.ServiceType == typeof(IHost));
+        var hostFactory = Assert.IsAssignableFrom<Func<IServiceProvider, object>>(descriptor.ImplementationFactory);
+
+        _ = hostFactory(provider);
+        var exception = Assert.Throws<InvalidOperationException>(() => hostFactory(provider));
+        await lease.DisposeAsync();
+
+        Assert.Contains("more than once", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(1, provider.DisposeCount);
+    }
+
+    [Fact]
+    public void ProviderLease_ThrowingWarningSinkDoesNotReplaceCompatibilityFallback()
+    {
+        var lease = AspireBuildServiceProviderLease.TryInstall(
+            new ServiceCollection(),
+            _ => throw new CleanupException());
+
+        Assert.Null(lease);
+    }
+
+    [Fact]
+    public void ProviderLease_ProcessFatalWarningSinkFailurePropagates()
+    {
+        Assert.Throws<OutOfMemoryException>(() => AspireBuildServiceProviderLease.TryInstall(
+            new ServiceCollection(),
+            _ => throw new OutOfMemoryException("fatal diagnostic failure")));
+    }
+
+    [Fact]
+    public void Diagnostics_TraceWarningAcceptsCompatibilityWarning()
+    {
+        AspireTestingDiagnostics.TraceWarning("compatibility fallback test");
+    }
+
+    [Fact]
+    public async Task BuildAsync_RealAspireProcessFatalFailureDefersPartialProviderCleanupToAsyncDispose()
+    {
+        var actualBuilder = CreateProcessFatalAspireBuilder(out var getPartialHostProbe);
+        var activation = new AsyncOnlyDisposalProbe();
+        var builder = new AppSurfaceAspireProfileTestingBuilder(actualBuilder, activation);
+
+        var exception = await Assert.ThrowsAsync<OutOfMemoryException>(() => builder.BuildAsync());
+
+        Assert.Equal("fatal host construction failure", exception.Message);
+        Assert.False(getPartialHostProbe().IsDisposed);
+        Assert.Equal(0, activation.DisposeCount);
+        await builder.DisposeAsync();
+        Assert.True(getPartialHostProbe().IsDisposed);
+        Assert.Equal(1, activation.DisposeCount);
+    }
+
+    [Fact]
+    public async Task BuildAsync_RealAspireProcessFatalFailureDefersPartialProviderCleanupToSynchronousDispose()
+    {
+        var actualBuilder = CreateProcessFatalAspireBuilder(out var getPartialHostProbe);
+        var activation = new DualDisposalProbe();
+        var builder = new AppSurfaceAspireProfileTestingBuilder(actualBuilder, activation);
+
+        await Assert.ThrowsAsync<OutOfMemoryException>(() => builder.BuildAsync());
+
+        Assert.False(getPartialHostProbe().IsDisposed);
+        builder.Dispose();
+        Assert.True(getPartialHostProbe().IsDisposed);
+        Assert.Equal(1, activation.SyncDisposeCount);
+        Assert.Equal(0, activation.AsyncDisposeCount);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_DeferredPartialProviderFailureStillDisposesActivation()
+    {
+        var disposalOrder = new List<string>();
+        var actualBuilder = CreateProcessFatalAspireBuilderWithThrowingProvider(
+            disposalOrder,
+            out var getPartialHostProbe);
+        var activation = new OrderedActivationDisposalProbe(disposalOrder);
+        var builder = new AppSurfaceAspireProfileTestingBuilder(actualBuilder, activation);
+
+        await Assert.ThrowsAsync<OutOfMemoryException>(() => builder.BuildAsync());
+
+        await Assert.ThrowsAsync<CleanupException>(() => builder.DisposeAsync().AsTask());
+        Assert.Equal(1, getPartialHostProbe().DisposeCount);
+        Assert.Equal(["provider", "activation"], disposalOrder);
+    }
+
+    [Fact]
+    public async Task Dispose_DeferredPartialProviderFailureStillDisposesActivation()
+    {
+        var disposalOrder = new List<string>();
+        var actualBuilder = CreateProcessFatalAspireBuilderWithThrowingProvider(
+            disposalOrder,
+            out var getPartialHostProbe);
+        var activation = new OrderedSynchronousActivationDisposalProbe(disposalOrder);
+        var builder = new AppSurfaceAspireProfileTestingBuilder(actualBuilder, activation);
+
+        await Assert.ThrowsAsync<OutOfMemoryException>(() => builder.BuildAsync());
+
+        Assert.Throws<CleanupException>(builder.Dispose);
+        Assert.Equal(1, getPartialHostProbe().DisposeCount);
+        Assert.Equal(["provider", "activation"], disposalOrder);
     }
 
     [Fact]
@@ -491,7 +792,7 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
             releaseBuild.Wait(TimeSpan.FromSeconds(10));
             throw new InvalidOperationException("expected failure");
         });
-        var builder = new AppSurfaceAspireProfileTestingBuilder(inner, activation);
+        var builder = CreateTestingBuilder(inner, activation);
 
         var buildTask = Task.Run(async () => await builder.BuildAsync());
         Assert.True(enteredBuild.Wait(TimeSpan.FromSeconds(10)));
@@ -816,8 +1117,57 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         IAsyncDisposable activation,
         IServiceCollection? services = null)
     {
-        A.CallTo(() => inner.Services).Returns(services ?? new ServiceCollection());
+        services ??= new ServiceCollection();
+        if (!services.Any(descriptor => descriptor.ServiceType == typeof(IHost)))
+        {
+            services.AddSingleton(_ => A.Fake<IHost>());
+        }
+
+        A.CallTo(() => inner.Services).Returns(services);
         return new AppSurfaceAspireProfileTestingBuilder(inner, activation);
+    }
+
+    private static IDistributedApplicationBuilder CreateProcessFatalAspireBuilder(
+        out Func<OwnedBuildProbe> getPartialHostProbe)
+    {
+        var actualBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = [],
+            AssemblyName = typeof(TestAppHost).Assembly.GetName().Name,
+            ProjectDirectory = TestAppHost.ProjectPath,
+            DisableDashboard = true
+        });
+        OwnedBuildProbe? partialHostProbe = null;
+        actualBuilder.Services.AddSingleton<OwnedBuildProbe>();
+        actualBuilder.Services.AddSingleton<IHostLifetime>(services =>
+        {
+            partialHostProbe = services.GetRequiredService<OwnedBuildProbe>();
+            throw new OutOfMemoryException("fatal host construction failure");
+        });
+        getPartialHostProbe = () => Assert.IsType<OwnedBuildProbe>(partialHostProbe);
+        return actualBuilder;
+    }
+
+    private static IDistributedApplicationBuilder CreateProcessFatalAspireBuilderWithThrowingProvider(
+        ICollection<string> disposalOrder,
+        out Func<OrderedThrowingProviderDisposalProbe> getPartialHostProbe)
+    {
+        var actualBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = [],
+            AssemblyName = typeof(TestAppHost).Assembly.GetName().Name,
+            ProjectDirectory = TestAppHost.ProjectPath,
+            DisableDashboard = true
+        });
+        OrderedThrowingProviderDisposalProbe? partialHostProbe = null;
+        actualBuilder.Services.AddSingleton(_ => new OrderedThrowingProviderDisposalProbe(disposalOrder));
+        actualBuilder.Services.AddSingleton<IHostLifetime>(services =>
+        {
+            partialHostProbe = services.GetRequiredService<OrderedThrowingProviderDisposalProbe>();
+            throw new OutOfMemoryException("fatal host construction failure");
+        });
+        getPartialHostProbe = () => Assert.IsType<OrderedThrowingProviderDisposalProbe>(partialHostProbe);
+        return actualBuilder;
     }
 
     public void Dispose()
@@ -1129,7 +1479,33 @@ public sealed class OwnedBuildProbe : IDisposable
 {
     public bool IsDisposed { get; private set; }
 
-    public void Dispose() => IsDisposed = true;
+    public int DisposeCount { get; private set; }
+
+    public void Dispose()
+    {
+        IsDisposed = true;
+        DisposeCount++;
+    }
+}
+
+public sealed class AsyncOwnedBuildProbe : IAsyncDisposable
+{
+    public bool IsDisposed { get; private set; }
+
+    public ValueTask DisposeAsync()
+    {
+        IsDisposed = true;
+        return ValueTask.CompletedTask;
+    }
+}
+
+public sealed class SynchronousServiceProviderProbe : IServiceProvider, IDisposable
+{
+    public int DisposeCount { get; private set; }
+
+    public object? GetService(Type serviceType) => null;
+
+    public void Dispose() => DisposeCount++;
 }
 
 public sealed class ThrowingDisposalProbe : IDisposable
@@ -1141,6 +1517,32 @@ public sealed class ThrowingDisposalProbe : IDisposable
         DisposeCount++;
         throw new CleanupException();
     }
+}
+
+public sealed class OrderedThrowingProviderDisposalProbe : IDisposable
+{
+    private readonly ICollection<string> _order;
+    private readonly Exception _exception;
+
+    public OrderedThrowingProviderDisposalProbe(ICollection<string> order, Exception? exception = null)
+    {
+        _order = order;
+        _exception = exception ?? new CleanupException();
+    }
+
+    public int DisposeCount { get; private set; }
+
+    public void Dispose()
+    {
+        DisposeCount++;
+        _order.Add("provider");
+        throw _exception;
+    }
+}
+
+public sealed class FormattingThrowingCleanupException : Exception
+{
+    public override string ToString() => throw new InvalidOperationException("Exception formatting failed.");
 }
 
 public sealed class FatalThrowingDisposalProbe : IDisposable
