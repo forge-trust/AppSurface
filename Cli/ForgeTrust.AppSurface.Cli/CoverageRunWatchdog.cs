@@ -836,8 +836,15 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         {
             await write.WaitAsync(_artifactWriteTimeout, deadline.Token);
         }
-        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+        catch (TimeoutException)
         {
+            // Best-effort bounded write timed out; continue without failing the watchdog loop.
+            return;
+        }
+        catch (OperationCanceledException)
+        {
+            // Best-effort bounded write was canceled by the deadline token; continue.
+            return;
         }
     }
 
