@@ -1184,6 +1184,10 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
+                    await _console.WriteCriticalErrorAsync(
+                        FormattableString.Invariant(
+                            $"ASCOV122 Coverage watchdog cleanup warning. Cause: staged-artifact-delete-failed. Artifact: {JsonSerializer.Serialize(DisplayArtifactPath(staged))}. Details: {ex.GetType().Name}: {ex.Message}. Fix: Ensure --output directory allows delete permissions. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog"),
+                        CancellationToken.None);
                 }
             }
 
