@@ -805,6 +805,8 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            // Monitor shutdown is expected when the supervisor is disposed or claims a terminal outcome.
+            return;
         }
     }
 
