@@ -18,23 +18,26 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     private const string MarkerContents = "AppSurface coverage output directory\n";
     private const int MaximumMarkerBytes = 128;
     private readonly string _outputPath;
+    private readonly Func<int, uint, int> _unixFChmod;
     private readonly List<SafeFileHandle> _windowsHandles = [];
     private readonly List<SafeFileHandle> _unixHandles = [];
     private SafeFileHandle? _outputHandle;
 
-    private CoverageRunOutputLease(string outputPath)
+    private CoverageRunOutputLease(string outputPath, Func<int, uint, int>? unixFChmod = null)
     {
         _outputPath = outputPath;
+        _unixFChmod = unixFChmod ?? UnixFChmod;
     }
 
     /// <summary>
     /// Independently opens or creates every output-path component without following links.
     /// </summary>
     /// <param name="outputPath">Absolute output directory path.</param>
+    /// <param name="unixFChmod">Optional Unix permission operation used to verify marker-creation failures.</param>
     /// <returns>A lease retaining every opened component until disposal.</returns>
-    internal static CoverageRunOutputLease Acquire(string outputPath)
+    internal static CoverageRunOutputLease Acquire(string outputPath, Func<int, uint, int>? unixFChmod = null)
     {
-        var lease = new CoverageRunOutputLease(NormalizePlatformPath(outputPath));
+        var lease = new CoverageRunOutputLease(NormalizePlatformPath(outputPath), unixFChmod);
         try
         {
             if (OperatingSystem.IsWindows())
@@ -619,7 +622,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         return authorizedChildren.TryGetValue(parentPath, out var children) ? children : [];
     }
 
-    private static void WriteUnixMarker(int descriptor)
+    private void WriteUnixMarker(int descriptor)
     {
         var flags = UnixWriteOnly | UnixCreate | UnixExclusive | UnixNoFollow | UnixCloseOnExec;
         var markerDescriptor = UnixOpenAt(descriptor, MarkerFileName, flags, Convert.ToUInt32("644", 8));
@@ -629,8 +632,11 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         }
 
         using var stream = new FileStream(new SafeFileHandle((nint)markerDescriptor, ownsHandle: true), FileAccess.Write);
-        if (UnixFChmod(markerDescriptor, Convert.ToUInt32("644", 8)) != 0)
+        if (_unixFChmod(markerDescriptor, Convert.ToUInt32("644", 8)) != 0)
         {
+            var error = Marshal.GetLastPInvokeError();
+            _ = UnlinkAt(descriptor, MarkerFileName, 0);
+            Marshal.SetLastPInvokeError(error);
             throw NativeIOException("Unable to set secure permissions on the coverage ownership marker.");
         }
 

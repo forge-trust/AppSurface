@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Xml;
-using System.Xml.Linq;
 using ForgeTrust.AppSurface.CoverageArtifacts;
 
 namespace ForgeTrust.AppSurface.CoverageRunner;
@@ -584,8 +583,8 @@ internal sealed class CoverageRunnerApplication
             await using (var stagedInput = new FileStream(staged, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
             using (var reader = XmlReader.Create(stagedInput, CoberturaReaderSettings))
             {
-                var document = await XDocument.LoadAsync(reader, LoadOptions.None, cancellationToken);
-                if (!string.Equals(document.Root?.Name.LocalName, "coverage", StringComparison.Ordinal))
+                var root = await ReadCoberturaRootAsync(reader, cancellationToken);
+                if (!string.Equals(root.LocalName, "coverage", StringComparison.Ordinal))
                 {
                     return "the Cobertura document root is not 'coverage'";
                 }
@@ -872,17 +871,16 @@ internal sealed class CoverageRunnerApplication
             await using (var staged = new FileStream(stagedPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
             using (var reader = XmlReader.Create(staged, CoberturaReaderSettings))
             {
-                var document = await XDocument.LoadAsync(reader, LoadOptions.None, cancellationToken);
-                var root = document.Root;
-                if (root is null || !string.Equals(root.Name.LocalName, "coverage", StringComparison.Ordinal))
+                var root = await ReadCoberturaRootAsync(reader, cancellationToken);
+                if (!string.Equals(root.LocalName, "coverage", StringComparison.Ordinal))
                 {
                     return new(CoberturaCommitFailureKind.InvalidDocument, "the document root is not 'coverage'");
                 }
 
-                if (!HasCoverageCountAttribute(root, "lines-covered")
-                    || !HasCoverageCountAttribute(root, "lines-valid")
-                    || !HasCoverageCountAttribute(root, "branches-covered")
-                    || !HasCoverageCountAttribute(root, "branches-valid"))
+                if (!HasCoverageCountAttribute(root.LinesCovered)
+                    || !HasCoverageCountAttribute(root.LinesValid)
+                    || !HasCoverageCountAttribute(root.BranchesCovered)
+                    || !HasCoverageCountAttribute(root.BranchesValid))
                 {
                     return new(CoberturaCommitFailureKind.InvalidCoverageCounts, "required numeric coverage attributes are missing or invalid");
                 }
@@ -957,8 +955,35 @@ internal sealed class CoverageRunnerApplication
         await WriteCanonicalTextAsync(destinationPath, contents, cancellationToken, beforeCommit);
     }
 
-    private static bool HasCoverageCountAttribute(XElement root, string name)
-        => ulong.TryParse(root.Attribute(name)?.Value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _);
+    private static async Task<CoberturaRoot> ReadCoberturaRootAsync(XmlReader reader, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CoberturaRoot? root = null;
+        while (await reader.ReadAsync().WaitAsync(cancellationToken))
+        {
+            if (root is null && reader.NodeType == XmlNodeType.Element)
+            {
+                root = new CoberturaRoot(
+                    reader.LocalName,
+                    reader.GetAttribute("lines-covered"),
+                    reader.GetAttribute("lines-valid"),
+                    reader.GetAttribute("branches-covered"),
+                    reader.GetAttribute("branches-valid"));
+            }
+        }
+
+        return root ?? throw new XmlException("The Cobertura document does not contain a root element.");
+    }
+
+    private static bool HasCoverageCountAttribute(string? value)
+        => ulong.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _);
+
+    private sealed record CoberturaRoot(
+        string LocalName,
+        string? LinesCovered,
+        string? LinesValid,
+        string? BranchesCovered,
+        string? BranchesValid);
 
     /// <summary>
     /// Classifies a failed Cobertura staging or validation attempt without deriving behavior from diagnostic text.

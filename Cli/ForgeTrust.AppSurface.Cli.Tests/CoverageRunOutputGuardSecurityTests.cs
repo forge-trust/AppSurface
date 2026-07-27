@@ -401,6 +401,25 @@ public sealed class CoverageRunOutputGuardSecurityTests
     }
 
     [Fact]
+    public void PrepareUnix_ShouldRemoveNewMarkerWhenPermissionHardeningFails()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        var marker = Path.Join(output, ".appsurface-coverage-output");
+        using var lease = CoverageRunOutputLease.Acquire(output, unixFChmod: static (_, _) => -1);
+
+        var exception = Assert.Throws<IOException>(() => lease.Prepare(clean: true, beforeMutation: null, beforeCleanup: null));
+
+        Assert.Contains("Unable to set secure permissions", exception.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(marker));
+    }
+
+    [Fact]
     public void Prepare_ShouldFailClosedWhenOutputIsMovedBeforeBindingRevalidation()
     {
         using var root = TestDirectory.Create();

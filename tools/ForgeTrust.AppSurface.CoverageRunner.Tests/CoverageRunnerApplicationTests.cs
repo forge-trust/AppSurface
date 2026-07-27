@@ -1268,6 +1268,44 @@ public sealed class CoverageRunnerApplicationTests
     }
 
     [Fact]
+    public async Task NormalizeCollectorCoverageAsync_ShouldAcceptLeadingMarkupAndNamespacedRoot()
+    {
+        using var workspace = TestRepo.Create();
+        var projectOutput = Path.Join(workspace.Root, "project");
+        var rawResults = Path.Join(projectOutput, "collector-results", "current");
+        Directory.CreateDirectory(rawResults);
+        File.WriteAllText(
+            Path.Join(rawResults, "coverage.cobertura.xml"),
+            "<?xml version=\"1.0\"?>\n<!-- collector output -->\n<coverage xmlns=\"urn:coverage\" />");
+
+        var failure = await CoverageRunnerApplication.NormalizeCollectorCoverageAsync(
+            projectOutput,
+            rawResults,
+            CancellationToken.None);
+
+        Assert.Null(failure);
+        Assert.Contains("urn:coverage", File.ReadAllText(Path.Join(projectOutput, "coverage.cobertura.xml")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NormalizeCollectorCoverageAsync_ShouldClassifyDocumentWithoutRootAsMalformed()
+    {
+        using var workspace = TestRepo.Create();
+        var projectOutput = Path.Join(workspace.Root, "project");
+        var rawResults = Path.Join(projectOutput, "collector-results", "current");
+        Directory.CreateDirectory(rawResults);
+        File.WriteAllText(Path.Join(rawResults, "coverage.cobertura.xml"), "<!-- no root -->");
+
+        var failure = await CoverageRunnerApplication.NormalizeCollectorCoverageAsync(
+            projectOutput,
+            rawResults,
+            CancellationToken.None);
+
+        Assert.Contains("malformed", failure, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Join(projectOutput, "coverage.cobertura.xml")));
+    }
+
+    [Fact]
     public async Task NormalizeCollectorCoverageAsync_ShouldRejectMissingInvocationDirectory()
     {
         using var workspace = TestRepo.Create();
@@ -1344,6 +1382,25 @@ public sealed class CoverageRunnerApplicationTests
         Assert.Contains("document root", failure.Detail, StringComparison.Ordinal);
         Assert.False(File.Exists(destination));
         Assert.Empty(Directory.EnumerateFiles(workspace.Root, ".coverage.cobertura.xml.*.tmp"));
+    }
+
+    [Fact]
+    public async Task CommitCoberturaAsync_ShouldAcceptLeadingMarkupAndNamespacedRoot()
+    {
+        using var workspace = TestRepo.Create();
+        var destination = Path.Join(workspace.Root, "coverage.cobertura.xml");
+        var source = Path.Join(workspace.Root, "Cobertura.xml");
+        File.WriteAllText(
+            source,
+            "<?xml version=\"1.0\"?>\n<!-- ReportGenerator output -->\n<coverage xmlns=\"urn:coverage\" lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />");
+
+        var failure = await CoverageRunnerApplication.CommitCoberturaAsync(
+            source,
+            destination,
+            CancellationToken.None);
+
+        Assert.Null(failure);
+        Assert.Contains("urn:coverage", File.ReadAllText(destination), StringComparison.Ordinal);
     }
 
     [Fact]

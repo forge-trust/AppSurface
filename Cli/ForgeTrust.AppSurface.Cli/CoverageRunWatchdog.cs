@@ -413,6 +413,10 @@ internal sealed class CoverageRunProcessLease
         }
         catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or System.ComponentModel.Win32Exception)
         {
+            Trace.TraceWarning(
+                "Coverage process termination could not observe process exit. Cause: {0}: {1}",
+                ex.GetType().Name,
+                ex.Message);
         }
     }
 
@@ -427,6 +431,10 @@ internal sealed class CoverageRunProcessLease
         }
         catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or NotSupportedException or System.ComponentModel.Win32Exception)
         {
+            Trace.TraceWarning(
+                "Coverage process termination could not kill the process tree. Cause: {0}: {1}",
+                ex.GetType().Name,
+                ex.Message);
         }
     }
 }
