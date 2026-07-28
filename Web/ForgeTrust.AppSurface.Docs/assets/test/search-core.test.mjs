@@ -204,6 +204,7 @@ test('normalizeSummaryPresentation enforces depth and node-count bounds by code 
 
   assert.ok(normalizeSummaryPresentation([current]));
 
+  assert.equal(normalizeSummaryPresentation(Array.from({ length: 128 }, () => ({ kind: 'text', text: 'x' })))?.length, 128);
   assert.equal(normalizeSummaryPresentation(Array.from({ length: 129 }, () => ({ kind: 'text', text: 'x' }))), null);
   assert.deepEqual(
     normalizeSummaryPresentation([

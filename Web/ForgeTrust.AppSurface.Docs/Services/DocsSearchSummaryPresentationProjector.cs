@@ -19,6 +19,7 @@ internal static class DocsSearchSummaryPresentationProjector
     internal const int MaxDepth = 8;
     internal const int MaxNodes = 128;
     internal const int MaxScalars = 1024;
+    private const int MinScalarsForWhitespaceTruncation = MaxScalars / 2;
 
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder().Build();
     private static readonly Regex UrlTokenRegex = new(
@@ -552,10 +553,10 @@ internal static class DocsSearchSummaryPresentationProjector
                 return value;
             }
 
-            if (runes.Length >= 512)
+            if (runes.Length >= MinScalarsForWhitespaceTruncation)
             {
                 var boundary = Array.FindLastIndex(runes, rune => Rune.IsWhiteSpace(rune));
-                if (boundary >= 512)
+                if (boundary >= MinScalarsForWhitespaceTruncation)
                 {
                     runes = runes[..boundary];
                 }

@@ -24,14 +24,15 @@ public class DocsSearchSummaryPresentationProjectorTests
         var presentation = DocsSearchSummaryPresentationProjector.Project("Visible <script>alert('no')</script> <style>.hidden {}</style> <b>text</b>.");
 
         var json = JsonSerializer.Serialize(presentation);
+        var renderedText = string.Concat(Assert.IsAssignableFrom<IReadOnlyList<DocsSearchSummaryPresentationNode>>(presentation).SelectMany(Flatten));
 
         Assert.DoesNotContain("script", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("alert", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("style", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("hidden", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("<b>", json, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Visible", json, StringComparison.Ordinal);
-        Assert.Contains("text", json, StringComparison.Ordinal);
+        Assert.Contains("Visible", renderedText, StringComparison.Ordinal);
+        Assert.Contains("text", renderedText, StringComparison.Ordinal);
     }
 
     [Fact]

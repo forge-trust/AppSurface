@@ -19,8 +19,8 @@ export const storeFields = [
   'navGroup'
 ];
 
-const summaryPresentationNodeKinds = new Set(['text', 'strong', 'emphasis', 'code']);
 const summaryPresentationLeafKinds = new Set(['text', 'code']);
+const summaryPresentationContainerKinds = new Set(['strong', 'emphasis']);
 const maxSummaryPresentationDepth = 8;
 const maxSummaryPresentationNodeCount = 128;
 const maxSummaryPresentationTextLength = 1024;
@@ -130,6 +130,31 @@ export function normalizeSummaryPresentation(value: any) {
   return normalized;
 }
 
+export function isSummaryPresentationLeaf(value: any): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !hasExactKeys(value, ['kind', 'text'])) {
+    return false;
+  }
+
+  return summaryPresentationLeafKinds.has(value.kind)
+    && typeof value.text === 'string'
+    && value.text.trim().length > 0;
+}
+
+export function isSummaryPresentationContainer(value: any): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !hasExactKeys(value, ['kind', 'children'])) {
+    return false;
+  }
+
+  return summaryPresentationContainerKinds.has(value.kind)
+    && Array.isArray(value.children)
+    && value.children.length > 0;
+}
+
+function hasExactKeys(value: object, expected: string[]) {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => keys.includes(key));
+}
+
 function normalizeSummaryPresentationNodeList(value: any[], depth: number, state: { nodeCount: number; leafCount: number; scalarCount: number }) {
   const nodes = [];
   for (const item of value) {
@@ -153,22 +178,7 @@ function normalizeSummaryPresentationNode(value: any, depth: number, state: { no
     return null;
   }
 
-  const keys = Object.keys(value);
-  const kind = String(value?.kind ?? '');
-  if (!summaryPresentationNodeKinds.has(kind)) {
-    return null;
-  }
-
-  if (summaryPresentationLeafKinds.has(kind)) {
-    const requiredKeys = ['kind', 'text'];
-    if (keys.length !== requiredKeys.length || !keys.every((key) => requiredKeys.includes(key))) {
-      return null;
-    }
-
-    if (typeof value.text !== 'string') {
-      return null;
-    }
-
+  if (isSummaryPresentationLeaf(value)) {
     const text = value.text;
     const scalarLength = Array.from(text).length;
     if (!text.trim() || scalarLength > maxSummaryPresentationTextLength || state.scalarCount + scalarLength > maxSummaryPresentationTextLength) {
@@ -178,19 +188,14 @@ function normalizeSummaryPresentationNode(value: any, depth: number, state: { no
     state.nodeCount += 1;
     state.leafCount += 1;
     state.scalarCount += scalarLength;
-    return { kind, text };
+    return { kind: value.kind, text };
+  }
+
+  if (!isSummaryPresentationContainer(value)) {
+    return null;
   }
 
   const children = value.children;
-  if (!Array.isArray(children)) {
-    return null;
-  }
-
-  const requiredKeys = ['kind', 'children'];
-  if (keys.length !== requiredKeys.length || !keys.every((key) => requiredKeys.includes(key))) {
-    return null;
-  }
-
   const normalizedChildren = normalizeSummaryPresentationNodeList(children, depth + 1, state);
   if (!normalizedChildren || normalizedChildren.length === 0) {
     return null;
@@ -198,7 +203,7 @@ function normalizeSummaryPresentationNode(value: any, depth: number, state: { no
 
   state.nodeCount += 1;
   return {
-    kind,
+    kind: value.kind,
     children: normalizedChildren
   };
 }

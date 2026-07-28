@@ -2,6 +2,8 @@ import {
   createMiniSearchConfiguration,
   createMiniSearchDocument,
   defaultSearchOptions,
+  isSummaryPresentationContainer,
+  isSummaryPresentationLeaf,
   isSafeSearchResultPath,
   normalizeCodeLanguage,
   normalizePageTypeAlias,
@@ -1256,7 +1258,7 @@ declare global {
     }
 
     if (node.kind === 'text' || node.kind === 'code') {
-      if (!isValidSummaryPresentationLeaf(node)) {
+      if (!isSummaryPresentationLeaf(node)) {
         return false;
       }
 
@@ -1272,7 +1274,7 @@ declare global {
     }
 
     if (node.kind === 'strong' || node.kind === 'emphasis') {
-      if (!isValidSummaryPresentationContainer(node)) {
+      if (!isSummaryPresentationContainer(node)) {
         return false;
       }
 
@@ -1294,28 +1296,6 @@ declare global {
     }
 
     return false;
-  }
-
-  function hasExactKeys(value, expected) {
-    const keys = Object.keys(value);
-    return keys.length === expected.length && expected.every((key) => keys.includes(key));
-  }
-
-  function isValidSummaryPresentationLeaf(node) {
-    if (!hasExactKeys(node, ['kind', 'text'])) {
-      return false;
-    }
-
-    return (node.kind === 'text' || node.kind === 'code')
-      && typeof node.text === 'string'
-      && node.text.trim();
-  }
-
-  function isValidSummaryPresentationContainer(node) {
-    return hasExactKeys(node, ['kind', 'children'])
-      && (node.kind === 'strong' || node.kind === 'emphasis')
-      && Array.isArray(node.children)
-      && node.children.length > 0;
   }
 
   function buildBreadcrumbLabels(doc) {
