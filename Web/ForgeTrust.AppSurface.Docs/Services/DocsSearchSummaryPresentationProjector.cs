@@ -434,16 +434,11 @@ internal static class DocsSearchSummaryPresentationProjector
 
         private static MutableNode? FindLastLeaf(IEnumerable<MutableNode> nodes)
         {
-            MutableNode? last = null;
-            foreach (var node in nodes)
-            {
-                var candidate = node.Children.Count == 0 && node.Text.Length > 0
+            return nodes
+                .Select(node => node.Children.Count == 0 && node.Text.Length > 0
                     ? node
-                    : FindLastLeaf(node.Children);
-                last = candidate ?? last;
-            }
-
-            return last;
+                    : FindLastLeaf(node.Children))
+                .LastOrDefault(candidate => candidate is not null);
         }
 
         private static void TrimLeafToScalars(IEnumerable<MutableNode> root, MutableNode leaf, int maximum)
