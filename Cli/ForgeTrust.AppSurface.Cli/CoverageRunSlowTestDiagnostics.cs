@@ -105,35 +105,6 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
     }
 
     /// <summary>
-    /// Writes diagnostic artifacts with measured aggregation overhead.
-    /// </summary>
-    /// <param name="outputDirectory">Coverage output directory.</param>
-    /// <param name="report">Report model returned by <see cref="CollectAsync"/>.</param>
-    /// <param name="getAggregationSeconds">Reads elapsed diagnostic aggregation seconds.</param>
-    /// <param name="calculateAggregationPercent">Calculates aggregation overhead as a percent of runner time.</param>
-    /// <param name="cancellationToken">Cancellation token for artifact writes.</param>
-    /// <returns>Written artifact paths and high-level metadata.</returns>
-    /// <remarks>
-    /// <c>WriteAsync</c> may call <c>WriteArtifactsAsync</c> twice when <c>aggregationSeconds</c> differs from
-    /// <c>finalAggregationSeconds</c>. The single re-write includes the first file-write cost in reported aggregation
-    /// overhead; later timing drift is not captured.
-    /// </remarks>
-    public static async Task<CoverageRunSlowTestDiagnosticsRun> WriteAsync(
-        string outputDirectory,
-        CoverageRunSlowTestDiagnosticsReport report,
-        Func<long> getAggregationSeconds,
-        Func<long, decimal> calculateAggregationPercent,
-        CancellationToken cancellationToken)
-        => await WriteAsync(
-            Path.Join(outputDirectory, MarkdownFileName),
-            Path.Join(outputDirectory, JsonFileName),
-            outputDirectory,
-            report,
-            getAggregationSeconds,
-            calculateAggregationPercent,
-            cancellationToken);
-
-    /// <summary>
     /// Writes diagnostics to private same-directory staging files while recording canonical artifact paths in their contents.
     /// </summary>
     /// <param name="stagedMarkdownPath">Unique private Markdown path alongside its canonical destination.</param>
@@ -143,7 +114,7 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
     /// <param name="getAggregationSeconds">Reads elapsed diagnostic aggregation seconds.</param>
     /// <param name="calculateAggregationPercent">Calculates aggregation overhead as a percent of runner time.</param>
     /// <param name="cancellationToken">Cancellation token for artifact writes.</param>
-    /// <returns>Canonical artifact paths and high-level metadata after staging completes.</returns>
+    /// <returns>Canonical artifact paths and high-level metadata after the private staging writes complete.</returns>
     public static async Task<CoverageRunSlowTestDiagnosticsRun> WriteAsync(
         string stagedMarkdownPath,
         string stagedJsonPath,

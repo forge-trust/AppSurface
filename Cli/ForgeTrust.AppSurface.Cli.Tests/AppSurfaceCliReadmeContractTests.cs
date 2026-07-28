@@ -173,6 +173,7 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.Contains("whole-process-tree termination through supervisor-owned process leases", readme, StringComparison.Ordinal);
         Assert.Contains("exits `124` with `ASCOV121`", readme, StringComparison.Ordinal);
         Assert.Contains("`--watchdog off` disables stall classification", readme, StringComparison.Ordinal);
+        Assert.Contains("GUID-named staging or backup remnants", readme, StringComparison.Ordinal);
     }
 
     [Theory]

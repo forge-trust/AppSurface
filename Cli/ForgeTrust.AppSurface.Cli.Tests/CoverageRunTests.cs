@@ -12,6 +12,25 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageRunTests
 {
     [Fact]
+    public void CoverageRunCommand_ShouldCreateRequestWithWatchdogOptions()
+    {
+        var command = new CoverageRunCommand(CreateWorkflow(
+            new RecordingCoverageRunProcessRunner(),
+            new RecordingReportGenerator()))
+        {
+            HeartbeatInterval = "500ms",
+            NoProgressTimeout = "1h",
+            Watchdog = "fail",
+        };
+
+        var request = command.CreateRequest();
+
+        Assert.Equal(TimeSpan.FromMilliseconds(500), request.HeartbeatInterval);
+        Assert.Equal(TimeSpan.FromHours(1), request.NoProgressTimeout);
+        Assert.Equal(CoverageRunWatchdogMode.Fail, request.WatchdogMode);
+    }
+
+    [Fact]
     public async Task RunAsync_DryRun_ShouldListSlnxDiscoveryAndUniqueProjectSlugs()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -1140,6 +1159,9 @@ public sealed class CoverageRunTests
         var oldTestResult = repo.WriteFile("TestResults/coverage-merged/test-results-old.xml", "old test result");
         var oldMarkdown = repo.WriteFile("TestResults/coverage-merged/slow-test-diagnostics.md", "old diagnostics");
         var oldJson = repo.WriteFile("TestResults/coverage-merged/slow-test-diagnostics.json", "{}");
+        var staleMarkdownStage = repo.WriteFile($"TestResults/coverage-merged/.slow-test-diagnostics.md.{Guid.NewGuid():N}.tmp", "staged diagnostics");
+        var staleJsonBackup = repo.WriteFile($"TestResults/coverage-merged/.slow-test-diagnostics.json.{Guid.NewGuid():N}.backup", "prior diagnostics");
+        var unrelatedTemporaryFile = repo.WriteFile("TestResults/coverage-merged/.slow-test-diagnostics.md.user-notes.tmp", "retain me");
         var oldGateMarkdown = repo.WriteFile("TestResults/coverage-merged/coverage-gate.md", "old gate");
         var oldGateJson = repo.WriteFile("TestResults/coverage-merged/coverage-gate.json", "{}");
         using var current = PushCurrentDirectory(repo.Path);
@@ -1154,6 +1176,9 @@ public sealed class CoverageRunTests
         Assert.False(File.Exists(oldTestResult));
         Assert.False(File.Exists(oldMarkdown));
         Assert.False(File.Exists(oldJson));
+        Assert.False(File.Exists(staleMarkdownStage));
+        Assert.False(File.Exists(staleJsonBackup));
+        Assert.True(File.Exists(unrelatedTemporaryFile));
         Assert.False(File.Exists(oldGateMarkdown));
         Assert.False(File.Exists(oldGateJson));
     }
@@ -1247,16 +1272,15 @@ public sealed class CoverageRunTests
         using var current = PushCurrentDirectory(repo.Path);
         var workflow = CreateWorkflow(new RecordingCoverageRunProcessRunner(), new RecordingReportGenerator());
         using var console = new FakeInMemoryConsole();
-        var request = CreateRequest(TestProjects: [project], SlowTestDiagnostics: true);
+        var request = CreateRequest(TestProjects: [project], SlowTestDiagnostics: true, Clean: false);
 
         var result = await workflow.RunAsync(request, console, CancellationToken.None);
 
         Assert.True(result.Success);
         Assert.Contains("Slow-test diagnostics failed", console.ReadErrorString(), StringComparison.Ordinal);
         var timings = File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json"));
-        Assert.Contains("\"warningCount\": 1", timings, StringComparison.Ordinal);
-        Assert.Contains("\"metadataComplete\": false", timings, StringComparison.Ordinal);
-        Assert.Contains("\"parserStatus\": \"diagnosticsFailed\"", timings, StringComparison.Ordinal);
+        Assert.Contains("\"diagnostics\": null", timings, StringComparison.Ordinal);
+        Assert.DoesNotContain("diagnosticsFailed", timings, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1265,6 +1289,7 @@ public sealed class CoverageRunTests
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
         var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
         repo.WriteFile("TestResults/coverage-merged/.appsurface-coverage-output", "AppSurface coverage output directory");
+        var oldMarkdown = repo.WriteFile("TestResults/coverage-merged/slow-test-diagnostics.md", "old diagnostics");
         Directory.CreateDirectory(Path.Join(repo.Path, "TestResults", "coverage-merged", "slow-test-diagnostics.json"));
         using var current = PushCurrentDirectory(repo.Path);
         var workflow = CreateWorkflow(new RecordingCoverageRunProcessRunner(), new RecordingReportGenerator());
@@ -1276,7 +1301,82 @@ public sealed class CoverageRunTests
         Assert.True(result.Success);
         Assert.Contains("Slow-test diagnostics failed", console.ReadErrorString(), StringComparison.Ordinal);
         var timings = File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json"));
-        Assert.Contains("\"parserStatus\": \"diagnosticsFailed\"", timings, StringComparison.Ordinal);
+        Assert.Contains("\"diagnostics\": null", timings, StringComparison.Ordinal);
+        Assert.DoesNotContain("diagnosticsFailed", timings, StringComparison.Ordinal);
+        Assert.Equal("old diagnostics", File.ReadAllText(oldMarkdown));
+    }
+
+    [Fact]
+    public async Task RunAsync_CancelledStagedSlowTestDiagnostics_ShouldPreserveCanonicalArtifacts()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        repo.WriteFile("TestResults/coverage-merged/.appsurface-coverage-output", "AppSurface coverage output directory");
+        var markdownPath = repo.WriteFile("TestResults/coverage-merged/slow-test-diagnostics.md", "prior markdown");
+        var jsonPath = repo.WriteFile("TestResults/coverage-merged/slow-test-diagnostics.json", "prior json");
+        using var current = PushCurrentDirectory(repo.Path);
+        using var cancellation = new CancellationTokenSource();
+        var workflow = new CoverageRunWorkflow(
+            new RecordingCoverageRunProcessRunner(),
+            new RecordingReportGenerator(),
+            TimeProvider.System,
+            slowTestDiagnosticsStaged: cancellation.Cancel);
+        using var console = new FakeInMemoryConsole();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], SlowTestDiagnostics: true, Clean: false),
+            console,
+            cancellation.Token));
+
+        Assert.Equal("prior markdown", File.ReadAllText(markdownPath));
+        Assert.Equal("prior json", File.ReadAllText(jsonPath));
+        Assert.Empty(Directory.EnumerateFiles(
+            Path.GetDirectoryName(markdownPath)!,
+            ".slow-test-diagnostics.*.tmp",
+            SearchOption.TopDirectoryOnly));
+    }
+
+    [Fact]
+    public async Task RunAsync_SlowTestDiagnostics_ShouldRollBackWhenSecondPromotionFails()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        repo.WriteFile("TestResults/coverage-merged/.appsurface-coverage-output", "AppSurface coverage output directory");
+        var markdownPath = repo.WriteFile("TestResults/coverage-merged/slow-test-diagnostics.md", "prior markdown");
+        var jsonPath = repo.WriteFile("TestResults/coverage-merged/slow-test-diagnostics.json", "prior json");
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = new CoverageRunWorkflow(
+            new RecordingCoverageRunProcessRunner(),
+            new RecordingReportGenerator(),
+            TimeProvider.System,
+            beforeSlowTestDiagnosticsPromotion: path =>
+            {
+                if (string.Equals(path, jsonPath, StringComparison.Ordinal))
+                {
+                    throw new IOException("simulated JSON promotion failure");
+                }
+            });
+        using var console = new FakeInMemoryConsole();
+
+        var result = await workflow.RunAsync(
+            CreateRequest(TestProjects: [project], SlowTestDiagnostics: true, Clean: false),
+            console,
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("Slow-test diagnostics failed", console.ReadErrorString(), StringComparison.Ordinal);
+        Assert.Equal("prior markdown", File.ReadAllText(markdownPath));
+        Assert.Equal("prior json", File.ReadAllText(jsonPath));
+        Assert.Empty(Directory.EnumerateFiles(
+            Path.GetDirectoryName(markdownPath)!,
+            ".slow-test-diagnostics.*.tmp",
+            SearchOption.TopDirectoryOnly));
+        Assert.Empty(Directory.EnumerateFiles(
+            Path.GetDirectoryName(markdownPath)!,
+            ".slow-test-diagnostics.*.backup",
+            SearchOption.TopDirectoryOnly));
+        var timings = File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json"));
+        Assert.Contains("\"diagnostics\": null", timings, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1286,7 +1386,11 @@ public sealed class CoverageRunTests
 
         var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync([], CancellationToken.None);
         var calls = 0;
+        var stagedMarkdownPath = Path.Join(repo.Path, $".{CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName}.{Guid.NewGuid():N}.tmp");
+        var stagedJsonPath = Path.Join(repo.Path, $".{CoverageRunSlowTestDiagnosticsWriter.JsonFileName}.{Guid.NewGuid():N}.tmp");
         var diagnostics = await CoverageRunSlowTestDiagnosticsWriter.WriteAsync(
+            stagedMarkdownPath,
+            stagedJsonPath,
             repo.Path,
             report,
             () => calls++ == 0 ? 1 : 2,
@@ -1297,13 +1401,45 @@ public sealed class CoverageRunTests
         Assert.Contains(report.Warnings, warning => warning.Contains("No project metadata was available", StringComparison.Ordinal));
         Assert.Equal(2, diagnostics.AggregationSeconds);
         Assert.Equal(20m, diagnostics.AggregationPercent);
-        var markdown = File.ReadAllText(diagnostics.MarkdownPath);
+        var markdown = File.ReadAllText(stagedMarkdownPath);
         Assert.Contains("No project timing metadata was available.", markdown, StringComparison.Ordinal);
         Assert.Contains("No JUnit test cases were available.", markdown, StringComparison.Ordinal);
         Assert.Contains(
             "Diagnostic aggregation overhead: 2s (20.00% of elapsed runner time at diagnostics generation)",
             markdown,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldWritePrivateArtifactsWithCanonicalPaths()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var artifactDirectory = Directory.CreateDirectory(Path.Join(repo.Path, "artifacts")).FullName;
+        var markdownPath = Path.Join(artifactDirectory, CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName);
+        var jsonPath = Path.Join(artifactDirectory, CoverageRunSlowTestDiagnosticsWriter.JsonFileName);
+        File.WriteAllText(markdownPath, "prior markdown");
+        File.WriteAllText(jsonPath, "prior json");
+        var stagedMarkdownPath = Path.Join(artifactDirectory, $".{CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName}.{Guid.NewGuid():N}.tmp");
+        var stagedJsonPath = Path.Join(artifactDirectory, $".{CoverageRunSlowTestDiagnosticsWriter.JsonFileName}.{Guid.NewGuid():N}.tmp");
+        var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync([], CancellationToken.None);
+
+        var diagnostics = await CoverageRunSlowTestDiagnosticsWriter.WriteAsync(
+            stagedMarkdownPath,
+            stagedJsonPath,
+            artifactDirectory,
+            report,
+            () => 1,
+            _ => 10m,
+            CancellationToken.None);
+
+        Assert.Equal(markdownPath, diagnostics.MarkdownPath);
+        Assert.Equal(jsonPath, diagnostics.JsonPath);
+        Assert.Equal("prior markdown", File.ReadAllText(markdownPath));
+        Assert.Equal("prior json", File.ReadAllText(jsonPath));
+        Assert.True(File.Exists(stagedMarkdownPath));
+        Assert.True(File.Exists(stagedJsonPath));
+        Assert.Contains(markdownPath, File.ReadAllText(stagedJsonPath), StringComparison.Ordinal);
+        Assert.Contains(jsonPath, File.ReadAllText(stagedMarkdownPath), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1324,7 +1460,11 @@ public sealed class CoverageRunTests
         var result = CreateProjectRunResult(repo.Path, junit);
 
         var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync([result], CancellationToken.None);
+        var stagedMarkdownPath = Path.Join(repo.Path, $".{CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName}.{Guid.NewGuid():N}.tmp");
+        var stagedJsonPath = Path.Join(repo.Path, $".{CoverageRunSlowTestDiagnosticsWriter.JsonFileName}.{Guid.NewGuid():N}.tmp");
         var diagnostics = await CoverageRunSlowTestDiagnosticsWriter.WriteAsync(
+            stagedMarkdownPath,
+            stagedJsonPath,
             repo.Path,
             report,
             () => 0,
@@ -1340,7 +1480,7 @@ public sealed class CoverageRunTests
         Assert.Contains(report.Warnings, warning => warning.Contains("missing name", StringComparison.Ordinal));
         Assert.Contains(report.Warnings, warning => warning.Contains("invalid time '-1'", StringComparison.Ordinal));
         Assert.Contains(report.Warnings, warning => warning.Contains("invalid time 'NaN'", StringComparison.Ordinal));
-        var markdown = File.ReadAllText(diagnostics.MarkdownPath);
+        var markdown = File.ReadAllText(stagedMarkdownPath);
         Assert.Contains("Pipe\\|Class.Fail Name", markdown, StringComparison.Ordinal);
         Assert.Contains("| 3 | failed |", markdown, StringComparison.Ordinal);
         Assert.Contains("| 2 | error |", markdown, StringComparison.Ordinal);
@@ -2982,6 +3122,8 @@ public sealed class CoverageRunTests
         var execution = runner.RunAsync(request, watchdog.CancellationToken);
         int? childProcessId = null;
         int? grandchildProcessId = null;
+        FixtureProcess? childFixture = null;
+        FixtureProcess? grandchildFixture = null;
         var processCleanupVerified = false;
 
         try
@@ -2992,6 +3134,8 @@ public sealed class CoverageRunTests
             childProcessId = await childProcessIdTask;
             grandchildProcessId = await grandchildProcessIdTask;
             Assert.NotEqual(childProcessId, grandchildProcessId);
+            childFixture = CaptureFixtureProcess(childProcessId);
+            grandchildFixture = CaptureFixtureProcess(grandchildProcessId);
             operation.Transition("nested-processes-ready");
 
             try
@@ -3028,8 +3172,8 @@ public sealed class CoverageRunTests
 
             if (!processCleanupVerified)
             {
-                TryKillFixtureProcess(childProcessId);
-                TryKillFixtureProcess(grandchildProcessId);
+                TryKillFixtureProcess(childFixture);
+                TryKillFixtureProcess(grandchildFixture);
             }
         }
     }
@@ -3091,21 +3235,47 @@ public sealed class CoverageRunTests
         new AccessViolationException("fatal observer failure"),
     ];
 
-    private static void TryKillFixtureProcess(int? processId)
+    private static FixtureProcess? CaptureFixtureProcess(int? processId)
     {
         if (processId is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(processId.Value);
+            return process.HasExited
+                ? null
+                : new FixtureProcess(process.Id, process.ProcessName, process.StartTime.ToUniversalTime());
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            // The watchdog already cleaned the fixture, or the platform cannot inspect it.
+            return null;
+        }
+    }
+
+    private static void TryKillFixtureProcess(FixtureProcess? fixture)
+    {
+        if (fixture is null)
         {
             return;
         }
 
         try
         {
-            using var process = Process.GetProcessById(processId.Value);
-            process.Kill(entireProcessTree: false);
+            using var process = Process.GetProcessById(fixture.ProcessId);
+            if (!process.HasExited
+                && string.Equals(process.ProcessName, fixture.ProcessName, StringComparison.Ordinal)
+                && process.StartTime.ToUniversalTime() == fixture.StartTimeUtc)
+            {
+                process.Kill(entireProcessTree: false);
+            }
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
         {
-            // The watchdog already cleaned the fixture, or the platform cannot inspect it.
+            // The watchdog already cleaned the fixture, or the PID now belongs to another process.
         }
     }
 
@@ -3173,6 +3343,8 @@ public sealed class CoverageRunTests
         await process.WaitForExitAsync();
         return state.TrimStart().StartsWith('Z');
     }
+
+    private sealed record FixtureProcess(int ProcessId, string ProcessName, DateTime StartTimeUtc);
 
     private static async Task AssertUnsafeOutputAsync(
         CoverageRunWorkflow workflow,

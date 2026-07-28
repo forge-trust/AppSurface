@@ -579,6 +579,19 @@ public sealed class ProgramEntryPointTests
     }
 
     [Theory]
+    [InlineData("--watchdog", "unexpected")]
+    [InlineData("--heartbeat-interval", "1M")]
+    [InlineData("--no-progress-timeout", "0")]
+    public async Task EntryPoint_ShouldRejectInvalidCoverageRunWatchdogOptions(string option, string value)
+    {
+        var result = await InvokeEntryPointAsync(["coverage", "run", option, value]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("ASCOV101", result.AllText, StringComparison.Ordinal);
+        Assert.Contains(option, result.AllText, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("0.1.0", "0.1.0")]
     [InlineData("0.1.0-rc.1", "0.1.0-rc.1")]
     [InlineData("0.1.0-rc-1", "0.1.0-rc-1")]

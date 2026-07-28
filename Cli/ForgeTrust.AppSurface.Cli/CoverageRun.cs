@@ -239,7 +239,11 @@ internal sealed partial class CoverageRunCommand : ICommand
         }
     }
 
-    private CoverageRunRequest CreateRequest()
+    /// <summary>
+    /// Validates command options and creates the immutable coverage-run request.
+    /// </summary>
+    /// <returns>Validated coverage-run configuration for workflow execution.</returns>
+    internal CoverageRunRequest CreateRequest()
     {
         if (Parallelism <= 0)
         {
@@ -551,6 +555,8 @@ internal sealed class CoverageRunWorkflow
     private readonly ICoverageRunReportGenerator _reportGenerator;
     private readonly TimeProvider _timeProvider;
     private readonly Func<CancellationToken, Task>? _beforeSlowTestDiagnostics;
+    private readonly Action? _slowTestDiagnosticsStaged;
+    private readonly Action<string>? _beforeSlowTestDiagnosticsPromotion;
     private readonly Action? _summaryStaged;
     private readonly Action? _timingsStaged;
     private readonly Action<string>? _deleteStagedCoverageFile;
@@ -563,6 +569,8 @@ internal sealed class CoverageRunWorkflow
     /// <param name="reportGenerator">Package-owned ReportGenerator wrapper.</param>
     /// <param name="timeProvider">Time provider used for timings.</param>
     /// <param name="beforeSlowTestDiagnostics">Optional test seam invoked after the supervised diagnostics operation starts.</param>
+    /// <param name="slowTestDiagnosticsStaged">Optional test seam invoked after diagnostics staging completes and before cancellation is rechecked.</param>
+    /// <param name="beforeSlowTestDiagnosticsPromotion">Optional test seam invoked after a prior canonical artifact is backed up and before a staged artifact is promoted.</param>
     /// <param name="summaryStaged">Optional test seam invoked after the text summary is staged and before its atomic commit.</param>
     /// <param name="timingsStaged">Optional test seam invoked after timings JSON is staged and before its atomic commit.</param>
     /// <param name="deleteStagedCoverageFile">Optional test seam that replaces staged collector-artifact deletion.</param>
@@ -572,6 +580,8 @@ internal sealed class CoverageRunWorkflow
         ICoverageRunReportGenerator reportGenerator,
         TimeProvider timeProvider,
         Func<CancellationToken, Task>? beforeSlowTestDiagnostics = null,
+        Action? slowTestDiagnosticsStaged = null,
+        Action<string>? beforeSlowTestDiagnosticsPromotion = null,
         Action? summaryStaged = null,
         Action? timingsStaged = null,
         Action<string>? deleteStagedCoverageFile = null,
@@ -581,6 +591,8 @@ internal sealed class CoverageRunWorkflow
         _reportGenerator = reportGenerator ?? throw new ArgumentNullException(nameof(reportGenerator));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _beforeSlowTestDiagnostics = beforeSlowTestDiagnostics;
+        _slowTestDiagnosticsStaged = slowTestDiagnosticsStaged;
+        _beforeSlowTestDiagnosticsPromotion = beforeSlowTestDiagnosticsPromotion;
         _summaryStaged = summaryStaged;
         _timingsStaged = timingsStaged;
         _deleteStagedCoverageFile = deleteStagedCoverageFile;
@@ -735,6 +747,8 @@ internal sealed class CoverageRunWorkflow
                         outputDirectory,
                         projectResults,
                         () => ElapsedSeconds(runStarted),
+                        supervisor.Commit,
+                        operation.Transition,
                         runConsole,
                         operation.ObserveBytes,
                         supervisedCancellationToken);
@@ -2219,6 +2233,8 @@ internal sealed class CoverageRunWorkflow
         string outputDirectory,
         IReadOnlyList<CoverageProjectRunResult> projectResults,
         Func<long> getTotalSeconds,
+        Action<Action> commit,
+        Action<string> transition,
         CoverageRunConsoleSink console,
         Action<int> observeProgress,
         CancellationToken cancellationToken)
@@ -2229,6 +2245,12 @@ internal sealed class CoverageRunWorkflow
         }
 
         var diagnosticStarted = _timeProvider.GetTimestamp();
+        var stagedMarkdownPath = Path.Join(
+            outputDirectory,
+            $".{CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName}.{Guid.NewGuid():N}.tmp");
+        var stagedJsonPath = Path.Join(
+            outputDirectory,
+            $".{CoverageRunSlowTestDiagnosticsWriter.JsonFileName}.{Guid.NewGuid():N}.tmp");
         try
         {
             if (_beforeSlowTestDiagnostics is not null)
@@ -2239,12 +2261,23 @@ internal sealed class CoverageRunWorkflow
             var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync(projectResults, cancellationToken);
             observeProgress(1);
             var diagnostics = await CoverageRunSlowTestDiagnosticsWriter.WriteAsync(
+                stagedMarkdownPath,
+                stagedJsonPath,
                 outputDirectory,
                 report,
                 () => ElapsedSeconds(diagnosticStarted),
                 aggregationSeconds => CalculateAggregationPercent(aggregationSeconds, getTotalSeconds()),
                 cancellationToken);
-            observeProgress(1);
+            _slowTestDiagnosticsStaged?.Invoke();
+            cancellationToken.ThrowIfCancellationRequested();
+            CommitStagedDiagnostics(
+                stagedMarkdownPath,
+                diagnostics.MarkdownPath,
+                stagedJsonPath,
+                diagnostics.JsonPath,
+                commit,
+                transition,
+                _beforeSlowTestDiagnosticsPromotion);
 
             await console.WriteOutputAsync(FormattableString.Invariant(
                 $"Slow-test diagnostics: {diagnostics.MarkdownPath} ({diagnostics.AggregationSeconds}s, {diagnostics.AggregationPercent:0.00}% overhead)"), cancellationToken);
@@ -2253,20 +2286,134 @@ internal sealed class CoverageRunWorkflow
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or XmlException)
         {
             var aggregationSeconds = ElapsedSeconds(diagnosticStarted);
-            var diagnostics = new CoverageRunSlowTestDiagnosticsRun(
-                Path.Join(outputDirectory, CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName),
-                Path.Join(outputDirectory, CoverageRunSlowTestDiagnosticsWriter.JsonFileName),
-                aggregationSeconds,
-                CalculateAggregationPercent(aggregationSeconds, getTotalSeconds()),
-                WarningCount: 1,
-                MetadataComplete: false,
-                projectResults
-                    .SelectMany(result => result.TestResults)
-                    .ToDictionary(artifact => artifact.Path, _ => "diagnosticsFailed", StringComparer.Ordinal));
             await console.WriteErrorAsync(FormattableString.Invariant(
-                $"Slow-test diagnostics failed after {diagnostics.AggregationSeconds}s ({diagnostics.AggregationPercent:0.00}% overhead): {ex.Message}"), cancellationToken);
-            return diagnostics;
+                $"Slow-test diagnostics failed after {aggregationSeconds}s ({CalculateAggregationPercent(aggregationSeconds, getTotalSeconds()):0.00}% overhead): {ex.Message}"), cancellationToken);
+            return null;
         }
+        finally
+        {
+            TryDeleteStagedDiagnosticsFile(stagedMarkdownPath);
+            TryDeleteStagedDiagnosticsFile(stagedJsonPath);
+        }
+    }
+
+    private static void CommitStagedDiagnostics(
+        string stagedMarkdownPath,
+        string markdownPath,
+        string stagedJsonPath,
+        string jsonPath,
+        Action<Action> commit,
+        Action<string> transition,
+        Action<string>? beforePromotion)
+    {
+        StagedDiagnosticsPromotion[] promotions =
+        [
+            new StagedDiagnosticsPromotion(stagedMarkdownPath, markdownPath),
+            new StagedDiagnosticsPromotion(stagedJsonPath, jsonPath),
+        ];
+
+        commit(() =>
+        {
+            foreach (var promotion in promotions)
+            {
+                if (!File.Exists(promotion.StagedPath))
+                {
+                    throw new IOException($"Slow-test diagnostics staging file is unavailable: {promotion.StagedPath}");
+                }
+
+                if (Directory.Exists(promotion.DestinationPath))
+                {
+                    throw new IOException($"Slow-test diagnostics destination is a directory: {promotion.DestinationPath}");
+                }
+            }
+
+            try
+            {
+                foreach (var promotion in promotions)
+                {
+                    if (File.Exists(promotion.DestinationPath))
+                    {
+                        promotion.BackupPath = Path.Join(
+                            Path.GetDirectoryName(promotion.DestinationPath)!,
+                            $".{Path.GetFileName(promotion.DestinationPath)}.{Guid.NewGuid():N}.backup");
+                        File.Move(promotion.DestinationPath, promotion.BackupPath);
+                    }
+
+                    beforePromotion?.Invoke(promotion.DestinationPath);
+                    File.Move(promotion.StagedPath, promotion.DestinationPath);
+                    promotion.Promoted = true;
+                }
+
+                transition("diagnostics-published");
+            }
+            catch
+            {
+                RollBackStagedDiagnostics(promotions);
+                throw;
+            }
+
+            foreach (var promotion in promotions)
+            {
+                if (promotion.BackupPath is not null)
+                {
+                    TryDeleteStagedDiagnosticsFile(promotion.BackupPath);
+                }
+            }
+        });
+    }
+
+    private static void RollBackStagedDiagnostics(IReadOnlyList<StagedDiagnosticsPromotion> promotions)
+    {
+        for (var index = promotions.Count - 1; index >= 0; index--)
+        {
+            var promotion = promotions[index];
+            if (promotion.Promoted)
+            {
+                try
+                {
+                    File.Move(promotion.DestinationPath, promotion.StagedPath, overwrite: true);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Continue restoring the prior canonical artifacts; the original promotion failure remains authoritative.
+                }
+            }
+
+            if (promotion.BackupPath is not null)
+            {
+                try
+                {
+                    File.Move(promotion.BackupPath, promotion.DestinationPath, overwrite: true);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Best-effort rollback preserves as much prior artifact state as possible.
+                }
+            }
+        }
+    }
+
+    private static void TryDeleteStagedDiagnosticsFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // A private staging remnant is safer than changing the coverage-run result after diagnostics already failed.
+        }
+    }
+
+    private sealed class StagedDiagnosticsPromotion(string stagedPath, string destinationPath)
+    {
+        public string StagedPath { get; } = stagedPath;
+
+        public string DestinationPath { get; } = destinationPath;
+
+        public string? BackupPath { get; set; }
+
+        public bool Promoted { get; set; }
     }
 
     private static decimal CalculateAggregationPercent(long aggregationSeconds, long totalSeconds)
