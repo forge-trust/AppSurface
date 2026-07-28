@@ -63,6 +63,17 @@ public class DocsSearchSummaryPresentationProjectorTests
         Assert.EndsWith("…", flattened.Last(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Project_ShouldBoundNodeCount_Deterministically()
+    {
+        var summary = string.Join(" ", Enumerable.Range(0, DocsSearchSummaryPresentationProjector.MaxNodes + 1).Select(index => $"`node-{index}`"));
+
+        var presentation = Assert.IsAssignableFrom<IReadOnlyList<DocsSearchSummaryPresentationNode>>(DocsSearchSummaryPresentationProjector.Project(summary));
+
+        Assert.True(presentation.Sum(CountNodes) <= DocsSearchSummaryPresentationProjector.MaxNodes);
+        Assert.Contains(presentation.SelectMany(Flatten), text => text.Contains("node-0", StringComparison.Ordinal));
+    }
+
     private static IEnumerable<string> Flatten(DocsSearchSummaryPresentationNode node)
     {
         if (node.Text is not null)
