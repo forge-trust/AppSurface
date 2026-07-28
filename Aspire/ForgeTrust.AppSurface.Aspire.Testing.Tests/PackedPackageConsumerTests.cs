@@ -4,11 +4,12 @@ using System.Xml.Linq;
 
 public sealed class PackedPackageConsumerTests
 {
-    private const string PackageVersion = "0.0.0-consumer-proof";
+    private const string PackageVersion = "0.0.0-consumer-override-proof";
+    private const string AspireOverrideVersion = "13.4.6";
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task PackedPackage_PinsAspireAndCompilesDocumentedConsumer()
+    public async Task PackedPackage_SetsAspireMinimumAndRunsConsumerOverrideCleanup()
     {
         var repositoryRoot = GetRepositoryRoot();
         var workDirectory = Path.Join(Path.GetTempPath(), $"appsurface-aspire-testing-consumer-&-{Guid.NewGuid():N}");
@@ -49,7 +50,7 @@ public sealed class PackedPackageConsumerTests
 
             var packagePath = Assert.Single(
                 Directory.GetFiles(feedDirectory, "ForgeTrust.AppSurface.Aspire.Testing.*.nupkg"));
-            var packedPackageVersion = AssertExactAspireDependencies(packagePath);
+            var packedPackageVersion = AssertMinimumAspireDependencies(packagePath);
 
             var nugetConfigPath = Path.Join(consumerDirectory, "NuGet.config");
             var nugetConfiguration = new XDocument(
@@ -80,12 +81,16 @@ public sealed class PackedPackageConsumerTests
                 <Project Sdk="Microsoft.NET.Sdk">
                   <PropertyGroup>
                     <TargetFramework>net10.0</TargetFramework>
+                    <OutputType>Exe</OutputType>
                     <ImplicitUsings>enable</ImplicitUsings>
                     <Nullable>enable</Nullable>
                     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
                   </PropertyGroup>
                   <ItemGroup>
                     <PackageReference Include="ForgeTrust.AppSurface.Aspire.Testing" Version="{{packedPackageVersion}}" />
+                    <PackageReference Include="Aspire.Hosting" Version="{{AspireOverrideVersion}}" />
+                    <PackageReference Include="Aspire.Hosting.AppHost" Version="{{AspireOverrideVersion}}" />
+                    <PackageReference Include="Aspire.Hosting.Testing" Version="{{AspireOverrideVersion}}" />
                   </ItemGroup>
                 </Project>
                 """);
@@ -124,12 +129,56 @@ public sealed class PackedPackageConsumerTests
                 {
                     public static Task<AppSurfaceAspireProfileTestingBuilder> CreateAsync() =>
                         AppSurfaceAspireTestingBuilder.CreateAsync<ConsumerAppHost, ConsumerModule, ConsumerProfile>();
+
+                    public static async Task Main()
+                    {
+                        await using var builder = await CreateAsync();
+                        builder.Services.AddSingleton<ConsumerBuildProbe>();
+                        builder.Services.AddSingleton<IHostLifetime>(services =>
+                        {
+                            ConsumerBuildProbe.Instance = services.GetRequiredService<ConsumerBuildProbe>();
+                            throw new ConsumerBuildException();
+                        });
+
+                        try
+                        {
+                            await builder.BuildAsync();
+                            throw new InvalidOperationException("Expected packed Aspire host construction to fail.");
+                        }
+                        catch (ConsumerBuildException)
+                        {
+                        }
+
+                        if (ConsumerBuildProbe.Instance?.IsDisposed != true)
+                        {
+                            throw new InvalidOperationException("Expected the packed package to dispose the partial provider.");
+                        }
+                    }
+                }
+
+                public sealed class ConsumerBuildProbe : IDisposable
+                {
+                    public static ConsumerBuildProbe? Instance { get; set; }
+                    public bool IsDisposed { get; private set; }
+                    public void Dispose() => IsDisposed = true;
+                }
+
+                public sealed class ConsumerBuildException : Exception
+                {
                 }
                 """);
 
             await RunDotNetAsync(
                 consumerDirectory,
                 ["build", "Consumer.csproj", "--configfile", nugetConfigPath, "--nologo"]);
+            await RunDotNetAsync(
+                consumerDirectory,
+                ["run", "--project", "Consumer.csproj", "--no-build", "--no-restore"],
+                new Dictionary<string, string>
+                {
+                    ["ASPIRE_DCP_PATH"] = "dummy",
+                    ["ASPIRE_DASHBOARD_PATH"] = "dummy"
+                });
         }
         finally
         {
@@ -137,7 +186,7 @@ public sealed class PackedPackageConsumerTests
         }
     }
 
-    private static string AssertExactAspireDependencies(string packagePath)
+    private static string AssertMinimumAspireDependencies(string packagePath)
     {
         using var archive = ZipFile.OpenRead(packagePath);
         var nuspecEntry = Assert.Single(archive.Entries, entry => entry.FullName.EndsWith(".nuspec", StringComparison.Ordinal));
@@ -151,14 +200,17 @@ public sealed class PackedPackageConsumerTests
                 element => element.Attribute("version")?.Value ?? string.Empty,
                 StringComparer.OrdinalIgnoreCase);
 
-        Assert.Equal("[13.4.4]", dependencies["Aspire.Hosting"]);
-        Assert.Equal("[13.4.4]", dependencies["Aspire.Hosting.AppHost"]);
-        Assert.Equal("[13.4.4]", dependencies["Aspire.Hosting.Testing"]);
+        Assert.Equal("13.4.4", dependencies["Aspire.Hosting"]);
+        Assert.Equal("13.4.4", dependencies["Aspire.Hosting.AppHost"]);
+        Assert.Equal("13.4.4", dependencies["Aspire.Hosting.Testing"]);
         Assert.Equal(packageVersion, dependencies["ForgeTrust.AppSurface.Aspire"]);
         return packageVersion;
     }
 
-    private static async Task RunDotNetAsync(string workingDirectory, IReadOnlyList<string> arguments)
+    private static async Task RunDotNetAsync(
+        string workingDirectory,
+        IReadOnlyList<string> arguments,
+        IReadOnlyDictionary<string, string>? environmentVariables = null)
     {
         using var process = new Process
         {
@@ -172,6 +224,14 @@ public sealed class PackedPackageConsumerTests
         };
         process.StartInfo.Environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
         process.StartInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
+        if (environmentVariables is not null)
+        {
+            foreach (var (name, value) in environmentVariables)
+            {
+                process.StartInfo.Environment[name] = value;
+            }
+        }
+
         foreach (var argument in arguments)
         {
             process.StartInfo.ArgumentList.Add(argument);

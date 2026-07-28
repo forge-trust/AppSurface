@@ -258,7 +258,7 @@ public sealed class CoverageRunnerOptionsTests
         Assert.Equal("Release", result.Options.BuildConfiguration);
         Assert.True(result.Options.BuildNoRestore);
         Assert.Equal("[Sample]*", result.Options.IncludeFilter);
-        Assert.Equal("[Sample.Tests]*%2c[Sample.Generated]*", result.Options.ExcludeFilter);
+        Assert.Equal("[Sample.Tests]*,[Sample.Generated]*", result.Options.ExcludeFilter);
     }
 
     [Fact]

@@ -13,6 +13,7 @@ namespace ForgeTrust.AppSurface.PackageIndex;
 internal sealed class PackageArtifactValidator
 {
     private const string RequiredPackageProjectUrl = "https://appsurface.dev";
+    private const string DocsPackageId = "ForgeTrust.AppSurface.Docs";
     private const string TailwindRuntimePackagePrefix = "ForgeTrust.AppSurface.Web.Tailwind.Runtime.";
     private const int MaxNoticeBytes = 256 * 1024;
 
@@ -24,6 +25,14 @@ internal sealed class PackageArtifactValidator
             ["osx-arm64"] = "tailwindcss-macos-arm64",
             ["osx-x64"] = "tailwindcss-macos-x64",
             ["win-x64"] = "tailwindcss-windows-x64.exe"
+        };
+
+    private static readonly IReadOnlyDictionary<string, Version?> StableDocsDependencies =
+        new Dictionary<string, Version?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["AngleSharp"] = new Version(1, 5, 2),
+            ["AngleSharp.Css"] = null,
+            ["HtmlSanitizer"] = null
         };
 
     /// <summary>
@@ -140,6 +149,8 @@ internal sealed class PackageArtifactValidator
             throw new PackageIndexException(
                 $"Package '{expected.PackageId}' has version '{inspected.PackageVersion}', expected '{packageVersion}'.");
         }
+
+        ValidateStableDocsDependencies(inspected, packageVersion);
 
         RequireMetadata(expected.PackageId, "authors", inspected.Authors);
         RequireMetadata(expected.PackageId, "description", inspected.Description);
@@ -902,6 +913,95 @@ internal sealed class PackageArtifactValidator
             || string.Equals(dependencyVersion, $"[{packageVersion}]", StringComparison.OrdinalIgnoreCase)
             || string.Equals(dependencyVersion, $"[{packageVersion}, )", StringComparison.OrdinalIgnoreCase)
             || string.Equals(dependencyVersion, $"[{packageVersion},)", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void ValidateStableDocsDependencies(InspectedPackage inspected, string packageVersion)
+    {
+        if (!string.Equals(inspected.PackageId, DocsPackageId, StringComparison.OrdinalIgnoreCase)
+            || packageVersion.Contains('-', StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var unsafeDependencies = StableDocsDependencies
+            .SelectMany(requiredDependency =>
+            {
+                if (!inspected.Dependencies.TryGetValue(requiredDependency.Key, out var versions)
+                    || versions.Count == 0)
+                {
+                    return [(DependencyId: requiredDependency.Key, Version: "<missing>")];
+                }
+
+                return versions
+                    .Where(version => !TryReadStableDependencyLowerBound(version, out var lowerBound)
+                        || (requiredDependency.Value is not null && lowerBound < requiredDependency.Value))
+                    .Select(version => (DependencyId: requiredDependency.Key, Version: string.IsNullOrWhiteSpace(version) ? "<versionless>" : version));
+            })
+            .OrderBy(dependency => dependency.DependencyId, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(dependency => dependency.Version, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (unsafeDependencies.Length == 0)
+        {
+            return;
+        }
+
+        var dependencySummary = string.Join(
+            ", ",
+            unsafeDependencies.Select(dependency => $"'{dependency.DependencyId}' at '{dependency.Version}'"));
+        throw new PackageIndexException(
+            $"ASPKG139 {DocsPackageId}: stable package version '{packageVersion}' contains missing or unsafe dependencies {dependencySummary}. Problem: a stable AppSurface Docs package must expose a complete, stable advisory-safe parser and sanitizer graph. Cause: the packed dependency graph omits a required dependency, contains a prerelease or malformed range, or allows AngleSharp below 1.5.2. Fix: declare stable AngleSharp, AngleSharp.Css, and HtmlSanitizer dependencies, keep AngleSharp at 1.5.2 or newer, and satisfy the v0.2.0 stable-exit requirement before packing the stable AppSurface Docs release. Docs: https://github.com/forge-trust/AppSurface/issues/682.");
+    }
+
+    private static bool TryReadStableDependencyLowerBound(string dependencyVersion, out Version lowerBound)
+    {
+        lowerBound = new Version();
+        var value = dependencyVersion.Trim();
+        if (value.Length == 0 || value.Contains('-', StringComparison.Ordinal) || value.Contains('+', StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (value.Contains(',', StringComparison.Ordinal))
+        {
+            if ((value[0] != '[' && value[0] != '(') || (value[^1] != ']' && value[^1] != ')'))
+            {
+                return false;
+            }
+
+            var bounds = value[1..^1].Split(',', StringSplitOptions.TrimEntries);
+            if (bounds.Length != 2 || !TryReadStableVersion(bounds[0], out lowerBound))
+            {
+                return false;
+            }
+
+            return bounds[1].Length == 0
+                || (TryReadStableVersion(bounds[1], out var upperBound) && lowerBound <= upperBound);
+        }
+
+        if (value[0] == '[' || value[^1] == ']')
+        {
+            if (value[0] != '[' || value[^1] != ']')
+            {
+                return false;
+            }
+
+            value = value[1..^1].Trim();
+        }
+        else if (value[0] == '(' || value[^1] == ')')
+        {
+            return false;
+        }
+
+        return TryReadStableVersion(value, out lowerBound);
+    }
+
+    private static bool TryReadStableVersion(string value, out Version version)
+    {
+        version = new Version();
+        var coreParts = value.Split('.');
+        return coreParts.Length is >= 2 and <= 4
+            && coreParts.All(part => part.Length > 0 && part.All(char.IsAsciiDigit))
+            && Version.TryParse(value, out version!);
     }
 
     private static bool IsFirstPartyAssemblyEntry(ZipArchiveEntry entry, IReadOnlySet<string> packageIds)

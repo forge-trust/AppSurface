@@ -4,7 +4,12 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
-- `appsurface coverage run` now explains long-running orchestration with per-operation heartbeats and no-observable-progress classification. The default remains non-terminating: heartbeats render every 30 seconds and `warn` records an incident after 10 minutes without observable progress.
+- [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog) now records monotonic per-operation progress, emits 30-second heartbeats by default, and warns after 10 minutes without observable progress. `--watchdog fail` additionally performs bounded whole-process-tree cleanup, writes privacy-minimized incident evidence when possible, and exits `124` with `ASCOV121`.
+- `appsurface secrets transfer plan|apply` now plans and applies declared LocalSecrets and Google Secret Manager
+  promotion jobs against existing Google secrets only. Plans bind configuration digest, expiry, and destination
+  preconditions; `--apply` is required for mutation, production jobs require explicit confirmation, and all text/JSON
+  diagnostics stay value-safe.
+- [`ForgeTrust.AppSurface.Aspire.Testing`](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md) now closes Aspire 13.4.4's partial-provider cleanup gap for profile tests. The builder captures the verified Aspire root provider immediately before host resolution, disposes it immediately when a non-process-fatal host construction fails, retains it for best-effort builder disposal after a process-fatal failure, preserves the original non-process-fatal build exception when cleanup also fails, and transfers ownership unchanged to the returned application after a successful build. Aspire dependencies now publish 13.4.4 as a minimum instead of an exact constraint, so consumers can select later versions without `NU1608`; an unfamiliar host-registration shape emits a trace warning and continues without the additional cleanup.
 - `ForgeTrust.RazorWire` now owns a deterministic Turbo 8.0.23 default: `<rw:scripts />` emits an exact package-carried, same-origin runtime before RazorWire, while explicit custom and host-managed policies cover app-owned same-origin files or fully host-owned URL, integrity, CSP, and load-order requirements. The upgrade from 8.0.12 is API-neutral and carries an explicit upstream-risk review plus focused Drive, Frame, Stream, form, island, and Behavior Kit compatibility evidence.
 - `ForgeTrust.RazorWire` Form Interactions now keeps duplicated mark-for-removal fields model-bindable by restoring the app-authored inactive value, defaulting to `false`, while identity and concurrency fields still clear. Combined duplicate, add, mark-delete, and submit workflows no longer fail with an empty Boolean value.
 
@@ -12,14 +17,30 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
+- [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection) now defaults to the
+  VSTest `coverlet.collector` driver, validates each selected project's effective test runner and direct package
+  references before cleanup or execution, and normalizes one validated Cobertura attachment per invocation into the
+  stable artifact path. Native Microsoft Testing Platform projects fail preflight because they require `coverlet.MTP`;
+  `--coverage-driver msbuild` remains available only as an explicit compatibility path and emits a reliability warning.
 - [`appsurface coverage gate`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate) now applies a configurable `--tolerance` grace margin to overall and patch thresholds. The default `0.5` percentage point tolerance reduces rounding-related flakiness, `0` preserves strict enforcement, effective thresholds never fall below `0`, invalid values fail before evaluation, and console plus Markdown and JSON reports show the effective thresholds they enforce while retaining configured thresholds for automation.
 - `ForgeTrust.AppSurface.Web.OpenApi` now uses `Microsoft.AspNetCore.OpenApi` 10.0.9 and directly requires `Microsoft.OpenApi` in the range `[2.7.5, 3.0.0)`, keeping .NET 10 consumers on the supported 2.x line above the range affected by [GHSA-v5pm-xwqc-g5wc](https://github.com/advisories/GHSA-v5pm-xwqc-g5wc) while preserving existing OpenAPI and Scalar APIs and endpoint behavior.
 - [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) can now start long-running non-exclusive test projects earlier with `--schedule longest-first`. It reuses prior `timings.json` data when available, preserves integration and Playwright projects as exclusive barriers, supports explicit priority projects, fails invalid explicit timing or priority input before tests run, warns and preserves input order for unmeasured projects when inferred prior timings are missing or unusable, and keeps artifact names stable.
 - [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#exclude-discovered-test-projects) now supports repeatable `--exclude-test-project` segment globs for solution-discovered tests. Exclusions are normalized and case-insensitive, reject stale or malformed patterns before side effects, remain visible in list and dry-run output, preserve solution compilation, and are proven through the packaged CLI consumer with an excluded failing sentinel project.
-- Add `--watchdog warn|fail|off`, `--heartbeat-interval`, and `--no-progress-timeout` to [`coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog). Fail mode requests bounded cleanup of discoverable active process trees through .NET [`Process.Kill(entireProcessTree: true)`](https://learn.microsoft.com/dotnet/api/system.diagnostics.process.kill?view=net-10.0), emits `ASCOV121`, and exits `124`; artifact write degradation is reported as `ASCOV122` without replacing the primary run outcome. Cleanup is bounded rather than an absolute descendant guarantee: detached, re-parented, or permission-inaccessible descendants remain outside the platform API's proof boundary.
-- Add a bounded, privacy-minimized `coverage-watchdog.json` incident artifact plus a runner-scoped temporary fallback for incidents that occur before the configured output directory can be safely claimed. The fallback run directory uses user-only permissions on Unix. Publishing remains an explicit operator choice because normalized repository-relative names and command metadata can still be sensitive.
-- Keep per-test hang detection, test identity, and dump collection with [VSTest `--blame-hang`](https://learn.microsoft.com/dotnet/core/tools/dotnet-test-vstest#--blame-hang) or [Microsoft.Testing.Platform crash and hang dumps](https://learn.microsoft.com/dotnet/core/testing/microsoft-testing-platform-crash-hang-dumps). The AppSurface watchdog observes orchestration phases and output bytes; it does not diagnose test-host internals. The guide includes a warn-only fixture recipe with a first heartbeat target below 15 seconds and warning evidence within two minutes.
 - The [ASP.NET Core DevAuth example](../examples/auth-aspnetcore-dev-auth/README.md#what-the-verifier-proves) now has deterministic, staged startup proof: synchronous build failures stop immediately, child exits and Kestrel readiness are observed separately, a child-owned listening record gates the real-loopback HTTP workflow, and cleanup targets only the recorded child. A child-scoped standard .NET host setting avoids configuration-reload stalls in restricted file-watcher environments without changing normal example or consumer behavior. Focused in-process host coverage complements rather than replaces the real-socket verifier, and failures preserve only bounded, sanitized, allowlisted evidence. This is a contributor-experience correction; it adds no package API, package or production-host runtime behavior, package version, or release implication.
+- The coordinated package graph now addresses
+  [GHSA-pgww-w46g-26qg](https://github.com/advisories/GHSA-pgww-w46g-26qg) by pinning AppSurface Docs to exact
+  `AngleSharp` `[1.5.2]`, `HtmlSanitizer` `[9.1.949-beta]`, and `AngleSharp.Css` `[1.0.0-beta.216]`
+  dependencies. This is a dependency-only upgrade: AppSurface Docs public APIs, registration, configuration, and consumer
+  usage are unchanged. The beta sanitizer/CSS pair is intentional only for preview releases; stable package verification
+  rejects either prerelease dependency until
+  [issue #682](https://github.com/forge-trust/AppSurface/issues/682) selects compatible stable versions. The
+  [Docs security boundary](../Web/ForgeTrust.AppSurface.Docs/README.md#dependency-security-boundary) remains narrow:
+  sanitization covers rendered package-documentation fragments, not general UGC or host CSP. The RazorWire CLI also
+  carries the coordinated parser upgrade in its proof-only bundled tool graph, but remains excluded with
+  `publish_decision: do_not_publish`; see its
+  [installation and publication boundary](../Web/ForgeTrust.RazorWire.Cli/README.md#installation). The sanitizer regression
+  proof passed all four Chromium variants: `text/html` and `application/xhtml+xml`, each exercised through `title` and
+  `style` RCDATA handling.
 - [`ForgeTrust.AppSurface.Web` named canary evaluation](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints) is now available in preview: applications register typed, application-owned proof
   evaluators and explicitly map one fixed protected route family. Completed evaluations add required `name`, `ready`, and
   `status` fields plus optional typed evidence, a marker fingerprint, and up to 16 registration-declared bounded details.
@@ -40,6 +61,9 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## Migration watch
 
-- Existing runs can now produce periodic console output and, after a warning boundary, an owned watchdog artifact. Use `--heartbeat-interval 0 --watchdog off` for the previous silent, non-classifying behavior, or tune `--no-progress-timeout` for intentionally quiet suites.
+- Existing silent coverage runs can retain that behavior with `--heartbeat-interval 0 --watchdog off`; use `--no-progress-timeout` to tune intentionally quiet suites without disabling watchdog classification.
+- Existing `appsurface coverage run` consumers that reference `coverlet.msbuild` must replace it with
+  `coverlet.collector`, or explicitly pass `--coverage-driver msbuild` while completing the migration. The command never
+  silently falls back between drivers.
 - Existing hosts that consume `/health` or `/ready` must set `WebOptions.Health.Enabled = true` when upgrading.
 - Hosts using `HostManaged` with a Turbo version other than 8.0.23 own compatibility testing for that version. Turbo 8.0.23 removes upstream-deprecated `Turbo.clearCache()`, `data-turbo-cache="false"`, and legacy form polyfills; these were never AppSurface-defined APIs.

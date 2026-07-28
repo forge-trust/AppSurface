@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+using System.Text.Json;
 using ForgeTrust.AppSurface.Core;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -116,7 +118,12 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.Contains("### `appsurface coverage merge`", readme, StringComparison.Ordinal);
         Assert.Contains("dotnet tool run appsurface coverage run --solution ./MyApp.slnx --dry-run", readme, StringComparison.Ordinal);
         Assert.Contains("dotnet tool run appsurface coverage merge --source ./TestResults/coverage-shards --output ./TestResults/coverage-merged", readme, StringComparison.Ordinal);
-        Assert.Contains("dotnet add tests/MyApp.Tests/MyApp.Tests.csproj package coverlet.msbuild", readme, StringComparison.Ordinal);
+        Assert.Contains("dotnet add tests/MyApp.Tests/MyApp.Tests.csproj package coverlet.collector", readme, StringComparison.Ordinal);
+        Assert.Contains("#### Coverage Driver Selection", readme, StringComparison.Ordinal);
+        Assert.Contains("#### Coverage Run Watchdog", readme, StringComparison.Ordinal);
+        Assert.Contains("--coverage-driver collector|msbuild", readme, StringComparison.Ordinal);
+        Assert.Contains("never silently falls back", readme, StringComparison.Ordinal);
+        Assert.Contains("`ASCOV121`", readme, StringComparison.Ordinal);
         Assert.Contains("package-owned ReportGenerator", readme, StringComparison.Ordinal);
         Assert.Contains("--schedule longest-first", readme, StringComparison.Ordinal);
         Assert.Contains("--schedule-timings ./artifacts/previous-coverage/timings.json", readme, StringComparison.Ordinal);
@@ -140,29 +147,75 @@ public sealed class AppSurfaceCliReadmeContractTests
     }
 
     [Fact]
+    public void RepositoryLockFiles_ShouldNotRetainDirectMsbuildCoverageReferences()
+    {
+        var repositoryRoot = GetRepositoryRoot();
+        var staleLockFiles = Directory.EnumerateFiles(repositoryRoot, "packages*.lock.json", SearchOption.AllDirectories)
+            .Where(HasDirectMsbuildCoverageReference)
+            .Select(path => Path.GetRelativePath(repositoryRoot, path).Replace('\\', '/'))
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(
+            staleLockFiles.Length == 0,
+            "Lock files still declare a direct coverlet.msbuild reference: " + string.Join(", ", staleLockFiles));
+    }
+
+    [Fact]
     public void Readme_ShouldDocumentCoverageRunWatchdogContract()
     {
         var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());
 
         Assert.Contains("#### Coverage Run Watchdog", readme, StringComparison.Ordinal);
-        Assert.Contains("| Defaults | Every 30 seconds | Warn after 10 minutes | No |", readme, StringComparison.Ordinal);
-        Assert.Contains("| `--watchdog off` | Every 30 seconds | No | No |", readme, StringComparison.Ordinal);
-        Assert.Contains("| `--heartbeat-interval 0` | No | Warn after 10 minutes | No |", readme, StringComparison.Ordinal);
-        Assert.Contains("| `--watchdog fail` | Every 30 seconds | Fail after 10 minutes | Yes |", readme, StringComparison.Ordinal);
-        Assert.Contains("--heartbeat-interval 0 \\", readme, StringComparison.Ordinal);
-        Assert.Contains("--watchdog off", readme, StringComparison.Ordinal);
-        Assert.Contains("emits `ASCOV121`, and exits `124`", readme, StringComparison.Ordinal);
-        Assert.Contains("| `ASCOV121` | The watchdog classified an operation", readme, StringComparison.Ordinal);
-        Assert.Contains("| `ASCOV122` | Watchdog evidence could not be committed", readme, StringComparison.Ordinal);
-        Assert.Contains("privacy-minimized and bounded, not automatically safe to publish", readme, StringComparison.Ordinal);
-        Assert.Contains("review those fields, confirm the destination's retention and access policy", readme, StringComparison.Ordinal);
-        Assert.Contains("uses: actions/upload-artifact@v4", readme, StringComparison.Ordinal);
-        Assert.Contains("if: always()", readme, StringComparison.Ordinal);
-        Assert.Contains("${{ runner.temp }}/appsurface-coverage-watchdog/**", readme, StringComparison.Ordinal);
-        Assert.Contains("Uploading watchdog evidence is an explicit workflow choice", readme, StringComparison.Ordinal);
-        Assert.Contains("VSTest `--blame-hang`", readme, StringComparison.Ordinal);
-        Assert.Contains("Microsoft.Testing.Platform hang dumps", readme, StringComparison.Ordinal);
-        Assert.Contains("AppSurface does not silently inject those settings", readme, StringComparison.Ordinal);
+        Assert.Contains("`--heartbeat-interval` defaults to `30s`", readme, StringComparison.Ordinal);
+        Assert.Contains("`--no-progress-timeout` defaults to `10m`", readme, StringComparison.Ordinal);
+        Assert.Contains("`--watchdog warn` is the default", readme, StringComparison.Ordinal);
+        Assert.Contains("whole-process-tree termination through supervisor-owned process leases", readme, StringComparison.Ordinal);
+        Assert.Contains("exits `124` with `ASCOV121`", readme, StringComparison.Ordinal);
+        Assert.Contains("`--watchdog off` disables stall classification", readme, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{ \"dependencies\": [] }")]
+    public void LockFileWithoutObjectDependencies_ShouldNotReportDirectMsbuildReference(string contents)
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, contents);
+
+            Assert.False(HasDirectMsbuildCoverageReference(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void RepositoryReadme_ShouldDocumentCoverageDriverPrerequisites()
+    {
+        var readme = File.ReadAllText(GetRepositoryReadmePath());
+
+        Assert.Contains("dotnet add tests/MyApp.Tests/MyApp.Tests.csproj package coverlet.collector", readme, StringComparison.Ordinal);
+        Assert.Contains("[coverage driver selection](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection)", readme, StringComparison.Ordinal);
+        Assert.Contains("native Microsoft Testing Platform projects are rejected", readme, StringComparison.Ordinal);
+        Assert.Contains("--coverage-driver msbuild", readme, StringComparison.Ordinal);
+    }
+
+    private static bool HasDirectMsbuildCoverageReference(string path)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        return document.RootElement.TryGetProperty("dependencies", out var dependencies)
+            && dependencies.ValueKind == JsonValueKind.Object
+            && dependencies.EnumerateObject()
+            .Where(framework => framework.Value.ValueKind == JsonValueKind.Object)
+            .SelectMany(framework => framework.Value.EnumerateObject())
+            .Any(package => string.Equals(package.Name, "coverlet.msbuild", StringComparison.OrdinalIgnoreCase)
+                && package.Value.TryGetProperty("type", out var type)
+                && type.ValueKind == JsonValueKind.String
+                && string.Equals(type.GetString(), "Direct", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string GetAppSurfaceCliReadmePath()
@@ -170,6 +223,15 @@ public sealed class AppSurfaceCliReadmeContractTests
         var repositoryRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
         return Path.Join(repositoryRoot, "Cli", "ForgeTrust.AppSurface.Cli", "README.md");
     }
+
+    private static string GetRepositoryReadmePath()
+    {
+        var repositoryRoot = GetRepositoryRoot();
+        return Path.Join(repositoryRoot, "README.md");
+    }
+
+    private static string GetRepositoryRoot([CallerFilePath] string sourceFile = "")
+        => PathUtils.FindRepositoryRoot(Path.GetDirectoryName(sourceFile)!);
 
     private static string GetAppSurfaceAuthReadmePath()
     {

@@ -2,11 +2,11 @@
   "version": 2,
   "dependencies": {
     "net10.0": {
-      "coverlet.msbuild": {
+      "coverlet.collector": {
         "type": "Direct",
         "requested": "[10.0.1, )",
         "resolved": "10.0.1",
-        "contentHash": "kb5kBe1HioGuH+ZDKysv/oAO9cCUW2yxtrGrRBZp/dIij5f011OfC4XiNMayZ8bGfOv2+n2ocPkaJIGppAZDEg=="
+        "contentHash": "27jXSV/0DbVqF5jDrAxuQFZ9oaz6gmG03p8ttxAFk+X0M4woFYj7MoWDLCna5EGLb0CE6OE7X6ZH3Wt5smTtaA=="
       },
       "GitHubActionsTestLogger": {
         "type": "Direct",
@@ -740,9 +740,9 @@
       "forgetrust.appsurface.aspire.testing": {
         "type": "Project",
         "dependencies": {
-          "Aspire.Hosting": "[13.4.4, 13.4.4]",
-          "Aspire.Hosting.AppHost": "[13.4.4, 13.4.4]",
-          "Aspire.Hosting.Testing": "[13.4.4, 13.4.4]",
+          "Aspire.Hosting": "[13.4.4, )",
+          "Aspire.Hosting.AppHost": "[13.4.4, )",
+          "Aspire.Hosting.Testing": "[13.4.4, )",
           "ForgeTrust.AppSurface.Aspire": "[0.1.0, )"
         }
       },

@@ -572,6 +572,319 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Equal("ForgeTrust.AppSurface.Web", entry.PackageId);
     }
 
+    [Theory]
+    [InlineData("HtmlSanitizer", "[9.1.949-beta]")]
+    [InlineData("AngleSharp.Css", "[1.0.0-beta.216]")]
+    public void PackageArtifactValidator_RejectsPrereleaseDocsDependencyFromStablePackage(
+        string dependencyId,
+        string dependencyVersion)
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [dependencyId] = dependencyVersion
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+                artifactDirectory,
+                "1.0.0"));
+
+        Assert.Contains("ASPKG139", error.Message, StringComparison.Ordinal);
+        Assert.Contains(dependencyId, error.Message, StringComparison.Ordinal);
+        Assert.Contains(dependencyVersion, error.Message, StringComparison.Ordinal);
+        Assert.Contains("Problem:", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Cause:", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Fix:", error.Message, StringComparison.Ordinal);
+        Assert.Contains("v0.2.0 stable-exit requirement", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Docs: https://github.com/forge-trust/AppSurface/issues/682", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("AngleSharp")]
+    [InlineData("AngleSharp.Css")]
+    [InlineData("HtmlSanitizer")]
+    public void PackageArtifactValidator_RejectsMissingRequiredDocsDependencyFromStablePackage(string missingDependencyId)
+    {
+        var dependencies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["AngleSharp"] = "[1.5.2]",
+            ["AngleSharp.Css"] = "[1.0.0]",
+            ["HtmlSanitizer"] = "[9.2.0]"
+        };
+        dependencies.Remove(missingDependencyId);
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(artifactDirectory, "ForgeTrust.AppSurface.Docs", "1.0.0", dependencies);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+                artifactDirectory,
+                "1.0.0"));
+
+        Assert.Contains("ASPKG139", error.Message, StringComparison.Ordinal);
+        Assert.Contains($"'{missingDependencyId}' at '<missing>'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_RejectsVersionlessRequiredDocsDependencyFromStablePackage()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            EmptyDependencies,
+            dependencyXml: """
+                <dependencies>
+                  <dependency id="AngleSharp" version="[1.5.2]" />
+                  <dependency id="AngleSharp.Css" />
+                  <dependency id="HtmlSanitizer" version="[9.2.0]" />
+                </dependencies>
+                """);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+                artifactDirectory,
+                "1.0.0"));
+
+        Assert.Contains("'AngleSharp.Css' at '<versionless>'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_RejectsVulnerableAngleSharpFloorFromStablePackage()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["AngleSharp"] = "[0.17.1]",
+                ["AngleSharp.Css"] = "[1.0.0]",
+                ["HtmlSanitizer"] = "[9.2.0]"
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+                artifactDirectory,
+                "1.0.0"));
+
+        Assert.Contains("'AngleSharp' at '[0.17.1]'", error.Message, StringComparison.Ordinal);
+        Assert.Contains("below 1.5.2", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("1.5.2+")]
+    [InlineData("1.5.2,2.0.0)")]
+    [InlineData("[1.5.2,2.0.0")]
+    [InlineData("[1.5.2,2.0.0,3.0.0)")]
+    [InlineData("[1.x,2.0.0)")]
+    [InlineData("1..2")]
+    [InlineData("[1.5.2,nope)")]
+    [InlineData("[2.0.0,1.5.2)")]
+    [InlineData("[1.5.2)")]
+    [InlineData("(1.5.2)")]
+    [InlineData("1")]
+    [InlineData("1.5.x")]
+    [InlineData("1.5.2.3.4")]
+    public void PackageArtifactValidator_RejectsMalformedAngleSharpRangeFromStablePackage(
+        string angleSharpVersion)
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["AngleSharp"] = angleSharpVersion,
+                ["AngleSharp.Css"] = "[1.0.0]",
+                ["HtmlSanitizer"] = "[9.2.0]"
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+                artifactDirectory,
+                "1.0.0"));
+
+        Assert.Contains($"'AngleSharp' at '{angleSharpVersion}'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("1.5.2")]
+    [InlineData("1.5.2.3")]
+    [InlineData("[1.5.2]")]
+    [InlineData("[1.5.2,)")]
+    [InlineData("(1.5.2,2.0.0)")]
+    public void PackageArtifactValidator_AllowsStableAngleSharpRangeFromStablePackage(
+        string angleSharpVersion)
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["AngleSharp"] = angleSharpVersion,
+                ["AngleSharp.Css"] = "[1.0.0]",
+                ["HtmlSanitizer"] = "[9.2.0]"
+            });
+
+        var report = new PackageArtifactValidator().Validate(
+            CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+            artifactDirectory,
+            "1.0.0");
+
+        Assert.Single(report.Entries);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_RejectsPrereleaseDocsDependencyFromAnyDependencyGroup()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            EmptyDependencies,
+            dependencyXml: """
+                <dependencies>
+                  <group targetFramework="net10.0">
+                    <dependency id="HtmlSanitizer" version="[9.2.0]" />
+                  </group>
+                  <group targetFramework="net9.0">
+                    <dependency id="HtmlSanitizer" version="[9.1.949-beta]" />
+                  </group>
+                </dependencies>
+                """);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+                artifactDirectory,
+                "1.0.0"));
+
+        Assert.Contains("HtmlSanitizer", error.Message, StringComparison.Ordinal);
+        Assert.Contains("[9.1.949-beta]", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ReportsEveryNonStableDocsDependencyDeterministically()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["HtmlSanitizer"] = "not-a-version",
+                ["AngleSharp.Css"] = "[1.0.0-beta.216]"
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+                artifactDirectory,
+                "1.0.0"));
+
+        var cssIndex = error.Message.IndexOf("'AngleSharp.Css'", StringComparison.Ordinal);
+        var sanitizerIndex = error.Message.IndexOf("'HtmlSanitizer'", StringComparison.Ordinal);
+        Assert.True(cssIndex >= 0);
+        Assert.True(sanitizerIndex > cssIndex);
+        Assert.Contains("not-a-version", error.Message, StringComparison.Ordinal);
+        Assert.Contains("prerelease or malformed", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_AllowsPrereleaseDocsDependenciesForPreviewPackage()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0-preview.1",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["HtmlSanitizer"] = "[9.1.949-beta]",
+                ["AngleSharp.Css"] = "[1.0.0-beta.216]"
+            });
+
+        var report = new PackageArtifactValidator().Validate(
+            CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+            artifactDirectory,
+            "1.0.0-preview.1");
+
+        Assert.Single(report.Entries);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_AllowsStableDocsDependencyGraphForStablePackage()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["AngleSharp"] = "[1.5.2]",
+                ["HtmlSanitizer"] = "[9.2.0]",
+                ["AngleSharp.Css"] = "[1.0.0,2.0.0)"
+            });
+
+        var report = new PackageArtifactValidator().Validate(
+            CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+            artifactDirectory,
+            "1.0.0");
+
+        Assert.Single(report.Entries);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_DoesNotApplyDocsGuardToUnrelatedPackage()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web",
+            "1.0.0",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["HtmlSanitizer"] = "[9.1.949-beta]",
+                ["AngleSharp.Css"] = "[1.0.0-beta.216]"
+            });
+
+        var report = new PackageArtifactValidator().Validate(
+            CreateSinglePackagePlan("ForgeTrust.AppSurface.Web"),
+            artifactDirectory,
+            "1.0.0");
+
+        Assert.Single(report.Entries);
+    }
+
     [Fact]
     public void PackageArtifactValidator_ThrowsWhenToolSettingsCommandDoesNotMatchPlan()
     {
@@ -3446,19 +3759,14 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 "dotnet new tool-manifest",
                 "dotnet tool install",
                 "appsurface --version",
-                "appsurface coverage run --help",
                 "appsurface coverage run",
-                "appsurface coverage run watchdog warn",
-                "appsurface coverage run watchdog fail",
-                "appsurface coverage run watchdog noisy",
-                "appsurface coverage run ordinary failure",
-                "appsurface coverage run watchdog off",
+                "appsurface coverage run msbuild",
                 "appsurface coverage merge",
                 "appsurface coverage gate",
                 "appsurface coverage gate"
             ],
             commandRunner.Requests
-                .Where(request => request.OperationName is "dotnet new tool-manifest" or "dotnet tool install" or "appsurface --version" or "appsurface coverage run --help" or "appsurface coverage run" or "appsurface coverage run watchdog warn" or "appsurface coverage run watchdog fail" or "appsurface coverage run watchdog noisy" or "appsurface coverage run ordinary failure" or "appsurface coverage run watchdog off" or "appsurface coverage merge" or "appsurface coverage gate")
+                .Where(request => request.OperationName is "dotnet new tool-manifest" or "dotnet tool install" or "appsurface --version" or "appsurface coverage run" or "appsurface coverage run msbuild" or "appsurface coverage merge" or "appsurface coverage gate")
                 .Select(request => request.OperationName)
                 .ToArray());
         var coverageRunRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface coverage run");
@@ -3470,22 +3778,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             StringComparison.Ordinal);
         Assert.Contains(
             report.Artifacts,
-            artifact => artifact.Description == "excluded project 'Smoke.Browser.Tests' produced no coverage artifacts" && artifact.Satisfied);
-        var warnRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface coverage run watchdog warn");
-        Assert.Contains("warn", warnRequest.Arguments);
-        Assert.Contains("100ms", warnRequest.Arguments);
-        Assert.Contains("1s", warnRequest.Arguments);
-        Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage run watchdog warning incident" && artifact.Satisfied);
-        var watchdogFailure = Assert.Single(report.Commands, command => command.OperationName == "appsurface coverage run watchdog fail");
-        Assert.Equal(124, watchdogFailure.ExitCode);
-        Assert.Contains("ASCOV121", watchdogFailure.StandardError, StringComparison.Ordinal);
-        var ordinaryFailure = Assert.Single(report.Commands, command => command.OperationName == "appsurface coverage run ordinary failure");
-        Assert.Equal(1, ordinaryFailure.ExitCode);
-        Assert.True(ordinaryFailure.Succeeded);
-        var offRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface coverage run watchdog off");
-        Assert.Contains("off", offRequest.Arguments);
-        Assert.Contains("0", offRequest.Arguments);
-        Assert.Contains(report.Artifacts, artifact => artifact.Description == "disabled watchdog produced no incident artifact" && artifact.Satisfied);
+            artifact => artifact.Description == "excluded project 'Smoke.Browser.Tests' produced no coverage artifacts" && artifact.Exists);
         var addPackageRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet add package");
         Assert.DoesNotContain("--configfile", addPackageRequest.Arguments);
         Assert.True(File.Exists(CombineSafeChildPath(report.WorkDirectory, "consumer/NuGet.config")));
@@ -3498,37 +3791,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
             Assert.True(File.Exists(command.StandardOutputPath));
             Assert.True(File.Exists(command.StandardErrorPath));
         });
-        Assert.Contains(report.Artifacts, artifact => artifact.Description == "failing gate JSON report" && artifact.Satisfied);
-        Assert.Contains(report.Artifacts, artifact => artifact.Description == "failing gate Markdown report" && artifact.Satisfied);
-    }
-
-    [Fact]
-    public async Task CoverageCliConsumerProofWorkflow_AcceptsDocumentedFailedTerminalCleanup()
-    {
-        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
-        Directory.CreateDirectory(artifactDirectory);
-        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
-        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
-        var commandRunner = new CoverageProofRecordingCommandRunner(
-            PackageVersion,
-            createFailingGateReports: true,
-            failModeCleanupFailed: true);
-        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
-
-        var report = await workflow.RunAsync(
-            new CoverageCliConsumerProofRequest(
-                _repositoryRoot,
-                artifactDirectory,
-                PackageVersion,
-                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
-                "https://api.nuget.org/v3/index.json"),
-            CreateCliProofValidationReport(cliArtifactPath),
-            CancellationToken.None);
-
-        Assert.True(report.Succeeded, report.FirstFailure);
-        Assert.Contains(
-            report.Artifacts,
-            artifact => artifact.Description == "coverage run watchdog terminal incident" && artifact.Satisfied);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "failing gate JSON report" && artifact.Exists);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "failing gate Markdown report" && artifact.Exists);
     }
 
     [Fact]
@@ -3553,35 +3817,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         Assert.False(report.Succeeded);
         Assert.Contains("did not write both gate reports", report.FirstFailure, StringComparison.Ordinal);
-        Assert.Contains(report.Artifacts, artifact => artifact.Description == "failing gate JSON report" && !artifact.Satisfied);
-    }
-
-    [Fact]
-    public async Task CoverageCliConsumerProofWorkflow_RejectsWatchdogExitForOrdinaryFailureProof()
-    {
-        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
-        Directory.CreateDirectory(artifactDirectory);
-        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
-        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
-        var commandRunner = new CoverageProofRecordingCommandRunner(
-            PackageVersion,
-            createFailingGateReports: true,
-            ordinaryFailureExitCode: 124);
-        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
-
-        var report = await workflow.RunAsync(
-            new CoverageCliConsumerProofRequest(
-                _repositoryRoot,
-                artifactDirectory,
-                PackageVersion,
-                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
-                "https://api.nuget.org/v3/index.json"),
-            CreateCliProofValidationReport(cliArtifactPath),
-            CancellationToken.None);
-
-        Assert.False(report.Succeeded);
-        Assert.Contains("Expected a non-watchdog failure exit code", report.FirstFailure, StringComparison.Ordinal);
-        Assert.Equal("appsurface coverage run ordinary failure", report.Commands.Last().OperationName);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "failing gate JSON report" && !artifact.Exists);
     }
 
     [Fact]
@@ -3693,67 +3929,6 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
-    public async Task CoverageCliConsumerProofWorkflow_FailsWhenPackagedHelpOmitsWatchdogOptions()
-    {
-        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
-        Directory.CreateDirectory(artifactDirectory);
-        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
-        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
-        var commandRunner = new CoverageProofRecordingCommandRunner(
-            PackageVersion,
-            createFailingGateReports: true,
-            coverageRunHelp: "--watchdog");
-        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
-
-        var report = await workflow.RunAsync(
-            new CoverageCliConsumerProofRequest(
-                _repositoryRoot,
-                artifactDirectory,
-                PackageVersion,
-                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
-                "https://api.nuget.org/v3/index.json"),
-            CreateCliProofValidationReport(cliArtifactPath),
-            CancellationToken.None);
-
-        Assert.False(report.Succeeded);
-        Assert.Contains("--heartbeat-interval, --no-progress-timeout", report.FirstFailure, StringComparison.Ordinal);
-        Assert.Equal("appsurface coverage run --help", report.Commands.Last().OperationName);
-    }
-
-    [Fact]
-    public async Task CoverageCliConsumerProofWorkflow_AcceptsPackagedHelpWrittenToStandardError()
-    {
-        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
-        Directory.CreateDirectory(artifactDirectory);
-        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
-        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
-        var commandRunner = new CoverageProofRecordingCommandRunner(
-            PackageVersion,
-            createFailingGateReports: true,
-            coverageRunHelp: string.Empty,
-            coverageRunHelpError: "--watchdog --heartbeat-interval --no-progress-timeout");
-        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
-
-        var report = await workflow.RunAsync(
-            new CoverageCliConsumerProofRequest(
-                _repositoryRoot,
-                artifactDirectory,
-                PackageVersion,
-                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
-                "https://api.nuget.org/v3/index.json"),
-            CreateCliProofValidationReport(cliArtifactPath),
-            CancellationToken.None);
-
-        Assert.True(report.Succeeded, report.FirstFailure);
-        Assert.Contains(commandRunner.Requests, request => request.OperationName == "appsurface coverage run --help");
-        var testProjectRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet new xunit");
-        Assert.Contains(
-            "NoisyStuckOperation",
-            await File.ReadAllTextAsync(Path.Join(testProjectRequest.WorkingDirectory, "Smoke.Tests", "Smoke.Tests.csproj")),
-            StringComparison.Ordinal);
-    }
-
-    [Fact]
     public async Task CoverageCliConsumerProofWorkflow_FailsWhenCoverageRunArtifactsAreMissing()
     {
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
@@ -3778,7 +3953,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         Assert.False(report.Succeeded);
         Assert.Contains("coverage run merged Cobertura", report.FirstFailure, StringComparison.Ordinal);
-        Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage run merged Cobertura" && !artifact.Satisfied);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage run merged Cobertura" && !artifact.Exists);
         Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface coverage merge");
     }
 
@@ -3863,7 +4038,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         Assert.False(report.Succeeded);
         Assert.Contains("coverage merge Cobertura", report.FirstFailure, StringComparison.Ordinal);
-        Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage merge Cobertura" && !artifact.Satisfied);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage merge Cobertura" && !artifact.Exists);
         Assert.DoesNotContain(
             commandRunner.Requests,
             request => request.OperationName == "appsurface coverage gate"
@@ -3895,7 +4070,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         Assert.False(report.Succeeded);
         Assert.Contains("passing gate JSON report", report.FirstFailure, StringComparison.Ordinal);
-        Assert.Contains(report.Artifacts, artifact => artifact.Description == "passing gate JSON report" && !artifact.Satisfied);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "passing gate JSON report" && !artifact.Exists);
         Assert.DoesNotContain(
             commandRunner.Requests,
             request => request.OperationName == "appsurface coverage gate"
@@ -3905,19 +4080,18 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Theory]
     [InlineData("dotnet new classlib", null)]
     [InlineData("dotnet new xunit", null)]
+    [InlineData("dotnet new xunit msbuild", null)]
     [InlineData("dotnet new xunit sentinel", null)]
     [InlineData("dotnet sln add", null)]
     [InlineData("dotnet add reference", null)]
+    [InlineData("dotnet add reference msbuild", null)]
     [InlineData("dotnet add package", null)]
+    [InlineData("dotnet add msbuild package", null)]
     [InlineData("dotnet new tool-manifest", null)]
     [InlineData("dotnet tool install", null)]
     [InlineData("appsurface --version", null)]
-    [InlineData("appsurface coverage run --help", null)]
     [InlineData("appsurface coverage run", null)]
-    [InlineData("appsurface coverage run watchdog warn", null)]
-    [InlineData("appsurface coverage run watchdog fail", null)]
-    [InlineData("appsurface coverage run watchdog noisy", null)]
-    [InlineData("appsurface coverage run watchdog off", null)]
+    [InlineData("appsurface coverage run msbuild", null)]
     [InlineData("appsurface coverage merge", null)]
     [InlineData("appsurface coverage gate", "passing")]
     public async Task CoverageCliConsumerProofWorkflow_StopsWhenRequiredCommandFails(
@@ -3947,10 +4121,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         Assert.False(report.Succeeded);
         Assert.Equal(failedOperationName, report.Commands.Last().OperationName);
-        Assert.Contains(
-            failedOperationName == "appsurface coverage run watchdog fail" ? "Expected watchdog exit code 124" : "Expected exit code 0",
-            report.FirstFailure,
-            StringComparison.Ordinal);
+        Assert.Contains("Expected exit code 0", report.FirstFailure, StringComparison.Ordinal);
         Assert.Equal(commandRunner.Requests.Count, report.Commands.Count);
         if (failedTimeoutDescription is not null)
         {
@@ -4126,36 +4297,6 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
-    public void CoverageCliConsumerProofWorkflow_ResolvesActualFixtureTargetDirectory()
-    {
-        var projectDirectory = CombineSafeChildPath(_repositoryRoot, "Smoke.Tests");
-        var targetDirectory = CombineSafeChildPath(projectDirectory, "bin/Release/net-next");
-        Directory.CreateDirectory(targetDirectory);
-        File.WriteAllText(CombineSafeChildPath(targetDirectory, "Smoke.Tests.dll"), string.Empty);
-        File.WriteAllText(CombineSafeChildPath(targetDirectory, "Smoke.Tests.deps.json"), "{}");
-
-        var resolved = CoverageCliConsumerProofWorkflow.ResolveFixtureOutputDirectory(projectDirectory);
-
-        Assert.Equal(targetDirectory, resolved);
-    }
-
-    [Fact]
-    public void CoverageCliConsumerProofWorkflow_RejectsAmbiguousFixtureTargetDirectories()
-    {
-        var projectDirectory = CombineSafeChildPath(_repositoryRoot, "Smoke.Tests");
-        foreach (var target in new[] { "bin/Debug/net9.0", "bin/Debug/net10.0" })
-        {
-            var targetDirectory = CombineSafeChildPath(projectDirectory, target);
-            Directory.CreateDirectory(targetDirectory);
-            File.WriteAllText(CombineSafeChildPath(targetDirectory, "Smoke.Tests.dll"), string.Empty);
-            File.WriteAllText(CombineSafeChildPath(targetDirectory, "Smoke.Tests.deps.json"), "{}");
-        }
-
-        Assert.Throws<InvalidOperationException>(
-            () => CoverageCliConsumerProofWorkflow.ResolveFixtureOutputDirectory(projectDirectory));
-    }
-
-    [Fact]
     public void CoverageCliConsumerProofWorkflow_PrepareWorkDirectoryRejectsUnsafeDeletionTargets()
     {
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
@@ -4235,13 +4376,13 @@ public sealed class PackageArtifactValidationTests : IDisposable
             "/tmp/fixture.config",
             "/tmp/logs",
             [command],
-            [new CoverageCliConsumerProofArtifactCheck("failing gate JSON report", "/tmp/coverage-gate.json", Satisfied: true)],
+            [new CoverageCliConsumerProofArtifactCheck("failing gate JSON report", "/tmp/coverage-gate.json", Exists: true)],
             string.Empty,
             "dotnet run -- verify-packages");
         var failure = success with
         {
             FirstFailure = "missing artifact",
-            Artifacts = [new CoverageCliConsumerProofArtifactCheck("coverage merge Cobertura", "/tmp/coverage.cobertura.xml", Satisfied: false)]
+            Artifacts = [new CoverageCliConsumerProofArtifactCheck("coverage merge Cobertura", "/tmp/coverage.cobertura.xml", Exists: false)]
         };
 
         var successMarkdown = CoverageCliConsumerProofReportRenderer.RenderMarkdown(success);
@@ -4251,7 +4392,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("Selected artifact SHA-512: `abc123`", successMarkdown, StringComparison.Ordinal);
         Assert.Contains("ASCOV020 Coverage gate failed.", successMarkdown, StringComparison.Ordinal);
         Assert.Contains("Status: `failed`", failureMarkdown, StringComparison.Ordinal);
-        Assert.Contains("## Failed artifact checks", failureMarkdown, StringComparison.Ordinal);
+        Assert.Contains("## Missing artifacts", failureMarkdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -4513,7 +4654,11 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
         var reportPath = CombineSafeChildPath(artifactDirectory, "package-validation-report.md");
         var artifactManifestPath = CombineSafeChildPath(artifactDirectory, "package-artifact-manifest.json");
+        var coverageProofWorkDirectory = CombineSafeChildPath(artifactDirectory, "coverage-proof");
         Directory.CreateDirectory(artifactDirectory);
+        Directory.CreateDirectory(CombineSafeChildPath(coverageProofWorkDirectory, "consumer"));
+        var staleCoverageProofProject = CombineSafeChildPath(coverageProofWorkDirectory, "consumer/Stale.csproj");
+        await File.WriteAllTextAsync(staleCoverageProofProject, "<Project />", Encoding.UTF8);
         var stalePackage = CombineSafeChildPath(artifactDirectory, "stale.nupkg");
         var staleSymbolPackage = CombineSafeChildPath(artifactDirectory, "stale.snupkg");
         await File.WriteAllTextAsync(stalePackage, "old package", Encoding.UTF8);
@@ -4539,7 +4684,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 reportPath,
                 PackageVersion,
                 artifactManifestPath,
-                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                coverageProofWorkDirectory,
                 CombineSafeChildPath(artifactDirectory, "coverage-proof.md"),
                 "https://api.nuget.org/v3/index.json"));
 
@@ -4556,6 +4701,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains($"/p:PackageVersion={PackageVersion}", packCommand.Arguments);
         Assert.Contains("/p:ContinuousIntegrationBuild=true", packCommand.Arguments);
         Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", packCommand.Arguments);
+        Assert.Equal("true", packCommand.Environment!["CI"]);
         var buildCommand = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet build");
         Assert.Contains($"/p:Version={PackageVersion}", buildCommand.Arguments);
         Assert.Contains($"/p:PackageVersion={PackageVersion}", buildCommand.Arguments);
@@ -4563,6 +4709,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", buildCommand.Arguments);
         Assert.False(File.Exists(stalePackage));
         Assert.False(File.Exists(staleSymbolPackage));
+        Assert.False(File.Exists(staleCoverageProofProject));
         Assert.True(File.Exists(reportPath), $"Expected report at {reportPath}.");
         Assert.Contains("Coverage CLI consumer proof", await File.ReadAllTextAsync(reportPath), StringComparison.Ordinal);
         Assert.True(File.Exists(artifactManifestPath), $"Expected artifact manifest at {artifactManifestPath}.");
@@ -6093,6 +6240,18 @@ public sealed class PackageArtifactValidationTests : IDisposable
         ]);
     }
 
+    private static PackagePublishPlan CreateSinglePackagePlan(string packageId)
+    {
+        return new PackagePublishPlan([
+            new PackagePublishPlanEntry(
+                $"{packageId}/{packageId}.csproj",
+                packageId,
+                PackagePublishDecision.Publish,
+                [],
+                IsTool: false)
+        ]);
+    }
+
     private static void WritePackage(
         string artifactDirectory,
         string packageId,
@@ -6512,10 +6671,6 @@ public sealed class PackageArtifactValidationTests : IDisposable
         private readonly bool _intentionallyFailingGateExitsNonZero;
         private readonly bool _emitCoverageRunExclusionEvidence;
         private readonly bool _createExcludedProjectArtifacts;
-        private readonly int _ordinaryFailureExitCode;
-        private readonly string _coverageRunHelp;
-        private readonly string _coverageRunHelpError;
-        private readonly bool _failModeCleanupFailed;
 
         public CoverageProofRecordingCommandRunner(
             string packageVersion,
@@ -6527,11 +6682,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             string? failTimeoutDescriptionContains = null,
             bool intentionallyFailingGateExitsNonZero = true,
             bool emitCoverageRunExclusionEvidence = true,
-            bool createExcludedProjectArtifacts = false,
-            int ordinaryFailureExitCode = 1,
-            string coverageRunHelp = "--watchdog --heartbeat-interval --no-progress-timeout",
-            string coverageRunHelpError = "",
-            bool failModeCleanupFailed = false)
+            bool createExcludedProjectArtifacts = false)
         {
             _packageVersion = packageVersion;
             _createFailingGateReports = createFailingGateReports;
@@ -6543,10 +6694,6 @@ public sealed class PackageArtifactValidationTests : IDisposable
             _intentionallyFailingGateExitsNonZero = intentionallyFailingGateExitsNonZero;
             _emitCoverageRunExclusionEvidence = emitCoverageRunExclusionEvidence;
             _createExcludedProjectArtifacts = createExcludedProjectArtifacts;
-            _ordinaryFailureExitCode = ordinaryFailureExitCode;
-            _coverageRunHelp = coverageRunHelp;
-            _coverageRunHelpError = coverageRunHelpError;
-            _failModeCleanupFailed = failModeCleanupFailed;
         }
 
         public List<ExternalCommandRequest> Requests { get; } = [];
@@ -6568,21 +6715,6 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 return Task.FromResult(new ExternalCommandResult(0, _packageVersion, string.Empty));
             }
 
-            if (request.OperationName == "dotnet new xunit")
-            {
-                var testDirectory = Path.Join(request.WorkingDirectory, "Smoke.Tests");
-                Directory.CreateDirectory(testDirectory);
-                File.WriteAllText(Path.Join(testDirectory, "Smoke.Tests.csproj"), "<Project></Project>");
-            }
-
-            if (request.OperationName == "appsurface coverage run --help")
-            {
-                return Task.FromResult(new ExternalCommandResult(
-                    0,
-                    _coverageRunHelp,
-                    _coverageRunHelpError));
-            }
-
             if (request.OperationName == "appsurface coverage run")
             {
                 var outputDirectory = ReadOption(request.Arguments, "--output");
@@ -6590,11 +6722,6 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 {
                     CreateCoverageRunArtifacts(outputDirectory, _createExcludedProjectArtifacts);
                 }
-
-                var testHostDirectory = Path.Join(request.WorkingDirectory, "Smoke.Tests", "bin", "Debug", "net10.0");
-                Directory.CreateDirectory(testHostDirectory);
-                File.WriteAllText(Path.Join(testHostDirectory, "Smoke.Tests.dll"), string.Empty);
-                File.WriteAllText(Path.Join(testHostDirectory, "Smoke.Tests.deps.json"), "{}");
 
                 return Task.FromResult(new ExternalCommandResult(
                     0,
@@ -6607,55 +6734,15 @@ public sealed class PackageArtifactValidationTests : IDisposable
                     string.Empty));
             }
 
-            if (request.OperationName == "appsurface coverage run watchdog fail")
+            if (request.OperationName == "appsurface coverage run msbuild")
             {
                 var outputDirectory = ReadOption(request.Arguments, "--output");
-                Directory.CreateDirectory(outputDirectory);
-                File.WriteAllText(Path.Join(outputDirectory, ".appsurface-coverage-output"), "AppSurface coverage output directory");
-                File.WriteAllText(
-                    Path.Join(outputDirectory, "coverage-watchdog.json"),
-                    _failModeCleanupFailed
-                        ? "{\"schemaVersion\":1,\"outcome\":\"terminated\",\"diagnosticCode\":\"ASCOV121\",\"watchdogMode\":\"fail\",\"cleanup\":{\"status\":\"failed\",\"detail\":\"kill-failed\"}}"
-                        : "{\"schemaVersion\":1,\"outcome\":\"terminated\",\"diagnosticCode\":\"ASCOV121\",\"watchdogMode\":\"fail\",\"cleanup\":{\"status\":\"complete\",\"detail\":null}}");
-                return Task.FromResult(new ExternalCommandResult(124, string.Empty, "ASCOV121 no observable progress"));
-            }
+                if (_createCoverageRunArtifacts)
+                {
+                    CreateCoverageRunArtifacts(outputDirectory, createExcludedProjectArtifacts: false, projectName: "Smoke.Msbuild.Tests");
+                }
 
-            if (request.OperationName == "appsurface coverage run watchdog warn")
-            {
-                var outputDirectory = ReadOption(request.Arguments, "--output");
-                Directory.CreateDirectory(outputDirectory);
-                File.WriteAllText(Path.Join(outputDirectory, ".appsurface-coverage-output"), "AppSurface coverage output directory");
-                File.WriteAllText(
-                    Path.Join(outputDirectory, "coverage-watchdog.json"),
-                    "{\"schemaVersion\":1,\"outcome\":\"warning\",\"diagnosticCode\":null,\"watchdogMode\":\"warn\",\"cleanup\":{\"status\":\"not-requested\",\"detail\":null}}");
-                return Task.FromResult(new ExternalCommandResult(
-                    0,
-                    "Coverage heartbeat: elapsed=1s" + Environment.NewLine + "Coverage watchdog warning: operation=projects",
-                    string.Empty));
-            }
-
-            if (request.OperationName == "appsurface coverage run watchdog noisy")
-            {
-                var outputDirectory = ReadOption(request.Arguments, "--output");
-                Directory.CreateDirectory(outputDirectory);
-                File.WriteAllText(Path.Join(outputDirectory, ".appsurface-coverage-output"), "AppSurface coverage output directory");
-                return Task.FromResult(new ExternalCommandResult(0, "Coverage heartbeat: elapsed=1s", string.Empty));
-            }
-
-            if (request.OperationName == "appsurface coverage run ordinary failure")
-            {
-                var outputDirectory = ReadOption(request.Arguments, "--output");
-                Directory.CreateDirectory(outputDirectory);
-                File.WriteAllText(Path.Join(outputDirectory, ".appsurface-coverage-output"), "AppSurface coverage output directory");
-                return Task.FromResult(new ExternalCommandResult(_ordinaryFailureExitCode, "Test Run Failed.", string.Empty));
-            }
-
-            if (request.OperationName == "appsurface coverage run watchdog off")
-            {
-                var outputDirectory = ReadOption(request.Arguments, "--output");
-                Directory.CreateDirectory(outputDirectory);
-                File.WriteAllText(Path.Join(outputDirectory, ".appsurface-coverage-output"), "AppSurface coverage output directory");
-                return Task.FromResult(new ExternalCommandResult(0, "Coverage run passed.", string.Empty));
+                return Task.FromResult(new ExternalCommandResult(0, "coverage run msbuild passed", string.Empty));
             }
 
             if (request.OperationName == "appsurface coverage merge")
@@ -6701,9 +6788,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
             return arguments[index + 1];
         }
 
-        private static void CreateCoverageRunArtifacts(string outputDirectory, bool createExcludedProjectArtifacts)
+        private static void CreateCoverageRunArtifacts(string outputDirectory, bool createExcludedProjectArtifacts, string projectName = "Smoke.Tests")
         {
-            var projectDirectory = CombineSafeChildPath(outputDirectory, "projects/Smoke.Tests-123");
+            var projectDirectory = CombineSafeChildPath(outputDirectory, $"projects/{projectName}-123");
             Directory.CreateDirectory(projectDirectory);
             if (createExcludedProjectArtifacts)
             {

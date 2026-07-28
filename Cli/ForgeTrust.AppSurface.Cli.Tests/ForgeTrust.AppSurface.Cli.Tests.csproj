@@ -8,8 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" />
-    <PackageReference Include="coverlet.msbuild">
+    <PackageReference Include="coverlet.collector">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
@@ -29,6 +28,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Config\ForgeTrust.AppSurface.Config.GoogleSecretManager\ForgeTrust.AppSurface.Config.GoogleSecretManager.csproj" />
     <ProjectReference Include="..\ForgeTrust.AppSurface.Cli\ForgeTrust.AppSurface.Cli.csproj" />
     <ProjectReference Include="..\..\tests\ForgeTrust.AppSurface.Testing\ForgeTrust.AppSurface.Testing.csproj" />
   </ItemGroup>

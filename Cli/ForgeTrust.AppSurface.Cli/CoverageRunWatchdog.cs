@@ -1,914 +1,1422 @@
+using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
+using CliFx;
+using CliFx.Infrastructure;
 
 namespace ForgeTrust.AppSurface.Cli;
 
 /// <summary>
-/// Configures how a coverage run responds when an active operation produces no observable progress.
+/// Controls how <c>coverage run</c> responds when an active operation produces no observable progress.
 /// </summary>
 internal enum CoverageRunWatchdogMode
 {
-    /// <summary>Disables no-progress classification while allowing heartbeats.</summary>
-    Off,
-
-    /// <summary>Reports each no-progress interval once and allows the run to continue.</summary>
+    /// <summary>
+    /// Report each newly observed stall and allow the run to continue.
+    /// </summary>
     Warn,
 
-    /// <summary>Allows the first confirmed no-progress operation to terminate the run.</summary>
+    /// <summary>
+    /// Report the first confirmed stall, cancel the run, and return exit code 124.
+    /// </summary>
     Fail,
-}
-
-/// <summary>
-/// Contains validated timing and behavior settings for a coverage-run watchdog.
-/// </summary>
-/// <param name="Mode">Action taken for an operation that crosses the no-progress threshold.</param>
-/// <param name="HeartbeatInterval">Periodic heartbeat interval, or zero to disable heartbeat rendering.</param>
-/// <param name="NoProgressTimeout">Positive interval after which an active operation is classified as stale.</param>
-internal sealed record CoverageRunWatchdogOptions(
-    CoverageRunWatchdogMode Mode,
-    TimeSpan HeartbeatInterval,
-    TimeSpan NoProgressTimeout)
-{
-    /// <summary>Gets the default warning-only watchdog configuration.</summary>
-    public static CoverageRunWatchdogOptions Default { get; } = new(
-        CoverageRunWatchdogMode.Warn,
-        TimeSpan.FromSeconds(30),
-        TimeSpan.FromMinutes(10));
-
-    /// <summary>Validates the option combination.</summary>
-    /// <returns>This validated option instance.</returns>
-    /// <exception cref="ArgumentOutOfRangeException">An interval is outside the supported range.</exception>
-    public CoverageRunWatchdogOptions Validate()
-    {
-        if (!Enum.IsDefined(Mode))
-        {
-            throw new ArgumentOutOfRangeException(nameof(Mode));
-        }
-
-        if (HeartbeatInterval < TimeSpan.Zero || HeartbeatInterval > CoverageRunWatchdogDuration.Maximum)
-        {
-            throw new ArgumentOutOfRangeException(nameof(HeartbeatInterval));
-        }
-
-        if (NoProgressTimeout <= TimeSpan.Zero || NoProgressTimeout > CoverageRunWatchdogDuration.Maximum)
-        {
-            throw new ArgumentOutOfRangeException(nameof(NoProgressTimeout));
-        }
-
-        return this;
-    }
-}
-
-/// <summary>
-/// Parses the strict, culture-invariant duration syntax accepted by coverage-run watchdog options.
-/// </summary>
-internal static class CoverageRunWatchdogDuration
-{
-    /// <summary>Gets the largest accepted duration.</summary>
-    public static TimeSpan Maximum { get; } = TimeSpan.FromDays(30);
 
     /// <summary>
-    /// Parses <paramref name="value"/> using the exact grammar <c>0|[1-9][0-9]*(ms|s|m|h)</c>.
+    /// Disable stall classification while retaining optional heartbeat output.
     /// </summary>
-    /// <param name="value">Untrimmed command-line value.</param>
-    /// <param name="duration">Parsed duration when this method returns <see langword="true"/>.</param>
-    /// <returns>Whether the value is syntactically valid and no greater than 30 days.</returns>
-    public static bool TryParse(string? value, out TimeSpan duration)
+    Off,
+}
+
+/// <summary>
+/// Parses the intentionally narrow duration grammar used by coverage watchdog options.
+/// </summary>
+internal static partial class CoverageRunDurationParser
+{
+    internal static readonly TimeSpan Maximum = TimeSpan.FromDays(30);
+
+    /// <summary>
+    /// Parses a lowercase integer duration such as <c>500ms</c>, <c>30s</c>, <c>10m</c>, or <c>1h</c>.
+    /// </summary>
+    /// <param name="value">Raw option value.</param>
+    /// <param name="option">Option name used in diagnostics.</param>
+    /// <param name="allowZero">Whether the exact value <c>0</c> is accepted.</param>
+    /// <returns>The parsed duration.</returns>
+    public static TimeSpan Parse(string? value, string option, bool allowZero)
     {
-        duration = default;
-        if (value is null)
+        if (allowZero && string.Equals(value, "0", StringComparison.Ordinal))
         {
-            return false;
+            return TimeSpan.Zero;
         }
 
-        if (value == "0")
+        var match = DurationPattern().Match(value ?? string.Empty);
+        if (!match.Success
+            || !long.TryParse(match.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var quantity))
         {
-            return true;
-        }
-
-        var suffixLength = value.EndsWith("ms", StringComparison.Ordinal) ? 2 : 1;
-        if (value.Length <= suffixLength)
-        {
-            return false;
-        }
-
-        var suffix = value[^suffixLength..];
-        long multiplier;
-        switch (suffix)
-        {
-            case "ms":
-                multiplier = 1;
-                break;
-            case "s":
-                multiplier = 1_000;
-                break;
-            case "m":
-                multiplier = 60_000;
-                break;
-            case "h":
-                multiplier = 3_600_000;
-                break;
-            default:
-                return false;
-        }
-
-        var number = value.AsSpan(0, value.Length - suffixLength);
-        if (number.IsEmpty || number[0] is < '1' or > '9')
-        {
-            return false;
-        }
-
-        foreach (var character in number[1..])
-        {
-            if (character is < '0' or > '9')
-            {
-                return false;
-            }
-        }
-
-        if (!long.TryParse(number, NumberStyles.None, CultureInfo.InvariantCulture, out var magnitude))
-        {
-            return false;
+            throw Invalid(option, value, allowZero);
         }
 
         try
         {
-            var milliseconds = checked(magnitude * multiplier);
-            if (milliseconds > (long)Maximum.TotalMilliseconds)
+            var milliseconds = match.Groups[2].Value switch
             {
-                return false;
+                "ms" => quantity,
+                "s" => checked(quantity * 1000),
+                "m" => checked(quantity * 60 * 1000),
+                "h" => checked(quantity * 60 * 60 * 1000),
+                _ => throw new InvalidOperationException("Unreachable duration suffix."),
+            };
+            var duration = TimeSpan.FromMilliseconds(milliseconds);
+            if (duration <= TimeSpan.Zero || duration > Maximum)
+            {
+                throw Invalid(option, value, allowZero);
             }
 
-            duration = TimeSpan.FromMilliseconds(milliseconds);
-            return true;
+            return duration;
         }
         catch (OverflowException)
         {
-            return false;
+            throw Invalid(option, value, allowZero);
         }
     }
-}
 
-/// <summary>Identifies a supervised coverage-run operation.</summary>
-internal enum CoverageRunWatchdogOperationKind
-{
-    /// <summary>Solution project discovery.</summary>
-    Discovery,
-    /// <summary>Optional solution build.</summary>
-    Build,
-    /// <summary>One scheduled test project.</summary>
-    Project,
-    /// <summary>Slow-test diagnostics.</summary>
-    Diagnostics,
-    /// <summary>Coverage report merge.</summary>
-    Merge,
-    /// <summary>Summary and timing artifact finalization.</summary>
-    Artifacts,
-}
+    private static CommandException Invalid(string option, string? value, bool allowZero)
+    {
+        var zero = allowZero ? " or use 0 to disable it" : string.Empty;
+        return CoverageRunDiagnostics.Create(
+            "ASCOV101",
+            $"{option} has an invalid duration.",
+            $"Received '{value ?? string.Empty}'. Durations use 0 or a positive lowercase integer followed by ms, s, m, or h and cannot exceed 30 days.",
+            $"Use a value such as 500ms, 30s, 10m, or 1h{zero}.",
+            "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog");
+    }
 
-/// <summary>Describes the externally visible lifecycle of a supervised operation.</summary>
-internal enum CoverageRunWatchdogOperationState
-{
-    /// <summary>The operation is scheduled but has no active no-progress clock.</summary>
-    Queued,
-    /// <summary>The operation is active.</summary>
-    Running,
-    /// <summary>The operation is completing in-process bookkeeping.</summary>
-    Finalizing,
-    /// <summary>The operation has completed and has no active no-progress clock.</summary>
-    Complete,
-}
-
-/// <summary>Defines shared identities used to connect workflow phases to their process observations.</summary>
-internal static class CoverageRunWatchdogOperationIds
-{
-    /// <summary>Solution project discovery.</summary>
-    public const string Discovery = "discovery";
-
-    /// <summary>Optional build work.</summary>
-    public const string Build = "build";
-
-    /// <summary>Slow-test diagnostics.</summary>
-    public const string Diagnostics = "diagnostics";
-
-    /// <summary>Coverage report merge.</summary>
-    public const string Merge = "merge";
-
-    /// <summary>Summary and timing artifact finalization.</summary>
-    public const string Artifacts = "artifacts";
+    [GeneratedRegex("^([1-9][0-9]*)(ms|s|m|h)$", RegexOptions.CultureInvariant)]
+    private static partial Regex DurationPattern();
 }
 
 /// <summary>
-/// Describes an operation before it is registered with a run-scoped watchdog.
+/// Serializes coverage-run console messages so heartbeat and incident blocks do not interleave.
 /// </summary>
-/// <param name="Identity">Stable unique identity within the run.</param>
-/// <param name="Kind">Operation kind.</param>
-/// <param name="ExecutionIndex">Stable project schedule index, or zero for a shared phase.</param>
-/// <param name="Project">Privacy-normalized solution-relative project path, when applicable.</param>
-/// <param name="Log">Privacy-normalized output-relative log path, when applicable.</param>
-internal sealed record CoverageRunWatchdogOperation(
-    string Identity,
-    CoverageRunWatchdogOperationKind Kind,
-    int ExecutionIndex = 0,
-    string? Project = null,
-    string? Log = null);
-
-/// <summary>
-/// Captures one immutable view of a supervised operation.
-/// </summary>
-/// <param name="Identity">Stable operation identity.</param>
-/// <param name="Kind">Operation kind.</param>
-/// <param name="State">Current lifecycle state.</param>
-/// <param name="ExecutionIndex">Stable project execution index.</param>
-/// <param name="Project">Privacy-normalized project path.</param>
-/// <param name="Log">Privacy-normalized log path.</param>
-/// <param name="Elapsed">Elapsed active time.</param>
-/// <param name="NoProgress">Elapsed time since the most recent observable progress.</param>
-/// <param name="LastProgressAtUtc">Display-only UTC time of the most recent progress.</param>
-/// <param name="ProgressSequence">Sequence used to reject stale classification races.</param>
-/// <param name="OutputBytes">Checked total of positive raw output-byte observations.</param>
-/// <param name="WarningLatched">Whether warn mode already reported the current no-progress interval.</param>
-internal sealed record CoverageRunWatchdogOperationSnapshot(
-    string Identity,
-    CoverageRunWatchdogOperationKind Kind,
-    CoverageRunWatchdogOperationState State,
-    int ExecutionIndex,
-    string? Project,
-    string? Log,
-    TimeSpan Elapsed,
-    TimeSpan NoProgress,
-    DateTimeOffset? LastProgressAtUtc,
-    long ProgressSequence,
-    long OutputBytes,
-    bool WarningLatched);
-
-/// <summary>
-/// Captures deterministic aggregate and operation state at one monotonic instant.
-/// </summary>
-/// <param name="RunElapsed">Elapsed time since supervisor construction.</param>
-/// <param name="CapturedAtUtc">Wall-clock time paired with this immutable evaluation snapshot.</param>
-/// <param name="Queued">Number of queued operations.</param>
-/// <param name="Running">Number of running operations.</param>
-/// <param name="Finalizing">Number of finalizing operations.</param>
-/// <param name="Complete">Number of completed operations.</param>
-/// <param name="Operations">Operations in stable workflow order.</param>
-internal sealed record CoverageRunWatchdogSnapshot(
-    TimeSpan RunElapsed,
-    DateTimeOffset CapturedAtUtc,
-    int Queued,
-    int Running,
-    int Finalizing,
-    int Complete,
-    IReadOnlyList<CoverageRunWatchdogOperationSnapshot> Operations);
-
-/// <summary>
-/// Describes work discovered during one watchdog evaluation.
-/// </summary>
-/// <param name="HeartbeatDue">Whether the caller should render a heartbeat.</param>
-/// <param name="Snapshot">Current immutable supervisor state.</param>
-/// <param name="NewlyStale">New warn incidents or fail-mode terminal candidates in stable order.</param>
-internal sealed record CoverageRunWatchdogEvaluation(
-    bool HeartbeatDue,
-    CoverageRunWatchdogSnapshot Snapshot,
-    IReadOnlyList<CoverageRunWatchdogOperationSnapshot> NewlyStale);
-
-/// <summary>
-/// Maintains concurrency-safe, run-scoped operation clocks for coverage heartbeats and no-progress classification.
-/// </summary>
-internal sealed class CoverageRunWatchdogSupervisor
+internal sealed class CoverageRunConsoleSink : IDisposable
 {
-    private static readonly TimeSpan MaximumMonitorDelay = TimeSpan.FromHours(24);
+    private readonly IConsole _console;
+    private readonly TimeSpan _writeTimeout;
+    private readonly object _sync = new();
+    private Task _writeTail = Task.CompletedTask;
+    private bool _disposed;
 
-    private readonly object _gate = new();
-    private readonly TimeProvider _timeProvider;
-    private readonly CoverageRunWatchdogOptions _options;
-    private readonly long _runStarted;
-    private readonly Dictionary<string, MutableOperation> _operations = new(StringComparer.Ordinal);
-    private long _lastHeartbeat;
-    private CoverageRunWatchdogOperationSnapshot? _terminalCause;
-    private bool _stopped;
-    private bool _externalCancellationClaimed;
-
-    /// <summary>Initializes a new supervisor using monotonic timestamps from <paramref name="timeProvider"/>.</summary>
-    /// <param name="timeProvider">Clock used for elapsed decisions and display-only UTC timestamps.</param>
-    /// <param name="options">Validated watchdog options.</param>
-    public CoverageRunWatchdogSupervisor(TimeProvider timeProvider, CoverageRunWatchdogOptions options)
+    /// <summary>
+    /// Creates a bounded run-scoped console sink.
+    /// </summary>
+    public CoverageRunConsoleSink(IConsole console, TimeSpan? writeTimeout = null)
     {
-        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
-        _options = options ?? throw new ArgumentNullException(nameof(options));
-        _options.Validate();
-        _runStarted = _timeProvider.GetTimestamp();
-        _lastHeartbeat = _runStarted;
-    }
-
-    /// <summary>Gets the first operation that successfully claimed the fail-mode terminal gate.</summary>
-    public CoverageRunWatchdogOperationSnapshot? TerminalCause
-    {
-        get
-        {
-            lock (_gate)
-            {
-                return _terminalCause;
-            }
-        }
-    }
-
-    /// <summary>Registers a unique operation in queued or active state.</summary>
-    /// <param name="operation">Stable operation metadata.</param>
-    /// <param name="initialState">Initial lifecycle state.</param>
-    public void Register(CoverageRunWatchdogOperation operation, CoverageRunWatchdogOperationState initialState)
-    {
-        ArgumentNullException.ThrowIfNull(operation);
-        if (string.IsNullOrWhiteSpace(operation.Identity))
-        {
-            throw new ArgumentException("An operation identity is required.", nameof(operation));
-        }
-
-        lock (_gate)
-        {
-            ThrowIfClosed();
-            var now = _timeProvider.GetTimestamp();
-            var utcNow = _timeProvider.GetUtcNow();
-            if (!_operations.TryAdd(operation.Identity, new MutableOperation(operation, initialState, now, utcNow)))
-            {
-                throw new InvalidOperationException($"Coverage watchdog operation '{operation.Identity}' is already registered.");
-            }
-        }
-    }
-
-    /// <summary>Transitions an operation and records the transition as progress.</summary>
-    /// <param name="identity">Registered operation identity.</param>
-    /// <param name="state">New lifecycle state.</param>
-    public void Transition(string identity, CoverageRunWatchdogOperationState state)
-    {
-        lock (_gate)
-        {
-            ThrowIfClosed();
-            var operation = GetOperation(identity);
-            operation.Transition(state, _timeProvider.GetTimestamp(), _timeProvider.GetUtcNow());
-        }
-    }
-
-    /// <summary>Records positive raw output bytes as progress for one active operation.</summary>
-    /// <param name="identity">Registered operation identity.</param>
-    /// <param name="byteCount">Positive raw byte count observed before decoding.</param>
-    /// <returns>Whether progress rearmed a warn-latched operation and introduced a new deadline.</returns>
-    public bool ObserveOutput(string identity, int byteCount)
-    {
-        if (byteCount <= 0)
-        {
-            return false;
-        }
-
-        lock (_gate)
-        {
-            ThrowIfClosed();
-            var operation = GetOperation(identity);
-            return operation.ObserveOutput(byteCount, _timeProvider.GetTimestamp(), _timeProvider.GetUtcNow());
-        }
-    }
-
-    /// <summary>Returns an immutable snapshot without changing heartbeat or warning latches.</summary>
-    /// <returns>Current state in stable workflow order.</returns>
-    public CoverageRunWatchdogSnapshot Snapshot()
-    {
-        lock (_gate)
-        {
-            return CreateSnapshot(_timeProvider.GetTimestamp());
-        }
+        _console = console;
+        _writeTimeout = writeTimeout ?? TimeSpan.FromSeconds(2);
     }
 
     /// <summary>
-    /// Gets the exact remaining time until the next actionable heartbeat or no-progress deadline,
-    /// capped at 24 hours so supported durations remain safe for timer implementations.
+    /// Writes one serialized block to standard output.
     /// </summary>
-    /// <returns>Zero when work is already due; otherwise a positive delay no greater than 24 hours.</returns>
-    public TimeSpan GetNextDelay()
-    {
-        lock (_gate)
-        {
-            if (_stopped || _terminalCause is not null)
-            {
-                return MaximumMonitorDelay;
-            }
-
-            var now = _timeProvider.GetTimestamp();
-            var next = MaximumMonitorDelay;
-            if (_options.HeartbeatInterval > TimeSpan.Zero)
-            {
-                next = Minimum(next, Remaining(_lastHeartbeat, _options.HeartbeatInterval, now));
-            }
-
-            if (_options.Mode != CoverageRunWatchdogMode.Off)
-            {
-                foreach (var operation in _operations.Values)
-                {
-                    if (!operation.IsActive ||
-                        (_options.Mode == CoverageRunWatchdogMode.Warn && operation.WarningLatched))
-                    {
-                        continue;
-                    }
-
-                    next = Minimum(next, Remaining(operation.LastProgress, _options.NoProgressTimeout, now));
-                }
-            }
-
-            return next;
-        }
-    }
+    /// <param name="text">Complete output block.</param>
+    /// <param name="cancellationToken">Bounds how long the caller waits without cancelling an accepted write.</param>
+    /// <param name="appendNewLine">Whether to append the platform newline.</param>
+    /// <param name="coalesceIfWritePending">Whether to omit this periodic update when an earlier write is still pending. Diagnostic and terminal blocks must leave this disabled.</param>
+    /// <returns>A task that completes when the write finishes or the caller's bounded wait ends.</returns>
+    public Task WriteOutputAsync(
+        string text,
+        CancellationToken cancellationToken = default,
+        bool appendNewLine = true,
+        bool coalesceIfWritePending = false)
+        => WriteAsync(_console.Output, text, appendNewLine, coalesceIfWritePending, cancellationToken);
 
     /// <summary>
-    /// Evaluates heartbeat and no-progress deadlines, atomically latching newly stale warn-mode operations.
+    /// Writes one serialized block to standard error.
     /// </summary>
-    /// <returns>One immutable evaluation for rendering or fail-mode revalidation.</returns>
-    public CoverageRunWatchdogEvaluation Evaluate()
-    {
-        lock (_gate)
-        {
-            var now = _timeProvider.GetTimestamp();
-            var heartbeatDue = !_stopped && _terminalCause is null && _options.HeartbeatInterval > TimeSpan.Zero &&
-                _timeProvider.GetElapsedTime(_lastHeartbeat, now) >= _options.HeartbeatInterval;
-            if (heartbeatDue)
-            {
-                _lastHeartbeat = now;
-            }
-
-            var newlyStale = new List<CoverageRunWatchdogOperationSnapshot>();
-            if (!_stopped && _terminalCause is null && _options.Mode != CoverageRunWatchdogMode.Off)
-            {
-                foreach (var operation in OrderedOperations())
-                {
-                    if (!operation.IsActive || operation.WarningLatched ||
-                        _timeProvider.GetElapsedTime(operation.LastProgress, now) < _options.NoProgressTimeout)
-                    {
-                        continue;
-                    }
-
-                    if (_options.Mode == CoverageRunWatchdogMode.Warn)
-                    {
-                        operation.WarningLatched = true;
-                    }
-
-                    newlyStale.Add(operation.Snapshot(_timeProvider, now));
-                }
-            }
-
-            return new CoverageRunWatchdogEvaluation(heartbeatDue, CreateSnapshot(now), newlyStale);
-        }
-    }
+    public Task WriteErrorAsync(
+        string text,
+        CancellationToken cancellationToken = default,
+        bool appendNewLine = true)
+        => WriteAsync(_console.Error, text, appendNewLine, coalesceIfWritePending: false, cancellationToken);
 
     /// <summary>
-    /// Atomically revalidates and claims one fail-mode candidate. The first successful claim closes the registry.
+    /// Writes a terminal diagnostic in FIFO order when possible, then bypasses a blocked queue after the bounded wait.
+    /// The fallback can interleave with a hung earlier output block, but atomically abandons its queued continuation so the
+    /// critical diagnostic is emitted at most once.
     /// </summary>
-    /// <param name="candidate">Previously evaluated candidate.</param>
-    /// <param name="terminalCause">Revalidated terminal snapshot on success.</param>
-    /// <returns>Whether this candidate won the terminal gate.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="candidate"/> is <see langword="null"/>.</exception>
-    public bool TryClaimTerminal(
-        CoverageRunWatchdogOperationSnapshot candidate,
-        out CoverageRunWatchdogOperationSnapshot? terminalCause)
-        => TryClaimTerminal(candidate, out terminalCause, out _);
-
-    /// <summary>
-    /// Atomically revalidates and claims one fail-mode candidate together with every operation
-    /// that remains stale at the claim instant.
-    /// </summary>
-    /// <param name="candidate">Previously evaluated candidate.</param>
-    /// <param name="terminalCause">Revalidated terminal snapshot on success.</param>
-    /// <param name="terminalEvaluation">Fresh terminal evidence with the primary candidate first on success.</param>
-    /// <returns>Whether this candidate won the terminal gate.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="candidate"/> is <see langword="null"/>.</exception>
-    public bool TryClaimTerminal(
-        CoverageRunWatchdogOperationSnapshot candidate,
-        out CoverageRunWatchdogOperationSnapshot? terminalCause,
-        out CoverageRunWatchdogEvaluation? terminalEvaluation)
+    /// <param name="text">Complete error block.</param>
+    /// <param name="cancellationToken">Bounds how long the caller waits without cancelling an accepted write.</param>
+    /// <param name="appendNewLine">Whether to append the platform newline.</param>
+    /// <returns>A task that completes after the ordered attempt or bounded direct fallback.</returns>
+    public async Task WriteCriticalErrorAsync(
+        string text,
+        CancellationToken cancellationToken = default,
+        bool appendNewLine = true)
     {
-        ArgumentNullException.ThrowIfNull(candidate);
-        lock (_gate)
+        var state = 0;
+        Task queuedWrite;
+        lock (_sync)
         {
-            terminalCause = _terminalCause;
-            terminalEvaluation = null;
-            if (_stopped || _options.Mode != CoverageRunWatchdogMode.Fail || _terminalCause is not null ||
-                !_operations.TryGetValue(candidate.Identity, out var operation) || !operation.IsActive ||
-                operation.ProgressSequence != candidate.ProgressSequence)
-            {
-                return false;
-            }
-
-            var now = _timeProvider.GetTimestamp();
-            if (_timeProvider.GetElapsedTime(operation.LastProgress, now) < _options.NoProgressTimeout)
-            {
-                return false;
-            }
-
-            var stale = OrderedOperations()
-                .Where(item => item.IsActive && _timeProvider.GetElapsedTime(item.LastProgress, now) >= _options.NoProgressTimeout)
-                .Select(item => item.Snapshot(_timeProvider, now))
-                .ToArray();
-            _terminalCause = stale.Single(item => string.Equals(item.Identity, candidate.Identity, StringComparison.Ordinal));
-            terminalCause = _terminalCause;
-            terminalEvaluation = new CoverageRunWatchdogEvaluation(
-                false,
-                CreateSnapshot(now),
-                [_terminalCause, .. stale.Where(item => !string.Equals(item.Identity, candidate.Identity, StringComparison.Ordinal))]);
-            return true;
-        }
-    }
-
-    /// <summary>Stops future evaluation and closes registration or progress mutation.</summary>
-    public void Stop()
-    {
-        lock (_gate)
-        {
-            _stopped = true;
-        }
-    }
-
-    /// <summary>Atomically claims caller cancellation unless another terminal outcome already won.</summary>
-    public void ClaimExternalCancellation()
-    {
-        lock (_gate)
-        {
-            if (_stopped || _terminalCause is not null)
+            if (_disposed)
             {
                 return;
             }
 
-            _externalCancellationClaimed = true;
-            _stopped = true;
+            queuedWrite = _writeTail.ContinueWith(
+                async _ =>
+                {
+                    if (Interlocked.CompareExchange(ref state, 1, 0) != 0)
+                    {
+                        return;
+                    }
+
+                    await WriteBlockAsync(_console.Error, text, appendNewLine);
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.None,
+                TaskScheduler.Default).Unwrap();
+            _writeTail = queuedWrite;
+        }
+
+        ObserveFault(queuedWrite);
+        try
+        {
+            await queuedWrite.WaitAsync(_writeTimeout, cancellationToken);
+            return;
+        }
+        catch (TimeoutException)
+        {
+            // The ordered write is still blocked, so fall through to the bounded direct-write fallback.
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            Interlocked.CompareExchange(ref state, 2, 0);
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref state, 2, 0) != 0)
+        {
+            return;
+        }
+
+        var directWrite = Task.Run(() => WriteBlockAsync(_console.Error, text, appendNewLine));
+        ObserveFault(directWrite);
+        await AwaitBoundedAsync(directWrite, cancellationToken);
+    }
+
+    private Task WriteAsync(
+        TextWriter writer,
+        string text,
+        bool appendNewLine,
+        bool coalesceIfWritePending,
+        CancellationToken cancellationToken)
+    {
+        Task write;
+        lock (_sync)
+        {
+            if (_disposed || (coalesceIfWritePending && !_writeTail.IsCompleted))
+            {
+                return Task.CompletedTask;
+            }
+
+            write = _writeTail.ContinueWith(
+                _ => WriteBlockAsync(writer, text, appendNewLine),
+                CancellationToken.None,
+                TaskContinuationOptions.None,
+                TaskScheduler.Default).Unwrap();
+            _writeTail = write;
+        }
+
+        ObserveFault(write);
+        return AwaitBoundedAsync(write, cancellationToken);
+    }
+
+    private static async Task WriteBlockAsync(TextWriter writer, string text, bool appendNewLine)
+    {
+        if (appendNewLine)
+        {
+            await writer.WriteLineAsync(text);
+        }
+        else
+        {
+            await writer.WriteAsync(text);
         }
     }
 
-    /// <summary>
-    /// Atomically closes normal or ordinary-failure completion unless fail mode already claimed a terminal cause.
-    /// </summary>
-    /// <param name="terminalCause">The already-claimed watchdog cause when completion lost the outcome gate.</param>
-    /// <param name="externalCancellationClaimed">Whether caller cancellation won the outcome gate.</param>
-    /// <returns><see langword="true" /> when the caller claimed non-watchdog completion.</returns>
-    public bool TryComplete(
-        out CoverageRunWatchdogOperationSnapshot? terminalCause,
-        out bool externalCancellationClaimed)
+    private static void ObserveFault(Task write)
+        => _ = write.ContinueWith(
+            completed => _ = completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+    private async Task AwaitBoundedAsync(Task write, CancellationToken cancellationToken)
     {
-        lock (_gate)
+        try
         {
-            terminalCause = _terminalCause;
-            externalCancellationClaimed = _externalCancellationClaimed;
-            if (_terminalCause is not null)
-            {
-                return false;
-            }
-
-            if (_externalCancellationClaimed)
-            {
-                return false;
-            }
-
-            _stopped = true;
-            return true;
+            await write.WaitAsync(_writeTimeout, cancellationToken);
+        }
+        catch (TimeoutException ex)
+        {
+            Trace.WriteLine($"Coverage console write did not complete within {_writeTimeout}. The write remains observed in the background. Cause: {ex.Message}");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Trace.WriteLine($"Coverage console write failed after it entered the output queue. Cause: {ex.GetType().Name}: {ex.Message}");
         }
     }
 
-    private CoverageRunWatchdogSnapshot CreateSnapshot(long now)
+    /// <inheritdoc />
+    public void Dispose()
     {
-        var operations = OrderedOperations().Select(operation => operation.Snapshot(_timeProvider, now)).ToArray();
-        return new CoverageRunWatchdogSnapshot(
-            _timeProvider.GetElapsedTime(_runStarted, now),
-            _timeProvider.GetUtcNow(),
-            operations.Count(operation => operation.State == CoverageRunWatchdogOperationState.Queued),
-            operations.Count(operation => operation.State == CoverageRunWatchdogOperationState.Running),
-            operations.Count(operation => operation.State == CoverageRunWatchdogOperationState.Finalizing),
-            operations.Count(operation => operation.State == CoverageRunWatchdogOperationState.Complete),
-            operations);
-    }
-
-    private IEnumerable<MutableOperation> OrderedOperations()
-        => _operations.Values
-            .OrderBy(operation => operation.Metadata.Kind)
-            .ThenBy(operation => operation.Metadata.Kind == CoverageRunWatchdogOperationKind.Project ? operation.Metadata.ExecutionIndex : 0)
-            .ThenBy(operation => operation.Metadata.Identity, StringComparer.Ordinal);
-
-    private MutableOperation GetOperation(string identity)
-        => _operations.TryGetValue(identity, out var operation)
-            ? operation
-            : throw new KeyNotFoundException($"Coverage watchdog operation '{identity}' is not registered.");
-
-    private TimeSpan Remaining(long started, TimeSpan interval, long now)
-    {
-        var elapsed = _timeProvider.GetElapsedTime(started, now);
-        return elapsed >= interval ? TimeSpan.Zero : interval - elapsed;
-    }
-
-    private static TimeSpan Minimum(TimeSpan left, TimeSpan right) => left <= right ? left : right;
-
-    private void ThrowIfClosed()
-    {
-        if (_stopped || _terminalCause is not null)
+        lock (_sync)
         {
-            throw new InvalidOperationException("The coverage watchdog registry is closed.");
-        }
-    }
-
-    private sealed class MutableOperation
-    {
-        public MutableOperation(
-            CoverageRunWatchdogOperation metadata,
-            CoverageRunWatchdogOperationState state,
-            long now,
-            DateTimeOffset utcNow)
-        {
-            Metadata = metadata;
-            State = state;
-            FirstActive = state is CoverageRunWatchdogOperationState.Running or CoverageRunWatchdogOperationState.Finalizing ? now : null;
-            LastProgress = now;
-            LastProgressAtUtc = FirstActive is null ? null : utcNow;
-            ProgressSequence = FirstActive is null ? 0 : 1;
-        }
-
-        public CoverageRunWatchdogOperation Metadata { get; }
-        public CoverageRunWatchdogOperationState State { get; private set; }
-        public long? FirstActive { get; private set; }
-        public long LastProgress { get; private set; }
-        public DateTimeOffset? LastProgressAtUtc { get; private set; }
-        public long ProgressSequence { get; private set; }
-        public long OutputBytes { get; private set; }
-        public bool WarningLatched { get; set; }
-        public bool IsActive => State is CoverageRunWatchdogOperationState.Running or CoverageRunWatchdogOperationState.Finalizing;
-
-        public void Transition(CoverageRunWatchdogOperationState state, long now, DateTimeOffset utcNow)
-        {
-            State = state;
-            if (state is CoverageRunWatchdogOperationState.Running or CoverageRunWatchdogOperationState.Finalizing)
-            {
-                FirstActive ??= now;
-                RecordProgress(now, utcNow);
-            }
-            else if (state == CoverageRunWatchdogOperationState.Complete)
-            {
-                ProgressSequence = checked(ProgressSequence + 1);
-                WarningLatched = false;
-            }
-        }
-
-        public bool ObserveOutput(int byteCount, long now, DateTimeOffset utcNow)
-        {
-            if (!IsActive)
-            {
-                return false;
-            }
-
-            var rearmedDeadline = WarningLatched;
-            OutputBytes = checked(OutputBytes + byteCount);
-            RecordProgress(now, utcNow);
-            return rearmedDeadline;
-        }
-
-        public CoverageRunWatchdogOperationSnapshot Snapshot(TimeProvider timeProvider, long now)
-            => new(
-                Metadata.Identity,
-                Metadata.Kind,
-                State,
-                Metadata.ExecutionIndex,
-                Metadata.Project,
-                Metadata.Log,
-                FirstActive is long started ? timeProvider.GetElapsedTime(started, now) : TimeSpan.Zero,
-                IsActive ? timeProvider.GetElapsedTime(LastProgress, now) : TimeSpan.Zero,
-                LastProgressAtUtc,
-                ProgressSequence,
-                OutputBytes,
-                WarningLatched);
-
-        private void RecordProgress(long now, DateTimeOffset utcNow)
-        {
-            LastProgress = now;
-            LastProgressAtUtc = utcNow;
-            ProgressSequence = checked(ProgressSequence + 1);
-            WarningLatched = false;
+            _disposed = true;
         }
     }
 }
 
-/// <summary>Contains privacy-normalized command metadata for a watchdog incident.</summary>
-/// <param name="Executable">Logical executable name.</param>
-/// <param name="Options">Command verb and switch names with all values omitted.</param>
-internal sealed record CoverageRunWatchdogCommand(string Executable, IReadOnlyList<string> Options);
-
-/// <summary>Contains one privacy-normalized operation in a watchdog incident.</summary>
-/// <param name="Kind">Lowercase operation kind.</param>
-/// <param name="Project">Normalized project path, when applicable.</param>
-/// <param name="State">Lowercase lifecycle state.</param>
-/// <param name="ElapsedMilliseconds">Elapsed active time.</param>
-/// <param name="NoProgressMilliseconds">Time since observable progress.</param>
-/// <param name="LastProgressAtUtc">UTC time of the last progress event.</param>
-/// <param name="ProgressSequence">Sequence used to confirm classification.</param>
-/// <param name="OutputBytes">Total positive raw output bytes.</param>
-/// <param name="Log">Normalized log path, when applicable.</param>
-/// <param name="Command">Privacy-normalized command metadata, when applicable.</param>
-internal sealed record CoverageRunWatchdogIncidentOperation(
-    CoverageRunWatchdogOperationKind Kind,
-    string? Project,
-    CoverageRunWatchdogOperationState State,
-    long ElapsedMilliseconds,
-    long NoProgressMilliseconds,
-    DateTimeOffset? LastProgressAtUtc,
-    long ProgressSequence,
-    long OutputBytes,
-    string? Log,
-    CoverageRunWatchdogCommand? Command);
-
-/// <summary>Contains bounded process-cleanup evidence for a watchdog incident.</summary>
-/// <param name="Status">One of <c>not-requested</c>, <c>complete</c>, <c>failed</c>, or <c>deadline-exceeded</c>.</param>
-/// <param name="Detail">Allowlisted cleanup detail, or <see langword="null"/>.</param>
-internal sealed record CoverageRunWatchdogCleanup(string Status, string? Detail);
-
-/// <summary>Defines the version-one watchdog artifact contract.</summary>
-/// <param name="SchemaVersion">Artifact schema version; version one is currently supported.</param>
-/// <param name="IncidentOrdinal">One-based incident number for this run.</param>
-/// <param name="Outcome">Either <c>warning</c> or <c>terminated</c>.</param>
-/// <param name="DiagnosticCode">Terminal diagnostic code, or <see langword="null"/> for warnings.</param>
-/// <param name="WatchdogMode">Configured watchdog mode.</param>
-/// <param name="HeartbeatIntervalMilliseconds">Configured heartbeat interval.</param>
-/// <param name="NoProgressTimeoutMilliseconds">Configured no-progress interval.</param>
-/// <param name="RunElapsedMilliseconds">Elapsed run time at classification.</param>
-/// <param name="ClassifiedAtUtc">UTC classification time.</param>
-/// <param name="Primary">Primary stale operation.</param>
-/// <param name="ConcurrentlyStale">Additional stale operations in stable order.</param>
-/// <param name="ConcurrentlyStaleOmitted">Number of trailing operations omitted for the size budget.</param>
-/// <param name="Cleanup">Final cleanup status.</param>
-internal sealed record CoverageRunWatchdogArtifact(
-    int SchemaVersion,
-    long IncidentOrdinal,
-    string Outcome,
-    string? DiagnosticCode,
-    CoverageRunWatchdogMode WatchdogMode,
-    long HeartbeatIntervalMilliseconds,
-    long NoProgressTimeoutMilliseconds,
-    long RunElapsedMilliseconds,
-    DateTimeOffset ClassifiedAtUtc,
-    CoverageRunWatchdogIncidentOperation Primary,
-    IReadOnlyList<CoverageRunWatchdogIncidentOperation> ConcurrentlyStale,
-    int ConcurrentlyStaleOmitted,
-    CoverageRunWatchdogCleanup Cleanup);
-
 /// <summary>
-/// Validates and serializes watchdog artifacts using deterministic lowercase enum strings,
-/// a 256-concurrent-operation pre-cap, and a strict size budget.
+/// Tracks one active coverage-run operation and exposes bounded progress updates.
 /// </summary>
-internal static class CoverageRunWatchdogArtifactSerializer
+internal sealed class CoverageRunOperation : IDisposable
 {
-    /// <summary>Gets the largest permitted UTF-8 artifact size, strictly below 64 KiB.</summary>
-    public const int MaximumBytes = (64 * 1024) - 1;
+    private readonly CoverageRunWatchdogSupervisor _owner;
+    private int _completed;
 
-    /// <summary>Gets the maximum number of concurrent operations considered before size fitting.</summary>
-    public const int MaximumConcurrentOperations = 256;
-
-    private static readonly JsonSerializerOptions SerializerOptions = new()
+    internal CoverageRunOperation(CoverageRunWatchdogSupervisor owner, long id)
     {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = true,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
-    };
+        _owner = owner;
+        Id = id;
+    }
 
-    /// <summary>Deserializes a bounded schema-version-one artifact for bootstrap promotion.</summary>
-    /// <param name="bytes">UTF-8 JSON previously written by <see cref="Serialize"/>.</param>
-    /// <returns>The validated watchdog artifact.</returns>
-    /// <exception cref="JsonException">
-    /// The payload is malformed, empty, oversized, or violates the schema-version-one field contract.
-    /// </exception>
-    /// <exception cref="ArgumentOutOfRangeException">The artifact uses an unsupported schema version.</exception>
-    public static CoverageRunWatchdogArtifact Deserialize(ReadOnlySpan<byte> bytes)
+    internal long Id { get; }
+
+    /// <summary>
+    /// Records a positive count of observed child-process bytes as progress.
+    /// </summary>
+    public void ObserveBytes(int count)
     {
-        if (bytes.Length > MaximumBytes)
+        if (count > 0)
         {
-            throw new JsonException("Watchdog artifact payload exceeded the size budget.");
+            _owner.ObserveBytes(Id, count);
         }
-
-        var artifact = JsonSerializer.Deserialize<CoverageRunWatchdogArtifact>(bytes, SerializerOptions)
-            ?? throw new JsonException("Watchdog artifact payload was empty.");
-        if (artifact.SchemaVersion != 1)
-        {
-            throw new ArgumentOutOfRangeException(nameof(bytes), "Only watchdog artifact schema version 1 is supported.");
-        }
-
-        if (artifact.IncidentOrdinal <= 0 ||
-            artifact.HeartbeatIntervalMilliseconds < 0 ||
-            artifact.NoProgressTimeoutMilliseconds <= 0 ||
-            artifact.RunElapsedMilliseconds < 0 ||
-            artifact.ConcurrentlyStaleOmitted < 0 ||
-            !Enum.IsDefined(artifact.WatchdogMode) ||
-            artifact.Primary is null ||
-            artifact.ConcurrentlyStale is null ||
-            artifact.Cleanup is null ||
-            artifact.ConcurrentlyStale.Count > MaximumConcurrentOperations ||
-            artifact.ConcurrentlyStale.Any(operation => operation is null) ||
-            !IsValidOperation(artifact.Primary) ||
-            artifact.ConcurrentlyStale.Any(operation => !IsValidOperation(operation)) ||
-            !IsValidOutcome(artifact))
-        {
-            throw new JsonException("Watchdog artifact payload did not satisfy the schema-version-one contract.");
-        }
-
-        return artifact;
     }
 
     /// <summary>
-    /// Serializes an artifact, pre-capping concurrent operations at 256, then dropping
-    /// concurrent command options, log pointers, and trailing records to fit the byte budget.
+    /// Records an explicit operation state transition as progress.
     /// </summary>
-    /// <param name="artifact">Complete normalized incident.</param>
-    /// <returns>UTF-8 JSON below 64 KiB.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="artifact"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">The artifact uses an unsupported schema version.</exception>
-    /// <exception cref="InvalidOperationException">Required primary and top-level fields alone exceed the budget.</exception>
-    public static byte[] Serialize(CoverageRunWatchdogArtifact artifact)
+    public void Transition(string state) => _owner.Transition(Id, state);
+
+    /// <summary>
+    /// Reserves a supervisor-owned process lease before invoking the process runner.
+    /// </summary>
+    public CoverageRunProcessLease ReserveProcess() => _owner.ReserveProcess();
+
+    /// <inheritdoc />
+    public void Dispose()
     {
-        ArgumentNullException.ThrowIfNull(artifact);
-        if (artifact.SchemaVersion != 1)
+        if (Interlocked.Exchange(ref _completed, 1) == 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(artifact), "Only watchdog artifact schema version 1 is supported.");
+            _owner.Complete(Id);
         }
+    }
+}
 
-        var retained = artifact.ConcurrentlyStale.Take(MaximumConcurrentOperations).ToArray();
-        var omitted = SaturatingAdd(
-            artifact.ConcurrentlyStaleOmitted,
-            artifact.ConcurrentlyStale.Count - retained.Length);
-        var bounded = artifact with { ConcurrentlyStale = retained, ConcurrentlyStaleOmitted = omitted };
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(bounded, SerializerOptions);
-        if (bytes.Length <= MaximumBytes)
+/// <summary>
+/// Tracks a callback-delivered root process and guarantees late attachments observe terminal closure.
+/// </summary>
+internal sealed class CoverageRunProcessLease
+{
+    private readonly CoverageRunWatchdogSupervisor? _owner;
+    private readonly object _sync = new();
+    private readonly TaskCompletionSource<Process?> _resolution = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private Process? _process;
+    private bool _terminationRequested;
+    private bool _completed;
+
+    internal CoverageRunProcessLease(CoverageRunWatchdogSupervisor? owner)
+    {
+        _owner = owner;
+    }
+
+    internal static CoverageRunProcessLease Detached() => new(null);
+
+    /// <summary>
+    /// Attaches the root process delivered by CliWrap's start callback.
+    /// </summary>
+    public void Attach(Process process)
+    {
+        var terminate = false;
+        lock (_sync)
         {
-            return bytes;
-        }
-
-        var concurrent = retained
-            .Select(operation => operation with
+            if (_completed)
             {
-                Log = null,
-                Command = operation.Command is null ? null : operation.Command with { Options = [] },
-            })
-            .ToList();
-        bounded = artifact with { ConcurrentlyStale = concurrent, ConcurrentlyStaleOmitted = omitted };
-        bytes = JsonSerializer.SerializeToUtf8Bytes(bounded, SerializerOptions);
-        if (bytes.Length <= MaximumBytes)
-        {
-            return bytes;
-        }
-
-        var lower = 0;
-        var upper = concurrent.Count;
-        byte[]? fittedBytes = null;
-        while (lower <= upper)
-        {
-            var candidateCount = lower + ((upper - lower) / 2);
-            var candidate = concurrent.Take(candidateCount).ToArray();
-            var candidateOmitted = SaturatingAdd(omitted, concurrent.Count - candidateCount);
-            bounded = artifact with { ConcurrentlyStale = candidate, ConcurrentlyStaleOmitted = candidateOmitted };
-            var candidateBytes = JsonSerializer.SerializeToUtf8Bytes(bounded, SerializerOptions);
-            if (candidateBytes.Length <= MaximumBytes)
-            {
-                fittedBytes = candidateBytes;
-                lower = candidateCount + 1;
+                terminate = true;
             }
             else
             {
-                upper = candidateCount - 1;
+                _process = process;
+                terminate = _terminationRequested;
+                _resolution.TrySetResult(process);
             }
         }
 
-        return fittedBytes
-            ?? throw new InvalidOperationException("Required watchdog artifact fields exceed the 64 KiB budget.");
+        if (terminate)
+        {
+            TryKill(process);
+        }
     }
 
-    private static int SaturatingAdd(int left, int right)
-        => (int)Math.Min(int.MaxValue, (long)left + right);
-
-    private static bool IsValidOutcome(CoverageRunWatchdogArtifact artifact)
-        => artifact.Outcome switch
+    /// <summary>
+    /// Marks the command complete and unregisters the lease.
+    /// </summary>
+    public void Complete()
+    {
+        lock (_sync)
         {
-            "warning" => artifact.WatchdogMode == CoverageRunWatchdogMode.Warn &&
-                artifact.DiagnosticCode is null &&
-                artifact.Cleanup is { Status: "not-requested", Detail: null },
-            "terminated" => artifact.WatchdogMode == CoverageRunWatchdogMode.Fail &&
-                string.Equals(artifact.DiagnosticCode, "ASCOV121", StringComparison.Ordinal) &&
-                IsValidTerminalCleanup(artifact.Cleanup),
-            _ => false,
-        };
+            _completed = true;
+            _resolution.TrySetResult(_process);
+            _process = null;
+        }
 
-    private static bool IsValidTerminalCleanup(CoverageRunWatchdogCleanup cleanup)
-        => cleanup switch
+        _owner?.ReleaseProcess(this);
+    }
+
+    internal async Task TerminateAsync()
+    {
+        Process? process;
+        lock (_sync)
         {
-            { Status: "complete", Detail: null } => true,
-            { Status: "failed", Detail: "kill-failed" } => true,
-            { Status: "deadline-exceeded", Detail: "cleanup-incomplete" or "root-timeout" or "kill-failed" } => true,
-            _ => false,
-        };
+            _terminationRequested = true;
+            process = _process;
+        }
 
-    private static bool IsValidOperation(CoverageRunWatchdogIncidentOperation operation)
-        => Enum.IsDefined(operation.Kind) &&
-            operation.State is CoverageRunWatchdogOperationState.Running or CoverageRunWatchdogOperationState.Finalizing &&
-            operation.ElapsedMilliseconds >= 0 &&
-            operation.NoProgressMilliseconds >= 0 &&
-            operation.ProgressSequence >= 0 &&
-            operation.OutputBytes >= 0 &&
-            (operation.Command is null ||
-                (!string.IsNullOrWhiteSpace(operation.Command.Executable) && operation.Command.Options is not null));
+        if (process is null)
+        {
+            process = await _resolution.Task;
+            if (process is null)
+            {
+                return;
+            }
+        }
+
+        await Task.Run(() => TryKill(process));
+        try
+        {
+            await process.WaitForExitAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or System.ComponentModel.Win32Exception)
+        {
+            Trace.TraceWarning(
+                "Coverage process termination could not observe process exit. Cause: {0}: {1}",
+                ex.GetType().Name,
+                ex.Message);
+        }
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or NotSupportedException or System.ComponentModel.Win32Exception)
+        {
+            Trace.TraceWarning(
+                "Coverage process termination could not kill the process tree. Cause: {0}: {1}",
+                ex.GetType().Name,
+                ex.Message);
+        }
+    }
+}
+
+/// <summary>
+/// Supervises coverage-run orchestration using per-operation monotonic progress clocks.
+/// </summary>
+internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
+{
+    private const string ArtifactName = "coverage-watchdog.json";
+    private const int MaximumConcurrentArtifactOperations = 32;
+    private const int MaximumArtifactTextLength = 1024;
+    private const int MaximumArtifactCommandOptions = 32;
+    private const int MaximumArtifactBytes = 64 * 1024;
+    private readonly object _sync = new();
+    private readonly TimeProvider _timeProvider;
+    private readonly CoverageRunConsoleSink _console;
+    private readonly CoverageRunWatchdogMode _mode;
+    private readonly TimeSpan _heartbeatInterval;
+    private readonly TimeSpan _timeout;
+    private readonly CancellationTokenSource _stop = new();
+    private readonly CancellationTokenSource _watchdogCancellation = new();
+    private readonly CancellationTokenSource _linkedCancellation;
+    private readonly SemaphoreSlim _stateChanged = new(0, 1);
+    private readonly object _artifactWriteSync = new();
+    private readonly SemaphoreSlim _artifactCommitGate = new(1, 1);
+    private readonly TimeSpan _artifactCommitTimeout;
+    private readonly TimeSpan _artifactWriteTimeout;
+    private readonly Action? _artifactStaged;
+    private readonly Action? _artifactIncidentQueued;
+    private readonly Action? _artifactResourcesDisposed;
+    private readonly Action<string> _bootstrapDirectoryDelete;
+    private readonly Action<string> _stagedArtifactDelete;
+    private readonly List<OperationState> _operations = [];
+    private readonly HashSet<CoverageRunProcessLease> _processLeases = [];
+    private readonly TaskCompletionSource _terminalCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly long _runStarted;
+    private readonly Task _monitor;
+    private readonly string _bootstrapDirectory;
+    private string? _outputDirectory;
+    private CoverageRunIncident? _terminalIncident;
+    private CoverageRunIncident? _pendingArtifactIncident;
+    private Task? _activeArtifactWrite;
+    private CancellationTokenSource? _activeArtifactWriteCancellation;
+    private long _nextId;
+    private int _incidentOrdinal;
+    private int _artifactResourcesDisposeState;
+
+    /// <summary>
+    /// Initializes and starts a run-scoped watchdog monitor.
+    /// </summary>
+    /// <param name="mode">Whether stalls are ignored, warned, or terminate the run.</param>
+    /// <param name="heartbeatInterval">Interval between progress heartbeats; zero disables them.</param>
+    /// <param name="timeout">Maximum observable no-progress duration for an active operation.</param>
+    /// <param name="console">Console receiving serialized heartbeat and incident output.</param>
+    /// <param name="timeProvider">Clock and timer source used for monotonic stall classification.</param>
+    /// <param name="externalCancellation">Caller cancellation linked to supervised work.</param>
+    /// <param name="artifactStaged">Optional test seam invoked after an incident artifact is staged.</param>
+    /// <param name="artifactCommitTimeout">Optional bound for bootstrap artifact promotion.</param>
+    /// <param name="artifactWriteTimeout">Optional bound for waiting on one incident write.</param>
+    /// <param name="artifactIncidentQueued">Optional test seam invoked when a newer incident is queued behind an active write.</param>
+    /// <param name="artifactResourcesDisposed">Optional test seam invoked after deferred artifact resources are released.</param>
+    /// <param name="bootstrapDirectoryDelete">Optional test seam used to delete the private bootstrap artifact directory during disposal.</param>
+    /// <param name="stagedArtifactDelete">Optional test seam used to delete a failed artifact staging file.</param>
+    public CoverageRunWatchdogSupervisor(
+        CoverageRunWatchdogMode mode,
+        TimeSpan heartbeatInterval,
+        TimeSpan timeout,
+        IConsole console,
+        TimeProvider timeProvider,
+        CancellationToken externalCancellation,
+        Action? artifactStaged = null,
+        TimeSpan? artifactCommitTimeout = null,
+        TimeSpan? artifactWriteTimeout = null,
+        Action? artifactIncidentQueued = null,
+        Action? artifactResourcesDisposed = null,
+        Action<string>? bootstrapDirectoryDelete = null,
+        Action<string>? stagedArtifactDelete = null)
+    {
+        _mode = mode;
+        _heartbeatInterval = heartbeatInterval;
+        _timeout = timeout;
+        _console = new CoverageRunConsoleSink(console);
+        _timeProvider = timeProvider;
+        _artifactStaged = artifactStaged;
+        _artifactCommitTimeout = artifactCommitTimeout ?? TimeSpan.FromSeconds(2);
+        _artifactWriteTimeout = artifactWriteTimeout ?? TimeSpan.FromSeconds(2);
+        _artifactIncidentQueued = artifactIncidentQueued;
+        _artifactResourcesDisposed = artifactResourcesDisposed;
+        _bootstrapDirectoryDelete = bootstrapDirectoryDelete ?? (static path => Directory.Delete(path, recursive: true));
+        _stagedArtifactDelete = stagedArtifactDelete ?? File.Delete;
+        _runStarted = timeProvider.GetTimestamp();
+        _bootstrapDirectory = Directory.CreateTempSubdirectory("appsurface-coverage-watchdog-").FullName;
+        _linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(externalCancellation, _watchdogCancellation.Token);
+        _monitor = MonitorAsync(_stop.Token);
+    }
+
+    /// <summary>
+    /// Gets the token shared by all supervised coverage work.
+    /// </summary>
+    public CancellationToken CancellationToken => _linkedCancellation.Token;
+
+    /// <summary>
+    /// Gets the run-scoped bounded console sink used by all coverage workflow messages.
+    /// </summary>
+    public CoverageRunConsoleSink Console => _console;
+
+    /// <summary>
+    /// Binds watchdog artifacts to an AppSurface-owned output directory after full output validation.
+    /// </summary>
+    /// <param name="outputDirectory">Absolute prepared output directory for canonical watchdog artifacts.</param>
+    /// <remarks>Promotion failures are reported as <c>ASCOV122</c> and do not replace the watchdog's terminal outcome.</remarks>
+    public void BindOutputDirectory(string outputDirectory)
+    {
+        var destination = Path.Join(outputDirectory, ArtifactName);
+        if (!_artifactCommitGate.Wait(_artifactCommitTimeout))
+        {
+            lock (_sync)
+            {
+                _outputDirectory = outputDirectory;
+            }
+
+            _ = _console.WriteCriticalErrorAsync(
+                "ASCOV122 Coverage watchdog bootstrap promotion is delayed by an active artifact write. Cause: artifact-write-timeout. Fix: Inspect the canonical output directory after the write completes. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog");
+            return;
+        }
+
+        try
+        {
+            lock (_sync)
+            {
+                _outputDirectory = outputDirectory;
+            }
+
+            var bootstrapArtifact = Path.Join(_bootstrapDirectory, ArtifactName);
+            if (File.Exists(bootstrapArtifact))
+            {
+                File.Move(bootstrapArtifact, destination, overwrite: true);
+            }
+
+            if (Directory.Exists(_bootstrapDirectory))
+            {
+                Directory.Delete(_bootstrapDirectory, recursive: true);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _ = _console.WriteCriticalErrorAsync(
+                "ASCOV122 Coverage watchdog bootstrap artifact could not be promoted. Cause: artifact-write-failed. Fix: Use a writable dedicated --output directory. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog");
+        }
+        finally
+        {
+            _artifactCommitGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Starts a supervised operation. Queued work should call this only when it becomes active.
+    /// </summary>
+    /// <param name="kind">Stable operation kind used for ordering and diagnostics.</param>
+    /// <param name="project">Optional solution-relative project path.</param>
+    /// <param name="order">Stable execution order among operations of the same kind.</param>
+    /// <param name="state">Initial operation state.</param>
+    /// <param name="log">Optional output-relative log path.</param>
+    /// <param name="commandOptions">Safe command option names; values must already be excluded.</param>
+    /// <returns>A disposable operation that marks completion and exposes progress/process seams.</returns>
+    /// <exception cref="OperationCanceledException">Thrown after the watchdog claims terminal ownership.</exception>
+    public CoverageRunOperation Start(
+        string kind,
+        string? project = null,
+        int order = 0,
+        string state = "running",
+        string? log = null,
+        IReadOnlyList<string>? commandOptions = null)
+    {
+        lock (_sync)
+        {
+            ThrowIfTerminalLocked();
+            var id = ++_nextId;
+            var now = _timeProvider.GetTimestamp();
+            _operations.Add(new OperationState(id, kind, project, order, state, log, commandOptions ?? [], now));
+            SignalStateChanged();
+            return new CoverageRunOperation(this, id);
+        }
+    }
+
+    /// <summary>
+    /// Reserves a process lease before a child-process start callback can attach its root process.
+    /// </summary>
+    /// <returns>A lease registered for terminal cleanup.</returns>
+    /// <exception cref="OperationCanceledException">Thrown after the watchdog claims terminal ownership.</exception>
+    internal CoverageRunProcessLease ReserveProcess()
+    {
+        lock (_sync)
+        {
+            ThrowIfTerminalLocked();
+            var lease = new CoverageRunProcessLease(this);
+            _processLeases.Add(lease);
+            return lease;
+        }
+    }
+
+    /// <summary>
+    /// Releases a completed process lease from terminal cleanup tracking.
+    /// </summary>
+    /// <param name="lease">The completed lease.</param>
+    internal void ReleaseProcess(CoverageRunProcessLease lease)
+    {
+        lock (_sync)
+        {
+            _processLeases.Remove(lease);
+        }
+    }
+
+    /// <summary>
+    /// Records positive observed output bytes for an active operation.
+    /// </summary>
+    /// <param name="id">Operation identifier.</param>
+    /// <param name="count">Positive byte count reported by the process observer.</param>
+    internal void ObserveBytes(long id, int count)
+    {
+        lock (_sync)
+        {
+            if (Find(id) is { Completed: false } operation)
+            {
+                operation.OutputBytes = checked(operation.OutputBytes + count);
+                MarkProgress(operation);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Records an explicit state transition as operation progress.
+    /// </summary>
+    /// <param name="id">Operation identifier.</param>
+    /// <param name="state">New stable state.</param>
+    internal void Transition(long id, string state)
+    {
+        lock (_sync)
+        {
+            if (Find(id) is { Completed: false } operation)
+            {
+                operation.State = state;
+                MarkProgress(operation);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Marks an active operation complete exactly once.
+    /// </summary>
+    /// <param name="id">Operation identifier.</param>
+    internal void Complete(long id)
+    {
+        lock (_sync)
+        {
+            if (Find(id) is { Completed: false } operation)
+            {
+                operation.State = "complete";
+                operation.Completed = true;
+                MarkProgress(operation);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Converts watchdog-owned cancellation into the stable <c>ASCOV121</c> exit-124 diagnostic.
+    /// </summary>
+    /// <exception cref="CommandException">Thrown with exit code 124 after terminal cleanup and the bounded incident-write attempt finish.</exception>
+    public void ThrowIfFailed()
+    {
+        CoverageRunIncident? incident;
+        lock (_sync)
+        {
+            incident = _terminalIncident;
+        }
+
+        if (incident is null)
+        {
+            return;
+        }
+
+        _terminalCompletion.Task.GetAwaiter().GetResult();
+        lock (_sync)
+        {
+            incident = _terminalIncident!;
+        }
+
+        var subject = incident.Primary.Project is null
+            ? $"Operation '{incident.Primary.Kind}'"
+            : $"Project '{incident.Primary.Project}'";
+        var message = FormattableString.Invariant(
+            $"ASCOV121 Coverage run stalled. Cause: {subject} produced no observable progress for {(long)incident.Primary.NoProgress.TotalSeconds}s; {incident.Concurrent.Count} additional operation(s) were concurrently stale. Fix: Inspect the local project log, raise --no-progress-timeout for intentionally quiet tests, or rerun with --watchdog warn. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog Artifact: {DisplayArtifactPath(incident.ArtifactPath)} Cleanup: {incident.CleanupStatus}");
+        throw new CommandException(message, 124);
+    }
+
+    /// <summary>
+    /// Revalidates that the watchdog has not claimed terminal ownership before an atomic artifact commit.
+    /// </summary>
+    /// <param name="commit">Synchronous canonical replacement performed while terminal ownership is locked.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="commit"/> is <see langword="null"/>.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when the watchdog already owns the terminal outcome.</exception>
+    public void Commit(Action commit)
+    {
+        ArgumentNullException.ThrowIfNull(commit);
+        lock (_sync)
+        {
+            ThrowIfTerminalLocked();
+            commit();
+        }
+    }
+
+    private async Task MonitorAsync(CancellationToken cancellationToken)
+    {
+        var nextHeartbeat = _heartbeatInterval > TimeSpan.Zero
+            ? _timeProvider.GetUtcNow() + _heartbeatInterval
+            : DateTimeOffset.MaxValue;
+
+        try
+        {
+            while (true)
+            {
+                var delay = ComputeDelay(nextHeartbeat);
+                await WaitForStateChangeOrDeadlineAsync(delay, cancellationToken);
+
+                var nowUtc = _timeProvider.GetUtcNow();
+                var snapshot = Snapshot();
+                var stale = snapshot.Where(item => !item.WarningLatched && item.NoProgress >= _timeout).ToArray();
+
+                if (nowUtc >= nextHeartbeat)
+                {
+                    await WriteHeartbeatBoundedAsync(snapshot, cancellationToken);
+                    nextHeartbeat = nowUtc + _heartbeatInterval;
+                }
+
+                if (_mode == CoverageRunWatchdogMode.Off || stale.Length == 0)
+                {
+                    continue;
+                }
+
+                if (!TryLatch(stale, out var confirmed))
+                {
+                    continue;
+                }
+
+                var incident = CreateIncident(confirmed, _mode == CoverageRunWatchdogMode.Fail);
+                if (_mode == CoverageRunWatchdogMode.Fail)
+                {
+                    lock (_sync)
+                    {
+                        _terminalIncident ??= incident;
+                    }
+
+                    try
+                    {
+                        RequestWatchdogCancellation();
+                        var cleanup = await CleanupProcessesAsync();
+                        incident = incident with { CleanupStatus = cleanup };
+                        lock (_sync)
+                        {
+                            _terminalIncident = incident;
+                        }
+
+                        await WriteIncidentBoundedAsync(incident);
+                    }
+                    finally
+                    {
+                        _terminalCompletion.TrySetResult();
+                    }
+
+                    return;
+                }
+
+                await WriteIncidentBoundedAsync(incident);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Monitor shutdown is expected when the supervisor is disposed or claims a terminal outcome.
+            return;
+        }
+    }
+
+    private async Task WriteIncidentBoundedAsync(CoverageRunIncident incident)
+    {
+        Task write;
+        lock (_artifactWriteSync)
+        {
+            if (_activeArtifactWrite is not null)
+            {
+                if (_pendingArtifactIncident is null
+                    || incident.Outcome == "terminated"
+                    || _pendingArtifactIncident.Outcome != "terminated")
+                {
+                    _pendingArtifactIncident = incident;
+                    _artifactIncidentQueued?.Invoke();
+                }
+
+                return;
+            }
+
+            write = StartArtifactWriteLocked(incident);
+        }
+
+        using var deadline = new CancellationTokenSource(_artifactWriteTimeout);
+        try
+        {
+            await write.WaitAsync(_artifactWriteTimeout, deadline.Token);
+        }
+        catch (TimeoutException)
+        {
+            // Best-effort bounded write timed out; continue without failing the watchdog loop.
+            return;
+        }
+        catch (OperationCanceledException)
+        {
+            // Best-effort bounded write was canceled by the deadline token; continue.
+            return;
+        }
+    }
+
+    private Task StartArtifactWriteLocked(CoverageRunIncident incident)
+    {
+        var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+        var write = Task.Run(() => WriteIncidentAsync(incident, cancellation.Token));
+        _activeArtifactWriteCancellation = cancellation;
+        _activeArtifactWrite = write;
+        _ = write.ContinueWith(
+            CompleteArtifactWrite,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+        return write;
+    }
+
+    private void CompleteArtifactWrite(Task completed)
+    {
+        _ = completed.Exception;
+        lock (_artifactWriteSync)
+        {
+            if (!ReferenceEquals(_activeArtifactWrite, completed))
+            {
+                return;
+            }
+
+            _activeArtifactWrite = null;
+            _activeArtifactWriteCancellation?.Dispose();
+            _activeArtifactWriteCancellation = null;
+            if (!_stop.IsCancellationRequested && _pendingArtifactIncident is { } pending)
+            {
+                _pendingArtifactIncident = null;
+                StartArtifactWriteLocked(pending);
+            }
+            else
+            {
+                _pendingArtifactIncident = null;
+            }
+        }
+    }
+
+    private async Task<bool> DrainArtifactWriteAsync()
+    {
+        Task? active;
+        lock (_artifactWriteSync)
+        {
+            _pendingArtifactIncident = null;
+            _activeArtifactWriteCancellation?.Cancel();
+            active = _activeArtifactWrite;
+        }
+
+        if (active is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            await active.WaitAsync(_artifactWriteTimeout);
+            return true;
+        }
+        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+        {
+            return active.IsCompleted;
+        }
+        catch (Exception)
+        {
+            return true;
+        }
+    }
+
+    private async Task WriteHeartbeatBoundedAsync(IReadOnlyList<OperationSnapshot> snapshot, CancellationToken cancellationToken)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(2));
+        try
+        {
+            await WriteHeartbeatAsync(snapshot, deadline.Token).WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
+        }
+        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            // Best-effort heartbeat write: ignore deadline/cancellation from the bounded wait
+            // when the caller has not requested cancellation.
+        }
+    }
+
+    private async Task<string> CleanupProcessesAsync()
+    {
+        CoverageRunProcessLease[] leases;
+        lock (_sync)
+        {
+            leases = _processLeases.ToArray();
+        }
+
+        try
+        {
+            await Task.WhenAll(leases.Select(lease => lease.TerminateAsync())).WaitAsync(TimeSpan.FromSeconds(10));
+            return "complete";
+        }
+        catch (TimeoutException)
+        {
+            return "deadline-exceeded";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return "failed";
+        }
+    }
+
+    private void RequestWatchdogCancellation()
+    {
+        var cancellation = _watchdogCancellation.CancelAsync();
+        _ = cancellation.ContinueWith(
+            completed => _ = completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    private TimeSpan ComputeDelay(DateTimeOffset nextHeartbeat)
+    {
+        var nowUtc = _timeProvider.GetUtcNow();
+        var heartbeatDelay = nextHeartbeat == DateTimeOffset.MaxValue ? TimeSpan.MaxValue : nextHeartbeat - nowUtc;
+        var stallDelay = Snapshot()
+            .Where(operation => _mode != CoverageRunWatchdogMode.Off && !operation.WarningLatched)
+            .Select(operation => _timeout - operation.NoProgress)
+            .DefaultIfEmpty(TimeSpan.MaxValue)
+            .Min();
+
+        var delay = heartbeatDelay < stallDelay ? heartbeatDelay : stallDelay;
+        if (delay == TimeSpan.MaxValue)
+        {
+            delay = TimeSpan.FromHours(24);
+        }
+
+        if (delay <= TimeSpan.Zero)
+        {
+            return TimeSpan.FromMilliseconds(1);
+        }
+
+        return delay;
+    }
+
+    private async Task WaitForStateChangeOrDeadlineAsync(TimeSpan delay, CancellationToken cancellationToken)
+    {
+        using var waitCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var deadline = Task.Delay(delay, _timeProvider, waitCancellation.Token);
+        var stateChange = _stateChanged.WaitAsync(waitCancellation.Token);
+        var completed = await Task.WhenAny(deadline, stateChange);
+        waitCancellation.Cancel();
+        await completed;
+    }
+
+    private void SignalStateChanged()
+    {
+        if (_stateChanged.CurrentCount == 0)
+        {
+            _stateChanged.Release();
+        }
+    }
+
+    private OperationSnapshot[] Snapshot()
+    {
+        lock (_sync)
+        {
+            var now = _timeProvider.GetTimestamp();
+            return _operations
+                .Where(operation => !operation.Completed)
+                .OrderBy(operation => OperationKindOrder(operation.Kind))
+                .ThenBy(operation => operation.Order)
+                .Select(operation => operation.Snapshot(_timeProvider.GetElapsedTime(operation.Started, now), _timeProvider.GetElapsedTime(operation.LastProgress, now)))
+                .ToArray();
+        }
+    }
+
+    private bool TryLatch(IReadOnlyList<OperationSnapshot> candidates, out OperationSnapshot[] confirmed)
+    {
+        lock (_sync)
+        {
+            var now = _timeProvider.GetTimestamp();
+            var result = new List<OperationSnapshot>();
+            foreach (var candidate in candidates)
+            {
+                var operation = Find(candidate.Id);
+                if (operation is null || operation.Completed || operation.WarningLatched || operation.Sequence != candidate.Sequence)
+                {
+                    continue;
+                }
+
+                var noProgress = _timeProvider.GetElapsedTime(operation.LastProgress, now);
+                if (noProgress < _timeout)
+                {
+                    continue;
+                }
+
+                operation.WarningLatched = true;
+                result.Add(operation.Snapshot(_timeProvider.GetElapsedTime(operation.Started, now), noProgress));
+            }
+
+            confirmed = result.ToArray();
+            return confirmed.Length > 0;
+        }
+    }
+
+    private CoverageRunIncident CreateIncident(IReadOnlyList<OperationSnapshot> stale, bool terminated)
+    {
+        return new CoverageRunIncident(
+            Interlocked.Increment(ref _incidentOrdinal),
+            terminated ? "terminated" : "warning",
+            stale[0],
+            stale.Skip(1).ToArray(),
+            ArtifactPath: null);
+    }
+
+    private string ResolveArtifactPath()
+    {
+        lock (_sync)
+        {
+            if (_outputDirectory is not null)
+            {
+                return Path.Join(_outputDirectory, ArtifactName);
+            }
+        }
+
+        return Path.Join(_bootstrapDirectory, ArtifactName);
+    }
+
+    private async Task WriteHeartbeatAsync(IReadOnlyList<OperationSnapshot> snapshot, CancellationToken cancellationToken)
+    {
+        if (_heartbeatInterval <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        var elapsed = (long)_timeProvider.GetElapsedTime(_runStarted).TotalSeconds;
+        var lines = new List<string>
+        {
+            FormattableString.Invariant($"Coverage heartbeat: elapsed={elapsed}s; running={snapshot.Count(item => item.State == "running")}; finalizing={snapshot.Count(item => item.State == "finalizing")}; complete={CompletedCount()}")
+        };
+        lines.AddRange(snapshot.Select(item => FormattableString.Invariant(
+            $"  operation={JsonSerializer.Serialize(item.Kind)}; project={JsonSerializer.Serialize(item.Project)}; state={item.State}; elapsed={(long)item.Elapsed.TotalSeconds}s; no-progress={(long)item.NoProgress.TotalSeconds}s; output-bytes={item.OutputBytes}")));
+        await _console.WriteOutputAsync(
+            string.Join(Environment.NewLine, lines),
+            cancellationToken,
+            coalesceIfWritePending: true);
+    }
+
+    private async Task WriteIncidentAsync(CoverageRunIncident incident, CancellationToken cancellationToken)
+    {
+        var initialArtifactPath = ResolveArtifactPath();
+        var directory = Path.GetDirectoryName(initialArtifactPath)!;
+        string? reportedArtifactPath = null;
+        string? staged = null;
+        var gateHeld = false;
+        try
+        {
+            await _artifactCommitGate.WaitAsync(cancellationToken);
+            gateHeld = true;
+            Directory.CreateDirectory(directory);
+            var concurrent = incident.Concurrent.Take(MaximumConcurrentArtifactOperations).ToArray();
+            var payload = new
+            {
+                schemaVersion = 1,
+                incidentOrdinal = incident.Ordinal,
+                outcome = incident.Outcome,
+                diagnosticCode = incident.Outcome == "terminated" ? "ASCOV121" : null,
+                watchdogMode = _mode.ToString().ToLowerInvariant(),
+                heartbeatIntervalMilliseconds = (long)_heartbeatInterval.TotalMilliseconds,
+                noProgressTimeoutMilliseconds = (long)_timeout.TotalMilliseconds,
+                runElapsedMilliseconds = (long)_timeProvider.GetElapsedTime(_runStarted).TotalMilliseconds,
+                classifiedAtUtc = _timeProvider.GetUtcNow(),
+                primary = ToArtifactRecord(incident.Primary),
+                concurrentlyStale = concurrent.Select(ToArtifactRecord),
+                concurrentlyStaleOmitted = incident.Concurrent.Count - concurrent.Length,
+                cleanup = new { status = incident.CleanupStatus, detail = (string?)null },
+            };
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            var json = JsonSerializer.Serialize(payload, options) + Environment.NewLine;
+            if (Encoding.UTF8.GetByteCount(json) > MaximumArtifactBytes)
+            {
+                var minimalPayload = new
+                {
+                    schemaVersion = 1,
+                    incidentOrdinal = incident.Ordinal,
+                    outcome = incident.Outcome,
+                    diagnosticCode = incident.Outcome == "terminated" ? "ASCOV121" : null,
+                    watchdogMode = _mode.ToString().ToLowerInvariant(),
+                    heartbeatIntervalMilliseconds = (long)_heartbeatInterval.TotalMilliseconds,
+                    noProgressTimeoutMilliseconds = (long)_timeout.TotalMilliseconds,
+                    runElapsedMilliseconds = (long)_timeProvider.GetElapsedTime(_runStarted).TotalMilliseconds,
+                    classifiedAtUtc = _timeProvider.GetUtcNow(),
+                    primary = ToMinimalArtifactRecord(incident.Primary),
+                    concurrentlyStale = Array.Empty<object>(),
+                    concurrentlyStaleOmitted = incident.Concurrent.Count,
+                    cleanup = new { status = incident.CleanupStatus, detail = "artifact-truncated" },
+                };
+                json = JsonSerializer.Serialize(minimalPayload, options) + Environment.NewLine;
+            }
+
+            staged = Path.Join(directory, $".{ArtifactName}.{Guid.NewGuid():N}.tmp");
+            await File.WriteAllTextAsync(staged, json, cancellationToken);
+            _artifactStaged?.Invoke();
+            cancellationToken.ThrowIfCancellationRequested();
+            var destination = ResolveArtifactPath();
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Move(staged, destination, overwrite: true);
+            staged = null;
+            reportedArtifactPath = destination;
+            lock (_sync)
+            {
+                if (_terminalIncident?.Ordinal == incident.Ordinal)
+                {
+                    _terminalIncident = _terminalIncident with { ArtifactPath = destination };
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            await _console.WriteCriticalErrorAsync(
+                "ASCOV122 Coverage watchdog artifact unavailable. Cause: artifact-write-failed. Fix: Use a writable dedicated --output directory. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog",
+                CancellationToken.None);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await _console.WriteCriticalErrorAsync(
+                "ASCOV122 Coverage watchdog artifact unavailable. Cause: artifact-write-cancelled. Fix: Inspect the coverage run terminal diagnostic and rerun with a writable dedicated --output directory. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog",
+                CancellationToken.None);
+        }
+        finally
+        {
+            if (staged is not null)
+            {
+                try
+                {
+                    _stagedArtifactDelete(staged);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Trace.TraceWarning(
+                        "Coverage watchdog staging artifact cleanup failed; the primary incident remains reported. Cause: {0}: {1}",
+                        ex.GetType().Name,
+                        ex.Message);
+                }
+            }
+
+            if (gateHeld)
+            {
+                _artifactCommitGate.Release();
+            }
+        }
+
+        var primary = incident.Primary;
+        var subject = primary.Project is null ? $"operation={primary.Kind}" : $"project={JsonSerializer.Serialize(primary.Project)}";
+        var prefix = incident.Outcome == "terminated" ? "Coverage watchdog termination" : "Coverage watchdog warning";
+        if (!cancellationToken.IsCancellationRequested)
+        {
+            await _console.WriteCriticalErrorAsync(FormattableString.Invariant(
+                $"{prefix}: {subject}; no-progress={(long)primary.NoProgress.TotalSeconds}s; concurrent-stalls={incident.Concurrent.Count}; artifact={JsonSerializer.Serialize(DisplayArtifactPath(reportedArtifactPath))}"), cancellationToken);
+        }
+    }
+
+    private object ToArtifactRecord(OperationSnapshot item) => new
+    {
+        kind = BoundArtifactText(item.Kind),
+        project = BoundArtifactText(item.Project),
+        state = BoundArtifactText(item.State),
+        elapsedMilliseconds = (long)item.Elapsed.TotalMilliseconds,
+        noProgressMilliseconds = (long)item.NoProgress.TotalMilliseconds,
+        lastProgressAtUtc = _timeProvider.GetUtcNow() - item.NoProgress,
+        progressSequence = item.Sequence,
+        outputBytes = item.OutputBytes,
+        log = BoundArtifactText(item.Log),
+        command = item.CommandOptions.Count == 0
+            ? null
+            : new
+            {
+                executable = "dotnet",
+                options = item.CommandOptions
+                    .Take(MaximumArtifactCommandOptions)
+                    .Select(option => BoundArtifactText(option, 256)),
+            },
+    };
+
+    private object ToMinimalArtifactRecord(OperationSnapshot item) => new
+    {
+        kind = BoundArtifactText(item.Kind, 128),
+        project = BoundArtifactText(item.Project, 128),
+        state = BoundArtifactText(item.State, 64),
+        elapsedMilliseconds = (long)item.Elapsed.TotalMilliseconds,
+        noProgressMilliseconds = (long)item.NoProgress.TotalMilliseconds,
+        lastProgressAtUtc = _timeProvider.GetUtcNow() - item.NoProgress,
+        progressSequence = item.Sequence,
+        outputBytes = item.OutputBytes,
+        log = BoundArtifactText(item.Log, 128),
+        command = (object?)null,
+    };
+
+    private static string DisplayArtifactPath(string? path)
+        => path is null
+            ? "unavailable"
+            : Path.GetRelativePath(Directory.GetCurrentDirectory(), path).Replace('\\', '/');
+
+    private static string? BoundArtifactText(string? value, int maximumLength = MaximumArtifactTextLength)
+        => value is null || value.Length <= maximumLength ? value : value[..maximumLength];
+
+    private int CompletedCount()
+    {
+        lock (_sync)
+        {
+            return _operations.Count(operation => operation.Completed);
+        }
+    }
+
+    private void MarkProgress(OperationState operation)
+    {
+        operation.LastProgress = _timeProvider.GetTimestamp();
+        operation.Sequence++;
+        operation.WarningLatched = false;
+        SignalStateChanged();
+    }
+
+    private OperationState? Find(long id) => _operations.FirstOrDefault(operation => operation.Id == id);
+
+    private void ThrowIfTerminalLocked()
+    {
+        if (_terminalIncident is not null)
+        {
+            throw new OperationCanceledException("Coverage watchdog already owns the terminal outcome.");
+        }
+    }
+
+    private static int OperationKindOrder(string kind) => kind switch
+    {
+        "discovery" => 0,
+        "build" => 1,
+        "project" => 2,
+        "merge" => 3,
+        "diagnostics" => 4,
+        "artifacts" => 5,
+        _ => 6,
+    };
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        _stop.Cancel();
+        try
+        {
+            await _monitor;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await _console.WriteCriticalErrorAsync(
+                $"ASCOV122 Coverage watchdog monitor fault was suppressed during cleanup. Cause: {ex.GetType().Name}. Fix: Inspect the coverage run diagnostic output and rerun with a writable dedicated --output directory. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog");
+        }
+        var artifactWriteDrained = await DrainArtifactWriteAsync();
+        _linkedCancellation.Dispose();
+        _watchdogCancellation.Dispose();
+        _stop.Dispose();
+        _stateChanged.Dispose();
+        if (!artifactWriteDrained)
+        {
+            ScheduleDeferredArtifactCleanup();
+            return;
+        }
+
+        DisposeArtifactResources();
+    }
+
+    private void ScheduleDeferredArtifactCleanup()
+    {
+        Task? active;
+        lock (_artifactWriteSync)
+        {
+            active = _activeArtifactWrite;
+        }
+
+        if (active is null)
+        {
+            DisposeArtifactResources();
+            return;
+        }
+
+        _ = active.ContinueWith(
+            _ => DisposeArtifactResources(),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    private void DisposeArtifactResources()
+    {
+        if (Interlocked.Exchange(ref _artifactResourcesDisposeState, 1) != 0)
+        {
+            return;
+        }
+
+        _artifactCommitGate.Dispose();
+        _console.Dispose();
+        try
+        {
+            if (Directory.Exists(_bootstrapDirectory))
+            {
+                _bootstrapDirectoryDelete(_bootstrapDirectory);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning(
+                "Coverage watchdog bootstrap directory cleanup failed. Cause: {0}: {1}",
+                ex.GetType().Name,
+                ex.Message);
+        }
+
+        _artifactResourcesDisposed?.Invoke();
+    }
+
+    private sealed class OperationState(
+        long id,
+        string kind,
+        string? project,
+        int order,
+        string state,
+        string? log,
+        IReadOnlyList<string> commandOptions,
+        long started)
+    {
+        public long Id { get; } = id;
+        public string Kind { get; } = kind;
+        public string? Project { get; } = project;
+        public int Order { get; } = order;
+        public string State { get; set; } = state;
+        public string? Log { get; } = log;
+        public IReadOnlyList<string> CommandOptions { get; } = commandOptions;
+        public long Started { get; } = started;
+        public long LastProgress { get; set; } = started;
+        public long Sequence { get; set; } = 1;
+        public long OutputBytes { get; set; }
+        public bool WarningLatched { get; set; }
+        public bool Completed { get; set; }
+
+        public OperationSnapshot Snapshot(TimeSpan elapsed, TimeSpan noProgress)
+            => new(Id, Kind, Project, State, Log, CommandOptions, elapsed, noProgress, Sequence, OutputBytes, WarningLatched);
+    }
+
+    private sealed record OperationSnapshot(
+        long Id,
+        string Kind,
+        string? Project,
+        string State,
+        string? Log,
+        IReadOnlyList<string> CommandOptions,
+        TimeSpan Elapsed,
+        TimeSpan NoProgress,
+        long Sequence,
+        long OutputBytes,
+        bool WarningLatched);
+
+    private sealed record CoverageRunIncident(
+        int Ordinal,
+        string Outcome,
+        OperationSnapshot Primary,
+        IReadOnlyList<OperationSnapshot> Concurrent,
+        string? ArtifactPath,
+        string CleanupStatus = "not-requested");
 }
