@@ -160,9 +160,9 @@ Issue [#624](https://github.com/forge-trust/AppSurface/issues/624) adds a bounde
 completion telemetry. It constrains shape and exposure; it does not classify or redact application-authored text. Issue
 [#625](https://github.com/forge-trust/AppSurface/issues/625) adds caller-side polling, and
 [#626](https://github.com/forge-trust/AppSurface/issues/626) adds a neutral end-to-end example. Until that operator rail is
-proved, this API remains preview. A separate [aggregate snapshot follow-up](https://github.com/forge-trust/AppSurface/issues/645)
-will compile multiple checks with bounded concurrency and deadlines after the safe envelope exists; #623 evaluates one
-registered name per request.
+proved, this API remains preview. The bounded aggregate snapshot composes registered checks for one protected deploy
+proof request ([#645](https://github.com/forge-trust/AppSurface/issues/645)); [#625](https://github.com/forge-trust/AppSurface/issues/625) remains responsible for caller polling,
+retry, exit codes, and CI rendering.
 
 Choose the surface by the question you need to answer:
 
@@ -403,6 +403,23 @@ curl --fail-with-body \
   https://app.example.com/_appsurface/canaries/forwarding.alpha-evidence
 ```
 
+Or take a bounded aggregate snapshot. Omit selectors to select the entire registered set, repeat `name` and `tag` to
+form their union, and use tags only for durable host-owned groups. Retagging deliberately changes future tag selections.
+Each request may supply at most 256 selector values before duplicate normalization.
+
+```bash
+curl --fail-with-body \
+  -H "Authorization: Bearer $DEPLOY_OPERATOR_TOKEN" \
+  -H "X-AppSurface-Canary-Marker: deploy-42" \
+  -H "X-AppSurface-Canary-Fresh-Since: 2026-07-12T12:00:00Z" \
+  'https://app.example.com/_appsurface/canaries?tag=deploy-critical&name=forwarding.alpha-evidence'
+```
+
+Snapshots select at most 64 canaries by default, start at most four evaluations concurrently, apply a 10-second
+per-check deadline and a 30-second overall admission deadline. Configure the host-owned limits through
+`options.Snapshot`; every value must be positive, selected-item limits are 1–256, and cancellation is cooperative.
+An evaluator that ignores cancellation delays the response but is never detached after it.
+
 The completed response contains a required compatibility core and omits optional evidence that is absent:
 
 ```json
@@ -434,8 +451,16 @@ omitted when absent; an empty details collection is omitted.
 
 #### Status and HTTP contract
 
-`MapAppSurfaceCanaries` maps one GET route, `/_appsurface/canaries/{name}`, for the whole named registry. It is excluded
-from API Explorer/OpenAPI and every package-owned response sets `Cache-Control: no-store` and `Pragma: no-cache`.
+`MapAppSurfaceCanaries` maps two GET routes for the whole named registry: `/_appsurface/canaries/{name}` evaluates one
+check and `/_appsurface/canaries` returns a bounded snapshot. Both are excluded from API Explorer/OpenAPI and every
+package-owned response sets `Cache-Control: no-store` and `Pragma: no-cache`.
+
+The snapshot response always contains `ready`, `overallTimedOut`, and ordered `results`. A result with
+`outcome: "completed"` carries the existing status/evidence fields and is ready only when its status is `pass`.
+`failed` has `ASCAN301`; `timed-out` has `ASCAN302` (per-check) or `ASCAN303` (overall after start); and `not-started`
+has `ASCAN304` (overall deadline before admission). Aggregate `ready` is true only when every selected result completed
+and passed. Parse this additive preview shape by property name, tolerate unknown fields, and never treat it as platform
+readiness.
 
 | Evaluator status | Meaning for a caller | Typical caller action | Default HTTP status |
 |---|---|---|---:|
@@ -725,8 +750,10 @@ fails after a valid completion, the completion event remains accurate and the wr
   it adds the evaluator as transient. Singleton, scoped, and transient overrides are supported; one request resolves the
   concrete evaluator exactly once from its request scope.
 - An unknown route name returns `404`. `not-configured` is different: the name is registered and its evaluator ran.
-- One request performs one evaluation. Request abort cancellation propagates. The package adds no evaluator timeout,
-  retry, polling loop, cache, fan-out, trigger, or readiness effect.
+- The detail route performs one evaluation. The snapshot route has bounded fan-out: the default cap is 64 selected
+  canaries, four may start concurrently, each has a 10-second cooperative deadline, and the overall admission deadline
+  is 30 seconds. Request-abort cancellation propagates. The package adds no retry, polling loop, cache, trigger, or
+  readiness effect.
 
 #### Authorization and route sharp edges
 
@@ -765,7 +792,11 @@ stable event, canary name, diagnostic code, and exception type.
 | `ASCAN201` | Required header missing | A registration-required marker or freshness value is blank/absent. | Supply the named header and retry. |
 | `ASCAN202` | Header invalid | A header is repeated, malformed, unsafe, or too large. | Follow the marker or strict freshness rules above. |
 | `ASCAN203` | Canary not found | The exact route name is not registered. | Register it or correct the lowercase name. |
+| `ASCAN204` | Snapshot selection too large | Query names/tags selected more canaries than the host cap. | Narrow selectors or adjust the host-owned cap. |
 | `ASCAN301` | Evaluation failed | Activation failed, the evaluator threw/canceled independently, returned null, returned invalid result state, or returned a detail key not declared for this canary. | Correct the evaluator or declare the bounded key; inspect host-local evaluator diagnostics because rejected values remain redacted. Caller retry policy remains external. |
+| `ASCAN302` | Snapshot check timed out | A started evaluator did not finish by its per-check deadline. | Inspect evaluator cancellation behavior and tune the host limit only when warranted. |
+| `ASCAN303` | Snapshot overall deadline reached | A started evaluator was canceled by the overall snapshot deadline. | Narrow the selection, inspect evaluator latency, or tune the host deadline. |
+| `ASCAN304` | Snapshot check not started | The overall deadline elapsed before the selected evaluator acquired an admission slot. | Narrow the selection, increase bounded concurrency, or tune the host deadline. |
 
 ### PWA Install and Push-Worker Foundation
 

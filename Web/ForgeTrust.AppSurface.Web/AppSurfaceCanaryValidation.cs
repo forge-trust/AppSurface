@@ -35,6 +35,13 @@ internal static partial class AppSurfaceCanaryValidation
         }
     }
 
+    /// <summary>Determines whether a query name has the same grammar as a registration name.</summary>
+    internal static bool IsValidName(string? name) =>
+        name is { Length: > 0 and <= MaximumNameLength } && NameRegex().IsMatch(name);
+
+    /// <summary>Determines whether a query tag has the same grammar as a registration tag.</summary>
+    internal static bool IsValidTag(string? tag) => tag is not null && TagRegex().IsMatch(tag);
+
     /// <summary>
     /// Validates configured metadata and creates an immutable descriptor snapshot.
     /// </summary>

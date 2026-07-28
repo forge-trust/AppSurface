@@ -55,13 +55,11 @@ internal sealed class AppSurfaceCanaryStartupValidator : IStartupFilter
             var route = Normalize(endpoint.RoutePattern.RawText);
             if (endpoint.Metadata.GetMetadata<AppSurfaceCanaryRouteMetadata>() is not null)
             {
-                if (!string.Equals(
-                    route,
-                    AppSurfaceCanaryEndpointDefaults.RoutePattern,
-                    StringComparison.Ordinal))
+                if (!string.Equals(route, AppSurfaceCanaryEndpointDefaults.RoutePattern, StringComparison.Ordinal)
+                    && !string.Equals(route, AppSurfaceCanaryEndpointDefaults.SnapshotRoutePattern, StringComparison.Ordinal))
                 {
                     throw new InvalidOperationException(
-                        $"ASCAN115: The AppSurface named-canary endpoint resolved to '{route}' instead of the fixed route '{AppSurfaceCanaryEndpointDefaults.RoutePattern}'. Map named canaries at the application root, outside route groups.");
+                        $"ASCAN115: The AppSurface named-canary endpoint resolved to '{route}' instead of one of the fixed routes '{AppSurfaceCanaryEndpointDefaults.SnapshotRoutePattern}' and '{AppSurfaceCanaryEndpointDefaults.RoutePattern}'. Map named canaries at the application root, outside route groups.");
                 }
 
                 continue;

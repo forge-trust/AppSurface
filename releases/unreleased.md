@@ -25,8 +25,10 @@ This is the living release note for the next coordinated AppSurface version afte
   correlation, and custom detail values remain response-only. Bounds and declarations constrain shape but do not classify
   or redact application-authored text. The default adapter still returns `200` only for `pass` and `503` for completed
   non-pass states; authenticated diagnostic consumers can opt into status-preserving `AlwaysOk`. Authorization remains
-  host-owned and fail-closed, and triggering, retries, polling, aggregation, health-check adaptation, and `/ready` behavior
-  remain outside this primitive.
+  host-owned and fail-closed. The same mapper now exposes a bounded protected aggregate snapshot with name/tag selection,
+  a default 64-item cap, four concurrent evaluations, 10-second per-check and 30-second overall cooperative deadlines,
+  ordered partial outcomes, and aggregate completion telemetry. Triggering, retries, polling, caller workflow/CI policy,
+  health-check adaptation, and `/ready` behavior remain outside this primitive.
 - [`ForgeTrust.AppSurface.Web` health and readiness probes](../Web/ForgeTrust.AppSurface.Web/README.md#health-and-readiness-probes) are now opt-in. New hosts avoid ASP.NET Core health-check registration and `/health` plus `/ready` endpoint mapping unless `WebOptions.Health.Enabled` is explicitly set to `true`; enabled probes also avoid general route-handler binding during startup. Hosts whose deployment or monitoring infrastructure consumes those probes must enable the shared flag; paths, readiness tags, response semantics, validation, and authorization behavior are unchanged.
 - [`ForgeTrust.RazorWire`](../Web/ForgeTrust.RazorWire/README.md#choose-who-supplies-turbo) upgrades its package-owned Turbo UMD payload from 8.0.12 to 8.0.23 while preserving the existing `Bundled`, same-origin `CustomPath`, and `HostManaged` runtime-source contract. Static CDN and hybrid exports continue to materialize the exact bundled runtime.
 
