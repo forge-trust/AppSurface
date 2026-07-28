@@ -49,6 +49,16 @@ public class DocsSearchSummaryPresentationProjectorTests
     }
 
     [Fact]
+    public void Project_ShouldIgnoreEmptyCodeBlocksWithoutDroppingFollowingText()
+    {
+        var presentation = DocsSearchSummaryPresentationProjector.Project("```\n```\n\nvisible");
+
+        var renderedText = string.Concat(Assert.IsAssignableFrom<IReadOnlyList<DocsSearchSummaryPresentationNode>>(presentation).SelectMany(Flatten));
+
+        Assert.Equal("visible", renderedText);
+    }
+
+    [Fact]
     public void Project_ShouldBoundDepthNodesAndUnicodeScalars_Deterministically()
     {
         var nested = string.Concat(Enumerable.Repeat("**", 10)) + "deep" + string.Concat(Enumerable.Repeat("**", 10));
@@ -123,6 +133,26 @@ public class DocsSearchSummaryPresentationProjectorTests
         Assert.Contains(expectedText, renderedText, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("Visible <script")]
+    [InlineData("Visible </script")]
+    public void Project_ShouldNotDropReaderTextForIncompleteSuppressionTags(string summary)
+    {
+        var presentation = DocsSearchSummaryPresentationProjector.Project(summary);
+
+        var renderedText = string.Concat(Assert.IsAssignableFrom<IReadOnlyList<DocsSearchSummaryPresentationNode>>(presentation).SelectMany(Flatten));
+
+        Assert.Contains("Visible", renderedText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryClassifySuppressedHtmlTag_ShouldRejectMalformedTags()
+    {
+        Assert.False(DocsSearchSummaryPresentationProjector.TryClassifySuppressedHtmlTag(string.Empty, out _, out _));
+        Assert.False(DocsSearchSummaryPresentationProjector.TryClassifySuppressedHtmlTag("script", out _, out _));
+        Assert.False(DocsSearchSummaryPresentationProjector.TryClassifySuppressedHtmlTag("<script", out _, out _));
+    }
+
     [Fact]
     public void Project_ShouldFlattenDeepFormattingWithoutReintroducingSuppressedContent()
     {
@@ -169,6 +199,82 @@ public class DocsSearchSummaryPresentationProjectorTests
         Assert.EndsWith("…", listText, StringComparison.Ordinal);
         Assert.DoesNotContain("not included", topLevelText, StringComparison.Ordinal);
         Assert.DoesNotContain("not included", listText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Project_ShouldTruncateLongWordsAtTheLastSafeWhitespaceBoundary()
+    {
+        var retained = new string('a', 600);
+        var summary = retained + " " + new string('b', 600);
+
+        var renderedText = string.Concat(Assert.IsAssignableFrom<IReadOnlyList<DocsSearchSummaryPresentationNode>>(
+            DocsSearchSummaryPresentationProjector.Project(summary)).SelectMany(Flatten));
+
+        Assert.Equal(retained + "…", renderedText);
+    }
+
+    [Fact]
+    public void Project_ShouldTruncateNestedFormattingAtTheLastSafeWhitespaceBoundary()
+    {
+        var retained = new string('a', 600);
+        var presentation = Assert.IsAssignableFrom<IReadOnlyList<DocsSearchSummaryPresentationNode>>(
+            DocsSearchSummaryPresentationProjector.Project("**" + retained + " " + new string('b', 600) + "**"));
+
+        var strong = Assert.Single(presentation);
+
+        Assert.Equal("strong", strong.Kind);
+        Assert.Equal(retained + "…", Assert.Single(strong.Children!).Text);
+    }
+
+    [Fact]
+    public void Project_ShouldTruncateWhenFormattedNodesReachTheNodeBudget()
+    {
+        var prefix = string.Concat(Enumerable.Repeat("`x`y", DocsSearchSummaryPresentationProjector.MaxNodes / 2));
+        var summary = prefix + "<!-- separator -->**not included**";
+
+        var presentation = Assert.IsAssignableFrom<IReadOnlyList<DocsSearchSummaryPresentationNode>>(
+            DocsSearchSummaryPresentationProjector.Project(summary));
+
+        Assert.True(presentation.Sum(CountNodes) <= DocsSearchSummaryPresentationProjector.MaxNodes);
+        Assert.EndsWith("…", presentation.SelectMany(Flatten).Last(), StringComparison.Ordinal);
+        Assert.DoesNotContain(presentation.SelectMany(Flatten), text => text.Contains("not included", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Project_ShouldTruncateWhenScalarAndNodeBudgetsAreExhaustedTogether()
+    {
+        var text = new string('a', 8);
+        var code = new string('b', 8);
+        var repeated = string.Concat(Enumerable.Repeat(text + "`" + code + "`", 63));
+        var summary = repeated + new string('a', 4) + "`" + code + "`" + "zzzzz";
+
+        var presentation = Assert.IsAssignableFrom<IReadOnlyList<DocsSearchSummaryPresentationNode>>(
+            DocsSearchSummaryPresentationProjector.Project(summary));
+        var flattened = presentation.SelectMany(Flatten).ToArray();
+
+        Assert.True(presentation.Sum(CountNodes) <= DocsSearchSummaryPresentationProjector.MaxNodes);
+        Assert.InRange(flattened.Sum(value => value.EnumerateRunes().Count()), 1, DocsSearchSummaryPresentationProjector.MaxScalars);
+        Assert.EndsWith("…", flattened.Last(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProjectionBuilder_ShouldHandleDefensiveBudgetGuardsWithoutAddingNodes()
+    {
+        var emptyBuilder = new DocsSearchSummaryPresentationProjector.ProjectionBuilder();
+
+        Assert.Null(emptyBuilder.AddContainer(emptyBuilder.Root, "strong", DocsSearchSummaryPresentationProjector.MaxDepth));
+        Assert.Empty(emptyBuilder.Root);
+
+        var builder = new DocsSearchSummaryPresentationProjector.ProjectionBuilder();
+        builder.AppendText(builder.Root, "text", new string('a', DocsSearchSummaryPresentationProjector.MaxScalars), depth: 1);
+        builder.AppendText(builder.Root, "text", "x", depth: 1);
+        var nodeCount = builder.Root.Count;
+
+        Assert.True(builder.IsTruncated);
+
+        builder.AppendText(builder.Root, "text", "ignored", depth: 1);
+
+        Assert.Equal(nodeCount, builder.Root.Count);
     }
 
     private static IEnumerable<string> Flatten(DocsSearchSummaryPresentationNode node)

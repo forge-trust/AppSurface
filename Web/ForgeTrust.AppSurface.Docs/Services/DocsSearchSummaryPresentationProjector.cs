@@ -233,7 +233,14 @@ internal static class DocsSearchSummaryPresentationProjector
         }
     }
 
-    private static bool TryClassifySuppressedHtmlTag(string tag, out bool isClosing, out bool isSelfClosing)
+    /// <summary>
+    /// Classifies the raw HTML tags that suppress their inline contents from a search summary.
+    /// </summary>
+    /// <param name="tag">Raw HTML tag text reported by the Markdown parser.</param>
+    /// <param name="isClosing">Whether <paramref name="tag"/> closes a suppressed element.</param>
+    /// <param name="isSelfClosing">Whether <paramref name="tag"/> is self-closing.</param>
+    /// <returns><see langword="true"/> when the tag is a script or style element; otherwise, <see langword="false"/>.</returns>
+    internal static bool TryClassifySuppressedHtmlTag(string tag, out bool isClosing, out bool isSelfClosing)
     {
         var value = tag.Trim();
         isClosing = value.StartsWith("</", StringComparison.Ordinal);
@@ -271,7 +278,13 @@ internal static class DocsSearchSummaryPresentationProjector
         return false;
     }
 
-    private sealed class ProjectionBuilder
+    /// <summary>
+    /// Accumulates the bounded presentation tree while enforcing node and scalar budgets.
+    /// </summary>
+    /// <remarks>
+    /// Internal visibility permits direct verification of defensive budget guards that valid Markdown cannot reach.
+    /// </remarks>
+    internal sealed class ProjectionBuilder
     {
         private readonly List<MutableNode> _root = [];
         private int _nodeCount;
@@ -280,10 +293,19 @@ internal static class DocsSearchSummaryPresentationProjector
         private bool _pendingBlockSeparator;
         private bool _pendingInlineSeparator;
 
+        /// <summary>
+        /// Gets the mutable top-level nodes collected for the current projection.
+        /// </summary>
         internal List<MutableNode> Root => _root;
 
+        /// <summary>
+        /// Gets whether the builder has emitted its terminal truncation marker.
+        /// </summary>
         internal bool IsTruncated { get; private set; }
 
+        /// <summary>
+        /// Records a boundary between reader-visible Markdown blocks.
+        /// </summary>
         internal void BeginBlock()
         {
             if (_hasContent)
@@ -292,6 +314,13 @@ internal static class DocsSearchSummaryPresentationProjector
             }
         }
 
+        /// <summary>
+        /// Adds a formatted container when the depth and node budgets allow it.
+        /// </summary>
+        /// <param name="target">The parent node collection.</param>
+        /// <param name="kind">The safe presentation-node kind.</param>
+        /// <param name="depth">The candidate container depth.</param>
+        /// <returns>The added node, or <see langword="null"/> after budget truncation.</returns>
         internal MutableNode? AddContainer(List<MutableNode> target, string kind, int depth)
         {
             if (depth >= MaxDepth || !CanAddNode())
@@ -306,6 +335,13 @@ internal static class DocsSearchSummaryPresentationProjector
             return node;
         }
 
+        /// <summary>
+        /// Normalizes and appends a bounded text or code leaf.
+        /// </summary>
+        /// <param name="target">The parent node collection.</param>
+        /// <param name="kind">The safe presentation-node kind.</param>
+        /// <param name="value">The raw text to append.</param>
+        /// <param name="depth">The leaf depth.</param>
         internal void AppendText(List<MutableNode> target, string kind, string? value, int depth)
         {
             if (IsTruncated || depth > MaxDepth)
@@ -335,11 +371,18 @@ internal static class DocsSearchSummaryPresentationProjector
             AppendBounded(target, kind, text);
         }
 
+        /// <summary>
+        /// Reclaims the node count after a newly created empty container is discarded.
+        /// </summary>
         internal void RemoveNode()
         {
             _nodeCount--;
         }
 
+        /// <summary>
+        /// Materializes a safe immutable presentation tree.
+        /// </summary>
+        /// <returns>The immutable nodes, or <see langword="null"/> when no reader-visible text remains.</returns>
         internal IReadOnlyList<DocsSearchSummaryPresentationNode>? Build()
         {
             var nodes = _root
@@ -571,14 +614,30 @@ internal static class DocsSearchSummaryPresentationProjector
         }
     }
 
-    private sealed class MutableNode(string kind)
+    /// <summary>
+    /// Holds one mutable presentation node until projection construction completes.
+    /// </summary>
+    internal sealed class MutableNode(string kind)
     {
+        /// <summary>
+        /// Gets the safe presentation-node kind.
+        /// </summary>
         internal string Kind { get; } = kind;
 
+        /// <summary>
+        /// Gets the mutable text leaf content.
+        /// </summary>
         internal StringBuilder Text { get; } = new();
 
+        /// <summary>
+        /// Gets the child nodes for formatted containers.
+        /// </summary>
         internal List<MutableNode> Children { get; } = [];
 
+        /// <summary>
+        /// Converts this node and its valid descendants into the public immutable contract.
+        /// </summary>
+        /// <returns>The immutable node, or <see langword="null"/> when no visible content remains.</returns>
         internal DocsSearchSummaryPresentationNode? ToImmutable()
         {
             if (Children.Count > 0)
