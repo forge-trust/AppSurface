@@ -159,6 +159,45 @@ to the current CLI invocation; configure `AppSurfaceLocalSecretsOptions.LinuxSec
 `--secret-tool-path` and `--store-file` are mutually exclusive so `doctor` cannot report file-store readiness when you
 meant to verify the Linux platform store.
 
+#### `appsurface secrets transfer`
+
+Create a value-free plan for a reviewed source-to-sink job, then revalidate and apply that artifact:
+
+```bash
+appsurface secrets transfer plan --config ./secret-promotion.json --job staging-to-production --out ./staging-to-production.plan.json
+appsurface secrets transfer apply --config ./secret-promotion.json --plan ./staging-to-production.plan.json --apply --confirm staging-to-production
+```
+
+The JSON configuration declares named endpoints and exact jobs. `local` is the built-in LocalSecrets endpoint; Google
+endpoints select either `applicationDefault` or a validated `credentialFile`. A job always supplies the logical key and
+the exact remote source version or destination secret parent. This v1 contract supports LocalSecrets sources promoted to
+Google destinations and Google source versions promoted to Google destinations without exposing arbitrary `--from`/`--to`
+flags.
+
+`credentialFile` requires an absolute regular-file path with owner-only file permissions. Its parent directories must
+not use symbolic links and must not be writable by group or other users unless the directory uses the sticky bit.
+Windows credential files fail closed because the CLI cannot verify an equivalent restrictive ACL; use explicitly
+selected Application Default Credentials there.
+
+`plan` performs metadata-only probes and records a configuration digest, expiry, canonical resources, and destination
+preconditions. It never reads a secret payload. `apply --apply` requires the same configuration, rejects stale or changed
+plans before reading values, and requires `--confirm <job>` when either endpoint is production-labelled. When a production job
+declares `allowMutableLocalSource: true`, the same exact-job confirmation also acknowledges that the LocalSecrets value may
+have changed since planning. Text and JSON summaries
+may identify the requested plan or receipt artifact path. Summaries and plan/receipt JSON contain resources, actions,
+diagnostic codes, and configuration/plan identity digests, but never secret values, payload bytes, secret-value hashes,
+credentials, or raw provider exceptions.
+
+Google destination secret parents must already exist. Without `--replace`, a Google destination with no enabled versions
+receives its first enabled version, while a destination that already has an enabled version is skipped and independent
+ready rows continue. With `--replace`, Google adds another enabled version to the existing secret parent and leaves older
+versions under operator control.
+The workflow never creates secrets, changes IAM, disables/destroys versions, rotates values, provisions Terraform, or
+starts background synchronization. Writes are ordered but cross-secret atomicity is unavailable. During apply, the
+workflow persists a value-free journal before the first mutation and updates it atomically after each row; the final
+receipt is the durable summary used by `--resume` to skip rows already confirmed as written. A crash can therefore leave
+a partial receipt, and an uncertain Google write is recorded as `IndeterminateWrite` and is never retried automatically.
+
 ### `appsurface coverage run`
 
 Run instrumented .NET test projects and merge private Cobertura artifacts.

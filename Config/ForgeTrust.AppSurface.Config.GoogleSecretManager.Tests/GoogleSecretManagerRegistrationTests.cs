@@ -80,6 +80,52 @@ public sealed class GoogleSecretManagerRegistrationTests
     }
 
     [Fact]
+    public void UseAppSurfaceGoogleSecretTransferClient_Should_RegisterClientType()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IAppSurfaceGoogleSecretTransferClient>(new FakeSecretTransferClient());
+
+        var returned = services.UseAppSurfaceGoogleSecretTransferClient<FakeSecretTransferClient>();
+
+        using var provider = services.BuildServiceProvider();
+        Assert.Same(services, returned);
+        Assert.IsType<FakeSecretTransferClient>(provider.GetRequiredService<IAppSurfaceGoogleSecretTransferClient>());
+        Assert.Single(provider.GetServices<IAppSurfaceGoogleSecretTransferClient>());
+    }
+
+    [Fact]
+    public void UseAppSurfaceGoogleSecretTransferClient_Should_ReplacePriorClientInstance()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IAppSurfaceGoogleSecretTransferClient>(new FakeSecretTransferClient());
+        var replacement = new FakeSecretTransferClient();
+
+        var returned = services.UseAppSurfaceGoogleSecretTransferClient(replacement);
+
+        using var provider = services.BuildServiceProvider();
+        Assert.Same(services, returned);
+        Assert.Same(replacement, provider.GetRequiredService<IAppSurfaceGoogleSecretTransferClient>());
+        Assert.Single(provider.GetServices<IAppSurfaceGoogleSecretTransferClient>());
+    }
+
+    [Fact]
+    public void UseAppSurfaceGoogleSecretTransferClient_Should_RejectNullArguments()
+    {
+        var services = new ServiceCollection();
+
+        var nullServicesForType = Assert.Throws<ArgumentNullException>(() =>
+            ServiceCollectionGoogleSecretManagerExtensions.UseAppSurfaceGoogleSecretTransferClient<FakeSecretTransferClient>(null!));
+        var nullServicesForInstance = Assert.Throws<ArgumentNullException>(() =>
+            ServiceCollectionGoogleSecretManagerExtensions.UseAppSurfaceGoogleSecretTransferClient(null!, new FakeSecretTransferClient()));
+        var nullClient = Assert.Throws<ArgumentNullException>(() =>
+            services.UseAppSurfaceGoogleSecretTransferClient(null!));
+
+        Assert.Equal("services", nullServicesForType.ParamName);
+        Assert.Equal("services", nullServicesForInstance.ParamName);
+        Assert.Equal("client", nullClient.ParamName);
+    }
+
+    [Fact]
     public void RegisterDependentModules_Should_AddConfigModuleDependency()
     {
         var module = new AppSurfaceGoogleSecretManagerModule();
@@ -94,6 +140,21 @@ public sealed class GoogleSecretManagerRegistrationTests
     {
         public AppSurfaceGoogleSecretPayload AccessSecretVersion(string resourceName, TimeSpan timeout) =>
             new([], resourceName);
+    }
+
+    private sealed class FakeSecretTransferClient : IAppSurfaceGoogleSecretTransferClient
+    {
+        public AppSurfaceGoogleSecretProbeResult ProbeSecret(string secretResourceName, TimeSpan timeout) =>
+            throw new NotSupportedException();
+
+        public AppSurfaceGoogleSecretProbeResult ProbeSecretVersion(string versionResourceName, TimeSpan timeout) =>
+            throw new NotSupportedException();
+
+        public AppSurfaceGoogleSecretAccessResult AccessSecretVersion(string versionResourceName, TimeSpan timeout) =>
+            throw new NotSupportedException();
+
+        public AppSurfaceGoogleSecretWriteResult AddSecretVersion(string secretResourceName, string value, TimeSpan timeout) =>
+            throw new NotSupportedException();
     }
 
     private sealed class TestHostModule : IAppSurfaceHostModule
