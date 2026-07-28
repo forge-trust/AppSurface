@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Xml;
@@ -1027,6 +1028,10 @@ internal sealed class CoverageRunnerApplication
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            Trace.TraceWarning(
+                "Coverage staging-file cleanup failed; the primary outcome is unchanged. Cause: {0}: {1}",
+                ex.GetType().Name,
+                ex.Message);
         }
     }
 

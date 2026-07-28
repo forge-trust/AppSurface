@@ -250,6 +250,46 @@ public sealed class CoverageRunWatchdogTests
     }
 
     [Fact]
+    public async Task DisposeAsync_ShouldTraceBootstrapCleanupFailureWithoutWritingToConsole()
+    {
+        using var console = new FakeInMemoryConsole();
+        using var trace = new StringWriter();
+        using var listener = new TextWriterTraceListener(trace);
+        string? bootstrapDirectory = null;
+        Trace.Listeners.Add(listener);
+        try
+        {
+            var supervisor = new CoverageRunWatchdogSupervisor(
+                CoverageRunWatchdogMode.Off,
+                TimeSpan.Zero,
+                TimeSpan.FromSeconds(1),
+                console,
+                TimeProvider.System,
+                CancellationToken.None,
+                bootstrapDirectoryDelete: path =>
+                {
+                    bootstrapDirectory = path;
+                    throw new UnauthorizedAccessException("bootstrap cleanup denied");
+                });
+
+            await supervisor.DisposeAsync();
+            listener.Flush();
+
+            Assert.Contains("Coverage watchdog bootstrap directory cleanup failed", trace.ToString(), StringComparison.Ordinal);
+            Assert.Contains("UnauthorizedAccessException: bootstrap cleanup denied", trace.ToString(), StringComparison.Ordinal);
+            Assert.Empty(console.ReadErrorString());
+        }
+        finally
+        {
+            Trace.Listeners.Remove(listener);
+            if (bootstrapDirectory is not null && Directory.Exists(bootstrapDirectory))
+            {
+                Directory.Delete(bootstrapDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task FailMode_ShouldAdvertiseArtifactOnlyAfterAtomicCommit()
     {
         using var output = TestDirectory.Create();
@@ -861,6 +901,48 @@ public sealed class CoverageRunWatchdogTests
         Assert.Empty(Directory.EnumerateFiles(output.Path, ".coverage-watchdog.json.*.tmp"));
     }
 
+    [Fact]
+    public async Task WarnMode_ShouldTraceStagingCleanupFailureWithoutDuplicateConsoleWarning()
+    {
+        using var output = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+        using var trace = new StringWriter();
+        using var listener = new TextWriterTraceListener(trace);
+        var destination = Path.Join(output.Path, "coverage-watchdog.json");
+        var cleanupAttempted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Trace.Listeners.Add(listener);
+        try
+        {
+            await using var supervisor = new CoverageRunWatchdogSupervisor(
+                CoverageRunWatchdogMode.Warn,
+                TimeSpan.Zero,
+                TimeSpan.FromMilliseconds(10),
+                console,
+                TimeProvider.System,
+                CancellationToken.None,
+                artifactStaged: () => Directory.CreateDirectory(destination),
+                stagedArtifactDelete: _ =>
+                {
+                    cleanupAttempted.TrySetResult();
+                    throw new UnauthorizedAccessException("staging cleanup denied");
+                });
+            supervisor.BindOutputDirectory(output.Path);
+            using var operation = supervisor.Start("project");
+
+            await cleanupAttempted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await WaitForErrorOccurrencesAsync(console, "ASCOV122", 1);
+            listener.Flush();
+
+            Assert.Contains("Coverage watchdog staging artifact cleanup failed", trace.ToString(), StringComparison.Ordinal);
+            Assert.Contains("UnauthorizedAccessException: staging cleanup denied", trace.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain("staged-artifact-delete-failed", console.ReadErrorString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Trace.Listeners.Remove(listener);
+        }
+    }
+
     private static async Task WaitForFileAsync(string path)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
@@ -898,6 +980,7 @@ public sealed class CoverageRunWatchdogTests
             }
             catch (Exception ex) when (ex is FileNotFoundException or IOException or JsonException)
             {
+                // The artifact may be concurrently replaced; retry until it is complete or the caller's deadline expires.
             }
 
             await Task.Delay(10, timeout.Token);

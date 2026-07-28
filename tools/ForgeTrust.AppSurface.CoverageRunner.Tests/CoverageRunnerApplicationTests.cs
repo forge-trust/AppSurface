@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
@@ -1500,24 +1501,38 @@ public sealed class CoverageRunnerApplicationTests
         var destination = Path.Join(outputDirectory, "summary.txt");
         File.WriteAllText(destination, "previous");
         using var cancellation = new CancellationTokenSource();
+        using var trace = new StringWriter();
+        using var traceListener = new TextWriterTraceListener(trace);
+        Trace.Listeners.Add(traceListener);
 
         try
         {
-            await Assert.ThrowsAsync<OperationCanceledException>(() => CoverageRunnerApplication.WriteCanonicalTextAsync(
-                destination,
-                "replacement",
-                cancellation.Token,
-                () =>
-                {
-                    File.SetUnixFileMode(outputDirectory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
-                    cancellation.Cancel();
-                }));
+            try
+            {
+                await Assert.ThrowsAsync<OperationCanceledException>(() => CoverageRunnerApplication.WriteCanonicalTextAsync(
+                    destination,
+                    "replacement",
+                    cancellation.Token,
+                    () =>
+                    {
+                        File.SetUnixFileMode(outputDirectory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+                        cancellation.Cancel();
+                    }));
+            }
+            finally
+            {
+                File.SetUnixFileMode(
+                    outputDirectory,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
+            traceListener.Flush();
+            Assert.Contains("Coverage staging-file cleanup failed", trace.ToString(), StringComparison.Ordinal);
+            Assert.Contains("UnauthorizedAccessException", trace.ToString(), StringComparison.Ordinal);
         }
         finally
         {
-            File.SetUnixFileMode(
-                outputDirectory,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            Trace.Listeners.Remove(traceListener);
         }
 
         Assert.Equal("previous", File.ReadAllText(destination));

@@ -466,6 +466,8 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     private readonly Action? _artifactStaged;
     private readonly Action? _artifactIncidentQueued;
     private readonly Action? _artifactResourcesDisposed;
+    private readonly Action<string> _bootstrapDirectoryDelete;
+    private readonly Action<string> _stagedArtifactDelete;
     private readonly List<OperationState> _operations = [];
     private readonly HashSet<CoverageRunProcessLease> _processLeases = [];
     private readonly TaskCompletionSource _terminalCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -495,6 +497,8 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     /// <param name="artifactWriteTimeout">Optional bound for waiting on one incident write.</param>
     /// <param name="artifactIncidentQueued">Optional test seam invoked when a newer incident is queued behind an active write.</param>
     /// <param name="artifactResourcesDisposed">Optional test seam invoked after deferred artifact resources are released.</param>
+    /// <param name="bootstrapDirectoryDelete">Optional test seam used to delete the private bootstrap artifact directory during disposal.</param>
+    /// <param name="stagedArtifactDelete">Optional test seam used to delete a failed artifact staging file.</param>
     public CoverageRunWatchdogSupervisor(
         CoverageRunWatchdogMode mode,
         TimeSpan heartbeatInterval,
@@ -506,7 +510,9 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         TimeSpan? artifactCommitTimeout = null,
         TimeSpan? artifactWriteTimeout = null,
         Action? artifactIncidentQueued = null,
-        Action? artifactResourcesDisposed = null)
+        Action? artifactResourcesDisposed = null,
+        Action<string>? bootstrapDirectoryDelete = null,
+        Action<string>? stagedArtifactDelete = null)
     {
         _mode = mode;
         _heartbeatInterval = heartbeatInterval;
@@ -518,6 +524,8 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         _artifactWriteTimeout = artifactWriteTimeout ?? TimeSpan.FromSeconds(2);
         _artifactIncidentQueued = artifactIncidentQueued;
         _artifactResourcesDisposed = artifactResourcesDisposed;
+        _bootstrapDirectoryDelete = bootstrapDirectoryDelete ?? (static path => Directory.Delete(path, recursive: true));
+        _stagedArtifactDelete = stagedArtifactDelete ?? File.Delete;
         _runStarted = timeProvider.GetTimestamp();
         _bootstrapDirectory = Directory.CreateTempSubdirectory("appsurface-coverage-watchdog-").FullName;
         _linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(externalCancellation, _watchdogCancellation.Token);
@@ -1180,14 +1188,14 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
             {
                 try
                 {
-                    File.Delete(staged);
+                    _stagedArtifactDelete(staged);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    await _console.WriteCriticalErrorAsync(
-                        FormattableString.Invariant(
-                            $"ASCOV122 Coverage watchdog cleanup warning. Cause: staged-artifact-delete-failed. Artifact: {JsonSerializer.Serialize(DisplayArtifactPath(staged))}. Details: {ex.GetType().Name}: {ex.Message}. Fix: Ensure --output directory allows delete permissions. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog"),
-                        CancellationToken.None);
+                    Trace.TraceWarning(
+                        "Coverage watchdog staging artifact cleanup failed; the primary incident remains reported. Cause: {0}: {1}",
+                        ex.GetType().Name,
+                        ex.Message);
                 }
             }
 
@@ -1349,11 +1357,15 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         {
             if (Directory.Exists(_bootstrapDirectory))
             {
-                Directory.Delete(_bootstrapDirectory, recursive: true);
+                _bootstrapDirectoryDelete(_bootstrapDirectory);
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            Trace.TraceWarning(
+                "Coverage watchdog bootstrap directory cleanup failed. Cause: {0}: {1}",
+                ex.GetType().Name,
+                ex.Message);
         }
 
         _artifactResourcesDisposed?.Invoke();
