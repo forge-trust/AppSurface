@@ -122,7 +122,7 @@ public sealed class GoogleSecretManagerConfigProviderTests
             manager.GetValue<string>("Production", "Stripe:ApiKey"));
 
         Assert.Equal("google-secret-manager-access-denied", exception.Diagnostic.Code);
-        Assert.DoesNotContain("raw-secret", exception.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("raw-secret", exception.ToString());
         Assert.False(fileProvider.WasCalled);
     }
 
@@ -178,7 +178,7 @@ public sealed class GoogleSecretManagerConfigProviderTests
         Assert.Equal(GoogleSecretManagerResultStatus.ConversionFailed, resolution.Status);
         Assert.True(provider.TryGetTerminalDiagnostic("Production", "Port", out var diagnostic));
         Assert.Equal("google-secret-manager-conversion-failed", diagnostic.Code);
-        Assert.DoesNotContain("not-the-port-secret", diagnostic.ToDisplayString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("not-the-port-secret", diagnostic.ToDisplayString());
     }
 
     [Fact]
@@ -224,7 +224,7 @@ public sealed class GoogleSecretManagerConfigProviderTests
             manager.GetValue<string>("Production", "Stripe:ApiKey"));
 
         Assert.Equal("google-secret-manager-unavailable", exception.Diagnostic.Code);
-        Assert.DoesNotContain("raw-secret", exception.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("raw-secret", exception.ToString());
         Assert.False(fileProvider.WasCalled);
     }
 
@@ -415,7 +415,7 @@ public sealed class GoogleSecretManagerConfigProviderTests
 
         Assert.Equal(expectedStatus, resolution.Status);
         Assert.Equal(expectedCode, resolution.Diagnostic?.Code);
-        Assert.DoesNotContain("raw-secret", resolution.Diagnostic?.ToDisplayString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("raw-secret", resolution.Diagnostic?.ToDisplayString());
     }
 
     [Fact]
@@ -434,7 +434,7 @@ public sealed class GoogleSecretManagerConfigProviderTests
         Assert.Equal(GoogleSecretManagerResultStatus.Unavailable, resolution.Status);
         Assert.Equal("google-secret-manager-unavailable", resolution.Diagnostic?.Code);
         Assert.True(resolution.Diagnostic?.Retryable);
-        Assert.DoesNotContain("raw-secret", resolution.Diagnostic?.ToDisplayString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("raw-secret", resolution.Diagnostic?.ToDisplayString());
     }
 
     [Fact]
@@ -612,7 +612,7 @@ public sealed class GoogleSecretManagerConfigProviderTests
         Assert.Equal(ConfigAuditEntryState.Invalid, resolution.State);
         var diagnostic = Assert.Single(resolution.Diagnostics);
         Assert.Equal("google-secret-manager-secret-missing", diagnostic.Code);
-        Assert.DoesNotContain("raw-secret", diagnostic.Message, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("raw-secret", diagnostic.Message);
     }
 
     private static GoogleSecretManagerConfigProvider CreateProvider(

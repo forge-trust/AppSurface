@@ -3760,12 +3760,13 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 "dotnet tool install",
                 "appsurface --version",
                 "appsurface coverage run",
+                "appsurface coverage run msbuild",
                 "appsurface coverage merge",
                 "appsurface coverage gate",
                 "appsurface coverage gate"
             ],
             commandRunner.Requests
-                .Where(request => request.OperationName is "dotnet new tool-manifest" or "dotnet tool install" or "appsurface --version" or "appsurface coverage run" or "appsurface coverage merge" or "appsurface coverage gate")
+                .Where(request => request.OperationName is "dotnet new tool-manifest" or "dotnet tool install" or "appsurface --version" or "appsurface coverage run" or "appsurface coverage run msbuild" or "appsurface coverage merge" or "appsurface coverage gate")
                 .Select(request => request.OperationName)
                 .ToArray());
         var coverageRunRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface coverage run");
@@ -4079,14 +4080,18 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Theory]
     [InlineData("dotnet new classlib", null)]
     [InlineData("dotnet new xunit", null)]
+    [InlineData("dotnet new xunit msbuild", null)]
     [InlineData("dotnet new xunit sentinel", null)]
     [InlineData("dotnet sln add", null)]
     [InlineData("dotnet add reference", null)]
+    [InlineData("dotnet add reference msbuild", null)]
     [InlineData("dotnet add package", null)]
+    [InlineData("dotnet add msbuild package", null)]
     [InlineData("dotnet new tool-manifest", null)]
     [InlineData("dotnet tool install", null)]
     [InlineData("appsurface --version", null)]
     [InlineData("appsurface coverage run", null)]
+    [InlineData("appsurface coverage run msbuild", null)]
     [InlineData("appsurface coverage merge", null)]
     [InlineData("appsurface coverage gate", "passing")]
     public async Task CoverageCliConsumerProofWorkflow_StopsWhenRequiredCommandFails(
@@ -4649,7 +4654,11 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
         var reportPath = CombineSafeChildPath(artifactDirectory, "package-validation-report.md");
         var artifactManifestPath = CombineSafeChildPath(artifactDirectory, "package-artifact-manifest.json");
+        var coverageProofWorkDirectory = CombineSafeChildPath(artifactDirectory, "coverage-proof");
         Directory.CreateDirectory(artifactDirectory);
+        Directory.CreateDirectory(CombineSafeChildPath(coverageProofWorkDirectory, "consumer"));
+        var staleCoverageProofProject = CombineSafeChildPath(coverageProofWorkDirectory, "consumer/Stale.csproj");
+        await File.WriteAllTextAsync(staleCoverageProofProject, "<Project />", Encoding.UTF8);
         var stalePackage = CombineSafeChildPath(artifactDirectory, "stale.nupkg");
         var staleSymbolPackage = CombineSafeChildPath(artifactDirectory, "stale.snupkg");
         await File.WriteAllTextAsync(stalePackage, "old package", Encoding.UTF8);
@@ -4675,7 +4684,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 reportPath,
                 PackageVersion,
                 artifactManifestPath,
-                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                coverageProofWorkDirectory,
                 CombineSafeChildPath(artifactDirectory, "coverage-proof.md"),
                 "https://api.nuget.org/v3/index.json"));
 
@@ -4692,6 +4701,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains($"/p:PackageVersion={PackageVersion}", packCommand.Arguments);
         Assert.Contains("/p:ContinuousIntegrationBuild=true", packCommand.Arguments);
         Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", packCommand.Arguments);
+        Assert.Equal("true", packCommand.Environment!["CI"]);
         var buildCommand = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet build");
         Assert.Contains($"/p:Version={PackageVersion}", buildCommand.Arguments);
         Assert.Contains($"/p:PackageVersion={PackageVersion}", buildCommand.Arguments);
@@ -4699,6 +4709,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", buildCommand.Arguments);
         Assert.False(File.Exists(stalePackage));
         Assert.False(File.Exists(staleSymbolPackage));
+        Assert.False(File.Exists(staleCoverageProofProject));
         Assert.True(File.Exists(reportPath), $"Expected report at {reportPath}.");
         Assert.Contains("Coverage CLI consumer proof", await File.ReadAllTextAsync(reportPath), StringComparison.Ordinal);
         Assert.True(File.Exists(artifactManifestPath), $"Expected artifact manifest at {artifactManifestPath}.");
@@ -6723,6 +6734,17 @@ public sealed class PackageArtifactValidationTests : IDisposable
                     string.Empty));
             }
 
+            if (request.OperationName == "appsurface coverage run msbuild")
+            {
+                var outputDirectory = ReadOption(request.Arguments, "--output");
+                if (_createCoverageRunArtifacts)
+                {
+                    CreateCoverageRunArtifacts(outputDirectory, createExcludedProjectArtifacts: false, projectName: "Smoke.Msbuild.Tests");
+                }
+
+                return Task.FromResult(new ExternalCommandResult(0, "coverage run msbuild passed", string.Empty));
+            }
+
             if (request.OperationName == "appsurface coverage merge")
             {
                 var outputDirectory = ReadOption(request.Arguments, "--output");
@@ -6766,9 +6788,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
             return arguments[index + 1];
         }
 
-        private static void CreateCoverageRunArtifacts(string outputDirectory, bool createExcludedProjectArtifacts)
+        private static void CreateCoverageRunArtifacts(string outputDirectory, bool createExcludedProjectArtifacts, string projectName = "Smoke.Tests")
         {
-            var projectDirectory = CombineSafeChildPath(outputDirectory, "projects/Smoke.Tests-123");
+            var projectDirectory = CombineSafeChildPath(outputDirectory, $"projects/{projectName}-123");
             Directory.CreateDirectory(projectDirectory);
             if (createExcludedProjectArtifacts)
             {

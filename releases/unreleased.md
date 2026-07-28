@@ -9,6 +9,10 @@ This is the living release note for the next coordinated AppSurface version afte
   `PostgreSqlDurableFlowClient` supplies idempotent start/event/cancel/release operations; and an internal fenced
   processor proves event/timer races plus atomic child-Work projection through a timed real-PostgreSQL verifier. It
   still starts no hosted worker, applies no automatic DDL, and remains excluded from publication until later slices.
+- `appsurface secrets transfer plan|apply` now plans and applies declared LocalSecrets and Google Secret Manager
+  promotion jobs against existing Google secrets only. Plans bind configuration digest, expiry, and destination
+  preconditions; `--apply` is required for mutation, production jobs require explicit confirmation, and all text/JSON
+  diagnostics stay value-safe.
 - [`ForgeTrust.AppSurface.Aspire.Testing`](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md) now closes Aspire 13.4.4's partial-provider cleanup gap for profile tests. The builder captures the verified Aspire root provider immediately before host resolution, disposes it immediately when a non-process-fatal host construction fails, retains it for best-effort builder disposal after a process-fatal failure, preserves the original non-process-fatal build exception when cleanup also fails, and transfers ownership unchanged to the returned application after a successful build. Aspire dependencies now publish 13.4.4 as a minimum instead of an exact constraint, so consumers can select later versions without `NU1608`; an unfamiliar host-registration shape emits a trace warning and continues without the additional cleanup.
 - `ForgeTrust.RazorWire` now owns a deterministic Turbo 8.0.23 default: `<rw:scripts />` emits an exact package-carried, same-origin runtime before RazorWire, while explicit custom and host-managed policies cover app-owned same-origin files or fully host-owned URL, integrity, CSP, and load-order requirements. The upgrade from 8.0.12 is API-neutral and carries an explicit upstream-risk review plus focused Drive, Frame, Stream, form, island, and Behavior Kit compatibility evidence.
 - `ForgeTrust.RazorWire` Form Interactions now keeps duplicated mark-for-removal fields model-bindable by restoring the app-authored inactive value, defaulting to `false`, while identity and concurrency fields still clear. Combined duplicate, add, mark-delete, and submit workflows no longer fail with an empty Boolean value.
@@ -17,6 +21,11 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
+- [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection) now defaults to the
+  VSTest `coverlet.collector` driver, validates each selected project's effective test runner and direct package
+  references before cleanup or execution, and normalizes one validated Cobertura attachment per invocation into the
+  stable artifact path. Native Microsoft Testing Platform projects fail preflight because they require `coverlet.MTP`;
+  `--coverage-driver msbuild` remains available only as an explicit compatibility path and emits a reliability warning.
 - [`appsurface coverage gate`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate) now applies a configurable `--tolerance` grace margin to overall and patch thresholds. The default `0.5` percentage point tolerance reduces rounding-related flakiness, `0` preserves strict enforcement, effective thresholds never fall below `0`, invalid values fail before evaluation, and console plus Markdown and JSON reports show the effective thresholds they enforce while retaining configured thresholds for automation.
 - `ForgeTrust.AppSurface.Web.OpenApi` now uses `Microsoft.AspNetCore.OpenApi` 10.0.9 and directly requires `Microsoft.OpenApi` in the range `[2.7.5, 3.0.0)`, keeping .NET 10 consumers on the supported 2.x line above the range affected by [GHSA-v5pm-xwqc-g5wc](https://github.com/advisories/GHSA-v5pm-xwqc-g5wc) while preserving existing OpenAPI and Scalar APIs and endpoint behavior.
 - [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) can now start long-running non-exclusive test projects earlier with `--schedule longest-first`. It reuses prior `timings.json` data when available, preserves integration and Playwright projects as exclusive barriers, supports explicit priority projects, fails invalid explicit timing or priority input before tests run, warns and preserves input order for unmeasured projects when inferred prior timings are missing or unusable, and keeps artifact names stable.
@@ -56,5 +65,8 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## Migration watch
 
+- Existing `appsurface coverage run` consumers that reference `coverlet.msbuild` must replace it with
+  `coverlet.collector`, or explicitly pass `--coverage-driver msbuild` while completing the migration. The command never
+  silently falls back between drivers.
 - Existing hosts that consume `/health` or `/ready` must set `WebOptions.Health.Enabled = true` when upgrading.
 - Hosts using `HostManaged` with a Turbo version other than 8.0.23 own compatibility testing for that version. Turbo 8.0.23 removes upstream-deprecated `Turbo.clearCache()`, `data-turbo-cache="false"`, and legacy form polyfills; these were never AppSurface-defined APIs.

@@ -18,7 +18,7 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 /// </remarks>
 [ExcludeFromCodeCoverage(
     Justification = "Real OS credential stores depend on desktop session state, prompts, and native services; deterministic tests cover fake stores and status mapping.")]
-public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
+public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore
 {
     private static readonly string[] LinuxSecretToolTrustedCandidates = ["/usr/bin/secret-tool", "/bin/secret-tool"];
 
@@ -61,6 +61,24 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
     /// <inheritdoc />
     public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix) =>
         _inner.List(applicationName, environment, keyPrefix);
+
+    /// <inheritdoc />
+    public AppSurfaceLocalSecretResult Probe(AppSurfaceLocalSecretIdentity identity)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+
+        return _inner is IAppSurfaceLocalSecretMetadataStore metadataStore
+            ? metadataStore.Probe(identity)
+            : AppSurfaceLocalSecretResult.NotFound(
+                LocalSecretResultStatus.ProviderFailed,
+                new AppSurfaceLocalSecretDiagnostic(
+                    "local-secret-metadata-unsupported",
+                    "Local secret metadata probe is unavailable.",
+                    "The configured LocalSecrets store does not expose metadata-only probes.",
+                    "Use an AppSurface LocalSecrets store that implements metadata probes before running secret transfer dry-runs.",
+                    "local-secrets-without-a-remote-vault"),
+                Name);
+    }
 
     /// <inheritdoc />
     public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) =>
@@ -263,7 +281,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 new AppSurfaceLocalSecretDiagnostic(
                     "local-secret-store-command-unsupported",
                     "Linux Secret Service command override is unsupported on this platform.",
-                    $"`secret-tool` overrides are Linux-only, but `{overridePath}` was configured for a non-Linux platform.",
+                    "`secret-tool` overrides are Linux-only, but one was configured on a non-Linux platform.",
                     "Remove `--secret-tool-path` or `AppSurfaceLocalSecretsOptions.LinuxSecretToolPath` on macOS/Windows and use the native platform store.",
                     "local-secrets-platform-compatibility"));
 
@@ -271,44 +289,43 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         {
             if (string.IsNullOrWhiteSpace(overridePath))
             {
-                return InvalidOverride(overridePath, "The configured `secret-tool` override path is empty.");
+                return InvalidOverride("The configured `secret-tool` override path is empty.");
             }
 
             if (!Path.IsPathFullyQualified(overridePath))
             {
-                return InvalidOverride(overridePath, "The configured `secret-tool` override path is not absolute.");
+                return InvalidOverride("The configured `secret-tool` override path is not absolute.");
             }
 
             var state = _inspectPath(overridePath);
             return state switch
             {
                 LinuxSecretToolPathState.ExecutableFile => LinuxSecretToolResolution.Found(overridePath),
-                LinuxSecretToolPathState.Directory => InvalidOverride(overridePath, "The configured `secret-tool` override path is a directory."),
-                LinuxSecretToolPathState.NotExecutableFile => InvalidOverride(overridePath, "The configured `secret-tool` override path exists but is not executable."),
-                _ => InvalidOverride(overridePath, "The configured `secret-tool` override path does not exist.")
+                LinuxSecretToolPathState.Directory => InvalidOverride("The configured `secret-tool` override path is a directory."),
+                LinuxSecretToolPathState.NotExecutableFile => InvalidOverride("The configured `secret-tool` override path exists but is not executable."),
+                _ => InvalidOverride("The configured `secret-tool` override path does not exist.")
             };
         }
 
-        private static LinuxSecretToolResolution InvalidOverride(string overridePath, string cause) =>
+        private static LinuxSecretToolResolution InvalidOverride(string cause) =>
             LinuxSecretToolResolution.Failed(
                 LocalSecretResultStatus.Unavailable,
                 new AppSurfaceLocalSecretDiagnostic(
                     "local-secret-store-command-invalid",
                     "Linux Secret Service command override is invalid.",
                     cause,
-                    $"Verify the binary with `test -x /absolute/path/to/secret-tool`, then pass `--secret-tool-path /absolute/path/to/secret-tool`. Current value: `{overridePath}`.",
+                    "Verify the binary with `test -x /absolute/path/to/secret-tool`, then pass `--secret-tool-path /absolute/path/to/secret-tool`.",
                     "local-secrets-platform-compatibility"));
 
         private string BuildNoTrustedCandidateCause()
         {
-            var checkedPaths = string.Join(", ", _trustedCandidates);
             var ignoredPathCandidate = FindIgnoredPathCandidate();
             if (ignoredPathCandidate == null)
             {
-                return $"Checked trusted candidates: {checkedPaths}. AppSurface does not search PATH for `secret-tool`.";
+                return "No executable was found at the trusted `secret-tool` locations. AppSurface does not search PATH for `secret-tool`.";
             }
 
-            return $"Checked trusted candidates: {checkedPaths}. Found `{ignoredPathCandidate}` on PATH, but AppSurface ignores PATH for `secret-tool` to avoid executing an untrusted command.";
+            return "No executable was found at the trusted `secret-tool` locations. A PATH candidate was found, but AppSurface ignores PATH for `secret-tool` to avoid executing an untrusted command.";
         }
 
         private string? FindIgnoredPathCandidate()
@@ -436,7 +453,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
     private sealed class DiagnosticLocalSecretStore(
         LocalSecretResultStatus status,
-        AppSurfaceLocalSecretDiagnostic diagnostic) : IAppSurfaceLocalSecretStore
+        AppSurfaceLocalSecretDiagnostic diagnostic) : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore
     {
         public string Name => nameof(DiagnosticLocalSecretStore);
 
@@ -448,6 +465,8 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix) =>
             AppSurfaceLocalSecretListResult.Failed(status, diagnostic, Name);
+
+        public AppSurfaceLocalSecretResult Probe(AppSurfaceLocalSecretIdentity identity) => Unsupported();
 
         public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) => Unsupported();
 
@@ -967,7 +986,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         }
     }
 
-    internal abstract class IndexedLocalSecretStore : IAppSurfaceLocalSecretStore
+    internal abstract class IndexedLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore
     {
         protected const string IndexKey = "__appsurface_index__";
 
@@ -982,10 +1001,32 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 return WriteStoredValue(identity, value);
             }
 
-            var write = WriteStoredValue(identity, value);
-            return write.Status == LocalSecretResultStatus.Found
-                ? AddToIndex(identity)
-                : write;
+            var index = ReadIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix);
+            if (index.Status != LocalSecretResultStatus.Found)
+            {
+                return AppSurfaceLocalSecretResult.NotFound(index.Status, index.Diagnostic!, Name);
+            }
+
+            var keys = index.Keys.ToHashSet(StringComparer.Ordinal);
+            var added = keys.Add(identity.Key);
+            if (added)
+            {
+                var indexWrite = WriteIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix, keys);
+                if (indexWrite.Status != LocalSecretResultStatus.Found)
+                {
+                    return indexWrite;
+                }
+            }
+
+            var valueWrite = WriteStoredValue(identity, value);
+            if (valueWrite.Status == LocalSecretResultStatus.Found || !added)
+            {
+                return valueWrite;
+            }
+
+            keys.Remove(identity.Key);
+            var rollback = WriteIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix, keys);
+            return rollback.Status == LocalSecretResultStatus.Found ? valueWrite : rollback;
         }
 
         public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity)
@@ -1072,6 +1113,21 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             return AppSurfaceLocalSecretListResult.Found(liveKeys, Name);
         }
 
+        public AppSurfaceLocalSecretResult Probe(AppSurfaceLocalSecretIdentity identity)
+        {
+            ArgumentNullException.ThrowIfNull(identity);
+
+            var index = ReadIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix);
+            if (index.Status != LocalSecretResultStatus.Found)
+            {
+                return AppSurfaceLocalSecretResult.NotFound(index.Status, index.Diagnostic!, Name);
+            }
+
+            return index.Keys.Contains(identity.Key, StringComparer.Ordinal)
+                ? AppSurfaceLocalSecretResult.Found(string.Empty, Name)
+                : AppSurfaceLocalSecretResult.Missing(Name);
+        }
+
         public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) =>
             DoctorStore(applicationName, environment, keyPrefix);
 
@@ -1128,19 +1184,6 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         private static bool IsIndexIdentity(AppSurfaceLocalSecretIdentity identity) =>
             string.Equals(identity.Key, IndexKey, StringComparison.Ordinal);
-
-        private AppSurfaceLocalSecretResult AddToIndex(AppSurfaceLocalSecretIdentity identity)
-        {
-            var index = ReadIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix);
-            if (index.Status != LocalSecretResultStatus.Found)
-            {
-                return AppSurfaceLocalSecretResult.NotFound(index.Status, index.Diagnostic!, Name);
-            }
-
-            var keys = index.Keys.ToHashSet(StringComparer.Ordinal);
-            keys.Add(identity.Key);
-            return WriteIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix, keys);
-        }
 
         private AppSurfaceLocalSecretResult WriteIndex(
             string applicationName,
