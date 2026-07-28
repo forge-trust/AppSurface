@@ -97,17 +97,17 @@ Create `PostgreSqlDurableWorkOptions` from the non-empty StoreId and explicitly 
 
 <!-- appsurface:snippet id="durable-postgresql-options-reuse" file="Durable/packed-consumers/PostgreSqlProvider/PostgreSqlReadmeProof.cs" marker="durable-postgresql-options-reuse" lang="csharp" -->
 ```csharp
-    internal static PostgreSqlDurableWorkOptions CreateSharedOptions(
-        Guid runtimeEpoch,
-        Guid expectedStoreId)
-    {
-        // PostgreSqlDurableWorkOptions is reused directly across Work and Flow operations to guarantee
-        // consistent ExpectedStoreId, active RuntimeEpoch, notification modes, and schema compatibility validation.
-        return new PostgreSqlDurableWorkOptions(
-            runtimeEpoch,
-            expectedStoreId,
-            PostgreSqlDurableWakeNotificationMode.Disabled);
-    }
+internal static PostgreSqlDurableWorkOptions CreateSharedOptions(
+    Guid runtimeEpoch,
+    Guid expectedStoreId)
+{
+    // PostgreSqlDurableWorkOptions is reused directly across Work and Flow operations to guarantee
+    // consistent ExpectedStoreId, active RuntimeEpoch, notification modes, and schema compatibility validation.
+    return new PostgreSqlDurableWorkOptions(
+        runtimeEpoch,
+        expectedStoreId,
+        PostgreSqlDurableWakeNotificationMode.Disabled);
+}
 ```
 <!-- /appsurface:snippet -->
 
@@ -148,6 +148,20 @@ internal static class PostgreSqlReadmeProof
         await transaction.CommitAsync(cancellationToken);
         return accepted;
     }
+
+    // docs:snippet durable-postgresql-options-reuse:start
+    internal static PostgreSqlDurableWorkOptions CreateSharedOptions(
+        Guid runtimeEpoch,
+        Guid expectedStoreId)
+    {
+        // PostgreSqlDurableWorkOptions is reused directly across Work and Flow operations to guarantee
+        // consistent ExpectedStoreId, active RuntimeEpoch, notification modes, and schema compatibility validation.
+        return new PostgreSqlDurableWorkOptions(
+            runtimeEpoch,
+            expectedStoreId,
+            PostgreSqlDurableWakeNotificationMode.Disabled);
+    }
+    // docs:snippet durable-postgresql-options-reuse:end
 }
 ```
 <!-- /appsurface:snippet -->
