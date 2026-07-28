@@ -706,6 +706,21 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             PostgreSqlFlowProcessingOutcome.RaceLost,
             (await processor.TryProcessAsync(staleTimer, "timer-row-missing-resolve")).Outcome);
         Assert.Equal(DurableFlowState.WaitingForEvent, timerWait.State);
+
+        var missingParentTimer = new PostgreSqlFlowDispatchCandidate(
+            Guid.NewGuid(),
+            scope,
+            PostgreSqlFlowDispatchKind.Timer,
+            new DurableFlowInstanceId("timer-parent-missing"),
+            Guid.NewGuid(),
+            DateTimeOffset.UtcNow,
+            ExpectedRevision: 1,
+            Priority: 0);
+        var missingParentResult = await processor.TryProcessAsync(
+            missingParentTimer,
+            "timer-parent-missing-resolve");
+        Assert.Equal(PostgreSqlFlowProcessingOutcome.RaceLost, missingParentResult.Outcome);
+        Assert.Null(missingParentResult.State);
     }
 
     [Fact]
@@ -1462,6 +1477,76 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             releaseActivity.Revision));
         Assert.Equal(DurableFlowCommandOutcome.Accepted, releasedActivity.Value!.Outcome);
         Assert.Equal(DurableFlowState.WaitingForActivity, releasedActivity.Value.State);
+
+        async Task<(DurableFlowInstanceId Instance, PostgreSqlEffectPermit Permit)>
+            StartPermittedActivityAsync(string scenario, byte context)
+        {
+            var scenarioInstance = new DurableFlowInstanceId($"activity-projection-{scenario}");
+            Assert.True((await client.StartAsync(new DurableFlowStartRequest(
+                scope,
+                new DurableCommandId($"activity-projection-{scenario}-start"),
+                $"activity-projection-{scenario}-key",
+                scenarioInstance,
+                registration.FlowId,
+                registration.FlowVersion,
+                contextCodec.EncodeObject(new[] { context })))).IsSuccess);
+            var scenarioActivity = await flowProcessor.TryProcessAsync(
+                Assert.Single(
+                    await flowProcessor.DiscoverAsync(),
+                    candidate => candidate.InstanceId == scenarioInstance),
+                $"flow-activity-projection-{scenario}-worker");
+            var scenarioCandidate = Assert.Single(
+                await workStore.DiscoverAsync(10),
+                candidate => candidate.WorkId == scenarioActivity.ChildWorkId);
+            var scenarioClaim = await workStore.TryClaimAsync(
+                scenarioCandidate,
+                $"work-activity-projection-{scenario}-worker");
+            var scenarioPermit = await workStore.TryAcquireEffectPermitAsync(scenarioClaim!);
+            return (scenarioInstance, Assert.IsType<PostgreSqlEffectPermit>(scenarioPermit));
+        }
+
+        async Task DeleteParentDispatchAsync(DurableFlowInstanceId scenarioInstance)
+        {
+            await using var deleteDispatch = database.DataSource.CreateCommand(
+                """
+                DELETE FROM appsurface_durable.flow_dispatch
+                WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND kind = 'flow';
+                """);
+            deleteDispatch.Parameters.AddWithValue("scope_id", scope.Value);
+            deleteDispatch.Parameters.AddWithValue("flow_instance_id", scenarioInstance.Value);
+            Assert.Equal(1, await deleteDispatch.ExecuteNonQueryAsync());
+        }
+
+        var (successProjectionInstance, successProjectionPermit) =
+            await StartPermittedActivityAsync("success-dispatch-missing", 10);
+        await DeleteParentDispatchAsync(successProjectionInstance);
+        var successProjectionException = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await workStore.RecordCompletionAsync(
+                successProjectionPermit.Claim,
+                new PostgreSqlWorkCompletion(
+                    PostgreSqlWorkCompletionKind.Succeeded,
+                    "activity-projection-success",
+                    "{}",
+                    resultCodec.EncodeObject(new byte[] { 10 }))));
+        Assert.Contains("Successful child Work did not project", successProjectionException.Message, StringComparison.Ordinal);
+        Assert.Equal(
+            DurableFlowState.WaitingForActivity,
+            (await client.GetAsync(new DurableFlowGetRequest(scope, successProjectionInstance))).Value!.State);
+
+        var (failureProjectionInstance, failureProjectionPermit) =
+            await StartPermittedActivityAsync("failure-dispatch-missing", 11);
+        await DeleteParentDispatchAsync(failureProjectionInstance);
+        var failureProjectionException = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await workStore.RecordCompletionAsync(
+                failureProjectionPermit.Claim,
+                new PostgreSqlWorkCompletion(
+                    PostgreSqlWorkCompletionKind.FailedTerminal,
+                    "activity-projection-failure",
+                    "{}")));
+        Assert.Contains("Terminal child Work did not project", failureProjectionException.Message, StringComparison.Ordinal);
+        Assert.Equal(
+            DurableFlowState.WaitingForActivity,
+            (await client.GetAsync(new DurableFlowGetRequest(scope, failureProjectionInstance))).Value!.State);
         WriteEvidence("flow-activity-resume", terminal.Revision);
     }
 

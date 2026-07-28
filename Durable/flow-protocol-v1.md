@@ -104,7 +104,7 @@ PostgreSQL Flow schema requires applying migrations strictly in order:
 2. `0002_forced_rls.sql`: Enables and forces Row Level Security on Work entities.
 3. `0003_flow_protocol.sql`: Defines the six Flow relations, indexes, constraints, and forced RLS policies.
 
-After applying any migration that adds package relations, run [`configure-postgresql-roles.sql`](configure-postgresql-roles.sql) again: migrations must run first, then the role recipe grants the reviewed Flow privileges to existing dispatcher and scoped-runtime roles.
+After applying any migration that adds package relations, run [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) again: migrations must run first, then the role recipe grants the reviewed Flow privileges to existing dispatcher and scoped-runtime roles.
 
 ### Rollback posture
 
