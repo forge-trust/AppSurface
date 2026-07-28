@@ -86,6 +86,7 @@ internal static class DocsSearchSummaryPresentationProjector
                     break;
                 }
 
+                builder.BeginBlock();
                 AppendBlock(child, builder, target, depth);
             }
         }
@@ -436,7 +437,10 @@ internal static class DocsSearchSummaryPresentationProjector
             MutableNode? last = null;
             foreach (var node in nodes)
             {
-                last = node.Children.Count == 0 ? node : FindLastLeaf(node.Children) ?? last;
+                var candidate = node.Children.Count == 0 && node.Text.Length > 0
+                    ? node
+                    : FindLastLeaf(node.Children);
+                last = candidate ?? last;
             }
 
             return last;
