@@ -6,12 +6,22 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>ForgeTrust.AppSurface.Durable.PostgreSql.TestHost</AssemblyName>
+    <PackageId>ForgeTrust.AppSurface.Durable.PostgreSql.V2WorkHarness</PackageId>
     <IsPackable>false</IsPackable>
+    <!-- The harness resolves its package only from verify-postgresql.sh's temporary local feed. -->
+    <RestorePackagesWithLockFile Condition="'$(V2PackageVersion)' == ''">false</RestorePackagesWithLockFile>
+    <RestoreLockedMode Condition="'$(V2PackageVersion)' == ''">false</RestoreLockedMode>
   </PropertyGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(V2PackageVersion)' != ''">
     <PackageReference Include="ForgeTrust.AppSurface.Durable.PostgreSql"
                       VersionOverride="$(V2PackageVersion)" />
   </ItemGroup>
+
+  <Target Name="RequireV2CompatibilityPackage"
+          BeforeTargets="Build"
+          Condition="'$(V2PackageVersion)' == ''">
+    <Error Text="V2WorkHarness must be built through Durable/verify-postgresql.sh, which supplies V2PackageVersion and a temporary package feed." />
+  </Target>
 
 </Project>
