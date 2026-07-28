@@ -124,6 +124,15 @@ WHERE namespace.nspname = 'appsurface_durable'
     )
   )
 ORDER BY CASE WHEN object.relkind = 'S' THEN 2 ELSE 1 END, object.relname \gexec
+
+SELECT format(
+    'ALTER POLICY flow_dispatch_global_discovery ON appsurface_durable.flow_dispatch TO %I',
+    :'dispatcher_role') \gexec
+DROP POLICY IF EXISTS flow_dispatch_runtime_scope_select ON appsurface_durable.flow_dispatch;
+SELECT format(
+    'CREATE POLICY flow_dispatch_runtime_scope_select ON appsurface_durable.flow_dispatch FOR SELECT TO %I USING (scope_id = nullif(current_setting(''appsurface_durable.scope_id'', true), ''''))',
+    :'runtime_role') \gexec
+
 SELECT NOT EXISTS
 (
   SELECT 1
@@ -173,6 +182,8 @@ WITH expected_policy(relation_name, policy_name, command_name, using_expression,
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
     ('flow_dispatch', 'flow_dispatch_global_discovery', 'r', 'true', NULL::text),
+    ('flow_dispatch', 'flow_dispatch_runtime_scope_select', 'r',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))', NULL::text),
     ('flow_dispatch', 'flow_dispatch_scope_insert', 'a', NULL::text,
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
     ('flow_dispatch', 'flow_dispatch_scope_update', 'w',
@@ -238,7 +249,13 @@ SELECT NOT EXISTS
   WHERE expected.policy_name IS NULL
     OR actual.policy_name IS NULL
     OR NOT actual.polpermissive
-    OR actual.polroles <> ARRAY[0]::oid[]
+    OR actual.polroles <> CASE
+        WHEN actual.policy_name = 'flow_dispatch_global_discovery' THEN ARRAY[
+            (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'dispatcher_role')]
+        WHEN actual.policy_name = 'flow_dispatch_runtime_scope_select' THEN ARRAY[
+            (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'runtime_role')]
+        ELSE ARRAY[0]::oid[]
+    END
     OR actual.command_name <> expected.command_name
     OR actual.using_expression IS DISTINCT FROM expected.using_expression
     OR actual.check_expression IS DISTINCT FROM expected.check_expression

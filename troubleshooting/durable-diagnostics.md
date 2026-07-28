@@ -30,7 +30,7 @@ A reserved code is part of the compatibility namespace, not evidence that the co
 | `ASDUR203` | Flow race lost | Another transition won the revision | Read current state; do not deliver another continuation |
 | `ASDUR204` | Event duplicate | A single-use event id already has an outcome | Return original truth only when fingerprints match |
 | `ASDUR205` | Flow access denied | Application authorization or trusted scope check failed | Correct application policy; opaque ids are not authorization |
-| `ASDUR206` | Flow start conflict | Start identity was reused with different semantic bytes | Reuse the exact request or allocate new identities |
+| `ASDUR206` | Flow start conflict | A start identity or target Flow instance conflicts with persisted Flow creation | Reuse the exact request or allocate new identities |
 | `ASDUR207` | Flow command conflict | Command/event identity was reused with different semantic bytes | Reuse the exact request or allocate new identities |
 | `ASDUR208` | Flow not found | No instance exists in the authorized scope | Verify scope and opaque instance id |
 | `ASDUR209` | Event contract mismatch | Payload does not match the active typed wait | Send the exact declared payload and reuse the unconsumed event id |
@@ -45,9 +45,9 @@ identities; do not change event semantics between retries.
 
 ### ASDUR206
 
-A start command or start idempotency key resolves to different semantic content or to split Flow instances. Retry the
-original start byte-for-byte, or use a new coherent command/idempotency pair. Never choose one conflicting identity as
-the winner.
+A start command or start idempotency key resolves to different semantic content, or the target Flow instance is already
+owned by another start. Retry the original start byte-for-byte, or use a new coherent command/idempotency/instance
+triple. Never choose one conflicting identity as the winner.
 
 ### ASDUR207
 
@@ -91,8 +91,8 @@ tested implementation without changing their meanings.
 | `ASDUR203` | Flow race lost | Optimistic aggregate revision CAS failed; reload instance state before retrying. |
 | `ASDUR204` | Event duplicate | Single-use `event_id` was already consumed; return original delivery result. |
 | `ASDUR205` | Flow access denied | Scope authorization check failed or scope setting missing. |
-| `ASDUR206` | Flow start conflict | `start_idempotency_key` reused with different definition or payload fingerprint. |
-| `ASDUR207` | Flow command conflict | `command_id` reused with different command parameters. |
+| `ASDUR206` | Flow start conflict | A start identity or target Flow instance conflicts with persisted Flow creation. |
+| `ASDUR207` | Flow command conflict | `command_id` or `event_id` reused with different command semantics. |
 | `ASDUR208` | Flow not found | Instance ID does not exist within the specified scope. |
 | `ASDUR209` | Event contract mismatch | Payload schema version or contract ID does not match active wait registration. |
 | `ASDUR210` | Release manifest mismatch | Recovery manifest registration disagrees with persisted history. |

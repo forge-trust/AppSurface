@@ -197,9 +197,13 @@ case "$mode" in
       done
       v2_harness_project="$repo_root/Durable/compatibility/V2WorkHarness/V2WorkHarness.csproj"
       v2_harness_bin="$work_dir/v2-harness-bin"
+      # The pinned packages are timestamped for this isolated compatibility build, so keep its generated lock file
+      # in the temporary work directory rather than rewriting the repository lock file.
       dotnet build "$v2_harness_project" --configuration Release \
         -p:V2PackageVersion="$v2_package_version" \
         -p:RestoreAdditionalProjectSources="$v2_packages" \
+        -p:NuGetLockFilePath="$work_dir/v2-harness-packages.lock.json" \
+        -p:RestoreLockedMode=false \
         -p:BaseOutputPath="$v2_harness_bin/" \
         -p:BaseIntermediateOutputPath="$work_dir/v2-harness-obj/" \
         || fail "the tiny harness could not build against the pinned v2 packages"

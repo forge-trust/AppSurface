@@ -180,7 +180,8 @@ internal sealed partial class PostgreSqlDurableFlowStore
     internal async ValueTask<DurableOperationResult<DurableFlowCommandResult>> StartAsync(
         DurableFlowStartRequest request,
         DurableFlowRegistration registration,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool retryAfterUniqueViolation = true)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(registration);
@@ -220,6 +221,25 @@ internal sealed partial class PostgreSqlDurableFlowStore
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
                 return DurableOperationResult<DurableFlowCommandResult>.Success(
                     duplicate.ToResult(DurableFlowCommandOutcome.Duplicate));
+            }
+
+            var existingInstance = await LockCurrentAsync(
+                connection,
+                transaction,
+                request.ScopeId,
+                request.InstanceId,
+                cancellationToken).ConfigureAwait(false);
+            if (existingInstance is not null)
+            {
+                return await CommitFailureAsync(
+                    transaction,
+                    Failure<DurableFlowCommandResult>(
+                        request.CommandId.Value,
+                        DurableProblemCodes.FlowStartConflict,
+                        "The Flow instance identity is already owned by a different start.",
+                        "The supplied command and idempotency identities do not resolve to the existing Flow instance.",
+                        "Retry the original start identities or choose a new Flow instance identity."),
+                    cancellationToken).ConfigureAwait(false);
             }
 
             var dispatchId = Guid.NewGuid();
@@ -309,7 +329,18 @@ internal sealed partial class PostgreSqlDurableFlowStore
         catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.UniqueViolation)
         {
             await TryRollbackAsync(transaction).ConfigureAwait(false);
-            return await StartAsync(request, registration, cancellationToken).ConfigureAwait(false);
+            if (retryAfterUniqueViolation)
+            {
+                return await StartAsync(request, registration, cancellationToken, retryAfterUniqueViolation: false)
+                    .ConfigureAwait(false);
+            }
+
+            return Failure<DurableFlowCommandResult>(
+                request.CommandId.Value,
+                DurableProblemCodes.FlowStartConflict,
+                "The Flow start could not claim its instance identity after a concurrent insert.",
+                "A conflicting durable identity remained after the bounded retry.",
+                "Reload the persisted Flow and retry only with its original start identities.");
         }
         catch
         {
@@ -320,7 +351,8 @@ internal sealed partial class PostgreSqlDurableFlowStore
 
     internal async ValueTask<DurableOperationResult<DurableFlowCommandResult>> RaiseEventAsync(
         DurableFlowEventRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool retryAfterUniqueViolation = true)
     {
         ArgumentNullException.ThrowIfNull(request);
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
@@ -555,7 +587,18 @@ internal sealed partial class PostgreSqlDurableFlowStore
         catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.UniqueViolation)
         {
             await TryRollbackAsync(transaction).ConfigureAwait(false);
-            return await RaiseEventAsync(request, cancellationToken).ConfigureAwait(false);
+            if (retryAfterUniqueViolation)
+            {
+                return await RaiseEventAsync(request, cancellationToken, retryAfterUniqueViolation: false)
+                    .ConfigureAwait(false);
+            }
+
+            return Failure<DurableFlowCommandResult>(
+                request.CommandId.Value,
+                DurableProblemCodes.FlowCommandConflict,
+                "The Flow event could not claim its command or event identity after a concurrent insert.",
+                "A conflicting durable identity remained after the bounded retry.",
+                "Reload the persisted Flow and retry only with its original event identities.");
         }
         catch
         {
@@ -612,7 +655,8 @@ internal sealed partial class PostgreSqlDurableFlowStore
         DurableCommandFingerprint fingerprint,
         bool isRelease,
         IDurableFlowRegistry? registry,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool retryAfterUniqueViolation = true)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
@@ -882,17 +926,28 @@ internal sealed partial class PostgreSqlDurableFlowStore
         catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.UniqueViolation)
         {
             await TryRollbackAsync(transaction).ConfigureAwait(false);
-            return await ApplyLifecycleCommandAsync(
-                scopeId,
-                commandId,
-                instanceId,
-                actorId,
-                reasonCode,
-                expectedRevision,
-                fingerprint,
-                isRelease,
-                registry,
-                cancellationToken).ConfigureAwait(false);
+            if (retryAfterUniqueViolation)
+            {
+                return await ApplyLifecycleCommandAsync(
+                    scopeId,
+                    commandId,
+                    instanceId,
+                    actorId,
+                    reasonCode,
+                    expectedRevision,
+                    fingerprint,
+                    isRelease,
+                    registry,
+                    cancellationToken,
+                    retryAfterUniqueViolation: false).ConfigureAwait(false);
+            }
+
+            return Failure<DurableFlowCommandResult>(
+                commandId.Value,
+                DurableProblemCodes.FlowCommandConflict,
+                "The Flow lifecycle command could not claim its command identity after a concurrent insert.",
+                "A conflicting durable identity remained after the bounded retry.",
+                "Reload the persisted Flow and retry only with its original command identity.");
         }
         catch
         {

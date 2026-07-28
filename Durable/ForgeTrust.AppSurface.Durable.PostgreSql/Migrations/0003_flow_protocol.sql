@@ -256,6 +256,12 @@ CREATE TABLE appsurface_durable.flow_wait
     ),
     CHECK
     (
+        (kind = 'event' AND state IN ('active', 'suspended', 'event_won', 'timer_won', 'superseded', 'canceled'))
+        OR
+        (kind = 'activity' AND state IN ('active', 'suspended', 'activity_completed', 'superseded', 'canceled'))
+    ),
+    CHECK
+    (
         (event_payload_required AND event_contract_id IS NOT NULL AND event_schema_version IS NOT NULL
             AND event_classification IS NOT NULL AND event_retention IS NOT NULL)
         OR
@@ -274,6 +280,10 @@ CREATE TABLE appsurface_durable.flow_wait
 CREATE UNIQUE INDEX ix_flow_wait_active_suspended
     ON appsurface_durable.flow_wait (scope_id, flow_instance_id)
     WHERE state IN ('active', 'suspended');
+
+CREATE INDEX ix_flow_wait_event_lookup
+    ON appsurface_durable.flow_wait (scope_id, flow_instance_id, event_name, created_at DESC)
+    WHERE kind = 'event';
 
 CREATE UNIQUE INDEX ix_flow_wait_child_work
     ON appsurface_durable.flow_wait (scope_id, child_work_id)
@@ -327,6 +337,9 @@ CREATE TABLE appsurface_durable.flow_dispatch
         (kind = 'timer' AND timer_id IS NOT NULL)
     )
 );
+
+CREATE INDEX ix_flow_dispatch_instance
+    ON appsurface_durable.flow_dispatch (scope_id, flow_instance_id);
 
 CREATE UNIQUE INDEX ix_flow_dispatch_flow
     ON appsurface_durable.flow_dispatch (scope_id, flow_instance_id)

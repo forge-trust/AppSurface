@@ -47,6 +47,9 @@ public sealed class DurableSchemaContractTests
                 Assert.Contains("flow_command", third.Sql, StringComparison.Ordinal);
                 Assert.Contains("flow_history", third.Sql, StringComparison.Ordinal);
                 Assert.Contains("flow_wait", third.Sql, StringComparison.Ordinal);
+                Assert.Contains("ix_flow_wait_event_lookup", third.Sql, StringComparison.Ordinal);
+                Assert.Contains("ix_flow_dispatch_instance", third.Sql, StringComparison.Ordinal);
+                Assert.Contains("activity_completed", third.Sql, StringComparison.Ordinal);
                 Assert.Contains("flow_timer", third.Sql, StringComparison.Ordinal);
                 Assert.Contains("flow_dispatch", third.Sql, StringComparison.Ordinal);
             });
@@ -306,6 +309,11 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("AS durable_rls_policies_are_exact", recipe, StringComparison.Ordinal);
         Assert.Contains("pg_catalog.pg_policy", recipe, StringComparison.Ordinal);
         Assert.Contains("pg_catalog.pg_get_expr", recipe, StringComparison.Ordinal);
+        Assert.Contains(
+            "ALTER POLICY flow_dispatch_global_discovery ON appsurface_durable.flow_dispatch TO %I",
+            recipe,
+            StringComparison.Ordinal);
+        Assert.Contains("flow_dispatch_runtime_scope_select", recipe, StringComparison.Ordinal);
         foreach (var restrictedAttribute in new[]
                  {
                      "rolcanlogin", "rolsuper", "rolcreatedb", "rolcreaterole", "rolreplication", "rolbypassrls",

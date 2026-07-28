@@ -1,5 +1,4 @@
 using Npgsql;
-using NpgsqlTypes;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 

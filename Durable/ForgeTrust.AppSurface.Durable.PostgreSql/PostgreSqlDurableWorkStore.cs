@@ -224,7 +224,7 @@ internal sealed class PostgreSqlDurableWorkStore
             if (transition is not null)
             {
                 await CommitClaimTransitionAsync(
-                    transaction, transition, onTransitionApplied, cancellationToken).ConfigureAwait(false);
+                    transaction, candidate, transition, onTransitionApplied, cancellationToken).ConfigureAwait(false);
                 return null;
             }
 
@@ -236,7 +236,7 @@ internal sealed class PostgreSqlDurableWorkStore
             if (transition is not null)
             {
                 await CommitClaimTransitionAsync(
-                    transaction, transition, onTransitionApplied, cancellationToken).ConfigureAwait(false);
+                    transaction, candidate, transition, onTransitionApplied, cancellationToken).ConfigureAwait(false);
                 return null;
             }
 
@@ -248,7 +248,7 @@ internal sealed class PostgreSqlDurableWorkStore
             if (transition is not null)
             {
                 await CommitClaimTransitionAsync(
-                    transaction, transition, onTransitionApplied, cancellationToken).ConfigureAwait(false);
+                    transaction, candidate, transition, onTransitionApplied, cancellationToken).ConfigureAwait(false);
                 return null;
             }
 
@@ -376,10 +376,21 @@ internal sealed class PostgreSqlDurableWorkStore
 
     private static async ValueTask CommitClaimTransitionAsync(
         NpgsqlTransaction transaction,
+        PostgreSqlDispatchCandidate candidate,
         PostgreSqlWorkClaimTransition transition,
         Func<NpgsqlTransaction, DurableWorkState, string, CancellationToken, ValueTask>? onTransitionApplied,
         CancellationToken cancellationToken)
     {
+        if (IsTerminal(transition.State) || transition.State == DurableWorkState.Suspended)
+        {
+            await PostgreSqlDurableFlowActivityProjector.ProjectAsync(
+                transaction,
+                candidate.ScopeId,
+                candidate.WorkId,
+                transition.State,
+                cancellationToken).ConfigureAwait(false);
+        }
+
         if (onTransitionApplied is not null)
         {
             await onTransitionApplied(

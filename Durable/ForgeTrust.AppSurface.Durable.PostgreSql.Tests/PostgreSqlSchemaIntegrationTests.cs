@@ -11,6 +11,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
     private const string RoleRecipeUsername = "appsurface";
     private const string RoleRecipePassword = "appsurface-test-password";
     private const string RoleRecipeApplicationName = "durable-role-recipe";
+    private const string DispatcherRoleTestPassword = "durable-dispatcher-test-password";
     private const string RuntimeRoleTestPassword = "durable-runtime-test-password";
 
     [Fact]
@@ -140,7 +141,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await using (var roles = dataSource.CreateCommand(
             $"""
             CREATE ROLE durable_owner NOLOGIN NOSUPERUSER NOBYPASSRLS;
-            CREATE ROLE durable_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE durable_dispatcher LOGIN PASSWORD '{DispatcherRoleTestPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE durable_runtime LOGIN PASSWORD '{RuntimeRoleTestPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE bypass_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
             CREATE ROLE createdb_dispatcher LOGIN NOSUPERUSER CREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
@@ -555,6 +556,77 @@ public sealed class PostgreSqlSchemaIntegrationTests
             reapplied.ExitCode == 0,
             $"Role recipe reapply failed with exit {reapplied.ExitCode}. stdout: {reapplied.Stdout} stderr: {reapplied.Stderr}");
 
+        await using (var flowDispatchPolicies = dataSource.CreateCommand(
+            """
+            SELECT policyname, roles, qual
+            FROM pg_policies
+            WHERE schemaname = 'appsurface_durable'
+              AND tablename = 'flow_dispatch'
+              AND policyname IN ('flow_dispatch_global_discovery', 'flow_dispatch_runtime_scope_select')
+            ORDER BY policyname;
+            """))
+        {
+            await using var reader = await flowDispatchPolicies.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal("flow_dispatch_global_discovery", reader.GetString(0));
+            Assert.Equal(["durable_dispatcher"], reader.GetFieldValue<string[]>(1));
+            Assert.Equal("true", reader.GetString(2));
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal("flow_dispatch_runtime_scope_select", reader.GetString(0));
+            Assert.Equal(["durable_runtime"], reader.GetFieldValue<string[]>(1));
+            Assert.Contains("appsurface_durable.scope_id", reader.GetString(2), StringComparison.Ordinal);
+            Assert.False(await reader.ReadAsync());
+        }
+
+        await using (var seedFlowDispatch = dataSource.CreateCommand(
+            """
+            INSERT INTO appsurface_durable.scope (scope_id)
+            VALUES ('flow-rls-scope-a'), ('flow-rls-scope-b');
+
+            INSERT INTO appsurface_durable.flow_instance
+            (
+                scope_id, flow_instance_id, flow_id, flow_version, manifest_id, authoring_model,
+                definition_fingerprint_schema, definition_fingerprint_sha256, current_node_id,
+                state, scope_generation, runtime_epoch
+            )
+            VALUES
+            (
+                'flow-rls-scope-a', 'flow-rls-instance-a', 'tests.flow', 'v1', 'tests.manifest', 'tests',
+                'sha256', repeat('0', 64), 'start', 'ready', 1, @runtime_epoch
+            ),
+            (
+                'flow-rls-scope-b', 'flow-rls-instance-b', 'tests.flow', 'v1', 'tests.manifest', 'tests',
+                'sha256', repeat('0', 64), 'start', 'ready', 1, @runtime_epoch
+            );
+
+            INSERT INTO appsurface_durable.flow_dispatch
+            (
+                dispatch_id, scope_id, kind, flow_instance_id, due_at, state, expected_revision
+            )
+            VALUES
+            (@dispatch_a, 'flow-rls-scope-a', 'flow', 'flow-rls-instance-a', clock_timestamp(), 'available', 1),
+            (@dispatch_b, 'flow-rls-scope-b', 'flow', 'flow-rls-instance-b', clock_timestamp(), 'available', 1);
+            """))
+        {
+            seedFlowDispatch.Parameters.AddWithValue("runtime_epoch", Guid.NewGuid());
+            seedFlowDispatch.Parameters.AddWithValue("dispatch_a", Guid.NewGuid());
+            seedFlowDispatch.Parameters.AddWithValue("dispatch_b", Guid.NewGuid());
+            Assert.Equal(6, await seedFlowDispatch.ExecuteNonQueryAsync());
+        }
+
+        var dispatcherConnectionString = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
+        {
+            Username = "durable_dispatcher",
+            Password = DispatcherRoleTestPassword,
+        }.ConnectionString;
+        await using var dispatcherDataSource = NpgsqlDataSource.Create(dispatcherConnectionString);
+        await using var dispatcherConnection = await dispatcherDataSource.OpenConnectionAsync();
+        await using (var dispatcherRead = dispatcherConnection.CreateCommand())
+        {
+            dispatcherRead.CommandText = "SELECT count(*) FROM appsurface_durable.flow_dispatch;";
+            Assert.Equal(2L, (long)(await dispatcherRead.ExecuteScalarAsync())!);
+        }
+
         var runtimeConnectionString = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
         {
             Username = "durable_runtime",
@@ -567,6 +639,46 @@ public sealed class PostgreSqlSchemaIntegrationTests
             allowedRead.CommandText =
                 "SELECT current_user = 'durable_runtime' AND EXISTS (SELECT 1 FROM appsurface_durable.store_metadata);";
             Assert.True((bool)(await allowedRead.ExecuteScalarAsync())!);
+        }
+
+        await using (var unscopedRead = runtimeConnection.CreateCommand())
+        {
+            unscopedRead.CommandText = "SELECT count(*) FROM appsurface_durable.flow_dispatch;";
+            Assert.Equal(0L, (long)(await unscopedRead.ExecuteScalarAsync())!);
+        }
+
+        await using (var scopedTransaction = await runtimeConnection.BeginTransactionAsync())
+        {
+            await using (var setScope = new NpgsqlCommand(
+                "SELECT set_config('appsurface_durable.scope_id', @scope_id, true);",
+                runtimeConnection,
+                scopedTransaction))
+            {
+                setScope.Parameters.AddWithValue("scope_id", "flow-rls-scope-a");
+                await setScope.ExecuteNonQueryAsync();
+            }
+
+            await using (var scopedRead = new NpgsqlCommand(
+                "SELECT scope_id FROM appsurface_durable.flow_dispatch ORDER BY scope_id;",
+                runtimeConnection,
+                scopedTransaction))
+            await using (var reader = await scopedRead.ExecuteReaderAsync())
+            {
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal("flow-rls-scope-a", reader.GetString(0));
+                Assert.False(await reader.ReadAsync());
+            }
+
+            await using (var scopedUpdate = new NpgsqlCommand(
+                "UPDATE appsurface_durable.flow_dispatch SET due_at = due_at + interval '1 second' WHERE scope_id = @scope_id;",
+                runtimeConnection,
+                scopedTransaction))
+            {
+                scopedUpdate.Parameters.AddWithValue("scope_id", "flow-rls-scope-a");
+                Assert.Equal(1, await scopedUpdate.ExecuteNonQueryAsync());
+            }
+
+            await scopedTransaction.CommitAsync();
         }
 
         var denied = await Assert.ThrowsAsync<PostgresException>(async () =>

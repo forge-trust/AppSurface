@@ -51,7 +51,7 @@ For strict CI verification across all PostgreSQL integration tests including Flo
 ## What the workload proves
 
 1. **Schema Deployment**: Migration owner checks status, applies migrations `0001_work_shared.sql`, `0002_forced_rls.sql`, and `0003_flow_protocol.sql`, reads `StoreId`, and explicitly initializes the runtime epoch.
-2. **Atomic Flow Start**: Flow instance starts atomically within a caller transaction or via `PostgreSqlDurableFlowClient`. Re-using `start_idempotency_key` with identical payload returns `Duplicate`; divergent definition returns `ASDUR206`.
+2. **Atomic Flow Start**: Flow instance starts atomically within a caller transaction or via `PostgreSqlDurableFlowClient`. Re-using `start_idempotency_key` with identical payload returns `Duplicate`; divergent definition or a new start identity targeting an existing Flow instance returns `ASDUR206`.
 3. **Step Evaluation & Determinism**: Step evaluation advances Flow state machine (`ready` -> `evaluating`) and verifies definition fingerprint SHA-256 against registered code.
 4. **Child Work Activity Lifecycle**: Flow enqueues child activity Work item in `appsurface_durable.work` and enters `waiting_activity`. Work engine claims item, acquires effect permit, executes provider I/O, and commits terminal fact. Completion handler resolves `flow_wait` (`activity_completed`) and returns Flow to `ready`.
 5. **External Event Delivery**: Incoming event delivers atomically via `flow_command`, resolves active wait (`event_won`), supersedes scheduled timer (`timer_won` lost), and updates state to `ready`. Single-use `event_id` reuse returns `ASDUR204`.
@@ -84,7 +84,7 @@ The compiled reference workload requires:
 ## Failure interpretation
 
 - Preflight/domain outcomes preserve caller transaction usability as specified by the [Flow protocol](flow-protocol-v1.md).
-- `ASDUR200` means definition unavailable; `ASDUR201` means history/definition mismatch; `ASDUR203` means aggregate revision race lost; `ASDUR204` means duplicate event ID; `ASDUR206`/`ASDUR207` mean start or command conflict.
+- `ASDUR200` means definition unavailable; `ASDUR201` means history/definition mismatch; `ASDUR203` means aggregate revision race lost; `ASDUR204` means duplicate event ID; `ASDUR206` means start conflict; `ASDUR207` means command or event identity conflict.
 - `ASDUR400`-`ASDUR403` require deployment correction via schema manager, not runtime DDL.
 
 See the [`diagnostics catalog`](../troubleshooting/durable-diagnostics.md),

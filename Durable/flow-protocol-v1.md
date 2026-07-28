@@ -82,6 +82,7 @@ Flow persistence guarantees deterministic recovery across 11 explicit process cr
 | Identity / Key | Scope | Duplicate / Collision Behavior |
 | --- | --- | --- |
 | `(scope_id, start_idempotency_key)` | Scope-wide | Identical fingerprint returns original `FlowInstanceId` and `accepted_at` (`Duplicate`). Divergent definition or payload returns `ASDUR206` start conflict. |
+| `(scope_id, flow_instance_id)` | Scope-wide | An instance is created by one coherent start only. Reusing it with different command or idempotency identities returns `ASDUR206`; an exact original start request returns the persisted outcome. |
 | `(scope_id, command_id)` | Scope-wide | Identical command fingerprint returns original command outcome (`accepted`). Divergent command payload returns `ASDUR207` command conflict. |
 | `(scope_id, event_id)` | Scope-wide | `ix_flow_command_event` prevents duplicate consumption. Exact retries return the original accepted/race-lost outcome; changed semantics fail `ASDUR207`. |
 | Aggregate `revision` CAS | Instance-wide | State transitions validate `expected_revision`. Race condition (e.g. concurrent step evaluation or event delivery) causes loser to fail CAS and return `ASDUR203` race lost. |
@@ -103,6 +104,8 @@ PostgreSQL Flow schema requires applying migrations strictly in order:
 2. `0002_forced_rls.sql`: Enables and forces Row Level Security on Work entities.
 3. `0003_flow_protocol.sql`: Defines the six Flow relations, indexes, constraints, and forced RLS policies.
 
+After applying any migration that adds package relations, run [`configure-postgresql-roles.sql`](configure-postgresql-roles.sql) again: migrations must run first, then the role recipe grants the reviewed Flow privileges to existing dispatcher and scoped-runtime roles.
+
 ### Rollback posture
 
 - Applied migrations are **forward-only**. The package provides no destructive down-migration scripts.
@@ -115,6 +118,10 @@ PostgreSQL Flow schema requires applying migrations strictly in order:
 ## Security and Row-Level Security (RLS)
 
 All six Flow tables, including payload-free `flow_dispatch`, have Row Level Security enabled and forced:
+
+The dispatcher credential alone receives global `flow_dispatch` discovery. The scoped runtime credential retains
+`SELECT` and column-scoped `UPDATE` privileges but sees Flow dispatch rows only after its transaction sets the matching
+`appsurface_durable.scope_id`; rerun the role recipe after applying `0003` to normalize these role-targeted policies.
 
 ```sql
 ALTER TABLE appsurface_durable.flow_instance ENABLE ROW LEVEL SECURITY;
@@ -138,8 +145,8 @@ Flow operations emit append-only `ASDURxxx` codes. Safe error reporting excludes
 | `ASDUR203` | Flow race lost | Optimistic aggregate revision CAS failed; reload instance state before retrying. |
 | `ASDUR204` | Event duplicate | Single-use `event_id` was already consumed; return original delivery result. |
 | `ASDUR205` | Flow access denied | Scope authorization check failed or scope setting missing. |
-| `ASDUR206` | Flow start conflict | `start_idempotency_key` reused with different definition or payload fingerprint. |
-| `ASDUR207` | Flow command conflict | `command_id` reused with different command parameters. |
+| `ASDUR206` | Flow start conflict | A start identity or target Flow instance conflicts with persisted Flow creation. |
+| `ASDUR207` | Flow command conflict | `command_id` or `event_id` reused with different command semantics. |
 | `ASDUR208` | Flow not found | Instance ID does not exist within the specified scope. |
 | `ASDUR209` | Event contract mismatch | Payload schema version or contract ID does not match active wait registration. |
 | `ASDUR210` | Release manifest mismatch | Recovery manifest registration disagrees with persisted history. |

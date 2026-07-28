@@ -117,6 +117,54 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     }
 
     [Fact]
+    public async Task FlowClaim_ConcurrentProcessorsApplyOneDecisionAndRejectStaleCandidates()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-flow-concurrent-claim");
+        var status = await schema.GetStatusAsync();
+        var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
+        var payloads = new DurablePayloadCodecRegistry([codec]);
+        var work = new DurableWorkRegistry([]);
+        var registration = new WaitingTestFlowRegistration(codec);
+        var flows = new DurableFlowRegistry([registration], work, payloads);
+        var options = new PostgreSqlDurableWorkOptions(epoch, status.StoreId);
+        var client = new PostgreSqlDurableFlowClient(database.DataSource, flows, payloads, options);
+        var processor = new PostgreSqlDurableFlowProcessor(
+            database.DataSource,
+            database.DataSource,
+            flows,
+            work,
+            payloads,
+            options);
+        var scope = new DurableScopeId("slice4-flow-concurrent-claim");
+        var instance = new DurableFlowInstanceId("concurrent-flow");
+        Assert.True((await client.StartAsync(new DurableFlowStartRequest(
+            scope,
+            new DurableCommandId("concurrent-flow-start"),
+            "concurrent-flow-start-key",
+            instance,
+            registration.FlowId,
+            registration.FlowVersion,
+            codec.EncodeObject(new byte[] { 1 })))).IsSuccess);
+
+        var candidate = Assert.Single(await processor.DiscoverAsync());
+        var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(index =>
+            processor.TryProcessAsync(candidate, $"concurrent-flow-worker-{index}").AsTask()));
+
+        var applied = Assert.Single(results, result => result.Outcome == PostgreSqlFlowProcessingOutcome.Applied);
+        Assert.Equal(DurableFlowState.WaitingForEvent, applied.State);
+        Assert.All(results, result => Assert.True(
+            result.Outcome is PostgreSqlFlowProcessingOutcome.Applied or PostgreSqlFlowProcessingOutcome.NotClaimed));
+
+        var snapshot = await client.GetAsync(new DurableFlowGetRequest(scope, instance));
+        Assert.Equal(DurableFlowState.WaitingForEvent, snapshot.Value!.State);
+        Assert.Equal(applied.Revision, snapshot.Value.Revision);
+    }
+
+    [Fact]
     public async Task EventBeforeWait_DoesNotConsumeIdentity_AndChangedStartConflicts()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -147,6 +195,17 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             codec.EncodeObject(new byte[] { 1 }));
         Assert.True((await client.StartAsync(start)).IsSuccess);
 
+        var competingStart = await client.StartAsync(new DurableFlowStartRequest(
+            scope,
+            new DurableCommandId("competing-start-identity"),
+            "competing-start-key",
+            instance,
+            registration.FlowId,
+            registration.FlowVersion,
+            codec.EncodeObject(new byte[] { 1 })));
+        Assert.False(competingStart.IsSuccess);
+        Assert.Equal(DurableProblemCodes.FlowStartConflict, competingStart.Problem!.Code);
+
         var early = new DurableFlowEventRequest(
             scope,
             new DurableCommandId("event-early"),
@@ -169,7 +228,142 @@ public sealed class DurableSlice4ReferenceWorkloadTests
         var conflict = await client.StartAsync(changed);
         Assert.False(conflict.IsSuccess);
         Assert.Equal(DurableProblemCodes.FlowCommandConflict, conflict.Problem!.Code);
+
+        await using (var injectUniqueViolation = database.DataSource.CreateCommand(
+            """
+            CREATE SEQUENCE appsurface_durable.flow_start_unique_violation_sequence;
+
+            CREATE FUNCTION appsurface_durable.raise_flow_start_unique_violation()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                IF nextval('appsurface_durable.flow_start_unique_violation_sequence') <= 2 THEN
+                    RAISE EXCEPTION 'Simulated Flow start unique violation' USING ERRCODE = '23505';
+                END IF;
+
+                RETURN NEW;
+            END;
+            $$;
+
+            CREATE TRIGGER flow_start_unique_violation
+            BEFORE INSERT ON appsurface_durable.flow_instance
+            FOR EACH ROW
+            EXECUTE FUNCTION appsurface_durable.raise_flow_start_unique_violation();
+            """))
+        {
+            await injectUniqueViolation.ExecuteNonQueryAsync();
+        }
+
+        var boundedRetry = await client.StartAsync(new DurableFlowStartRequest(
+            scope,
+            new DurableCommandId("bounded-retry-start-identity"),
+            "bounded-retry-start-key",
+            new DurableFlowInstanceId("bounded-retry-flow"),
+            registration.FlowId,
+            registration.FlowVersion,
+            codec.EncodeObject(new byte[] { 1 })));
+        Assert.False(boundedRetry.IsSuccess);
+        Assert.Equal(DurableProblemCodes.FlowStartConflict, boundedRetry.Problem!.Code);
         WriteEvidence("flow-identity-retry", 1);
+    }
+
+    [Fact]
+    public async Task FlowStore_BoundsUniqueViolationRetriesForEventsAndLifecycleCommands()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-command-retry");
+        var status = await schema.GetStatusAsync();
+        var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
+        var payloads = new DurablePayloadCodecRegistry([codec]);
+        var work = new DurableWorkRegistry([]);
+        var registration = new WaitingTestFlowRegistration(codec);
+        var flows = new DurableFlowRegistry([registration], work, payloads);
+        var options = new PostgreSqlDurableWorkOptions(epoch, status.StoreId);
+        var client = new PostgreSqlDurableFlowClient(database.DataSource, flows, payloads, options);
+        var processor = new PostgreSqlDurableFlowProcessor(
+            database.DataSource,
+            database.DataSource,
+            flows,
+            work,
+            payloads,
+            options);
+        var scope = new DurableScopeId("slice4-command-retry");
+        var instance = new DurableFlowInstanceId("command-retry-flow");
+
+        Assert.True((await client.StartAsync(new DurableFlowStartRequest(
+            scope,
+            new DurableCommandId("command-retry-start"),
+            "command-retry-key",
+            instance,
+            registration.FlowId,
+            registration.FlowVersion,
+            codec.EncodeObject(new byte[] { 1 })))).IsSuccess);
+        var waiting = await processor.TryProcessAsync(
+            Assert.Single(await processor.DiscoverAsync()),
+            "command-retry-wait-worker");
+        Assert.Equal(DurableFlowState.WaitingForEvent, waiting.State);
+
+        await using (var injectUniqueViolation = database.DataSource.CreateCommand(
+            """
+            CREATE SEQUENCE appsurface_durable.flow_event_unique_violation_sequence;
+            CREATE SEQUENCE appsurface_durable.flow_cancel_unique_violation_sequence;
+
+            CREATE FUNCTION appsurface_durable.raise_flow_command_unique_violation()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                IF (NEW.command_type = 'event'
+                    AND nextval('appsurface_durable.flow_event_unique_violation_sequence') <= 2)
+                   OR (NEW.command_type = 'cancel'
+                    AND nextval('appsurface_durable.flow_cancel_unique_violation_sequence') <= 2) THEN
+                    RAISE EXCEPTION 'Simulated Flow command unique violation' USING ERRCODE = '23505';
+                END IF;
+
+                RETURN NEW;
+            END;
+            $$;
+
+            CREATE TRIGGER flow_command_unique_violation
+            BEFORE INSERT ON appsurface_durable.flow_command
+            FOR EACH ROW
+            EXECUTE FUNCTION appsurface_durable.raise_flow_command_unique_violation();
+            """))
+        {
+            await injectUniqueViolation.ExecuteNonQueryAsync();
+        }
+
+        var boundedEvent = await client.RaiseEventAsync(new DurableFlowEventRequest(
+            scope,
+            new DurableCommandId("command-retry-event"),
+            new DurableFlowEventId("command-retry-event-id"),
+            instance,
+            "approved",
+            expectedRevision: waiting.Revision));
+        Assert.False(boundedEvent.IsSuccess);
+        Assert.Equal(DurableProblemCodes.FlowCommandConflict, boundedEvent.Problem!.Code);
+
+        var afterEvent = await client.GetAsync(new DurableFlowGetRequest(scope, instance));
+        Assert.Equal(DurableFlowState.WaitingForEvent, afterEvent.Value!.State);
+        Assert.Equal(waiting.Revision, afterEvent.Value.Revision);
+
+        var boundedCancel = await client.CancelAsync(new DurableFlowCancelRequest(
+            scope,
+            new DurableCommandId("command-retry-cancel"),
+            instance,
+            "tests",
+            "bounded-retry",
+            waiting.Revision));
+        Assert.False(boundedCancel.IsSuccess);
+        Assert.Equal(DurableProblemCodes.FlowCommandConflict, boundedCancel.Problem!.Code);
+
+        var afterCancel = await client.GetAsync(new DurableFlowGetRequest(scope, instance));
+        Assert.Equal(DurableFlowState.WaitingForEvent, afterCancel.Value!.State);
+        Assert.Equal(waiting.Revision, afterCancel.Value.Revision);
     }
 
     [Fact]
@@ -492,7 +686,7 @@ public sealed class DurableSlice4ReferenceWorkloadTests
                 await processor.DiscoverAsync(),
                 candidate => candidate.InstanceId == timerInstance),
             "timer-row-missing-register");
-        await Task.Delay(25);
+        await ForceTimerDueAsync(database.DataSource, scope, timerInstance);
         var staleTimer = Assert.Single(
             await processor.DiscoverAsync(),
             candidate => candidate.InstanceId == timerInstance && candidate.Kind == PostgreSqlFlowDispatchKind.Timer);
@@ -609,6 +803,87 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     }
 
     [Fact]
+    public async Task FlowClaim_ReturnsNullWhenScopeIsInactiveOrRemoved()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-flow-claim-disabled-scope");
+        var status = await schema.GetStatusAsync();
+        var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
+        var payloads = new DurablePayloadCodecRegistry([codec]);
+        var work = new DurableWorkRegistry([]);
+        var registration = new WaitingTestFlowRegistration(codec);
+        var flows = new DurableFlowRegistry([registration], work, payloads);
+        var options = new PostgreSqlDurableWorkOptions(epoch, status.StoreId);
+        var client = new PostgreSqlDurableFlowClient(database.DataSource, flows, payloads, options);
+        var processor = new PostgreSqlDurableFlowProcessor(
+            database.DataSource,
+            database.DataSource,
+            flows,
+            work,
+            payloads,
+            options);
+        var store = new PostgreSqlDurableFlowStore(database.DataSource, options);
+        var scope = new DurableScopeId("slice4-flow-claim-disabled-scope");
+        var instance = new DurableFlowInstanceId("disabled-scope-flow");
+
+        Assert.True((await client.StartAsync(new DurableFlowStartRequest(
+            scope,
+            new DurableCommandId("disabled-scope-start"),
+            "disabled-scope-start-key",
+            instance,
+            registration.FlowId,
+            registration.FlowVersion,
+            codec.EncodeObject(new byte[] { 1 })))).IsSuccess);
+        var candidate = Assert.Single(await processor.DiscoverAsync());
+
+        var workStore = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
+        var disabled = await workStore.DisableScopeAsync(scope, "tests", "disable", expectedGeneration: 1);
+        Assert.Equal(PostgreSqlScopeMutationOutcome.Applied, disabled.Outcome);
+
+        Assert.Null(await store.TryClaimFlowAsync(
+            candidate,
+            "disabled-scope-claim-worker",
+            TimeSpan.FromMinutes(1),
+            default));
+
+        var removedScope = new DurableScopeId("slice4-flow-claim-removed-scope");
+        var removedInstance = new DurableFlowInstanceId("removed-scope-flow");
+        Assert.True((await client.StartAsync(new DurableFlowStartRequest(
+            removedScope,
+            new DurableCommandId("removed-scope-start"),
+            "removed-scope-start-key",
+            removedInstance,
+            registration.FlowId,
+            registration.FlowVersion,
+            codec.EncodeObject(new byte[] { 2 })))).IsSuccess);
+        var removedCandidate = Assert.Single(
+            await processor.DiscoverAsync(),
+            item => item.InstanceId == removedInstance);
+
+        await using (var removeScope = database.DataSource.CreateCommand(
+            """
+            DELETE FROM appsurface_durable.flow_dispatch WHERE scope_id = @scope_id;
+            DELETE FROM appsurface_durable.flow_history WHERE scope_id = @scope_id;
+            DELETE FROM appsurface_durable.flow_command WHERE scope_id = @scope_id;
+            DELETE FROM appsurface_durable.flow_instance WHERE scope_id = @scope_id;
+            DELETE FROM appsurface_durable.scope WHERE scope_id = @scope_id;
+            """))
+        {
+            removeScope.Parameters.AddWithValue("scope_id", removedScope.Value);
+            Assert.Equal(5, await removeScope.ExecuteNonQueryAsync());
+        }
+
+        Assert.Null(await store.TryClaimFlowAsync(
+            removedCandidate,
+            "removed-scope-claim-worker",
+            TimeSpan.FromMinutes(1),
+            default));
+    }
+
+    [Fact]
     public async Task FlowClaim_RejectsPersistedContextWithAnInvalidHash()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -687,44 +962,101 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             options);
         var store = new PostgreSqlDurableFlowStore(database.DataSource, options);
         var scope = new DurableScopeId("slice4-event-hash");
-        var instance = new DurableFlowInstanceId("invalid-event-hash");
-        Assert.True((await client.StartAsync(new DurableFlowStartRequest(
-            scope,
-            new DurableCommandId("invalid-event-hash-start"),
-            "invalid-event-hash-key",
-            instance,
-            registration.FlowId,
-            registration.FlowVersion,
-            contextCodec.EncodeObject(new byte[] { 1 })))).IsSuccess);
-        var waiting = await processor.TryProcessAsync(
-            Assert.Single(await processor.DiscoverAsync()),
-            "event-hash-wait-worker");
-        Assert.Equal(DurableFlowState.WaitingForEvent, waiting.State);
-        Assert.Equal(DurableFlowCommandOutcome.Accepted, (await client.RaiseEventAsync(new DurableFlowEventRequest(
-            scope,
-            new DurableCommandId("invalid-event-hash-event"),
-            new DurableFlowEventId("invalid-event-hash-id"),
-            instance,
-            "approved",
-            eventCodec.EncodeObject(new byte[] { 9 }),
-            waiting.Revision))).Value!.Outcome);
-        var candidate = Assert.Single(await processor.DiscoverAsync());
 
-        await using (var tamperEvent = database.DataSource.CreateCommand(
+        await using (var findConstraint = database.DataSource.CreateCommand(
+            """
+            SELECT format('%I', conname)
+            FROM pg_catalog.pg_constraint
+            WHERE conrelid = 'appsurface_durable.flow_instance'::regclass
+              AND contype = 'c'
+              AND pg_get_constraintdef(oid) LIKE '%resume_event_payload%';
+            """))
+        {
+            var resumeEventConstraint = (string)(await findConstraint.ExecuteScalarAsync())!;
+            await using (var dropConstraint = database.DataSource.CreateCommand(
+                $"ALTER TABLE appsurface_durable.flow_instance DROP CONSTRAINT {resumeEventConstraint};"))
+            {
+                await dropConstraint.ExecuteNonQueryAsync();
+            }
+        }
+
+        async Task AssertInvalidEventHashAsync(
+            string suffix,
+            string updateSql,
+            string expectedMessage,
+            string workerId)
+        {
+            var instance = new DurableFlowInstanceId($"invalid-event-hash-{suffix}");
+            Assert.True((await client.StartAsync(new DurableFlowStartRequest(
+                scope,
+                new DurableCommandId($"invalid-event-hash-{suffix}-start"),
+                $"invalid-event-hash-{suffix}-key",
+                instance,
+                registration.FlowId,
+                registration.FlowVersion,
+                contextCodec.EncodeObject(new byte[] { 1 })))).IsSuccess);
+
+            var waiting = await processor.TryProcessAsync(
+                Assert.Single(
+                    await processor.DiscoverAsync(),
+                    item => item.InstanceId == instance),
+                "event-hash-wait-worker");
+            Assert.Equal(DurableFlowState.WaitingForEvent, waiting.State);
+
+            Assert.Equal(DurableFlowCommandOutcome.Accepted, (await client.RaiseEventAsync(new DurableFlowEventRequest(
+                scope,
+                new DurableCommandId($"invalid-event-hash-{suffix}-event"),
+                new DurableFlowEventId($"invalid-event-hash-{suffix}-id"),
+                instance,
+                "approved",
+                eventCodec.EncodeObject(new byte[] { 9 }),
+                waiting.Revision))).Value!.Outcome);
+
+            var candidate = Assert.Single(
+                await processor.DiscoverAsync(),
+                item => item.InstanceId == instance);
+
+            await using (var tamperEvent = database.DataSource.CreateCommand(updateSql))
+            {
+                tamperEvent.Parameters.AddWithValue("scope_id", scope.Value);
+                tamperEvent.Parameters.AddWithValue("flow_instance_id", instance.Value);
+                Assert.Equal(1, await tamperEvent.ExecuteNonQueryAsync());
+            }
+
+            var exception = await Assert.ThrowsAsync<InvalidDataException>(async () =>
+                await store.TryClaimFlowAsync(candidate, workerId, TimeSpan.FromMinutes(1), default));
+            Assert.Contains(expectedMessage, exception.Message, StringComparison.Ordinal);
+        }
+
+        await AssertInvalidEventHashAsync(
+            "payload-null",
+            """
+            UPDATE appsurface_durable.flow_instance
+            SET resume_event_payload = NULL
+            WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id;
+            """,
+            "Flow event has a hash without persisted payload bytes.",
+            "event-hash-null-payload-worker");
+
+        await AssertInvalidEventHashAsync(
+            "hash-null",
+            """
+            UPDATE appsurface_durable.flow_instance
+            SET resume_event_sha256 = NULL
+            WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id;
+            """,
+            "Flow event is missing its persisted SHA-256.",
+            "event-hash-null-hash-worker");
+
+        await AssertInvalidEventHashAsync(
+            "mismatch",
             """
             UPDATE appsurface_durable.flow_instance
             SET resume_event_payload = '\\xDEADBEEF'::bytea
             WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id;
-            """))
-        {
-            tamperEvent.Parameters.AddWithValue("scope_id", scope.Value);
-            tamperEvent.Parameters.AddWithValue("flow_instance_id", instance.Value);
-            Assert.Equal(1, await tamperEvent.ExecuteNonQueryAsync());
-        }
-
-        var exception = await Assert.ThrowsAsync<InvalidDataException>(async () =>
-            await store.TryClaimFlowAsync(candidate, "event-hash-claim-worker", TimeSpan.FromMinutes(1), default));
-        Assert.Contains("Flow event failed persisted SHA-256 verification", exception.Message, StringComparison.Ordinal);
+            """,
+            "Flow event failed persisted SHA-256 verification.",
+            "event-hash-mismatch-worker");
     }
 
     [Fact]
@@ -1134,6 +1466,86 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     }
 
     [Fact]
+    public async Task ClaimTimeRecovery_SuspendsTheParentActivityFlowAtomically()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var originalEpoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(originalEpoch, "tests", "slice4-claim-recovery");
+        var status = await schema.GetStatusAsync();
+        var contextCodec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
+        var workCodec = new PostgreSqlOpaqueTestCodec("tests.flow.activity", "v1");
+        var resultCodec = new PostgreSqlOpaqueTestCodec("tests.flow.activity.result", "v1");
+        var workRegistration = new PostgreSqlOpaqueTestWorkRegistration(
+            "tests.flow.activity",
+            "v1",
+            DurableProviderSafety.ProviderKeyed,
+            workCodec,
+            resultCodec);
+        var payloads = new DurablePayloadCodecRegistry([contextCodec, workCodec, resultCodec]);
+        var work = new DurableWorkRegistry([workRegistration]);
+        var registration = new ActivityTestFlowRegistration(contextCodec, workRegistration, workCodec);
+        var flows = new DurableFlowRegistry([registration], work, payloads);
+        var originalOptions = new PostgreSqlDurableWorkOptions(originalEpoch, status.StoreId);
+        var flowClient = new PostgreSqlDurableFlowClient(database.DataSource, flows, payloads, originalOptions);
+        var flowProcessor = new PostgreSqlDurableFlowProcessor(
+            database.DataSource,
+            database.DataSource,
+            flows,
+            work,
+            payloads,
+            originalOptions);
+        var scope = new DurableScopeId("slice4-claim-recovery");
+        var instance = new DurableFlowInstanceId("claim-recovery-flow");
+        Assert.True((await flowClient.StartAsync(new DurableFlowStartRequest(
+            scope,
+            new DurableCommandId("claim-recovery-start"),
+            "claim-recovery-start-key",
+            instance,
+            registration.FlowId,
+            registration.FlowVersion,
+            contextCodec.EncodeObject(new byte[] { 1 })))).IsSuccess);
+
+        var activity = await flowProcessor.TryProcessAsync(
+            Assert.Single(await flowProcessor.DiscoverAsync()),
+            "claim-recovery-flow-worker");
+        Assert.Equal(DurableFlowState.WaitingForActivity, activity.State);
+        Assert.NotNull(activity.ChildWorkId);
+
+        var originalWorkStore = new PostgreSqlDurableWorkStore(database.DataSource, originalEpoch);
+        var candidate = Assert.Single(
+            await originalWorkStore.DiscoverAsync(10),
+            item => item.WorkId == activity.ChildWorkId);
+        var recoveryEpoch = Guid.NewGuid();
+        await schema.RotateRuntimeEpochAsync(originalEpoch, recoveryEpoch, "tests", "claim-recovery");
+
+        var recoveryStore = new PostgreSqlDurableWorkStore(database.DataSource, recoveryEpoch);
+        Assert.Null(await recoveryStore.TryClaimAsync(candidate, "claim-recovery-work-worker"));
+
+        var recoveryClient = new PostgreSqlDurableFlowClient(
+            database.DataSource,
+            flows,
+            payloads,
+            new PostgreSqlDurableWorkOptions(recoveryEpoch, status.StoreId));
+        var snapshot = await recoveryClient.GetAsync(new DurableFlowGetRequest(scope, instance));
+        Assert.Equal(DurableFlowState.Suspended, snapshot.Value!.State);
+
+        await using var wait = database.DataSource.CreateCommand(
+            """
+            SELECT state, suspension_descriptor ->> 'work_state'
+            FROM appsurface_durable.flow_wait
+            WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND kind = 'activity';
+            """);
+        wait.Parameters.AddWithValue("scope_id", scope.Value);
+        wait.Parameters.AddWithValue("flow_instance_id", instance.Value);
+        await using var reader = await wait.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("suspended", reader.GetString(0));
+        Assert.Equal(DurableWorkState.Suspended.ToString(), reader.GetString(1));
+    }
+
+    [Fact]
     public async Task FlowActivityCommit_GuardsProviderSafetyAndRollsBackStaleChildAcceptance()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -1254,6 +1666,58 @@ public sealed class DurableSlice4ReferenceWorkloadTests
         var stale = await store.CommitDecisionAsync(staleClaim, staleDecision, work, default);
         Assert.Equal(PostgreSqlFlowProcessingOutcome.Stale, stale.Outcome);
         Assert.Equal(workCountBefore, await CountAsync(database.DataSource, scope, workRegistration.WorkName));
+
+        var staleDispatchInstance = new DurableFlowInstanceId("activity-stale-dispatch");
+        Assert.True((await client.StartAsync(new DurableFlowStartRequest(
+            scope,
+            new DurableCommandId("activity-stale-dispatch-start"),
+            "activity-stale-dispatch-key",
+            staleDispatchInstance,
+            registration.FlowId,
+            registration.FlowVersion,
+            contextCodec.EncodeObject(new byte[] { 3 })))).IsSuccess);
+
+        var staleDispatchCandidate = Assert.Single(
+            await processor.DiscoverAsync(),
+            candidate => candidate.InstanceId == staleDispatchInstance);
+        var staleDispatchClaim = await store.TryClaimFlowAsync(
+            staleDispatchCandidate,
+            "activity-stale-dispatch-worker",
+            TimeSpan.FromMinutes(1),
+            default);
+        Assert.NotNull(staleDispatchClaim);
+        var staleDispatchWorkCountBefore = await CountAsync(database.DataSource, scope, workRegistration.WorkName);
+
+        await using (var makeDispatchStale = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.flow_dispatch
+            SET expected_revision = @stale_revision
+            WHERE dispatch_id = @dispatch_id;
+            """))
+        {
+            makeDispatchStale.Parameters.AddWithValue("dispatch_id", staleDispatchCandidate.DispatchId);
+            makeDispatchStale.Parameters.AddWithValue("stale_revision", staleDispatchClaim.Revision + 1);
+            Assert.Equal(1, await makeDispatchStale.ExecuteNonQueryAsync());
+        }
+
+        var staleDispatchDecision = new DurableFlowEvaluationResult(
+            FlowTransitionKind.Activity,
+            staleDispatchClaim.CurrentNodeId,
+            staleDispatchClaim.Context,
+            null,
+            null,
+            null,
+            null,
+            new DurableFlowActivityCommand(
+                activity.CallsiteId,
+                activity.ResultContractVersion,
+                activity.WorkName,
+                activity.WorkVersion,
+                workRegistration.ProviderSafety,
+                activity.Work));
+        var staleDispatch = await store.CommitDecisionAsync(staleDispatchClaim, staleDispatchDecision, work, default);
+        Assert.Equal(PostgreSqlFlowProcessingOutcome.Stale, staleDispatch.Outcome);
+        Assert.Equal(staleDispatchWorkCountBefore, await CountAsync(database.DataSource, scope, workRegistration.WorkName));
     }
 
     [Fact]
@@ -1322,7 +1786,7 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             Assert.Single(await processor.DiscoverAsync()),
             "timer-register-worker");
         Assert.Equal(DurableFlowState.WaitingForEvent, waiting.State);
-        await Task.Delay(25);
+        await ForceTimerDueAsync(database.DataSource, scope, instance);
         var timerCandidate = Assert.Single(await processor.DiscoverAsync());
         Assert.Equal(PostgreSqlFlowDispatchKind.Timer, timerCandidate.Kind);
         var crashCheckpoint = await RunTimerUntilCommitAndTerminateAsync(
@@ -1400,7 +1864,7 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             (await processor.TryProcessAsync(
                 Assert.Single(await processor.DiscoverAsync()),
                 "timer-cardinality-register-worker")).State);
-        await Task.Delay(25);
+        await ForceTimerDueAsync(database.DataSource, scope, instance);
         var timerCandidate = Assert.Single(await processor.DiscoverAsync());
 
         await using (var delete = database.DataSource.CreateCommand(
@@ -1479,7 +1943,7 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             (await processor.TryProcessAsync(
                 Assert.Single(await processor.DiscoverAsync()),
                 "timer-not-due-register-worker")).State);
-        await Task.Delay(25);
+        await ForceTimerDueAsync(database.DataSource, scope, instance);
         var candidate = Assert.Single(await processor.DiscoverAsync());
 
         await using (var deferTimer = database.DataSource.CreateCommand(
@@ -1541,7 +2005,7 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             (await processor.TryProcessAsync(
                 Assert.Single(await processor.DiscoverAsync()),
                 "timer-barrier-register-worker")).State);
-        await Task.Delay(25);
+        await ForceTimerDueAsync(database.DataSource, scope, instance);
 
         var result = await processor.TryProcessAsync(
             Assert.Single(await processor.DiscoverAsync()),
@@ -1747,7 +2211,7 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             (await timerProcessor.TryProcessAsync(
                 Assert.Single(await timerProcessor.DiscoverAsync()),
                 "disabled-timer-register-worker")).State);
-        await Task.Delay(25);
+        await ForceTimerDueAsync(database.DataSource, timerScope, timerInstance);
         var disabledTimerCandidate = Assert.Single(await timerProcessor.DiscoverAsync());
         Assert.Equal(
             PostgreSqlScopeMutationOutcome.Applied,
@@ -2365,7 +2829,7 @@ public sealed class DurableSlice4ReferenceWorkloadTests
                 await timerProcessor.DiscoverAsync(),
                 candidate => candidate.InstanceId == timerInstance),
             "event-wins-timer-register");
-        await Task.Delay(25);
+        await ForceTimerDueAsync(database.DataSource, scope, timerInstance);
         var staleTimer = Assert.Single(
             await timerProcessor.DiscoverAsync(),
             candidate => candidate.Kind == PostgreSqlFlowDispatchKind.Timer);
@@ -2380,6 +2844,27 @@ public sealed class DurableSlice4ReferenceWorkloadTests
         Assert.Equal(
             PostgreSqlFlowProcessingOutcome.RaceLost,
             (await timerProcessor.TryProcessAsync(staleTimer, "event-wins-stale-timer")).Outcome);
+    }
+
+    private static async ValueTask ForceTimerDueAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableFlowInstanceId instance)
+    {
+        await using var command = dataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.flow_timer
+            SET due_at = clock_timestamp() - interval '1 second', updated_at = clock_timestamp()
+            WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND state = 'scheduled';
+
+            UPDATE appsurface_durable.flow_dispatch
+            SET due_at = clock_timestamp() - interval '1 second', updated_at = clock_timestamp()
+            WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id
+              AND kind = 'timer' AND state IN ('available', 'leased');
+            """);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("flow_instance_id", instance.Value);
+        Assert.Equal(2, await command.ExecuteNonQueryAsync());
     }
 
     private static async ValueTask<long> CountAsync(

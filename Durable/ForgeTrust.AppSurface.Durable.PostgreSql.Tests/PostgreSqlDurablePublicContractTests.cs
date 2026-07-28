@@ -62,6 +62,27 @@ public sealed class PostgreSqlDurablePublicContractTests
     }
 
     [Fact]
+    public async Task FlowClient_RejectsNullRequestsBeforeOpeningConnection()
+    {
+        using var dataSource = NpgsqlDataSource.Create(
+            "Host=127.0.0.1;Port=5432;Database=durable_contracts;Username=durable");
+        var payloads = new DurablePayloadCodecRegistry();
+        var work = new DurableWorkRegistry([]);
+        var client = new PostgreSqlDurableFlowClient(
+            dataSource,
+            new DurableFlowRegistry([], work, payloads),
+            payloads,
+            new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()));
+
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.GetAsync(null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.ListAsync(null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.StartAsync(null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.RaiseEventAsync(null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.CancelAsync(null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.ReleaseSuspensionAsync(null!));
+    }
+
+    [Fact]
     public async Task FlowProcessor_RejectsDiscoveryBoundsBeforeOpeningConnection()
     {
         using var dataSource = NpgsqlDataSource.Create(

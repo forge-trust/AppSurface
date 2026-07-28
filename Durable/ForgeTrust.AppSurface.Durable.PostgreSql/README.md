@@ -51,6 +51,10 @@ the migration owner so pre-existing object ownership cannot preserve runtime DDL
 inherited, or `PUBLIC` schema, relation, column, and sequence privileges outside the documented allowlist cause the
 transactional recipe to fail and roll back; remove those host-managed grants before retrying.
 
+Apply schema migrations before rerunning the role recipe. A migration can add package relations, but the recipe owns
+the reviewed grants for existing service roles; running it second is required before Flow runtime or dispatcher
+connections can use the new relations.
+
 ### Role recipe contract
 
 Run the recipe with `psql` as a principal that can transfer ownership and grant privileges:
@@ -76,8 +80,8 @@ migration owner. Do not place application-owned objects there.
 
 | Principal | Allowed privileges |
 | --- | --- |
-| Dispatcher | Schema `USAGE`; table `SELECT` on payload-free `dispatch` and `flow_dispatch` only. |
-| Runtime reads | Schema `USAGE`; table `SELECT` on package metadata, scoped Work relations, and all six scoped Flow relations including `flow_dispatch`. |
+| Dispatcher | Schema `USAGE`; global table `SELECT` on payload-free `dispatch` and `flow_dispatch` only. |
+| Runtime reads | Schema `USAGE`; table `SELECT` on package metadata, scoped Work relations, and all six scoped Flow relations. `flow_dispatch` is scope-filtered by transaction-local RLS. |
 | Runtime inserts | Table `INSERT` on scoped Work relations and all six scoped Flow relations. |
 | Runtime updates | Reviewed column-level `UPDATE` on mutable Work, Flow instance/wait/timer, and dispatch fields; no table-wide update grant. |
 | Runtime sequences | `USAGE` and `SELECT` on every sequence in the package schema. |
