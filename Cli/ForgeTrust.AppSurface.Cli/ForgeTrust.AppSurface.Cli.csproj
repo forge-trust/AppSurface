@@ -9,13 +9,15 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>appsurface</ToolCommandName>
     <PackageId>ForgeTrust.AppSurface.Cli</PackageId>
-    <PackageDescription>Command-line tooling for AppSurface repository and documentation workflows.</PackageDescription>
-    <PackageTags>appsurface;appsurfacedocs;documentation;cli;dotnet-tool</PackageTags>
+    <PackageDescription>Command-line tooling for AppSurface documentation, coverage, PWA verification, and declared secret-promotion workflows.</PackageDescription>
+    <PackageTags>appsurface;appsurfacedocs;documentation;coverage;secrets;cli;dotnet-tool</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\Console\ForgeTrust.AppSurface.Console\ForgeTrust.AppSurface.Console.csproj" />
+    <ProjectReference Include="..\..\Config\ForgeTrust.AppSurface.Config.GoogleSecretManager\ForgeTrust.AppSurface.Config.GoogleSecretManager.csproj" />
     <ProjectReference Include="..\..\Config\ForgeTrust.AppSurface.Config.LocalSecrets\ForgeTrust.AppSurface.Config.LocalSecrets.csproj" />
+    <ProjectReference Include="..\..\ForgeTrust.AppSurface.Core\ForgeTrust.AppSurface.Core.csproj" />
     <ProjectReference Include="..\..\Web\ForgeTrust.AppSurface.Web\ForgeTrust.AppSurface.Web.csproj" />
     <ProjectReference Include="..\..\Web\ForgeTrust.AppSurface.Docs.Standalone\ForgeTrust.AppSurface.Docs.Standalone.csproj" />
     <ProjectReference Include="..\..\Web\ForgeTrust.RazorWire.Cli\ForgeTrust.RazorWire.Cli.csproj" />

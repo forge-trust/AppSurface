@@ -2759,6 +2759,20 @@ trust:
 - Keep private maintainer-only runbooks outside harvested docs. Hidden pages are removed from nav and search, but they are still public if linked directly.
 - Do not turn the trust bar into marketing chrome. It should answer status, safety, and provenance questions quickly.
 
+## Dependency security boundary
+
+The coordinated response to [GHSA-pgww-w46g-26qg](https://github.com/advisories/GHSA-pgww-w46g-26qg) upgrades the HTML parsing and sanitization graph without changing the AppSurface Docs public API, registration sequence, configuration, or consumer usage. The package restores these exact versions from the repository's [central package version catalog](../../Directory.Packages.props):
+
+- `AngleSharp` `[1.5.2]`
+- `HtmlSanitizer` `[9.1.949-beta]`
+- `AngleSharp.Css` `[1.0.0-beta.216]`
+
+The exact pins are intentional: `HtmlSanitizer` and `AngleSharp.Css` must be upgraded as a compatible pair, and the brackets prevent NuGet from silently selecting a different dependency graph. Their beta versions are acceptable only while AppSurface packages are themselves preview releases. The [package artifact verification workflow](../../packages/README.md#maintainer-notes) requires all three dependencies for a stable Docs package, rejects missing or malformed ranges and AngleSharp lower bounds below 1.5.2, and blocks prerelease `HtmlSanitizer` or `AngleSharp.Css`; [issue #682](https://github.com/forge-trust/AppSurface/issues/682) tracks replacing the pair with compatible stable releases as a stable-release prerequisite, not a reason to loosen the exact pins.
+
+If an adopter's central package policy conflicts with any of these versions, do not use `VersionOverride`, remove the equality brackets, or widen only one dependency. Align the application's entire trio to the exact graph above, or remain on the prior AppSurface preview until a coordinated compatible graph is available. A locally successful restore with a loosened range is not supported compatibility evidence. Maintainers proving the packed graph must follow the [#678 package-proof sequence](../../packages/README.md#issue-678-package-proof).
+
+`IAppSurfaceDocsHtmlSanitizer` protects rendered package-documentation fragments before AppSurface Docs includes them in its UI. It is not a general untrusted-user-content sanitizer, a whole-document security boundary, or a substitute for a host Content Security Policy. Applications accepting general UGC must define and verify their own sanitization policy, and hosts remain responsible for CSP and the rest of their response-hardening policy. Do not widen the Docs allowlist merely to make unrelated application HTML render.
+
 ## Related Projects
 
 - [ForgeTrust.AppSurface.Docs.Standalone](../ForgeTrust.AppSurface.Docs.Standalone/README.md) for the exportable host used in docs export and smoke testing

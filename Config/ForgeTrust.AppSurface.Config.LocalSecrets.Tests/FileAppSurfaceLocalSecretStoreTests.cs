@@ -32,9 +32,484 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Contains("Stripe:ApiKey", list.Keys);
         Assert.Equal(LocalSecretResultStatus.Found, delete.Status);
         Assert.Equal(LocalSecretResultStatus.Missing, missing.Status);
-        Assert.DoesNotContain("sk_test_secret", set.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", delete.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", set.ToString());
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", delete.ToString());
     }
+
+    [Fact]
+    public void Probe_Should_ReportExistenceWithoutReturningSecretValue()
+    {
+        using var temp = TempDirectory.Create();
+        var store = new FileAppSurfaceLocalSecretStore(Path.Join(temp.Path, "secrets.json"));
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+
+        var set = store.Set(identity, "sk_test_secret");
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Found, set.Status);
+        Assert.Equal(LocalSecretResultStatus.Found, probe.Status);
+        Assert.Equal(string.Empty, probe.Value);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", probe.ToString());
+    }
+
+    [Fact]
+    public void Probe_Should_FindStorageNamesWithJsonEscapedCharacters()
+    {
+        using var temp = TempDirectory.Create();
+        var store = new FileAppSurfaceLocalSecretStore(Path.Join(temp.Path, "secrets.json"));
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:\"Snow-雪")
+            .Identity!;
+
+        Assert.Equal(LocalSecretResultStatus.Found, store.Set(identity, "sentinel-local-secret").Status);
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Found, probe.Status);
+        Assert.Equal(string.Empty, probe.Value);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", probe.ToString());
+    }
+
+    [Fact]
+    public void Probe_Should_FindStorageNamesWithEquivalentEscapedAndRawUtf8PropertyNames()
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:雪😀")
+            .Identity!;
+        var escapedStorageName = identity.StorageName
+            .Replace(":", "\\u003A", StringComparison.Ordinal)
+            .Replace("雪", "\\u96ea", StringComparison.Ordinal);
+
+        var raw = CreateProbeStore("{\"" + identity.StorageName + "\":{}}").Probe(identity);
+        var escaped = CreateProbeStore("{\"" + escapedStorageName + "\":{}}").Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Found, raw.Status);
+        Assert.Equal(LocalSecretResultStatus.Found, escaped.Status);
+        Assert.Equal(string.Empty, raw.Value);
+        Assert.Equal(string.Empty, escaped.Value);
+    }
+
+    [Fact]
+    public void Probe_Should_NotReadStoredValueObject_WhenStorageNameMatches()
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var json = "{\"" + identity.StorageName + "\":{\"ApplicationName\":\"MyApp\",\"Environment\":\"Development\",\"KeyPrefix\":null,\"Key\":\"Stripe:ApiKey\",\"Value\":\"sk_test_secret\"}}";
+        var valueObjectOffset = System.Text.Encoding.UTF8.GetByteCount(json[..json.IndexOf("{\"ApplicationName\"", StringComparison.Ordinal)]);
+        var store = new FileAppSurfaceLocalSecretStore(
+            "/tmp/appsurface-test-secrets.json",
+            new ThrowingFileSystem(openRead: () => new ThrowAfterPositionStream(System.Text.Encoding.UTF8.GetBytes(json), valueObjectOffset + 1)));
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Found, probe.Status);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", probe.ToString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Probe_Should_ReturnMissing_WhenOnlyDifferentPropertyExists(bool matchesStorageNamePrefix)
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var propertyName = matchesStorageNamePrefix ? identity.StorageName + "-suffix" : "Ignored";
+        var store = CreateProbeStore("{\"" + propertyName + "\":{}}");
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Missing, probe.Status);
+        Assert.Null(probe.Value);
+    }
+
+    [Fact]
+    public void Probe_Should_ReturnInvalidStore_WhenMatchedValueIsMissing()
+    {
+        using var temp = TempDirectory.Create();
+        var path = Path.Join(temp.Path, "secrets.json");
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        File.WriteAllText(path, "{\"" + identity.StorageName + "\":");
+        if (IsUnix())
+        {
+            new FileInfo(path).UnixFileMode = SecretFileMode;
+        }
+
+        var store = new FileAppSurfaceLocalSecretStore(path);
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, probe.Status);
+        Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
+    }
+
+    [Fact]
+    public void Probe_Should_ReturnInvalidStore_WhenMatchedValueIsNotObject()
+    {
+        using var temp = TempDirectory.Create();
+        var path = Path.Join(temp.Path, "secrets.json");
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        File.WriteAllText(path, "{\"" + identity.StorageName + "\":true}");
+        if (IsUnix())
+        {
+            new FileInfo(path).UnixFileMode = SecretFileMode;
+        }
+
+        var store = new FileAppSurfaceLocalSecretStore(path);
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, probe.Status);
+        Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
+    }
+
+    [Fact]
+    public void Probe_Should_ReturnInvalidStore_WhenEarlierValueIsNotObject()
+    {
+        using var temp = TempDirectory.Create();
+        var path = Path.Join(temp.Path, "secrets.json");
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        File.WriteAllText(
+            path,
+            "{\"Other\":true,\"" + identity.StorageName + "\":{\"ApplicationName\":\"MyApp\",\"Environment\":\"Development\",\"KeyPrefix\":null,\"Key\":\"Stripe:ApiKey\",\"Value\":\"raw-secret\"}}");
+        if (IsUnix())
+        {
+            new FileInfo(path).UnixFileMode = SecretFileMode;
+        }
+
+        var store = new FileAppSurfaceLocalSecretStore(path);
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, probe.Status);
+        Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
+        ValueSafeAssert.DoesNotExpose("raw-secret", probe.ToString());
+    }
+
+    [Fact]
+    public void Probe_Should_ReturnInvalidStore_WhenEarlierValueIsMalformed()
+    {
+        using var temp = TempDirectory.Create();
+        var path = Path.Join(temp.Path, "secrets.json");
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        File.WriteAllText(
+            path,
+            "{\"Other\":[},\"" + identity.StorageName + "\":{\"ApplicationName\":\"MyApp\",\"Environment\":\"Development\",\"KeyPrefix\":null,\"Key\":\"Stripe:ApiKey\",\"Value\":\"raw-secret\"}}");
+        if (IsUnix())
+        {
+            new FileInfo(path).UnixFileMode = SecretFileMode;
+        }
+
+        var store = new FileAppSurfaceLocalSecretStore(path);
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, probe.Status);
+        Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
+        ValueSafeAssert.DoesNotExpose("raw-secret", probe.ToString());
+    }
+
+    [Fact]
+    public void Probe_Should_SkipEveryValidNestedJsonValueShapeBeforeMatchingEntry()
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var json =
+            "{" +
+            "\"Ignored\":{" +
+            "\"text\":\"escaped \\\"quote\\\" and unicode \\u0031\"," +
+            "\"object\":{\"nested\":true}," +
+            "\"emptyObject\":{}," +
+            "\"array\":[false,null,\"text\",-1.25e+3]," +
+            "\"emptyArray\":[]," +
+            "\"integer\":0," +
+            "\"number\":12.5E-2" +
+            "}," +
+            "\"" + identity.StorageName + "\":{}" +
+            "}";
+        var store = CreateProbeStore(json);
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Found, probe.Status);
+        Assert.Equal(string.Empty, probe.Value);
+    }
+
+    [Theory]
+    [MemberData(nameof(MalformedSkippedValues))]
+    public void Probe_Should_ReturnInvalidStore_ForMalformedSkippedValue(string value)
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var store = CreateProbeStore("{\"Ignored\":{\"value\":" + value + "},\"" + identity.StorageName + "\":{}}");
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, probe.Status);
+        Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
+    }
+
+    [Fact]
+    public void Probe_Should_ReturnInvalidStore_ForInvalidUtf8InSkippedString()
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var prefix = System.Text.Encoding.UTF8.GetBytes("{\"Ignored\":{\"value\":\"");
+        var suffix = System.Text.Encoding.UTF8.GetBytes("\"},\"" + identity.StorageName + "\":{}}");
+        byte[] json = [.. prefix, 0xC3, 0x28, .. suffix];
+
+        var probe = CreateProbeStore(json).Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, probe.Status);
+        Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Probe_Should_ReturnValueSafeFailure_ForReadExceptions(bool unauthorized)
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var store = new FileAppSurfaceLocalSecretStore(
+            "/tmp/appsurface-test-secrets.json",
+            new ThrowingFileSystem(openRead: () =>
+            {
+                if (unauthorized)
+                {
+                    throw new UnauthorizedAccessException("sentinel-local-secret");
+                }
+
+                throw new IOException("sentinel-local-secret");
+            }));
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(unauthorized ? LocalSecretResultStatus.Locked : LocalSecretResultStatus.Unavailable, probe.Status);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", probe.ToString());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Probe_Should_ReturnValueSafeFailure_ForPostureInspectionExceptions(bool unauthorized)
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var store = new FileAppSurfaceLocalSecretStore(
+            "/tmp/appsurface-test-secrets.json",
+            new ThrowingFileSystem(existingFilePosture: () =>
+            {
+                if (unauthorized)
+                {
+                    throw new UnauthorizedAccessException("sentinel-local-secret");
+                }
+
+                throw new IOException("sentinel-local-secret");
+            }));
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(unauthorized ? LocalSecretResultStatus.Locked : LocalSecretResultStatus.Unavailable, probe.Status);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", probe.ToString());
+    }
+
+    [Fact]
+    public void Probe_Should_ReturnPostureFailure_WhenExistingFileIsUnsupported()
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var store = new FileAppSurfaceLocalSecretStore(
+            "/tmp/appsurface-test-secrets.json",
+            new ThrowingFileSystem(existingFilePosture: () => FileSecretPostureResult.Unsupported(
+                "local-secret-test-posture",
+                "Local secret test posture failed.",
+                "The test posture is unsupported.",
+                "Use a supported test posture.")));
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, probe.Status);
+        Assert.Equal("local-secret-test-posture", probe.Diagnostic?.Code);
+    }
+
+    [Fact]
+    public void Probe_Should_ValidatePostureBeforeCheckingFileExists()
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var inspectedPosture = false;
+        var checkedFileExists = false;
+        var store = new FileAppSurfaceLocalSecretStore(
+            "/tmp/appsurface-test-secrets.json",
+            new ThrowingFileSystem(
+                fileExists: () =>
+                {
+                    checkedFileExists = true;
+                    Assert.True(inspectedPosture);
+                    return false;
+                },
+                existingFilePosture: () =>
+                {
+                    inspectedPosture = true;
+                    return FileSecretPostureResult.Ready();
+                }));
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Missing, probe.Status);
+        Assert.True(inspectedPosture);
+        Assert.True(checkedFileExists);
+    }
+
+    [Theory]
+    [MemberData(nameof(ValidEscapedPropertyDocuments))]
+    public void Probe_Should_AcceptEveryJsonPropertyEscape(string json)
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+
+        var probe = CreateProbeStore(json).Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Missing, probe.Status);
+    }
+
+    public static IEnumerable<object[]> ValidEscapedPropertyDocuments()
+    {
+        yield return ["{\"\\\"\":{}}"];
+        yield return ["{\"\\\\\":{}}"];
+        yield return ["{\"\\/\":{}}"];
+        yield return ["{\"\\b\":{}}"];
+        yield return ["{\"\\f\":{}}"];
+        yield return ["{\"\\n\":{}}"];
+        yield return ["{\"\\r\":{}}"];
+        yield return ["{\"\\t\":{}}"];
+        yield return ["{\"\\uABCD\":{}}"];
+        yield return ["{\"\\uabcd\":{}}"];
+    }
+
+    [Fact]
+    public void Probe_Should_SkipAllValidStringEscapesAndNumericBoundaries()
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var store = CreateProbeStore(
+            "{\"Ignored\":{" +
+            "\"escapes\":\"\\\"\\\\\\/\\b\\f\\n\\r\\t\\uABCD\"," +
+            "\"fraction\":1.09," +
+            "\"unsignedExponent\":1e09," +
+            "\"positiveExponent\":1e+09," +
+            "\"negativeExponent\":1e-09" +
+            "}}");
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Missing, probe.Status);
+    }
+
+    public static IEnumerable<object[]> MalformedSkippedValues()
+    {
+        yield return ["]"];
+        yield return ["\"unterminated"];
+        yield return ["\"\\q\""];
+        yield return ["\"\\u0X00\""];
+        yield return ["[1 2]"];
+        yield return ["[1,]"];
+        yield return ["{bad:1}"];
+        yield return ["{\"nested\" 1}"];
+        yield return ["{\"nested\":1 \"other\":2}"];
+        yield return ["\"control\u0001\""];
+        yield return ["truX"];
+        yield return ["truex"];
+        yield return ["-x"];
+        yield return ["01"];
+        yield return ["1."];
+        yield return ["1e+"];
+    }
+
+    [Theory]
+    [MemberData(nameof(MalformedRootDocuments))]
+    public void Probe_Should_ReturnInvalidStore_ForMalformedRootDocument(string json)
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+        var store = CreateProbeStore(json);
+
+        var probe = store.Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, probe.Status);
+        Assert.Equal("local-secret-store-invalid", probe.Diagnostic?.Code);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" \r\n\t")]
+    [InlineData("null")]
+    [InlineData("{}")]
+    public void Probe_Should_ReturnMissing_ForEmptyStoreDocuments(string json)
+    {
+        var identity = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
+            .Identity!;
+
+        var probe = CreateProbeStore(json).Probe(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Missing, probe.Status);
+    }
+
+    public static IEnumerable<object[]> MalformedRootDocuments()
+    {
+        yield return ["[]"];
+        yield return ["{Ignored:{}}"];
+        yield return ["{\"Ignored\" {}}"];
+        yield return ["{\"Ignored\":{} x}"];
+        yield return ["{\"Ignored\":{}} trailing"];
+        yield return ["{\"unterminated"];
+        yield return ["{" + "\"" + "\\"];
+        yield return ["{\"\\q\":{}}"];
+        yield return ["{\"\\u0X00\":{}}"];
+        yield return ["{\"control\u0001\":{}}"];
+        yield return ["{\"Ignored\":{\"value\":-"];
+        yield return ["{\"Ignored\":{\"value\":\"\\"];
+        yield return ["{\"Ignored\":{\"value\":\"\\u0"];
+        yield return ["{\"\\u0"];
+        yield return ["{\"Ignored\":{\"value\":\"unterminated"];
+        yield return ["{\"Ignored\":{\"value\":"];
+        yield return ["{\"Ignored\":{\"value\":1"];
+        yield return ["{\"Ignored\":{\"value\":1."];
+        yield return ["{\"Ignored\":{\"value\":1e"];
+    }
+
+    private static FileAppSurfaceLocalSecretStore CreateProbeStore(string json) =>
+        new(
+            "/tmp/appsurface-test-secrets.json",
+            new ThrowingFileSystem(openRead: () => new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json))));
+
+    private static FileAppSurfaceLocalSecretStore CreateProbeStore(byte[] json) =>
+        new(
+            "/tmp/appsurface-test-secrets.json",
+            new ThrowingFileSystem(openRead: () => new MemoryStream(json)));
 
     [Fact]
     public void Delete_Should_ReturnMissing_WhenKeyDoesNotExist()
@@ -212,7 +687,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Equal(looseMode, new DirectoryInfo(directory).UnixFileMode);
         Assert.False(File.Exists(path));
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -266,8 +741,8 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.ProviderFailed, list.Status);
         Assert.Equal("local-secret-store-invalid", get.Diagnostic?.Code);
         Assert.Equal("local-secret-store-invalid", list.Diagnostic?.Code);
-        Assert.DoesNotContain("raw-secret", get.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("raw-secret", list.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("raw-secret", get.ToString());
+        ValueSafeAssert.DoesNotExpose("raw-secret", list.ToString());
     }
 
     [Fact]
@@ -306,7 +781,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Equal("Local secret file posture is unsupported.", result.Diagnostic?.Problem);
         Assert.Null(result.Value);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -332,7 +807,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Equal("Local secret file posture is unsupported.", result.Diagnostic?.Problem);
         Assert.Null(result.Value);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -358,7 +833,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Equal("{}", File.ReadAllText(target));
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -389,7 +864,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Null(result.Value);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -417,7 +892,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.False(File.Exists(Path.Join(nestedDirectory, "secrets.json")));
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -445,7 +920,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.False(readCalled);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -471,7 +946,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
         Assert.Null(result.Value);
         Assert.False(readCalled);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -499,7 +974,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.False(readCalled);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -528,7 +1003,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.False(readCalled);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -556,7 +1031,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.Equal(2, postureChecks);
         Assert.Null(result.Value);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -611,7 +1086,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
         Assert.Null(result.Value);
         Assert.Equal(2, postureChecks);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -687,7 +1162,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.True(writeCalled);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -704,7 +1179,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.Locked, result.Status);
         Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -721,7 +1196,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.Locked, result.Status);
         Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -741,8 +1216,8 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
         Assert.False(Directory.Exists(ancestor));
-        Assert.DoesNotContain("sk_test_secret", File.ReadAllText(ancestor), StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", File.ReadAllText(ancestor));
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -758,7 +1233,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.UnsupportedPlatform, result.Status);
         Assert.Equal("local-secret-file-posture-unsupported", result.Diagnostic?.Code);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -805,7 +1280,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.Locked, result.Status);
         Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -850,7 +1325,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
         Assert.Equal("local-secret-store-unavailable", result.Diagnostic?.Code);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -893,7 +1368,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         Assert.Equal(SecretDirectoryMode, new DirectoryInfo(temp.Path).UnixFileMode);
         Assert.Equal(SecretFileMode, new FileInfo(path).UnixFileMode);
         Assert.Empty(store.List("MyApp", "Development", null).Keys);
-        Assert.DoesNotContain("sk_test_secret", result.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.ToString());
     }
 
     [Fact]
@@ -1267,15 +1742,20 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     private sealed class ThrowingFileSystem(
         Func<string>? read = null,
         Action<string>? write = null,
+        Func<Stream>? openRead = null,
+        Func<bool>? fileExists = null,
         Func<FileSecretPostureResult>? readPath = null,
         Func<FileSecretPostureResult>? existingFilePosture = null,
         Func<FileSecretPostureResult>? prepareWrite = null,
         Func<FileSecretPostureResult>? writePosture = null,
         Func<FileSecretPostureResult>? doctor = null) : IFileAppSurfaceLocalSecretStoreFileSystem
     {
-        public bool FileExists(string path) => true;
+        public bool FileExists(string path) => fileExists?.Invoke() ?? true;
 
         public string ReadAllText(string path) => read?.Invoke() ?? "{}";
+
+        public Stream OpenRead(string path) =>
+            openRead?.Invoke() ?? new MemoryStream(System.Text.Encoding.UTF8.GetBytes(ReadAllText(path)));
 
         public FileSecretPostureResult InspectReadPath(string path) => readPath?.Invoke() ?? FileSecretPostureResult.Ready();
 
@@ -1291,5 +1771,55 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
         }
 
         public FileSecretPostureResult Doctor(string path) => doctor?.Invoke() ?? FileSecretPostureResult.Ready();
+    }
+
+    private sealed class ThrowAfterPositionStream(byte[] data, int throwAt) : Stream
+    {
+        private int _position;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => _position;
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            ArgumentNullException.ThrowIfNull(buffer);
+            if (_position >= throwAt)
+            {
+                throw new InvalidOperationException("Probe read into the stored value payload.");
+            }
+
+            if (_position >= data.Length)
+            {
+                return 0;
+            }
+
+            var availableBeforeThrow = throwAt - _position;
+            var available = Math.Min(data.Length - _position, availableBeforeThrow);
+            var bytesRead = Math.Min(count, available);
+            Array.Copy(data, _position, buffer, offset, bytesRead);
+            _position += bytesRead;
+            return bytesRead;
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }
