@@ -1,12 +1,15 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Text;
 using System.Text.Json;
 
 using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Caching;
+using ForgeTrust.AppSurface.Config.GoogleSecretManager;
 using ForgeTrust.AppSurface.Config.LocalSecrets;
 using ForgeTrust.AppSurface.Console;
 using ForgeTrust.AppSurface.Core;
@@ -56,12 +59,158 @@ public sealed class ProgramEntryPointTests
         var result = await InvokeEntryPointAsync(["secrets", "--help"]);
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("Manage AppSurface local development secrets.", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Manage AppSurface local development secrets and explicit remote transfers.", result.AllText, StringComparison.Ordinal);
         Assert.Contains("set", result.AllText, StringComparison.Ordinal);
         Assert.Contains("doctor", result.AllText, StringComparison.Ordinal);
         Assert.Contains("appsurface secrets [command] --help", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsCommand_Should_PrintPlanApplyGuidance()
+    {
+        var result = await InvokeProgramEntryPointAsync(["secrets"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("appsurface secrets transfer plan|apply", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("transfer google", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsTransfer_Should_PrintDeclaredWorkflowGuidance()
+    {
+        var result = await InvokeProgramEntryPointAsync(["secrets", "transfer"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("secrets transfer plan", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("secrets transfer apply --apply", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("plan", "--out")]
+    [InlineData("apply", "--plan")]
+    public async Task SecretsTransferCommands_Should_DescribeRequiredArtifacts(string command, string requiredOption)
+    {
+        var result = await InvokeProgramEntryPointAsync(["secrets", "transfer", command, "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains(requiredOption, result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("plan", "--config is required.")]
+    [InlineData("apply", "--config is required.")]
+    public async Task SecretsTransferCommands_Should_RequireConfigurationBeforeAnyProviderWork(string command, string expectedDiagnostic)
+    {
+        var result = await InvokeProgramEntryPointAsync(["secrets", "transfer", command]);
+
+        Assert.Equal(2, result.ExitCode);
+        Assert.Contains(expectedDiagnostic, result.AllText, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("NaN")]
+    [InlineData("0")]
+    [InlineData("61")]
+    public async Task SecretsTransferPlan_Should_RejectInvalidExpiry(string value)
+    {
+        var result = await InvokeProgramEntryPointAsync([
+            "secrets", "transfer", "plan",
+            "--config", "unused.json",
+            "--job", "unused",
+            "--out", "unused.plan.json",
+            "--expires-minutes", value
+        ]);
+
+        Assert.Equal(2, result.ExitCode);
+        Assert.Contains("finite number greater than 0 and at most 60", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsTransferCommands_Should_Plan_DryRun_AndApply_WithValueSafeJsonOutput()
+    {
+        using var temp = TempDirectory.Create("appsurface-transfer-");
+        var storePath = Path.Join(temp.Path, "secrets.json");
+        var configPath = Path.Join(temp.Path, "promotion.json");
+        var planPath = Path.Join(temp.Path, "promotion.plan.json");
+        await File.WriteAllTextAsync(configPath, """
+            {"version":1,"endpoints":[{"name":"staging","provider":"google","environment":"staging","credential":{"mode":"applicationDefault"}}],"jobs":[{"name":"local-to-staging","source":"local","destination":"staging","rows":[{"key":"Stripe:ApiKey","destination":"projects/staging/secrets/stripe-api-key"}]}]}
+            """);
+        var client = new FakeGoogleSecretTransferClient();
+        client.Secrets["projects/staging/secrets/stripe-api-key"] = false;
+        var shared = new[] { "--app", "MyApp", "--environment", "Development", "--store-file", storePath };
+
+        var set = await InvokeProgramEntryPointAsync(["secrets", "set", "Stripe:ApiKey", "--stdin", .. shared], standardInput: "sentinel-local-secret\n");
+        var plan = await InvokeProgramEntryPointAsync(["secrets", "transfer", "plan", "--config", configPath, "--job", "local-to-staging", "--out", planPath, "--json", .. shared], options => RegisterGoogleTransferClient(options, client));
+        var dryRun = await InvokeProgramEntryPointAsync(["secrets", "transfer", "apply", "--config", configPath, "--plan", planPath, "--json", .. shared], options => RegisterGoogleTransferClient(options, client));
+        var apply = await InvokeProgramEntryPointAsync(["secrets", "transfer", "apply", "--config", configPath, "--plan", planPath, "--apply", "--json", .. shared], options => RegisterGoogleTransferClient(options, client));
+
+        Assert.Equal(0, set.ExitCode);
+        Assert.Equal(0, plan.ExitCode);
+        Assert.Equal(0, dryRun.ExitCode);
+        Assert.Equal(0, apply.ExitCode);
+        Assert.Equal("projects/staging/secrets/stripe-api-key", Assert.Single(client.Writes));
+        var planArtifact = await File.ReadAllTextAsync(planPath);
+        var receiptArtifact = await File.ReadAllTextAsync($"{planPath}.receipt.json");
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", plan.AllText + dryRun.AllText + apply.AllText + planArtifact + receiptArtifact);
+    }
+
+    [Fact]
+    public async Task SecretsTransferPlan_Should_RenderValueSafeTextDiagnostics_WhenSourceIsMissing()
+    {
+        using var temp = TempDirectory.Create("appsurface-transfer-");
+        var storePath = Path.Join(temp.Path, "secrets.json");
+        var configPath = Path.Join(temp.Path, "promotion.json");
+        var planPath = Path.Join(temp.Path, "promotion.plan.json");
+        await File.WriteAllTextAsync(configPath, """
+            {"version":1,"endpoints":[{"name":"staging","provider":"google","environment":"staging","credential":{"mode":"applicationDefault"}}],"jobs":[{"name":"local-to-staging","source":"local","destination":"staging","rows":[{"key":"Missing:ApiKey","destination":"projects/staging/secrets/missing-api-key"}]}]}
+            """);
+        var client = new FakeGoogleSecretTransferClient();
+        client.Secrets["projects/staging/secrets/missing-api-key"] = false;
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "plan", "--config", configPath, "--job", "local-to-staging", "--out", planPath, "--app", "MyApp", "--environment", "Development", "--store-file", storePath],
+            options => RegisterGoogleTransferClient(options, client));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Operation: plan; Job: local-to-staging; Mode: dry-run", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("SourceMissing: Missing:ApiKey", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Diagnostic: local-secret-promotion-source-missing", result.AllText, StringComparison.Ordinal);
+        Assert.Empty(client.Writes);
+    }
+
+    [Fact]
+    public async Task SecretsTransferApply_Should_ReturnFailure_WhenApplyPreflightChanges()
+    {
+        using var temp = TempDirectory.Create("appsurface-transfer-");
+        var storePath = Path.Join(temp.Path, "secrets.json");
+        var configPath = Path.Join(temp.Path, "promotion.json");
+        var planPath = Path.Join(temp.Path, "promotion.plan.json");
+        await File.WriteAllTextAsync(configPath, """
+            {"version":1,"endpoints":[{"name":"staging","provider":"google","environment":"staging","credential":{"mode":"applicationDefault"}}],"jobs":[{"name":"local-to-staging","source":"local","destination":"staging","rows":[{"key":"Stripe:ApiKey","destination":"projects/staging/secrets/stripe-api-key"}]}]}
+            """);
+        var client = new FakeGoogleSecretTransferClient();
+        client.Secrets["projects/staging/secrets/stripe-api-key"] = false;
+        var shared = new[] { "--app", "MyApp", "--environment", "Development", "--store-file", storePath };
+
+        var set = await InvokeProgramEntryPointAsync(["secrets", "set", "Stripe:ApiKey", "--stdin", .. shared], standardInput: "sentinel-local-secret\n");
+        var plan = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "plan", "--config", configPath, "--job", "local-to-staging", "--out", planPath, .. shared],
+            options => RegisterGoogleTransferClient(options, client));
+        client.Secrets.Clear();
+
+        var apply = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "apply", "--config", configPath, "--plan", planPath, "--apply", .. shared],
+            options => RegisterGoogleTransferClient(options, client));
+
+        Assert.Equal(0, set.ExitCode);
+        Assert.Equal(0, plan.ExitCode);
+        Assert.Equal(1, apply.ExitCode);
+        Assert.Contains("ProbeGoogleDestination", apply.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-local-secret", apply.AllText);
+        Assert.Empty(client.Writes);
     }
 
     [Fact]
@@ -84,7 +233,7 @@ public sealed class ProgramEntryPointTests
         Assert.Equal(0, delete.ExitCode);
         Assert.Contains("Stripe:ApiKey", list.AllText, StringComparison.Ordinal);
         Assert.Contains("Found: local secret namespace", get.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", init.AllText + set.AllText + list.AllText + get.AllText + delete.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", init.AllText + set.AllText + list.AllText + get.AllText + delete.AllText);
     }
 
     [Fact]
@@ -101,7 +250,7 @@ public sealed class ProgramEntryPointTests
         Assert.Equal(0, list.ExitCode);
         Assert.Contains("Stripe:ApiKey", list.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Source:", list.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", list.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", list.AllText);
     }
 
     [Fact]
@@ -121,7 +270,7 @@ public sealed class ProgramEntryPointTests
 
         Assert.NotEqual(0, list.ExitCode);
         Assert.Contains("local-secret-store-invalid", list.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", list.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", list.AllText);
     }
 
     [Fact]
@@ -136,7 +285,7 @@ public sealed class ProgramEntryPointTests
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Ready: local secret namespace", result.AllText, StringComparison.Ordinal);
         Assert.Contains(OperatingSystem.IsWindows() ? "local-secret-file-posture-degraded" : "local-secret-store-ready", result.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.AllText);
     }
 
     [Fact]
@@ -158,7 +307,7 @@ public sealed class ProgramEntryPointTests
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Ready: local secret namespace", result.AllText, StringComparison.Ordinal);
         Assert.Contains("local-secret-file-posture-repaired", result.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.AllText);
     }
 
     [Fact]
@@ -186,7 +335,7 @@ public sealed class ProgramEntryPointTests
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("Use either --store-file or --secret-tool-path", result.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.AllText);
     }
 
     [Fact]
@@ -273,8 +422,8 @@ public sealed class ProgramEntryPointTests
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("Use either --value or --stdin", result.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_other_secret", result.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.AllText);
+        ValueSafeAssert.DoesNotExpose("sk_other_secret", result.AllText);
     }
 
     [Fact]
@@ -292,7 +441,7 @@ public sealed class ProgramEntryPointTests
         Assert.Equal(0, get.ExitCode);
         Assert.Contains("Set: local secret namespace", set.AllText, StringComparison.Ordinal);
         Assert.Contains("Found: local secret namespace", get.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", set.AllText + get.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", set.AllText + get.AllText);
     }
 
     [Fact]
@@ -319,7 +468,7 @@ public sealed class ProgramEntryPointTests
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("Local secret was not found", result.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.AllText);
     }
 
     [Fact]
@@ -358,7 +507,7 @@ public sealed class ProgramEntryPointTests
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("local-secret-file-posture-unsupported", result.AllText, StringComparison.Ordinal);
-        Assert.DoesNotContain("sk_test_secret", result.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sk_test_secret", result.AllText);
     }
 
     [Fact]
@@ -3058,6 +3207,11 @@ public sealed class ProgramEntryPointTests
         options.CustomRegistrations.Add(services => services.AddSingleton<IAppSurfaceDocsHostRunner>(runner));
     }
 
+    private static void RegisterGoogleTransferClient(ConsoleOptions options, FakeGoogleSecretTransferClient client)
+    {
+        options.CustomRegistrations.Add(services => services.AddSingleton<IAppSurfaceGoogleSecretTransferClient>(client));
+    }
+
     private static void RegisterRunner(ConsoleOptions options, CapturingAppSurfaceDocsExportRunner runner)
     {
         options.CustomRegistrations.Add(services => services.AddSingleton<IAppSurfaceDocsExportRunner>(runner));
@@ -3248,6 +3402,88 @@ public sealed class ProgramEntryPointTests
                     Stderr,
                     string.Join(Environment.NewLine, LogMessages)
                 });
+    }
+
+    private sealed class FakeGoogleSecretTransferClient : IAppSurfaceGoogleSecretTransferClient
+    {
+        public Dictionary<string, bool> Secrets { get; } = new(StringComparer.Ordinal);
+
+        public Dictionary<string, byte[]> Versions { get; } = new(StringComparer.Ordinal);
+
+        public Dictionary<string, GoogleSecretManagerTransferStatus> VersionProbeFailures { get; } = new(StringComparer.Ordinal);
+
+        public Dictionary<string, GoogleSecretManagerTransferStatus> AccessFailures { get; } = new(StringComparer.Ordinal);
+
+        public List<string> Writes { get; } = [];
+
+        public int ProbeSecretCalls { get; private set; }
+
+        public int VersionProbeCalls { get; private set; }
+
+        public int AccessCalls { get; private set; }
+
+        public AppSurfaceGoogleSecretProbeResult ProbeSecret(string secretResourceName, TimeSpan timeout)
+        {
+            ProbeSecretCalls++;
+            return Secrets.TryGetValue(secretResourceName, out var hasEnabledVersions)
+                ? AppSurfaceGoogleSecretProbeResult.Ready(secretResourceName, hasEnabledVersions)
+                : AppSurfaceGoogleSecretProbeResult.Failed(
+                    GoogleSecretManagerTransferStatus.Missing,
+                    secretResourceName,
+                    CreateDiagnostic(GoogleSecretManagerTransferStatus.Missing));
+        }
+
+        public AppSurfaceGoogleSecretProbeResult ProbeSecretVersion(string versionResourceName, TimeSpan timeout)
+        {
+            VersionProbeCalls++;
+            if (VersionProbeFailures.TryGetValue(versionResourceName, out var status))
+            {
+                return AppSurfaceGoogleSecretProbeResult.Failed(status, versionResourceName, CreateDiagnostic(status));
+            }
+
+            return Versions.ContainsKey(versionResourceName)
+                    ? AppSurfaceGoogleSecretProbeResult.Ready(versionResourceName)
+                    : AppSurfaceGoogleSecretProbeResult.Failed(
+                        GoogleSecretManagerTransferStatus.Missing,
+                        versionResourceName,
+                        CreateDiagnostic(GoogleSecretManagerTransferStatus.Missing));
+        }
+
+        public AppSurfaceGoogleSecretAccessResult AccessSecretVersion(string versionResourceName, TimeSpan timeout)
+        {
+            AccessCalls++;
+            if (AccessFailures.TryGetValue(versionResourceName, out var status))
+            {
+                return AppSurfaceGoogleSecretAccessResult.Failed(status, versionResourceName, CreateDiagnostic(status));
+            }
+
+            return AppSurfaceGoogleSecretAccessResult.Accessed(
+                versionResourceName,
+                new AppSurfaceGoogleSecretPayload(Versions[versionResourceName], versionResourceName));
+        }
+
+        public AppSurfaceGoogleSecretWriteResult AddSecretVersion(string secretResourceName, string value, TimeSpan timeout)
+        {
+            _ = value;
+            Writes.Add(secretResourceName);
+            return AppSurfaceGoogleSecretWriteResult.Written(
+                secretResourceName,
+                $"{secretResourceName}/versions/{Writes.Count.ToString(CultureInfo.InvariantCulture)}");
+        }
+
+        private static AppSurfaceGoogleSecretTransferDiagnostic CreateDiagnostic(GoogleSecretManagerTransferStatus status) =>
+            new(
+                status switch
+                {
+                    GoogleSecretManagerTransferStatus.AccessDenied => "google-secret-transfer-access-denied",
+                    GoogleSecretManagerTransferStatus.NotEnabled => "google-secret-transfer-version-not-enabled",
+                    _ => "fake-google-secret-transfer-diagnostic"
+                },
+                "Google Secret Manager fake transfer failed.",
+                $"The fake transfer client returned {status}.",
+                "Adjust the fake transfer test setup.",
+                "google-secret-manager-transfer",
+                false);
     }
 
     private sealed class CapturingAppSurfaceDocsHostRunner : IAppSurfaceDocsHostRunner

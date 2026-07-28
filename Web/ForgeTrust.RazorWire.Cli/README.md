@@ -20,28 +20,41 @@ A successful run publishes the sample, starts it on an ephemeral loopback URL, c
 The RazorWire CLI project is configured as a .NET tool with the command name
 `razorwire`. Use an exact package version when running release builds so exports
 are reproducible. The package chooser still excludes `ForgeTrust.RazorWire.Cli`
-from the direct-install matrix until issue #171 lands stable public tool
-packaging, so the commands in this section require the package to exist on one
-of your configured NuGet sources or for you to pass an explicit local package
+from the direct-install matrix and marks it `do_not_publish` until
+[#171](https://github.com/forge-trust/AppSurface/issues/171) lands stable public
+tool packaging. Its proof-only .NET tool artifact bundles
+the dependency closure needed to exercise export, including the coordinated
+`AngleSharp` upgrade for
+[GHSA-pgww-w46g-26qg](https://github.com/advisories/GHSA-pgww-w46g-26qg), but
+that artifact is verification evidence rather than a supported public package.
+The commands in this section therefore require the package to exist on one of
+your configured NuGet sources or for you to pass an explicit local package
 source. During normal repository development, prefer the source-run command below.
 
-Run a published package without permanently installing it:
+Do not publish the proof artifact merely because it restores and runs
+successfully. Its exclusion and `do_not_publish` decision remain authoritative
+in the [package registry](../../packages/README.md#not-in-the-direct-install-matrix);
+a future public tool release must first land the tracked packaging work and pass
+the normal package and stable-dependency gates, including the stable sanitizer
+pair tracked by [issue #682](https://github.com/forge-trust/AppSurface/issues/682).
+
+Run an exact proof or local package without permanently installing it. Until the package registry changes the CLI's publication decision, `<version>` means a package produced by the [#678 package-proof sequence](../../packages/README.md#issue-678-package-proof) or another explicitly supplied local proof source; it does not imply a supported public NuGet release:
 
 ```bash
-dnx ForgeTrust.RazorWire.Cli@<version> --yes -- export -o ./dist -p ./examples/razorwire-mvc/RazorWireWebExample.csproj
+dnx ForgeTrust.RazorWire.Cli@<version> --yes --source ./artifacts/packages -- export -o ./dist -p ./examples/razorwire-mvc/RazorWireWebExample.csproj
 ```
 
 The equivalent SDK spelling is:
 
 ```bash
-dotnet tool execute ForgeTrust.RazorWire.Cli@<version> --yes -- export -o ./dist -p ./examples/razorwire-mvc/RazorWireWebExample.csproj
+dotnet tool exec ForgeTrust.RazorWire.Cli@<version> --yes --source ./artifacts/packages -- export -o ./dist -p ./examples/razorwire-mvc/RazorWireWebExample.csproj
 ```
 
-Install the tool when you want a stable `razorwire` command on your PATH:
+Install an exact local proof artifact into an isolated tool path when you need a stable `razorwire` command for verification:
 
 ```bash
-dotnet tool install --global ForgeTrust.RazorWire.Cli --version <version>
-razorwire export -o ./dist -p ./examples/razorwire-mvc/RazorWireWebExample.csproj
+dotnet tool install ForgeTrust.RazorWire.Cli --tool-path ./artifacts/razorwire-tool --version <version> --source ./artifacts/packages
+./artifacts/razorwire-tool/razorwire export -o ./dist -p ./examples/razorwire-mvc/RazorWireWebExample.csproj
 ```
 
 During repository development, run the CLI directly from source:
@@ -54,7 +67,7 @@ When testing an unpublished package from a local folder, pack it first, pass tha
 folder as the package source, and keep the version exact:
 
 ```bash
-dotnet pack Web/ForgeTrust.RazorWire.Cli -c Release -o ./artifacts/packages /p:PackageVersion=0.0.0-local.1
+dotnet pack Web/ForgeTrust.RazorWire.Cli -c Release -o ./artifacts/packages /p:EnableRazorWireCliToolPackaging=true /p:PackageVersion=0.0.0-local.1
 ```
 
 ```bash

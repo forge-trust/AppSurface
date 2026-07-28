@@ -8,7 +8,7 @@ packages:
     release_notes_path: releases/v0.2.0-preview.4.md
     order: 10
     use_when: Install this directly only when you are authoring reusable AppSurface modules or host integrations instead of starting from a web, console, or Aspire package.
-    includes: Core module abstractions, dependency graph orchestration, AppSurfaceStartup, and StartupContext.
+    includes: Core module abstractions, dependency graph orchestration, AppSurfaceStartup, StartupContext, process utilities, and lexically contained path construction.
     does_not_include: ASP.NET Core hosting, CliFx command hosting, Aspire app-model helpers, or optional integrations.
     start_here_path: ForgeTrust.AppSurface.Core/README.md
   - project: Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj
@@ -34,7 +34,7 @@ packages:
     release_notes_path: releases/v0.2.0-preview.4.md
     order: 25
     use_when: Add this after Config when a solo or hobbyist AppSurface app needs local development secrets before adopting a remote vault.
-    includes: AppSurfaceLocalSecretsModule, OS-backed local secret store adapters, trusted Linux `secret-tool` resolution, fail-closed posture modes, Unix mode-bit-hardened file fallback for deterministic examples/tests, local secret identity normalization, structured source diagnostics, test seams, and the `appsurface secrets` workflow.
+    includes: AppSurfaceLocalSecretsModule, OS-backed local secret store adapters, trusted Linux `secret-tool` resolution, fail-closed posture modes, Unix mode-bit-hardened file fallback for deterministic examples/tests, local secret identity normalization, metadata-only probe seam, structured source diagnostics, test seams, and the `appsurface secrets` workflow.
     does_not_include: Team secret sharing, CI/container secret injection, production rotation, remote vault storage, cloud secret managers, generic vault abstractions, PATH-based executable discovery, or file-fallback parity with OS credential stores.
     start_here_path: Config/ForgeTrust.AppSurface.Config.LocalSecrets/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Config.LocalSecrets` after Config when local development secrets need source-aware diagnostics before a remote vault exists, including trusted Linux `secret-tool` resolution for nonstandard installs.
@@ -52,8 +52,8 @@ packages:
     release_notes_path: releases/v0.2.0-preview.4.md
     order: 26
     use_when: Add this after Config when an AppSurface app running on Google Cloud should resolve explicitly mapped configuration secrets from Google Secret Manager while keeping environment variables as the emergency override.
-    includes: AppSurfaceGoogleSecretManagerModule, explicit logical-key to Secret Manager mappings, optional scoped convention resolver, fail-closed terminal diagnostics for claimed keys, Google client test seam, source-aware config audit integration, and UTF-8 text conversion through AppSurface Config.
-    does_not_include: Secret creation, writes, deletion, rotation, IAM provisioning, Terraform or gcloud workflows, generic multi-cloud vault abstraction, mutation CLI commands, background refresh, or runtime credential minting.
+    includes: AppSurfaceGoogleSecretManagerModule, explicit logical-key to Secret Manager mappings, optional scoped convention resolver, fail-closed terminal diagnostics for claimed keys, Google client and promotion test seams, source-aware config audit integration, UTF-8 text conversion through AppSurface Config, and CLI-assisted declared LocalSecrets or Google promotion to existing Google secrets.
+    does_not_include: Secret creation, deletion, disable/destroy operations, rotation, IAM provisioning, Terraform or gcloud workflows, generic multi-cloud vault abstraction, background refresh, or runtime credential minting.
     start_here_path: Config/ForgeTrust.AppSurface.Config.GoogleSecretManager/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Config.GoogleSecretManager` after Config when production-like Google Cloud hosts should read mapped AppSurface config secrets from Secret Manager with fail-closed diagnostics.
     depends_on:
@@ -278,8 +278,8 @@ packages:
   - project: Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj
     classification: public
     publish_decision: do_not_publish
-    publish_reason: Public-preview source contract held until the PostgreSQL provider milestone supplies conformance and restore evidence.
-    readiness_note: Publication is held until the PostgreSQL provider milestone supplies conformance and restore evidence.
+    publish_reason: Public-preview source contract remains held after the PostgreSQL provider milestone until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, and coordinated operational conformance.
+    readiness_note: Slice 3 supplies PostgreSQL Work conformance; publication remains held for the slices 4-6 coordinated release gate.
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
@@ -300,8 +300,8 @@ packages:
   - project: Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj
     classification: public
     publish_decision: do_not_publish
-    publish_reason: Public-preview source contract held until the PostgreSQL provider milestone supplies conformance and restore evidence.
-    readiness_note: Publication is held until the PostgreSQL provider milestone supplies conformance and restore evidence.
+    publish_reason: Public-preview Provider SPI remains held after the PostgreSQL provider milestone until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, and coordinated operational conformance.
+    readiness_note: Slice 3 supplies PostgreSQL Work conformance; publication remains held for the slices 4-6 coordinated release gate.
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
@@ -316,6 +316,37 @@ packages:
       - ForgeTrust.AppSurface.Durable
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Durable
+  - project: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj
+    classification: public
+    publish_decision: do_not_publish
+    publish_reason: PostgreSQL Work provider held until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, and coordinated operational conformance.
+    readiness_note: Slice 3 is source-only infrastructure conformance with no hosted worker or production activation.
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 48
+    use_when: Evaluate PostgreSQL-backed atomic Work acceptance and manually driven process-loss recovery from source without installing a hosted runtime.
+    includes: Explicit ordered schema management, StoreId and runtime-epoch fencing, caller-owned transaction acceptance, short-transaction Work client, scoped dispatch, leases, effect permits, retries, cancellation, terminal facts, and real PostgreSQL conformance proof.
+    does_not_include: Flow persistence, schedule execution, hosted polling, automatic startup DDL, health/drain hosting, endpoints, telemetry implementation, exactly-once external effects, destructive down migrations, or production support.
+    start_here_path: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
+    recipe_summary: Evaluate the held PostgreSQL source provider only when one database must atomically own domain mutation and durable Work acceptance; slice 3 starts no worker.
+    depends_on:
+      - ForgeTrust.AppSurface.Durable
+      - ForgeTrust.AppSurface.Durable.Provider
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Durable
+      - ForgeTrust.AppSurface.Durable.Provider
+  - project: Durable/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    publish_reason: Child-process crash-conformance helper used only by the PostgreSQL source-provider test suite.
+    product_family: internal_support
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 48
+    note: Internal executable test helper; it is not a hosted runtime, production worker, or package adoption surface.
   - project: Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj
     classification: public
     publish_decision: publish
@@ -323,7 +354,7 @@ packages:
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.2.0-preview.4.md
-    order: 48
+    order: 49
     use_when: Start here for CLI apps and worker-style entry points that should run through the AppSurface startup pipeline with CliFx.
     includes: ConsoleStartup, ConsoleApp, hosted command execution, and CliFx source-generated command discovery through AppSurface modules.
     does_not_include: ASP.NET Core hosting, OpenAPI surfaces, or Razor-based UI composition.
@@ -396,17 +427,14 @@ packages:
       - ForgeTrust.AppSurface.Deployment
   - project: Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj
     classification: public
-    publish_decision: do_not_publish
-    publish_reason: Public-preview package held until pinned Aspire disposes or exposes partial host state created before a failed host construction.
+    publish_decision: publish
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/unreleased.md
-    readiness_blocker: "#668"
-    readiness_note: Aspire 13.4.4 leaks its partial host service provider when host construction fails after provider creation; publication remains blocked until the pinned dependency disposes or exposes that state.
     order: 61
     use_when: Add this to tests for an AppSurface profile-based AppHost when the resource graph must be created deterministically without invoking the asynchronous AppHost entry point.
-    includes: Typed AppHost, module, and profile selection; shared runtime graph composition; an Aspire-compatible configurable builder; one-build enforcement; and deterministic activation-host cleanup.
+    includes: Typed AppHost, module, and profile selection; shared runtime graph composition; an Aspire-compatible configurable builder; one-build enforcement; deterministic activation-host cleanup; and verified-shape Aspire failed-build provider cleanup with non-blocking compatibility warnings.
     does_not_include: Native AppHost replacement, CliFx option or positional-parameter binding, cross-assembly profiles, readiness policy, higher-level fixtures, or stable diagnostic codes.
     start_here_path: Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Aspire.Testing` to tests for profile-based AppHosts; native AppHosts should continue using Aspire's native testing API.
@@ -560,7 +588,8 @@ packages:
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
     order: 200
-    note: Reusable docs package for harvesting repository docs into an AppSurface Docs UI, with source harvesting, search, release archives, diagnostics, and the dark-family Theme Contract v1 for branded docs chrome. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps.
+    note: >-
+      Reusable docs package for harvesting repository docs into an AppSurface Docs UI, with source harvesting, search, release archives, diagnostics, and the dark-family Theme Contract v1 for branded docs chrome. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps. Its exact coordinated GHSA-pgww-w46g-26qg graph is `AngleSharp` `[1.5.2]`, `HtmlSanitizer` `[9.1.949-beta]`, and `AngleSharp.Css` `[1.0.0-beta.216]`; the beta pair is preview-only. Stable verification requires all three dependencies, rejects missing or malformed ranges and AngleSharp floors below 1.5.2, and blocks the beta pair until [issue #682](https://github.com/forge-trust/AppSurface/issues/682) lands compatible stable versions. The [Docs dependency security boundary](../Web/ForgeTrust.AppSurface.Docs/README.md#dependency-security-boundary) covers rendered package-documentation fragments, not general UGC or host CSP.
     start_here_path: Web/ForgeTrust.AppSurface.Docs/README.md
     start_here_label: AppSurface Docs README
     expected_dependency_package_ids:
@@ -647,20 +676,20 @@ packages:
     order: 120
     tool_command_name: appsurface
     use_when: Install this when you want repository-level AppSurface tooling from a global or local .NET tool command.
-    includes: The `appsurface` .NET tool command, `appsurface docs` AppSurface Docs workflows, `appsurface pwa verify` install-readiness evidence for AppSurface Web apps, `appsurface coverage run` private test orchestration with managed JUnit diagnostics, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` private threshold enforcement, and the `appsurface secrets init`, `set`, `get`, `list --names-only`, `delete`, and `doctor` local-secret workflow.
+    includes: The `appsurface` .NET tool command, `appsurface docs` AppSurface Docs workflows, `appsurface pwa verify` install-readiness evidence for AppSurface Web apps, `appsurface coverage run` private test orchestration with managed JUnit diagnostics, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` private threshold enforcement, the `appsurface secrets init`, `set`, `get`, `list --names-only`, `delete`, and `doctor` local-secret workflow, and declared `appsurface secrets transfer plan|apply` promotion jobs.
     does_not_include: App runtime packages, hosted coverage dashboards, coverage uploads, coverage trend storage, grouped coverage runs, TRX/TUnit result parsing, RazorWire-specific export workflows, or a replacement for project package references.
     start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
     start_here_label: AppSurface CLI README
-    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface docs` workflows, `appsurface pwa verify` install-readiness evidence, or private `appsurface coverage run`, `coverage merge`, and `coverage gate` commands without running from source; verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests.
+    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface docs`, `appsurface pwa verify`, private coverage commands, or declared secret-promotion workflows without running from source; verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests.
   - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
     classification: excluded
     publish_decision: do_not_publish
     product_family: razorwire
-    publish_reason: "Held out of package publishing until issue #171 lands real .NET tool packaging and stable install guidance."
+    publish_reason: "Held out of package publishing until issue #171 lands real .NET tool packaging and stable install guidance; its proof-only bundled dependency graph is verification evidence, not authorization to publish."
     release_status: excluded
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
     order: 400
-    note: "Held out of the direct-install chooser until issue #171 lands real .NET tool packaging and stable install guidance."
+    note: "Held out of the direct-install chooser with `publish_decision: do_not_publish` until [issue #171](https://github.com/forge-trust/AppSurface/issues/171) lands real .NET tool packaging and stable install guidance. Its proof-only tool package bundles its coordinated dependency graph for artifact verification, but that proof is not authorization to publish it; see the [CLI boundary](../Web/ForgeTrust.RazorWire.Cli/README.md#installation)."
     start_here_path: Web/ForgeTrust.RazorWire.Cli/README.md
     start_here_label: RazorWire CLI README

@@ -2837,6 +2837,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.False(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.AppSurface.Web/bin/Release/net10.0/Generated.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.AppSurface.Web/obj/Release/net10.0/Generated.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("node_modules/package/Generated.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject("artifacts/packages/coverage-cli-consumer-proof/consumer/Smoke/Smoke.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("examples/web-app/WebAppExample.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.RazorWire.IntegrationTests/ForgeTrust.RazorWire.IntegrationTests.csproj"));

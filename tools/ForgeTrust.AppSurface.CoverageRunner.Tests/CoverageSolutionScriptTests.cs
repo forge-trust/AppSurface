@@ -57,6 +57,10 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("COVERAGE_PARALLELISM: 2", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}", workflow, StringComparison.Ordinal);
         Assert.Contains("./scripts/coverage-solution.sh", workflow, StringComparison.Ordinal);
+        Assert.Contains(
+            "files: 'TestResults/coverage-merged/coverage.cobertura.xml'\n          disable_search: true",
+            workflow,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("coverage run \\", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("Gate PR coverage with AppSurface CLI", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("Gate baseline coverage with AppSurface CLI", workflow, StringComparison.Ordinal);

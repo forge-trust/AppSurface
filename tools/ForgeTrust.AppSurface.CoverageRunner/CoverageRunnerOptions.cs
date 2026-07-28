@@ -70,8 +70,9 @@ internal sealed record CoverageRunnerOptions
     public required string IncludeFilter { get; init; }
 
     /// <summary>
-    /// Gets the coverlet exclude filter with commas escaped for MSBuild. Defaults to
-    /// <c>[*.Tests]*,[*.IntegrationTests]*</c> before comma escaping.
+    /// Gets the Coverlet collector exclude filter as a comma-separated runsettings value.
+    /// Defaults to <c>[*.Tests]*,[*.IntegrationTests]*</c>. MSBuild-specific escaping belongs
+    /// only to callers that explicitly select the legacy MSBuild driver.
     /// </summary>
     public required string ExcludeFilter { get; init; }
 
@@ -144,7 +145,7 @@ internal sealed record CoverageRunnerOptions
         var buildConfiguration = ReadEnvironment(environment, "BUILD_CONFIGURATION") ?? "Debug";
         var buildNoRestore = string.Equals(ReadEnvironment(environment, "BUILD_NO_RESTORE"), "true", StringComparison.OrdinalIgnoreCase);
         var includeFilter = ReadEnvironment(environment, "INCLUDE_FILTER") ?? "[ForgeTrust.AppSurface.*]*";
-        var excludeFilter = (ReadEnvironment(environment, "EXCLUDE_FILTER") ?? "[*.Tests]*,[*.IntegrationTests]*").Replace(",", "%2c", StringComparison.Ordinal);
+        var excludeFilter = ReadEnvironment(environment, "EXCLUDE_FILTER") ?? "[*.Tests]*,[*.IntegrationTests]*";
         var buildSolutionValue = ReadEnvironment(environment, "BUILD_SOLUTION");
         var mergeOnly = false;
         var mergeSourceDirectory = (string?)null;
