@@ -460,7 +460,7 @@ internal sealed partial class CoverageRunCommand : ICommand
 /// <param name="SlowTestDiagnostics">Whether slow-test diagnostic artifacts should be written.</param>
 /// <param name="Clean">Whether AppSurface-owned output is cleaned before writing new artifacts.</param>
 /// <param name="Verbosity">Verbosity forwarded to <c>dotnet test</c>.</param>
-/// <param name="HeartbeatInterval">Interval between orchestration heartbeats; zero disables rendering.</param>
+/// <param name="HeartbeatInterval">Interval between orchestration heartbeats; zero disables heartbeat output.</param>
 /// <param name="NoProgressTimeout">Maximum no-observable-progress duration for an active operation.</param>
 /// <param name="WatchdogMode">Action taken when an operation crosses the no-progress timeout.</param>
 /// <param name="CoverageDriver">VSTest coverage integration selected once for the complete run.</param>
@@ -530,7 +530,8 @@ internal enum CoverageRunTestResultFormat
 /// </summary>
 /// <remarks>
 /// A result is returned only after discovery, test execution, merge, summary, and timings steps have
-/// finished. Diagnostic failures throw <see cref="CommandException"/> before this result is created.
+/// finished. Slow-test diagnostics are best-effort: parsing and artifact I/O failures are reported to the
+/// diagnostic stream and produce no diagnostics record, without changing the required coverage-run result.
 /// When tests fail after writing coverage, <see cref="Success"/> is <see langword="false"/> while
 /// merged artifacts are still available for inspection.
 /// </remarks>
@@ -569,23 +570,23 @@ internal sealed class CoverageRunWorkflow
     /// <param name="reportGenerator">Package-owned ReportGenerator wrapper.</param>
     /// <param name="timeProvider">Time provider used for timings.</param>
     /// <param name="beforeSlowTestDiagnostics">Optional test seam invoked after the supervised diagnostics operation starts.</param>
-    /// <param name="slowTestDiagnosticsStaged">Optional test seam invoked after diagnostics staging completes and before cancellation is rechecked.</param>
-    /// <param name="beforeSlowTestDiagnosticsPromotion">Optional test seam invoked after a prior canonical artifact is backed up and before a staged artifact is promoted.</param>
     /// <param name="summaryStaged">Optional test seam invoked after the text summary is staged and before its atomic commit.</param>
     /// <param name="timingsStaged">Optional test seam invoked after timings JSON is staged and before its atomic commit.</param>
     /// <param name="deleteStagedCoverageFile">Optional test seam that replaces staged collector-artifact deletion.</param>
     /// <param name="appendCleanupDiagnostic">Optional test seam that replaces writing a cleanup diagnostic to its dedicated log.</param>
+    /// <param name="slowTestDiagnosticsStaged">Optional test seam invoked after diagnostics staging completes and before cancellation is rechecked.</param>
+    /// <param name="beforeSlowTestDiagnosticsPromotion">Optional test seam invoked after a prior canonical artifact is backed up and before a staged artifact is promoted.</param>
     public CoverageRunWorkflow(
         ICoverageRunProcessRunner processRunner,
         ICoverageRunReportGenerator reportGenerator,
         TimeProvider timeProvider,
         Func<CancellationToken, Task>? beforeSlowTestDiagnostics = null,
-        Action? slowTestDiagnosticsStaged = null,
-        Action<string>? beforeSlowTestDiagnosticsPromotion = null,
         Action? summaryStaged = null,
         Action? timingsStaged = null,
         Action<string>? deleteStagedCoverageFile = null,
-        Func<string, string, CancellationToken, Task<CoverageRunDiagnosticLogWriteResult>>? appendCleanupDiagnostic = null)
+        Func<string, string, CancellationToken, Task<CoverageRunDiagnosticLogWriteResult>>? appendCleanupDiagnostic = null,
+        Action? slowTestDiagnosticsStaged = null,
+        Action<string>? beforeSlowTestDiagnosticsPromotion = null)
     {
         _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
         _reportGenerator = reportGenerator ?? throw new ArgumentNullException(nameof(reportGenerator));
@@ -2251,6 +2252,8 @@ internal sealed class CoverageRunWorkflow
         var stagedJsonPath = Path.Join(
             outputDirectory,
             $".{CoverageRunSlowTestDiagnosticsWriter.JsonFileName}.{Guid.NewGuid():N}.tmp");
+        string? activeStagedMarkdownPath = null;
+        string? activeStagedJsonPath = null;
         try
         {
             if (_beforeSlowTestDiagnostics is not null)
@@ -2258,7 +2261,7 @@ internal sealed class CoverageRunWorkflow
                 await _beforeSlowTestDiagnostics(cancellationToken);
             }
 
-            var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync(projectResults, cancellationToken);
+            var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync(projectResults, cancellationToken, observeProgress);
             observeProgress(1);
             var diagnostics = await CoverageRunSlowTestDiagnosticsWriter.WriteAsync(
                 stagedMarkdownPath,
@@ -2267,13 +2270,16 @@ internal sealed class CoverageRunWorkflow
                 report,
                 () => ElapsedSeconds(diagnosticStarted),
                 aggregationSeconds => CalculateAggregationPercent(aggregationSeconds, getTotalSeconds()),
-                cancellationToken);
+                cancellationToken,
+                observeProgress);
+            activeStagedMarkdownPath = diagnostics.StagedMarkdownPath;
+            activeStagedJsonPath = diagnostics.StagedJsonPath;
             _slowTestDiagnosticsStaged?.Invoke();
             cancellationToken.ThrowIfCancellationRequested();
             CommitStagedDiagnostics(
-                stagedMarkdownPath,
+                activeStagedMarkdownPath,
                 diagnostics.MarkdownPath,
-                stagedJsonPath,
+                activeStagedJsonPath,
                 diagnostics.JsonPath,
                 commit,
                 transition,
@@ -2292,8 +2298,15 @@ internal sealed class CoverageRunWorkflow
         }
         finally
         {
-            TryDeleteStagedDiagnosticsFile(stagedMarkdownPath);
-            TryDeleteStagedDiagnosticsFile(stagedJsonPath);
+            if (activeStagedMarkdownPath is not null)
+            {
+                CoverageRunSlowTestDiagnosticsWriter.TryDeleteStagedFile(activeStagedMarkdownPath);
+            }
+
+            if (activeStagedJsonPath is not null)
+            {
+                CoverageRunSlowTestDiagnosticsWriter.TryDeleteStagedFile(activeStagedJsonPath);
+            }
         }
     }
 
@@ -2352,12 +2365,9 @@ internal sealed class CoverageRunWorkflow
                 throw;
             }
 
-            foreach (var promotion in promotions)
+            foreach (var promotion in promotions.Where(static promotion => promotion.BackupPath is not null))
             {
-                if (promotion.BackupPath is not null)
-                {
-                    TryDeleteStagedDiagnosticsFile(promotion.BackupPath);
-                }
+                CoverageRunSlowTestDiagnosticsWriter.TryDeleteStagedFile(promotion.BackupPath!);
             }
         });
     }
@@ -2390,18 +2400,6 @@ internal sealed class CoverageRunWorkflow
                     // Best-effort rollback preserves as much prior artifact state as possible.
                 }
             }
-        }
-    }
-
-    private static void TryDeleteStagedDiagnosticsFile(string path)
-    {
-        try
-        {
-            File.Delete(path);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // A private staging remnant is safer than changing the coverage-run result after diagnostics already failed.
         }
     }
 
