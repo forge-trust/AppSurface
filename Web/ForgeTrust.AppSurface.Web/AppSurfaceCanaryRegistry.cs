@@ -28,7 +28,9 @@ internal sealed class AppSurfaceCanaryRegistry
         }
 
         _descriptors = dictionary.ToFrozenDictionary(StringComparer.Ordinal);
-        _orderedDescriptors = dictionary.Values.ToArray();
+        _orderedDescriptors = dictionary.Values
+            .OrderBy(descriptor => descriptor.Name, StringComparer.Ordinal)
+            .ToArray();
     }
 
     /// <summary>Attempts exact ordinal lookup of a registered descriptor.</summary>
@@ -38,6 +40,10 @@ internal sealed class AppSurfaceCanaryRegistry
     internal bool TryGet(string name, out AppSurfaceCanaryDescriptor descriptor) =>
         _descriptors.TryGetValue(name, out descriptor!);
 
-    /// <summary>Gets the registration-order descriptor snapshot without resolving evaluators.</summary>
+    /// <summary>Determines whether every exact selector name is registered without resolving evaluators.</summary>
+    internal bool ContainsAllNames(IReadOnlyCollection<string> names) =>
+        names.All(name => _descriptors.ContainsKey(name));
+
+    /// <summary>Gets the ordinal descriptor snapshot without resolving evaluators.</summary>
     internal IReadOnlyList<AppSurfaceCanaryDescriptor> OrderedDescriptors => _orderedDescriptors;
 }

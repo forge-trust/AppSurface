@@ -67,6 +67,11 @@ public sealed class AppSurfaceCanaryEndpointTests
             options => options.Snapshot.MaxConcurrency = 0,
             options => options.Snapshot.PerCheckTimeout = TimeSpan.Zero,
             options => options.Snapshot.OverallTimeout = TimeSpan.Zero,
+            options =>
+            {
+                options.Snapshot.PerCheckTimeout = TimeSpan.FromSeconds(2);
+                options.Snapshot.OverallTimeout = TimeSpan.FromSeconds(1);
+            },
         })
         {
             var exception = Assert.Throws<ArgumentException>(() =>
@@ -245,11 +250,14 @@ public sealed class AppSurfaceCanaryEndpointTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.True(json.RootElement.GetProperty("ready").GetBoolean());
         Assert.False(json.RootElement.GetProperty("overallTimedOut").GetBoolean());
+        Assert.True(json.RootElement.GetProperty("elapsedMilliseconds").GetDouble() >= 0);
         var result = Assert.Single(json.RootElement.GetProperty("results").EnumerateArray());
         Assert.Equal(Name, result.GetProperty("name").GetString());
         Assert.Equal("completed", result.GetProperty("outcome").GetString());
-        Assert.Equal("pass", result.GetProperty("status").GetString());
-        Assert.True(result.GetProperty("ready").GetBoolean());
+        Assert.False(result.TryGetProperty("code", out _));
+        var evidence = result.GetProperty("result");
+        Assert.Equal("pass", evidence.GetProperty("status").GetString());
+        Assert.True(evidence.GetProperty("ready").GetBoolean());
         AssertNoStore(response);
         Assert.Equal(1, host.State.InvocationCount);
         Assert.Single(loggerProvider.Entries, entry => entry.EventId.Id == 62401);
@@ -277,20 +285,27 @@ public sealed class AppSurfaceCanaryEndpointTests
     public async Task SnapshotEndpoint_RejectsExcessiveSelectorValuesBeforeRegistryLookup()
     {
         await using var host = await StartHostAsync();
-        var query = string.Join('&', Enumerable.Repeat($"name={Name}", 257));
-        using var request = AuthorizedRequest($"{SnapshotRoute()}?{query}");
+        var nameQuery = string.Join('&', Enumerable.Repeat($"name={Name}", 65));
+        using var request = AuthorizedRequest($"{SnapshotRoute()}?{nameQuery}");
 
         using var response = await host.Client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("ASCAN202", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
         Assert.Equal(0, host.State.InvocationCount);
+
+        var tagQuery = string.Join('&', Enumerable.Repeat("tag=deploy-critical", 17));
+        using var tagRequest = AuthorizedRequest($"{SnapshotRoute()}?{tagQuery}");
+        using var tagResponse = await host.Client.SendAsync(tagRequest);
+        Assert.Equal(HttpStatusCode.BadRequest, tagResponse.StatusCode);
+        Assert.Contains("ASCAN202", await tagResponse.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(0, host.State.InvocationCount);
     }
 
     [Fact]
     public async Task SnapshotEndpoint_SelectsTagAndNameUnionOnceInStableOrder()
     {
-        const string additionalName = "forwarding.bravo-evidence";
+        const string additionalName = "aaa.bravo-evidence";
         await using var host = await StartHostAsync(
             additionalCanaryNames: [additionalName],
             tags: ["deploy-critical"]);
@@ -302,9 +317,22 @@ public sealed class AppSurfaceCanaryEndpointTests
         var results = json.RootElement.GetProperty("results").EnumerateArray().ToArray();
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal([Name, additionalName], results.Select(result => result.GetProperty("name").GetString()!).ToArray());
+        Assert.Equal([additionalName, Name], results.Select(result => result.GetProperty("name").GetString()!).ToArray());
         Assert.All(results, result => Assert.Equal("completed", result.GetProperty("outcome").GetString()));
         Assert.Equal(2, host.State.InvocationCount);
+    }
+
+    [Fact]
+    public async Task SnapshotEndpoint_RejectsUnknownExactNameEvenWhenTagMatches()
+    {
+        await using var host = await StartHostAsync(tags: ["deploy-critical"]);
+        using var request = AuthorizedRequest($"{SnapshotRoute()}?name=unknown.canary&tag=deploy-critical");
+
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Contains("ASCAN203", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(0, host.State.InvocationCount);
     }
 
     [Fact]
@@ -358,14 +386,18 @@ public sealed class AppSurfaceCanaryEndpointTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.False(root.GetProperty("ready").GetBoolean());
+        Assert.True(root.GetProperty("elapsedMilliseconds").GetDouble() >= 0);
+        Assert.False(root.TryGetProperty("markerFingerprint", out _));
+        Assert.False(root.TryGetProperty("freshSince", out _));
+        Assert.False(item.TryGetProperty("code", out _));
+        var evidence = item.GetProperty("result");
         Assert.Equal(
             "sha256:6bd4a0d2fca0465d45b13c75065d55ad129f825d18b57d9cb56e20a259728315",
-            root.GetProperty("markerFingerprint").GetString());
-        Assert.Equal("2026-07-16T04:30:00.0000000Z", root.GetProperty("freshSince").GetString());
-        Assert.Equal("pending", item.GetProperty("status").GetString());
-        Assert.Equal("2026-07-16T04:31:02.1230000Z", item.GetProperty("observedAt").GetString());
-        Assert.Equal("proof-not-observed", item.GetProperty("reasonCode").GetString());
-        Assert.True(item.GetProperty("elapsedMilliseconds").GetDouble() >= 0);
+            evidence.GetProperty("markerFingerprint").GetString());
+        Assert.Equal("2026-07-16T04:30:00.0000000Z", evidence.GetProperty("freshSince").GetString());
+        Assert.Equal("pending", evidence.GetProperty("status").GetString());
+        Assert.Equal("2026-07-16T04:31:02.1230000Z", evidence.GetProperty("observedAt").GetString());
+        Assert.Equal("proof-not-observed", evidence.GetProperty("reasonCode").GetString());
         Assert.Equal(1, aggregateLog.State["Selected"]);
         Assert.Equal(1, aggregateLog.State["Completed"]);
         Assert.False((bool)aggregateLog.State["Ready"]!);
@@ -397,7 +429,8 @@ public sealed class AppSurfaceCanaryEndpointTests
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal("timed-out", result.GetProperty("outcome").GetString());
-        Assert.Equal("ASCAN302", result.GetProperty("reasonCode").GetString());
+        Assert.Equal("ASCAN302", result.GetProperty("code").GetString());
+        Assert.False(result.TryGetProperty("result", out _));
         Assert.False(json.RootElement.GetProperty("ready").GetBoolean());
         Assert.Equal(1, host.State.InvocationCount);
     }
@@ -409,7 +442,7 @@ public sealed class AppSurfaceCanaryEndpointTests
             waitForCancellation: true,
             configureEndpoint: options =>
             {
-                options.Snapshot.PerCheckTimeout = TimeSpan.FromSeconds(1);
+                options.Snapshot.PerCheckTimeout = TimeSpan.FromMilliseconds(25);
                 options.Snapshot.OverallTimeout = TimeSpan.FromMilliseconds(25);
             });
         using var request = AuthorizedRequest(SnapshotRoute());
@@ -421,7 +454,8 @@ public sealed class AppSurfaceCanaryEndpointTests
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.True(json.RootElement.GetProperty("overallTimedOut").GetBoolean());
         Assert.Equal("timed-out", result.GetProperty("outcome").GetString());
-        Assert.Equal("ASCAN303", result.GetProperty("reasonCode").GetString());
+        Assert.Equal("ASCAN303", result.GetProperty("code").GetString());
+        Assert.False(result.TryGetProperty("result", out _));
         Assert.Equal(1, host.State.InvocationCount);
     }
 
@@ -435,7 +469,7 @@ public sealed class AppSurfaceCanaryEndpointTests
             configureEndpoint: options =>
             {
                 options.Snapshot.MaxConcurrency = 1;
-                options.Snapshot.PerCheckTimeout = TimeSpan.FromSeconds(1);
+                options.Snapshot.PerCheckTimeout = TimeSpan.FromMilliseconds(25);
                 options.Snapshot.OverallTimeout = TimeSpan.FromMilliseconds(25);
             });
         using var request = AuthorizedRequest(SnapshotRoute());
@@ -447,9 +481,9 @@ public sealed class AppSurfaceCanaryEndpointTests
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.True(json.RootElement.GetProperty("overallTimedOut").GetBoolean());
         Assert.Equal(2, results.Length);
-        Assert.Equal("ASCAN303", results.Single(result => result.GetProperty("name").GetString() == Name).GetProperty("reasonCode").GetString());
+        Assert.Equal("ASCAN303", results.Single(result => result.GetProperty("name").GetString() == Name).GetProperty("code").GetString());
         Assert.Equal("not-started", results.Single(result => result.GetProperty("name").GetString() == queuedName).GetProperty("outcome").GetString());
-        Assert.Equal("ASCAN304", results.Single(result => result.GetProperty("name").GetString() == queuedName).GetProperty("reasonCode").GetString());
+        Assert.Equal("ASCAN304", results.Single(result => result.GetProperty("name").GetString() == queuedName).GetProperty("code").GetString());
         Assert.Equal(1, host.State.InvocationCount);
     }
 
@@ -484,7 +518,7 @@ public sealed class AppSurfaceCanaryEndpointTests
     }
 
     [Fact]
-    public async Task SnapshotEndpoint_EvaluationFailureEmitsRedactedPerCanaryFailureEvent()
+    public async Task SnapshotEndpoint_EvaluationFailureIsRedactedFromSnapshotLogs()
     {
         using var loggerProvider = new RecordingLoggerProvider();
         await using var host = await StartHostAsync(throwOnEvaluate: true, loggerProvider: loggerProvider);
@@ -493,15 +527,12 @@ public sealed class AppSurfaceCanaryEndpointTests
         using var response = await host.Client.SendAsync(request);
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var result = Assert.Single(json.RootElement.GetProperty("results").EnumerateArray());
-        var failure = Assert.Single(loggerProvider.Entries, entry => entry.EventId.Id == 62301);
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal("failed", result.GetProperty("outcome").GetString());
-        Assert.Equal("ASCAN301", result.GetProperty("reasonCode").GetString());
-        Assert.Equal(Name, failure.State["CanaryName"]);
-        Assert.Equal("ASCAN301", failure.State["DiagnosticCode"]);
-        Assert.Equal(typeof(InvalidOperationException).FullName, failure.State["ExceptionType"]);
-        Assert.DoesNotContain("raw-secret", failure.Message, StringComparison.Ordinal);
+        Assert.Equal("ASCAN301", result.GetProperty("code").GetString());
+        Assert.False(result.TryGetProperty("result", out _));
+        Assert.DoesNotContain(loggerProvider.Entries, entry => entry.EventId.Id == 62301);
         Assert.Single(loggerProvider.Entries, entry => entry.EventId.Id == 62402);
         Assert.DoesNotContain(loggerProvider.Entries, entry => entry.EventId.Id == 62401);
     }
@@ -1650,6 +1681,24 @@ public sealed class AppSurfaceCanaryEndpointTests
 
         Assert.StartsWith("ASCAN115", exception.Message, StringComparison.Ordinal);
         Assert.Contains(AppSurfaceCanaryEndpointDefaults.RoutePattern, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StartupValidator_RequiresExactlyOneSnapshotAndOneDetailRoute()
+    {
+        var builder = WebApplication.CreateBuilder();
+        using var app = builder.Build();
+        app.MapGet(AppSurfaceCanaryEndpointDefaults.SnapshotRoutePattern, () => "snapshot")
+            .WithMetadata(AppSurfaceCanaryRouteMetadata.Instance);
+        var mappingState = new AppSurfaceCanaryMappingState();
+        Assert.True(mappingState.TryClaim(((IEndpointRouteBuilder)app).DataSources));
+        var validator = new AppSurfaceCanaryStartupValidator(mappingState);
+
+        var exception = Assert.Throws<InvalidOperationException>(validator.Validate);
+
+        Assert.StartsWith("ASCAN115", exception.Message, StringComparison.Ordinal);
+        Assert.Contains(AppSurfaceCanaryEndpointDefaults.RoutePattern, exception.Message, StringComparison.Ordinal);
+        Assert.Contains(AppSurfaceCanaryEndpointDefaults.SnapshotRoutePattern, exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]

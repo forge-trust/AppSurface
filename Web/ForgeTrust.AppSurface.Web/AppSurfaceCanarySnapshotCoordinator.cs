@@ -33,6 +33,9 @@ internal sealed class AppSurfaceCanarySnapshotCoordinator
         return selected.Count <= maximum;
     }
 
+    internal bool ContainsAllNames(IReadOnlyCollection<string> names) =>
+        _registry.ContainsAllNames(names);
+
     internal async Task<AppSurfaceCanarySnapshotOutcome> EvaluateAsync(
         IReadOnlyList<AppSurfaceCanaryDescriptor> descriptors,
         string? marker,
@@ -120,9 +123,7 @@ internal sealed class AppSurfaceCanarySnapshotCoordinator
             }
             catch (Exception exception) when (AppSurfaceCanaryEndpointRouteBuilderExtensions.IsNonFatalEvaluationFailure(exception))
             {
-                results[index] = AppSurfaceCanarySnapshotItem.Failed(
-                    descriptor.Name,
-                    exception.GetType().FullName ?? exception.GetType().Name);
+                results[index] = AppSurfaceCanarySnapshotItem.Failed(descriptor.Name);
             }
         }
         finally
@@ -154,29 +155,27 @@ internal sealed class AppSurfaceCanarySnapshotItem(
     string outcome,
     AppSurfaceCanaryResult? result,
     string? reasonCode,
-    double? elapsedMilliseconds,
-    string? failureExceptionType)
+    double? elapsedMilliseconds)
 {
     internal string Name { get; } = name;
     internal string Outcome { get; } = outcome;
     internal AppSurfaceCanaryResult? Result { get; } = result;
     internal string? ReasonCode { get; } = reasonCode;
     internal double? ElapsedMilliseconds { get; } = elapsedMilliseconds;
-    internal string? FailureExceptionType { get; } = failureExceptionType;
     internal bool Ready => Result?.Status == AppSurfaceCanaryStatus.Pass && Outcome == "completed";
 
     internal static AppSurfaceCanarySnapshotItem Completed(string name, AppSurfaceCanaryResult result, double elapsedMilliseconds) =>
-        new(name, "completed", result, null, elapsedMilliseconds, null);
+        new(name, "completed", result, null, elapsedMilliseconds);
 
-    internal static AppSurfaceCanarySnapshotItem Failed(string name, string exceptionType) =>
-        new(name, "failed", null, "ASCAN301", null, exceptionType);
+    internal static AppSurfaceCanarySnapshotItem Failed(string name) =>
+        new(name, "failed", null, "ASCAN301", null);
 
     internal static AppSurfaceCanarySnapshotItem PerCheckTimedOut(string name) =>
-        new(name, "timed-out", null, "ASCAN302", null, null);
+        new(name, "timed-out", null, "ASCAN302", null);
 
     internal static AppSurfaceCanarySnapshotItem OverallTimedOut(string name) =>
-        new(name, "timed-out", null, "ASCAN303", null, null);
+        new(name, "timed-out", null, "ASCAN303", null);
 
     internal static AppSurfaceCanarySnapshotItem NotStarted(string name) =>
-        new(name, "not-started", null, "ASCAN304", null, null);
+        new(name, "not-started", null, "ASCAN304", null);
 }

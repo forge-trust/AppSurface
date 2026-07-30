@@ -25,7 +25,8 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
     private const string DocsLink = "https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints";
     private const int MaximumHostNameUtf8Bytes = 128;
     private const int MaximumMarkerUtf8Bytes = 256;
-    private const int MaximumSnapshotSelectors = 256;
+    private const int MaximumSnapshotNames = 64;
+    private const int MaximumSnapshotTags = 16;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static readonly EventId EvaluationFailureEvent = new(62301, "AppSurfaceCanaryEvaluationFailed");
     private static readonly JsonSerializerOptions ResponseJsonOptions = CreateResponseJsonOptions();
@@ -139,10 +140,10 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         if (options.MaxSelectedCanaries is < 1 or > 256
             || options.MaxConcurrency is < 1 or > 64
             || options.PerCheckTimeout <= TimeSpan.Zero
-            || options.OverallTimeout <= TimeSpan.Zero)
+            || options.OverallTimeout < options.PerCheckTimeout)
         {
             throw new ArgumentException(
-                "ASCAN117: Snapshot limits must be positive; MaxSelectedCanaries is 1-256 and MaxConcurrency is 1-64.",
+                "ASCAN117: Snapshot limits must be positive; MaxSelectedCanaries is 1-256, MaxConcurrency is 1-64, and OverallTimeout must not be shorter than PerCheckTimeout.",
                 "configure");
         }
     }
@@ -335,6 +336,19 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         }
 
         var coordinator = httpContext.RequestServices.GetRequiredService<AppSurfaceCanarySnapshotCoordinator>();
+        if (!coordinator.ContainsAllNames(names))
+        {
+            await CreateProblem(
+                    StatusCodes.Status404NotFound,
+                    "AppSurface canary selection not found",
+                    "ASCAN203",
+                    "No registered canary matched the requested selection.",
+                    "An exact name selector did not match a registered canary.",
+                    "Correct the selector or register the canary with its exact lowercase name.")
+                .ExecuteAsync(httpContext);
+            return;
+        }
+
         if (!coordinator.TrySelect(names, tags, snapshotOptions.MaxSelectedCanaries, out var descriptors))
         {
             await CreateProblem(
@@ -403,11 +417,6 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
                 environmentName);
         }
 
-        foreach (var item in snapshot.Items.Where(item => item.FailureExceptionType is not null))
-        {
-            LogEvaluationFailure(logger, item.Name, item.FailureExceptionType!);
-        }
-
         CanarySnapshotCompleted(
             logger,
             descriptors.Count,
@@ -425,9 +434,11 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
                 new AppSurfaceCanarySnapshotResponse(
                     ready,
                     snapshot.OverallTimedOut,
-                    marker is null ? null : CreateMarkerFingerprint(marker),
-                    freshSince?.ToUniversalTime(),
-                    snapshot.Items.Select(AppSurfaceCanarySnapshotResponseItem.From).ToArray()),
+                    elapsedMilliseconds,
+                    snapshot.Items.Select(item => AppSurfaceCanarySnapshotResponseItem.From(
+                        item,
+                        marker is null ? null : CreateMarkerFingerprint(marker),
+                        freshSince?.ToUniversalTime())).ToArray()),
                 options: ResponseJsonOptions,
                 statusCode: statusCode,
                 contentType: $"{MediaTypeNames.Application.Json}; charset={Encoding.UTF8.WebName}")
@@ -445,7 +456,8 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         names = [];
         tags = [];
         problem = null;
-        if (requestedNames.Length + requestedTags.Length > MaximumSnapshotSelectors
+        if (requestedNames.Length > MaximumSnapshotNames
+            || requestedTags.Length > MaximumSnapshotTags
             || requestedNames.Any(name => !AppSurfaceCanaryValidation.IsValidName(name))
             || requestedTags.Any(tag => !AppSurfaceCanaryValidation.IsValidTag(tag)))
         {
@@ -454,8 +466,8 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
                 "Invalid AppSurface canary request",
                 "ASCAN202",
                 "A snapshot selector is invalid.",
-                "Names and tags must use the same bounded lowercase grammar as their registrations and include at most 256 total values.",
-                "Send at most 256 repeated name/tag values using registered identifier grammar.");
+                "Names and tags must use the same bounded lowercase grammar as their registrations and include at most 64 name values and 16 tag values.",
+                "Send at most 64 repeated name values and 16 repeated tag values using registered identifier grammar.");
             return false;
         }
 
@@ -763,8 +775,7 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
     private sealed class AppSurfaceCanarySnapshotResponse(
         bool ready,
         bool overallTimedOut,
-        string? markerFingerprint,
-        DateTimeOffset? freshSince,
+        double elapsedMilliseconds,
         IReadOnlyList<AppSurfaceCanarySnapshotResponseItem> results)
     {
         [JsonPropertyName("ready")]
@@ -773,11 +784,8 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         [JsonPropertyName("overallTimedOut")]
         public bool OverallTimedOut { get; } = overallTimedOut;
 
-        [JsonPropertyName("markerFingerprint")]
-        public string? MarkerFingerprint { get; } = markerFingerprint;
-
-        [JsonPropertyName("freshSince")]
-        public DateTimeOffset? FreshSince { get; } = freshSince;
+        [JsonPropertyName("elapsedMilliseconds")]
+        public double ElapsedMilliseconds { get; } = elapsedMilliseconds;
 
         [JsonPropertyName("results")]
         public IReadOnlyList<AppSurfaceCanarySnapshotResponseItem> Results { get; } = results;
@@ -786,41 +794,42 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
     private sealed class AppSurfaceCanarySnapshotResponseItem(
         string name,
         string outcome,
-        bool ready,
-        string? status,
-        string? reasonCode,
-        DateTimeOffset? observedAt,
-        int? matchedCount,
-        string? summary,
-        IReadOnlyDictionary<string, string>? details,
-        string? correlationId,
-        double? elapsedMilliseconds)
+        AppSurfaceCanaryResponse? result,
+        string? code)
     {
         [JsonPropertyName("name")] public string Name { get; } = name;
         [JsonPropertyName("outcome")] public string Outcome { get; } = outcome;
-        [JsonPropertyName("ready")] public bool Ready { get; } = ready;
-        [JsonPropertyName("status")] public string? Status { get; } = status;
-        [JsonPropertyName("reasonCode")] public string? ReasonCode { get; } = reasonCode;
-        [JsonPropertyName("observedAt")] public DateTimeOffset? ObservedAt { get; } = observedAt;
-        [JsonPropertyName("matchedCount")] public int? MatchedCount { get; } = matchedCount;
-        [JsonPropertyName("summary")] public string? Summary { get; } = summary;
-        [JsonPropertyName("details")] public IReadOnlyDictionary<string, string>? Details { get; } = details;
-        [JsonPropertyName("correlationId")] public string? CorrelationId { get; } = correlationId;
-        [JsonPropertyName("elapsedMilliseconds")] public double? ElapsedMilliseconds { get; } = elapsedMilliseconds;
+        [JsonPropertyName("result")] public AppSurfaceCanaryResponse? Result { get; } = result;
+        [JsonPropertyName("code")] public string? Code { get; } = code;
 
-        internal static AppSurfaceCanarySnapshotResponseItem From(AppSurfaceCanarySnapshotItem item) =>
-            new(
+        internal static AppSurfaceCanarySnapshotResponseItem From(
+            AppSurfaceCanarySnapshotItem item,
+            string? markerFingerprint,
+            DateTimeOffset? freshSince)
+        {
+            if (item.Result is null)
+            {
+                return new AppSurfaceCanarySnapshotResponseItem(item.Name, item.Outcome, null, item.ReasonCode);
+            }
+
+            var result = item.Result;
+            return new AppSurfaceCanarySnapshotResponseItem(
                 item.Name,
                 item.Outcome,
-                item.Ready,
-                item.Result is null ? null : ToWireStatus(item.Result.Status),
-                item.ReasonCode ?? item.Result?.ReasonCode,
-                item.Result?.ObservedAt,
-                item.Result?.MatchedCount,
-                item.Result?.Summary,
-                item.Result?.Details.Count > 0 ? item.Result.Details : null,
-                item.Result?.CorrelationId,
-                item.ElapsedMilliseconds);
+                new AppSurfaceCanaryResponse(
+                    item.Name,
+                    item.Ready,
+                    ToWireStatus(result.Status),
+                    markerFingerprint,
+                    freshSince,
+                    result.ObservedAt,
+                    result.MatchedCount,
+                    result.ReasonCode,
+                    result.Summary,
+                    result.Details.Count == 0 ? null : result.Details,
+                    result.CorrelationId),
+                null);
+        }
     }
 
     /// <summary>Reads and writes named-canary timestamps using the canonical UTC wire format.</summary>

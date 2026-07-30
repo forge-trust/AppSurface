@@ -405,7 +405,7 @@ curl --fail-with-body \
 
 Or take a bounded aggregate snapshot. Omit selectors to select the entire registered set, repeat `name` and `tag` to
 form their union, and use tags only for durable host-owned groups. Retagging deliberately changes future tag selections.
-Each request may supply at most 256 selector values before duplicate normalization.
+Each request may supply at most 64 repeated `name` values and 16 repeated `tag` values before duplicate normalization.
 
 ```bash
 curl --fail-with-body \
@@ -417,7 +417,8 @@ curl --fail-with-body \
 
 Snapshots select at most 64 canaries by default, start at most four evaluations concurrently, apply a 10-second
 per-check deadline and a 30-second overall admission deadline. Configure the host-owned limits through
-`options.Snapshot`; every value must be positive, selected-item limits are 1–256, and cancellation is cooperative.
+`options.Snapshot`; concurrency and both timeouts must be positive, the overall timeout must not be shorter than the
+per-check timeout, selected-item limits are 1–256, and cancellation is cooperative.
 An evaluator that ignores cancellation delays the response but is never detached after it.
 
 The completed response contains a required compatibility core and omits optional evidence that is absent:
@@ -455,12 +456,37 @@ omitted when absent; an empty details collection is omitted.
 check and `/_appsurface/canaries` returns a bounded snapshot. Both are excluded from API Explorer/OpenAPI and every
 package-owned response sets `Cache-Control: no-store` and `Pragma: no-cache`.
 
-The snapshot response always contains `ready`, `overallTimedOut`, and ordered `results`. A result with
-`outcome: "completed"` carries the existing status/evidence fields and is ready only when its status is `pass`.
-`failed` has `ASCAN301`; `timed-out` has `ASCAN302` (per-check) or `ASCAN303` (overall after start); and `not-started`
-has `ASCAN304` (overall deadline before admission). Aggregate `ready` is true only when every selected result completed
-and passed. Parse this additive preview shape by property name, tolerate unknown fields, and never treat it as platform
-readiness.
+The snapshot response always contains `ready`, `overallTimedOut`, non-negative `elapsedMilliseconds`, and ordinally
+ordered `results`. A `completed` item carries the complete existing safe response inside `result`; it has no `code`.
+`failed` has only `code: "ASCAN301"`; `timed-out` has `ASCAN302` (per-check) or `ASCAN303` (overall after start); and
+`not-started` has `ASCAN304` (overall deadline before admission). Non-completed items omit `result`. Aggregate `ready`
+is true only when every selected result completed and passed. Parse this additive preview shape by property name,
+tolerate unknown fields, and never treat it as platform readiness.
+
+```json
+{
+  "ready": false,
+  "overallTimedOut": true,
+  "elapsedMilliseconds": 30017.4,
+  "results": [
+    {
+      "name": "forwarding.alpha-evidence",
+      "outcome": "completed",
+      "result": {
+        "name": "forwarding.alpha-evidence",
+        "ready": false,
+        "status": "pending",
+        "reasonCode": "proof-not-observed"
+      }
+    },
+    {
+      "name": "migrations.ready",
+      "outcome": "timed-out",
+      "code": "ASCAN303"
+    }
+  ]
+}
+```
 
 | Evaluator status | Meaning for a caller | Typical caller action | Default HTTP status |
 |---|---|---|---:|
