@@ -394,6 +394,12 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
             freshSince,
             snapshotOptions,
             httpContext.RequestAborted);
+        var markerFingerprint = marker is null ? null : CreateMarkerFingerprint(marker);
+        var normalizedFreshSince = freshSince?.ToUniversalTime();
+        var responseItems = snapshot.Items.Select(item => AppSurfaceCanarySnapshotResponseItem.From(
+            item,
+            markerFingerprint,
+            normalizedFreshSince)).ToArray();
         var elapsedMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         var ready = snapshot.Ready;
         var statusCode = responseMode == AppSurfaceCanaryCompletedResponseMode.AlwaysOk || ready
@@ -435,10 +441,7 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
                     ready,
                     snapshot.OverallTimedOut,
                     elapsedMilliseconds,
-                    snapshot.Items.Select(item => AppSurfaceCanarySnapshotResponseItem.From(
-                        item,
-                        marker is null ? null : CreateMarkerFingerprint(marker),
-                        freshSince?.ToUniversalTime())).ToArray()),
+                    responseItems),
                 options: ResponseJsonOptions,
                 statusCode: statusCode,
                 contentType: $"{MediaTypeNames.Application.Json}; charset={Encoding.UTF8.WebName}")

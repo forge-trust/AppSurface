@@ -16,7 +16,10 @@ public sealed class AppSurfaceCanarySnapshotOptions
     /// <summary>Gets or sets the timeout applied to each started evaluator. The default is 10 seconds.</summary>
     public TimeSpan PerCheckTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
-    /// <summary>Gets or sets the total snapshot admission deadline. The default is 30 seconds.</summary>
+    /// <summary>
+    /// Gets or sets the total snapshot admission deadline. The default is 30 seconds and the configured value must not
+    /// be shorter than <see cref="PerCheckTimeout"/>.
+    /// </summary>
     public TimeSpan OverallTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>Creates an internal immutable-at-mapping copy of these host settings.</summary>
