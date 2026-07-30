@@ -931,7 +931,7 @@ public sealed class CoverageRunWatchdogTests
 
             await cleanupAttempted.Task.WaitAsync(TimeSpan.FromSeconds(2));
             await WaitForErrorOccurrencesAsync(console, "ASCOV122", 1);
-            listener.Flush();
+            await WaitForTraceAsync(trace, listener, "Coverage watchdog staging artifact cleanup failed");
 
             Assert.Contains("Coverage watchdog staging artifact cleanup failed", trace.ToString(), StringComparison.Ordinal);
             Assert.Contains("UnauthorizedAccessException: staging cleanup denied", trace.ToString(), StringComparison.Ordinal);
@@ -992,6 +992,21 @@ public sealed class CoverageRunWatchdogTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         while (CountOccurrences(console.ReadErrorString(), value) < count)
         {
+            await Task.Delay(10, timeout.Token);
+        }
+    }
+
+    private static async Task WaitForTraceAsync(StringWriter trace, TraceListener listener, string value)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        while (true)
+        {
+            listener.Flush();
+            if (trace.ToString().Contains(value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
             await Task.Delay(10, timeout.Token);
         }
     }
