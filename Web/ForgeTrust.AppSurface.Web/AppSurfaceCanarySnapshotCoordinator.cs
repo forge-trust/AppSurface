@@ -108,6 +108,10 @@ internal sealed class AppSurfaceCanarySnapshotCoordinator
                 var result = await _runner.EvaluateAsync(descriptor, marker, freshSince, perCheckCancellation.Token);
                 results[index] = AppSurfaceCanarySnapshotItem.Completed(descriptor.Name, result, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
             }
+            catch (OperationCanceledException) when (requestAborted.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (OperationCanceledException) when (perCheckCancellation.IsCancellationRequested && !requestAborted.IsCancellationRequested)
             {
                 results[index] = overallCancellation.IsCancellationRequested
