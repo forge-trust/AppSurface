@@ -1136,6 +1136,10 @@ declare global {
       return false;
     }
 
+    if (url.hash) {
+      return false;
+    }
+
     const normalizedPath = normalizeComparablePath(url.pathname);
     if (normalizedPath === docsRootPath) {
       return false;
