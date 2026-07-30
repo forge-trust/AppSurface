@@ -148,6 +148,28 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
         Assert.Equal("Releases", searchDocument.NavGroup);
     }
 
+    [Fact]
+    public async Task CoordinatedCurrentPointer_ShouldBeHarvestedAsATreeLocalReleasePage()
+    {
+        var docs = await HarvestRepositoryDocsAsync();
+        var pointer = SingleDoc(docs, "releases/current.md");
+
+        Assert.Equal("Current coordinated release", pointer.Metadata?.Title);
+        Assert.Equal("release-note", pointer.Metadata?.PageType);
+        Assert.Equal("Tree-local coordinated release pointer", pointer.Metadata?.Trust?.Status);
+
+        var aggregator = CreateAggregator(docs);
+        var details = await aggregator.GetDocDetailsAsync("releases/current.md");
+        Assert.NotNull(details);
+        Assert.Contains("v0.2.0-preview.4", details!.Document.Content, StringComparison.Ordinal);
+
+        var searchIndex = await aggregator.GetSearchIndexPayloadAsync();
+        var searchDocument = Assert.Single(
+            searchIndex.Documents,
+            document => string.Equals(document.SourcePath, "releases/current.md", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("/docs/releases/current", searchDocument.Path);
+    }
+
     private static async Task<IReadOnlyList<DocNode>> HarvestRepositoryDocsAsync()
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);

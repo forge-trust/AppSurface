@@ -18,17 +18,20 @@ It also acts as a concrete AppSurface Docs example for teams that want stronger 
 - [Changelog](../CHANGELOG.md) is the compact ledger that points to unreleased and tagged stories.
 - [Pre-1.0 upgrade policy](./upgrade-policy.md) explains the stability contract before `v1.0.0`.
 - [Release authoring checklist](./release-authoring-checklist.md) is the maintainer workflow for turning the unreleased page into a tagged release.
+- [Coordinated release links](./coordinated-release-links.md) explains when package rows use the frozen tree-local current pointer, an explicit historical note, a held release, or a proof-host note.
 
 Older preview routes redirect to their canonical release notes so each release line has one live package-facing story.
 
 ## Official release artifacts
 
-Each generated tagged release owns four checked-in artifacts:
+Each generated tagged release owns four immutable versioned artifacts and two overwriteable tree-local pointer artifacts:
 
 - `releases/v{version}.md`: the human release narrative.
 - `releases/v{version}.md.yml`: AppSurface Docs metadata for the release note.
 - `releases/v{version}.release.json`: machine-readable release metadata and generated file list.
 - `releases/v{version}.evidence.json`: generated release evidence bundle proving repository release-artifact consistency.
+- `releases/current.md`: frozen pointer from coordinated package links to this release note in the documentation tree that contains it.
+- `releases/current.md.yml`: AppSurface Docs metadata for the frozen pointer.
 
 The release evidence bundle is not a signature or hosted-build attestation. It is the reviewable consistency proof used by release-prep and publish validation.
 

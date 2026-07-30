@@ -69,4 +69,24 @@ internal static class ReleaseNoteBuilder
 
             """;
     }
+
+    /// <summary>
+    /// Builds the tree-local pointer used by coordinated package and documentation links.
+    /// </summary>
+    /// <param name="version">The immutable tagged release selected by this pointer.</param>
+    /// <returns>Deterministic Markdown that links to the exact release note.</returns>
+    /// <remarks>
+    /// Do not replace this link with a global release lookup. Release archives copy this file into their immutable exact trees;
+    /// a historical <c>current</c> route must therefore point to the release current when that tree was published.
+    /// </remarks>
+    internal static string BuildCurrentReleasePointer(SemVer version)
+    {
+        return $"""
+            # Current coordinated release
+
+            This documentation tree was published for AppSurface `{version}`. Its coordinated package links intentionally resolve to this frozen release narrative.
+
+            [Read the AppSurface {version} release note](./v{version}.md).
+            """;
+    }
 }

@@ -60,6 +60,14 @@ internal sealed class ReleasePublishing
         var releaseManifest = await RequireGitBlobOutputAsync(tag, releaseManifestPathInTag, "release-manifest-missing-from-tag", cancellationToken);
         var evidencePathInTag = $"releases/v{options.Version}.evidence.json";
         var evidenceJson = await RequireGitBlobOutputAsync(tag, evidencePathInTag, "release-evidence-missing", cancellationToken);
+        string? currentRelease = null;
+        string? currentReleaseSidecar = null;
+        if (ReleaseEvidence.IsV2(evidenceJson))
+        {
+            currentRelease = await RequireGitBlobOutputAsync(tag, "releases/current.md", "release-current-pointer-missing-from-tag", cancellationToken);
+            currentReleaseSidecar = await RequireGitBlobOutputAsync(tag, "releases/current.md.yml", "release-current-pointer-sidecar-missing-from-tag", cancellationToken);
+        }
+
         var evidence = ReleaseEvidence.ValidateTag(
             options.Version,
             options.Version.IsStable ? "stable" : "prerelease",
@@ -68,7 +76,9 @@ internal sealed class ReleasePublishing
             note,
             sidecar,
             releaseManifest,
-            evidenceJson);
+            evidenceJson,
+            currentRelease,
+            currentReleaseSidecar);
         if (evidence.Diagnostics.Count > 0)
         {
             throw new ReleaseToolException(evidence.Diagnostics[0]);

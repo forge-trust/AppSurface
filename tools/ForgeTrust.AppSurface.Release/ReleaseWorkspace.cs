@@ -40,6 +40,20 @@ internal sealed class ReleaseWorkspace
     internal string UnreleasedSidecarPath => PathFor("releases/unreleased.md.yml");
 
     /// <summary>
+    /// Gets the absolute current coordinated release pointer path.
+    /// </summary>
+    /// <remarks>
+    /// This pointer is overwritten only by release preparation. Once docs are exported, its bytes live inside that exact tree,
+    /// so the same <c>releases/current.md</c> route stays frozen to the release represented by the tree.
+    /// </remarks>
+    internal string CurrentReleasePath => PathFor("releases/current.md");
+
+    /// <summary>
+    /// Gets the absolute current coordinated release pointer sidecar path.
+    /// </summary>
+    internal string CurrentReleaseSidecarPath => PathFor("releases/current.md.yml");
+
+    /// <summary>
     /// Gets the absolute package index manifest path.
     /// </summary>
     internal string PackageIndexPath => PathFor("packages/package-index.yml");

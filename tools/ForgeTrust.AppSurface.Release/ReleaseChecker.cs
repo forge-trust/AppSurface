@@ -32,6 +32,7 @@ internal sealed class ReleaseChecker
         var errors = new List<ReleaseDiagnostic>();
         var warnings = new List<ReleaseDiagnostic>();
         var generatedFiles = GeneratedFiles(options.Version);
+        var versionedGeneratedFiles = VersionedGeneratedFiles(options.Version);
         ReleaseEvidenceSummary? evidenceSummary = null;
 
         foreach (var requiredPath in RequiredPaths().Where(requiredPath => !File.Exists(requiredPath)))
@@ -57,7 +58,7 @@ internal sealed class ReleaseChecker
             }
         }
 
-        foreach (var target in generatedFiles.Where(File.Exists))
+        foreach (var target in versionedGeneratedFiles.Where(File.Exists))
         {
             if (options.AllowExistingTargets && string.Equals(options.Command, "check", StringComparison.Ordinal))
             {
@@ -131,6 +132,20 @@ internal sealed class ReleaseChecker
                     "`classification: public` plus `publish_decision: publish` defines the release package surface.",
                     "Fix `packages/package-index.yml` before preparing a coordinated release.",
                     "packages/README.md"));
+            }
+
+            var packagesWithoutReleaseLink = packageSummary.PublicPublishedPackages
+                .Where(package => package.ReleaseLink is null)
+                .Select(package => package.Project)
+                .ToArray();
+            if (packagesWithoutReleaseLink.Length > 0)
+            {
+                errors.Add(ReleaseDiagnostic.Error(
+                    "release-public-package-link-missing",
+                    "A public publishable package does not declare a release link.",
+                    $"Missing release link for: {string.Join(", ", packagesWithoutReleaseLink)}.",
+                    "Use release_track: coordinated for the coordinated release pointer, or use release_track: explicit with release_notes_path.",
+                    "packages/README.md#release-links"));
             }
 
             var blockedPackages = packageSummary.PublicPublishedPackages
@@ -208,6 +223,16 @@ internal sealed class ReleaseChecker
     }
 
     private IReadOnlyList<string> GeneratedFiles(SemVer version)
+    {
+        return
+        [
+            .. VersionedGeneratedFiles(version),
+            _workspace.CurrentReleasePath,
+            _workspace.CurrentReleaseSidecarPath
+        ];
+    }
+
+    private IReadOnlyList<string> VersionedGeneratedFiles(SemVer version)
     {
         return
         [

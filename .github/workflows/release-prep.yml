@@ -97,7 +97,7 @@ jobs:
           git config user.name "appsurface-release-bot"
           git config user.email "appsurface-release-bot@users.noreply.github.com"
           git checkout -b "${branch}"
-          git add CHANGELOG.md releases packages/package-index.yml
+          git add CHANGELOG.md releases
           git commit -m "chore(release): prepare v${VERSION}"
           git push --force-with-lease origin "${branch}"
           existing_pr="$(gh pr list --head "${branch}" --json number --jq '.[0].number // ""')"
@@ -140,7 +140,9 @@ jobs:
             ':(glob)releases/v*.md' \
             ':(glob)releases/v*.md.yml' \
             ':(glob)releases/v*.release.json' \
-            ':(glob)releases/v*.evidence.json')
+            ':(glob)releases/v*.evidence.json' \
+            'releases/current.md' \
+            'releases/current.md.yml')
           if [[ "${#release_artifact_changes[@]}" -eq 0 ]]; then
             echo "No versioned release artifacts changed; validating release tooling instead."
             dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj
@@ -151,7 +153,9 @@ jobs:
             ':(glob)releases/v*.md' \
             ':(glob)releases/v*.md.yml' \
             ':(glob)releases/v*.release.json' \
-            ':(glob)releases/v*.evidence.json')
+            ':(glob)releases/v*.evidence.json' \
+            'releases/current.md' \
+            'releases/current.md.yml')
 
           mapfile -t manifests < <(git diff --no-renames --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- ':(glob)releases/v*.release.json')
           if [[ "${#manifests[@]}" -ne 1 ]]; then
@@ -175,6 +179,8 @@ jobs:
             "releases/v${version}.md.yml"
             "releases/v${version}.release.json"
             "releases/v${version}.evidence.json"
+            "releases/current.md"
+            "releases/current.md.yml"
           )
           if [[ "${#release_artifact_deletions[@]}" -ne 0 ]]; then
             allowed_release_artifact_deletions=()
@@ -200,7 +206,7 @@ jobs:
               if printf '%s\n' "${allowed_release_artifact_deletions[@]}" | grep -Fxq "${deleted_release_artifact}"; then
                 continue
               fi
-              echo "Unexpected versioned release artifact deletion ${deleted_release_artifact}; release preparation pull requests may only delete explicitly allowed superseded artifacts." >&2
+              echo "Unexpected release artifact deletion ${deleted_release_artifact}; release preparation pull requests may only delete explicitly allowed superseded artifacts." >&2
               exit 1
             done
           fi
@@ -216,7 +222,32 @@ jobs:
             if printf '%s\n' "${sorted_expected_artifacts[@]}" | grep -Fxq "${artifact}"; then
               continue
             fi
-            echo "Release preparation pull requests must change exactly the four generated artifacts for v${version}; found: ${sorted_release_artifacts[*]}." >&2
+            echo "Release preparation pull requests must change exactly the six generated artifacts for v${version}, including the frozen current pointer; found: ${sorted_release_artifacts[*]}." >&2
+            exit 1
+          done
+          expected_changed_files=(
+            "CHANGELOG.md"
+            "releases/v${version}.md"
+            "releases/v${version}.md.yml"
+            "releases/v${version}.release.json"
+            "releases/v${version}.evidence.json"
+            "releases/current.md"
+            "releases/current.md.yml"
+            "releases/unreleased.md"
+            "releases/unreleased.md.yml"
+          )
+          mapfile -t changed_files < <(git diff --no-renames --name-only "origin/${GITHUB_BASE_REF}...HEAD")
+          for expected_file in "${expected_changed_files[@]}"; do
+            if ! printf '%s\n' "${changed_files[@]}" | grep -Fxq "${expected_file}"; then
+              echo "Release preparation pull requests must change ${expected_file}; found: ${changed_files[*]}." >&2
+              exit 1
+            fi
+          done
+          for changed_file in "${changed_files[@]}"; do
+            if printf '%s\n' "${expected_changed_files[@]}" | grep -Fxq "${changed_file}"; then
+              continue
+            fi
+            echo "Release preparation pull requests may change only generated release files; unexpected path: ${changed_file}." >&2
             exit 1
           done
           if [[ "${version}" != *-* ]]; then

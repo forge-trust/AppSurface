@@ -35,7 +35,7 @@ For stable releases, `check` also validates prepared release evidence and verifi
 - `releases/v{version}.release.json`
 - `releases/v{version}.evidence.json`
 - `CHANGELOG.md` compact rollover entries
-- `packages/package-index.yml` release note paths for every `classification: public` plus `publish_decision: publish` package
+- [`packages/package-index.yml`](../../packages/package-index.yml) release-link contracts for every `classification: public` plus `publish_decision: publish` package; see the [coordinated release-links guide](../../releases/coordinated-release-links.md)
 - reset `releases/unreleased.md` and `releases/unreleased.md.yml`
 
 The changelog is a compact ledger, not the detailed release narrative. During preparation, the detailed `CHANGELOG.md` `Unreleased`
@@ -71,9 +71,9 @@ Stable publication rejects release-manifest digest mismatches and recommended-ve
 
 ## Release Evidence Bundle
 
-`releases/v{version}.evidence.json` uses schema `appsurface-release-evidence-bundle-v1`. The release JSON describes the coordinated release metadata and generated release files; the release evidence bundle proves the generated release artifacts agree. Draft evidence is validated during release-prep pull request review. Tag-bound evidence is validated by `publish` against the resolved annotated tag commit.
+Historical evidence uses schema `appsurface-release-evidence-bundle-v1`. New coordinated releases use `appsurface-release-evidence-bundle-v2`. The release JSON describes the coordinated release metadata and generated release files; V2 evidence proves the tagged note, tagged sidecar, release JSON, frozen `releases/current.md`, and current-pointer sidecar agree. Draft evidence is validated during release-prep pull request review. Tag-bound evidence is validated by `publish` against the resolved annotated tag commit.
 
-The bundle records release identity, release note and sidecar paths, the release JSON digest, public package release-note paths, optional AppSurface Docs archive catalog fields, split commit identities, generator metadata, and a deterministic subject SHA-256. The subject digest excludes the generated timestamp so maintainers can review generation time without churning the proof. Optional GitHub artifact attestations are not required in v1; default workflows must not request attestation permissions unless a future explicit attestation mode is added.
+The bundle records release identity, release note and sidecar paths, the release JSON digest, public package release links, optional AppSurface Docs archive catalog fields, split commit identities, generator metadata, and a deterministic subject SHA-256. V2 binds the frozen pointer to the tagged note for this docs tree; it never performs a global current-version lookup. The subject digest excludes the generated timestamp so maintainers can review generation time without churning the proof. Optional GitHub artifact attestations are not required; default workflows must not request attestation permissions unless a future explicit attestation mode is added.
 
 The AppSurface Docs `.appsurface-docs-release-manifest.json` remains the exact-tree byte manifest produced by docs export. Runtime archive mounting still trusts only the version catalog's `releaseManifestSha256` pin plus local archive verification; release evidence connects that catalog/archive identity to the repository release artifacts when those docs archive fields are present.
 

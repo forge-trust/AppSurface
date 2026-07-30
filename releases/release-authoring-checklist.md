@@ -13,14 +13,15 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 - confirm every breaking or behavior-changing update has migration guidance
 - for stable releases, stage the AppSurface Docs exact archive and run `appsurface docs verify-archive --catalog <staging>/versions.json --version x.y.z --trusted-release-root <staging>` before asking the release tool to validate docs evidence
 - for stable releases, confirm the checked-in evidence fields describe the same staged docs archive that `nuget-stable-publish.yml` will export and verify before `publish-nuget`
-- use `./eng/release prepare --version x.y.z --dry-run` to inspect the generated tagged note, sidecar, release manifest, release evidence bundle, changelog rollover, package release-note path updates, and reset unreleased artifact before opening the release PR
+- review [coordinated release links](./coordinated-release-links.md) before changing package release metadata; public coordinated rows retain `release_track: coordinated`, while explicit historical, held, and proof-host rows keep their documented paths
+- use `./eng/release prepare --version x.y.z --dry-run` to inspect the generated tagged note, sidecar, release manifest, V2 release evidence bundle, frozen current pointer and sidecar, changelog rollover, and reset unreleased artifact before opening the release PR
 
 ## When cutting the tagged release note
 
 - run `./eng/release prepare --version x.y.z --date YYYY-MM-DD` from an up-to-date release base branch (`main` for normal releases, or the maintained release branch such as `release/0.1.0`)
 - review the generated `releases/vx.y.z.md`, `releases/vx.y.z.md.yml`, `releases/vx.y.z.release.json`, and `releases/vx.y.z.evidence.json`
 - for stable releases, confirm `releases/vx.y.z.evidence.json` records `docsArchive.exactTreePath`, `docsArchive.releaseManifestSha256`, and matching `docsArchive.catalogEntry` fields from the staged docs catalog
-- confirm the generated package path updates described in the [package registry](../packages/README.md) point every `classification: public` plus `publish_decision: publish` package at the tagged note
+- confirm the generated current pointer targets the tagged note and the [package registry](../packages/README.md) keeps every `classification: public` plus `publish_decision: publish` package on `release_track: coordinated`; release prep must not rewrite those package rows
 - review the generated [package readiness evidence](../packages/readiness.md) and resolve or explicitly track package-index blockers before asking maintainers to approve package artifacts; this package-index evidence is separate from the per-version release evidence bundle
 - check that the tagged note gives adopters direct paths to related guides, examples, package docs, and command references instead of only naming the capability
 - when a tagged or release-candidate note supersedes a preview page, remove the preview source file and carry its browser routes as `redirect_aliases` on the new canonical note

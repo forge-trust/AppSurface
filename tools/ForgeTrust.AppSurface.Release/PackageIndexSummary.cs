@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.ReleaseContracts;
 using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
@@ -50,9 +51,23 @@ internal sealed class PackageIndexSummary
                      string.Equals(package.Classification, "public", StringComparison.Ordinal)
                      && string.Equals(package.PublishDecision, "publish", StringComparison.Ordinal)))
         {
+            if (!PackageReleaseLinkResolver.TryResolve(
+                    package.ReleaseTrack,
+                    package.ReleaseNotesPath,
+                    out var releaseLink,
+                    out var issue))
+            {
+                throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                    "release-package-link-invalid",
+                    "A public package release link is invalid.",
+                    $"Package '{package.Project}' {issue}.",
+                    "Use release_track: coordinated with no release_notes_path, or release_track: explicit with a repository-relative release_notes_path.",
+                    "packages/README.md#release-links"));
+            }
+
             publicPublishedPackages.Add(new PackageIndexEntry(
                 package.Project,
-                package.ReleaseNotesPath ?? string.Empty,
+                releaseLink,
                 package.ReadinessBlocker));
         }
 
@@ -92,7 +107,12 @@ internal sealed class PackageIndexYamlEntry
     public string? PublishDecision { get; init; }
 
     /// <summary>
-    /// Gets the release notes path.
+    /// Gets the release-link policy.
+    /// </summary>
+    public string? ReleaseTrack { get; init; }
+
+    /// <summary>
+    /// Gets the explicit release notes path when the package uses an explicit link.
     /// </summary>
     public string? ReleaseNotesPath { get; init; }
 
@@ -106,6 +126,12 @@ internal sealed class PackageIndexYamlEntry
 /// Package row included in a release manifest.
 /// </summary>
 /// <param name="Project">Repository-relative package project path. The package index supplies a non-empty path for every row.</param>
-/// <param name="ReleaseNotesPath">Repository-relative release-note path, normalized to an empty string when the YAML value is omitted.</param>
+/// <param name="ReleaseLink">Resolved package release-link policy.</param>
 /// <param name="ReadinessBlocker">Optional same-repository issue or pull-request reference. A non-empty value blocks publication until the package is held or the blocker is cleared.</param>
-internal sealed record PackageIndexEntry(string Project, string ReleaseNotesPath, string? ReadinessBlocker);
+internal sealed record PackageIndexEntry(string Project, PackageReleaseLink? ReleaseLink, string? ReadinessBlocker)
+{
+    /// <summary>
+    /// Gets the repository-relative release note path after applying the package release-link policy.
+    /// </summary>
+    internal string ReleaseNotesPath => ReleaseLink?.ReleaseNotesPath ?? string.Empty;
+}

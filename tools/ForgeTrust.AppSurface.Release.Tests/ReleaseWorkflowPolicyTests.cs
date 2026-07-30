@@ -43,11 +43,16 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("git diff --no-renames --name-only --diff-filter=AM", prep, StringComparison.Ordinal);
         Assert.Contains("releases/v*.release.json", prep, StringComparison.Ordinal);
         Assert.Contains("releases/v*.evidence.json", prep, StringComparison.Ordinal);
+        Assert.Contains("releases/current.md", prep, StringComparison.Ordinal);
+        Assert.Contains("releases/current.md.yml", prep, StringComparison.Ordinal);
         Assert.Contains("Expected exactly one added or modified release manifest", prep, StringComparison.Ordinal);
         Assert.Contains("Expected exactly one added or modified release evidence bundle", prep, StringComparison.Ordinal);
-        Assert.Contains("Unexpected versioned release artifact deletion", prep, StringComparison.Ordinal);
+        Assert.Contains("Unexpected release artifact deletion", prep, StringComparison.Ordinal);
         Assert.Contains("releases/v0.1.0-rc.4.release.json", prep, StringComparison.Ordinal);
-        Assert.Contains("Release preparation pull requests must change exactly the four generated artifacts", prep, StringComparison.Ordinal);
+        Assert.Contains("Release preparation pull requests must change exactly the six generated artifacts", prep, StringComparison.Ordinal);
+        Assert.Contains("Release preparation pull requests may change only generated release files", prep, StringComparison.Ordinal);
+        Assert.Contains("git add CHANGELOG.md releases", prep, StringComparison.Ordinal);
+        Assert.DoesNotContain("git add CHANGELOG.md releases packages/package-index.yml", prep, StringComparison.Ordinal);
         Assert.Contains("docs export", prep, StringComparison.Ordinal);
         Assert.Contains("docs verify-archive", prep, StringComparison.Ordinal);
         Assert.Contains("--docs-catalog", prep, StringComparison.Ordinal);

@@ -1,4 +1,5 @@
 using System.Text;
+using ForgeTrust.AppSurface.ReleaseContracts;
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
@@ -16,6 +17,29 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     {
         _repositoryRoot = Path.Combine(Path.GetTempPath(), "PackageIndexTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_repositoryRoot);
+    }
+
+    [Fact]
+    public void PackageReleaseLinkResolver_SeparatesCoordinatedExplicitAndLegacyLinks()
+    {
+        Assert.True(PackageReleaseLinkResolver.TryResolve("coordinated", null, out var coordinated, out var coordinatedError));
+        Assert.Null(coordinatedError);
+        Assert.Equal(PackageReleaseTrack.Coordinated, coordinated!.Track);
+        Assert.Equal("releases/current.md", coordinated.ReleaseNotesPath);
+
+        Assert.True(PackageReleaseLinkResolver.TryResolve("explicit", "releases/v0.1.0.md", out var explicitLink, out var explicitError));
+        Assert.Null(explicitError);
+        Assert.Equal(PackageReleaseTrack.Explicit, explicitLink!.Track);
+        Assert.Equal("releases/v0.1.0.md", explicitLink.ReleaseNotesPath);
+
+        Assert.True(PackageReleaseLinkResolver.TryResolve(null, "releases/v0.1.0.md", out var legacyLink, out var legacyError));
+        Assert.Null(legacyError);
+        Assert.Equal(PackageReleaseTrack.Explicit, legacyLink!.Track);
+
+        Assert.False(PackageReleaseLinkResolver.TryResolve("coordinated", "releases/v0.1.0.md", out _, out var conflictingError));
+        Assert.Contains("must not also define release_notes_path", conflictingError, StringComparison.Ordinal);
+        Assert.False(PackageReleaseLinkResolver.TryResolve("unknown", null, out _, out var unknownError));
+        Assert.Contains("unsupported release_track", unknownError, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -869,6 +893,52 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Contains("[v0.1.0-rc.1 release note](../releases/v0.1.0-rc.1.md)", markdown, StringComparison.Ordinal);
         Assert.Contains("current package-facing story", markdown, StringComparison.Ordinal);
         Assert.DoesNotContain("v0.1.0 Release Preview", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GenerateDocumentsAsync_RendersAndValidatesCoordinatedCurrentReleasePointer()
+    {
+        await WriteProgramRepoAsync();
+        await WriteFileAsync("releases/current.md", "# Current release\n");
+        var manifestPath = Path.Combine(_repositoryRoot, "packages", "package-index.yml");
+        var manifest = await File.ReadAllTextAsync(manifestPath);
+        await File.WriteAllTextAsync(
+            manifestPath,
+            manifest.Replace("release_notes_path: releases/unreleased.md", "release_track: coordinated", StringComparison.Ordinal));
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web")
+        });
+
+        var documents = await generator.GenerateDocumentsAsync(CreateRequest());
+
+        Assert.Contains("[current release note](../releases/current.md)", documents.ChooserMarkdown, StringComparison.Ordinal);
+        Assert.Contains("[notes](../releases/current.md)", documents.ReadinessMarkdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("release_notes_path is missing", documents.ReadinessMarkdown, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GenerateDocumentsAsync_RejectsCoordinatedReleaseTrackWhenCurrentPointerIsMissing()
+    {
+        await WriteProgramRepoAsync();
+        var manifestPath = Path.Combine(_repositoryRoot, "packages", "package-index.yml");
+        var manifest = await File.ReadAllTextAsync(manifestPath);
+        await File.WriteAllTextAsync(
+            manifestPath,
+            manifest.Replace("release_notes_path: releases/unreleased.md", "release_track: coordinated", StringComparison.Ordinal));
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web")
+        });
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.GenerateDocumentsAsync(CreateRequest()));
+
+        Assert.Contains("releases/current.md", error.Message, StringComparison.Ordinal);
+        Assert.Contains("missing", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
