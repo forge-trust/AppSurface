@@ -353,6 +353,7 @@ public void ConfigureServices(StartupContext context, IServiceCollection service
         {
             canary.RequireMarker();
             canary.RequireFreshSince();
+            canary.Tags.Add("deploy-critical");
             canary.AllowedDetailKeys.Add(ForwardingCanaryEvaluator.ProofKindDetailKey);
         });
 }
@@ -388,7 +389,15 @@ public void ConfigureEndpointAwareMiddleware(StartupContext context, IApplicatio
 
 public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
 {
-    endpoints.MapAppSurfaceCanaries("DeployOperators");
+    endpoints.MapAppSurfaceCanaries(
+        "DeployOperators",
+        options =>
+        {
+            options.Snapshot.MaxSelectedCanaries = 64;
+            options.Snapshot.MaxConcurrency = 4;
+            options.Snapshot.PerCheckTimeout = TimeSpan.FromSeconds(10);
+            options.Snapshot.OverallTimeout = TimeSpan.FromSeconds(30);
+        });
 }
 ```
 <!-- /appsurface:snippet -->

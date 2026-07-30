@@ -109,7 +109,26 @@ internal sealed class AppSurfaceCanarySnapshotCoordinator
             try
             {
                 var result = await _runner.EvaluateAsync(descriptor, marker, freshSince, perCheckCancellation.Token);
-                results[index] = AppSurfaceCanarySnapshotItem.Completed(descriptor.Name, result, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                if (requestAborted.IsCancellationRequested)
+                {
+                    throw new OperationCanceledException(requestAborted);
+                }
+
+                if (overallCancellation.IsCancellationRequested)
+                {
+                    results[index] = AppSurfaceCanarySnapshotItem.OverallTimedOut(descriptor.Name);
+                }
+                else if (perCheckCancellation.IsCancellationRequested)
+                {
+                    results[index] = AppSurfaceCanarySnapshotItem.PerCheckTimedOut(descriptor.Name);
+                }
+                else
+                {
+                    results[index] = AppSurfaceCanarySnapshotItem.Completed(
+                        descriptor.Name,
+                        result,
+                        Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                }
             }
             catch (OperationCanceledException) when (requestAborted.IsCancellationRequested)
             {

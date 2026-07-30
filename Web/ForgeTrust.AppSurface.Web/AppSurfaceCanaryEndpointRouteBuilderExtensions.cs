@@ -32,11 +32,15 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
     private static readonly JsonSerializerOptions ResponseJsonOptions = CreateResponseJsonOptions();
 
     /// <summary>
-    /// Maps <c>GET /_appsurface/canaries/{name}</c> with a required host-owned authorization policy.
+    /// Maps the protected named-canary route family: <c>GET /_appsurface/canaries/{name}</c> evaluates one canary and
+    /// <c>GET /_appsurface/canaries</c> evaluates a bounded aggregate snapshot.
     /// </summary>
     /// <param name="endpoints">The endpoint route builder that receives the fixed route family.</param>
     /// <param name="authorizationPolicyName">The nonblank host-owned ASP.NET Core authorization policy name.</param>
-    /// <param name="configure">An optional callback that controls completed-result HTTP status mapping.</param>
+    /// <param name="configure">
+    /// An optional callback that controls completed-result HTTP status mapping and host-owned snapshot limits. Snapshot
+    /// concurrency and timeouts must be positive, and the overall timeout must not be shorter than the per-check timeout.
+    /// </param>
     /// <returns>The route handler builder so the host can add ordinary endpoint conventions.</returns>
     /// <remarks>
     /// The default response mode returns 200 for <see cref="AppSurfaceCanaryStatus.Pass"/> and 503 for every other
