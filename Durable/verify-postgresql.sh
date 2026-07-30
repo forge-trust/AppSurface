@@ -112,17 +112,19 @@ if [[ -n "$evidence_mode" || -n "$evidence_output" ]]; then
   done < "$source_file_list" > "$source_hashes"
   source_fingerprint="$(shasum -a 256 "$source_hashes" | awk '{print $1}')"
 
+  flow_scenarios=(flow-activity-resume flow-event-resume flow-identity-retry flow-scope-disable flow-timer-race)
+  work_scenarios=(
+    caller-owned-transaction
+    operator-disable-scope
+    process-loss-idempotent
+    process-loss-manualresolution
+    process-loss-providerkeyed
+    process-loss-reconcilebeforeretry
+  )
   if [[ "$use_flow" == "true" ]]; then
-    scenario_names=(flow-activity-resume flow-event-resume flow-identity-retry flow-scope-disable flow-timer-race)
+    scenario_names=("${flow_scenarios[@]}")
   else
-    scenario_names=(
-      caller-owned-transaction
-      operator-disable-scope
-      process-loss-idempotent
-      process-loss-manualresolution
-      process-loss-providerkeyed
-      process-loss-reconcilebeforeretry
-    )
+    scenario_names=("${work_scenarios[@]}")
   fi
   output_names=("${scenario_names[@]}" run)
   for output_name in "${output_names[@]}"; do
@@ -139,24 +141,26 @@ started_epoch="$(date +%s)"
 
 if [[ "$use_flow" == "true" ]]; then
   target_test_class="DurableSlice4ReferenceWorkloadTests"
+  target_test_filter="FullyQualifiedName~Flow_StartWaitEventResumeComplete_IsIdempotentAndAuthoritative|FullyQualifiedName~EventBeforeWait_DoesNotConsumeIdentity_AndChangedStartConflicts|FullyQualifiedName~ActivityCompletion_ProjectsWorkResultAndResumesParentAtomically|FullyQualifiedName~TimerAndEventRace_HasOneRevisionWinnerAndDuplicateStableLoser|FullyQualifiedName~ScopeDisable_SuspendsFlowDispatchWaitAndHistoryTogether"
 else
   target_test_class="DurableSlice3ReferenceWorkloadTests"
+  target_test_filter="FullyQualifiedName~$target_test_class"
 fi
 
 case "$mode" in
   --quick)
     dotnet test "$project" --list-tests \
-      --filter "FullyQualifiedName~$target_test_class" >"$list_log" \
+      --filter "$target_test_filter" >"$list_log" \
       || fail "test discovery failed"
     grep -Fq "$target_test_class" "$list_log" \
       || fail "the named reference workload selected zero tests"
     if [[ -n "$evidence_output" ]]; then
       dotnet test "$project" \
-        --filter "FullyQualifiedName~$target_test_class" \
+        --filter "$target_test_filter" \
         --logger 'console;verbosity=normal' | tee "$test_log"
     else
       dotnet test "$project" \
-        --filter "FullyQualifiedName~$target_test_class" \
+        --filter "$target_test_filter" \
         --logger 'console;verbosity=normal'
     fi
     ;;
@@ -233,20 +237,7 @@ if [[ -n "$evidence_output" ]]; then
   fi
   [[ "$elapsed_seconds" -le "$threshold_seconds" ]] \
     || fail "$evidence_mode workload took ${elapsed_seconds}s, exceeding the ${threshold_seconds}s readiness target"
-  if [[ "$use_flow" == "true" ]]; then
-    expected_test_count=5
-    scenario_names=(flow-activity-resume flow-event-resume flow-identity-retry flow-scope-disable flow-timer-race)
-  else
-    expected_test_count=6
-    scenario_names=(
-      caller-owned-transaction
-      operator-disable-scope
-      process-loss-idempotent
-      process-loss-manualresolution
-      process-loss-providerkeyed
-      process-loss-reconcilebeforeretry
-    )
-  fi
+  expected_test_count="${#scenario_names[@]}"
   test_count="$(grep -c "$target_test_class" "$list_log" | tr -d ' ')"
   [[ "$test_count" == "$expected_test_count" ]] \
     || fail "expected exactly $expected_test_count discovered reference workload cases, found $test_count"

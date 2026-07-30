@@ -10,7 +10,7 @@ AppSurface Durable is a source-only public preview of portable durable contracts
   authoritative-store implementation. Slices 3 and 4 supply explicit schema management, a Work engine, and a Flow engine;
   they start no hosted worker.
 
-All three packages are machine-held out of every publish plan until slices 4-6 prove Flow, Schedule, hosted runtime,
+All three packages are machine-held out of every publish plan until slices 5-6 prove Schedule, hosted runtime,
 drain/recovery, and operational conformance in a coordinated release review. They can be built and packed directly for
 contract verification, but they are not a supported NuGet release.
 

@@ -431,6 +431,10 @@ public sealed record DurableFlowListRequest
 public sealed record DurableFlowListResult
 {
     /// <summary>Initializes a Flow list result.</summary>
+    /// <param name="flows">The immutable page of payload-free Flow snapshots.</param>
+    /// <param name="continuationToken">
+    /// The opaque token for the next page, limited to 512 characters, or <see langword="null"/> on the final page.
+    /// </param>
     public DurableFlowListResult(IReadOnlyList<DurableFlowSnapshot> flows, string? continuationToken)
     {
         ArgumentNullException.ThrowIfNull(flows);

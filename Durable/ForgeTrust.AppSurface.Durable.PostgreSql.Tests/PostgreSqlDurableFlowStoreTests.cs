@@ -1415,6 +1415,73 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             DurableFlowState.Canceled,
             (await client.GetAsync(new DurableFlowGetRequest(scope, cancelPendingInstance))).Value!.State);
 
+        var (cancelPendingFailureInstance, cancelPendingFailurePermit) =
+            await StartPermittedActivityAsync("cancel-pending-failure", 10);
+        var cancelPendingFailureSnapshot = (await client.GetAsync(
+            new DurableFlowGetRequest(scope, cancelPendingFailureInstance))).Value!;
+        var cancelPendingFailure = await client.CancelAsync(new DurableFlowCancelRequest(
+            scope,
+            new DurableCommandId("activity-cancel-pending-failure"),
+            cancelPendingFailureInstance,
+            "tests",
+            "consumer-requested",
+            cancelPendingFailureSnapshot.Revision));
+        Assert.Equal(DurableFlowState.CancelPending, cancelPendingFailure.Value!.State);
+        await workStore.RecordCompletionAsync(
+            cancelPendingFailurePermit.Claim,
+            new PostgreSqlWorkCompletion(
+                PostgreSqlWorkCompletionKind.FailedTerminal,
+                "activity.failed-after-cancel",
+                "{}"));
+        Assert.Equal(
+            DurableFlowState.Suspended,
+            (await client.GetAsync(new DurableFlowGetRequest(scope, cancelPendingFailureInstance))).Value!.State);
+        await using (var suspendedFrom = database.DataSource.CreateCommand(
+            """
+            SELECT suspended_from_state
+            FROM appsurface_durable.flow_instance
+            WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id;
+            """))
+        {
+            suspendedFrom.Parameters.AddWithValue("scope_id", scope.Value);
+            suspendedFrom.Parameters.AddWithValue("flow_instance_id", cancelPendingFailureInstance.Value);
+            Assert.Equal("cancel_pending", (string?)await suspendedFrom.ExecuteScalarAsync());
+        }
+
+        var (suspendedParentInstance, suspendedParentPermit) =
+            await StartPermittedActivityAsync("already-suspended-parent", 11);
+        await using (var suspendParentAndWait = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.flow_instance
+            SET state = 'suspended', suspended_from_state = 'waiting_activity',
+                suspension_descriptor = '{"code":"operator-review"}'::jsonb
+            WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id;
+
+            UPDATE appsurface_durable.flow_wait
+            SET state = 'suspended', suspension_descriptor = '{"code":"operator-review"}'::jsonb
+            WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND kind = 'activity';
+
+            UPDATE appsurface_durable.flow_dispatch
+            SET state = 'suspended'
+            WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND kind = 'flow';
+            """))
+        {
+            suspendParentAndWait.Parameters.AddWithValue("scope_id", scope.Value);
+            suspendParentAndWait.Parameters.AddWithValue("flow_instance_id", suspendedParentInstance.Value);
+            Assert.Equal(3, await suspendParentAndWait.ExecuteNonQueryAsync());
+        }
+        var suspendedParentCompletion = await workStore.RecordCompletionAsync(
+            suspendedParentPermit.Claim,
+            new PostgreSqlWorkCompletion(
+                PostgreSqlWorkCompletionKind.Succeeded,
+                "activity.completed-after-parent-suspension",
+                "{}",
+                resultCodec.EncodeObject(new byte[] { 11 })));
+        Assert.Equal(DurableWorkState.Succeeded, suspendedParentCompletion.State);
+        Assert.Equal(
+            DurableFlowState.Suspended,
+            (await client.GetAsync(new DurableFlowGetRequest(scope, suspendedParentInstance))).Value!.State);
+
         var effectPermittedInstance = new DurableFlowInstanceId("activity-flow-effect-permitted-cancel");
         Assert.True((await client.StartAsync(new DurableFlowStartRequest(
             scope,

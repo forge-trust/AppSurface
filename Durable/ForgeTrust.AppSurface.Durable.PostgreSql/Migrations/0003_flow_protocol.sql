@@ -23,21 +23,21 @@ CREATE TABLE appsurface_durable.flow_instance
     context_retention text CHECK (context_retention IS NULL OR length(context_retention) BETWEEN 1 AND 128),
     resume_event_name text CHECK (resume_event_name IS NULL OR length(resume_event_name) BETWEEN 1 AND 200),
     resume_event_is_timeout boolean NOT NULL DEFAULT false,
-    resume_event_contract_id text,
-    resume_event_schema_version text,
-    resume_event_codec_id text,
+    resume_event_contract_id text CHECK (resume_event_contract_id IS NULL OR length(resume_event_contract_id) BETWEEN 1 AND 256),
+    resume_event_schema_version text CHECK (resume_event_schema_version IS NULL OR length(resume_event_schema_version) BETWEEN 1 AND 100),
+    resume_event_codec_id text CHECK (resume_event_codec_id IS NULL OR length(resume_event_codec_id) BETWEEN 1 AND 320),
     resume_event_payload bytea,
     resume_event_sha256 bytea CHECK (resume_event_sha256 IS NULL OR octet_length(resume_event_sha256) = 32),
-    resume_event_classification text,
-    resume_event_retention text,
+    resume_event_classification text CHECK (resume_event_classification IS NULL OR length(resume_event_classification) BETWEEN 1 AND 64),
+    resume_event_retention text CHECK (resume_event_retention IS NULL OR length(resume_event_retention) BETWEEN 1 AND 128),
     activity_callsite_id text CHECK (activity_callsite_id IS NULL OR length(activity_callsite_id) BETWEEN 1 AND 200),
-    activity_result_contract_id text,
-    activity_result_schema_version text,
-    activity_result_codec_id text,
+    activity_result_contract_id text CHECK (activity_result_contract_id IS NULL OR length(activity_result_contract_id) BETWEEN 1 AND 256),
+    activity_result_schema_version text CHECK (activity_result_schema_version IS NULL OR length(activity_result_schema_version) BETWEEN 1 AND 100),
+    activity_result_codec_id text CHECK (activity_result_codec_id IS NULL OR length(activity_result_codec_id) BETWEEN 1 AND 320),
     activity_result_payload bytea,
     activity_result_sha256 bytea CHECK (activity_result_sha256 IS NULL OR octet_length(activity_result_sha256) = 32),
-    activity_result_classification text,
-    activity_result_retention text,
+    activity_result_classification text CHECK (activity_result_classification IS NULL OR length(activity_result_classification) BETWEEN 1 AND 64),
+    activity_result_retention text CHECK (activity_result_retention IS NULL OR length(activity_result_retention) BETWEEN 1 AND 128),
     lease_generation bigint NOT NULL DEFAULT 0 CHECK (lease_generation >= 0),
     lease_owner text CHECK (lease_owner IS NULL OR length(lease_owner) BETWEEN 1 AND 200),
     lease_started_at timestamp with time zone,
@@ -386,6 +386,9 @@ CREATE POLICY flow_timer_scope_isolation ON appsurface_durable.flow_timer
 
 ALTER TABLE appsurface_durable.flow_dispatch ENABLE ROW LEVEL SECURITY;
 ALTER TABLE appsurface_durable.flow_dispatch FORCE ROW LEVEL SECURITY;
+-- Ordering requirement: run Durable/configure-postgresql-roles.sql before granting SELECT on flow_dispatch. This
+-- migration policy is PUBLIC for dispatcher discovery; the role recipe narrows it to dispatcher_role and adds the
+-- runtime scope predicate. There is intentionally no scope-restricted SELECT fallback in this migration.
 CREATE POLICY flow_dispatch_global_discovery ON appsurface_durable.flow_dispatch
     FOR SELECT
     USING (true);

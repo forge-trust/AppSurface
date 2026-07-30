@@ -58,6 +58,11 @@ var completion = await store.RecordCompletionAsync(
         "v2_binary_completed",
         "{}",
         registration.ResultCodec.EncodeObject("v2-result"u8.ToArray())));
+if (completion.State != DurableWorkState.Succeeded)
+{
+    throw new InvalidOperationException(
+        $"V2 Work completion reported '{completion.State}' instead of a succeeded terminal state.");
+}
 
 Console.WriteLine(JsonSerializer.Serialize(new
 {

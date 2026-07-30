@@ -26,8 +26,20 @@ internal sealed record PostgreSqlDurableFlowProcessorSettings
 }
 
 /// <summary>Observes committed protocol barriers used by subprocess crash certification.</summary>
+/// <remarks>
+/// Observers run after the named database boundary commits and must preserve that ordering. They must not access the
+/// database or initiate another Flow operation, because observers exist only to certify recovery boundaries such as a
+/// deterministic subprocess termination.
+/// </remarks>
 internal interface IPostgreSqlDurableFlowBarrierObserver
 {
+    /// <summary>Observes a committed Flow protocol barrier.</summary>
+    /// <param name="barrier">The stable name of the committed boundary.</param>
+    /// <param name="scopeId">The scope that owns the committed Flow transition.</param>
+    /// <param name="instanceId">The Flow instance that crossed the boundary.</param>
+    /// <param name="revision">The committed aggregate revision.</param>
+    /// <param name="cancellationToken">Cancellation for observer-only work after the commit.</param>
+    /// <returns>A task that completes after the observer records the barrier.</returns>
     ValueTask ObserveAsync(
         string barrier,
         DurableScopeId scopeId,
@@ -36,6 +48,7 @@ internal interface IPostgreSqlDurableFlowBarrierObserver
         CancellationToken cancellationToken);
 }
 
+/// <summary>Provides the production barrier observer that preserves ordering without recording a checkpoint.</summary>
 internal sealed class NoOpPostgreSqlDurableFlowBarrierObserver : IPostgreSqlDurableFlowBarrierObserver
 {
     internal static NoOpPostgreSqlDurableFlowBarrierObserver Instance { get; } = new();
@@ -53,12 +66,25 @@ internal sealed class NoOpPostgreSqlDurableFlowBarrierObserver : IPostgreSqlDura
         ValueTask.CompletedTask;
 }
 
+/// <summary>Classifies the payload-free dispatch row that initiated Flow processing.</summary>
 internal enum PostgreSqlFlowDispatchKind
 {
+    /// <summary>Runs the next Flow evaluation after a ready or resumed Flow transition.</summary>
     Flow = 0,
+
+    /// <summary>Resolves a due Flow timer before the next Flow evaluation.</summary>
     Timer = 1,
 }
 
+/// <summary>Describes one payload-free Flow or timer dispatch candidate discovered by the dispatcher role.</summary>
+/// <param name="DispatchId">The unique dispatch row identity.</param>
+/// <param name="ScopeId">The owning durable scope.</param>
+/// <param name="Kind">Whether the candidate evaluates a Flow or resolves a timer.</param>
+/// <param name="InstanceId">The target Flow instance.</param>
+/// <param name="TimerId">The timer identity for <see cref="PostgreSqlFlowDispatchKind.Timer"/> candidates.</param>
+/// <param name="DueAtUtc">The time at which the candidate becomes eligible for processing.</param>
+/// <param name="ExpectedRevision">The Flow revision that must still match when the candidate is claimed.</param>
+/// <param name="Priority">The stable scheduler priority used when candidates share a due time.</param>
 internal sealed record PostgreSqlFlowDispatchCandidate(
     Guid DispatchId,
     DurableScopeId ScopeId,
@@ -69,16 +95,36 @@ internal sealed record PostgreSqlFlowDispatchCandidate(
     long ExpectedRevision,
     short Priority);
 
+/// <summary>Describes the durable outcome of attempting to process one Flow dispatch candidate.</summary>
 internal enum PostgreSqlFlowProcessingOutcome
 {
+    /// <summary>The candidate committed its intended transition.</summary>
     Applied = 0,
+
+    /// <summary>The dispatcher could not claim the candidate because another worker owns or completed it.</summary>
     NotClaimed = 1,
+
+    /// <summary>The candidate no longer matched its persisted revision, epoch, or scope fence before processing began.</summary>
     Stale = 2,
+
+    /// <summary>The Flow committed a safety suspension instead of continuing evaluation.</summary>
     Suspended = 3,
+
+    /// <summary>The Flow committed a terminal state.</summary>
     Terminal = 4,
+
+    /// <summary>A competing transaction won the transition after this worker had discovered the candidate.</summary>
     RaceLost = 5,
 }
 
+/// <summary>Reports the observable result of processing a single Flow dispatch candidate.</summary>
+/// <param name="Outcome">The applied, terminal, fenced, or competing-transition outcome.</param>
+/// <param name="ScopeId">The scope that owns the candidate.</param>
+/// <param name="InstanceId">The Flow instance considered for processing.</param>
+/// <param name="State">The resulting Flow state when a durable transition was observed.</param>
+/// <param name="Revision">The resulting or observed Flow aggregate revision.</param>
+/// <param name="ChildWorkId">The child Work accepted by an activity transition, when one was created.</param>
+/// <param name="ProblemCode">The durable safety code when the Flow was suspended or rejected.</param>
 internal sealed record PostgreSqlFlowProcessingResult(
     PostgreSqlFlowProcessingOutcome Outcome,
     DurableScopeId ScopeId,

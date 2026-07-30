@@ -15,6 +15,12 @@ internal sealed partial class PostgreSqlDurableFlowStore
     private static readonly Uri Diagnostics =
         new("https://forge-trust.com/troubleshooting/durable-diagnostics");
 
+    private const string FlowCommandProjection = """
+        SELECT flow_instance_id, command_id, fingerprint_schema, fingerprint_sha256,
+               outcome, resulting_state, resulting_revision
+        FROM appsurface_durable.flow_command
+        """;
+
     private static readonly FrozenDictionary<string, DurableFlowState> PersistedStates =
         new Dictionary<string, DurableFlowState>(StringComparer.Ordinal)
         {
@@ -982,6 +988,8 @@ internal sealed partial class PostgreSqlDurableFlowStore
               AND wait.flow_instance_id = @flow_instance_id
               AND wait.kind = 'activity'
               AND wait.state IN ('active', 'suspended')
+            -- Lock ordering: keep OF work. A bare FOR UPDATE also locks flow_wait, which would invert
+            -- the flow_instance -> flow_wait order used by event delivery and permit a deadlock.
             FOR UPDATE OF work;
             """;
         await using var command = new NpgsqlCommand(sql, connection, transaction);
@@ -1228,10 +1236,8 @@ internal sealed partial class PostgreSqlDurableFlowStore
         string? eventId,
         CancellationToken cancellationToken)
     {
-        const string sql = """
-            SELECT flow_instance_id, command_id, fingerprint_schema, fingerprint_sha256,
-                   outcome, resulting_state, resulting_revision
-            FROM appsurface_durable.flow_command
+        var sql = $"""
+            {FlowCommandProjection}
             WHERE scope_id = @scope_id
               AND ((@command_id IS NOT NULL AND command_id = @command_id)
                    OR (@event_id IS NOT NULL AND event_id = @event_id))
@@ -1249,13 +1255,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
         });
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
-            ? new FlowCommandRow(
-                new DurableFlowInstanceId(reader.GetString(0)),
-                reader.GetString(1),
-                new DurableCommandFingerprint(reader.GetString(2), reader.GetString(3)),
-                reader.GetString(4),
-                reader.GetString(5),
-                reader.GetInt64(6))
+            ? ReadFlowCommandRow(reader)
             : null;
     }
 
@@ -1266,10 +1266,8 @@ internal sealed partial class PostgreSqlDurableFlowStore
         string idempotencyKey,
         CancellationToken cancellationToken)
     {
-        const string sql = """
-            SELECT flow_instance_id, command_id, fingerprint_schema, fingerprint_sha256,
-                   outcome, resulting_state, resulting_revision
-            FROM appsurface_durable.flow_command
+        var sql = $"""
+            {FlowCommandProjection}
             WHERE scope_id = @scope_id AND start_idempotency_key = @idempotency_key
             LIMIT 1;
             """;
@@ -1278,15 +1276,18 @@ internal sealed partial class PostgreSqlDurableFlowStore
         command.Parameters.AddWithValue("idempotency_key", idempotencyKey);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
-            ? new FlowCommandRow(
-                new DurableFlowInstanceId(reader.GetString(0)),
-                reader.GetString(1),
-                new DurableCommandFingerprint(reader.GetString(2), reader.GetString(3)),
-                reader.GetString(4),
-                reader.GetString(5),
-                reader.GetInt64(6))
+            ? ReadFlowCommandRow(reader)
             : null;
     }
+
+    private static FlowCommandRow ReadFlowCommandRow(NpgsqlDataReader reader) =>
+        new(
+            new DurableFlowInstanceId(reader.GetString(0)),
+            reader.GetString(1),
+            new DurableCommandFingerprint(reader.GetString(2), reader.GetString(3)),
+            reader.GetString(4),
+            reader.GetString(5),
+            reader.GetInt64(6));
 
     private static DurableOperationResult<DurableFlowCommandResult>? ResolveStartIdentity(
         DurableFlowStartRequest request,

@@ -70,6 +70,10 @@ public sealed class DurableReplayFlowCoverageTests
         Assert.Empty(result.Flows);
         Assert.Null(result.ContinuationToken);
 
+        var maximumContinuationToken = new string('a', 512);
+        Assert.Equal(maximumContinuationToken, new DurableFlowListRequest(Scope, continuationToken: maximumContinuationToken).ContinuationToken);
+        Assert.Equal(maximumContinuationToken, new DurableFlowListResult([], maximumContinuationToken).ContinuationToken);
+
         Assert.Throws<ArgumentException>(() => new DurableFlowGetRequest(default, Instance));
         Assert.Throws<ArgumentException>(() => new DurableFlowGetRequest(Scope, default));
         Assert.Throws<ArgumentOutOfRangeException>(() => new DurableFlowListRequest(Scope, (DurableFlowState)999));

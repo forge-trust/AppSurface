@@ -678,6 +678,15 @@ public sealed class PostgreSqlSchemaIntegrationTests
                 Assert.Equal(1, await scopedUpdate.ExecuteNonQueryAsync());
             }
 
+            await using (var crossScopeUpdate = new NpgsqlCommand(
+                "UPDATE appsurface_durable.flow_dispatch SET due_at = due_at + interval '1 second' WHERE scope_id = @scope_id;",
+                runtimeConnection,
+                scopedTransaction))
+            {
+                crossScopeUpdate.Parameters.AddWithValue("scope_id", "flow-rls-scope-b");
+                Assert.Equal(0, await crossScopeUpdate.ExecuteNonQueryAsync());
+            }
+
             await scopedTransaction.CommitAsync();
         }
 

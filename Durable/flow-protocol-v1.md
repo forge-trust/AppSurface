@@ -36,11 +36,12 @@ A Flow instance transitions through the following formal states:
 
 To prevent deadlocks across concurrent flow steps, event deliveries, and child activity completions, all operations adhere to the canonical lock hierarchy:
 
-**`scope` -> `child Work (when present)` -> `parent Flow` -> `Flow dispatch` -> `Flow wait` -> `Flow timer` -> `Work dispatch` -> `permit/operator command` -> `Work history` -> `Flow history`**
+**`scope` -> `child Work (when present)` -> `parent Flow` -> `Flow command` -> `Flow wait` -> `Flow timer` -> `Flow dispatch` -> `Work dispatch` -> `permit/operator command` -> `Work history` -> `Flow history`**
 
-Rows within one class are locked in stable primary-key order. Activity acceptance resolves or inserts its deterministic
-child Work before locking and conditionally advancing the parent; any parent-fence loss rolls the entire transaction
-back.
+Every operation acquires only the relations it needs, but always preserves this relative order; rows within one class are
+locked in stable primary-key order. Activity acceptance creates a previously absent deterministic child Work under its
+held Flow claim; later operations that lock the existing child and parent acquire the child Work before the parent Flow.
+Any parent-fence loss rolls the entire transaction back.
 
 Schema management and epoch rotation take the same exclusive session advisory lock as Work operations before altering schema or rotating active epoch credentials.
 
@@ -50,15 +51,15 @@ Schema management and epoch rotation take the same exclusive session advisory lo
 | --- | --- | --- | --- |
 | **Get schema status** | Read-only deployment connection | Migration hashes for `0001`, `0002`, `0003` | Reports compatibility (compatible, missing, inconsistent, old/new); includes `StoreId` and active epoch. |
 | **Apply migrations** | Migration owner; session advisory lock | Pre/post migration hashes for `0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol` | Applies pending known migrations in sequence under lock; fails closed on SHA-256 mismatch. |
-| **Start Flow** | Caller/client transaction; scope -> flow_instance -> flow_command -> flow_history | Target, StoreId, active epoch, registry, definition fingerprint, `start_idempotency_key` | Atomically creates `flow_instance` (state `ready`), records `flow_command`, appends `flow_history` event, or returns exact duplicate. |
-| **Deliver External Event** | Short transaction following the global order | Target, StoreId, active epoch, unique `event_id`, matching active `waiting_event` | Records command, resolves active wait (`event_won`), supersedes timer if scheduled, updates `flow_instance` to `ready`, appends history. Exact re-delivery returns the original duplicate-stable outcome. |
-| **Fire Timer** | Payload-free `ix_flow_dispatch_due`; short transaction following the global order | StoreId, active epoch, `state = 'scheduled'`, `due_at <= clock_timestamp()` | Updates timer to `fired`, resolves event wait (`timer_won`), updates `flow_instance` to `ready`, appends history. |
-| **Evaluate Step** | Short scoped transaction; scope -> flow_instance -> flow_history | Active lease/epoch, aggregate revision match, definition fingerprint matching registered code | Replays/evaluates transitions; advances node; creates new `flow_wait`/`flow_timer` or enqueues child Work; updates state and increments revision. |
-| **Accept Child Activity Work** | Scoped transaction; child Work before parent Flow | Active Flow claim, registered Work contract, active epoch | Atomically inserts/resolves Work, dispatch/history, creates an activity wait, and sets Flow state to `waiting_activity`; parent-fence loss rolls everything back. |
-| **Complete Activity Wait** | Scoped transaction; scope -> child Work -> parent Flow -> Flow dispatch -> wait -> Work dispatch/history -> Flow history | Terminal Work fact, matching `child_work_id` | Resolves the wait, records the typed activity result or suspension descriptor, transitions the parent, and appends both histories atomically. |
-| **Cancel Flow** | Scoped transaction; scope -> flow_instance -> flow_command -> flow_wait -> flow_timer -> flow_history | Target, active instance, authorized actor/reason | If `ready`/`waiting`, cancels active waits/timers and transitions to `canceled`. If activity in-flight, transitions to `cancel_pending`. |
+| **Start Flow** | Caller/client transaction; scope -> flow_instance -> flow_command -> flow_dispatch -> flow_history | Target, StoreId, active epoch, registry, definition fingerprint, `start_idempotency_key` | Atomically creates `flow_instance` (state `ready`), records `flow_command`, appends `flow_history` event, or returns exact duplicate. |
+| **Deliver External Event** | Scoped transaction; scope -> flow_instance -> flow_command -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | Target, StoreId, active epoch, unique `event_id`, matching active `waiting_event` | Records command, resolves active wait (`event_won`), supersedes timer if scheduled, updates `flow_instance` to `ready`, appends history. Exact re-delivery returns the original duplicate-stable outcome. |
+| **Fire Timer** | Payload-free discovery claim, then scoped transition; scope -> flow_instance -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | StoreId, active epoch, `state = 'scheduled'`, `due_at <= clock_timestamp()` | Updates timer to `fired`, resolves event wait (`timer_won`), updates `flow_instance` to `ready`, appends history. |
+| **Evaluate Step** | Short scoped transaction; scope -> flow_instance -> newly created flow_wait/flow_timer/child Work -> flow_dispatch -> flow_history | Active lease/epoch, aggregate revision match, definition fingerprint matching registered code | Replays/evaluates transitions; advances node; creates new `flow_wait`/`flow_timer` or enqueues child Work; updates state and increments revision. |
+| **Accept Child Activity Work** | Scoped transaction; existing child Work -> parent Flow -> flow_wait -> Work dispatch -> Work history -> Flow history | Active Flow claim, registered Work contract, active epoch | Atomically inserts/resolves Work, dispatch/history, creates an activity wait, and sets Flow state to `waiting_activity`; parent-fence loss rolls everything back. |
+| **Complete Activity Wait** | Scoped transaction; scope -> child Work -> parent Flow -> flow_wait -> flow_dispatch -> Work dispatch -> Work history -> Flow history | Terminal Work fact, matching `child_work_id` | Resolves the wait, records the typed activity result or suspension descriptor, transitions the parent, and appends both histories atomically. |
+| **Cancel Flow** | Scoped transaction; scope -> flow_instance -> flow_command -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | Target, active instance, authorized actor/reason | If `ready`/`waiting`, cancels active waits/timers and transitions to `canceled`. If activity in-flight, transitions to `cancel_pending`. |
 | **Suspend Flow** | Scoped transaction; scope -> flow_instance -> flow_history | Invalid transition, non-restorable child failure, code mismatch (`ASDUR200`/`ASDUR201`/`ASDUR211`) | Sets state to `suspended`, records `suspended_from_state` and terminal reason code, appends audit history. |
-| **Release Suspended Flow** | Scoped transaction; scope -> flow_instance -> flow_command -> flow_history | Operator command, expected revision, valid epoch, authorized resolution | Clears suspension, restores original or target state, appends command and history record. |
+| **Release Suspended Flow** | Scoped transaction; scope -> flow_instance -> flow_command -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | Operator command, expected revision, valid epoch, authorized resolution | Clears suspension, restores original or target state, appends command and history record. |
 | **Disable Scope** | Scoped transaction; canonical lock order | Active scope generation, actor/reason | Permanent tombstone on scope; atomically suspends non-terminal Flow instances and Work items in scope. |
 
 ## 11 Crash recovery boundaries
@@ -119,9 +120,12 @@ After applying any migration that adds package relations, run [`configure-postgr
 
 All six Flow tables, including payload-free `flow_dispatch`, have Row Level Security enabled and forced:
 
-The dispatcher credential alone receives global `flow_dispatch` discovery. The scoped runtime credential retains
-`SELECT` and column-scoped `UPDATE` privileges but sees Flow dispatch rows only after its transaction sets the matching
-`appsurface_durable.scope_id`; rerun the role recipe after applying `0003` to normalize these role-targeted policies.
+The dispatcher credential alone receives global `flow_dispatch` discovery. Run `configure-postgresql-roles.sql`
+immediately after applying `0003` and before granting `SELECT` on `flow_dispatch`: the migration's
+`flow_dispatch_global_discovery` policy is initially `PUBLIC`, because it has
+no scope-restricted discovery fallback. The role recipe narrows that policy to the dispatcher credential and adds the
+runtime-role scope predicate. The scoped runtime credential then retains `SELECT` and column-scoped `UPDATE` privileges
+but sees Flow dispatch rows only after its transaction sets the matching `appsurface_durable.scope_id`.
 
 ```sql
 ALTER TABLE appsurface_durable.flow_instance ENABLE ROW LEVEL SECURITY;

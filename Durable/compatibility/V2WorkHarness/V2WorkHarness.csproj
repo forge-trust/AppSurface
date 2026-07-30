@@ -18,6 +18,11 @@
                       VersionOverride="$(V2PackageVersion)" />
   </ItemGroup>
 
+  <!-- The CI verifier redirects intermediates to a temporary directory; never treat a prior local obj tree as source. -->
+  <ItemGroup>
+    <Compile Remove="obj/**/*.cs" />
+  </ItemGroup>
+
   <Target Name="RequireV2CompatibilityPackage"
           BeforeTargets="Build"
           Condition="'$(V2PackageVersion)' == ''">

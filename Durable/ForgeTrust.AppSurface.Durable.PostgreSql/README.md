@@ -1,8 +1,8 @@
 # ForgeTrust.AppSurface.Durable.PostgreSql
 
 > **Source-only public preview:** this package supplies explicit PostgreSQL schema management and a manually driven Work
-> engine, and a Flow engine. It is excluded from publish plans until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, and
-> coordinated operations. It starts no worker or hosted service.
+> engine, and a Flow engine. It is excluded from publish plans until slices 5-6 prove Schedule, hosted runtime,
+> drain/recovery, and coordinated operations. It starts no worker or hosted service.
 
 Choose this package when an application must commit its domain mutation and durable Work acceptance in the same
 PostgreSQL transaction, and when process-loss recovery must use explicit leases, runtime/scope fences, effect permits,

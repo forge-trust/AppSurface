@@ -52,6 +52,19 @@ public sealed class DurableSchemaContractTests
                 Assert.Contains("activity_completed", third.Sql, StringComparison.Ordinal);
                 Assert.Contains("flow_timer", third.Sql, StringComparison.Ordinal);
                 Assert.Contains("flow_dispatch", third.Sql, StringComparison.Ordinal);
+                Assert.Contains(
+                    "resume_event_contract_id text CHECK (resume_event_contract_id IS NULL OR length(resume_event_contract_id) BETWEEN 1 AND 256)",
+                    third.Sql,
+                    StringComparison.Ordinal);
+                Assert.Contains(
+                    "activity_result_codec_id text CHECK (activity_result_codec_id IS NULL OR length(activity_result_codec_id) BETWEEN 1 AND 320)",
+                    third.Sql,
+                    StringComparison.Ordinal);
+                Assert.Contains(
+                    "activity_result_retention text CHECK (activity_result_retention IS NULL OR length(activity_result_retention) BETWEEN 1 AND 128)",
+                    third.Sql,
+                    StringComparison.Ordinal);
+                Assert.Contains("run Durable/configure-postgresql-roles.sql before granting SELECT", third.Sql, StringComparison.Ordinal);
             });
         Assert.Equal(migrations.Count, DurablePostgreSqlMigrationCatalog.RequiredVersion);
         Assert.Equal(migrations.Count, PostgreSqlDurableRuntimeSchemaManager.RequiredVersion);

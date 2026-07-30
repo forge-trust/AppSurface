@@ -97,6 +97,13 @@ internal static class PostgreSqlDurableFlowActivityProjector
             && workState is DurableWorkState.CanceledBeforeEffect
                 or DurableWorkState.Succeeded
                 or DurableWorkState.SucceededAfterCancelRequested;
+        if (flowState == "suspended")
+        {
+            // Scope recovery or an earlier projection already preserved the retained activity wait.
+            // Let the child Work commit its terminal truth without trying to project the parent again.
+            return;
+        }
+
         var revision = checked(flowRevision + 1);
         if (succeeded && !canceledParent && hasResultPayload)
         {
@@ -122,6 +129,7 @@ internal static class PostgreSqlDurableFlowActivityProjector
             waitId,
             revision,
             canceledParent,
+            flowState,
             workState,
             definitionFingerprint,
             cancellationToken).ConfigureAwait(false);
@@ -209,6 +217,7 @@ internal static class PostgreSqlDurableFlowActivityProjector
         Guid waitId,
         long revision,
         bool canceledParent,
+        string suspendedFromState,
         DurableWorkState workState,
         string definitionFingerprint,
         CancellationToken cancellationToken)
@@ -223,7 +232,7 @@ internal static class PostgreSqlDurableFlowActivityProjector
                 SET state = @next_state, revision = @revision,
                     terminal_at = CASE WHEN @next_state = 'canceled' THEN clock_timestamp() ELSE NULL END,
                     terminal_code = CASE WHEN @next_state = 'canceled' THEN @problem_code ELSE NULL END,
-                    suspended_from_state = CASE WHEN @next_state = 'suspended' THEN 'waiting_activity' ELSE NULL END,
+                    suspended_from_state = CASE WHEN @next_state = 'suspended' THEN @suspended_from_state ELSE NULL END,
                     suspension_descriptor = CASE WHEN @next_state = 'suspended'
                         THEN jsonb_build_object('code', @problem_code, 'source', 'child_work', 'work_state', @work_state)
                         ELSE NULL END,
@@ -266,6 +275,7 @@ internal static class PostgreSqlDurableFlowActivityProjector
         AddParameters(command, scopeId, instanceId, waitId, revision, definitionFingerprint);
         command.Parameters.AddWithValue("next_state", nextState);
         command.Parameters.AddWithValue("wait_state", waitState);
+        command.Parameters.AddWithValue("suspended_from_state", suspendedFromState);
         command.Parameters.AddWithValue("problem_code", code);
         command.Parameters.AddWithValue("work_state", workState.ToString());
         if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
