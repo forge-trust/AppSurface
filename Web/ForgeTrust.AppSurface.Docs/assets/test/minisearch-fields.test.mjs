@@ -30,6 +30,27 @@ test('real MiniSearch matches every AppSurface Docs search field', async () => {
   }
 });
 
+test('summaryPresentation is stored but not searchable by MiniSearch', async () => {
+  const { createMiniSearchConfiguration, createMiniSearchDocument, normalizeSearchDocument } = await loadSearchCore();
+  const index = new MiniSearch(createMiniSearchConfiguration());
+
+  const doc = normalizeSearchDocument({
+    id: 'summary-presentation-no-index',
+    path: '/docs/summary-presentation-no-index',
+    title: 'Visible to search index',
+    summary: 'visible summary',
+    summaryPresentation: [{ kind: 'text', text: 'summaryPresentationOnlyToken' }]
+  });
+
+  index.addAll([createMiniSearchDocument(doc)]);
+
+  const hiddenOnly = index.search('summaryPresentationOnlyToken');
+  assert.equal(hiddenOnly.length, 0);
+
+  const summaryVisible = index.search('visible summary text');
+  assert.equal(summaryVisible[0]?.id, 'summary-presentation-no-index');
+});
+
 test('real MiniSearch candidates hydrate into reader-intent ranked docs', async () => {
   const { createMiniSearchConfiguration, createMiniSearchDocument, normalizeSearchDocument, rankSearchResults } = await loadSearchCore();
   const index = new MiniSearch(createMiniSearchConfiguration());
