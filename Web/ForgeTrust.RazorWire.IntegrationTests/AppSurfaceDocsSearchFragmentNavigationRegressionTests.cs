@@ -21,7 +21,6 @@ public sealed class AppSurfaceDocsSearchFragmentNavigationRegressionTests
     {
         // Regression: ISSUE-001 — search-result frame navigation dropped destination fragments.
         // Found by /qa on 2026-07-30.
-        // Report: .gstack/qa-reports/qa-report-localhost-6187-2026-07-30.md
         await using var context = await _fixture.Browser.NewContextAsync();
         var page = await context.NewPageAsync();
 

@@ -586,15 +586,18 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
 
         await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Guides");
         await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Dependency Guide");
-        var richSnippet = page
+        var dependencyGuide = page
             .Locator(".docs-search-result")
-            .Filter(new LocatorFilterOptions { HasTextString = "Dependency Guide" })
-            .Locator(".docs-search-result-snippet");
+            .Filter(new LocatorFilterOptions { HasTextString = "Dependency Guide" });
+        var richSnippet = dependencyGuide.Locator(".docs-search-result-snippet");
         await Assertions.Expect(richSnippet).ToHaveTextAsync("Manage dependencies with AppSurface Docs.");
         await Assertions.Expect(richSnippet.Locator("strong")).ToHaveTextAsync("dependencies");
         await Assertions.Expect(richSnippet.Locator("code")).ToHaveTextAsync("AppSurface Docs");
         Assert.DoesNotContain("**", await richSnippet.InnerTextAsync(), StringComparison.Ordinal);
         Assert.DoesNotContain("`", await richSnippet.InnerTextAsync(), StringComparison.Ordinal);
+        var dependencyGuideLink = dependencyGuide.Locator(".docs-search-result-link");
+        Assert.Equal("doc-content", await dependencyGuideLink.GetAttributeAsync("data-turbo-frame"));
+        Assert.Equal("advance", await dependencyGuideLink.GetAttributeAsync("data-turbo-action"));
         await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Guide");
         await ExpectVisibleTextAsync(page, "#docs-search-page-results", "AppSurface Docs");
         await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Maintainer");
