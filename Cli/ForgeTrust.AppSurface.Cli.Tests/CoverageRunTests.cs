@@ -1766,6 +1766,78 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldIgnoreTestCasesBelowTheBoundedTopTests()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var testCases = string.Concat(Enumerable.Range(1, 21).Reverse().Select(seconds =>
+            $"<testcase classname=\"SampleTests\" name=\"Case{seconds}\" time=\"{seconds}\" />"));
+        var junit = repo.WriteFile(
+            "junit.xml",
+            $"<testsuite>{testCases}<testcase classname=\"SampleTests\" name=\"Ignored\" time=\"0\" /></testsuite>");
+        var result = CreateProjectRunResult(repo.Path, junit);
+
+        var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync([result], CancellationToken.None);
+
+        Assert.Equal(22, report.TestCaseCount);
+        Assert.Equal(20, report.TopTestCases.Count);
+        Assert.Equal(21d, report.TopTestCases[0].Seconds);
+        Assert.Equal(2d, report.TopTestCases[^1].Seconds);
+        Assert.DoesNotContain(report.TopTestCases, testCase => testCase.Name == "Ignored");
+    }
+
+    [Fact]
+    public void SlowTestDiagnosticsWriter_TryDeleteStagedFile_ShouldIgnoreDirectoryDeletionFailures()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var stagedDirectory = Directory.CreateDirectory(Path.Join(repo.Path, "staged-directory")).FullName;
+        repo.WriteFile("staged-directory/sentinel.txt", "sentinel");
+
+        CoverageRunSlowTestDiagnosticsWriter.TryDeleteStagedFile(stagedDirectory);
+
+        Assert.True(Directory.Exists(stagedDirectory));
+    }
+
+    [Fact]
+    public async Task SlowTestDiagnosticsWriter_ProgressReportingStream_ShouldDelegateAndReportReads()
+    {
+        var observedBytes = new List<int>();
+        var inner = new MemoryStream([1, 2, 3, 4], writable: true);
+
+        using (var stream = new CoverageRunSlowTestDiagnosticsWriter.ProgressReportingStream(inner, observedBytes.Add))
+        {
+            Assert.True(stream.CanRead);
+            Assert.True(stream.CanSeek);
+            Assert.True(stream.CanWrite);
+            Assert.Equal(4, stream.Length);
+
+            var buffer = new byte[2];
+            Assert.Equal(2, stream.Read(buffer, 0, buffer.Length));
+            Assert.Equal(2, await stream.ReadAsync(buffer, 0, buffer.Length, CancellationToken.None));
+            stream.Position = 0;
+            Assert.Equal(2, await stream.ReadAsync(buffer.AsMemory(), CancellationToken.None));
+
+            Assert.Equal(0, stream.Seek(0, SeekOrigin.Begin));
+            stream.SetLength(0);
+            stream.Write([5], 0, 1);
+            await stream.WriteAsync([6], 0, 1, CancellationToken.None);
+            await stream.WriteAsync(new byte[] { 7 }.AsMemory(), CancellationToken.None);
+            stream.Flush();
+            await stream.FlushAsync(CancellationToken.None);
+        }
+
+        Assert.Equal([2, 2, 2], observedBytes);
+        Assert.Throws<ObjectDisposedException>(() => inner.ReadByte());
+
+        var asyncInner = new MemoryStream();
+        await using (var stream = new CoverageRunSlowTestDiagnosticsWriter.ProgressReportingStream(asyncInner, observeProgress: null))
+        {
+            await stream.FlushAsync(CancellationToken.None);
+        }
+
+        Assert.Throws<ObjectDisposedException>(() => asyncInner.ReadByte());
+    }
+
+    [Fact]
     public async Task SlowTestDiagnosticsWriter_ShouldParseStatusesAndMetadataWarnings()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");

@@ -393,7 +393,14 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
         }
     }
 
-    private sealed class ProgressReportingStream(Stream inner, Action<int>? observeProgress) : Stream
+    /// <summary>
+    /// Delegates stream operations while reporting positive byte counts from reads.
+    /// </summary>
+    /// <remarks>
+    /// This type remains internal so the diagnostics tests can verify that all delegated stream operations
+    /// preserve the wrapped stream's behavior without relying on reflection.
+    /// </remarks>
+    internal sealed class ProgressReportingStream(Stream inner, Action<int>? observeProgress) : Stream
     {
         public override bool CanRead => inner.CanRead;
         public override bool CanSeek => inner.CanSeek;
