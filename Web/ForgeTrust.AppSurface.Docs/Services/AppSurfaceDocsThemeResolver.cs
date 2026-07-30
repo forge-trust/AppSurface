@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
+using ForgeTrust.AppSurface.Theming;
+using ForgeTrust.AppSurface.Web.Theming;
 
 namespace ForgeTrust.AppSurface.Docs.Services;
 
@@ -19,10 +21,30 @@ internal sealed class AppSurfaceDocsThemeResolver
     /// </summary>
     /// <param name="options">The normalized AppSurface Docs options.</param>
     public AppSurfaceDocsThemeResolver(AppSurfaceDocsOptions options)
+        : this(options, [])
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AppSurfaceDocsThemeResolver"/> with optional shared theme support.
+    /// </summary>
+    /// <param name="options">The normalized AppSurface Docs options.</param>
+    /// <param name="themeResolvers">Registered shared theme resolvers. An empty sequence preserves the legacy Docs contract.</param>
+    public AppSurfaceDocsThemeResolver(
+        AppSurfaceDocsOptions options,
+        IEnumerable<IAppSurfaceThemeResolver> themeResolvers)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(themeResolvers);
 
-        Theme = AppSurfaceDocsThemePolicy.Resolve(options.Theme);
+        var legacyTheme = AppSurfaceDocsThemePolicy.Resolve(options.Theme);
+        var sharedResolver = themeResolvers.LastOrDefault();
+        var sharedResolution = sharedResolver?.ResolveDefault();
+        Theme = sharedResolution is not null
+            && legacyTheme.Preset == AppSurfaceDocsThemePreset.AppSurfaceDark
+            && AppSurfaceThemeDocumentSerializer.TrySerialize(sharedResolution, out _)
+            ? AppSurfaceDocsThemePolicy.ResolveShared(legacyTheme, options.Theme)
+            : legacyTheme;
     }
 
     /// <summary>
@@ -43,6 +65,8 @@ internal sealed class AppSurfaceDocsThemeResolver
 /// <param name="RootCssClass">CSS classes emitted on the document root.</param>
 /// <param name="CssVariables">Resolved CSS custom properties consumed by the package stylesheets.</param>
 /// <param name="CssVariableStyle">Serialized CSS custom property declarations suitable for a style attribute.</param>
+/// <param name="UsesSharedTheme">Whether the root consumes the shared AppSurface semantic pair.</param>
+/// <param name="CriticalCss">Docs-owned critical CSS emitted before the package stylesheet when <paramref name="UsesSharedTheme"/> is <see langword="true"/>.</param>
 internal sealed record AppSurfaceDocsResolvedTheme(
     AppSurfaceDocsThemePreset Preset,
     AppSurfaceDocsThemeDensity Density,
@@ -52,7 +76,9 @@ internal sealed record AppSurfaceDocsResolvedTheme(
     string ChromeAttribute,
     string RootCssClass,
     IReadOnlyDictionary<string, string> CssVariables,
-    string CssVariableStyle);
+    string CssVariableStyle,
+    bool UsesSharedTheme = false,
+    string? CriticalCss = null);
 
 /// <summary>
 /// Centralizes normalization, validation, and render-ready resolution for the AppSurface Docs theme contract.
@@ -183,6 +209,25 @@ internal static class AppSurfaceDocsThemePolicy
             rootCssClass,
             cssVariables,
             SerializeCssVariables(cssVariables));
+    }
+
+    /// <summary>
+    /// Maps a shared semantic pair into the AppSurface Docs internal CSS-variable graph.
+    /// </summary>
+    /// <param name="legacyTheme">Resolved Docs compatibility values.</param>
+    /// <param name="options">Normalized Docs theme options, including supported legacy color overrides.</param>
+    /// <returns>A Docs theme that consumes shared semantic variables without exposing Docs-local variables publicly.</returns>
+    public static AppSurfaceDocsResolvedTheme ResolveShared(
+        AppSurfaceDocsResolvedTheme legacyTheme,
+        AppSurfaceDocsThemeOptions? options)
+    {
+        ArgumentNullException.ThrowIfNull(legacyTheme);
+
+        return legacyTheme with
+        {
+            UsesSharedTheme = true,
+            CriticalCss = BuildSharedCriticalCss(options?.Colors)
+        };
     }
 
     private static string? NormalizeCssHexColorOrNull(string? value)
@@ -455,7 +500,7 @@ internal static class AppSurfaceDocsThemePolicy
     private static string SerializeCssVariables(IReadOnlyDictionary<string, string> variables)
     {
         var builder = new StringBuilder();
-        foreach (var (key, value) in variables)
+        foreach (var (key, value) in variables.OrderBy(pair => pair.Key, StringComparer.Ordinal))
         {
             builder.Append(key);
             builder.Append(':');
@@ -464,6 +509,211 @@ internal static class AppSurfaceDocsThemePolicy
         }
 
         return builder.ToString();
+    }
+
+    private static string BuildSharedCriticalCss(AppSurfaceDocsThemeColorOptions? colors)
+    {
+        var accent = ResolveOverride(colors?.AccentColor, "var(--as-accent)");
+        var accentStrong = ResolveOverride(colors?.AccentStrongColor, "var(--as-accent-strong)");
+        var link = ResolveOverride(colors?.LinkColor, "var(--as-link)");
+        var visitedLink = ResolveOverride(colors?.VisitedLinkColor, "var(--as-visited-link)");
+        var variables = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["--docs-brand-blue"] = accentStrong,
+            ["--docs-brand-teal"] = accent,
+            ["--docs-brand-violet"] = visitedLink,
+            ["--docs-color-surface-canvas"] = "var(--as-canvas)",
+            ["--docs-color-surface-canvas-mid"] = "color-mix(in srgb, var(--as-canvas) 82%, var(--as-surface))",
+            ["--docs-color-surface-canvas-deep"] = "color-mix(in srgb, var(--as-canvas) 92%, var(--as-text))",
+            ["--docs-color-surface-raised"] = "var(--as-raised-surface)",
+            ["--docs-color-surface-muted"] = "color-mix(in srgb, var(--as-surface) 82%, transparent)",
+            ["--docs-color-surface-panel"] = "color-mix(in srgb, var(--as-surface) 84%, transparent)",
+            ["--docs-color-surface-panel-elevated"] = "color-mix(in srgb, var(--as-surface) 94%, transparent)",
+            ["--docs-color-surface-panel-heavy"] = "color-mix(in srgb, var(--as-raised-surface) 96%, transparent)",
+            ["--docs-color-surface-panel-hover"] = "color-mix(in srgb, var(--as-raised-surface) 72%, transparent)",
+            ["--docs-color-surface-panel-hover-strong"] = "color-mix(in srgb, var(--as-raised-surface) 84%, transparent)",
+            ["--docs-color-surface-panel-raised"] = "color-mix(in srgb, var(--as-raised-surface) 82%, transparent)",
+            ["--docs-color-surface-panel-active"] = "color-mix(in srgb, var(--as-accent) 18%, var(--as-raised-surface))",
+            ["--docs-color-surface-panel-soft"] = "color-mix(in srgb, var(--as-surface) 64%, transparent)",
+            ["--docs-color-surface-panel-faint"] = "color-mix(in srgb, var(--as-surface) 44%, transparent)",
+            ["--docs-color-surface-panel-table"] = "color-mix(in srgb, var(--as-surface) 76%, transparent)",
+            ["--docs-color-surface-panel-table-head"] = "color-mix(in srgb, var(--as-raised-surface) 92%, transparent)",
+            ["--docs-color-surface-overlay"] = "color-mix(in srgb, var(--as-canvas) 78%, transparent)",
+            ["--docs-color-surface-overlay-strong"] = "color-mix(in srgb, var(--as-canvas) 92%, transparent)",
+            ["--docs-color-surface-overlay-soft"] = "color-mix(in srgb, var(--as-canvas) 68%, transparent)",
+            ["--docs-color-surface-overlay-faint"] = "color-mix(in srgb, var(--as-canvas) 32%, transparent)",
+            ["--docs-color-surface-code"] = "color-mix(in srgb, var(--as-canvas) 92%, var(--as-raised-surface))",
+            ["--docs-color-surface-code-plain"] = "color-mix(in srgb, var(--as-surface) 82%, var(--as-raised-surface))",
+            ["--docs-color-border-muted"] = "color-mix(in srgb, var(--as-border) 56%, transparent)",
+            ["--docs-color-border-muted-heavy"] = "color-mix(in srgb, var(--as-border) 86%, transparent)",
+            ["--docs-color-border-code-plain"] = "var(--as-border)",
+            ["--docs-color-border-default"] = "var(--as-border)",
+            ["--docs-color-border-default-strong"] = "color-mix(in srgb, var(--as-border) 88%, transparent)",
+            ["--docs-color-border-default-heavy"] = "color-mix(in srgb, var(--as-border) 90%, transparent)",
+            ["--docs-color-border-default-heavier"] = "color-mix(in srgb, var(--as-border) 92%, transparent)",
+            ["--docs-color-border-strong"] = "color-mix(in srgb, var(--as-border) 84%, var(--as-text))",
+            ["--docs-color-text-strong"] = "var(--as-text)",
+            ["--docs-color-text-default"] = "var(--as-text)",
+            ["--docs-color-text-default-underline"] = "color-mix(in srgb, var(--as-text) 78%, transparent)",
+            ["--docs-color-text-muted"] = "var(--as-muted-text)",
+            ["--docs-color-text-subtle"] = "color-mix(in srgb, var(--as-muted-text) 84%, transparent)",
+            ["--docs-color-text-subtle-underline"] = "color-mix(in srgb, var(--as-muted-text) 62%, transparent)",
+            ["--docs-color-text-faint"] = "color-mix(in srgb, var(--as-muted-text) 64%, transparent)",
+            ["--docs-color-text-prose"] = "var(--as-text)",
+            ["--docs-color-text-table"] = "var(--as-text)",
+            ["--docs-color-text-info"] = "var(--as-text)",
+            ["--docs-color-text-info-muted"] = "var(--as-muted-text)",
+            ["--docs-color-text-mark"] = "var(--as-text)",
+            ["--docs-color-accent"] = accent,
+            ["--docs-color-accent-strong"] = accentStrong,
+            ["--docs-color-accent-blue"] = accentStrong,
+            ["--docs-color-accent-violet"] = visitedLink,
+            ["--docs-color-accent-soft"] = "color-mix(in srgb, " + accent + " 24%, var(--as-surface))",
+            ["--docs-color-accent-muted"] = "color-mix(in srgb, " + accent + " 56%, var(--as-surface))",
+            ["--docs-color-link"] = link,
+            ["--docs-color-link-visited"] = visitedLink,
+            ["--docs-color-link-underline"] = "color-mix(in srgb, " + link + " 50%, transparent)",
+            ["--docs-color-accent-fill-soft"] = "color-mix(in srgb, " + accentStrong + " 14%, transparent)",
+            ["--docs-color-accent-mark-fill"] = "color-mix(in srgb, " + accent + " 28%, transparent)",
+            ["--docs-color-accent-underline"] = "color-mix(in srgb, " + accent + " 50%, transparent)",
+            ["--docs-color-accent-soft-underline"] = "color-mix(in srgb, " + accent + " 42%, transparent)",
+            ["--docs-color-accent-soft-underline-muted"] = "color-mix(in srgb, " + accent + " 32%, transparent)",
+            ["--docs-color-state-active-fill"] = "color-mix(in srgb, " + accentStrong + " 24%, transparent)",
+            ["--docs-color-state-active-fill-strong"] = "color-mix(in srgb, " + accentStrong + " 34%, transparent)",
+            ["--docs-color-state-link-fill"] = "color-mix(in srgb, " + accentStrong + " 28%, transparent)",
+            ["--docs-color-state-trust-fill-start"] = "color-mix(in srgb, " + accentStrong + " 18%, transparent)",
+            ["--docs-color-state-outline-fill"] = "color-mix(in srgb, " + accentStrong + " 46%, transparent)",
+            ["--docs-color-state-outline-fill-end"] = "color-mix(in srgb, var(--as-raised-surface) 30%, transparent)",
+            ["--docs-color-state-outline-rail-start"] = "color-mix(in srgb, " + accentStrong + " 50%, transparent)",
+            ["--docs-color-state-outline-rail-mid"] = "color-mix(in srgb, " + accent + " 22%, transparent)",
+            ["--docs-color-state-outline-rail-end"] = "color-mix(in srgb, var(--as-raised-surface) 18%, transparent)",
+            ["--docs-color-state-outline-rail-hover-start"] = "color-mix(in srgb, " + accentStrong + " 60%, transparent)",
+            ["--docs-color-state-outline-rail-hover-mid"] = "color-mix(in srgb, " + accent + " 30%, transparent)",
+            ["--docs-color-state-outline-rail-hover-end"] = "color-mix(in srgb, var(--as-raised-surface) 24%, transparent)",
+            ["--docs-color-page-wash"] = "color-mix(in srgb, " + accentStrong + " 8%, transparent)",
+            ["--docs-color-skeleton-edge"] = "color-mix(in srgb, var(--as-border) 70%, transparent)",
+            ["--docs-color-skeleton-mid"] = "color-mix(in srgb, var(--as-border) 42%, transparent)",
+            ["--docs-color-syntax-keyword"] = visitedLink,
+            ["--docs-color-syntax-string"] = accent,
+            ["--docs-color-syntax-comment"] = "var(--as-muted-text)",
+            ["--docs-color-syntax-number"] = "var(--as-danger)",
+            ["--docs-color-syntax-type"] = link,
+            ["--docs-color-syntax-member"] = "var(--as-text)",
+            ["--docs-color-syntax-parameter"] = accentStrong,
+            ["--docs-color-syntax-operator"] = "var(--as-muted-text)",
+            ["--docs-color-syntax-inserted"] = accent,
+            ["--docs-color-syntax-deleted"] = "var(--as-danger)",
+            ["--docs-focus-ring-inset"] = "0 0 0 1px var(--as-focus) inset",
+            ["--docs-focus-outline"] = "2px solid var(--as-focus)"
+        };
+
+        return "html[data-as-theme]{"
+            + SerializeCssVariables(variables)
+            + "}\n"
+            + BuildForcedColorsCss();
+    }
+
+    private static string BuildForcedColorsCss()
+    {
+        const string selector = "  html[data-as-theme]{";
+        var builder = new StringBuilder("@media (forced-colors: active){\n");
+        builder.Append(selector);
+        AppendForcedColor(builder, "--docs-brand-blue", "Highlight");
+        AppendForcedColor(builder, "--docs-brand-teal", "Highlight");
+        AppendForcedColor(builder, "--docs-brand-violet", "VisitedText");
+        foreach (var surface in new[]
+                 {
+                     "--docs-color-surface-canvas", "--docs-color-surface-canvas-mid", "--docs-color-surface-canvas-deep",
+                     "--docs-color-surface-raised", "--docs-color-surface-muted", "--docs-color-surface-panel",
+                     "--docs-color-surface-panel-elevated", "--docs-color-surface-panel-heavy", "--docs-color-surface-panel-hover",
+                     "--docs-color-surface-panel-hover-strong", "--docs-color-surface-panel-raised", "--docs-color-surface-panel-active",
+                     "--docs-color-surface-panel-soft", "--docs-color-surface-panel-faint", "--docs-color-surface-panel-table",
+                     "--docs-color-surface-panel-table-head", "--docs-color-surface-overlay", "--docs-color-surface-overlay-strong",
+                     "--docs-color-surface-overlay-soft", "--docs-color-surface-overlay-faint", "--docs-color-surface-code",
+                     "--docs-color-surface-code-plain"
+                 })
+        {
+            AppendForcedColor(builder, surface, "Canvas");
+        }
+
+        foreach (var border in new[]
+                 {
+                     "--docs-color-border-muted", "--docs-color-border-muted-heavy", "--docs-color-border-code-plain",
+                     "--docs-color-border-default", "--docs-color-border-default-strong", "--docs-color-border-default-heavy",
+                     "--docs-color-border-default-heavier", "--docs-color-border-strong", "--docs-color-skeleton-edge",
+                     "--docs-color-skeleton-mid"
+                 })
+        {
+            AppendForcedColor(builder, border, "GrayText");
+        }
+
+        foreach (var text in new[]
+                 {
+                     "--docs-color-text-strong", "--docs-color-text-default", "--docs-color-text-default-underline",
+                     "--docs-color-text-prose", "--docs-color-text-table", "--docs-color-text-info", "--docs-color-text-mark",
+                     "--docs-color-syntax-member", "--docs-color-syntax-number", "--docs-color-syntax-deleted"
+                 })
+        {
+            AppendForcedColor(builder, text, "CanvasText");
+        }
+
+        foreach (var muted in new[]
+                 {
+                     "--docs-color-text-muted", "--docs-color-text-subtle", "--docs-color-text-subtle-underline",
+                     "--docs-color-text-faint", "--docs-color-text-info-muted", "--docs-color-syntax-comment",
+                     "--docs-color-syntax-operator"
+                 })
+        {
+            AppendForcedColor(builder, muted, "GrayText");
+        }
+
+        foreach (var accent in new[]
+                 {
+                     "--docs-color-accent", "--docs-color-accent-strong", "--docs-color-accent-blue",
+                     "--docs-color-accent-soft", "--docs-color-accent-muted", "--docs-color-accent-fill-soft",
+                     "--docs-color-accent-mark-fill", "--docs-color-accent-underline", "--docs-color-accent-soft-underline",
+                     "--docs-color-accent-soft-underline-muted", "--docs-color-state-active-fill",
+                     "--docs-color-state-active-fill-strong", "--docs-color-state-link-fill", "--docs-color-state-trust-fill-start",
+                     "--docs-color-state-outline-fill", "--docs-color-state-outline-rail-start",
+                     "--docs-color-state-outline-rail-mid", "--docs-color-state-outline-rail-hover-start",
+                     "--docs-color-state-outline-rail-hover-mid", "--docs-color-page-wash", "--docs-color-syntax-keyword",
+                     "--docs-color-syntax-string", "--docs-color-syntax-parameter", "--docs-color-syntax-inserted"
+                 })
+        {
+            AppendForcedColor(builder, accent, "Highlight");
+        }
+
+        foreach (var link in new[] { "--docs-color-link", "--docs-color-link-underline", "--docs-color-syntax-type" })
+        {
+            AppendForcedColor(builder, link, "LinkText");
+        }
+
+        AppendForcedColor(builder, "--docs-color-link-visited", "VisitedText");
+        AppendForcedColor(builder, "--docs-color-accent-violet", "VisitedText");
+        AppendForcedColor(builder, "--docs-color-state-outline-fill-end", "Canvas");
+        AppendForcedColor(builder, "--docs-color-state-outline-rail-end", "Canvas");
+        AppendForcedColor(builder, "--docs-color-state-outline-rail-hover-end", "Canvas");
+        AppendForcedColor(builder, "--docs-focus-ring-inset", "0 0 0 1px Highlight inset");
+        AppendForcedColor(builder, "--docs-focus-outline", "2px solid Highlight");
+        builder.Append("  }\n}");
+        return builder.ToString();
+    }
+
+    private static void AppendForcedColor(StringBuilder builder, string name, string value)
+    {
+        builder.Append("\n    ");
+        builder.Append(name);
+        builder.Append(":");
+        builder.Append(value);
+        builder.Append(';');
+    }
+
+    private static string ResolveOverride(string? value, string fallback)
+    {
+        return AppSurfaceDocsIdentityPath.TryNormalizeCssHexColor(value, out var normalized, out _)
+            && normalized is not null
+            ? normalized
+            : fallback;
     }
 
     private static string ToPresetAttribute(AppSurfaceDocsThemePreset preset)

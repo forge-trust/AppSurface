@@ -198,19 +198,6 @@
           "Microsoft.Extensions.FileProviders.Physical": "10.0.8"
         }
       },
-      "Microsoft.Extensions.DependencyInjection": {
-        "type": "Transitive",
-        "resolved": "10.0.8",
-        "contentHash": "daf62xHIrq8pnE709hgaZZN9tSam9TGGepWe1+bE6V3GEuVwJiMs6ib+38lfMCyAJAHiX0vapxBhsuMSV7U+cg==",
-        "dependencies": {
-          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.8"
-        }
-      },
-      "Microsoft.Extensions.DependencyInjection.Abstractions": {
-        "type": "Transitive",
-        "resolved": "10.0.8",
-        "contentHash": "21nbDV60SRPWGIivsyl6lqBeEJNG1sginhhfWgRrr3Ais7aQ12To25OAHQxgoiJkjqy1aQ6RxpZBGYuTi7Ge6A=="
-      },
       "Microsoft.Extensions.Diagnostics": {
         "type": "Transitive",
         "resolved": "10.0.8",
@@ -460,6 +447,8 @@
           "ForgeTrust.AppSurface.Caching": "[0.1.0, )",
           "ForgeTrust.AppSurface.Config": "[0.1.0, )",
           "ForgeTrust.AppSurface.Intelligence": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Theming": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web.Tailwind": "[0.1.0, )",
           "ForgeTrust.RazorWire": "[0.1.0, )",
           "HtmlSanitizer": "[9.0.892, )",
@@ -493,11 +482,18 @@
       "forgetrust.appsurface.testing": {
         "type": "Project"
       },
+      "forgetrust.appsurface.theming": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "[10.0.8, )"
+        }
+      },
       "forgetrust.appsurface.web": {
         "type": "Project",
         "dependencies": {
           "ForgeTrust.AppSurface.Config": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Theming": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.web.tailwind": {
@@ -624,6 +620,21 @@
           "Microsoft.Extensions.Options": "10.0.8",
           "Microsoft.Extensions.Primitives": "10.0.8"
         }
+      },
+      "Microsoft.Extensions.DependencyInjection": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.8, )",
+        "resolved": "10.0.8",
+        "contentHash": "daf62xHIrq8pnE709hgaZZN9tSam9TGGepWe1+bE6V3GEuVwJiMs6ib+38lfMCyAJAHiX0vapxBhsuMSV7U+cg==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.8"
+        }
+      },
+      "Microsoft.Extensions.DependencyInjection.Abstractions": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.8, )",
+        "resolved": "10.0.8",
+        "contentHash": "21nbDV60SRPWGIivsyl6lqBeEJNG1sginhhfWgRrr3Ais7aQ12To25OAHQxgoiJkjqy1aQ6RxpZBGYuTi7Ge6A=="
       },
       "Microsoft.Extensions.DependencyModel": {
         "type": "CentralTransitive",

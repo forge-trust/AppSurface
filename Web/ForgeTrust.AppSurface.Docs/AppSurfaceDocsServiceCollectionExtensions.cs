@@ -3,6 +3,8 @@ using ForgeTrust.AppSurface.Config;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Intelligence;
+using ForgeTrust.AppSurface.Theming;
+using ForgeTrust.AppSurface.Web;
 using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -251,6 +253,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
 
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IValidateOptions<AppSurfaceDocsOptions>, AppSurfaceDocsOptionsValidator>());
+        EnsureThemePairServices(services);
         services.TryAddSingleton(sp => sp.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value);
         services.AddConfigAuditKey<AppSurfaceDocsOptions>(AppSurfaceDocsOptions.SectionName);
         services.AddConfigAuditKey<AppSurfaceDocsIdentityOptions>($"{AppSurfaceDocsOptions.SectionName}.Identity");
@@ -316,6 +319,21 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                 provider => new AppSurfaceDocsHarvestChannelAuthorizer(
                     provider.GetRequiredService<IRazorWireStreamAuthorizer>()),
                 lifetime));
+    }
+
+    private static void EnsureThemePairServices(IServiceCollection services)
+    {
+        if (!services.Any(descriptor => descriptor.ServiceType == typeof(IAppSurfaceThemeResolver)))
+        {
+            services.AddAppSurfaceTheming(
+                options =>
+                {
+                    options.DefaultMode = AppSurfaceThemeMode.Dark;
+                    options.Pairs.Add(AppSurfaceThemePair.AppSurface());
+                });
+        }
+
+        services.AddAppSurfaceWebTheming();
     }
 
     private static ServiceLifetime GetHarvestAuthorizerLifetime(

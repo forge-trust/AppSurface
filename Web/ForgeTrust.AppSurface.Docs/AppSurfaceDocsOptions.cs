@@ -150,8 +150,9 @@ public sealed class AppSurfaceDocsThemeOptions
     /// Gets or sets the preset palette used before applying supported color overrides.
     /// </summary>
     /// <remarks>
-    /// The default is <see cref="AppSurfaceDocsThemePreset.AppSurfaceDark"/>. V1 presets are dark-only so code
-    /// highlighting, search states, and existing docs chrome keep their contrast guarantees.
+    /// The default is <see cref="AppSurfaceDocsThemePreset.AppSurfaceDark"/>. When a shared AppSurface theme pair is
+    /// registered, this preset maps its package-owned docs surfaces to that pair's System, Light, or Dark branch while
+    /// preserving this options object's supported override, density, and chrome contract. Graphite remains local and dark-only.
     /// </remarks>
     public AppSurfaceDocsThemePreset Preset { get; set; } = AppSurfaceDocsThemePreset.AppSurfaceDark;
 
@@ -167,7 +168,7 @@ public sealed class AppSurfaceDocsThemeOptions
 }
 
 /// <summary>
-/// Dark-family AppSurface Docs theme presets.
+/// AppSurface Docs compatibility presets.
 /// </summary>
 public enum AppSurfaceDocsThemePreset
 {

@@ -34,7 +34,10 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
         Assert.Contains("href=\"/docs/sections/start-here\" data-rw-export-ignore=\"true\"", html);
         Assert.Contains("href=\"/docs/sections/packages\" data-rw-export-ignore=\"true\"", html);
         Assert.Contains("href=\"/docs\" data-rw-export-ignore=\"true\"", html);
-        Assert.Contains("background: #0d182a", html);
+        Assert.Contains("color-scheme: light dark", html);
+        Assert.Contains("@@media (prefers-color-scheme: dark)", html);
+        Assert.Contains("--docs-404-canvas: #0d182a", html);
+        Assert.Contains("@@media (forced-colors: active)", html);
         Assert.Contains("/docs/missing-page", html);
     }
 

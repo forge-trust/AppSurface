@@ -60,6 +60,8 @@
           "ForgeTrust.AppSurface.Caching": "[0.1.0, )",
           "ForgeTrust.AppSurface.Config": "[0.1.0, )",
           "ForgeTrust.AppSurface.Intelligence": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Theming": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web.Tailwind": "[0.1.0, )",
           "ForgeTrust.RazorWire": "[0.1.0, )",
           "HtmlSanitizer": "[9.0.892, )",
@@ -76,11 +78,15 @@
           "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
+      "forgetrust.appsurface.theming": {
+        "type": "Project"
+      },
       "forgetrust.appsurface.web": {
         "type": "Project",
         "dependencies": {
           "ForgeTrust.AppSurface.Config": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Theming": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.web.tailwind": {

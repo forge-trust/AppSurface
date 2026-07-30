@@ -37,6 +37,46 @@ The base class for the application bootstrapping logic. While `WebApp` uses a ge
 
 ## Features
 
+### Theme pairs quickstart
+
+AppSurface Web can render a native semantic light/dark pair for package-owned UI without resetting or styling application-authored components. First register a pair and the explicit Web adapter from a module or host service-registration path:
+
+```csharp
+using ForgeTrust.AppSurface.Theming;
+
+services.AddAppSurfaceTheming(options =>
+{
+    options.DefaultTheme = new AppSurfaceThemeId("appsurface");
+    options.DefaultMode = AppSurfaceThemeMode.System;
+    options.Pairs.Add(AppSurfaceThemePair.AppSurface());
+});
+services.AddAppSurfaceWebTheming();
+```
+
+Then import the TagHelpers and opt into the document root/head in the layout that owns them:
+
+```cshtml
+@addTagHelper *, ForgeTrust.AppSurface.Web
+<html appsurface-theme-root>
+<head>
+    <meta charset="utf-8" />
+    <appsurface-theme-head />
+    <link rel="stylesheet" href="~/css/site.css" />
+</head>
+```
+
+The root helper emits `data-as-theme`, `data-as-theme-mode`, and a `color-scheme` declaration. The head helper emits `<meta name="color-scheme">` followed by a deterministic `data-as-theme-critical` stylesheet before external stylesheets. `System` emits light values and a dark `prefers-color-scheme` branch; `Light` and `Dark` emit only their selected branch. Neither helper emits scripts, page-hiding CSS, storage access, or a switcher.
+
+The optional `nonce` attribute is copied only to the live inline critical style:
+
+```cshtml
+<appsurface-theme-head nonce="@Model.CspNonce" />
+```
+
+The host owns generating that per-response nonce and its `style-src` policy. Static exports use the same canonical payload without a nonce. If the root already declares `color-scheme`, AppSurface preserves it and marks `data-as-theme-color-scheme-conflict="true"`; correct the host declaration rather than relying on hidden precedence.
+
+Use the neutral package's [theme contract](../../ForgeTrust.AppSurface.Theming/README.md) for roles, validation, typed application extras, diagnostics, and deliberately deferred preference/tenant policy. Use the [Docs migration guide](../ForgeTrust.AppSurface.Docs/README.md#theme-pairs-migration) when the application hosts AppSurface Docs. RazorWire's generated-error boundary is documented in [Failed Form UX](../ForgeTrust.RazorWire/Docs/form-failures.md#appsurface-theme-pairs).
+
 ### PWA application badging
 
 AppSurface Web includes a default-off, privacy-safe browser rail for application-icon badge requests:

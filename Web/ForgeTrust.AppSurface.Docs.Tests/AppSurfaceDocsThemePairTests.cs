@@ -1,0 +1,102 @@
+using ForgeTrust.AppSurface.Docs.Services;
+using ForgeTrust.AppSurface.Theming;
+
+namespace ForgeTrust.AppSurface.Docs.Tests;
+
+public sealed class AppSurfaceDocsThemePairTests
+{
+    [Fact]
+    public void Resolver_ShouldMapSharedSystemPairIntoDocsInternalCriticalCss()
+    {
+        var options = new AppSurfaceDocsOptions();
+        var pair = AppSurfaceThemePair.AppSurface();
+        var resolution = new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.System, pair.Light, pair.Dark);
+
+        var theme = new AppSurfaceDocsThemeResolver(options, [new StubThemeResolver(resolution)]).Theme;
+
+        Assert.True(theme.UsesSharedTheme);
+        Assert.NotNull(theme.CriticalCss);
+        Assert.StartsWith("html[data-as-theme]{", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-surface-canvas:var(--as-canvas);", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-syntax-keyword:var(--as-visited-link);", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-focus-outline:2px solid var(--as-focus);", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("@media (forced-colors: active)", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-surface-canvas:Canvas;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-border-default:GrayText;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-text-default:CanvasText;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-accent:Highlight;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-link:LinkText;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-link-visited:VisitedText;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-syntax-comment:GrayText;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-focus-outline:2px solid Highlight;", theme.CriticalCss, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolver_ShouldKeepGraphiteOnTheLegacyLocalPath()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Theme = new AppSurfaceDocsThemeOptions
+            {
+                Preset = AppSurfaceDocsThemePreset.GraphiteDark
+            }
+        };
+        var pair = AppSurfaceThemePair.AppSurface();
+        var resolution = new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.Light, pair.Light, pair.Dark);
+
+        var theme = new AppSurfaceDocsThemeResolver(options, [new StubThemeResolver(resolution)]).Theme;
+
+        Assert.False(theme.UsesSharedTheme);
+        Assert.Null(theme.CriticalCss);
+        Assert.Equal("#080a0d", theme.CssVariables["--docs-color-surface-canvas"]);
+    }
+
+    [Fact]
+    public void Resolver_ShouldPreserveShortHexOverridesWhenMappingSharedPair()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Theme = new AppSurfaceDocsThemeOptions
+            {
+                Colors = new AppSurfaceDocsThemeColorOptions
+                {
+                    AccentColor = "#0af",
+                    AccentStrongColor = "#88f",
+                    LinkColor = "#9cf",
+                    VisitedLinkColor = "#fbf"
+                }
+            }
+        };
+        AppSurfaceDocsThemePolicy.Normalize(options.Theme);
+        var pair = AppSurfaceThemePair.AppSurface();
+        var resolution = new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.Light, pair.Light, pair.Dark);
+
+        var theme = new AppSurfaceDocsThemeResolver(options, [new StubThemeResolver(resolution)]).Theme;
+
+        Assert.Contains("--docs-color-accent:#0af;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-link:#9cf;", theme.CriticalCss, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolver_ShouldKeepLegacyDocsVariablesWhenTheCustomResolutionIsUnsafe()
+    {
+        var options = new AppSurfaceDocsOptions();
+        var pair = AppSurfaceThemePair.AppSurface();
+        var unsafeLight = new AppSurfaceThemeRoles(
+            pair.Light.Canvas, pair.Light.Surface, pair.Light.RaisedSurface, pair.Light.Canvas, pair.Light.MutedText,
+            pair.Light.Border, pair.Light.Accent, pair.Light.AccentStrong, pair.Light.Link, pair.Light.VisitedLink,
+            pair.Light.Danger, pair.Light.Focus);
+        var resolution = new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.System, unsafeLight, pair.Dark);
+
+        var theme = new AppSurfaceDocsThemeResolver(options, [new StubThemeResolver(resolution)]).Theme;
+
+        Assert.False(theme.UsesSharedTheme);
+        Assert.Null(theme.CriticalCss);
+        Assert.NotEmpty(theme.CssVariableStyle);
+    }
+
+    private sealed class StubThemeResolver(AppSurfaceThemeResolution resolution) : IAppSurfaceThemeResolver
+    {
+        public AppSurfaceThemeResolution ResolveDefault() => resolution;
+    }
+}
