@@ -355,8 +355,14 @@ internal sealed partial class PostgreSqlDurableFlowStore
         }
     }
 
+    internal ValueTask<DurableOperationResult<DurableFlowCommandResult>> RaiseEventAsync(
+        DurableFlowEventRequest request,
+        CancellationToken cancellationToken) =>
+        RaiseEventAsync(request, validatePayload: null, cancellationToken);
+
     internal async ValueTask<DurableOperationResult<DurableFlowCommandResult>> RaiseEventAsync(
         DurableFlowEventRequest request,
+        Action<DurableEncodedPayload?>? validatePayload,
         CancellationToken cancellationToken,
         bool retryAfterUniqueViolation = true)
     {
@@ -399,6 +405,9 @@ internal sealed partial class PostgreSqlDurableFlowStore
                 return DurableOperationResult<DurableFlowCommandResult>.Success(
                     duplicate.ToResult(DurableFlowCommandOutcome.Duplicate));
             }
+
+            // An exact duplicate is durable truth even if the original payload codec has since been retired.
+            validatePayload?.Invoke(request.Payload);
 
             var current = await LockCurrentAsync(
                 connection, transaction, request.ScopeId, request.InstanceId, cancellationToken).ConfigureAwait(false);
@@ -595,7 +604,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
             await TryRollbackAsync(transaction).ConfigureAwait(false);
             if (retryAfterUniqueViolation)
             {
-                return await RaiseEventAsync(request, cancellationToken, retryAfterUniqueViolation: false)
+                return await RaiseEventAsync(request, validatePayload, cancellationToken, retryAfterUniqueViolation: false)
                     .ConfigureAwait(false);
             }
 

@@ -51,10 +51,10 @@ For strict CI verification across all PostgreSQL integration tests including Flo
 ## What the workload proves
 
 1. **Schema Deployment**: Migration owner checks status, applies migrations `0001_work_shared.sql`, `0002_forced_rls.sql`, and `0003_flow_protocol.sql`, reads `StoreId`, and explicitly initializes the runtime epoch.
-2. **Atomic Flow Start**: Flow instance starts atomically within a caller transaction or via `PostgreSqlDurableFlowClient`. Re-using `start_idempotency_key` with identical payload returns `Duplicate`; divergent definition or a new start identity targeting an existing Flow instance returns `ASDUR206`.
+2. **Atomic Flow Start**: `PostgreSqlDurableFlowClient` commits each Flow start atomically in its own short transaction. Slice 4 exposes no caller-owned Flow transaction API. Re-using `start_idempotency_key` with identical payload returns `Duplicate`; divergent definition or a new start identity targeting an existing Flow instance returns `ASDUR206`.
 3. **Step Evaluation & Determinism**: Step evaluation advances Flow state machine (`ready` -> `evaluating`) and verifies definition fingerprint SHA-256 against registered code.
 4. **Child Work Activity Lifecycle**: Flow enqueues child activity Work item in `appsurface_durable.work` and enters `waiting_activity`. Work engine claims item, acquires effect permit, executes provider I/O, and commits terminal fact. Completion handler resolves `flow_wait` (`activity_completed`) and returns Flow to `ready`.
-5. **External Event Delivery**: Incoming event delivers atomically via `flow_command`, resolves active wait (`event_won`), supersedes scheduled timer (`timer_won` lost), and updates state to `ready`. Single-use `event_id` reuse returns `ASDUR204`.
+5. **External Event Delivery**: Incoming event delivers atomically via `flow_command`, resolves active wait (`event_won`), supersedes scheduled timer (`timer_won` lost), and updates state to `ready`. Exact command/event retries return `Duplicate`; divergent reuse returns `ASDUR207`.
 6. **Timer Expiry**: Scheduled timer fires when `due_at <= clock_timestamp()`, resolves wait (`timer_won`), supersedes event wait, and updates state to `ready`.
 7. **11 Recovery Boundaries** (boundary 9 is a forced child-process termination; the others are transactional/fresh-processor proofs):
    - Boundary 1 (Start pre-commit): Transaction rollback leaves no state; safe caller retry.
@@ -79,7 +79,7 @@ The compiled reference workload requires:
 2. Call `GetStatusAsync`, `ApplyAsync` (applying migrations `0001`-`0003`), and `InitializeRuntimeEpochAsync`; capture StoreId and active epoch.
 3. Construct `PostgreSqlDurableWorkOptions` with `RuntimeEpoch` and `ExpectedStoreId`.
 4. Construct `PostgreSqlDurableFlowClient` with the scoped data source, Flow registry, payload codec registry, and shared PostgreSQL options.
-5. Invoke `StartFlowAsync`, `DeliverEventAsync`, or `ExecuteStepAsync`.
+5. Invoke `IDurableFlowClient.StartAsync` or `IDurableFlowClient.RaiseEventAsync`. The manually driven Slice 4 processor discovers and evaluates steps through `PostgreSqlDurableFlowProcessor.DiscoverAsync` and `TryProcessAsync`; no public `ExecuteStepAsync` API exists.
 
 ## Failure interpretation
 

@@ -117,6 +117,66 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     }
 
     [Fact]
+    public async Task EventDuplicate_ReturnsPersistedTruthAfterEventCodecRetires()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-event-codec-retirement");
+        var status = await schema.GetStatusAsync();
+        var contextCodec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
+        var eventCodec = new PostgreSqlOpaqueTestCodec("tests.flow.event", "v1");
+        var payloads = new DurablePayloadCodecRegistry([contextCodec, eventCodec]);
+        var work = new DurableWorkRegistry([]);
+        var registration = new RequiredPayloadWaitingRegistration(contextCodec);
+        var flows = new DurableFlowRegistry([registration], work, payloads);
+        var options = new PostgreSqlDurableWorkOptions(epoch, status.StoreId);
+        var client = new PostgreSqlDurableFlowClient(database.DataSource, flows, payloads, options);
+        var processor = new PostgreSqlDurableFlowProcessor(
+            database.DataSource,
+            database.DataSource,
+            flows,
+            work,
+            payloads,
+            options);
+        var scope = new DurableScopeId("slice4-event-codec-retirement");
+        var instance = new DurableFlowInstanceId("event-codec-retirement");
+        Assert.True((await client.StartAsync(new DurableFlowStartRequest(
+            scope,
+            new DurableCommandId("event-codec-retirement-start"),
+            "event-codec-retirement-key",
+            instance,
+            registration.FlowId,
+            registration.FlowVersion,
+            contextCodec.EncodeObject(new byte[] { 1 })))).IsSuccess);
+        var waited = await processor.TryProcessAsync(
+            Assert.Single(await processor.DiscoverAsync()),
+            "event-codec-retirement-worker");
+        var request = new DurableFlowEventRequest(
+            scope,
+            new DurableCommandId("event-codec-retirement-command"),
+            new DurableFlowEventId("event-codec-retirement-event"),
+            instance,
+            "approved",
+            eventCodec.EncodeObject(new byte[] { 2 }),
+            waited.Revision);
+
+        var accepted = await client.RaiseEventAsync(request);
+        Assert.Equal(DurableFlowCommandOutcome.Accepted, accepted.Value!.Outcome);
+
+        var retryClient = new PostgreSqlDurableFlowClient(
+            database.DataSource,
+            flows,
+            new DurablePayloadCodecRegistry([contextCodec]),
+            options);
+        var duplicate = await retryClient.RaiseEventAsync(request);
+
+        Assert.Equal(DurableFlowCommandOutcome.Duplicate, duplicate.Value!.Outcome);
+        Assert.Equal(accepted.Value.Revision, duplicate.Value.Revision);
+    }
+
+    [Fact]
     public async Task FlowClaim_ConcurrentProcessorsApplyOneDecisionAndRejectStaleCandidates()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -2871,6 +2931,17 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             Assert.Equal(PostgreSqlFlowProcessingOutcome.Suspended, result.Outcome);
             Assert.Equal(DurableFlowState.Suspended, result.State);
         });
+        await using (var suspendedFrom = database.DataSource.CreateCommand(
+            """
+            SELECT suspended_from_state
+            FROM appsurface_durable.flow_instance
+            WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id;
+            """))
+        {
+            suspendedFrom.Parameters.AddWithValue("scope_id", scope.Value);
+            suspendedFrom.Parameters.AddWithValue("flow_instance_id", "throwing");
+            Assert.Equal("ready", (string?)await suspendedFrom.ExecuteScalarAsync());
+        }
         Assert.Equal(
             PostgreSqlFlowProcessingOutcome.NotClaimed,
             (await processor.TryProcessAsync(candidates[0], "suspension-retry")).Outcome);

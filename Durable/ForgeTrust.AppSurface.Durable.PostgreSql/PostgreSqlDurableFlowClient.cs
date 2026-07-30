@@ -73,12 +73,17 @@ public sealed class PostgreSqlDurableFlowClient : IDurableFlowClient
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (request.Payload is { } payload)
-        {
-            _ = _payloadCodecs.GetRequired(payload.ContractName, payload.ContractVersion).DecodeObject(payload);
-        }
-
-        return await _store.RaiseEventAsync(request, cancellationToken).ConfigureAwait(false);
+        return await _store.RaiseEventAsync(
+            request,
+            payload =>
+            {
+                if (payload is { } eventPayload)
+                {
+                    _ = _payloadCodecs.GetRequired(eventPayload.ContractName, eventPayload.ContractVersion)
+                        .DecodeObject(eventPayload);
+                }
+            },
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

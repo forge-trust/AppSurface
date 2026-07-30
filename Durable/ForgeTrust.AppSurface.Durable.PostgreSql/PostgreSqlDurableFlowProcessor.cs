@@ -487,6 +487,8 @@ internal sealed partial class PostgreSqlDurableFlowStore
             var revision = checked(claim.Revision + 1);
             const string sql = """
                 UPDATE appsurface_durable.flow_instance
+                -- An evaluation claim is a temporary leased state. Releasing this safety suspension must return
+                -- to ready, the last dispatchable state, rather than a lease-free evaluating row.
                 SET state = 'suspended', suspended_from_state = 'ready',
                     suspension_descriptor = jsonb_build_object('code', @problem_code, 'source', 'evaluation'),
                     revision = @revision, lease_owner = NULL, lease_started_at = NULL, lease_expires_at = NULL,
