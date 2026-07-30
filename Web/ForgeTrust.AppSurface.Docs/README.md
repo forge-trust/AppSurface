@@ -2662,7 +2662,18 @@ The current-surface `search-index.json` payload continues to emit the raw `pageT
 - `language` and `languageLabel` for generated API documentation language facets and result chrome
 These fields let custom search clients stay visually aligned with the landing and detail experiences without re-implementing the mapping table.
 
-Search runtime note: the bundled `minisearch.min.js` asset is generated from the pinned upstream MiniSearch browser bundle, not a CDN or hand-maintained compatibility shim. The built-in search client indexes `title`, `aliases`, `keywords`, `summary`, `headings`, `bodyText`, namespace `entryPoints`, and generated API `languageSearchText` as first-class MiniSearch fields with field-specific boosts. Package maintainers changing the search runtime should update the pinned package, rebuild the generated asset, verify the third-party notice, and run the asset verification scripts before shipping.
+`summaryPresentation` is an optional display-only array for clients that want to render Markdown-like summary emphasis without exposing raw Markdown markers. The legacy `summary` string remains unchanged and remains the summary search field; clients that do not recognize `summaryPresentation` can ignore it. When present, each node is one of `text`, `strong`, `emphasis`, or `code`: `text` and `code` nodes carry only `kind` and `text`, while `strong` and `emphasis` nodes carry only `kind` and `children`. The array root is not a node. Nodes are limited to depth 8, 128 total nodes, and 1,024 Unicode scalars across all leaves. The projection never carries HTML, attributes, URLs, image sources, or link destinations; links and images contribute only their reader-facing text. Custom clients should validate the whole optional tree atomically and fall back to `summary` (then `snippet`) if it is missing or invalid.
+
+```json
+"summaryPresentation": [
+  { "kind": "text", "text": "Register " },
+  { "kind": "code", "text": "AddAppSurfaceDocs" },
+  { "kind": "text", "text": " with " },
+  { "kind": "strong", "children": [{ "kind": "text", "text": "one host call" }] }
+]
+```
+
+Search runtime note: the bundled `minisearch.min.js` asset is generated from the pinned upstream MiniSearch browser bundle, not a CDN or hand-maintained compatibility shim. The built-in search client indexes `title`, `aliases`, `keywords`, `summary`, `headings`, `bodyText`, namespace `entryPoints`, and generated API `languageSearchText` as first-class MiniSearch fields with field-specific boosts. `summaryPresentation` is stored only for result rendering and must never become a MiniSearch field or ranking input. Package maintainers changing the search runtime should update the pinned package, rebuild the generated asset, verify the third-party notice, and run the asset verification scripts before shipping.
 
 ### Reader-intent search relevance
 
