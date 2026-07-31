@@ -645,6 +645,146 @@ public static class CanaryEnvelopeConsumer
         _ => throw new JsonException("The named-canary status is not recognized."),
     };
 }
+
+/// <summary>Represents one parsed aggregate snapshot item.</summary>
+/// <param name="Name">The exact registered canary name.</param>
+/// <param name="Outcome">The aggregate outcome: completed, failed, timed-out, or not-started.</param>
+/// <param name="Result">The nested completed envelope, present only for completed items.</param>
+/// <param name="Code">The safe aggregate diagnostic, present only for non-completed items.</param>
+public sealed record CanarySnapshotConsumerItem(
+    string Name,
+    string Outcome,
+    CanaryConsumerResult? Result,
+    string? Code);
+
+/// <summary>Represents the required aggregate snapshot compatibility core.</summary>
+/// <param name="Ready">Whether every selected canary completed with pass evidence.</param>
+/// <param name="OverallTimedOut">Whether the overall deadline stopped or canceled any selected evaluation.</param>
+/// <param name="ElapsedMilliseconds">The non-negative aggregate elapsed time.</param>
+/// <param name="Results">The ordered settled result for every selected canary.</param>
+public sealed record CanarySnapshotConsumerResult(
+    bool Ready,
+    bool OverallTimedOut,
+    double ElapsedMilliseconds,
+    IReadOnlyList<CanarySnapshotConsumerItem> Results);
+
+/// <summary>Parses the bounded aggregate snapshot by required field names and outcome-specific omission rules.</summary>
+public static class CanarySnapshotEnvelopeConsumer
+{
+    /// <summary>Parses and validates the aggregate snapshot compatibility core.</summary>
+    /// <param name="json">The non-null aggregate JSON envelope to parse.</param>
+    /// <returns>The validated aggregate fields and settled item results.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="json"/> is null.</exception>
+    /// <exception cref="JsonException">A required aggregate field or outcome-specific item shape is invalid.</exception>
+    public static CanarySnapshotConsumerResult Parse(string json)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException("The named-canary snapshot must be a JSON object.");
+        }
+
+        var ready = ReadRequiredBoolean(root, "ready");
+        var overallTimedOut = ReadRequiredBoolean(root, "overallTimedOut");
+        if (!root.TryGetProperty("elapsedMilliseconds", out var elapsedProperty)
+            || elapsedProperty.ValueKind != JsonValueKind.Number
+            || !elapsedProperty.TryGetDouble(out var elapsedMilliseconds)
+            || elapsedMilliseconds < 0)
+        {
+            throw new JsonException("The named-canary snapshot elapsedMilliseconds field is required and must be non-negative.");
+        }
+
+        if (!root.TryGetProperty("results", out var resultsProperty)
+            || resultsProperty.ValueKind != JsonValueKind.Array)
+        {
+            throw new JsonException("The named-canary snapshot results field is required and must be an array.");
+        }
+
+        var results = resultsProperty.EnumerateArray().Select(ParseItem).ToArray();
+        if (results.Length == 0)
+        {
+            throw new JsonException("The named-canary snapshot results array must not be empty.");
+        }
+
+        if (ready != results.All(item => item.Result?.Ready == true))
+        {
+            throw new JsonException("The named-canary snapshot ready projection does not match its settled results.");
+        }
+
+        if (overallTimedOut != results.Any(item => item.Code is "ASCAN303" or "ASCAN304"))
+        {
+            throw new JsonException("The named-canary snapshot overallTimedOut projection does not match its settled results.");
+        }
+
+        return new CanarySnapshotConsumerResult(ready, overallTimedOut, elapsedMilliseconds, results);
+    }
+
+    private static CanarySnapshotConsumerItem ParseItem(JsonElement item)
+    {
+        if (item.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException("Every named-canary snapshot result must be a JSON object.");
+        }
+
+        var name = ReadRequiredString(item, "name");
+        var outcome = ReadRequiredString(item, "outcome");
+        var hasResult = item.TryGetProperty("result", out var resultProperty);
+        var hasCode = item.TryGetProperty("code", out var codeProperty);
+        if (outcome == "completed")
+        {
+            if (!hasResult || resultProperty.ValueKind != JsonValueKind.Object || hasCode)
+            {
+                throw new JsonException("A completed named-canary snapshot result requires result and omits code.");
+            }
+
+            return new CanarySnapshotConsumerItem(name, outcome, CanaryEnvelopeConsumer.Parse(resultProperty.GetRawText()), null);
+        }
+
+        var expectedCode = outcome switch
+        {
+            "failed" => "ASCAN301",
+            "timed-out" => null,
+            "not-started" => "ASCAN304",
+            _ => throw new JsonException("The named-canary snapshot outcome is not recognized."),
+        };
+        if (hasResult
+            || !hasCode
+            || codeProperty.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(codeProperty.GetString())
+            || (expectedCode is not null && !string.Equals(codeProperty.GetString(), expectedCode, StringComparison.Ordinal))
+            || (outcome == "timed-out" && codeProperty.GetString() is not ("ASCAN302" or "ASCAN303")))
+        {
+            throw new JsonException("A non-completed named-canary snapshot result requires its matching code and omits result.");
+        }
+
+        return new CanarySnapshotConsumerItem(name, outcome, null, codeProperty.GetString());
+    }
+
+    private static bool ReadRequiredBoolean(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var property)
+            || property.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+        {
+            throw new JsonException($"The named-canary snapshot {propertyName} field is required and must be Boolean.");
+        }
+
+        return property.GetBoolean();
+    }
+
+    private static string ReadRequiredString(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var property)
+            || property.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(property.GetString()))
+        {
+            throw new JsonException($"The named-canary snapshot {propertyName} field is required and must be a nonblank string.");
+        }
+
+        return property.GetString()!;
+    }
+}
 ```
 <!-- /appsurface:snippet -->
 
