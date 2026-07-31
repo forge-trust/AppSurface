@@ -409,6 +409,7 @@ public sealed class CoverageRunWatchdogTests
         var timeProvider = new FreezableTimeProvider();
         var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var processKilled = new TaskCompletionSource<Process>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var processKillCount = 0;
         await using var supervisor = new CoverageRunWatchdogSupervisor(
             CoverageRunWatchdogMode.Fail,
             TimeSpan.Zero,
@@ -419,6 +420,7 @@ public sealed class CoverageRunWatchdogTests
             processCleanupStarted: cleanupStarted.SetResult,
             processKiller: process =>
             {
+                Interlocked.Increment(ref processKillCount);
                 process.Kill();
                 processKilled.TrySetResult(process);
             });
@@ -439,6 +441,7 @@ public sealed class CoverageRunWatchdogTests
         await WaitForFileAsync(Path.Join(output.Path, "coverage-watchdog.json"));
 
         Assert.True(process.HasExited);
+        Assert.Equal(1, Volatile.Read(ref processKillCount));
         var exception = Assert.Throws<CommandException>(supervisor.ThrowIfFailed);
         Assert.Contains("Cleanup: complete", exception.Message, StringComparison.Ordinal);
     }
@@ -751,6 +754,39 @@ public sealed class CoverageRunWatchdogTests
     }
 
     [Fact]
+    public async Task ProcessLease_ShouldInvokeTestProcessKillerOnceForAttachedProcess()
+    {
+        var processKillCount = 0;
+        var lease = new CoverageRunProcessLease(
+            owner: null,
+            processKiller: process =>
+            {
+                Interlocked.Increment(ref processKillCount);
+                process.Kill();
+            });
+        using var process = Process.Start(CreateLongRunningProcess())!;
+        lease.Attach(process);
+
+        await lease.TerminateAsync();
+
+        Assert.Equal(1, Volatile.Read(ref processKillCount));
+        Assert.True(process.HasExited);
+    }
+
+    [Fact]
+    public async Task ProcessLease_ShouldSuppressExpectedTestProcessKillerExceptions()
+    {
+        var lease = new CoverageRunProcessLease(
+            owner: null,
+            processKiller: _ => throw new InvalidOperationException("process already exited"));
+        using var process = Process.Start(CreateCompletedProcess())!;
+        await process.WaitForExitAsync();
+
+        lease.Attach(process);
+        await lease.TerminateAsync();
+    }
+
+    [Fact]
     public async Task ProcessLease_ShouldHandleAlreadyExitedAndDisposedProcesses()
     {
         var exitedLease = CoverageRunProcessLease.Detached();
@@ -1030,7 +1066,7 @@ public sealed class CoverageRunWatchdogTests
 
     private static ProcessStartInfo CreateLongRunningProcess()
         => OperatingSystem.IsWindows()
-            ? new ProcessStartInfo("cmd.exe", "/c ping 127.0.0.1 -n 30 > nul") { UseShellExecute = false, CreateNoWindow = true }
+            ? new ProcessStartInfo("ping.exe", "127.0.0.1 -n 30") { UseShellExecute = false, CreateNoWindow = true }
             // Launch the process under test directly so its termination is not coupled to shell process-tree behavior.
             : new ProcessStartInfo("/bin/sleep", "30") { UseShellExecute = false };
 

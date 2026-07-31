@@ -391,6 +391,28 @@ public class ExportSourceResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_Should_Propagate_Caller_Cancellation_When_Readiness_Request_Is_Canceled()
+    {
+        var fakeProcess = new FakeTargetAppProcess();
+        var factory = new FakeTargetAppProcessFactory(_ => fakeProcess);
+        var readinessRequestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resolver = CreateResolver(factory, new SignalingNeverCompletesHttpClientFactory(readinessRequestStarted));
+        resolver.ListeningUrlTimeout = TimeSpan.FromSeconds(1);
+        resolver.AppReadyTimeout = TimeSpan.FromSeconds(10);
+
+        using var cts = new CancellationTokenSource();
+        var request = new ExportSourceRequest(ExportSourceKind.Dll, "/tmp/app.dll", null, [], false);
+        fakeProcess.OnStart = () => fakeProcess.EmitOutput("Now listening on: http://127.0.0.1:5050");
+
+        var resolution = resolver.ResolveAsync(request, cts.Token);
+        await readinessRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await resolution);
+        Assert.True(fakeProcess.Disposed);
+    }
+
+    [Fact]
     public async Task ResolveAsync_Should_Throw_Timeout_When_Ready_Timeout_Elapses_Between_Zero_Delay_Polls()
     {
         var fakeProcess = new FakeTargetAppProcess();
@@ -1281,6 +1303,14 @@ public class ExportSourceResolverTests
         }
     }
 
+    private sealed class SignalingNeverCompletesHttpClientFactory(TaskCompletionSource readinessRequestStarted) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name)
+        {
+            return new HttpClient(new SignalingNeverCompletesHandler(readinessRequestStarted));
+        }
+    }
+
     private sealed class ClientTimeoutHttpClientFactory(TimeSpan timeout) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name)
@@ -1298,6 +1328,18 @@ public class ExportSourceResolverTests
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+        }
+    }
+
+    private sealed class SignalingNeverCompletesHandler(TaskCompletionSource readinessRequestStarted) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            readinessRequestStarted.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
         }
