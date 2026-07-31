@@ -2,7 +2,21 @@ using System.Diagnostics;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Durable;
 using ForgeTrust.AppSurface.Durable.PostgreSql;
+using ForgeTrust.AppSurface.Flow;
 using Npgsql;
+
+if (args.Length == 5
+    && args[0] == "flow-timer"
+    && Guid.TryParse(args[1], out var flowRuntimeEpoch)
+    && Guid.TryParse(args[2], out var flowStoreId))
+{
+    await RunFlowTimerCrashBoundaryAsync(
+        flowRuntimeEpoch,
+        flowStoreId,
+        new DurableScopeId(args[3]),
+        new DurableFlowInstanceId(args[4]));
+    return;
+}
 
 if (args.Length != 3
     || !Guid.TryParse(args[0], out var runtimeEpoch)
@@ -83,6 +97,41 @@ Console.WriteLine(JsonSerializer.Serialize(new ReferenceCheckpoint(
 await Console.Out.FlushAsync();
 await Task.Delay(Timeout.InfiniteTimeSpan);
 
+static async ValueTask RunFlowTimerCrashBoundaryAsync(
+    Guid runtimeEpoch,
+    Guid storeId,
+    DurableScopeId scopeId,
+    DurableFlowInstanceId instanceId)
+{
+    var connectionString = Environment.GetEnvironmentVariable("APPSURFACE_POSTGRES_REFERENCE_CONNECTION");
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        throw new InvalidOperationException("APPSURFACE_POSTGRES_REFERENCE_CONNECTION is required.");
+    }
+
+    await using var dataSource = NpgsqlDataSource.Create(connectionString);
+    var codec = new FlowCrashCodec();
+    var payloads = new DurablePayloadCodecRegistry([codec]);
+    var work = new DurableWorkRegistry([]);
+    var registration = new FlowCrashTimerRegistration(codec);
+    var flows = new DurableFlowRegistry([registration], work, payloads);
+    var processor = new PostgreSqlDurableFlowProcessor(
+        dataSource,
+        dataSource,
+        flows,
+        work,
+        payloads,
+        new PostgreSqlDurableWorkOptions(runtimeEpoch, storeId),
+        barriers: new FlowCrashBarrier());
+    var candidate = (await processor.DiscoverAsync(1_000))
+        .Single(item =>
+            item.Kind == PostgreSqlFlowDispatchKind.Timer
+            && item.ScopeId == scopeId
+            && item.InstanceId == instanceId);
+    _ = await processor.TryProcessAsync(candidate, "flow-timer-crash-host");
+    throw new InvalidOperationException("The timer crash barrier unexpectedly returned.");
+}
+
 /// <summary>Locates the reference child-process assembly from integration tests.</summary>
 public sealed class ReferenceWorkloadHostMarker;
 
@@ -113,6 +162,80 @@ public sealed record ReferenceCheckpointEvent(
     string Outcome,
     string TransactionBoundary,
     long ElapsedMilliseconds);
+
+/// <summary>Reports the committed Flow timer boundary reached before forced process termination.</summary>
+public sealed record FlowCrashCheckpoint(
+    string Phase,
+    string ScopeId,
+    string FlowInstanceId,
+    long Revision);
+
+internal sealed class FlowCrashBarrier : IPostgreSqlDurableFlowBarrierObserver
+{
+    public async ValueTask ObserveAsync(
+        string barrier,
+        DurableScopeId scopeId,
+        DurableFlowInstanceId instanceId,
+        long revision,
+        CancellationToken cancellationToken)
+    {
+        if (barrier != "flow.timer-resolution.committed")
+        {
+            return;
+        }
+
+        Console.WriteLine(JsonSerializer.Serialize(new FlowCrashCheckpoint(
+            barrier,
+            scopeId.Value,
+            instanceId.Value,
+            revision)));
+        await Console.Out.FlushAsync(cancellationToken);
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+    }
+}
+
+internal sealed class FlowCrashTimerRegistration(IDurablePayloadCodec contextCodec) : DurableFlowRegistration
+{
+    public override string FlowId => "tests.timer-flow";
+
+    public override string FlowVersion => "v1";
+
+    public override string ImplementationVersion => "tests-timer-v1";
+
+    public override string StartNodeId => "timer";
+
+    public override string DefinitionFingerprint => new('c', 64);
+
+    public override IDurablePayloadCodec ContextCodec { get; } = contextCodec;
+
+    public override IReadOnlyList<DurableFlowEventBinding> EventBindings => [];
+
+    public override IReadOnlyList<DurableWorkRegistration> ActivityWorkRegistrations => [];
+
+    public override ValueTask<DurableFlowEvaluationResult> EvaluateAsync(
+        DurableFlowEvaluationInput input,
+        IDurablePayloadCodecRegistry payloadCodecs,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("The timer crash host resolves a committed timer and does not evaluate a Flow node.");
+}
+
+internal sealed class FlowCrashCodec : IDurablePayloadCodec
+{
+    public Type PayloadType => typeof(byte[]);
+    public string ContractName => "tests.flow.context";
+    public string ContractVersion => "v1";
+    public DurableDataClassification Classification => DurableDataClassification.Operational;
+    public string RetentionPolicyId => DurableEncodedPayload.DefaultRetentionPolicyId;
+
+    public DurableEncodedPayload EncodeObject(object value) => new(
+        ContractName,
+        ContractVersion,
+        Classification,
+        (byte[])value,
+        RetentionPolicyId);
+
+    public object DecodeObject(DurableEncodedPayload payload) => payload.Content.ToArray();
+}
 
 internal sealed class ReferenceWorkRegistration(DurableProviderSafety providerSafety) : DurableWorkRegistration(
     $"reference.{providerSafety.ToString().ToLowerInvariant()}",

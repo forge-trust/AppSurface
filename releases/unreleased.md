@@ -4,6 +4,11 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
+- The machine-held `ForgeTrust.AppSurface.Durable.PostgreSql` source preview now persists one-transition durable Flows:
+  migration 0003 adds forced-RLS Flow state, command, history, wait, timer, and payload-free dispatch records; the new
+  `PostgreSqlDurableFlowClient` supplies idempotent start/event/cancel/release operations; and an internal fenced
+  processor proves event/timer races plus atomic child-Work projection through a timed real-PostgreSQL verifier. It
+  still starts no hosted worker, applies no automatic DDL, and remains excluded from publication until later slices.
 - [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog) now records monotonic per-operation progress, emits 30-second heartbeats by default, and warns after 10 minutes without observable progress. `--watchdog fail` additionally performs bounded whole-process-tree cleanup, writes privacy-minimized incident evidence when possible, and exits `124` with `ASCOV121`.
 - `appsurface secrets transfer plan|apply` now plans and applies declared LocalSecrets and Google Secret Manager
   promotion jobs against existing Google secrets only. Plans bind configuration digest, expiry, and destination
