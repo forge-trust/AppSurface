@@ -57,6 +57,7 @@ internal sealed class AppSurfaceCanarySnapshotCoordinator
                 marker,
                 freshSince,
                 options.PerCheckTimeout,
+                options.OverallTimeout,
                 concurrency,
                 overallCancellation.Token,
                 requestAborted,
@@ -79,6 +80,7 @@ internal sealed class AppSurfaceCanarySnapshotCoordinator
         string? marker,
         DateTimeOffset? freshSince,
         TimeSpan perCheckTimeout,
+        TimeSpan overallTimeout,
         SemaphoreSlim concurrency,
         CancellationToken overallCancellation,
         CancellationToken requestAborted,
@@ -109,7 +111,11 @@ internal sealed class AppSurfaceCanarySnapshotCoordinator
             }
 
             using var perCheckCancellation = CancellationTokenSource.CreateLinkedTokenSource(operationCancellation);
-            perCheckCancellation.CancelAfter(perCheckTimeout);
+            if (perCheckTimeout < overallTimeout)
+            {
+                perCheckCancellation.CancelAfter(perCheckTimeout);
+            }
+
             var started = Stopwatch.GetTimestamp();
             try
             {
