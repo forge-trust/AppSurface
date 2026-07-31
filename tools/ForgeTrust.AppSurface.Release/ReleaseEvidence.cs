@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json.Serialization;
+using ForgeTrust.AppSurface.ReleaseContracts;
 
 namespace ForgeTrust.AppSurface.Release;
 
@@ -91,7 +92,7 @@ internal static class ReleaseEvidence
         string releaseManifestContent,
         string currentReleaseContent,
         string currentReleaseSidecarContent,
-        IReadOnlyList<PackageIndexEntry> packages) =>
+        IReadOnlyList<CoordinatedPackageReleaseNoteResolution> coordinatedPackageReleaseNoteResolutions) =>
         ReleaseEvidenceV2.BuildDraft(
             workspace,
             version,
@@ -103,7 +104,7 @@ internal static class ReleaseEvidence
             releaseManifestContent,
             currentReleaseContent,
             currentReleaseSidecarContent,
-            packages);
+            coordinatedPackageReleaseNoteResolutions);
 
     /// <summary>
     /// Validates a checked-in release evidence bundle in the current worktree.
@@ -231,7 +232,7 @@ internal static class ReleaseEvidence
                 diagnostics.Add(ReleaseDiagnostic.Error(
                     "release-evidence-current-pointer-missing",
                     "V2 release evidence requires the frozen current pointer from the annotated tag.",
-                    "releases/current.md or releases/current.md.yml was not loaded from the tag.",
+                    $"{PackageReleaseLink.CoordinatedReleaseNotesPath} or {PackageReleaseLink.CoordinatedReleaseSidecarPath} was not loaded from the tag.",
                     "Include both frozen current-pointer artifacts in the tagged release.",
                     "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
                 return new ReleaseEvidenceValidationResult(null, diagnostics, null);
@@ -584,6 +585,34 @@ internal static class ReleaseEvidence
         List<ReleaseDiagnostic> diagnostics,
         string docsPath)
     {
+        try
+        {
+            using var document = JsonDocument.Parse(releaseManifestJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("schema", out var schema)
+                || schema.ValueKind != JsonValueKind.String
+                || !string.Equals(schema.GetString(), "appsurface-release-manifest-v1", StringComparison.Ordinal))
+            {
+                diagnostics.Add(ReleaseDiagnostic.Error(
+                    "release-evidence-release-manifest-schema-invalid",
+                    "V1 release evidence requires an appsurface-release-manifest-v1 release manifest.",
+                    "The manifest schema is missing, unknown, or belongs to a newer release contract.",
+                    "Pair historical V1 evidence only with its original V1 release manifest.",
+                    docsPath));
+                return;
+            }
+        }
+        catch (JsonException ex)
+        {
+            diagnostics.Add(ReleaseDiagnostic.Error(
+                "release-evidence-release-manifest-schema-invalid",
+                "Release evidence could not parse the release manifest.",
+                ex.Message,
+                "Regenerate the release JSON with the release tool instead of hand-editing it.",
+                docsPath));
+            return;
+        }
+
         ReleaseManifest? manifest;
         try
         {

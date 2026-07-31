@@ -1,3 +1,5 @@
+using ForgeTrust.AppSurface.ReleaseContracts;
+
 namespace ForgeTrust.AppSurface.Release;
 
 /// <summary>
@@ -64,8 +66,16 @@ internal sealed class ReleasePublishing
         string? currentReleaseSidecar = null;
         if (ReleaseEvidence.IsV2(evidenceJson))
         {
-            currentRelease = await RequireGitBlobOutputAsync(tag, "releases/current.md", "release-current-pointer-missing-from-tag", cancellationToken);
-            currentReleaseSidecar = await RequireGitBlobOutputAsync(tag, "releases/current.md.yml", "release-current-pointer-sidecar-missing-from-tag", cancellationToken);
+            currentRelease = await RequireGitBlobOutputAsync(
+                tag,
+                PackageReleaseLink.CoordinatedReleaseNotesPath,
+                "release-current-pointer-missing-from-tag",
+                cancellationToken);
+            currentReleaseSidecar = await RequireGitBlobOutputAsync(
+                tag,
+                PackageReleaseLink.CoordinatedReleaseSidecarPath,
+                "release-current-pointer-sidecar-missing-from-tag",
+                cancellationToken);
         }
 
         var evidence = ReleaseEvidence.ValidateTag(

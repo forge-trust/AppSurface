@@ -14,7 +14,7 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 - for stable releases, stage the AppSurface Docs exact archive and run `appsurface docs verify-archive --catalog <staging>/versions.json --version x.y.z --trusted-release-root <staging>` before asking the release tool to validate docs evidence
 - for stable releases, confirm the checked-in evidence fields describe the same staged docs archive that `nuget-stable-publish.yml` will export and verify before `publish-nuget`
 - review [coordinated release links](./coordinated-release-links.md) before changing package release metadata; public coordinated rows retain `release_track: coordinated`, while explicit historical, held, and proof-host rows keep their documented paths
-- use `./eng/release prepare --version x.y.z --dry-run` to inspect the generated tagged note, sidecar, release manifest, V2 release evidence bundle, frozen current pointer and sidecar, changelog rollover, and reset unreleased artifact before opening the release PR
+- use `./eng/release prepare --version x.y.z --dry-run` to inspect the generated tagged note and sidecar, release manifest, V2 release evidence bundle, generated frozen current pointer, preserved permanent current-pointer metadata sidecar, changelog rollover, and reset unreleased artifact before opening the release PR
 
 ## When cutting the tagged release note
 

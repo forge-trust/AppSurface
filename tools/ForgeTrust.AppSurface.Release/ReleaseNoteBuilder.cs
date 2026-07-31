@@ -81,12 +81,6 @@ internal static class ReleaseNoteBuilder
     /// </remarks>
     internal static string BuildCurrentReleasePointer(SemVer version)
     {
-        return $"""
-            # Current coordinated release
-
-            This documentation tree was published for AppSurface `{version}`. Its coordinated package links intentionally resolve to this frozen release narrative.
-
-            [Read the AppSurface {version} release note](./v{version}.md).
-            """;
+        return ReleaseCurrentPointer.Build(version);
     }
 }

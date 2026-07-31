@@ -14,6 +14,11 @@ public sealed record PackageReleaseLink(PackageReleaseTrack Track, string Releas
     /// Gets the repository-relative current pointer used by coordinated packages.
     /// </summary>
     public const string CoordinatedReleaseNotesPath = "releases/current.md";
+
+    /// <summary>
+    /// Gets the repository-relative permanent metadata sidecar for the coordinated current pointer.
+    /// </summary>
+    public const string CoordinatedReleaseSidecarPath = "releases/current.md.yml";
 }
 
 /// <summary>
@@ -76,7 +81,7 @@ public static class PackageReleaseLinkResolver
         {
             if (!string.IsNullOrEmpty(normalizedPath))
             {
-                error = "uses release_track: coordinated and must not also define release_notes_path; the coordinated target is releases/current.md";
+                error = $"uses release_track: coordinated and must not also define release_notes_path; the coordinated target is {PackageReleaseLink.CoordinatedReleaseNotesPath}";
                 return false;
             }
 

@@ -62,6 +62,37 @@ internal sealed record ReleaseManifest(
     IReadOnlyList<string> WarningIds);
 
 /// <summary>
+/// Machine-readable schema-v2 release manifest for frozen coordinated release links.
+/// </summary>
+/// <remarks>
+/// V2 deliberately retains V1 as a separate type so checked-in historical manifests are never deserialized through a newer contract.
+/// Its package resolutions record the tree-local alias and the immutable tagged note it resolves to at preparation time.
+/// </remarks>
+internal sealed record ReleaseManifestV2(
+    string Schema,
+    string Version,
+    string Tag,
+    string Date,
+    string? PreparationBaseCommit,
+    string ReleaseClassification,
+    IReadOnlyList<string> GeneratedFiles,
+    IReadOnlyList<string> PublishedPackageProjects,
+    IReadOnlyList<CoordinatedPackageReleaseNoteResolution> CoordinatedPackageReleaseNoteResolutions,
+    IReadOnlyList<ReleaseDiagnosticRecord> Diagnostics,
+    IReadOnlyList<string> WarningIds);
+
+/// <summary>
+/// Records how a public package's coordinated release alias resolves in the prepared documentation tree.
+/// </summary>
+internal sealed record CoordinatedPackageReleaseNoteResolution(
+    string Project,
+    string Source,
+    string AliasPath,
+    string ResolvedPath,
+    string ReleaseTag,
+    string? PreparationBaseCommit);
+
+/// <summary>
 /// Package release note path update recorded in the release manifest.
 /// </summary>
 internal sealed record PackagePathUpdate(string Project, string PreviousReleaseNotesPath, string NextReleaseNotesPath);

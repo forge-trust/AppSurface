@@ -365,9 +365,13 @@
         "dependencies": {
           "CliFx": "[3.0.0, )",
           "ForgeTrust.AppSurface.Console": "[0.1.0, )",
+          "ForgeTrust.AppSurface.ReleaseContracts": "[0.1.0, )",
           "Markdig": "[1.2.0, )",
           "YamlDotNet": "[18.0.0, )"
         }
+      },
+      "forgetrust.appsurface.releasecontracts": {
+        "type": "Project"
       },
       "forgetrust.appsurface.testing": {
         "type": "Project"

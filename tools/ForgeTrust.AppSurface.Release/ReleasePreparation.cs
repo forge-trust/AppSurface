@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using ForgeTrust.AppSurface.ReleaseContracts;
 
 namespace ForgeTrust.AppSurface.Release;
 
@@ -60,6 +61,7 @@ internal sealed class ReleasePreparation
         var currentPointerSidecarSnapshot = await CaptureFileDigestAsync(_workspace.CurrentReleaseSidecarPath, cancellationToken);
         var unreleased = await File.ReadAllTextAsync(_workspace.UnreleasedPath, cancellationToken);
         var sidecar = await ReleaseSidecar.LoadAsync(_workspace.UnreleasedSidecarPath, cancellationToken);
+        var currentReleaseSidecar = await File.ReadAllTextAsync(_workspace.CurrentReleaseSidecarPath, cancellationToken);
         var packageSummary = await PackageIndexSummary.LoadAsync(_workspace.PackageIndexPath, cancellationToken);
         var generatedPaths = new List<string>();
         var releaseNotePath = _workspace.ReleaseNotePath(options.Version);
@@ -68,25 +70,31 @@ internal sealed class ReleasePreparation
         var releaseEvidencePath = _workspace.ReleaseEvidencePath(options.Version);
         var releasePath = $"releases/v{options.Version}.md";
         var currentReleasePath = _workspace.CurrentReleasePath;
-        var currentReleaseSidecarPath = _workspace.CurrentReleaseSidecarPath;
 
         var releaseNote = ReleaseNoteBuilder.Build(options.Version, date, unreleased);
         var releaseSidecar = sidecar.ToTaggedRelease(options.Version, date);
         var currentRelease = ReleaseNoteBuilder.BuildCurrentReleasePointer(options.Version);
-        var currentReleaseSidecar = ReleaseSidecar.CurrentReleasePointerTemplate(options.Version, date);
-        var packagePathUpdates = packageSummary.PublicPublishedPackages
-            .Select(package => new PackagePathUpdate(package.Project, package.ReleaseNotesPath, releasePath))
+        var coordinatedResolutions = packageSummary.PublicPublishedPackages
+            .Where(package => package.ReleaseLink?.Track == PackageReleaseTrack.Coordinated)
+            .Select(package => new CoordinatedPackageReleaseNoteResolution(
+                package.Project,
+                "coordinated",
+                PackageReleaseLink.CoordinatedReleaseNotesPath,
+                releasePath,
+                options.Version.TagName,
+                check.SourceCommit))
+            .OrderBy(resolution => resolution.Project, StringComparer.Ordinal)
             .ToArray();
-        var manifest = new ReleaseManifest(
-            "appsurface-release-manifest-v1",
+        var manifest = new ReleaseManifestV2(
+            "appsurface-release-manifest-v2",
             options.Version.ToString(),
             options.Version.TagName,
             date.ToString("yyyy-MM-dd"),
             check.SourceCommit,
             check.ReleaseClassification,
             check.GeneratedFiles,
-            packageSummary.PublicPublishedPackages.Select(package => package.Project).ToArray(),
-            packagePathUpdates,
+            packageSummary.PublicPublishedPackages.Select(package => package.Project).OrderBy(project => project, StringComparer.Ordinal).ToArray(),
+            coordinatedResolutions,
             check.Errors.Concat(check.Warnings).Select(ReleaseDiagnosticRecord.FromDiagnostic).ToArray(),
             check.Warnings.Select(warning => warning.Code).ToArray());
         var releaseManifestContent = JsonSerializer.Serialize(manifest, ReleaseJson.Options) + Environment.NewLine;
@@ -101,7 +109,7 @@ internal sealed class ReleasePreparation
             releaseManifestContent,
             currentRelease,
             currentReleaseSidecar,
-            packageSummary.PublicPublishedPackages);
+            coordinatedResolutions);
         var releaseEvidenceContent = ReleaseEvidence.Serialize(evidence);
 
         var changelog = await File.ReadAllTextAsync(_workspace.ChangelogPath, cancellationToken);
@@ -114,7 +122,6 @@ internal sealed class ReleasePreparation
             [releaseManifestPath] = releaseManifestContent,
             [releaseEvidencePath] = releaseEvidenceContent,
             [currentReleasePath] = currentRelease,
-            [currentReleaseSidecarPath] = currentReleaseSidecar,
             [_workspace.ChangelogPath] = ChangelogEditor.RollForward(changelog, options.Version, date, releasePath),
             [_workspace.UnreleasedPath] = nextUnreleased,
             [_workspace.UnreleasedSidecarPath] = ReleaseSidecar.UnreleasedTemplate()
@@ -127,6 +134,7 @@ internal sealed class ReleasePreparation
                 await _beforeWriteAsync(cancellationToken);
             }
 
+            await EnsurePreparationBaseCommitUnchangedAsync(check.SourceCommit, cancellationToken);
             await EnsureFileDigestUnchangedAsync(currentPointerSnapshot, cancellationToken);
             await EnsureFileDigestUnchangedAsync(currentPointerSidecarSnapshot, cancellationToken);
             foreach (var (path, content) in writes)
@@ -175,6 +183,27 @@ internal sealed class ReleasePreparation
         await using var stream = File.OpenRead(path);
         var hash = await SHA256.HashDataAsync(stream, cancellationToken);
         return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private async Task EnsurePreparationBaseCommitUnchangedAsync(string? preparationBaseCommit, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(preparationBaseCommit))
+        {
+            return;
+        }
+
+        var current = await _checker.GetSourceCommitAsync(cancellationToken);
+        if (string.Equals(preparationBaseCommit, current, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        throw new ReleaseToolException(ReleaseDiagnostic.Error(
+            "release-preparation-base-commit-concurrent-update",
+            "HEAD changed while release preparation was rendering artifacts.",
+            $"Preparation started from `{preparationBaseCommit}` but the repository now resolves HEAD to `{current ?? "unknown"}`.",
+            "Review the concurrent change, reset only the partial generated release artifacts, and rerun ./eng/release prepare.",
+            "releases/release-authoring-checklist.md"));
     }
 }
 

@@ -1,3 +1,5 @@
+using ForgeTrust.AppSurface.ReleaseContracts;
+
 namespace ForgeTrust.AppSurface.Release;
 
 /// <summary>
@@ -46,12 +48,12 @@ internal sealed class ReleaseWorkspace
     /// This pointer is overwritten only by release preparation. Once docs are exported, its bytes live inside that exact tree,
     /// so the same <c>releases/current.md</c> route stays frozen to the release represented by the tree.
     /// </remarks>
-    internal string CurrentReleasePath => PathFor("releases/current.md");
+    internal string CurrentReleasePath => PathFor(PackageReleaseLink.CoordinatedReleaseNotesPath);
 
     /// <summary>
-    /// Gets the absolute current coordinated release pointer sidecar path.
+    /// Gets the absolute permanent current coordinated release pointer metadata sidecar path.
     /// </summary>
-    internal string CurrentReleaseSidecarPath => PathFor("releases/current.md.yml");
+    internal string CurrentReleaseSidecarPath => PathFor(PackageReleaseLink.CoordinatedReleaseSidecarPath);
 
     /// <summary>
     /// Gets the absolute package index manifest path.

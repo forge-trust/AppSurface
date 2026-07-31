@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://forge-trust.com/schemas/appsurface/release-manifest-v2.schema.json",
+  "title": "AppSurface release manifest v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "tag", "date", "preparationBaseCommit", "releaseClassification", "generatedFiles", "publishedPackageProjects", "coordinatedPackageReleaseNoteResolutions", "diagnostics", "warningIds"],
+  "properties": {
+    "schema": { "const": "appsurface-release-manifest-v2" },
+    "version": { "$ref": "#/$defs/version" },
+    "tag": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" },
+    "date": { "type": "string", "format": "date" },
+    "preparationBaseCommit": { "$ref": "#/$defs/commit" },
+    "releaseClassification": { "enum": ["prerelease", "stable"] },
+    "generatedFiles": { "type": "array", "items": { "$ref": "#/$defs/repositoryPath" }, "uniqueItems": true },
+    "publishedPackageProjects": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "coordinatedPackageReleaseNoteResolutions": { "type": "array", "items": { "$ref": "#/$defs/resolution" }, "uniqueItems": true },
+    "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } },
+    "warningIds": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+  },
+  "$defs": {
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "repositoryPath": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" },
+    "resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project", "source", "aliasPath", "resolvedPath", "releaseTag", "preparationBaseCommit"],
+      "properties": {
+        "project": { "type": "string", "minLength": 1 },
+        "source": { "const": "coordinated" },
+        "aliasPath": { "const": "releases/current.md" },
+        "resolvedPath": { "$ref": "#/$defs/repositoryPath" },
+        "releaseTag": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" },
+        "preparationBaseCommit": { "$ref": "#/$defs/commit" }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "code", "problem", "cause", "fix", "docs"],
+      "properties": {
+        "severity": { "enum": ["error", "warning"] },
+        "code": { "type": "string", "minLength": 1 },
+        "problem": { "type": "string" },
+        "cause": { "type": "string" },
+        "fix": { "type": "string" },
+        "docs": { "type": "string" }
+      }
+    }
+  }
+}

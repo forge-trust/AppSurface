@@ -163,7 +163,16 @@ internal sealed class ReleaseChecker
             }
         }
 
-        var sourceCommit = await TryGetSourceCommitAsync(cancellationToken);
+        var sourceCommit = await GetSourceCommitAsync(cancellationToken);
+        if (string.Equals(options.Command, "prepare", StringComparison.Ordinal)
+            && sourceCommit is not null
+            && File.Exists(_workspace.CurrentReleasePath))
+        {
+            var pointer = await File.ReadAllTextAsync(_workspace.CurrentReleasePath, cancellationToken);
+            var pointerGate = new ReleaseCurrentPointerGate(_workspace, _commandRunner);
+            errors.AddRange(await pointerGate.ValidateAsync(options.Version, pointer, sourceCommit, cancellationToken));
+        }
+
         if (string.Equals(options.Command, "check", StringComparison.Ordinal)
             && (options.AllowExistingTargets || options.Version.IsStable))
         {
@@ -217,6 +226,8 @@ internal sealed class ReleaseChecker
             _workspace.ChangelogPath,
             _workspace.UnreleasedPath,
             _workspace.UnreleasedSidecarPath,
+            _workspace.CurrentReleasePath,
+            _workspace.CurrentReleaseSidecarPath,
             _workspace.PackageIndexPath,
             _workspace.TemplatePath
         ];
@@ -227,8 +238,7 @@ internal sealed class ReleaseChecker
         return
         [
             .. VersionedGeneratedFiles(version),
-            _workspace.CurrentReleasePath,
-            _workspace.CurrentReleaseSidecarPath
+            _workspace.CurrentReleasePath
         ];
     }
 
@@ -243,7 +253,7 @@ internal sealed class ReleaseChecker
         ];
     }
 
-    private async Task<string?> TryGetSourceCommitAsync(CancellationToken cancellationToken)
+    internal async Task<string?> GetSourceCommitAsync(CancellationToken cancellationToken)
     {
         var result = await _commandRunner.RunAsync(
             new CommandInvocation("git", ["rev-parse", "HEAD"], _workspace.RepositoryRoot),

@@ -16,6 +16,31 @@ internal static class ReleaseEvidenceV2
 {
     internal const string Schema = "appsurface-release-evidence-bundle-v2";
 
+    private static readonly HashSet<string> RequiredRootProperties = new(StringComparer.Ordinal)
+    {
+        "schema",
+        "version",
+        "tag",
+        "releaseClassification",
+        "releaseNotePath",
+        "releaseSidecarPath",
+        "releaseManifestPath",
+        "evidencePath",
+        "releaseManifestDigest",
+        "releaseArtifactDigests",
+        "coordinatedPackageReleaseNoteResolutions",
+        "docsArchive",
+        "commits",
+        "generatedBy",
+        "generatedAtUtc",
+        "subject"
+    };
+
+    private static readonly HashSet<string> AllowedRootProperties = new(RequiredRootProperties, StringComparer.Ordinal)
+    {
+        "attestation"
+    };
+
     internal static ReleaseEvidenceBundleV2 BuildDraft(
         ReleaseWorkspace workspace,
         SemVer version,
@@ -27,7 +52,7 @@ internal static class ReleaseEvidenceV2
         string releaseManifestContent,
         string currentReleaseContent,
         string currentReleaseSidecarContent,
-        IReadOnlyList<PackageIndexEntry> packages)
+        IReadOnlyList<CoordinatedPackageReleaseNoteResolution> coordinatedPackageReleaseNoteResolutions)
     {
         var releaseNotePath = workspace.DisplayPath(workspace.ReleaseNotePath(version));
         var releaseSidecarPath = workspace.DisplayPath(workspace.ReleaseSidecarPath(version));
@@ -51,24 +76,17 @@ internal static class ReleaseEvidenceV2
                 (releaseManifestPath, releaseManifestContent),
                 (currentReleasePath, currentReleaseContent),
                 (currentReleaseSidecarPath, currentReleaseSidecarContent)),
-            packages
-                .Select(package => new ReleaseEvidencePackageReleaseLink(
-                    package.Project,
-                    package.ReleaseLink?.Track == PackageReleaseTrack.Coordinated ? "coordinated" : "explicit",
-                    package.ReleaseLink?.ReleaseNotesPath ?? string.Empty))
-                .OrderBy(package => package.Project, StringComparer.Ordinal)
-                .ToArray(),
-            new ReleaseEvidenceCurrentRelease(currentReleasePath, currentReleaseSidecarPath, releaseNotePath),
+            coordinatedPackageReleaseNoteResolutions,
             new ReleaseEvidenceDocsArchive("notConfigured", null, null, null, null, null),
-            new ReleaseEvidenceCommits(contentSourceCommit, null, null, null),
+            new ReleaseEvidenceCommitsV2(contentSourceCommit, null, null, null),
             new ReleaseEvidenceGeneratedBy("./eng/release"),
             date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).ToString("O", CultureInfo.InvariantCulture),
-            new ReleaseEvidenceSubject("release-evidence", string.Empty),
+            new ReleaseEvidenceSubject("AppSurface release evidence", string.Empty),
             Attestation: null);
         return bundle with
         {
             Subject = new ReleaseEvidenceSubject(
-                evidencePath,
+                "AppSurface release evidence",
                 ComputeSubjectSha256(bundle))
         };
     }
@@ -154,8 +172,8 @@ internal static class ReleaseEvidenceV2
                     [bundle.ReleaseNotePath] = releaseNoteContent,
                     [bundle.ReleaseSidecarPath] = releaseSidecarContent,
                     [bundle.ReleaseManifestPath] = releaseManifestContent,
-                    [bundle.CurrentRelease.ReleaseNotePath] = currentReleaseContent,
-                    [bundle.CurrentRelease.ReleaseSidecarPath] = currentReleaseSidecarContent
+                    [PackageReleaseLink.CoordinatedReleaseNotesPath] = currentReleaseContent,
+                    [PackageReleaseLink.CoordinatedReleaseSidecarPath] = currentReleaseSidecarContent
                 },
                 diagnostics,
                 docsPath);
@@ -187,6 +205,12 @@ internal static class ReleaseEvidenceV2
     {
         try
         {
+            if (!HasCanonicalRootShape(json, out var issue))
+            {
+                AddError(diagnostics, "release-evidence-schema-invalid", "Release evidence bundle does not match the schema-v2 root contract.", issue, "Regenerate release evidence instead of hand-editing JSON.", docsPath);
+                return null;
+            }
+
             return JsonSerializer.Deserialize<ReleaseEvidenceBundleV2>(json, ReleaseJson.Options);
         }
         catch (JsonException ex)
@@ -196,14 +220,48 @@ internal static class ReleaseEvidenceV2
         }
     }
 
+    private static bool HasCanonicalRootShape(string json, out string issue)
+    {
+        issue = string.Empty;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                issue = "The JSON root must be an object.";
+                return false;
+            }
+
+            var names = document.RootElement.EnumerateObject().Select(property => property.Name).ToArray();
+            if (RequiredRootProperties.Except(names, StringComparer.Ordinal).Any())
+            {
+                issue = "One or more required V2 evidence properties are missing.";
+                return false;
+            }
+
+            if (names.Any(name => !AllowedRootProperties.Contains(name)))
+            {
+                issue = "The bundle contains unknown or V1-only evidence properties.";
+                return false;
+            }
+
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            issue = ex.Message;
+            return false;
+        }
+    }
+
     private static bool ValidateShape(ReleaseEvidenceBundleV2 bundle, List<ReleaseDiagnostic> diagnostics, string docsPath)
     {
         if (bundle.Schema is null || bundle.Version is null || bundle.Tag is null || bundle.ReleaseClassification is null
             || bundle.ReleaseNotePath is null || bundle.ReleaseSidecarPath is null || bundle.ReleaseManifestPath is null
             || bundle.EvidencePath is null || bundle.ReleaseManifestDigest is null || bundle.ReleaseArtifactDigests is null
-            || bundle.PackageReleaseLinks is null || bundle.CurrentRelease is null || bundle.DocsArchive is null || bundle.Commits is null
+            || bundle.CoordinatedPackageReleaseNoteResolutions is null || bundle.DocsArchive is null || bundle.Commits is null
             || bundle.GeneratedBy is null || bundle.GeneratedAtUtc is null || bundle.Subject is null
-            || bundle.ReleaseArtifactDigests.Any(item => item is null) || bundle.PackageReleaseLinks.Any(item => item is null))
+            || bundle.ReleaseArtifactDigests.Any(item => item is null) || bundle.CoordinatedPackageReleaseNoteResolutions.Any(item => item is null))
         {
             AddError(diagnostics, "release-evidence-schema-invalid", "Release evidence bundle is missing required v2 fields.", "One or more required top-level or array fields are missing.", "Regenerate release evidence with the current release tool.", docsPath);
             return false;
@@ -211,8 +269,8 @@ internal static class ReleaseEvidenceV2
 
         if (bundle.ReleaseManifestDigest.Algorithm is null || bundle.ReleaseManifestDigest.Value is null
             || bundle.ReleaseArtifactDigests.Any(item => item.Path is null || item.Algorithm is null || item.Value is null)
-            || bundle.PackageReleaseLinks.Any(item => item.Project is null || item.Track is null || item.ReleaseNotesPath is null)
-            || bundle.CurrentRelease.ReleaseNotePath is null || bundle.CurrentRelease.ReleaseSidecarPath is null || bundle.CurrentRelease.TargetReleaseNotePath is null
+            || bundle.CoordinatedPackageReleaseNoteResolutions.Any(item => item.Project is null || item.Source is null || item.AliasPath is null || item.ResolvedPath is null || item.ReleaseTag is null || item.PreparationBaseCommit is null)
+            || bundle.Commits.PreparationBaseCommit is null
             || bundle.DocsArchive.Status is null || bundle.GeneratedBy.Tool is null || bundle.Subject.Name is null || bundle.Subject.Sha256 is null)
         {
             AddError(diagnostics, "release-evidence-schema-invalid", "Release evidence bundle is missing required nested v2 fields.", "One or more digest, package-link, current-pointer, or metadata fields are missing.", "Regenerate release evidence with the current release tool.", docsPath);
@@ -241,28 +299,27 @@ internal static class ReleaseEvidenceV2
             || !string.Equals(bundle.ReleaseNotePath, expectedNote, StringComparison.Ordinal)
             || !string.Equals(bundle.ReleaseSidecarPath, expectedSidecar, StringComparison.Ordinal)
             || !string.Equals(bundle.ReleaseManifestPath, expectedManifest, StringComparison.Ordinal)
-            || !string.Equals(bundle.EvidencePath, expectedEvidence, StringComparison.Ordinal)
-            || !string.Equals(bundle.CurrentRelease.ReleaseNotePath, PackageReleaseLink.CoordinatedReleaseNotesPath, StringComparison.Ordinal)
-            || !string.Equals(bundle.CurrentRelease.ReleaseSidecarPath, "releases/current.md.yml", StringComparison.Ordinal)
-            || !string.Equals(bundle.CurrentRelease.TargetReleaseNotePath, expectedNote, StringComparison.Ordinal))
+            || !string.Equals(bundle.EvidencePath, expectedEvidence, StringComparison.Ordinal))
         {
             AddError(diagnostics, "release-evidence-version-mismatch", "Release evidence bundle does not match the requested release identity.", $"Expected tagged paths under `releases/v{version}` and a current pointer to `{expectedNote}`.", "Regenerate release evidence for the requested version.", docsPath);
             isValid = false;
         }
 
-        var invalidLinks = bundle.PackageReleaseLinks
-            .Where(link => string.IsNullOrWhiteSpace(link.Project)
-                           || (string.Equals(link.Track, "coordinated", StringComparison.Ordinal)
-                               && !string.Equals(link.ReleaseNotesPath, PackageReleaseLink.CoordinatedReleaseNotesPath, StringComparison.Ordinal))
-                           || (string.Equals(link.Track, "explicit", StringComparison.Ordinal)
-                               && string.IsNullOrWhiteSpace(link.ReleaseNotesPath))
-                           || (!string.Equals(link.Track, "coordinated", StringComparison.Ordinal)
-                               && !string.Equals(link.Track, "explicit", StringComparison.Ordinal)))
-            .Select(link => link.Project)
+        var invalidLinks = bundle.CoordinatedPackageReleaseNoteResolutions
+            .Where(resolution => string.IsNullOrWhiteSpace(resolution.Project)
+                                 || !string.Equals(resolution.Source, "coordinated", StringComparison.Ordinal)
+                                 || !string.Equals(resolution.AliasPath, PackageReleaseLink.CoordinatedReleaseNotesPath, StringComparison.Ordinal)
+                                 || !string.Equals(resolution.ResolvedPath, expectedNote, StringComparison.Ordinal)
+                                 || !string.Equals(resolution.ReleaseTag, version.TagName, StringComparison.Ordinal)
+                                 || !string.Equals(resolution.PreparationBaseCommit, bundle.Commits.PreparationBaseCommit, StringComparison.Ordinal))
+            .Select(resolution => resolution.Project)
             .ToArray();
-        if (invalidLinks.Length > 0 || bundle.PackageReleaseLinks.Select(link => link.Project).Distinct(StringComparer.Ordinal).Count() != bundle.PackageReleaseLinks.Count)
+        var orderedProjects = bundle.CoordinatedPackageReleaseNoteResolutions.Select(resolution => resolution.Project).ToArray();
+        if (invalidLinks.Length > 0
+            || orderedProjects.Distinct(StringComparer.Ordinal).Count() != orderedProjects.Length
+            || !orderedProjects.SequenceEqual(orderedProjects.OrderBy(project => project, StringComparer.Ordinal), StringComparer.Ordinal))
         {
-            AddError(diagnostics, "release-evidence-package-link-mismatch", "V2 release evidence contains invalid package release links.", $"Invalid or duplicate package links: {string.Join(", ", invalidLinks)}.", "Use a coordinated releases/current.md link or a non-empty explicit historical release_notes_path, then regenerate evidence.", docsPath);
+            AddError(diagnostics, "release-evidence-package-link-mismatch", "V2 release evidence contains invalid coordinated package resolutions.", $"Invalid, duplicate, or unordered package resolutions: {string.Join(", ", invalidLinks)}.", "Keep only ordinal-sorted coordinated releases/current.md resolutions and regenerate evidence.", docsPath);
             isValid = false;
         }
 
@@ -278,7 +335,7 @@ internal static class ReleaseEvidenceV2
         await AddIfExistsAsync(content, workspace.DisplayPath(workspace.CurrentReleasePath), workspace.CurrentReleasePath, cancellationToken);
         await AddIfExistsAsync(content, workspace.DisplayPath(workspace.CurrentReleaseSidecarPath), workspace.CurrentReleaseSidecarPath, cancellationToken);
         ValidateArtifactDigests(bundle, content, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle");
-        if (content.TryGetValue(bundle.CurrentRelease.ReleaseNotePath, out var current))
+        if (content.TryGetValue(PackageReleaseLink.CoordinatedReleaseNotesPath, out var current))
         {
             ValidateCurrentPointer(bundle, version, current, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle");
         }
@@ -302,8 +359,8 @@ internal static class ReleaseEvidenceV2
             bundle.ReleaseNotePath,
             bundle.ReleaseSidecarPath,
             bundle.ReleaseManifestPath,
-            bundle.CurrentRelease.ReleaseNotePath,
-            bundle.CurrentRelease.ReleaseSidecarPath
+            PackageReleaseLink.CoordinatedReleaseNotesPath,
+            PackageReleaseLink.CoordinatedReleaseSidecarPath
         };
         var actualPaths = bundle.ReleaseArtifactDigests.Select(item => item.Path).Order(StringComparer.Ordinal).ToArray();
         if (!actualPaths.SequenceEqual(expectedPaths.Order(StringComparer.Ordinal), StringComparer.Ordinal))
@@ -325,10 +382,11 @@ internal static class ReleaseEvidenceV2
 
     private static void ValidateCurrentPointer(ReleaseEvidenceBundleV2 bundle, SemVer version, string currentReleaseContent, List<ReleaseDiagnostic> diagnostics, string docsPath)
     {
-        var expectedLink = $"[Read the AppSurface {version} release note](./v{version}.md)";
-        if (!currentReleaseContent.Contains(expectedLink, StringComparison.Ordinal))
+        if (!ReleaseCurrentPointer.TryParse(currentReleaseContent, out var pointerVersion)
+            || pointerVersion is null
+            || pointerVersion.CompareTo(version) != 0)
         {
-            AddError(diagnostics, "release-evidence-current-pointer-mismatch", "The frozen current release pointer does not link to this tagged release.", $"Expected `{bundle.CurrentRelease.ReleaseNotePath}` to contain `{expectedLink}`.", "Regenerate releases/current.md through ./eng/release prepare.", docsPath);
+            AddError(diagnostics, "release-evidence-current-pointer-mismatch", "The frozen current release pointer does not identify this tagged release.", $"Expected `{PackageReleaseLink.CoordinatedReleaseNotesPath}` to be the canonical pointer for `v{version}`.", "Regenerate releases/current.md through ./eng/release prepare.", docsPath);
         }
     }
 
@@ -345,17 +403,14 @@ internal static class ReleaseEvidenceV2
             AddError(diagnostics, "release-evidence-release-manifest-digest-mismatch", "Release evidence bundle does not match the release manifest bytes.", "The stored release manifest digest differs from the current release manifest.", "Regenerate evidence after changing release JSON.", docsPath);
         }
 
-        try
+        if (!ReleaseManifestV2Validator.TryDeserialize(releaseManifestContent, out var manifest, out var issue))
         {
-            var manifest = JsonSerializer.Deserialize<ReleaseManifest>(releaseManifestContent, ReleaseJson.Options);
-            if (manifest is null || !string.Equals(bundle.Commits.ContentSourceCommit, manifest.SourceCommit, StringComparison.Ordinal))
-            {
-                AddError(diagnostics, "release-evidence-content-source-commit-mismatch", "Release evidence content source commit does not match the release manifest.", "The evidence and manifest were not generated from the same reviewed release state.", "Regenerate evidence and release JSON together.", docsPath);
-            }
+            AddError(diagnostics, "release-evidence-release-manifest-schema-invalid", "Release evidence could not parse a complete V2 release manifest.", issue, "Regenerate release JSON with the release tool.", docsPath);
         }
-        catch (JsonException ex)
+        else if (!string.Equals(bundle.Commits.PreparationBaseCommit, manifest!.PreparationBaseCommit, StringComparison.Ordinal)
+                 || !bundle.CoordinatedPackageReleaseNoteResolutions.SequenceEqual(manifest.CoordinatedPackageReleaseNoteResolutions))
         {
-            AddError(diagnostics, "release-evidence-release-manifest-schema-invalid", "Release evidence could not parse the release manifest.", ex.Message, "Regenerate release JSON with the release tool.", docsPath);
+            AddError(diagnostics, "release-evidence-release-manifest-schema-invalid", "V2 release evidence does not match the V2 release manifest.", "The preparation base commit or coordinated resolutions differ between generated artifacts.", "Regenerate evidence and release JSON together.", docsPath);
         }
 
         if (!string.IsNullOrWhiteSpace(ContentSourceCommit)
@@ -407,8 +462,7 @@ internal static class ReleaseEvidenceV2
             bundle.EvidencePath,
             bundle.ReleaseManifestDigest,
             bundle.ReleaseArtifactDigests,
-            bundle.PackageReleaseLinks,
-            bundle.CurrentRelease,
+            bundle.CoordinatedPackageReleaseNoteResolutions,
             bundle.DocsArchive,
             bundle.Commits,
             bundle.GeneratedBy,
@@ -431,10 +485,9 @@ internal sealed record ReleaseEvidenceBundleV2(
     string EvidencePath,
     ReleaseEvidenceFileDigest ReleaseManifestDigest,
     IReadOnlyList<ReleaseEvidenceArtifactDigest> ReleaseArtifactDigests,
-    IReadOnlyList<ReleaseEvidencePackageReleaseLink> PackageReleaseLinks,
-    ReleaseEvidenceCurrentRelease CurrentRelease,
+    IReadOnlyList<CoordinatedPackageReleaseNoteResolution> CoordinatedPackageReleaseNoteResolutions,
     ReleaseEvidenceDocsArchive DocsArchive,
-    ReleaseEvidenceCommits Commits,
+    ReleaseEvidenceCommitsV2 Commits,
     ReleaseEvidenceGeneratedBy GeneratedBy,
     string GeneratedAtUtc,
     ReleaseEvidenceSubject Subject,
@@ -447,12 +500,14 @@ internal sealed record ReleaseEvidenceBundleV2(
     /// Adapts already-parsed v2 docs archive fields for the existing archive gate; this is not JSON deserialization.
     /// </summary>
     internal ReleaseEvidenceBundle ToCompatibilityBundle() =>
-        new("appsurface-release-evidence-bundle-v1", Version, Tag, ReleaseClassification, ReleaseNotePath, ReleaseSidecarPath, ReleaseManifestPath, EvidencePath, ReleaseManifestDigest, ReleaseArtifactDigests, PackageReleaseLinks.Select(link => new ReleaseEvidencePackagePath(link.Project, link.ReleaseNotesPath)).ToArray(), DocsArchive, Commits, GeneratedBy, GeneratedAtUtc, Subject, Attestation);
+        new("appsurface-release-evidence-bundle-v1", Version, Tag, ReleaseClassification, ReleaseNotePath, ReleaseSidecarPath, ReleaseManifestPath, EvidencePath, ReleaseManifestDigest, ReleaseArtifactDigests, CoordinatedPackageReleaseNoteResolutions.Select(resolution => new ReleaseEvidencePackagePath(resolution.Project, resolution.AliasPath)).ToArray(), DocsArchive, new ReleaseEvidenceCommits(Commits.PreparationBaseCommit, Commits.ReleasePreparationCommit, Commits.TagCommit, Commits.WorkflowRunId), GeneratedBy, GeneratedAtUtc, Subject, Attestation);
 }
 
-internal sealed record ReleaseEvidencePackageReleaseLink(string Project, string Track, string ReleaseNotesPath);
-
-internal sealed record ReleaseEvidenceCurrentRelease(string ReleaseNotePath, string ReleaseSidecarPath, string TargetReleaseNotePath);
+internal sealed record ReleaseEvidenceCommitsV2(
+    string? PreparationBaseCommit,
+    string? ReleasePreparationCommit,
+    string? TagCommit,
+    string? WorkflowRunId);
 
 internal sealed record ReleaseEvidenceSubjectInputV2(
     string Schema,
@@ -465,9 +520,8 @@ internal sealed record ReleaseEvidenceSubjectInputV2(
     string EvidencePath,
     ReleaseEvidenceFileDigest ReleaseManifestDigest,
     IReadOnlyList<ReleaseEvidenceArtifactDigest> ReleaseArtifactDigests,
-    IReadOnlyList<ReleaseEvidencePackageReleaseLink> PackageReleaseLinks,
-    ReleaseEvidenceCurrentRelease CurrentRelease,
+    IReadOnlyList<CoordinatedPackageReleaseNoteResolution> CoordinatedPackageReleaseNoteResolutions,
     ReleaseEvidenceDocsArchive DocsArchive,
-    ReleaseEvidenceCommits Commits,
+    ReleaseEvidenceCommitsV2 Commits,
     ReleaseEvidenceGeneratedBy GeneratedBy,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReleaseEvidenceAttestation? Attestation);
