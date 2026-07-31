@@ -345,6 +345,7 @@ public sealed class ReleaseToolTests : IDisposable
     [Theory]
     [InlineData("1.0.0-alpha.2", "1.0.0-alpha.10", -1)]
     [InlineData("1.0.0-alpha.1", "1.0.0-alpha.beta", -1)]
+    [InlineData("1.0.0-99999999999999999999", "1.0.0-100000000000000000000", -1)]
     [InlineData("1.0.0-rc.1", "1.0.0", -1)]
     [InlineData("2.0.0", "1.999.999", 1)]
     public void SemVerComparisonUsesSemVerPrecedence(string left, string right, int expectedSign)
@@ -395,11 +396,40 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task CurrentPointerGateReportsTagDiscoveryFailuresInsteadOfAssumingNoHistory()
+    {
+        var runner = new FakeCommandRunner();
+        runner.Add("git for-each-ref --format=%(refname:short) refs/tags/v*", new CommandResult(128, "", "not a git repository"));
+        var gate = new ReleaseCurrentPointerGate(new ReleaseWorkspace(_repositoryRoot), runner);
+
+        var diagnostics = await gate.ValidateAsync(SemVer.Parse("1.0.0"), ReleaseCurrentPointer.BuildNone(), "base", CancellationToken.None);
+
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == "release-current-page-tag-discovery-failed");
+    }
+
+    [Fact]
+    public async Task CurrentPointerGateRejectsAnExistingUnreachableTargetTag()
+    {
+        var runner = new FakeCommandRunner();
+        runner.Add("git for-each-ref --format=%(refname:short) refs/tags/v*", new CommandResult(0, "v1.0.0\n", ""));
+        runner.Add("git cat-file -t refs/tags/v1.0.0", new CommandResult(0, "tag\n", ""));
+        runner.Add("git rev-parse refs/tags/v1.0.0^{commit}", new CommandResult(0, "unreachable\n", ""));
+        runner.Add("git merge-base --is-ancestor unreachable base", new CommandResult(1, "", ""));
+        runner.Add("git rev-parse --verify --quiet refs/tags/v1.0.0", new CommandResult(0, "tag-object\n", ""));
+        var gate = new ReleaseCurrentPointerGate(new ReleaseWorkspace(_repositoryRoot), runner);
+
+        var diagnostics = await gate.ValidateAsync(SemVer.Parse("1.0.0"), ReleaseCurrentPointer.BuildNone(), "base", CancellationToken.None);
+
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == "release-current-page-target-tag-exists");
+    }
+
+    [Fact]
     public async Task PrepareRejectsHeadChangeBeforeWritingAnyReleaseArtifacts()
     {
         await SeedRepositoryAsync();
         var runner = new FakeCommandRunner();
         runner.AddSequence("git rev-parse HEAD", new CommandResult(0, "base\n", ""), new CommandResult(0, "changed\n", ""));
+        runner.Add("git for-each-ref --format=%(refname:short) refs/tags/v*", new CommandResult(0, "", ""));
         var workspace = new ReleaseWorkspace(_repositoryRoot);
         var preparation = new ReleasePreparation(workspace, new ReleaseChecker(workspace, runner), new SystemReleaseClock());
         var options = new ReleaseOptions("prepare", _repositoryRoot, SemVer.Parse("0.1.0-preview.1"), null, new DateOnly(2026, 5, 25), false, null, null, false, false);
@@ -407,6 +437,20 @@ public sealed class ReleaseToolTests : IDisposable
         var error = await Assert.ThrowsAsync<ReleaseToolException>(() => preparation.PrepareAsync(options, CancellationToken.None));
 
         Assert.Equal("release-preparation-base-commit-concurrent-update", error.Diagnostic.Code);
+        Assert.False(File.Exists(RepositoryPath("releases/v0.1.0-preview.1.md")));
+    }
+
+    [Fact]
+    public async Task PrepareRejectsWhenPreparationBaseCommitCannotBeResolved()
+    {
+        await SeedRepositoryAsync();
+
+        var result = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
+            new FakeCommandRunner());
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("release-preparation-base-commit-unavailable", result.Stdout, StringComparison.Ordinal);
         Assert.False(File.Exists(RepositoryPath("releases/v0.1.0-preview.1.md")));
     }
 
@@ -6053,6 +6097,7 @@ public sealed class ReleaseToolTests : IDisposable
         {
             var runner = new FakeCommandRunner();
             runner.Add("git rev-parse HEAD", new CommandResult(0, sourceCommit + "\n", ""));
+            runner.Add("git for-each-ref --format=%(refname:short) refs/tags/v*", new CommandResult(0, "", ""));
             return runner;
         }
 

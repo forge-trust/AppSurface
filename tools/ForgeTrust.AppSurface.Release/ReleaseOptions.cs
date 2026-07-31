@@ -204,11 +204,12 @@ internal sealed partial record SemVer(int Major, int Minor, int Patch, string? P
 
     private static int ComparePrereleaseIdentifier(string left, string right)
     {
-        var leftIsNumeric = int.TryParse(left, NumberStyles.None, CultureInfo.InvariantCulture, out var leftNumber);
-        var rightIsNumeric = int.TryParse(right, NumberStyles.None, CultureInfo.InvariantCulture, out var rightNumber);
+        var leftIsNumeric = left.All(char.IsAsciiDigit);
+        var rightIsNumeric = right.All(char.IsAsciiDigit);
         if (leftIsNumeric && rightIsNumeric)
         {
-            return leftNumber.CompareTo(rightNumber);
+            var length = left.Length.CompareTo(right.Length);
+            return length != 0 ? length : string.CompareOrdinal(left, right);
         }
 
         if (leftIsNumeric)

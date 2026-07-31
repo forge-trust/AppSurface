@@ -7,7 +7,7 @@ using ForgeTrust.AppSurface.Release;
 public sealed class ReleaseWorkflowPolicyTests
 {
     [Fact]
-    public void ReleasePreparationChangePolicyAcceptsExactlyTheFiveRequestedArtifacts()
+    public void ReleasePreparationChangePolicyAcceptsTheCompletePreparationArtifactSet()
     {
         var result = ReleasePreparationChangePolicy.Validate(
             "1.2.3",
@@ -16,7 +16,10 @@ public sealed class ReleaseWorkflowPolicyTests
                 new("A", "releases/v1.2.3.md.yml"),
                 new("A", "releases/v1.2.3.release.json"),
                 new("A", "releases/v1.2.3.evidence.json"),
-                new("M", "releases/current.md")
+                new("M", "releases/current.md"),
+                new("M", "CHANGELOG.md"),
+                new("M", "releases/unreleased.md"),
+                new("M", "releases/unreleased.md.yml")
             ]);
 
         Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
@@ -46,6 +49,9 @@ public sealed class ReleaseWorkflowPolicyTests
                 new("A", "releases/v1.2.3.release.json"),
                 new("A", "releases/v1.2.3.evidence.json"),
                 new("M", "releases/current.md"),
+                new("M", "CHANGELOG.md"),
+                new("M", "releases/unreleased.md"),
+                new("M", "releases/unreleased.md.yml"),
                 new("M", "releases/current.md.yml"),
                 new("M", "README.md"),
                 new("D", "releases/v1.1.0.md"),
@@ -158,6 +164,8 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("RELEASE_PREP_POLICY_BASE_REF", prep, StringComparison.Ordinal);
         Assert.Contains("RELEASE_PREP_POLICY_VERSION", prep, StringComparison.Ordinal);
         Assert.Contains("ReleasePreparationChangePolicyValidatesPullRequestDiff", prep, StringComparison.Ordinal);
+        Assert.Contains("release_prep_paths", prep, StringComparison.Ordinal);
+        Assert.Contains("without exactly one added or modified versioned release manifest", prep, StringComparison.Ordinal);
         Assert.Contains("releases/v${VERSION}.release.json", prep, StringComparison.Ordinal);
         Assert.Contains("git add", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("git add CHANGELOG.md releases", prep, StringComparison.Ordinal);

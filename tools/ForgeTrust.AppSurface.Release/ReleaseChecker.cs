@@ -165,12 +165,21 @@ internal sealed class ReleaseChecker
 
         var sourceCommit = await GetSourceCommitAsync(cancellationToken);
         if (string.Equals(options.Command, "prepare", StringComparison.Ordinal)
-            && sourceCommit is not null
+            && string.IsNullOrWhiteSpace(sourceCommit))
+        {
+            errors.Add(ReleaseDiagnostic.Error(
+                "release-preparation-base-commit-unavailable",
+                "Release preparation could not resolve the current HEAD commit.",
+                "The current release pointer and V2 evidence must be bound to a concrete preparation base commit.",
+                "Run the release tool from a valid Git worktree with a readable HEAD, then retry.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle"));
+        }
+        else if (string.Equals(options.Command, "prepare", StringComparison.Ordinal)
             && File.Exists(_workspace.CurrentReleasePath))
         {
             var pointer = await File.ReadAllTextAsync(_workspace.CurrentReleasePath, cancellationToken);
             var pointerGate = new ReleaseCurrentPointerGate(_workspace, _commandRunner);
-            errors.AddRange(await pointerGate.ValidateAsync(options.Version, pointer, sourceCommit, cancellationToken));
+            errors.AddRange(await pointerGate.ValidateAsync(options.Version, pointer, sourceCommit!, cancellationToken));
         }
 
         if (string.Equals(options.Command, "check", StringComparison.Ordinal)

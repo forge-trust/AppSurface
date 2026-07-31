@@ -14,7 +14,7 @@ internal sealed record ReleasePreparationChange(string Status, string Path, stri
 internal sealed record ReleasePreparationChangePolicyResult(IReadOnlyList<string> Errors)
 {
     /// <summary>
-    /// Gets whether the diff is exactly the five generated artifacts for the requested version.
+    /// Gets whether the diff is exactly the generated release artifacts and next-cycle rollover files for the requested version.
     /// </summary>
     internal bool IsValid => Errors.Count == 0;
 }
@@ -32,8 +32,7 @@ internal static class ReleasePreparationChangePolicy
     private const string CurrentPointerSidecarPath = "releases/current.md.yml";
 
     /// <summary>
-    /// Validates that the diff contains exactly the release note, note sidecar, manifest,
-    /// evidence bundle, and frozen current pointer for <paramref name="version"/>.
+    /// Validates that the diff contains the versioned release artifacts, frozen current pointer, changelog, and next-cycle files for <paramref name="version"/>.
     /// </summary>
     /// <param name="version">Release version without a leading <c>v</c>.</param>
     /// <param name="changes">Complete Git name-status diff.</param>
@@ -57,7 +56,10 @@ internal static class ReleasePreparationChangePolicy
             $"releases/v{version}.md.yml",
             $"releases/v{version}.release.json",
             $"releases/v{version}.evidence.json",
-            "releases/current.md"
+            "releases/current.md",
+            "CHANGELOG.md",
+            "releases/unreleased.md",
+            "releases/unreleased.md.yml"
         };
         var actualChanges = changes.ToArray();
         if (actualChanges.Length == 0)

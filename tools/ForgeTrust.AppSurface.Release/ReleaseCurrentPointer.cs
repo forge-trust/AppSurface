@@ -96,13 +96,25 @@ internal sealed class ReleaseCurrentPointerGate
         }
 
         var tags = await DiscoverTagsAsync(preparationBaseCommit, diagnostics, cancellationToken);
-        if (tags.Any(item => string.Equals(item.Tag, target.TagName, StringComparison.Ordinal)))
+        var targetTag = await _commandRunner.RunAsync(
+            new CommandInvocation("git", ["rev-parse", "--verify", "--quiet", $"refs/tags/{target.TagName}"], _workspace.RepositoryRoot),
+            cancellationToken);
+        if (targetTag.ExitCode == 0 || tags.Any(item => string.Equals(item.Tag, target.TagName, StringComparison.Ordinal)))
         {
             diagnostics.Add(ReleaseDiagnostic.Error(
                 "release-current-page-target-tag-exists",
                 $"Target tag '{target.TagName}' already exists.",
                 "Release preparation must create new versioned artifacts before the annotated tag is created.",
                 "Choose a new target version and prepare it before creating its tag.",
+                "releases/coordinated-release-links.md"));
+        }
+        else if (targetTag.ExitCode != 1)
+        {
+            diagnostics.Add(ReleaseDiagnostic.Error(
+                "release-current-page-tag-discovery-failed",
+                $"Release preparation could determine whether target tag '{target.TagName}' exists.",
+                string.IsNullOrWhiteSpace(targetTag.StandardError) ? "git rev-parse returned a nonzero exit code." : targetTag.StandardError.Trim(),
+                "Repair the Git worktree and rerun release preparation.",
                 "releases/coordinated-release-links.md"));
         }
 
@@ -169,8 +181,12 @@ internal sealed class ReleaseCurrentPointerGate
             cancellationToken);
         if (list.ExitCode != 0)
         {
-            // An empty test fixture and a repository with no v tags both have no qualifying coordinated tag. Git itself succeeds in a
-            // normal repository, but retaining this compatibility path keeps readiness checks usable in shallow fixture worktrees.
+            diagnostics.Add(ReleaseDiagnostic.Error(
+                "release-current-page-tag-discovery-failed",
+                "Release preparation could not enumerate coordinated release tags.",
+                string.IsNullOrWhiteSpace(list.StandardError) ? "git for-each-ref returned a nonzero exit code." : list.StandardError.Trim(),
+                "Repair the Git worktree and rerun release preparation; do not treat a tag-discovery failure as an empty history.",
+                "releases/coordinated-release-links.md"));
             return [];
         }
 
@@ -185,6 +201,17 @@ internal sealed class ReleaseCurrentPointerGate
             var annotated = await _commandRunner.RunAsync(
                 new CommandInvocation("git", ["cat-file", "-t", $"refs/tags/{tag}"], _workspace.RepositoryRoot),
                 cancellationToken);
+            if (annotated.ExitCode != 0)
+            {
+                diagnostics.Add(ReleaseDiagnostic.Error(
+                    "release-current-page-tag-discovery-failed",
+                    $"Release preparation could inspect tag '{tag}'.",
+                    string.IsNullOrWhiteSpace(annotated.StandardError) ? "git cat-file returned a nonzero exit code." : annotated.StandardError.Trim(),
+                    "Repair the tag reference before preparing a release.",
+                    "releases/coordinated-release-links.md"));
+                continue;
+            }
+
             if (!string.Equals(annotated.StandardOutput.Trim(), "tag", StringComparison.Ordinal))
             {
                 continue;
@@ -211,6 +238,15 @@ internal sealed class ReleaseCurrentPointerGate
             if (reachable.ExitCode == 0)
             {
                 results.Add(new ReachableReleaseTag(tag, version));
+            }
+            else if (reachable.ExitCode != 1)
+            {
+                diagnostics.Add(ReleaseDiagnostic.Error(
+                    "release-current-page-tag-discovery-failed",
+                    $"Release preparation could determine whether tag '{tag}' is reachable from the preparation base.",
+                    string.IsNullOrWhiteSpace(reachable.StandardError) ? "git merge-base returned a nonzero exit code." : reachable.StandardError.Trim(),
+                    "Repair the Git worktree and rerun release preparation.",
+                    "releases/coordinated-release-links.md"));
             }
         }
 
