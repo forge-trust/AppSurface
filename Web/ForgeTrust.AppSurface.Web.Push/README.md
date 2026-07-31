@@ -26,6 +26,22 @@ Open the sample, select the Push Admin DevAuth persona, register the worker, and
 
 The sample registers `AddAppSurfaceWebPushDevelopmentProofTransport(environment)` after the normal package registration. This public proof seam is restricted to `Development`, replaces only the outbound transport, and retains package validation, encryption, single-attempt behavior, and response classification. It throws outside Development. Use it only in canonical examples or local integration proofs; never treat its HTTP 201 as push-service or browser-delivery evidence.
 
+### Server-known push-readiness posture
+
+`ForgeTrust.AppSurface.Web.Push` contributes the base Web package's [privacy-safe push-readiness evidence](../ForgeTrust.AppSurface.Web/Docs/pwa-install.md#push-readiness-evidence) when its validated active VAPID configuration is available. Without that optional rail, the base Web worker/helper proof may still pass with rail status `not-configured`. When configured, the contribution contains only the safe active key identifier, a SHA-256 fingerprint of the decoded public key, and whether the package-owned subscription route was mapped. It does not expose key material, subscriptions, payloads, provider responses, or exceptions.
+
+Verify that posture explicitly and save the result as a named artifact:
+
+```bash
+appsurface pwa verify --surface push \
+  --base-url https://app.example.com \
+  --entry-path /account/resume \
+  --expect-push enabled \
+  --json > artifacts/pwa-push-readiness.json
+```
+
+The command proves server-known readiness posture only. It does not score the package, evaluate browser support or permission, prove subscription or notification display, or claim push-service/browser delivery. Treat a nonzero exit as authoritative even when JSON was written.
+
 Choose the exact origin for the browser under test: Chromium commonly uses `https://fcm.googleapis.com`, Firefox uses `https://updates.push.services.mozilla.com`, and Safari uses `https://web.push.apple.com`. These are explicit starting values, not wildcards; if a browser vendor changes its endpoint origin, add that reviewed exact origin before intake rather than weakening validation.
 
 ## Registration and protected mapping

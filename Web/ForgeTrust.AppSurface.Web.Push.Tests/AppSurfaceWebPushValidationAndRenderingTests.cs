@@ -1,11 +1,13 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
+using ForgeTrust.AppSurface.Web;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Razor.TagHelpers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Web.Push.Tests;
 
@@ -57,6 +59,98 @@ public sealed class AppSurfaceWebPushValidationAndRenderingTests
             AppSurfaceWebPushValidation.Base64UrlEncode(invalidPoint)));
         Assert.False(AppSurfaceWebPushValidation.IsValidP256PublicKey(
             AppSurfaceWebPushValidation.Base64UrlEncode(new byte[33])));
+    }
+
+    [Fact]
+    public void ReadinessProvider_UsesDecodedPublicKeyFingerprintVectorAndRouteMappingBit()
+    {
+        const string publicKey =
+            "BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU";
+        var options = new AppSurfaceWebPushOptions { ActiveVapidKeyId = "primary" };
+        options.VapidKeys.Add(
+            "primary",
+            new AppSurfaceWebPushVapidKeyOptions
+            {
+                PublicKey = publicKey,
+            });
+        var registry = new AppSurfaceWebPushRouteRegistry();
+        var provider = new AppSurfaceWebPushReadinessProvider(Options.Create(options), registry);
+
+        var unmapped = Assert.IsType<PwaPushReadiness>(provider.GetReadiness());
+        Assert.Equal("primary", unmapped.ActiveVapidKeyId);
+        Assert.Equal(
+            "sha256-aYvqY9xEo0RmP_FCmuoQhC3ye2uZHvJYZrLGwCzcxb4",
+            unmapped.PublicKeyFingerprint);
+        Assert.False(unmapped.RouteMapped);
+
+        Assert.True(registry.Claim("/push"));
+        var mapped = Assert.IsType<PwaPushReadiness>(provider.GetReadiness());
+        Assert.True(mapped.RouteMapped);
+    }
+
+    [Fact]
+    public void ReadinessProvider_ReturnsNullForIncompleteOrInvalidConfiguration()
+    {
+        var missingKey = new AppSurfaceWebPushOptions { ActiveVapidKeyId = "primary" };
+        var invalidPublicKey = new AppSurfaceWebPushOptions { ActiveVapidKeyId = "primary" };
+        invalidPublicKey.VapidKeys.Add(
+            "primary",
+            new AppSurfaceWebPushVapidKeyOptions { PublicKey = "not-a-p256-public-key" });
+
+        foreach (var options in new[] { new AppSurfaceWebPushOptions(), missingKey, invalidPublicKey })
+        {
+            var provider = new AppSurfaceWebPushReadinessProvider(
+                Options.Create(options),
+                new AppSurfaceWebPushRouteRegistry());
+
+            Assert.Null(provider.GetReadiness());
+        }
+    }
+
+    [Fact]
+    public void ReadinessProvider_ContainsOptionsAccessFailures()
+    {
+        var provider = new AppSurfaceWebPushReadinessProvider(
+            new ThrowingWebPushOptions(),
+            new AppSurfaceWebPushRouteRegistry());
+
+        Assert.Null(provider.GetReadiness());
+    }
+
+    [Fact]
+    public void AddWebPush_RegistersOneSingletonReadinessProvider()
+    {
+        var services = new ServiceCollection();
+
+        services.AddAppSurfaceWebPush(_ => { });
+
+        var descriptors = services
+            .Where(descriptor => descriptor.ServiceType == typeof(IPwaPushReadinessProvider))
+            .ToArray();
+        var descriptor = Assert.Single(descriptors);
+        Assert.Equal(ServiceLifetime.Singleton, descriptor.Lifetime);
+        using var provider = services.BuildServiceProvider();
+        Assert.Same(
+            provider.GetRequiredService<IPwaPushReadinessProvider>(),
+            provider.GetRequiredService<IPwaPushReadinessProvider>());
+    }
+
+    [Fact]
+    public void AddWebPush_PreservesPackageReadinessProviderWhenHostRegistersAnotherContributor()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IPwaPushReadinessProvider>(
+            new DelegatePushReadinessProvider(() => null));
+
+        services.AddAppSurfaceWebPush(_ => { });
+
+        var descriptors = services
+            .Where(descriptor => descriptor.ServiceType == typeof(IPwaPushReadinessProvider))
+            .ToArray();
+        Assert.Equal(2, descriptors.Length);
+        Assert.Contains(
+            descriptors,
+            descriptor => descriptor.ImplementationType == typeof(AppSurfaceWebPushReadinessProvider));
     }
 
     [Theory]
@@ -291,6 +385,16 @@ public sealed class AppSurfaceWebPushValidationAndRenderingTests
         return (
             AppSurfaceWebPushValidation.Base64UrlEncode(publicKey),
             AppSurfaceWebPushValidation.Base64UrlEncode(parameters.D!));
+    }
+
+    private sealed class DelegatePushReadinessProvider(Func<PwaPushReadiness?> callback) : IPwaPushReadinessProvider
+    {
+        public PwaPushReadiness? GetReadiness() => callback();
+    }
+
+    private sealed class ThrowingWebPushOptions : IOptions<AppSurfaceWebPushOptions>
+    {
+        public AppSurfaceWebPushOptions Value => throw new InvalidOperationException("options access failed");
     }
 
     private sealed class ProofEnvironment(string environmentName) : IHostEnvironment

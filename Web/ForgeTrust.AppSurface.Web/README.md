@@ -49,6 +49,22 @@ With `<appsurface:pwa-head />` in the page head, applications can call `AppSurfa
 
 Start with the [PWA badging quick start](Docs/pwa-install.md#badging-only), then use the [executable accessible proof](../../examples/web-pwa-install/README.md). The full guide documents configuration, sanitized `ASPWAJS040`–`042` failures, PathBase, activation lag, privacy boundaries, and unsupported-browser behavior.
 
+### PWA push-readiness posture
+
+The base Web package exposes the optional `IPwaPushReadinessProvider` contribution point for privacy-safe, server-known push posture. A contributor may report only the active VAPID key identifier, a SHA-256 public-key fingerprint, and whether the package-owned route is mapped. Hosts without a provider can still pass worker/helper readiness with optional rail status `not-configured`. The canonical [push-readiness evidence contract](Docs/pwa-install.md#push-readiness-evidence) documents `ASPWA2xx` remediation, `Docs` links, redaction, and the boundary between server posture and browser/delivery state.
+
+Use the CLI explicitly when this evidence is needed:
+
+```bash
+appsurface pwa verify --surface push \
+  --base-url https://app.example.com \
+  --entry-path /account/resume \
+  --expect-push enabled \
+  --json > artifacts/pwa-push-readiness.json
+```
+
+This is readiness-posture evidence, not a browser compatibility, permission, subscription, scoring, or delivery proof. A nonzero CLI exit is authoritative even if a JSON artifact was produced.
+
 ### Health and Readiness Probes
 
 AppSurface Web can map public platform probe endpoints when a host explicitly enables them:
