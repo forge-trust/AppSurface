@@ -836,7 +836,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
         var markdown = await generator.GenerateAsync(CreateRequest());
 
-        Assert.Contains("# AppSurface v0.1 package chooser", markdown, StringComparison.Ordinal);
+        Assert.Contains("# AppSurface package chooser", markdown, StringComparison.Ordinal);
         Assert.Contains("```bash", markdown, StringComparison.Ordinal);
         Assert.Contains("dotnet package add ForgeTrust.AppSurface.Web", markdown, StringComparison.Ordinal);
         Assert.Contains("[Package-first quickstart](../start-here/first-success-path.md#package-first-path)", markdown, StringComparison.Ordinal);
@@ -1290,7 +1290,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.True(File.Exists(request.ChooserOutputPath));
         Assert.True(File.Exists(request.ReadinessOutputPath));
         var markdown = await File.ReadAllTextAsync(request.ChooserOutputPath);
-        Assert.Contains("# AppSurface v0.1 package chooser", markdown, StringComparison.Ordinal);
+        Assert.Contains("# AppSurface package chooser", markdown, StringComparison.Ordinal);
     }
 
     [Fact]

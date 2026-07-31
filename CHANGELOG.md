@@ -5,8 +5,8 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 ## Reading guide
 
 - `Unreleased` tracks the next coordinated version and points to the living release note.
-- Future tagged sections will use the shape `## x.y.z - YYYY-MM-DD`.
-- Every tagged section will link to a matching narrative release note in [`releases/`](./releases/README.md).
+- Versioned sections use the shape `## x.y.z - YYYY-MM-DD`.
+- Every versioned section links to a matching narrative release note in [`releases/`](./releases/README.md).
 - Breaking or behavior-changing updates must record migration guidance here and in the matching release note.
 
 ## Unreleased

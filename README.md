@@ -16,7 +16,7 @@
 
 ForgeTrust.AppSurface is a collection of .NET libraries designed to provide a lightweight, modular startup pipeline for both console and web applications.
 
-If you are deciding which package to install first, start with the [AppSurface v0.1 package chooser](./packages/README.md). If you are choosing among Auth packages, use the [AppSurface Auth adoption ladder](./start-here/auth-adoption-ladder.md) before installing optional auth adapters.
+If you are deciding which package to install first, start with the [AppSurface package chooser](./packages/README.md). If you are choosing among Auth packages, use the [AppSurface Auth adoption ladder](./start-here/auth-adoption-ladder.md) before installing optional auth adapters.
 
 ## Vision
 
@@ -53,7 +53,7 @@ This approach aims to:
 
 ### [Packages](./packages/README.md)
 
-- [**AppSurface v0.1 package chooser**](./packages/README.md) - the generated install map for direct-install packages, support/runtime packages, and proof-host surfaces.
+- [**AppSurface package chooser**](./packages/README.md) - the generated install map for direct-install packages, support/runtime packages, and proof-host surfaces.
 
 ### [Core](./ForgeTrust.AppSurface.Core/README.md)
 
