@@ -9,7 +9,7 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 /// This store is not durable and is not a production or development secret store. It exists as a package-local test seam
 /// so apps can verify LocalSecrets provider behavior without touching the platform credential store.
 /// </remarks>
-public sealed class InMemoryAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
+public sealed class InMemoryAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore
 {
     private readonly ConcurrentDictionary<string, (AppSurfaceLocalSecretIdentity Identity, string Value)> _values =
         new(StringComparer.Ordinal);
@@ -43,6 +43,16 @@ public sealed class InMemoryAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretS
         ArgumentNullException.ThrowIfNull(identity);
 
         return _values.TryRemove(identity.StorageName, out _)
+            ? AppSurfaceLocalSecretResult.Found(string.Empty, Name)
+            : AppSurfaceLocalSecretResult.Missing(Name);
+    }
+
+    /// <inheritdoc />
+    public AppSurfaceLocalSecretResult Probe(AppSurfaceLocalSecretIdentity identity)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+
+        return _values.ContainsKey(identity.StorageName)
             ? AppSurfaceLocalSecretResult.Found(string.Empty, Name)
             : AppSurfaceLocalSecretResult.Missing(Name);
     }

@@ -1,10 +1,12 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using CliFx;
+using ForgeTrust.AppSurface.Config.GoogleSecretManager;
 using ForgeTrust.AppSurface.Console;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.RazorWire.Cli;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 
 namespace ForgeTrust.AppSurface.Cli;
@@ -74,6 +76,9 @@ internal static class AppSurfaceCliApp
         services.AddSingleton<ICoverageRunProcessRunner, CliWrapCoverageRunProcessRunner>();
         services.AddSingleton<IReportGeneratorPackageLocator, ReportGeneratorPackageLocator>();
         services.AddSingleton<ICoverageRunReportGenerator, CoverageRunReportGenerator>();
+        services.TryAddSingleton<IAppSurfaceGoogleSecretTransferClient, GoogleSecretManagerTransferClientAdapter>();
+        services.TryAddSingleton<ISecretPromotionGoogleClientFactory, DefaultSecretPromotionGoogleClientFactory>();
+        services.AddTransient<SecretPromotionWorkflow>();
         AddPwaVerifierServices(services);
         services.AddTransient<PwaVerifier>();
         services.AddSingleton(TimeProvider.System);

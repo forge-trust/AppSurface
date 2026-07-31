@@ -6,6 +6,7 @@ export const storeFields = [
   'title',
   'snippet',
   'summary',
+  'summaryPresentation',
   'breadcrumbs',
   'pageType',
   'pageTypeLabel',
@@ -17,6 +18,12 @@ export const storeFields = [
   'status',
   'navGroup'
 ];
+
+const summaryPresentationLeafKinds = new Set(['text', 'code']);
+const summaryPresentationContainerKinds = new Set(['strong', 'emphasis']);
+const maxSummaryPresentationDepth = 8;
+const maxSummaryPresentationNodeCount = 128;
+const maxSummaryPresentationTextLength = 1024;
 
 export const defaultSearchOptions = {
   prefix: true,
@@ -37,8 +44,9 @@ export function createMiniSearchConfiguration() {
 
 export function normalizeSearchDocument(doc: any) {
   const orderValue = Number.parseInt(String(doc?.order ?? ''), 10);
+  const summaryPresentation = normalizeSummaryPresentation(doc?.summaryPresentation);
 
-  return {
+  const normalized: any = {
     id: String(doc?.id ?? doc?.path ?? ''),
     path: String(doc?.path ?? ''),
     title: String(doc?.title ?? '').trim(),
@@ -68,6 +76,12 @@ export function normalizeSearchDocument(doc: any) {
     breadcrumbs: toStringArray(doc?.breadcrumbs),
     sourcePath: String(doc?.sourcePath ?? '').trim()
   };
+
+  if (summaryPresentation) {
+    normalized.summaryPresentation = summaryPresentation;
+  }
+
+  return normalized;
 }
 
 export function createMiniSearchDocument(doc: any) {
@@ -92,7 +106,105 @@ export function createMiniSearchDocument(doc: any) {
     languageLabel: doc.languageLabel ?? '',
     audience: doc.audience,
     status: doc.status,
-    navGroup: doc.navGroup
+    navGroup: doc.navGroup,
+    ...(doc.summaryPresentation ? { summaryPresentation: doc.summaryPresentation } : {})
+  };
+}
+
+export function normalizeSummaryPresentation(value: any) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const state = {
+    nodeCount: 0,
+    leafCount: 0,
+    scalarCount: 0
+  };
+
+  const normalized = normalizeSummaryPresentationNodeList(value, 1, state);
+  if (!normalized || !normalized.length || state.leafCount === 0 || state.nodeCount > maxSummaryPresentationNodeCount) {
+    return null;
+  }
+
+  return normalized;
+}
+
+export function isSummaryPresentationLeaf(value: any): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !hasExactKeys(value, ['kind', 'text'])) {
+    return false;
+  }
+
+  return summaryPresentationLeafKinds.has(value.kind)
+    && typeof value.text === 'string'
+    && value.text.trim().length > 0;
+}
+
+export function isSummaryPresentationContainer(value: any): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !hasExactKeys(value, ['kind', 'children'])) {
+    return false;
+  }
+
+  return summaryPresentationContainerKinds.has(value.kind)
+    && Array.isArray(value.children)
+    && value.children.length > 0;
+}
+
+function hasExactKeys(value: object, expected: string[]) {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => keys.includes(key));
+}
+
+function normalizeSummaryPresentationNodeList(value: any[], depth: number, state: { nodeCount: number; leafCount: number; scalarCount: number }) {
+  const nodes = [];
+  for (const item of value) {
+    const node = normalizeSummaryPresentationNode(item, depth, state);
+    if (!node) {
+      return null;
+    }
+
+    nodes.push(node);
+  }
+
+  return nodes;
+}
+
+function normalizeSummaryPresentationNode(value: any, depth: number, state: { nodeCount: number; leafCount: number; scalarCount: number }) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  if (depth > maxSummaryPresentationDepth || state.nodeCount >= maxSummaryPresentationNodeCount) {
+    return null;
+  }
+
+  if (isSummaryPresentationLeaf(value)) {
+    const text = value.text;
+    const scalarLength = Array.from(text).length;
+    if (!text.trim() || scalarLength > maxSummaryPresentationTextLength || state.scalarCount + scalarLength > maxSummaryPresentationTextLength) {
+      return null;
+    }
+
+    state.nodeCount += 1;
+    state.leafCount += 1;
+    state.scalarCount += scalarLength;
+    return { kind: value.kind, text };
+  }
+
+  if (!isSummaryPresentationContainer(value)) {
+    return null;
+  }
+
+  const children = value.children;
+  const normalizedChildren = normalizeSummaryPresentationNodeList(children, depth + 1, state);
+  if (!normalizedChildren || normalizedChildren.length === 0) {
+    return null;
+  }
+
+  state.nodeCount += 1;
+  return {
+    kind: value.kind,
+    children: normalizedChildren
   };
 }
 

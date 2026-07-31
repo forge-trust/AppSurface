@@ -2699,7 +2699,18 @@ The current-surface `search-index.json` payload continues to emit the raw `pageT
 - `language` and `languageLabel` for generated API documentation language facets and result chrome
 These fields let custom search clients stay visually aligned with the landing and detail experiences without re-implementing the mapping table.
 
-Search runtime note: the bundled `minisearch.min.js` asset is generated from the pinned upstream MiniSearch browser bundle, not a CDN or hand-maintained compatibility shim. The built-in search client indexes `title`, `aliases`, `keywords`, `summary`, `headings`, `bodyText`, namespace `entryPoints`, and generated API `languageSearchText` as first-class MiniSearch fields with field-specific boosts. Package maintainers changing the search runtime should update the pinned package, rebuild the generated asset, verify the third-party notice, and run the asset verification scripts before shipping.
+`summaryPresentation` is an optional display-only array for clients that want to render Markdown-like summary emphasis without exposing raw Markdown markers. The legacy `summary` string remains unchanged and remains the summary search field; clients that do not recognize `summaryPresentation` can ignore it. When present, each node is one of `text`, `strong`, `emphasis`, or `code`: `text` and `code` nodes carry only `kind` and `text`, while `strong` and `emphasis` nodes carry only `kind` and `children`. The array root is not a node. Nodes are limited to depth 8, 128 total nodes, and 1,024 Unicode scalars across all leaves. The projection never carries HTML, attributes, URLs, image sources, or link destinations; links and images contribute only their reader-facing text. Custom clients should validate the whole optional tree atomically and fall back to `summary` (then `snippet`) if it is missing or invalid.
+
+```json
+"summaryPresentation": [
+  { "kind": "text", "text": "Register " },
+  { "kind": "code", "text": "AddAppSurfaceDocs" },
+  { "kind": "text", "text": " with " },
+  { "kind": "strong", "children": [{ "kind": "text", "text": "one host call" }] }
+]
+```
+
+Search runtime note: the bundled `minisearch.min.js` asset is generated from the pinned upstream MiniSearch browser bundle, not a CDN or hand-maintained compatibility shim. The built-in search client indexes `title`, `aliases`, `keywords`, `summary`, `headings`, `bodyText`, namespace `entryPoints`, and generated API `languageSearchText` as first-class MiniSearch fields with field-specific boosts. `summaryPresentation` is stored only for result rendering and must never become a MiniSearch field or ranking input. Package maintainers changing the search runtime should update the pinned package, rebuild the generated asset, verify the third-party notice, and run the asset verification scripts before shipping.
 
 ### Reader-intent search relevance
 
@@ -2784,6 +2795,20 @@ trust:
   AppSurface Docs drops those hrefs and keeps harvesting the page so the warning appears in logs and harvest health.
 - Keep private maintainer-only runbooks outside harvested docs. Hidden pages are removed from nav and search, but they are still public if linked directly.
 - Do not turn the trust bar into marketing chrome. It should answer status, safety, and provenance questions quickly.
+
+## Dependency security boundary
+
+The coordinated response to [GHSA-pgww-w46g-26qg](https://github.com/advisories/GHSA-pgww-w46g-26qg) upgrades the HTML parsing and sanitization graph without changing the AppSurface Docs public API, registration sequence, configuration, or consumer usage. The package restores these exact versions from the repository's [central package version catalog](../../Directory.Packages.props):
+
+- `AngleSharp` `[1.5.2]`
+- `HtmlSanitizer` `[9.1.949-beta]`
+- `AngleSharp.Css` `[1.0.0-beta.216]`
+
+The exact pins are intentional: `HtmlSanitizer` and `AngleSharp.Css` must be upgraded as a compatible pair, and the brackets prevent NuGet from silently selecting a different dependency graph. Their beta versions are acceptable only while AppSurface packages are themselves preview releases. The [package artifact verification workflow](../../packages/README.md#maintainer-notes) requires all three dependencies for a stable Docs package, rejects missing or malformed ranges and AngleSharp lower bounds below 1.5.2, and blocks prerelease `HtmlSanitizer` or `AngleSharp.Css`; [issue #682](https://github.com/forge-trust/AppSurface/issues/682) tracks replacing the pair with compatible stable releases as a stable-release prerequisite, not a reason to loosen the exact pins.
+
+If an adopter's central package policy conflicts with any of these versions, do not use `VersionOverride`, remove the equality brackets, or widen only one dependency. Align the application's entire trio to the exact graph above, or remain on the prior AppSurface preview until a coordinated compatible graph is available. A locally successful restore with a loosened range is not supported compatibility evidence. Maintainers proving the packed graph must follow the [#678 package-proof sequence](../../packages/README.md#issue-678-package-proof).
+
+`IAppSurfaceDocsHtmlSanitizer` protects rendered package-documentation fragments before AppSurface Docs includes them in its UI. It is not a general untrusted-user-content sanitizer, a whole-document security boundary, or a substitute for a host Content Security Policy. Applications accepting general UGC must define and verify their own sanitization policy, and hosts remain responsible for CSP and the rest of their response-hardening policy. Do not widen the Docs allowlist merely to make unrelated application HTML render.
 
 ## Related Projects
 

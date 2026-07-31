@@ -71,7 +71,7 @@ public sealed class AppSurfaceLocalSecretProviderTests
         Assert.Null(value);
         Assert.True(provider.TryGetTerminalDiagnostic("Development", "Stripe:ApiKey", out var diagnostic));
         Assert.Equal("local-secret-terminal", diagnostic.Code);
-        Assert.DoesNotContain("raw-secret", diagnostic.ToDisplayString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("raw-secret", diagnostic.ToDisplayString());
     }
 
     [Fact]
@@ -150,7 +150,7 @@ public sealed class AppSurfaceLocalSecretProviderTests
 
         Assert.Equal(LocalSecretResultStatus.Found, resolution.Status);
         Assert.Equal(string.Empty, resolution.Value);
-        Assert.DoesNotContain("raw-secret", resolution.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("raw-secret", resolution.ToString());
     }
 
     [Fact]
@@ -163,7 +163,7 @@ public sealed class AppSurfaceLocalSecretProviderTests
         Assert.Equal(LocalSecretResultStatus.ProviderFailed, resolution.Status);
         Assert.Equal("local-secret-provider-threw", resolution.Diagnostic?.Code);
         Assert.Contains(nameof(InvalidOperationException), resolution.Diagnostic?.Cause, StringComparison.Ordinal);
-        Assert.DoesNotContain("raw-secret", resolution.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("raw-secret", resolution.ToString());
     }
 
     [Fact]
@@ -213,8 +213,8 @@ public sealed class AppSurfaceLocalSecretProviderTests
         Assert.Equal(LocalSecretResultStatus.ConversionFailed, resolution.Status);
         Assert.True(provider.TryGetTerminalDiagnostic("Development", "Port", out var diagnostic));
         Assert.Equal("local-secret-conversion-failed", diagnostic.Code);
-        Assert.DoesNotContain("not-the-port-secret", diagnostic.ToDisplayString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("not-the-port-secret", diagnostic.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("not-the-port-secret", diagnostic.ToDisplayString());
+        ValueSafeAssert.DoesNotExpose("not-the-port-secret", diagnostic.ToString());
     }
 
     [Theory]
@@ -236,7 +236,7 @@ public sealed class AppSurfaceLocalSecretProviderTests
         Assert.Equal("local-secret-conversion-failed", diagnostic.Code);
         if (rawValue.Length > 0)
         {
-            Assert.DoesNotContain(rawValue, diagnostic.ToDisplayString(), StringComparison.Ordinal);
+            ValueSafeAssert.DoesNotExpose(rawValue, diagnostic.ToDisplayString());
         }
     }
 
@@ -277,8 +277,8 @@ public sealed class AppSurfaceLocalSecretProviderTests
         Assert.Equal(LocalSecretResultStatus.ConversionFailed, resolution.Status);
         Assert.True(provider.TryGetTerminalDiagnostic("Development", "Port", out var diagnostic));
         Assert.Equal("local-secret-conversion-failed", diagnostic.Code);
-        Assert.DoesNotContain(overflowingSecret, diagnostic.ToDisplayString(), StringComparison.Ordinal);
-        Assert.DoesNotContain(overflowingSecret, resolution.ToString(), StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(overflowingSecret, diagnostic.ToDisplayString());
+        ValueSafeAssert.DoesNotExpose(overflowingSecret, resolution.ToString());
     }
 
     [Fact]
