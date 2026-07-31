@@ -99,10 +99,7 @@ internal sealed class AppSurfaceCanarySnapshotCoordinator
 
         try
         {
-            if (requestAborted.IsCancellationRequested)
-            {
-                throw new OperationCanceledException(requestAborted);
-            }
+            requestAborted.ThrowIfCancellationRequested();
 
             if (overallCancellation.IsCancellationRequested)
             {
@@ -120,10 +117,7 @@ internal sealed class AppSurfaceCanarySnapshotCoordinator
             try
             {
                 var result = await _runner.EvaluateAsync(descriptor, marker, freshSince, perCheckCancellation.Token);
-                if (requestAborted.IsCancellationRequested)
-                {
-                    throw new OperationCanceledException(requestAborted);
-                }
+                requestAborted.ThrowIfCancellationRequested();
 
                 if (overallCancellation.IsCancellationRequested)
                 {
