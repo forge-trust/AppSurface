@@ -97,6 +97,11 @@ internal sealed class AppSurfaceCanarySnapshotCoordinator
 
         try
         {
+            if (requestAborted.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(requestAborted);
+            }
+
             if (overallCancellation.IsCancellationRequested)
             {
                 results[index] = AppSurfaceCanarySnapshotItem.NotStarted(descriptor.Name);
