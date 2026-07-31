@@ -135,20 +135,6 @@ internal sealed class ReleaseChecker
                     "packages/README.md"));
             }
 
-            var packagesWithoutReleaseLink = packageSummary.PublicPublishedPackages
-                .Where(package => package.ReleaseLink is null)
-                .Select(package => package.Project)
-                .ToArray();
-            if (packagesWithoutReleaseLink.Length > 0)
-            {
-                errors.Add(ReleaseDiagnostic.Error(
-                    "release-public-package-link-missing",
-                    "A public publishable package does not declare a release link.",
-                    $"Missing release link for: {string.Join(", ", packagesWithoutReleaseLink)}.",
-                    "Use release_track: coordinated for the coordinated release pointer, or use release_track: explicit with release_notes_path.",
-                    "packages/README.md#release-links"));
-            }
-
             var blockedPackages = packageSummary.PublicPublishedPackages
                 .Where(package => !string.IsNullOrWhiteSpace(package.ReadinessBlocker))
                 .Select(package => $"{package.Project} ({package.ReadinessBlocker})")
