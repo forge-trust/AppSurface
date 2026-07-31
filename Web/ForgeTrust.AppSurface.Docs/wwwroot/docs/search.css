@@ -458,6 +458,17 @@
     line-height: 1.6;
 }
 
+.docs-search-result-snippet code {
+    padding: 0.08rem 0.28rem;
+    border: 1px solid var(--docs-search-color-border-muted);
+    border-radius: 0.28rem;
+    background: var(--docs-search-color-surface-raised);
+    color: var(--docs-search-color-text-default);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.88em;
+    overflow-wrap: anywhere;
+}
+
 .docs-search-result-starter {
     padding-block: 0.85rem;
 }

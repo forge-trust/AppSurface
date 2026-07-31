@@ -13,7 +13,7 @@ namespace ForgeTrust.AppSurface.Cli;
 /// diagnostic warnings so slow-test reporting cannot change the coverage result.
 /// <list type="bullet">
 /// <item><description>Only the first managed JUnit artifact for a project is parsed; additional JUnit artifacts emit warnings.</description></item>
-/// <item><description><see cref="WriteAsync"/> may write artifacts twice when aggregation timing changes during the initial write.</description></item>
+/// <item><description><c>WriteAsync</c> may write artifacts twice when aggregation timing changes during the initial write.</description></item>
 /// <item><description>Legacy or externally managed test-result files are not consumed.</description></item>
 /// <item><description>Missing files and parser failures are reported as warnings instead of failing coverage.</description></item>
 /// </list>
@@ -38,20 +38,25 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
     private const int MaxTopTests = 20;
     private const int MaxTopProjects = 20;
     private const int MaxWarnings = 100;
+    private const int ProgressBatchSize = 256;
+    private const int StagedTextChunkSize = 16 * 1024;
+    private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 
     /// <summary>
     /// Parses managed JUnit files and builds a diagnostic report.
     /// </summary>
     /// <param name="results">Project run results with managed test result artifact paths.</param>
     /// <param name="cancellationToken">Cancellation token for artifact reads.</param>
+    /// <param name="observeProgress">Optional callback that receives positive parsing and aggregation progress counts.</param>
     /// <returns>Slow-test diagnostic report model.</returns>
     public static async Task<CoverageRunSlowTestDiagnosticsReport> CollectAsync(
         IReadOnlyList<CoverageProjectRunResult> results,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<int>? observeProgress = null)
     {
         var warnings = new List<string>();
         var projects = new List<CoverageRunSlowTestProject>();
-        var testCases = new List<CoverageRunSlowTestCase>();
+        var testCaseSummary = new CoverageRunSlowTestCaseSummaryBuilder(observeProgress);
         foreach (var result in results.OrderBy(result => result.Index))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -80,9 +85,15 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
                 continue;
             }
 
-            var junitResult = await ReadJunitFileAsync(project, warnings, cancellationToken);
-            testCases.AddRange(junitResult.TestCases);
+            var junitTestCaseSummary = new CoverageRunSlowTestCaseSummaryBuilder(observeProgress);
+            var junitResult = await ReadJunitFileAsync(project, warnings, junitTestCaseSummary.Add, cancellationToken, observeProgress);
+            if (junitResult.ParserStatus == "parsed")
+            {
+                testCaseSummary.Merge(junitTestCaseSummary.Build());
+            }
+
             projects.Add(project with { ParserStatus = junitResult.ParserStatus });
+            observeProgress?.Invoke(1);
         }
 
         if (projects.Count == 0)
@@ -90,72 +101,127 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
             AddWarning(warnings, "No project metadata was available for slow-test diagnostics.");
         }
 
+        var testCaseSummaryResult = testCaseSummary.Build();
         return new CoverageRunSlowTestDiagnosticsReport(
             SchemaVersion,
             DateTimeOffset.UtcNow,
             MetadataComplete: projects.Count > 0 && projects.All(project => project.ParserStatus == "parsed") && warnings.Count == 0,
             projects.Count(project => project.JunitFile is not null && File.Exists(project.JunitFile)),
             projects,
-            testCases
-                .OrderByDescending(test => test.Seconds ?? 0)
-                .ThenBy(test => test.ClassName, StringComparer.Ordinal)
-                .ThenBy(test => test.Name, StringComparer.Ordinal)
-                .ToArray(),
+            testCaseSummaryResult.TestCaseCount,
+            testCaseSummaryResult.FailedTestCaseCount,
+            testCaseSummaryResult.SkippedTestCaseCount,
+            testCaseSummaryResult.TopTestCases,
             warnings.Take(MaxWarnings).ToArray());
     }
 
     /// <summary>
-    /// Writes diagnostic artifacts with measured aggregation overhead.
+    /// Writes diagnostics to private same-directory staging files while recording canonical artifact paths in their contents.
     /// </summary>
-    /// <param name="outputDirectory">Coverage output directory.</param>
+    /// <param name="stagedMarkdownPath">Unique private Markdown path alongside its canonical destination.</param>
+    /// <param name="stagedJsonPath">Unique private JSON path alongside its canonical destination.</param>
+    /// <param name="artifactDirectory">Canonical directory represented in returned and embedded artifact paths.</param>
     /// <param name="report">Report model returned by <see cref="CollectAsync"/>.</param>
     /// <param name="getAggregationSeconds">Reads elapsed diagnostic aggregation seconds.</param>
     /// <param name="calculateAggregationPercent">Calculates aggregation overhead as a percent of runner time.</param>
     /// <param name="cancellationToken">Cancellation token for artifact writes.</param>
-    /// <returns>Written artifact paths and high-level metadata.</returns>
-    /// <remarks>
-    /// <see cref="WriteAsync"/> may call <c>WriteArtifactsAsync</c> twice when <c>aggregationSeconds</c> differs from
-    /// <c>finalAggregationSeconds</c>. The single re-write includes the first file-write cost in reported aggregation
-    /// overhead; later timing drift is not captured.
-    /// </remarks>
+    /// <param name="observeProgress">Optional callback that receives positive staging progress counts.</param>
+    /// <returns>
+    /// Canonical artifact paths, high-level metadata, and private staging paths after the writes complete.
+    /// The caller owns the returned staging paths: promote them to their canonical destinations or call
+    /// <see cref="TryDeleteStagedFile"/> after a failed or cancelled promotion.
+    /// </returns>
     public static async Task<CoverageRunSlowTestDiagnosticsRun> WriteAsync(
-        string outputDirectory,
+        string stagedMarkdownPath,
+        string stagedJsonPath,
+        string artifactDirectory,
         CoverageRunSlowTestDiagnosticsReport report,
         Func<long> getAggregationSeconds,
         Func<long, decimal> calculateAggregationPercent,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<int>? observeProgress = null)
     {
-        var markdownPath = Path.Join(outputDirectory, MarkdownFileName);
-        var jsonPath = Path.Join(outputDirectory, JsonFileName);
-        var aggregationSeconds = getAggregationSeconds();
-        await WriteArtifactsAsync(report, markdownPath, jsonPath, aggregationSeconds, calculateAggregationPercent(aggregationSeconds), cancellationToken);
+        var markdownPath = Path.Join(artifactDirectory, MarkdownFileName);
+        var jsonPath = Path.Join(artifactDirectory, JsonFileName);
+        var currentStagedMarkdownPath = stagedMarkdownPath;
+        var currentStagedJsonPath = stagedJsonPath;
+        var ownedStagedPaths = new HashSet<string>(StringComparer.Ordinal);
 
-        var finalAggregationSeconds = getAggregationSeconds();
-        if (finalAggregationSeconds != aggregationSeconds)
+        try
         {
-            aggregationSeconds = finalAggregationSeconds;
-            await WriteArtifactsAsync(report, markdownPath, jsonPath, aggregationSeconds, calculateAggregationPercent(aggregationSeconds), cancellationToken);
-        }
+            var aggregationSeconds = getAggregationSeconds();
+            await WriteArtifactsAsync(
+                report,
+                currentStagedMarkdownPath,
+                currentStagedJsonPath,
+                markdownPath,
+                jsonPath,
+                aggregationSeconds,
+                calculateAggregationPercent(aggregationSeconds),
+                cancellationToken,
+                observeProgress,
+                path => ownedStagedPaths.Add(path));
 
-        return new CoverageRunSlowTestDiagnosticsRun(
-            markdownPath,
-            jsonPath,
-            aggregationSeconds,
-            calculateAggregationPercent(aggregationSeconds),
-            report.Warnings.Count,
-            report.MetadataComplete,
-            report.Projects
-                .Where(project => !string.IsNullOrWhiteSpace(project.JunitFile))
-                .ToDictionary(project => project.JunitFile!, project => project.ParserStatus, StringComparer.Ordinal));
+            var finalAggregationSeconds = getAggregationSeconds();
+            if (finalAggregationSeconds != aggregationSeconds)
+            {
+                var replacementStagedMarkdownPath = CreateStagedPath(stagedMarkdownPath, MarkdownFileName);
+                var replacementStagedJsonPath = CreateStagedPath(stagedJsonPath, JsonFileName);
+                aggregationSeconds = finalAggregationSeconds;
+                await WriteArtifactsAsync(
+                    report,
+                    replacementStagedMarkdownPath,
+                    replacementStagedJsonPath,
+                    markdownPath,
+                    jsonPath,
+                    aggregationSeconds,
+                    calculateAggregationPercent(aggregationSeconds),
+                    cancellationToken,
+                    observeProgress,
+                    path => ownedStagedPaths.Add(path));
+                TryDeleteStagedFile(currentStagedMarkdownPath);
+                TryDeleteStagedFile(currentStagedJsonPath);
+                ownedStagedPaths.Remove(currentStagedMarkdownPath);
+                ownedStagedPaths.Remove(currentStagedJsonPath);
+                currentStagedMarkdownPath = replacementStagedMarkdownPath;
+                currentStagedJsonPath = replacementStagedJsonPath;
+            }
+
+            return new CoverageRunSlowTestDiagnosticsRun(
+                markdownPath,
+                jsonPath,
+                aggregationSeconds,
+                calculateAggregationPercent(aggregationSeconds),
+                report.Warnings.Count,
+                report.MetadataComplete,
+                report.Projects
+                    .Where(project => !string.IsNullOrWhiteSpace(project.JunitFile))
+                    .ToDictionary(project => project.JunitFile!, project => project.ParserStatus, StringComparer.Ordinal),
+                currentStagedMarkdownPath,
+                currentStagedJsonPath);
+        }
+        catch
+        {
+            foreach (var ownedStagedPath in ownedStagedPaths)
+            {
+                TryDeleteStagedFile(ownedStagedPath);
+            }
+
+            throw;
+        }
     }
 
     private static async Task WriteArtifactsAsync(
         CoverageRunSlowTestDiagnosticsReport report,
+        string stagedMarkdownPath,
+        string stagedJsonPath,
         string markdownPath,
         string jsonPath,
         long aggregationSeconds,
         decimal aggregationPercent,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<int>? observeProgress,
+        Action<string> markStagedFileOwned)
     {
         var payload = new
         {
@@ -176,31 +242,38 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
             {
                 projects = report.Projects.Count,
                 junitFiles = report.JunitFileCount,
-                testCases = report.TestCases.Count,
-                failedTestCases = report.TestCases.Count(test => test.Status == "failed" || test.Status == "error"),
-                skippedTestCases = report.TestCases.Count(test => test.Status == "skipped"),
+                testCases = report.TestCaseCount,
+                failedTestCases = report.FailedTestCaseCount,
+                skippedTestCases = report.SkippedTestCaseCount,
                 warnings = report.Warnings.Count,
             },
             topProjects = report.Projects
                 .OrderByDescending(project => project.Seconds)
                 .ThenBy(project => project.Project, StringComparer.Ordinal)
                 .Take(MaxTopProjects),
-            topTestCases = report.TestCases.Take(MaxTopTests),
+            topTestCases = report.TopTestCases,
             warnings = report.Warnings,
         };
         var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
-        await File.WriteAllTextAsync(jsonPath, json + Environment.NewLine, cancellationToken);
-        await File.WriteAllTextAsync(markdownPath, RenderMarkdown(report, markdownPath, jsonPath, aggregationSeconds, aggregationPercent), cancellationToken);
+        await WriteStagedTextAsync(stagedJsonPath, json + Environment.NewLine, cancellationToken, observeProgress, markStagedFileOwned);
+        await WriteStagedTextAsync(
+            stagedMarkdownPath,
+            RenderMarkdown(report, markdownPath, jsonPath, aggregationSeconds, aggregationPercent),
+            cancellationToken,
+            observeProgress,
+            markStagedFileOwned);
     }
 
     private static async Task<CoverageRunJunitReadResult> ReadJunitFileAsync(
         CoverageRunSlowTestProject project,
         List<string> warnings,
-        CancellationToken cancellationToken)
+        Action<CoverageRunSlowTestCase> addTestCase,
+        CancellationToken cancellationToken,
+        Action<int>? observeProgress)
     {
         try
         {
-            await using var stream = File.OpenRead(project.JunitFile!);
+            await using var stream = new ProgressReportingStream(File.OpenRead(project.JunitFile!), observeProgress);
             var settings = new XmlReaderSettings
             {
                 Async = true,
@@ -208,43 +281,207 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
                 XmlResolver = null,
             };
             using var reader = XmlReader.Create(stream, settings);
-            var testCases = await ReadTestCasesAsync(reader, project, warnings, cancellationToken);
-            return new CoverageRunJunitReadResult(testCases, "parsed");
+            await ReadTestCasesAsync(reader, project, warnings, addTestCase, cancellationToken);
+            return new CoverageRunJunitReadResult("parsed");
         }
         catch (FileNotFoundException)
         {
             AddWarning(warnings, $"JUnit file was not created: {project.JunitFile}");
-            return new CoverageRunJunitReadResult([], "missing");
+            return new CoverageRunJunitReadResult("missing");
         }
         catch (DirectoryNotFoundException)
         {
             AddWarning(warnings, $"JUnit file was not created: {project.JunitFile}");
-            return new CoverageRunJunitReadResult([], "missing");
+            return new CoverageRunJunitReadResult("missing");
         }
         catch (XmlException ex)
         {
             AddWarning(warnings, $"Failed to parse JUnit XML '{project.JunitFile}': {ex.Message}");
-            return new CoverageRunJunitReadResult([], "parseFailed");
+            return new CoverageRunJunitReadResult("parseFailed");
         }
         catch (IOException ex)
         {
             AddWarning(warnings, $"Failed to read JUnit XML '{project.JunitFile}': {ex.Message}");
-            return new CoverageRunJunitReadResult([], "readFailed");
+            return new CoverageRunJunitReadResult("readFailed");
         }
         catch (UnauthorizedAccessException ex)
         {
             AddWarning(warnings, $"Failed to access JUnit XML '{project.JunitFile}': {ex.Message}");
-            return new CoverageRunJunitReadResult([], "readFailed");
+            return new CoverageRunJunitReadResult("readFailed");
         }
     }
 
-    private static async Task<IReadOnlyList<CoverageRunSlowTestCase>> ReadTestCasesAsync(
+    private static async Task WriteStagedTextAsync(
+        string path,
+        string contents,
+        CancellationToken cancellationToken,
+        Action<int>? observeProgress,
+        Action<string> markStagedFileOwned)
+    {
+        await using var stream = new FileStream(
+            path,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: StagedTextChunkSize,
+            FileOptions.Asynchronous);
+        markStagedFileOwned(path);
+        await using var writer = new StreamWriter(stream, Utf8WithoutBom, StagedTextChunkSize, leaveOpen: true);
+
+        for (var offset = 0; offset < contents.Length;)
+        {
+            var count = Math.Min(StagedTextChunkSize, contents.Length - offset);
+            await writer.WriteAsync(contents.AsMemory(offset, count), cancellationToken);
+            await writer.FlushAsync(cancellationToken);
+            observeProgress?.Invoke(count);
+            offset += count;
+        }
+    }
+
+    private static void InsertTopTestCase(List<CoverageRunSlowTestCase> topTestCases, CoverageRunSlowTestCase testCase)
+    {
+        var insertionIndex = 0;
+        while (insertionIndex < topTestCases.Count && CompareTestCases(topTestCases[insertionIndex], testCase) <= 0)
+        {
+            insertionIndex++;
+        }
+
+        if (insertionIndex >= MaxTopTests)
+        {
+            return;
+        }
+
+        topTestCases.Insert(insertionIndex, testCase);
+        if (topTestCases.Count > MaxTopTests)
+        {
+            topTestCases.RemoveAt(MaxTopTests);
+        }
+    }
+
+    private static int CompareTestCases(CoverageRunSlowTestCase left, CoverageRunSlowTestCase right)
+    {
+        var seconds = (right.Seconds ?? 0).CompareTo(left.Seconds ?? 0);
+        if (seconds != 0)
+        {
+            return seconds;
+        }
+
+        var className = StringComparer.Ordinal.Compare(left.ClassName, right.ClassName);
+        return className != 0 ? className : StringComparer.Ordinal.Compare(left.Name, right.Name);
+    }
+
+    private static string CreateStagedPath(string existingStagedPath, string artifactName)
+    {
+        var directory = Path.GetDirectoryName(existingStagedPath)
+            ?? throw new IOException($"Slow-test diagnostics staging path has no parent directory: {existingStagedPath}");
+        return Path.Join(directory, $".{artifactName}.{Guid.NewGuid():N}.tmp");
+    }
+
+    /// <summary>
+    /// Best-effort deletes a staging or backup path created by this diagnostics operation.
+    /// </summary>
+    /// <param name="path">Private path whose removal is safe after its creation was confirmed.</param>
+    internal static void TryDeleteStagedFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Preserve the original diagnostics failure when owned staging cleanup cannot complete.
+        }
+    }
+
+    /// <summary>
+    /// Delegates stream operations while reporting positive byte counts from reads.
+    /// </summary>
+    /// <remarks>
+    /// This type remains internal so the diagnostics tests can verify that all delegated stream operations
+    /// preserve the wrapped stream's behavior without relying on reflection.
+    /// </remarks>
+    internal sealed class ProgressReportingStream(Stream inner, Action<int>? observeProgress) : Stream
+    {
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => inner.CanSeek;
+        public override bool CanWrite => inner.CanWrite;
+        public override long Length => inner.Length;
+
+        public override long Position
+        {
+            get => inner.Position;
+            set => inner.Position = value;
+        }
+
+        public override void Flush() => inner.Flush();
+
+        public override Task FlushAsync(CancellationToken cancellationToken) => inner.FlushAsync(cancellationToken);
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var read = inner.Read(buffer, offset, count);
+            Report(read);
+            return read;
+        }
+
+        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            var read = await inner.ReadAsync(buffer, offset, count, cancellationToken);
+            Report(read);
+            return read;
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var read = await inner.ReadAsync(buffer, cancellationToken);
+            Report(read);
+            return read;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+
+        public override void SetLength(long value) => inner.SetLength(value);
+
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            => inner.WriteAsync(buffer, offset, count, cancellationToken);
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+            => inner.WriteAsync(buffer, cancellationToken);
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                inner.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            await inner.DisposeAsync();
+            GC.SuppressFinalize(this);
+        }
+
+        private void Report(int count)
+        {
+            if (count > 0)
+            {
+                observeProgress?.Invoke(count);
+            }
+        }
+    }
+
+    private static async Task ReadTestCasesAsync(
         XmlReader reader,
         CoverageRunSlowTestProject project,
         List<string> warnings,
+        Action<CoverageRunSlowTestCase> addTestCase,
         CancellationToken cancellationToken)
     {
-        var tests = new List<CoverageRunSlowTestCase>();
         TestCaseBuilder? current = null;
         while (await reader.ReadAsync())
         {
@@ -254,7 +491,7 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
                 current = CreateBuilder(reader, project, warnings);
                 if (reader.IsEmptyElement)
                 {
-                    tests.Add(current.Build());
+                    addTestCase(current.Build());
                     current = null;
                 }
 
@@ -279,12 +516,10 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
 
             if (current is not null && reader.NodeType == XmlNodeType.EndElement && reader.Name == "testcase")
             {
-                tests.Add(current.Build());
+                addTestCase(current.Build());
                 current = null;
             }
         }
-
-        return tests;
     }
 
     private static TestCaseBuilder CreateBuilder(
@@ -365,7 +600,7 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
         builder.AppendLine();
         builder.AppendLine("## Top Test Cases");
         builder.AppendLine();
-        if (report.TestCases.Count == 0)
+        if (report.TestCaseCount == 0)
         {
             builder.AppendLine("No JUnit test cases were available.");
         }
@@ -373,7 +608,7 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
         {
             builder.AppendLine("| Seconds | Status | Project | Test |");
             builder.AppendLine("| ---: | --- | --- | --- |");
-            foreach (var test in report.TestCases.Take(MaxTopTests))
+            foreach (var test in report.TopTestCases)
             {
                 var testName = test.ClassName + "." + test.Name;
                 builder.AppendLine(FormattableString.Invariant(
@@ -441,11 +676,72 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
                 _project.JunitFile ?? string.Empty);
         }
     }
+
+    private sealed class CoverageRunSlowTestCaseSummaryBuilder(Action<int>? observeProgress)
+    {
+        private readonly List<CoverageRunSlowTestCase> _topTestCases = new(MaxTopTests);
+        private int _testCaseCount;
+        private int _failedTestCaseCount;
+        private int _skippedTestCaseCount;
+
+        public void Add(CoverageRunSlowTestCase testCase)
+        {
+            _testCaseCount++;
+            if (testCase.Status is "failed" or "error")
+            {
+                _failedTestCaseCount++;
+            }
+            else if (testCase.Status == "skipped")
+            {
+                _skippedTestCaseCount++;
+            }
+
+            InsertTopTestCase(_topTestCases, testCase);
+            if (_testCaseCount % ProgressBatchSize == 0)
+            {
+                observeProgress?.Invoke(1);
+            }
+        }
+
+        public CoverageRunSlowTestCaseSummary Build()
+            => new(_testCaseCount, _failedTestCaseCount, _skippedTestCaseCount, _topTestCases);
+
+        public void Merge(CoverageRunSlowTestCaseSummary summary)
+        {
+            _testCaseCount += summary.TestCaseCount;
+            _failedTestCaseCount += summary.FailedTestCaseCount;
+            _skippedTestCaseCount += summary.SkippedTestCaseCount;
+            foreach (var testCase in summary.TopTestCases)
+            {
+                InsertTopTestCase(_topTestCases, testCase);
+            }
+        }
+    }
+
+    private sealed record CoverageRunSlowTestCaseSummary(
+        int TestCaseCount,
+        int FailedTestCaseCount,
+        int SkippedTestCaseCount,
+        IReadOnlyList<CoverageRunSlowTestCase> TopTestCases);
 }
 
 /// <summary>
 /// Written slow-test diagnostic artifact metadata.
 /// </summary>
+/// <remarks>
+/// <see cref="StagedMarkdownPath"/> and <see cref="StagedJsonPath"/> are newly created private files.
+/// Once this record is returned, the caller is responsible for promoting or deleting them. Failed or
+/// cancelled writes clean up only staging files created by the writer.
+/// </remarks>
+/// <param name="MarkdownPath">Canonical Markdown destination recorded in the diagnostics.</param>
+/// <param name="JsonPath">Canonical JSON destination recorded in the diagnostics.</param>
+/// <param name="AggregationSeconds">Elapsed time spent collecting and writing diagnostics.</param>
+/// <param name="AggregationPercent">Diagnostic overhead relative to the coverage run.</param>
+/// <param name="WarningCount">Number of collected diagnostics warnings.</param>
+/// <param name="MetadataComplete">Whether all requested test metadata was collected.</param>
+/// <param name="ParserStatuses">Parse status for each managed JUnit artifact.</param>
+/// <param name="StagedMarkdownPath">Private Markdown staging path the caller must promote or delete.</param>
+/// <param name="StagedJsonPath">Private JSON staging path the caller must promote or delete.</param>
 internal sealed record CoverageRunSlowTestDiagnosticsRun(
     string MarkdownPath,
     string JsonPath,
@@ -453,18 +749,33 @@ internal sealed record CoverageRunSlowTestDiagnosticsRun(
     decimal AggregationPercent,
     int WarningCount,
     bool MetadataComplete,
-    IReadOnlyDictionary<string, string> ParserStatuses);
+    IReadOnlyDictionary<string, string> ParserStatuses,
+    string StagedMarkdownPath,
+    string StagedJsonPath);
 
 /// <summary>
 /// Slow-test diagnostic report before overhead fields are finalized.
 /// </summary>
+/// <param name="SchemaVersion">Version of the serialized diagnostics schema.</param>
+/// <param name="GeneratedAtUtc">UTC time at which diagnostics aggregation completed.</param>
+/// <param name="MetadataComplete">Whether every requested managed JUnit artifact parsed without warnings.</param>
+/// <param name="JunitFileCount">Number of managed JUnit artifacts that were present during aggregation.</param>
+/// <param name="Projects">Per-project execution and parser metadata.</param>
+/// <param name="TestCaseCount">Total number of parsed JUnit test cases.</param>
+/// <param name="FailedTestCaseCount">Number of parsed test cases with failed or error status.</param>
+/// <param name="SkippedTestCaseCount">Number of parsed skipped test cases.</param>
+/// <param name="TopTestCases">Bounded, descending-duration test-case list for rendered artifacts.</param>
+/// <param name="Warnings">Bounded diagnostics warnings encountered during aggregation.</param>
 internal sealed record CoverageRunSlowTestDiagnosticsReport(
     int SchemaVersion,
     DateTimeOffset GeneratedAtUtc,
     bool MetadataComplete,
     int JunitFileCount,
     IReadOnlyList<CoverageRunSlowTestProject> Projects,
-    IReadOnlyList<CoverageRunSlowTestCase> TestCases,
+    int TestCaseCount,
+    int FailedTestCaseCount,
+    int SkippedTestCaseCount,
+    IReadOnlyList<CoverageRunSlowTestCase> TopTestCases,
     IReadOnlyList<string> Warnings);
 
 /// <summary>
@@ -483,7 +794,6 @@ internal sealed record CoverageRunSlowTestProject(
 /// Best-effort parse result for one managed JUnit file.
 /// </summary>
 internal sealed record CoverageRunJunitReadResult(
-    IReadOnlyList<CoverageRunSlowTestCase> TestCases,
     string ParserStatus);
 
 /// <summary>

@@ -9,11 +9,13 @@ This is the living release note for the next coordinated AppSurface version afte
   `PostgreSqlDurableFlowClient` supplies idempotent start/event/cancel/release operations; and an internal fenced
   processor proves event/timer races plus atomic child-Work projection through a timed real-PostgreSQL verifier. It
   still starts no hosted worker, applies no automatic DDL, and remains excluded from publication until later slices.
+- [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog) now records monotonic per-operation progress, emits 30-second heartbeats by default, and warns after 10 minutes without observable progress. `--watchdog fail` additionally performs bounded whole-process-tree cleanup, writes privacy-minimized incident evidence when possible, and exits `124` with `ASCOV121`.
 - `appsurface secrets transfer plan|apply` now plans and applies declared LocalSecrets and Google Secret Manager
   promotion jobs against existing Google secrets only. Plans bind configuration digest, expiry, and destination
   preconditions; `--apply` is required for mutation, production jobs require explicit confirmation, and all text/JSON
   diagnostics stay value-safe.
 - [`ForgeTrust.AppSurface.Aspire.Testing`](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md) now closes Aspire 13.4.4's partial-provider cleanup gap for profile tests. The builder captures the verified Aspire root provider immediately before host resolution, disposes it immediately when a non-process-fatal host construction fails, retains it for best-effort builder disposal after a process-fatal failure, preserves the original non-process-fatal build exception when cleanup also fails, and transfers ownership unchanged to the returned application after a successful build. Aspire dependencies now publish 13.4.4 as a minimum instead of an exact constraint, so consumers can select later versions without `NU1608`; an unfamiliar host-registration shape emits a trace warning and continues without the additional cleanup.
+- `ForgeTrust.AppSurface.Docs` search results now render a bounded, safe rich summary presentation for authored Markdown emphasis and inline code while preserving the existing schema-v1 `summary` field, ranking behavior, and legacy-client fallback. The additive optional `summaryPresentation` payload is display-only: it carries no HTML, attributes, or URLs; external clients can ignore it or validate it atomically and fall back to `summary` then `snippet`.
 - `ForgeTrust.RazorWire` now owns a deterministic Turbo 8.0.23 default: `<rw:scripts />` emits an exact package-carried, same-origin runtime before RazorWire, while explicit custom and host-managed policies cover app-owned same-origin files or fully host-owned URL, integrity, CSP, and load-order requirements. The upgrade from 8.0.12 is API-neutral and carries an explicit upstream-risk review plus focused Drive, Frame, Stream, form, island, and Behavior Kit compatibility evidence.
 - `ForgeTrust.RazorWire` Form Interactions now keeps duplicated mark-for-removal fields model-bindable by restoring the app-authored inactive value, defaulting to `false`, while identity and concurrency fields still clear. Combined duplicate, add, mark-delete, and submit workflows no longer fail with an empty Boolean value.
 
@@ -65,6 +67,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## Migration watch
 
+- Existing silent coverage runs can retain that behavior with `--heartbeat-interval 0 --watchdog off`; use `--no-progress-timeout` to tune intentionally quiet suites without disabling watchdog classification.
 - Existing `appsurface coverage run` consumers that reference `coverlet.msbuild` must replace it with
   `coverlet.collector`, or explicitly pass `--coverage-driver msbuild` while completing the migration. The command never
   silently falls back between drivers.
