@@ -95,6 +95,26 @@ internal sealed class ReleasePublishing
             throw new ReleaseToolException(evidence.Diagnostics[0]);
         }
 
+        if (isV2Evidence)
+        {
+            var packageIndex = await RequireGitBlobOutputAsync(
+                tag,
+                "packages/package-index.yml",
+                "release-package-index-missing-from-tag",
+                cancellationToken);
+            var packageSummary = PackageIndexSummary.Load(packageIndex);
+            if (!ReleaseManifestV2Validator.TryDeserialize(releaseManifest, out var manifest, out var issue)
+                || !ReleaseManifestV2Validator.TryValidatePackageSet(manifest!, packageSummary.PublicPublishedPackages, out issue))
+            {
+                throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                    "release-evidence-package-set-mismatch",
+                    "V2 release evidence does not attest to the tagged package-index release surface.",
+                    issue,
+                    "Regenerate the release manifest and evidence from the package index in the tagged release tree.",
+                    "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle"));
+            }
+        }
+
         if (isV2Evidence && evidence.Bundle is not null)
         {
             await ValidatePreparationBaseContainedByTagAsync(

@@ -26,6 +26,16 @@ internal sealed class PackageIndexSummary
     internal static async Task<PackageIndexSummary> LoadAsync(string path, CancellationToken cancellationToken)
     {
         var content = await File.ReadAllTextAsync(path, cancellationToken);
+        return Load(content);
+    }
+
+    /// <summary>
+    /// Parses a package-index document into the release-owned public package summary.
+    /// </summary>
+    /// <param name="content">The YAML document to parse.</param>
+    /// <returns>The public publish package rows and their release-link contracts.</returns>
+    internal static PackageIndexSummary Load(string content)
+    {
         PackageIndexManifest? manifest;
         try
         {

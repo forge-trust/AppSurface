@@ -539,6 +539,39 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public void ReleaseManifestV2Validator_RequiresPackageIndexCompleteResolutionSet()
+    {
+        var packages = PackageIndexSummary.Load(
+            """
+            packages:
+              - project: Core/ForgeTrust.AppSurface.Core.csproj
+                classification: public
+                publish_decision: publish
+                release_track: coordinated
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                classification: public
+                publish_decision: publish
+                release_notes_path: releases/unreleased.md
+            """);
+        var manifest = new ReleaseManifestV2(
+            ReleaseManifestV2Validator.Schema,
+            "0.1.0-preview.1",
+            "v0.1.0-preview.1",
+            "2026-05-25",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "prerelease",
+            [],
+            packages.PublicPublishedPackages.Select(package => package.Project).OrderBy(project => project, StringComparer.Ordinal).ToArray(),
+            [],
+            [],
+            []);
+
+        Assert.False(ReleaseManifestV2Validator.TryValidatePackageSet(manifest, packages.PublicPublishedPackages, out var issue));
+        Assert.Contains("Core/ForgeTrust.AppSurface.Core.csproj", issue, StringComparison.Ordinal);
+        Assert.Contains("coordinated rows", issue, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PrepareReportsInvalidSidecarThroughDiagnosticEnvelope()
     {
         await SeedRepositoryAsync();
@@ -1839,8 +1872,10 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
-    public async Task PackageIndexSummaryNormalizesMissingOptionalPublicationMetadata()
+    public async Task CheckRejectsPublicPublishedPackageWithoutReleaseLink()
     {
+        const string project = "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj";
+        await SeedRepositoryAsync();
         await WriteFileAsync(
             "packages/package-index.yml",
             """
@@ -1851,13 +1886,44 @@ public sealed class ReleaseToolTests : IDisposable
                 order: 10
             """);
 
-        var summary = await PackageIndexSummary.LoadAsync(
-            Path.Join(_repositoryRoot, "packages", "package-index.yml"),
-            CancellationToken.None);
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1"],
+        FakeCommandRunner.WithSourceCommit("abc123"));
 
-        var package = Assert.Single(summary.PublicPublishedPackages);
-        Assert.Equal(string.Empty, package.ReleaseNotesPath);
-        Assert.Null(package.ReadinessBlocker);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("release-package-link-invalid", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains(project, result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("package-release-link-missing", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HistoricalV1ReleaseFixturesRemainReadableWithoutMutation()
+    {
+        var sourceRoot = FindSourceRoot();
+        var evidencePath = Path.Join(sourceRoot, "releases", "v0.1.0.evidence.json");
+        var manifestPath = Path.Join(sourceRoot, "releases", "v0.1.0.release.json");
+        var notePath = Path.Join(sourceRoot, "releases", "v0.1.0.md");
+        var sidecarPath = Path.Join(sourceRoot, "releases", "v0.1.0.md.yml");
+        var evidence = await File.ReadAllTextAsync(evidencePath);
+        var manifest = await File.ReadAllTextAsync(manifestPath);
+        var note = await File.ReadAllTextAsync(notePath);
+        var sidecar = await File.ReadAllTextAsync(sidecarPath);
+
+        var result = ReleaseEvidence.ValidateTag(
+            SemVer.Parse("0.1.0"),
+            "stable",
+            "v0.1.0",
+            "bc2ee375659ca972db3a95c82b961dcb5b2f650e",
+            note,
+            sidecar,
+            manifest,
+            evidence);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.NotNull(result.Summary);
+        Assert.Equal("appsurface-release-evidence-bundle-v1", result.Summary!.Schema);
+        Assert.Equal(evidence, await File.ReadAllTextAsync(evidencePath));
+        Assert.Equal(manifest, await File.ReadAllTextAsync(manifestPath));
     }
 
     [Fact]
@@ -5787,6 +5853,9 @@ public sealed class ReleaseToolTests : IDisposable
         {
             runner.Add($"git show {tag}:{path}", new CommandResult(0, await ReadFileAsync(path), ""));
         }
+        runner.Add(
+            $"git show {tag}:packages/package-index.yml",
+            new CommandResult(0, await ReadFileAsync("packages/package-index.yml"), ""));
 
         return runner;
     }

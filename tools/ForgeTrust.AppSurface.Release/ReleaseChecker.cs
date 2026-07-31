@@ -34,6 +34,7 @@ internal sealed class ReleaseChecker
         var generatedFiles = GeneratedFiles(options.Version);
         var versionedGeneratedFiles = VersionedGeneratedFiles(options.Version);
         ReleaseEvidenceSummary? evidenceSummary = null;
+        PackageIndexSummary? packageSummary = null;
 
         foreach (var requiredPath in RequiredPaths().Where(requiredPath => !File.Exists(requiredPath)))
         {
@@ -123,7 +124,7 @@ internal sealed class ReleaseChecker
 
         if (File.Exists(_workspace.PackageIndexPath))
         {
-            var packageSummary = await PackageIndexSummary.LoadAsync(_workspace.PackageIndexPath, cancellationToken);
+            packageSummary = await PackageIndexSummary.LoadAsync(_workspace.PackageIndexPath, cancellationToken);
             if (packageSummary.PublicPublishedPackages.Count == 0)
             {
                 errors.Add(ReleaseDiagnostic.Error(
@@ -193,6 +194,24 @@ internal sealed class ReleaseChecker
                 cancellationToken);
             evidenceSummary = evidence.Summary;
             errors.AddRange(evidence.Diagnostics);
+            if (packageSummary is not null
+                && File.Exists(_workspace.ReleaseManifestPath(options.Version))
+                && File.Exists(_workspace.ReleaseEvidencePath(options.Version)))
+            {
+                var evidenceJson = await File.ReadAllTextAsync(_workspace.ReleaseEvidencePath(options.Version), cancellationToken);
+                var manifestJson = await File.ReadAllTextAsync(_workspace.ReleaseManifestPath(options.Version), cancellationToken);
+                if (ReleaseEvidence.IsV2(evidenceJson)
+                    && ReleaseManifestV2Validator.TryDeserialize(manifestJson, out var manifest, out _)
+                    && !ReleaseManifestV2Validator.TryValidatePackageSet(manifest!, packageSummary.PublicPublishedPackages, out var issue))
+                {
+                    errors.Add(ReleaseDiagnostic.Error(
+                        "release-evidence-package-set-mismatch",
+                        "V2 release evidence does not attest to the package-index release surface.",
+                        issue,
+                        "Regenerate the release manifest and evidence from the unchanged package index before release review.",
+                        "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle"));
+                }
+            }
             if (options.Version.IsStable
                 && evidence.Bundle is not null
                 && evidence.Summary is not null

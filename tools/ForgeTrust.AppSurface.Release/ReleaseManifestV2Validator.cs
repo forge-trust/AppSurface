@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ForgeTrust.AppSurface.ReleaseContracts;
 
 namespace ForgeTrust.AppSurface.Release;
 
@@ -81,7 +82,7 @@ internal static class ReleaseManifestV2Validator
                 || resolutionProjects.Distinct(StringComparer.Ordinal).Count() != resolutionProjects.Length
                 || parsed.CoordinatedPackageReleaseNoteResolutions.Any(item =>
                     !string.Equals(item.Source, "coordinated", StringComparison.Ordinal)
-                    || !string.Equals(item.AliasPath, "releases/current.md", StringComparison.Ordinal)
+                    || !string.Equals(item.AliasPath, PackageReleaseLink.CoordinatedReleaseNotesPath, StringComparison.Ordinal)
                     || !string.Equals(item.ResolvedPath, $"releases/v{parsed.Version}.md", StringComparison.Ordinal)
                     || !string.Equals(item.ReleaseTag, parsed.Tag, StringComparison.Ordinal)
                     || !string.Equals(item.PreparationBaseCommit, parsed.PreparationBaseCommit, StringComparison.Ordinal)))
@@ -98,5 +99,42 @@ internal static class ReleaseManifestV2Validator
             issue = ex.Message;
             return false;
         }
+    }
+
+    /// <summary>
+    /// Confirms that a V2 manifest attests to exactly the release surface declared by the package index.
+    /// </summary>
+    /// <param name="manifest">The already validated V2 manifest.</param>
+    /// <param name="packages">Public publish package rows from the same release tree.</param>
+    /// <param name="issue">The mismatch explanation when validation fails.</param>
+    /// <returns><see langword="true"/> when the manifest and package index describe the same release surface.</returns>
+    internal static bool TryValidatePackageSet(
+        ReleaseManifestV2 manifest,
+        IReadOnlyList<PackageIndexEntry> packages,
+        out string issue)
+    {
+        var expectedPublishedProjects = packages
+            .Select(package => package.Project)
+            .OrderBy(project => project, StringComparer.Ordinal)
+            .ToArray();
+        var expectedCoordinatedProjects = packages
+            .Where(package => package.ReleaseLink?.Track == PackageReleaseTrack.Coordinated)
+            .Select(package => package.Project)
+            .OrderBy(project => project, StringComparer.Ordinal)
+            .ToArray();
+        var manifestProjects = manifest.PublishedPackageProjects.ToArray();
+        var resolutionProjects = manifest.CoordinatedPackageReleaseNoteResolutions
+            .Select(resolution => resolution.Project)
+            .ToArray();
+
+        if (!manifestProjects.SequenceEqual(expectedPublishedProjects, StringComparer.Ordinal)
+            || !resolutionProjects.SequenceEqual(expectedCoordinatedProjects, StringComparer.Ordinal))
+        {
+            issue = $"Manifest published packages [{string.Join(", ", manifestProjects)}] and coordinated resolutions [{string.Join(", ", resolutionProjects)}] must exactly match package-index public publish rows [{string.Join(", ", expectedPublishedProjects)}] and coordinated rows [{string.Join(", ", expectedCoordinatedProjects)}].";
+            return false;
+        }
+
+        issue = string.Empty;
+        return true;
     }
 }

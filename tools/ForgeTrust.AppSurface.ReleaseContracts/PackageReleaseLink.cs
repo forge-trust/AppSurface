@@ -49,11 +49,12 @@ public static class PackageReleaseLinkResolver
     /// <param name="releaseNotesPath">Optional <c>release_notes_path</c> YAML value.</param>
     /// <param name="link">The resolved link when validation succeeds.</param>
     /// <param name="error">A maintainer-facing validation error when validation fails.</param>
-    /// <returns><see langword="true"/> when the fields describe a supported link, including a legacy absent optional link.</returns>
+    /// <returns><see langword="true"/> when the fields describe a supported link.</returns>
     /// <remarks>
-    /// Rows without <c>release_track</c> retain the historical explicit-path meaning so old release manifests and archived
-    /// package-index snapshots remain readable. New coordinated rows must not also carry a versioned path: that combination
-    /// makes it unclear whether a reader should follow the frozen alias or the mutable package-index value.
+    /// Rows without <c>release_track</c> retain the historical explicit-path meaning when they declare a non-empty
+    /// <c>release_notes_path</c>, so old release manifests and archived package-index snapshots remain readable. Every
+    /// row still needs one source. New coordinated rows must not also carry a versioned path: that combination makes it
+    /// unclear whether a reader should follow the frozen alias or the mutable package-index value.
     /// </remarks>
     public static bool TryResolve(
         string? releaseTrack,
@@ -66,11 +67,24 @@ public static class PackageReleaseLinkResolver
         var normalizedTrack = releaseTrack?.Trim();
         var normalizedPath = releaseNotesPath?.Trim();
 
+        if (releaseTrack is not null && string.IsNullOrEmpty(normalizedTrack))
+        {
+            error = "package-release-track-invalid: release_track must be coordinated or explicit, not blank";
+            return false;
+        }
+
+        if (releaseNotesPath is not null && string.IsNullOrEmpty(normalizedPath))
+        {
+            error = "package-release-link-missing: release_notes_path must be a non-empty repository-relative path";
+            return false;
+        }
+
         if (string.IsNullOrEmpty(normalizedTrack))
         {
             if (string.IsNullOrEmpty(normalizedPath))
             {
-                return true;
+                error = "package-release-link-missing: define release_track: coordinated or release_notes_path";
+                return false;
             }
 
             link = new PackageReleaseLink(PackageReleaseTrack.Explicit, normalizedPath);
@@ -81,7 +95,7 @@ public static class PackageReleaseLinkResolver
         {
             if (!string.IsNullOrEmpty(normalizedPath))
             {
-                error = $"uses release_track: coordinated and must not also define release_notes_path; the coordinated target is {PackageReleaseLink.CoordinatedReleaseNotesPath}";
+                error = $"package-release-link-conflict: uses release_track: coordinated and must not also define release_notes_path; the coordinated target is {PackageReleaseLink.CoordinatedReleaseNotesPath}";
                 return false;
             }
 
@@ -93,7 +107,7 @@ public static class PackageReleaseLinkResolver
         {
             if (string.IsNullOrEmpty(normalizedPath))
             {
-                error = "uses release_track: explicit and must define release_notes_path";
+                error = "package-release-link-missing: uses release_track: explicit and must define release_notes_path";
                 return false;
             }
 
@@ -101,7 +115,7 @@ public static class PackageReleaseLinkResolver
             return true;
         }
 
-        error = $"has unsupported release_track '{normalizedTrack}'; use coordinated or explicit";
+        error = $"package-release-track-invalid: has unsupported release_track '{normalizedTrack}'; use coordinated or explicit";
         return false;
     }
 }

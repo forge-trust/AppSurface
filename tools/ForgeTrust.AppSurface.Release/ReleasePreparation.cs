@@ -45,8 +45,10 @@ internal sealed class ReleasePreparation
     /// freezes the current pointer that was generated for its release. Dry-run mode performs all reads and rendering but does not write files.
     /// The method does not create git branches, tags, commits, package artifacts, or GitHub Releases; workflows own those operations.
     /// Callers should treat any readiness errors as blocking and should avoid running against a dirty or concurrently modified tree.
-    /// Writes are sequential rather than transactional. If the local process fails after some files are written, rerun <c>git status</c>
-    /// and remove or revert the partial generated artifacts before retrying so create-only target checks do not stop the next run.
+    /// Writes are sequential rather than transactional. The current pointer is written last, so a partial write cannot advance the
+    /// visible coordinated alias before the matching versioned artifacts and living-note roll-forward exist. If the local process fails,
+    /// rerun <c>git status</c> and remove or revert the partial generated artifacts before retrying so create-only target checks do not
+    /// stop the next run.
     /// </remarks>
     internal async Task<ReleasePreparationResult> PrepareAsync(ReleaseOptions options, CancellationToken cancellationToken)
     {
@@ -115,16 +117,16 @@ internal sealed class ReleasePreparation
         var changelog = await File.ReadAllTextAsync(_workspace.ChangelogPath, cancellationToken);
         var nextUnreleased = ReleaseNoteBuilder.ResetUnreleased(options.Version);
 
-        var writes = new Dictionary<string, string>
+        var writes = new List<KeyValuePair<string, string>>
         {
-            [releaseNotePath] = releaseNote,
-            [releaseSidecarPath] = releaseSidecar,
-            [releaseManifestPath] = releaseManifestContent,
-            [releaseEvidencePath] = releaseEvidenceContent,
-            [currentReleasePath] = currentRelease,
-            [_workspace.ChangelogPath] = ChangelogEditor.RollForward(changelog, options.Version, date, releasePath),
-            [_workspace.UnreleasedPath] = nextUnreleased,
-            [_workspace.UnreleasedSidecarPath] = ReleaseSidecar.UnreleasedTemplate()
+            new(releaseNotePath, releaseNote),
+            new(releaseSidecarPath, releaseSidecar),
+            new(releaseManifestPath, releaseManifestContent),
+            new(releaseEvidencePath, releaseEvidenceContent),
+            new(_workspace.ChangelogPath, ChangelogEditor.RollForward(changelog, options.Version, date, releasePath)),
+            new(_workspace.UnreleasedPath, nextUnreleased),
+            new(_workspace.UnreleasedSidecarPath, ReleaseSidecar.UnreleasedTemplate()),
+            new(currentReleasePath, currentRelease)
         };
 
         if (!options.DryRun)
@@ -137,7 +139,7 @@ internal sealed class ReleasePreparation
             await EnsurePreparationBaseCommitUnchangedAsync(check.SourceCommit, cancellationToken);
             await EnsureFileDigestUnchangedAsync(currentPointerSnapshot, cancellationToken);
             await EnsureFileDigestUnchangedAsync(currentPointerSidecarSnapshot, cancellationToken);
-            foreach (var path in writes.Keys)
+            foreach (var (path, _) in writes)
             {
                 EnsureSafeWriteTarget(path);
             }
@@ -151,7 +153,7 @@ internal sealed class ReleasePreparation
         }
         else
         {
-            generatedPaths.AddRange(writes.Keys.Select(_workspace.DisplayPath));
+            generatedPaths.AddRange(writes.Select(write => _workspace.DisplayPath(write.Key)));
         }
 
         return new ReleasePreparationResult(check, generatedPaths, options.DryRun, evidence.ToSummary("draft evidence for release-prep review"));

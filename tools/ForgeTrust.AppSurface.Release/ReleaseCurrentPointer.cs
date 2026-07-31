@@ -112,7 +112,7 @@ internal sealed class ReleaseCurrentPointerGate
         {
             diagnostics.Add(ReleaseDiagnostic.Error(
                 "release-current-page-tag-discovery-failed",
-                $"Release preparation could determine whether target tag '{target.TagName}' exists.",
+                $"Release preparation could not determine whether target tag '{target.TagName}' exists.",
                 string.IsNullOrWhiteSpace(targetTag.StandardError) ? "git rev-parse returned a nonzero exit code." : targetTag.StandardError.Trim(),
                 "Repair the Git worktree and rerun release preparation.",
                 "releases/coordinated-release-links.md"));
@@ -205,7 +205,7 @@ internal sealed class ReleaseCurrentPointerGate
             {
                 diagnostics.Add(ReleaseDiagnostic.Error(
                     "release-current-page-tag-discovery-failed",
-                    $"Release preparation could inspect tag '{tag}'.",
+                    $"Release preparation could not inspect tag '{tag}'.",
                     string.IsNullOrWhiteSpace(annotated.StandardError) ? "git cat-file returned a nonzero exit code." : annotated.StandardError.Trim(),
                     "Repair the tag reference before preparing a release.",
                     "releases/coordinated-release-links.md"));
@@ -243,7 +243,7 @@ internal sealed class ReleaseCurrentPointerGate
             {
                 diagnostics.Add(ReleaseDiagnostic.Error(
                     "release-current-page-tag-discovery-failed",
-                    $"Release preparation could determine whether tag '{tag}' is reachable from the preparation base.",
+                    $"Release preparation could not determine whether tag '{tag}' is reachable from the preparation base.",
                     string.IsNullOrWhiteSpace(reachable.StandardError) ? "git merge-base returned a nonzero exit code." : reachable.StandardError.Trim(),
                     "Repair the Git worktree and rerun release preparation.",
                     "releases/coordinated-release-links.md"));

@@ -37,9 +37,9 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(PackageReleaseTrack.Explicit, legacyLink!.Track);
 
         Assert.False(PackageReleaseLinkResolver.TryResolve("coordinated", "releases/v0.1.0.md", out _, out var conflictingError));
-        Assert.Contains("must not also define release_notes_path", conflictingError, StringComparison.Ordinal);
+        Assert.Contains("package-release-link-conflict", conflictingError, StringComparison.Ordinal);
         Assert.False(PackageReleaseLinkResolver.TryResolve("unknown", null, out _, out var unknownError));
-        Assert.Contains("unsupported release_track", unknownError, StringComparison.Ordinal);
+        Assert.Contains("package-release-track-invalid", unknownError, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -51,7 +51,24 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.False(PackageReleaseLinkResolver.TryResolve("explicit", releaseNotesPath, out var link, out var error));
 
         Assert.Null(link);
-        Assert.Contains("must define release_notes_path", error, StringComparison.Ordinal);
+        Assert.Contains("package-release-link-missing", error, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null, null, "package-release-link-missing")]
+    [InlineData(null, "   ", "package-release-link-missing")]
+    [InlineData("   ", null, "package-release-track-invalid")]
+    [InlineData("coordinated", "releases/unreleased.md", "package-release-link-conflict")]
+    [InlineData("unknown", null, "package-release-track-invalid")]
+    public void PackageReleaseLinkResolver_RejectsMissingBlankConflictingAndUnknownDeclarations(
+        string? releaseTrack,
+        string? releaseNotesPath,
+        string expectedDiagnosticCode)
+    {
+        Assert.False(PackageReleaseLinkResolver.TryResolve(releaseTrack, releaseNotesPath, out var link, out var error));
+
+        Assert.Null(link);
+        Assert.Contains(expectedDiagnosticCode, error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -314,6 +331,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 product_family: appsurface
                 classification: public
                 publish_decision: publish
+                release_notes_path: releases/unreleased.md
                 readiness_blocker: "#642"
                 readiness_note: Pinned dependency cleanup is incomplete.
                 order: 10
@@ -325,6 +343,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 product_family: appsurface
                 classification: public
                 publish_decision: publish
+                release_notes_path: releases/unreleased.md
                 readiness_blocker: "#642"
                 readiness_note: Pinned dependency cleanup is incomplete.
                 order: 20
@@ -343,6 +362,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync("examples/web-app/README.md", "# Example");
         await WriteFileAsync("start-here/first-success-path.md", FirstSuccessPathMarkdown);
         await WriteFileAsync("releases/README.md", "# Releases");
+        await WriteFileAsync("releases/unreleased.md", "# Unreleased");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
         await WriteFileAsync("CHANGELOG.md", "# Changelog");
 
@@ -420,6 +440,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 product_family: appsurface
                 classification: public
                 publish_decision: publish
+                release_notes_path: releases/v0.1-preview.md
                 order: 10
                 use_when: Install this first for a normal ASP.NET Core app with AppSurface modules.
                 includes: Base web startup.
@@ -797,6 +818,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 product_family: appsurface
                 classification: public
                 publish_decision: publish
+                release_notes_path: releases/v0.1-preview.md
                 order: 10
                 use_when: Install this first for a normal ASP.NET Core app with AppSurface modules.
                 includes: Base web startup.
@@ -806,6 +828,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 product_family: razorwire
                 classification: public
                 publish_decision: publish
+                release_notes_path: releases/v0.1-preview.md
                 order: 20
                 use_when: Install this when you want to export RazorWire apps from a stable command-line tool.
                 includes: The `razorwire` .NET tool command and static export workflow.
@@ -876,7 +899,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Contains("```bash", markdown, StringComparison.Ordinal);
         Assert.Contains("dotnet package add ForgeTrust.AppSurface.Web", markdown, StringComparison.Ordinal);
         Assert.Contains("[Package-first quickstart](../start-here/first-success-path.md#package-first-path)", markdown, StringComparison.Ordinal);
-        Assert.Contains("[v0.1.0 Release Preview](../releases/v0.1-preview.md)", markdown, StringComparison.Ordinal);
+        Assert.Contains("[current release note](../releases/current.md)", markdown, StringComparison.Ordinal);
         Assert.Contains("| `ForgeTrust.AppSurface.Web` |", markdown, StringComparison.Ordinal);
         Assert.DoesNotContain('\r', markdown);
         Assert.EndsWith("\n", markdown, StringComparison.Ordinal);
@@ -1113,6 +1136,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 product_family: appsurface
                 classification: public
                 publish_decision: publish
+                release_notes_path: releases/v0.1-preview.md
                 order: 10
                 use_when: Install this first for a normal ASP.NET Core app with AppSurface modules.
                 includes: Base web startup.
@@ -1122,6 +1146,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 product_family: appsurface
                 classification: public
                 publish_decision: publish
+                release_notes_path: releases/v0.1-preview.md
                 order: 20
                 use_when: Add this after the base web package when you want an OpenAPI document.
                 includes: OpenAPI generation.
@@ -1132,6 +1157,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 product_family: internal_support
                 classification: support
                 publish_decision: support_publish
+                release_notes_path: releases/v0.1-preview.md
                 order: 30
                 note: Restored transitively on matching build hosts.
                 start_here_path: Web/ForgeTrust.AppSurface.Web.Tailwind/README.md
@@ -1218,6 +1244,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 product_family: appsurface
                 classification: public
                 publish_decision: publish
+                release_notes_path: releases/v0.1-preview.md
                 order: 10
                 use_when: Install this first for a normal ASP.NET Core app with AppSurface modules.
                 includes: Base web startup.
@@ -1227,6 +1254,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 product_family: appsurface
                 classification: public
                 publish_decision: publish
+                release_notes_path: releases/v0.1-preview.md
                 order: 20
                 use_when: Start here for CLI apps.
                 includes: Command hosting.
@@ -1240,6 +1268,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync("examples/web-app/README.md", "# Example");
         await WriteFileAsync("start-here/first-success-path.md", FirstSuccessPathMarkdown);
         await WriteFileAsync("releases/README.md", "# Releases");
+        await WriteFileAsync("releases/v0.1-preview.md", "# v0.1 Preview");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
         await WriteFileAsync("CHANGELOG.md", "# Changelog");
 
@@ -1292,7 +1321,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
-    public async Task GenerateAsync_OmitsOptionalReleaseReadinessLinksWhenTargetsAreMissing()
+    public async Task GenerateAsync_RejectsDeclaredReleaseLinksWhenTargetsAreMissing()
     {
         await WriteCommonChooserFilesAsync(includeUnreleased: false);
         File.Delete(Path.GetFullPath(Path.Join("releases", "v0.1-preview.md"), _repositoryRoot));
@@ -1319,12 +1348,10 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 outputType: "Exe")
         });
 
-        var markdown = await generator.GenerateAsync(CreateRequest());
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.GenerateAsync(CreateRequest()));
 
-        Assert.Contains("[Release hub](../releases/README.md)", markdown, StringComparison.Ordinal);
-        Assert.DoesNotContain("v0.1.0 Release Preview", markdown, StringComparison.Ordinal);
-        Assert.DoesNotContain("[Unreleased proof artifact]", markdown, StringComparison.Ordinal);
-        Assert.Contains("Unreleased proof artifact: Not published yet", markdown, StringComparison.Ordinal);
+        Assert.Contains("releases/v0.1-preview.md", error.Message, StringComparison.Ordinal);
+        Assert.Contains("missing documentation", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1648,7 +1675,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(PackageReadinessStatus.Blocked, readiness.Status);
         Assert.Contains(readiness.BlockingReasons, reason => reason.Contains("release_status", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(readiness.FixHints, hint => hint.Contains("release_status: public_preview", StringComparison.Ordinal));
-        Assert.Contains(readiness.BlockingReasons, reason => reason.Contains("release_notes_path is missing", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(readiness.BlockingReasons, reason => reason.Contains("package-release-link-missing", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -2839,6 +2866,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 product_family: appsurface
                 classification: public
                 publish_decision: publish
+                release_track: coordinated
                 order: 10
                 use_when: Install this first.
                 includes: Base web hosting.
@@ -3262,6 +3290,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 product_family: appsurface
                 classification: public
                 publish_decision: publish
+                release_track: coordinated
                 order: 10
                 use_when: Install this first for a normal ASP.NET Core app with AppSurface modules.
                 includes: Base web startup, middleware composition, and endpoint registration.
@@ -3272,6 +3301,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 product_family: appsurface
                 classification: public
                 publish_decision: publish
+                release_track: coordinated
                 order: 20
                 use_when: Add this after the base web package when you want an OpenAPI document.
                 includes: OpenAPI generation and endpoint explorer wiring.
@@ -3281,6 +3311,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 product_family: internal_support
                 classification: support
                 publish_decision: support_publish
+                release_notes_path: releases/v0.1-preview.md
                 order: 30
                 note: Restored transitively by `ForgeTrust.AppSurface.Web.Tailwind` on matching build hosts. Do not install it directly.
               - project: Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj
@@ -3288,6 +3319,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 classification: proof_host
                 publish_decision: do_not_publish
                 publish_reason: Proof-host package is not part of the prerelease package surface.
+                release_notes_path: releases/v0.1-preview.md
                 order: 40
                 note: Reusable docs package for hosting harvested repository docs.
                 start_here_path: Web/ForgeTrust.AppSurface.Docs/README.md
@@ -3295,6 +3327,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 product_family: razorwire
                 classification: public
                 publish_decision: publish
+                release_track: coordinated
                 order: 50
                 use_when: Install this when you want to export RazorWire apps from a stable command-line tool.
                 includes: The `razorwire` .NET tool command and static export workflow.
@@ -3317,6 +3350,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync("start-here/first-success-path.md", FirstSuccessPathMarkdown);
         await WriteFileAsync("releases/README.md", "# Releases");
         await WriteFileAsync("releases/v0.1-preview.md", "# v0.1 Preview");
+        await WriteFileAsync("releases/current.md", "# Current coordinated release");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
         await WriteFileAsync("CHANGELOG.md", "# Changelog");
         if (includeUnreleased)
