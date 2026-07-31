@@ -391,6 +391,26 @@ public class ExportSourceResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_Should_Throw_Timeout_When_Ready_Timeout_Elapses_Between_Zero_Delay_Polls()
+    {
+        var fakeProcess = new FakeTargetAppProcess();
+        var factory = new FakeTargetAppProcessFactory(_ => fakeProcess);
+        var resolver = CreateResolver(factory, new ThrowingHttpClientFactory());
+        resolver.ListeningUrlTimeout = TimeSpan.FromSeconds(1);
+        resolver.AppReadyTimeout = TimeSpan.FromMilliseconds(50);
+        resolver.AppReadyPollInterval = TimeSpan.Zero;
+
+        var request = new ExportSourceRequest(ExportSourceKind.Dll, "/tmp/app.dll", null, [], false);
+        fakeProcess.OnStart = () => fakeProcess.EmitOutput("Now listening on: http://127.0.0.1:5050");
+
+        var exception = await Assert.ThrowsAsync<TimeoutException>(
+            async () => await resolver.ResolveAsync(request));
+
+        Assert.Contains("did not become ready", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(fakeProcess.Disposed);
+    }
+
+    [Fact]
     public async Task ResolveAsync_Should_Treat_404_As_Ready()
     {
         var fakeProcess = new FakeTargetAppProcess();

@@ -125,6 +125,9 @@ public sealed class ExportSourceResolver
     /// <exception cref="InvalidOperationException">
     /// Thrown when a launched process exits before becoming crawlable or reports an unusable startup state.
     /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when <paramref name="cancellationToken"/> is canceled while publishing, launching, or probing the source.
+    /// </exception>
     public async Task<ResolvedExportSource> ResolveAsync(
         ExportSourceRequest request,
         CancellationToken cancellationToken = default)
@@ -953,8 +956,15 @@ public sealed class ExportSourceResolver
         timeoutCts.CancelAfter(AppReadyTimeout);
         using var client = _httpClientFactory.CreateClient("ExportEngine");
 
-        while (!timeoutCts.Token.IsCancellationRequested)
+        while (true)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (timeoutCts.Token.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    $"Target application did not become ready within {AppReadyTimeout.TotalSeconds} seconds.{Environment.NewLine}{GetRecentLogs(logs)}");
+            }
+
             if (process.HasExited || processExited())
             {
                 throw new InvalidOperationException(
@@ -1000,13 +1010,11 @@ public sealed class ExportSourceResolver
             }
             catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
             {
-                throw new TimeoutException(
-                    $"Target application did not become ready within {AppReadyTimeout.TotalSeconds} seconds.{Environment.NewLine}{GetRecentLogs(logs)}");
+                // Classify the linked cancellation at the top of the next iteration.
+                continue;
             }
         }
 
-        throw new TimeoutException(
-            $"Target application did not become ready within {AppReadyTimeout.TotalSeconds} seconds.{Environment.NewLine}{GetRecentLogs(logs)}");
     }
 
     private static string GetRecentLogs(ConcurrentQueue<string> logs)
