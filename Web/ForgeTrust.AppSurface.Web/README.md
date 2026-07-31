@@ -42,6 +42,7 @@ The base class for the application bootstrapping logic. While `WebApp` uses a ge
 AppSurface Web can render a native semantic light/dark pair for package-owned UI without resetting or styling application-authored components. First register a pair and the explicit Web adapter from a module or host service-registration path:
 
 ```csharp
+using ForgeTrust.AppSurface.Web;
 using ForgeTrust.AppSurface.Theming;
 
 services.AddAppSurfaceTheming(options =>

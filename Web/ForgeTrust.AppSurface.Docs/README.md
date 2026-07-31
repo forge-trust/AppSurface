@@ -1380,6 +1380,8 @@ Use theme options when the host wants branded docs without owning views. `AppSur
 Docs is a first-class theme-pairs surface. Keep the existing `AppSurfaceDark` preset (the default), then register the shared pair and Web adapter before `AddAppSurfaceDocs()` runs:
 
 ```csharp
+using ForgeTrust.AppSurface.Docs;
+using ForgeTrust.AppSurface.Web;
 using ForgeTrust.AppSurface.Theming;
 
 services.AddAppSurfaceTheming(options =>
