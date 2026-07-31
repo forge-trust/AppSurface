@@ -825,6 +825,159 @@ public class AppSurfaceDocsWebModuleRegressionTests
     }
 
     [Fact]
+    public async Task ConfigureWebApplication_Versioning_MergesCurrentAndHistoricalSearchResultsWithoutCrossTreeReleasePointerLeakage()
+    {
+        var tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "appsurfacedocs-published-search-regression-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+            var historicalTree = CreatePublishedReleaseNavigationTree(tempDirectory, "1.2.3");
+            var currentTree = CreatePublishedReleaseNavigationTree(tempDirectory, "1.2.4");
+            WritePublishedReleaseSearchIndex(historicalTree, "1.2.3");
+            WritePublishedReleaseSearchIndex(currentTree, "1.2.4");
+            var historicalManifestSha256 = WriteReleaseManifest(historicalTree);
+            var currentManifestSha256 = WriteReleaseManifest(currentTree);
+            var catalogPath = Path.Combine(tempDirectory, "catalog.json");
+            File.WriteAllText(
+                catalogPath,
+                $$"""
+                {
+                  "recommendedVersion": "1.2.4",
+                  "versions": [
+                    {
+                      "version": "1.2.4",
+                      "label": "1.2.4",
+                      "exactTreePath": "1.2.4",
+                      "releaseManifestSha256": "{{currentManifestSha256}}",
+                      "supportState": "Current",
+                      "visibility": "Public",
+                      "advisoryState": "None"
+                    },
+                    {
+                      "version": "1.2.3",
+                      "label": "1.2.3",
+                      "exactTreePath": "1.2.3",
+                      "releaseManifestSha256": "{{historicalManifestSha256}}",
+                      "supportState": "Archived",
+                      "visibility": "Public",
+                      "advisoryState": "None"
+                    }
+                  ]
+                }
+                """);
+
+            var module = new AppSurfaceDocsWebModule();
+            var startup = new TestAppSurfaceDocsStartup(module);
+            var context = CreatePackagedModuleStartupContext(module);
+            var builder = ((IAppSurfaceStartup)startup).CreateHostBuilder(context);
+            builder.ConfigureAppConfiguration(
+                (_, configuration) =>
+                {
+                    configuration.AddInMemoryCollection(
+                        new Dictionary<string, string?>
+                        {
+                            ["AppSurfaceDocs:Source:RepositoryRoot"] = repoRoot,
+                            ["AppSurfaceDocs:Routing:DocsRootPath"] = "/docs/next",
+                            ["AppSurfaceDocs:Versioning:Enabled"] = "true",
+                            ["AppSurfaceDocs:Versioning:CatalogPath"] = catalogPath
+                        });
+                });
+            builder.ConfigureWebHost(webHost => webHost.UseUrls("http://127.0.0.1:0"));
+
+            using var host = builder.Build();
+            await host.StartAsync();
+
+            try
+            {
+                var server = host.Services.GetRequiredService<IServer>();
+                var addresses = server.Features.Get<IServerAddressesFeature>();
+                var baseAddress = Assert.Single(addresses!.Addresses);
+                using var client = new HttpClient
+                {
+                    BaseAddress = new Uri(baseAddress)
+                };
+
+                var currentSearchDocuments = await ReadPublishedSearchDocumentsAsync(client, "/docs/search-index.json");
+                var historicalSearchDocuments = await ReadPublishedSearchDocumentsAsync(
+                    client,
+                    "/docs/v/1.2.3/search-index.json");
+
+                Assert.Equal(
+                    [
+                        new PublishedSearchDocument("release-current", "/docs/releases/current", "Current release 1.2.4"),
+                        new PublishedSearchDocument("release-version", "/docs/releases/v1.2.4", "Release 1.2.4")
+                    ],
+                    currentSearchDocuments
+                        .Where(document => document.Title.Contains("release", StringComparison.OrdinalIgnoreCase))
+                        .DistinctBy(document => (document.Id, document.Path))
+                        .OrderBy(document => document.Path, StringComparer.Ordinal)
+                        .ToArray());
+
+                Assert.Equal(
+                    [
+                        new PublishedSearchDocument(
+                            "release-current",
+                            "/docs/v/1.2.3/releases/current",
+                            "Current release 1.2.3"),
+                        new PublishedSearchDocument(
+                            "release-version",
+                            "/docs/v/1.2.3/releases/v1.2.3",
+                            "Release 1.2.3")
+                    ],
+                    historicalSearchDocuments
+                        .Where(document => document.Title.Contains("release", StringComparison.OrdinalIgnoreCase))
+                        .DistinctBy(document => (document.Id, document.Path))
+                        .OrderBy(document => document.Path, StringComparer.Ordinal)
+                        .ToArray());
+
+                var mergedReleaseResults = currentSearchDocuments
+                    .Concat(historicalSearchDocuments)
+                    .Where(document => document.Title.Contains("release", StringComparison.OrdinalIgnoreCase))
+                    .DistinctBy(document => (document.Id, document.Path))
+                    .OrderBy(document => document.Path, StringComparer.Ordinal)
+                    .ToArray();
+
+                Assert.Equal(
+                    [
+                        new PublishedSearchDocument("release-current", "/docs/releases/current", "Current release 1.2.4"),
+                        new PublishedSearchDocument("release-version", "/docs/releases/v1.2.4", "Release 1.2.4"),
+                        new PublishedSearchDocument(
+                            "release-current",
+                            "/docs/v/1.2.3/releases/current",
+                            "Current release 1.2.3"),
+                        new PublishedSearchDocument(
+                            "release-version",
+                            "/docs/v/1.2.3/releases/v1.2.3",
+                            "Release 1.2.3")
+                    ],
+                    mergedReleaseResults);
+                Assert.DoesNotContain(
+                    historicalSearchDocuments,
+                    document => string.Equals(document.Path, "/docs/releases/current", StringComparison.Ordinal));
+                Assert.DoesNotContain(
+                    currentSearchDocuments,
+                    document => document.Path.StartsWith("/docs/v/1.2.3/", StringComparison.Ordinal));
+            }
+            finally
+            {
+                await host.StopAsync();
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(tempDirectory))
+            {
+                Directory.Delete(tempDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task StandaloneBuild_Issue001_IncludesGeneratedStylesheetInRuntimeAndPackManifests()
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
@@ -2638,6 +2791,65 @@ public class AppSurfaceDocsWebModuleRegressionTests
         return root;
     }
 
+    private static void WritePublishedReleaseSearchIndex(string root, string version)
+    {
+        File.WriteAllText(
+            Path.Combine(root, "search-index.json"),
+            $$"""
+            {
+              "documents": [
+                {
+                  "id": "guide",
+                  "path": "/docs/guide.html",
+                  "title": "Guide"
+                },
+                {
+                  "id": "release-current",
+                  "path": "/docs/releases/current",
+                  "title": "Current release {{version}}"
+                },
+                {
+                  "id": "release-current",
+                  "path": "/docs/releases/current",
+                  "title": "Current release {{version}}"
+                },
+                {
+                  "id": "release-version",
+                  "path": "/docs/releases/v{{version}}",
+                  "title": "Release {{version}}"
+                },
+                {
+                  "id": "release-version",
+                  "path": "/docs/releases/v{{version}}",
+                  "title": "Release {{version}}"
+                }
+              ]
+            }
+            """);
+    }
+
+    private static async Task<IReadOnlyList<PublishedSearchDocument>> ReadPublishedSearchDocumentsAsync(
+        HttpClient client,
+        string requestPath)
+    {
+        using var response = await client.GetAsync(requestPath);
+        var json = await response.Content.ReadAsStringAsync();
+        Assert.True(
+            response.StatusCode == HttpStatusCode.OK,
+            $"Expected '{requestPath}' to return 200 but received {(int)response.StatusCode}. Body: {json}");
+
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement
+            .GetProperty("documents")
+            .EnumerateArray()
+            .Select(
+                item => new PublishedSearchDocument(
+                    item.GetProperty("id").GetString()!,
+                    item.GetProperty("path").GetString()!,
+                    item.GetProperty("title").GetString()!))
+            .ToArray();
+    }
+
     private static async Task AssertPublishedReleaseNavigationAsync(HttpClient client, string docsRootPath, string version)
     {
         var expectedCurrentReleasePath = $"{docsRootPath}/releases/current";
@@ -2907,6 +3119,8 @@ public class AppSurfaceDocsWebModuleRegressionTests
             throw new InvalidOperationException(RawFailureMessage);
         }
     }
+
+    private sealed record PublishedSearchDocument(string Id, string Path, string Title);
 
     private sealed record BuildCoordinates(string Configuration, string TargetFramework);
 }

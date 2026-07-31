@@ -53,7 +53,7 @@ internal sealed class ReleaseChecker
                     "release-generated-target-missing",
                     $"Generated target '{_workspace.DisplayPath(target)}' is missing.",
                     "`--allow-existing-targets` is only valid when reviewing the complete prepared release artifact set.",
-                    "Run `./eng/release prepare` for this version and include the release note, sidecar metadata, and release manifest in the release preparation pull request.",
+                    "Run `./eng/release prepare` for this version and include the versioned release note, sidecar metadata, release manifest, evidence bundle, and frozen releases/current.md pointer in the release preparation pull request.",
                     "tools/ForgeTrust.AppSurface.Release/README.md#check"));
             }
         }

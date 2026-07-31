@@ -86,7 +86,7 @@ internal sealed class ReleasePreparation
             .OrderBy(resolution => resolution.Project, StringComparer.Ordinal)
             .ToArray();
         var manifest = new ReleaseManifestV2(
-            "appsurface-release-manifest-v2",
+            ReleaseManifestV2Validator.Schema,
             options.Version.ToString(),
             options.Version.TagName,
             date.ToString("yyyy-MM-dd"),
@@ -137,6 +137,11 @@ internal sealed class ReleasePreparation
             await EnsurePreparationBaseCommitUnchangedAsync(check.SourceCommit, cancellationToken);
             await EnsureFileDigestUnchangedAsync(currentPointerSnapshot, cancellationToken);
             await EnsureFileDigestUnchangedAsync(currentPointerSidecarSnapshot, cancellationToken);
+            foreach (var path in writes.Keys)
+            {
+                EnsureSafeWriteTarget(path);
+            }
+
             foreach (var (path, content) in writes)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -151,6 +156,44 @@ internal sealed class ReleasePreparation
 
         return new ReleasePreparationResult(check, generatedPaths, options.DryRun, evidence.ToSummary("draft evidence for release-prep review"));
     }
+
+    private void EnsureSafeWriteTarget(string path)
+    {
+        var directory = Path.GetDirectoryName(path)!;
+        if (!ReleaseDocsArchiveGate.TryValidateNoReparseSegments(_workspace.RepositoryRoot, directory, out var directoryIssue))
+        {
+            throw UnsafePreparationOutput(path, directoryIssue ?? "The output directory is outside the repository or includes a reparse point.");
+        }
+
+        if (!File.Exists(path) && !Directory.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            {
+                throw UnsafePreparationOutput(path, "The existing output is a symlink, junction, or reparse point.");
+            }
+        }
+        catch (ReleaseToolException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            throw UnsafePreparationOutput(path, $"The existing output could not be inspected: {ex.Message}");
+        }
+    }
+
+    private ReleaseToolException UnsafePreparationOutput(string path, string cause) =>
+        new(ReleaseDiagnostic.Error(
+            "release-preparation-output-path-unsafe",
+            $"Release preparation cannot write generated output '{_workspace.DisplayPath(path)}'.",
+            cause,
+            "Restore ordinary repository directories and files for the generated release paths, then rerun release preparation.",
+            "tools/ForgeTrust.AppSurface.Release/README.md#prepare"));
 
     private static async Task<ReleaseFileDigestSnapshot> CaptureFileDigestAsync(string path, CancellationToken cancellationToken)
     {

@@ -1,3 +1,5 @@
+using ForgeTrust.AppSurface.ReleaseContracts;
+
 namespace ForgeTrust.AppSurface.Release;
 
 /// <summary>
@@ -29,8 +31,6 @@ internal sealed record ReleasePreparationChangePolicyResult(IReadOnlyList<string
 /// </remarks>
 internal static class ReleasePreparationChangePolicy
 {
-    private const string CurrentPointerSidecarPath = "releases/current.md.yml";
-
     /// <summary>
     /// Validates that the diff contains the versioned release artifacts, frozen current pointer, changelog, and next-cycle files for <paramref name="version"/>.
     /// </summary>
@@ -71,10 +71,10 @@ internal static class ReleasePreparationChangePolicy
         var seenPaths = new HashSet<string>(StringComparer.Ordinal);
         foreach (var change in actualChanges)
         {
-            if (string.Equals(change.Path, CurrentPointerSidecarPath, StringComparison.Ordinal)
-                || string.Equals(change.OriginalPath, CurrentPointerSidecarPath, StringComparison.Ordinal))
+            if (string.Equals(change.Path, PackageReleaseLink.CoordinatedReleaseSidecarPath, StringComparison.Ordinal)
+                || string.Equals(change.OriginalPath, PackageReleaseLink.CoordinatedReleaseSidecarPath, StringComparison.Ordinal))
             {
-                errors.Add($"{CurrentPointerSidecarPath} is permanent metadata and must not change.");
+                errors.Add($"{PackageReleaseLink.CoordinatedReleaseSidecarPath} is permanent metadata and must not change.");
                 continue;
             }
 

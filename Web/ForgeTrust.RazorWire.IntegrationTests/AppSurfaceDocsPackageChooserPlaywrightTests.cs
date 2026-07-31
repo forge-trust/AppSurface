@@ -105,6 +105,14 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
         Assert.Equal(PackageChooserCurrentReleaseHeading, (await page.TextContentAsync("h1"))?.Trim());
         Assert.Contains("release note", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
 
+        var taggedReleasePath = await page.Locator(".docs-content a[href^='/docs/releases/v']").First.GetAttributeAsync("href")
+            ?? throw new InvalidOperationException("The current release page must link to its frozen tagged release.");
+        Assert.StartsWith("/docs/releases/v", taggedReleasePath, StringComparison.Ordinal);
+        var taggedReleaseVersion = taggedReleasePath[(taggedReleasePath.LastIndexOf('/') + 2)..];
+
+        await page.Locator($".docs-content a[href='{taggedReleasePath}']").First.ClickAsync();
+        await WaitForPathAndHeadingAsync(page, taggedReleasePath, $"Release {taggedReleaseVersion}");
+
         await page.GotoAsync($"{_fixture.DocsUrl}/packages");
         await page.WaitForFunctionAsync(
             "() => document.querySelector('h1')?.textContent?.trim() === 'AppSurface v0.1 package chooser'",

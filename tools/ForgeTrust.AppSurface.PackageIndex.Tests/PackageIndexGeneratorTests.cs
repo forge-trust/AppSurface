@@ -42,6 +42,18 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Contains("unsupported release_track", unknownError, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void PackageReleaseLinkResolver_RejectsExplicitTrackWithoutReleaseNotesPath(string? releaseNotesPath)
+    {
+        Assert.False(PackageReleaseLinkResolver.TryResolve("explicit", releaseNotesPath, out var link, out var error));
+
+        Assert.Null(link);
+        Assert.Contains("must define release_notes_path", error, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task GenerateAsync_ThrowsWhenCandidateProjectIsMissingFromManifest()
     {

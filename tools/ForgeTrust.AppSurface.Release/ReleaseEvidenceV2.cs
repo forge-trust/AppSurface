@@ -464,7 +464,7 @@ internal static class ReleaseEvidenceV2
             bundle.ReleaseArtifactDigests,
             bundle.CoordinatedPackageReleaseNoteResolutions,
             bundle.DocsArchive,
-            bundle.Commits,
+            new ReleaseEvidenceSubjectCommitsV2(bundle.Commits.PreparationBaseCommit),
             bundle.GeneratedBy,
             bundle.Attestation);
         return ReleaseEvidence.ComputeSha256Hex(JsonSerializer.Serialize(input, ReleaseJson.Options));
@@ -509,6 +509,15 @@ internal sealed record ReleaseEvidenceCommitsV2(
     string? TagCommit,
     string? WorkflowRunId);
 
+/// <summary>
+/// The immutable commit identity included in the V2 evidence subject digest.
+/// </summary>
+/// <remarks>
+/// The reviewed preparation source is stable release evidence. Later preparation, tag, and workflow identities are intentionally
+/// excluded because they are supplied after the preparation artifact set is generated.
+/// </remarks>
+internal sealed record ReleaseEvidenceSubjectCommitsV2(string? PreparationBaseCommit);
+
 internal sealed record ReleaseEvidenceSubjectInputV2(
     string Schema,
     string Version,
@@ -522,6 +531,6 @@ internal sealed record ReleaseEvidenceSubjectInputV2(
     IReadOnlyList<ReleaseEvidenceArtifactDigest> ReleaseArtifactDigests,
     IReadOnlyList<CoordinatedPackageReleaseNoteResolution> CoordinatedPackageReleaseNoteResolutions,
     ReleaseEvidenceDocsArchive DocsArchive,
-    ReleaseEvidenceCommitsV2 Commits,
+    ReleaseEvidenceSubjectCommitsV2 Commits,
     ReleaseEvidenceGeneratedBy GeneratedBy,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReleaseEvidenceAttestation? Attestation);

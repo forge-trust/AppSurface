@@ -64,7 +64,8 @@ internal sealed class ReleasePublishing
         var evidenceJson = await RequireGitBlobOutputAsync(tag, evidencePathInTag, "release-evidence-missing", cancellationToken);
         string? currentRelease = null;
         string? currentReleaseSidecar = null;
-        if (ReleaseEvidence.IsV2(evidenceJson))
+        var isV2Evidence = ReleaseEvidence.IsV2(evidenceJson);
+        if (isV2Evidence)
         {
             currentRelease = await RequireGitBlobOutputAsync(
                 tag,
@@ -92,6 +93,15 @@ internal sealed class ReleasePublishing
         if (evidence.Diagnostics.Count > 0)
         {
             throw new ReleaseToolException(evidence.Diagnostics[0]);
+        }
+
+        if (isV2Evidence && evidence.Bundle is not null)
+        {
+            await ValidatePreparationBaseContainedByTagAsync(
+                tag,
+                evidence.Bundle.Commits.ContentSourceCommit,
+                tagCommit,
+                cancellationToken);
         }
 
         if (evidence.Summary is null)
@@ -224,6 +234,46 @@ internal sealed class ReleasePublishing
                 "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
         }
     }
+
+    private async Task ValidatePreparationBaseContainedByTagAsync(
+        string tag,
+        string? preparationBaseCommit,
+        string tagCommit,
+        CancellationToken cancellationToken)
+    {
+        var canonicalPreparationBaseCommit = preparationBaseCommit ?? string.Empty;
+        if (!IsCanonicalCommitId(canonicalPreparationBaseCommit))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-preparation-base-commit-invalid",
+                $"Tag '{tag}' has V2 release evidence with an invalid preparation base commit.",
+                "V2 evidence must preserve the exact 40-character lowercase Git commit captured before release preparation wrote artifacts.",
+                "Regenerate the release preparation artifacts from the reviewed source commit before creating the tag.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle"));
+        }
+
+        var result = await _commandRunner.RunAsync(
+            new CommandInvocation(
+                "git",
+                ["merge-base", "--is-ancestor", canonicalPreparationBaseCommit, tagCommit.Trim()],
+                _workspace.RepositoryRoot),
+            cancellationToken);
+        if (result.ExitCode != 0)
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-preparation-base-commit-not-contained-by-tag",
+                $"Tag '{tag}' does not contain the V2 evidence preparation base commit.",
+                string.IsNullOrWhiteSpace(result.StandardError)
+                    ? $"Preparation base commit {canonicalPreparationBaseCommit} is not an ancestor of tag commit {tagCommit.Trim()}."
+                    : result.StandardError.Trim(),
+                "Create the annotated tag from a commit that contains the reviewed release preparation artifacts and their captured source commit.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
+        }
+    }
+
+    private static bool IsCanonicalCommitId(string value) =>
+        value.Length == 40
+        && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private async Task ValidateGitHubReleaseDraftSafeAsync(string tag, CancellationToken cancellationToken)
     {
