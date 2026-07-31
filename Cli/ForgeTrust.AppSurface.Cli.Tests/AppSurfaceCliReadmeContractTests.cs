@@ -161,6 +161,21 @@ public sealed class AppSurfaceCliReadmeContractTests
             "Lock files still declare a direct coverlet.msbuild reference: " + string.Join(", ", staleLockFiles));
     }
 
+    [Fact]
+    public void Readme_ShouldDocumentCoverageRunWatchdogContract()
+    {
+        var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());
+
+        Assert.Contains("#### Coverage Run Watchdog", readme, StringComparison.Ordinal);
+        Assert.Contains("`--heartbeat-interval` defaults to `30s`", readme, StringComparison.Ordinal);
+        Assert.Contains("`--no-progress-timeout` defaults to `10m`", readme, StringComparison.Ordinal);
+        Assert.Contains("`--watchdog warn` is the default", readme, StringComparison.Ordinal);
+        Assert.Contains("whole-process-tree termination through supervisor-owned process leases", readme, StringComparison.Ordinal);
+        Assert.Contains("exits `124` with `ASCOV121`", readme, StringComparison.Ordinal);
+        Assert.Contains("`--watchdog off` disables stall classification", readme, StringComparison.Ordinal);
+        Assert.Contains("GUID-named staging or backup remnants", readme, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("{}")]
     [InlineData("{ \"dependencies\": [] }")]
