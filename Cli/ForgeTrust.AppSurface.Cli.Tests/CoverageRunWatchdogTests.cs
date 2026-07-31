@@ -408,6 +408,7 @@ public sealed class CoverageRunWatchdogTests
         using var console = new FakeInMemoryConsole();
         var timeProvider = new FreezableTimeProvider();
         var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var processKilled = new TaskCompletionSource<Process>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var supervisor = new CoverageRunWatchdogSupervisor(
             CoverageRunWatchdogMode.Fail,
             TimeSpan.Zero,
@@ -415,7 +416,12 @@ public sealed class CoverageRunWatchdogTests
             console,
             timeProvider,
             CancellationToken.None,
-            processCleanupStarted: cleanupStarted.SetResult);
+            processCleanupStarted: cleanupStarted.SetResult,
+            processKiller: process =>
+            {
+                process.Kill();
+                processKilled.TrySetResult(process);
+            });
         supervisor.BindOutputDirectory(output.Path);
         using var operation = supervisor.Start("project", "tests/LateProcess.Tests/LateProcess.Tests.csproj");
         var lease = operation.ReserveProcess();
@@ -427,7 +433,8 @@ public sealed class CoverageRunWatchdogTests
 
         using var process = Process.Start(CreateLongRunningProcess())!;
         lease.Attach(process);
-        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Same(process, await processKilled.Task.WaitAsync(TimeSpan.FromSeconds(2)));
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2));
         lease.Complete();
         await WaitForFileAsync(Path.Join(output.Path, "coverage-watchdog.json"));
 
@@ -1024,7 +1031,8 @@ public sealed class CoverageRunWatchdogTests
     private static ProcessStartInfo CreateLongRunningProcess()
         => OperatingSystem.IsWindows()
             ? new ProcessStartInfo("cmd.exe", "/c ping 127.0.0.1 -n 30 > nul") { UseShellExecute = false, CreateNoWindow = true }
-            : new ProcessStartInfo("/bin/sh", "-c \"sleep 30\"") { UseShellExecute = false };
+            // Launch the process under test directly so its termination is not coupled to shell process-tree behavior.
+            : new ProcessStartInfo("/bin/sleep", "30") { UseShellExecute = false };
 
     private static ProcessStartInfo CreateCompletedProcess()
         => OperatingSystem.IsWindows()

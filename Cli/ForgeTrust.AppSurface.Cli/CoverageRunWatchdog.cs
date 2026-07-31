@@ -334,15 +334,17 @@ internal sealed class CoverageRunOperation : IDisposable
 internal sealed class CoverageRunProcessLease
 {
     private readonly CoverageRunWatchdogSupervisor? _owner;
+    private readonly Action<Process> _killProcess;
     private readonly object _sync = new();
     private readonly TaskCompletionSource<Process?> _resolution = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Process? _process;
     private bool _terminationRequested;
     private bool _completed;
 
-    internal CoverageRunProcessLease(CoverageRunWatchdogSupervisor? owner)
+    internal CoverageRunProcessLease(CoverageRunWatchdogSupervisor? owner, Action<Process>? processKiller = null)
     {
         _owner = owner;
+        _killProcess = processKiller ?? TryKill;
     }
 
     internal static CoverageRunProcessLease Detached() => new(null);
@@ -369,7 +371,7 @@ internal sealed class CoverageRunProcessLease
 
         if (terminate)
         {
-            TryKill(process);
+            _killProcess(process);
         }
     }
 
@@ -406,7 +408,7 @@ internal sealed class CoverageRunProcessLease
             }
         }
 
-        await Task.Run(() => TryKill(process));
+        await Task.Run(() => _killProcess(process));
         try
         {
             await process.WaitForExitAsync();
@@ -469,6 +471,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     private readonly Action<string> _bootstrapDirectoryDelete;
     private readonly Action<string> _stagedArtifactDelete;
     private readonly Action? _processCleanupStarted;
+    private readonly Action<Process>? _processKiller;
     private readonly List<OperationState> _operations = [];
     private readonly HashSet<CoverageRunProcessLease> _processLeases = [];
     private readonly TaskCompletionSource _terminalCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -501,6 +504,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     /// <param name="bootstrapDirectoryDelete">Optional test seam used to delete the private bootstrap artifact directory during disposal.</param>
     /// <param name="stagedArtifactDelete">Optional test seam used to delete a failed artifact staging file.</param>
     /// <param name="processCleanupStarted">Optional test seam invoked after terminal cleanup captures its process-lease snapshot.</param>
+    /// <param name="processKiller">Optional test seam that replaces root-process termination.</param>
     public CoverageRunWatchdogSupervisor(
         CoverageRunWatchdogMode mode,
         TimeSpan heartbeatInterval,
@@ -515,7 +519,8 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         Action? artifactResourcesDisposed = null,
         Action<string>? bootstrapDirectoryDelete = null,
         Action<string>? stagedArtifactDelete = null,
-        Action? processCleanupStarted = null)
+        Action? processCleanupStarted = null,
+        Action<Process>? processKiller = null)
     {
         _mode = mode;
         _heartbeatInterval = heartbeatInterval;
@@ -530,6 +535,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         _bootstrapDirectoryDelete = bootstrapDirectoryDelete ?? (static path => Directory.Delete(path, recursive: true));
         _stagedArtifactDelete = stagedArtifactDelete ?? File.Delete;
         _processCleanupStarted = processCleanupStarted;
+        _processKiller = processKiller;
         _runStarted = timeProvider.GetTimestamp();
         _bootstrapDirectory = Directory.CreateTempSubdirectory("appsurface-coverage-watchdog-").FullName;
         _linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(externalCancellation, _watchdogCancellation.Token);
@@ -635,7 +641,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         lock (_sync)
         {
             ThrowIfTerminalLocked();
-            var lease = new CoverageRunProcessLease(this);
+            var lease = new CoverageRunProcessLease(this, _processKiller);
             _processLeases.Add(lease);
             return lease;
         }
