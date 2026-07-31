@@ -7,10 +7,10 @@ AppSurface Durable is a source-only public preview of portable durable contracts
 - [`ForgeTrust.AppSurface.Durable.Provider`](ForgeTrust.AppSurface.Durable.Provider/README.md) is the runtime-provider and
   operator SPI for claims, pumping, health, drain, recovery, and controlled repair.
 - [`ForgeTrust.AppSurface.Durable.PostgreSql`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md) is the first
-  authoritative-store implementation. Slice 3 supplies explicit schema management and a manually driven Work engine;
-  it starts no hosted worker.
+  authoritative-store implementation. Slices 3 and 4 supply explicit schema management, a Work engine, and a Flow engine;
+  they start no hosted worker.
 
-All three packages are machine-held out of every publish plan until slices 4-6 prove Flow, Schedule, hosted runtime,
+All three packages are machine-held out of every publish plan until slices 5-6 prove Schedule, hosted runtime,
 drain/recovery, and operational conformance in a coordinated release review. They can be built and packed directly for
 contract verification, but they are not a supported NuGet release.
 
@@ -22,7 +22,7 @@ public, testable contracts without friend access to the application package. The
 `ForgeTrust.AppSurface.Durable.PostgreSql` → `ForgeTrust.AppSurface.Durable.Provider` → `ForgeTrust.AppSurface.Durable`
 
 The application package registers only passive registries. A provider is selected explicitly by the host. The PostgreSQL
-source preview adds explicit migrations and one-operation-at-a-time Work persistence, but no polling host, scheduling
+source preview adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`) and one-operation-at-a-time Work and Flow persistence, but no polling host, scheduling
 execution, hosted service, endpoint, or telemetry implementation.
 
 ## Scale and transport boundary
@@ -50,9 +50,9 @@ command fingerprints make ambiguity observable and fail closed.
 Operational failures use the shared [`ASDURxxx` diagnostics catalog](../troubleshooting/durable-diagnostics.md). Codes
 for later hosted-runtime behavior remain reserved there.
 
-For the PostgreSQL boundary, start with the [`slice 3 reference workload`](slice3-reference-workload.md), then use the
-normative [`Work protocol v1`](work-protocol-v1.md). The
-[`slice 3 reconstruction ledger`](slice3-reconstruction.md) accounts for every artifact in the superseded branch.
+For the PostgreSQL boundary, start with the [`slice 3 reference workload`](slice3-reference-workload.md) and [`slice 4 reference workload`](slice4-reference-workload.md), then use the
+normative [`Work protocol v1`](work-protocol-v1.md) and [`Flow protocol v1`](flow-protocol-v1.md). The
+[`slice 3 reconstruction ledger`](slice3-reconstruction.md) and [`slice 4 reconstruction ledger`](slice4-reconstruction.md) account for every artifact in the superseded branches.
 
 The [slice 2 API budget](api-budget.md) records which original public contracts were retained, moved, added,
 internalized, or removed. The package test projects enforce the corresponding member-level API snapshots.

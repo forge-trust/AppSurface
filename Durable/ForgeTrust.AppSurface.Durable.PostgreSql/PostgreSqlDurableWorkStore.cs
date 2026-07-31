@@ -33,6 +33,52 @@ internal sealed class PostgreSqlDurableWorkStore
         Guid runtimeEpoch,
         Guid? expectedStoreId,
         bool sendWakeNotification,
+        CancellationToken cancellationToken) =>
+        await AcceptCoreAsync(
+            transaction,
+            request,
+            runtimeEpoch,
+            expectedStoreId,
+            sendWakeNotification,
+            derivedActivityId: null,
+            cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Accepts a Flow child Work with an immutable activity identity while retaining the ordinary Work protocol.
+    /// The caller owns the surrounding transaction and must register the parent wait before commit.
+    /// </summary>
+    internal static async ValueTask<DurableOperationResult<DurableWorkAcceptance>> AcceptFlowChildAsync(
+        NpgsqlTransaction transaction,
+        DurableWorkRequest request,
+        Guid runtimeEpoch,
+        Guid expectedStoreId,
+        bool sendWakeNotification,
+        string derivedActivityId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(derivedActivityId) || derivedActivityId.Length > 200)
+        {
+            throw new ArgumentException(
+                "The derived Flow activity identity must contain 1 to 200 characters.",
+                nameof(derivedActivityId));
+        }
+        return await AcceptCoreAsync(
+            transaction,
+            request,
+            runtimeEpoch,
+            expectedStoreId,
+            sendWakeNotification,
+            derivedActivityId,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask<DurableOperationResult<DurableWorkAcceptance>> AcceptCoreAsync(
+        NpgsqlTransaction transaction,
+        DurableWorkRequest request,
+        Guid runtimeEpoch,
+        Guid? expectedStoreId,
+        bool sendWakeNotification,
+        string? derivedActivityId,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(transaction);
@@ -82,6 +128,7 @@ internal sealed class PostgreSqlDurableWorkStore
             workId,
             dispatchId,
             fingerprint,
+            derivedActivityId,
             cancellationToken).ConfigureAwait(false);
 
         if (accepted is not null)
@@ -177,7 +224,7 @@ internal sealed class PostgreSqlDurableWorkStore
             if (transition is not null)
             {
                 await CommitClaimTransitionAsync(
-                    transaction, transition, onTransitionApplied, cancellationToken).ConfigureAwait(false);
+                    transaction, candidate, transition, onTransitionApplied, cancellationToken).ConfigureAwait(false);
                 return null;
             }
 
@@ -189,7 +236,7 @@ internal sealed class PostgreSqlDurableWorkStore
             if (transition is not null)
             {
                 await CommitClaimTransitionAsync(
-                    transaction, transition, onTransitionApplied, cancellationToken).ConfigureAwait(false);
+                    transaction, candidate, transition, onTransitionApplied, cancellationToken).ConfigureAwait(false);
                 return null;
             }
 
@@ -201,7 +248,7 @@ internal sealed class PostgreSqlDurableWorkStore
             if (transition is not null)
             {
                 await CommitClaimTransitionAsync(
-                    transaction, transition, onTransitionApplied, cancellationToken).ConfigureAwait(false);
+                    transaction, candidate, transition, onTransitionApplied, cancellationToken).ConfigureAwait(false);
                 return null;
             }
 
@@ -329,10 +376,21 @@ internal sealed class PostgreSqlDurableWorkStore
 
     private static async ValueTask CommitClaimTransitionAsync(
         NpgsqlTransaction transaction,
+        PostgreSqlDispatchCandidate candidate,
         PostgreSqlWorkClaimTransition transition,
         Func<NpgsqlTransaction, DurableWorkState, string, CancellationToken, ValueTask>? onTransitionApplied,
         CancellationToken cancellationToken)
     {
+        if (IsTerminal(transition.State) || transition.State == DurableWorkState.Suspended)
+        {
+            await PostgreSqlDurableFlowActivityProjector.ProjectAsync(
+                transaction,
+                candidate.ScopeId,
+                candidate.WorkId,
+                transition.State,
+                cancellationToken).ConfigureAwait(false);
+        }
+
         if (onTransitionApplied is not null)
         {
             await onTransitionApplied(
@@ -1261,6 +1319,16 @@ internal sealed class PostgreSqlDurableWorkStore
                 await onProjectionApplied(transaction, parsedState, cancellationToken).ConfigureAwait(false);
             }
 
+            if (IsTerminal(parsedState) || parsedState == DurableWorkState.Suspended)
+            {
+                await PostgreSqlDurableFlowActivityProjector.ProjectAsync(
+                    transaction,
+                    claim.ScopeId,
+                    claim.WorkId,
+                    parsedState,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return new PostgreSqlWorkCompletionResult(
                 PostgreSqlWorkObservationOutcome.Applied,
@@ -1494,6 +1562,16 @@ internal sealed class PostgreSqlDurableWorkStore
                 await onProjectionApplied(transaction, parsedState, cancellationToken).ConfigureAwait(false);
             }
 
+            if (IsTerminal(parsedState) || parsedState == DurableWorkState.Suspended)
+            {
+                await PostgreSqlDurableFlowActivityProjector.ProjectAsync(
+                    transaction,
+                    scopeId,
+                    workId,
+                    parsedState,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return new PostgreSqlCancellationResult(
                 PostgreSqlCancellationOutcome.Applied,
@@ -1668,6 +1746,7 @@ internal sealed class PostgreSqlDurableWorkStore
                       ('pending', 'retry_wait', 'leased', 'reconciling', 'effect_permitted', 'cancel_pending',
                        'suspended_ambiguous_external_outcome', 'suspended_reconciliation_required',
                        'suspended_manual_resolution', 'suspended_contract_unavailable')
+                ORDER BY work.work_id
                 FOR UPDATE OF work
             ),
             projected_work AS
@@ -1742,13 +1821,134 @@ internal sealed class PostgreSqlDurableWorkStore
         command.Parameters.AddWithValue("actor_id", actorId);
         command.Parameters.AddWithValue("reason_code", reasonCode);
         command.Parameters.AddWithValue("scope_disabled_code", DurableProblemCodes.ScopeDisabled);
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+                || reader.GetInt64(0) != reader.GetInt64(1)
+                || reader.GetInt64(0) != reader.GetInt64(2))
+            {
+                throw new InvalidOperationException(
+                    "Scope disable did not project every authoritative Work to dispatch and history exactly once.");
+            }
+        }
+
+        await SuspendScopeFlowsAsync(
+            connection,
+            transaction,
+            scopeId,
+            actorId,
+            reasonCode,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask SuspendScopeFlowsAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        DurableScopeId scopeId,
+        string actorId,
+        string reasonCode,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            WITH flow_evidence AS
+            (
+                SELECT flow_instance_id, state, revision
+                FROM appsurface_durable.flow_instance
+                WHERE scope_id = @scope_id
+                  AND state NOT IN ('completed', 'faulted', 'canceled')
+                ORDER BY flow_instance_id
+                FOR UPDATE
+            ),
+            dispatch_evidence AS MATERIALIZED
+            (
+                SELECT dispatch_id
+                FROM appsurface_durable.flow_dispatch AS dispatch
+                WHERE dispatch.scope_id = @scope_id
+                  AND dispatch.state <> 'terminal'
+                  AND EXISTS
+                  (
+                      SELECT 1
+                      FROM flow_evidence AS flow
+                      WHERE flow.flow_instance_id = dispatch.flow_instance_id
+                  )
+            ),
+            projected_flow AS
+            (
+                UPDATE appsurface_durable.flow_instance AS flow
+                SET state = 'suspended',
+                    suspended_from_state = CASE
+                        WHEN flow.state = 'suspended' THEN flow.suspended_from_state
+                        ELSE flow.state
+                    END,
+                    suspension_descriptor = jsonb_build_object(
+                        'code', @scope_disabled_code,
+                        'source', 'scope',
+                        'actor_id', @actor_id,
+                        'reason_code', @reason_code),
+                    lease_owner = NULL, lease_started_at = NULL, lease_expires_at = NULL,
+                    revision = flow.revision + 1, updated_at = clock_timestamp()
+                FROM flow_evidence AS evidence
+                WHERE flow.scope_id = @scope_id
+                  AND flow.flow_instance_id = evidence.flow_instance_id
+                RETURNING flow.flow_instance_id, flow.revision, flow.current_node_id
+            ),
+            projected_wait AS
+            (
+                UPDATE appsurface_durable.flow_wait AS wait
+                SET state = 'suspended',
+                    suspension_descriptor = jsonb_build_object(
+                        'code', @scope_disabled_code,
+                        'source', 'scope'),
+                    updated_at = clock_timestamp()
+                FROM projected_flow AS flow
+                WHERE wait.scope_id = @scope_id
+                  AND wait.flow_instance_id = flow.flow_instance_id
+                  AND wait.state IN ('active', 'suspended')
+                RETURNING wait.flow_instance_id
+            ),
+            projected_dispatch AS
+            (
+                UPDATE appsurface_durable.flow_dispatch AS dispatch
+                SET state = 'suspended', expected_revision = flow.revision,
+                    updated_at = clock_timestamp()
+                FROM projected_flow AS flow
+                WHERE dispatch.scope_id = @scope_id
+                  AND dispatch.flow_instance_id = flow.flow_instance_id
+                  AND dispatch.dispatch_id IN (SELECT dispatch_id FROM dispatch_evidence)
+                RETURNING dispatch.flow_instance_id, dispatch.kind
+            ),
+            historied AS
+            (
+                INSERT INTO appsurface_durable.flow_history
+                    (scope_id, flow_instance_id, aggregate_revision, node_id, transition_kind, details)
+                SELECT @scope_id, flow_instance_id, revision, current_node_id, 'scope_disabled',
+                       jsonb_build_object(
+                           'code', @scope_disabled_code,
+                           'actor_id', @actor_id,
+                           'reason_code', @reason_code)
+                FROM projected_flow
+                RETURNING flow_instance_id
+            )
+            SELECT
+                (SELECT count(*) FROM projected_flow),
+                (SELECT count(*) FROM dispatch_evidence),
+                (SELECT count(*) FROM projected_dispatch),
+                (SELECT count(DISTINCT flow_instance_id) FROM projected_dispatch),
+                (SELECT count(*) FROM historied);
+            """;
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        command.Parameters.AddWithValue("scope_id", scopeId.Value);
+        command.Parameters.AddWithValue("actor_id", actorId);
+        command.Parameters.AddWithValue("reason_code", reasonCode);
+        command.Parameters.AddWithValue("scope_disabled_code", DurableProblemCodes.ScopeDisabled);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
-            || reader.GetInt64(0) != reader.GetInt64(1)
-            || reader.GetInt64(0) != reader.GetInt64(2))
+            || reader.GetInt64(0) != reader.GetInt64(3)
+            || reader.GetInt64(1) != reader.GetInt64(2)
+            || reader.GetInt64(0) != reader.GetInt64(4))
         {
             throw new InvalidOperationException(
-                "Scope disable did not project every authoritative Work to dispatch and history exactly once.");
+                "Scope disable did not project every authoritative Flow to dispatch and history exactly once.");
         }
     }
 
@@ -2259,6 +2459,7 @@ internal sealed class PostgreSqlDurableWorkStore
         DurableWorkId workId,
         Guid dispatchId,
         DurableCommandFingerprint fingerprint,
+        string? derivedActivityId,
         CancellationToken cancellationToken)
     {
         const string sql = """
@@ -2311,7 +2512,15 @@ internal sealed class PostgreSqlDurableWorkStore
             FROM accepted;
             """;
         await using var command = new NpgsqlCommand(sql, connection, transaction);
-        AddAcceptanceParameters(command, request, runtimeEpoch, scopeGeneration, workId, dispatchId, fingerprint);
+        AddAcceptanceParameters(
+            command,
+            request,
+            runtimeEpoch,
+            scopeGeneration,
+            workId,
+            dispatchId,
+            fingerprint,
+            derivedActivityId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
@@ -2333,11 +2542,12 @@ internal sealed class PostgreSqlDurableWorkStore
         long scopeGeneration,
         DurableWorkId workId,
         Guid dispatchId,
-        DurableCommandFingerprint fingerprint)
+        DurableCommandFingerprint fingerprint,
+        string? derivedActivityId)
     {
         command.Parameters.AddWithValue("scope_id", request.ScopeId.Value);
         command.Parameters.AddWithValue("work_id", workId.Value);
-        command.Parameters.AddWithValue("activity_id", workId.Value);
+        command.Parameters.AddWithValue("activity_id", derivedActivityId ?? workId.Value);
         command.Parameters.AddWithValue("command_id", request.CommandId.Value);
         command.Parameters.AddWithValue("idempotency_key", request.IdempotencyKey);
         command.Parameters.AddWithValue("work_name", request.WorkName);

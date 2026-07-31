@@ -2399,7 +2399,10 @@ public sealed class CoverageRunTests
 
         Assert.True(result.Success);
         var tests = runner.Commands.Where(command => command.Arguments.FirstOrDefault() == "test").ToArray();
-        Assert.Equal([first, second, browser], tests.Select(command => command.Arguments[1]).ToArray());
+        Assert.Equal(3, tests.Length);
+        Assert.Contains(first, tests[..2].Select(command => command.Arguments[1]));
+        Assert.Contains(second, tests[..2].Select(command => command.Arguments[1]));
+        Assert.Equal(browser, tests[2].Arguments[1]);
         Assert.True(tests[2].StartedAt >= tests[0].FinishedAt);
         Assert.True(tests[2].StartedAt >= tests[1].FinishedAt);
         Assert.Contains("(exclusive)", console.ReadOutputString(), StringComparison.Ordinal);
@@ -5067,6 +5070,9 @@ public sealed class CoverageRunTests
 
     private sealed class RecordingCoverageRunProcessRunner : ICoverageRunProcessRunner
     {
+        private readonly object _commandsLock = new();
+        private readonly List<RecordedCommand> _commands = [];
+
         public string SlnListOutput { get; init; } = string.Empty;
         public bool WriteCoverageFiles { get; init; } = true;
         public bool WriteJunitFiles { get; init; } = true;
@@ -5103,7 +5109,16 @@ public sealed class CoverageRunTests
         public Dictionary<string, TimeSpan> TestDelays { get; } = [];
         public Action<string>? TestStarted { get; set; }
         public HashSet<string> ProjectsWithoutCoverage { get; } = [];
-        public List<RecordedCommand> Commands { get; } = [];
+        public IReadOnlyList<RecordedCommand> Commands
+        {
+            get
+            {
+                lock (_commandsLock)
+                {
+                    return [.. _commands];
+                }
+            }
+        }
 
         public async Task<CoverageRunProcessResult> RunAsync(
             CoverageRunProcessRequest request,
@@ -5116,7 +5131,10 @@ public sealed class CoverageRunTests
             var outputFile = request.OutputFile;
             var outputObserver = request.OutputObserver;
             var command = new RecordedCommand(fileName, arguments.ToArray(), workingDirectory, outputFile, DateTimeOffset.UtcNow);
-            Commands.Add(command);
+            lock (_commandsLock)
+            {
+                _commands.Add(command);
+            }
             if (arguments is ["sln", ..])
             {
                 if (CancelSlnList)
