@@ -12,6 +12,30 @@ public sealed class AppSurfaceThemeRegistryTests
         Assert.StartsWith("ASTHEME003:", exception.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("a")]
+    [InlineData("a0-9")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    public void AppSurfaceThemeId_ShouldAcceptCanonicalBoundaryValues(string value)
+    {
+        Assert.Equal(value, new AppSurfaceThemeId(value).Value);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("0theme")]
+    [InlineData("-theme")]
+    [InlineData("theme-")]
+    [InlineData("theme--alt")]
+    [InlineData("Theme")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    public void AppSurfaceThemeId_ShouldRejectMalformedOrOversizedValues(string? value)
+    {
+        Assert.Throws<ArgumentException>(() => new AppSurfaceThemeId(value!));
+    }
+
     [Fact]
     public void AppSurfaceThemeId_ShouldRenderItsDefaultValueSafely()
     {
@@ -33,6 +57,56 @@ public sealed class AppSurfaceThemeRegistryTests
         Assert.Equal(AppSurfaceThemeMode.System, resolution.Mode);
         Assert.Equal("#f8fafc", resolution.Light.Canvas);
         Assert.Equal("#0f172a", resolution.Dark.Canvas);
+    }
+
+    [Fact]
+    public void Registry_ShouldResolveTheConfiguredCustomDefaultPair()
+    {
+        var options = CreateOptions();
+        var alternate = CreateSecondPair();
+        options.Pairs.Add(alternate);
+        options.DefaultTheme = alternate.Id;
+        options.DefaultMode = AppSurfaceThemeMode.Dark;
+
+        var registry = new AppSurfaceThemeRegistry(options);
+        var resolution = registry.ResolveDefault();
+
+        Assert.Equal(alternate.Id, resolution.Id);
+        Assert.Equal(AppSurfaceThemeMode.Dark, resolution.Mode);
+        Assert.Equal(alternate.Light.Canvas, resolution.Light.Canvas);
+        Assert.Equal(alternate.Dark.Canvas, resolution.Dark.Canvas);
+        Assert.Equal(2, registry.ThemeIds.Count);
+    }
+
+    [Fact]
+    public void IsSafeResolution_ShouldApplyTheNeutralRegistryContractWithoutWebSerialization()
+    {
+        var pair = AppSurfaceThemePair.AppSurface();
+        var safe = new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.System, pair.Light, pair.Dark);
+        var unsupportedMode = new AppSurfaceThemeResolution(pair.Id, (AppSurfaceThemeMode)99, pair.Light, pair.Dark);
+        var defaultId = new AppSurfaceThemeResolution(default, AppSurfaceThemeMode.System, pair.Light, pair.Dark);
+
+        Assert.True(AppSurfaceThemeRegistry.IsSafeResolution(safe));
+        Assert.False(AppSurfaceThemeRegistry.IsSafeResolution(null));
+        Assert.False(AppSurfaceThemeRegistry.IsSafeResolution(unsupportedMode));
+        Assert.False(AppSurfaceThemeRegistry.IsSafeResolution(defaultId));
+    }
+
+    [Fact]
+    public void ServiceRegistration_ShouldSupportTheExplicitOptionsOverloadAndRejectNullArguments()
+    {
+        var options = CreateOptions();
+        var services = new ServiceCollection();
+
+        Assert.Same(services, services.AddAppSurfaceTheming(options));
+        Assert.Throws<ArgumentNullException>(() => AppSurfaceThemeServiceCollectionExtensions.AddAppSurfaceTheming(null!, options));
+        Assert.Throws<ArgumentNullException>(() => services.AddAppSurfaceTheming((AppSurfaceThemeRegistryOptions)null!));
+        Assert.Throws<ArgumentNullException>(() => AppSurfaceThemeServiceCollectionExtensions.AddAppSurfaceTheming(null!, _ => { }));
+        Assert.Throws<ArgumentNullException>(() => services.AddAppSurfaceTheming((Action<AppSurfaceThemeRegistryOptions>)null!));
+        Assert.Throws<ArgumentNullException>(() => AppSurfaceThemeServiceCollectionExtensions.AddRequiredThemeExtension<string>(null!));
+
+        using var provider = services.BuildServiceProvider();
+        Assert.Equal("appsurface", provider.GetRequiredService<IAppSurfaceThemeResolver>().ResolveDefault().Id.Value);
     }
 
     [Fact]

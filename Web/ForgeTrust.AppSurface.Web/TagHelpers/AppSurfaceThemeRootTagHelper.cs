@@ -1,5 +1,5 @@
-using Microsoft.AspNetCore.Razor.TagHelpers;
 using ForgeTrust.AppSurface.Web.Theming;
+using Microsoft.AspNetCore.Razor.TagHelpers;
 
 namespace ForgeTrust.AppSurface.Web.TagHelpers;
 
@@ -37,10 +37,9 @@ public sealed class AppSurfaceThemeRootTagHelper : TagHelper
             return;
         }
 
-        output.Attributes.SetAttribute("data-as-theme", GetAttributeValue(document.RootAttributes, "data-as-theme"));
-        output.Attributes.SetAttribute(
-            "data-as-theme-mode",
-            GetAttributeValue(document.RootAttributes, "data-as-theme-mode"));
+        output.Attributes.SetAttribute("data-as-theme", document.RootThemeId);
+        output.Attributes.SetAttribute("data-as-theme-mode", document.RootThemeMode);
+        output.Attributes.SetAttribute("data-as-theme-schema", document.RootSchemaVersion);
 
         var existingStyle = output.Attributes["style"]?.Value?.ToString();
         if (string.IsNullOrWhiteSpace(existingStyle))
@@ -56,20 +55,6 @@ public sealed class AppSurfaceThemeRootTagHelper : TagHelper
         }
 
         output.Attributes.SetAttribute("style", $"{existingStyle.TrimEnd().TrimEnd(';')}; {document.RootStyle}");
-    }
-
-    private static string GetAttributeValue(string attributes, string name)
-    {
-        var prefix = name + "=\"";
-        var start = attributes.IndexOf(prefix, StringComparison.Ordinal);
-        if (start < 0)
-        {
-            return string.Empty;
-        }
-
-        start += prefix.Length;
-        var end = attributes.IndexOf('"', start);
-        return end < 0 ? string.Empty : attributes[start..end];
     }
 
     private static bool HasColorSchemeDeclaration(string style)

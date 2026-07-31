@@ -101,6 +101,20 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
+    public async Task Layout_ShouldRenderOneCanonicalThemePayload()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+
+        var html = await RenderDocsViewAsync(services, "Index", controller => controller.Index());
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+
+        Assert.Single(document.QuerySelectorAll("html[data-as-theme='appsurface']"));
+        Assert.Equal("1", document.DocumentElement?.GetAttribute("data-as-theme-schema"));
+        Assert.Single(document.QuerySelectorAll("meta[name='color-scheme']"));
+        Assert.Single(document.QuerySelectorAll("style[data-as-theme-critical]"));
+    }
+
+    [Fact]
     public async Task Layout_ShouldRenderPackagedStylesheet_WhenAppSurfaceDocsIsEmbeddedInAnotherHost()
     {
         using var services = CreateServiceProvider(

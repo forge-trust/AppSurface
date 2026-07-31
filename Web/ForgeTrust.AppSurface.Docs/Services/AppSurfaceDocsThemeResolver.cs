@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
 using ForgeTrust.AppSurface.Theming;
-using ForgeTrust.AppSurface.Web.Theming;
 
 namespace ForgeTrust.AppSurface.Docs.Services;
 
@@ -42,7 +41,7 @@ internal sealed class AppSurfaceDocsThemeResolver
         var sharedResolution = sharedResolver?.ResolveDefault();
         Theme = sharedResolution is not null
             && legacyTheme.Preset == AppSurfaceDocsThemePreset.AppSurfaceDark
-            && AppSurfaceThemeDocumentSerializer.TrySerialize(sharedResolution, out _)
+            && AppSurfaceThemeRegistry.IsSafeResolution(sharedResolution)
             ? AppSurfaceDocsThemePolicy.ResolveShared(legacyTheme, options.Theme)
             : legacyTheme;
     }

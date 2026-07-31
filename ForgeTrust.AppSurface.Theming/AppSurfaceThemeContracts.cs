@@ -19,17 +19,17 @@ public enum AppSurfaceThemeMode
 /// <summary>Identifies a registered semantic theme pair.</summary>
 public readonly record struct AppSurfaceThemeId
 {
-    private static readonly Regex Pattern = new("^[a-z][a-z0-9-]{0,62}$", RegexOptions.CultureInvariant);
+    private static readonly Regex Pattern = new("^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){0,62}$", RegexOptions.CultureInvariant);
 
     /// <summary>Initializes a canonical theme-pair identifier.</summary>
-    /// <param name="value">A lowercase identifier beginning with a letter and containing only lowercase letters, digits, and hyphens.</param>
+    /// <param name="value">A lowercase identifier beginning with a letter and containing only lowercase letters, digits, and single interior hyphens.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="value"/> is not a canonical theme-pair identifier.</exception>
     public AppSurfaceThemeId(string value)
     {
         if (string.IsNullOrWhiteSpace(value) || !Pattern.IsMatch(value))
         {
             throw new ArgumentException(
-                "ASTHEME003: theme ids must begin with a lowercase letter, contain only lowercase letters, digits, or hyphens, and be at most 63 characters.",
+                "ASTHEME003: theme ids must begin with a lowercase letter, contain only lowercase letters or digits separated by single interior hyphens, and be at most 63 characters.",
                 nameof(value));
         }
 

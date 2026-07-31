@@ -1,4 +1,6 @@
 using ForgeTrust.AppSurface.Web.Theming;
+using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.AspNetCore.Razor.TagHelpers;
 
 namespace ForgeTrust.AppSurface.Web.TagHelpers;
@@ -12,6 +14,7 @@ namespace ForgeTrust.AppSurface.Web.TagHelpers;
 [HtmlTargetElement("appsurface-theme-head")]
 public sealed class AppSurfaceThemeHeadTagHelper : TagHelper
 {
+    private static readonly object RenderedHttpContextItemKey = new();
     private readonly IAppSurfaceThemeDocumentProvider _documentProvider;
 
     /// <summary>Initializes a head helper from the registered document provider.</summary>
@@ -25,6 +28,11 @@ public sealed class AppSurfaceThemeHeadTagHelper : TagHelper
     [HtmlAttributeName("nonce")]
     public string? Nonce { get; set; }
 
+    /// <summary>Gets or sets the MVC view context for request-scoped duplicate suppression.</summary>
+    [ViewContext]
+    [HtmlAttributeNotBound]
+    public ViewContext ViewContext { get; set; } = default!;
+
     /// <inheritdoc />
     public override void Process(TagHelperContext context, TagHelperOutput output)
     {
@@ -33,9 +41,21 @@ public sealed class AppSurfaceThemeHeadTagHelper : TagHelper
 
         output.TagName = null;
         var document = _documentProvider.GetDocument();
+        if (!document.IsRenderable)
+        {
+            output.Content.SetHtmlContent(string.Empty);
+            return;
+        }
+
+        var items = ViewContext?.HttpContext?.Items;
+        if (items is not null && items.ContainsKey(RenderedHttpContextItemKey))
+        {
+            output.Content.SetHtmlContent(string.Empty);
+            return;
+        }
+
+        items?[RenderedHttpContextItemKey] = true;
         output.Content.SetHtmlContent(
-            document.IsRenderable
-                ? AppSurfaceThemeDocumentSerializer.SerializeHeadContent(document, Nonce)
-                : string.Empty);
+            AppSurfaceThemeDocumentSerializer.SerializeHeadContent(document, Nonce));
     }
 }

@@ -2,6 +2,7 @@ using ForgeTrust.AppSurface.Theming;
 using ForgeTrust.AppSurface.Web.TagHelpers;
 using ForgeTrust.AppSurface.Web.Theming;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Razor.TagHelpers;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -15,7 +16,7 @@ public sealed class AppSurfaceThemeWebIntegrationTests
         var document = AppSurfaceThemeDocumentSerializer.Serialize(CreateResolution(AppSurfaceThemeMode.System));
 
         Assert.Equal(
-            "data-as-theme=\"appsurface\" data-as-theme-mode=\"system\"",
+            "data-as-theme=\"appsurface\" data-as-theme-mode=\"system\" data-as-theme-schema=\"1\"",
             document.RootAttributes);
         Assert.Equal("color-scheme: light dark;", document.RootStyle);
         Assert.Contains("<meta name=\"color-scheme\" content=\"light dark\" />\n<style data-as-theme-critical>\n", document.HeadContent);
@@ -32,6 +33,58 @@ public sealed class AppSurfaceThemeWebIntegrationTests
             StringComparison.Ordinal);
         Assert.DoesNotContain('\r', document.HeadContent);
         Assert.DoesNotContain("nonce", document.HeadContent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Serializer_ShouldEmitEverySemanticRoleAndCompleteAccessibilityFallbacks()
+    {
+        var document = AppSurfaceThemeDocumentSerializer.Serialize(CreateResolution(AppSurfaceThemeMode.System));
+
+        foreach (var (name, light, dark) in GetSemanticRoles())
+        {
+            Assert.Contains($"--as-{name}: {light};", document.HeadContent, StringComparison.Ordinal);
+            Assert.Contains($"--as-{name}: {dark};", document.HeadContent, StringComparison.Ordinal);
+        }
+
+        foreach (var declaration in new[]
+                 {
+                     "border: 1px solid var(--rw-form-error-border, var(--as-danger));",
+                     "background-color: var(--rw-form-error-bg, var(--as-raised-surface));",
+                     "color: var(--rw-form-error-text, var(--as-text));",
+                     "--rw-form-error-title: var(--as-text);",
+                     "border-radius: var(--rw-form-error-radius, 0.25rem);",
+                     "padding: var(--rw-form-error-spacing, 1rem);",
+                     "outline: 2px solid var(--rw-form-error-focus, var(--as-focus));",
+                     "outline-offset: 2px;",
+                     "border-color: CanvasText;",
+                     "background-color: Canvas;",
+                     "color: CanvasText;",
+                     "--rw-form-error-title: CanvasText;",
+                     "outline-color: Highlight;"
+                 })
+        {
+            Assert.Contains(declaration, document.HeadContent, StringComparison.Ordinal);
+        }
+
+        Assert.Contains(
+            "[data-as-theme] [data-rw-form-error-generated=\"true\"]:focus-visible,",
+            document.HeadContent,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "[data-rw-form-error-generated=\"true\"] {\n  outline:",
+            document.HeadContent,
+            StringComparison.Ordinal);
+
+        foreach (var declaration in new[]
+                 {
+                     "--as-canvas: Canvas;", "--as-surface: Canvas;", "--as-raised-surface: Canvas;",
+                     "--as-text: CanvasText;", "--as-muted-text: GrayText;", "--as-border: GrayText;",
+                     "--as-accent: Highlight;", "--as-accent-strong: Highlight;", "--as-link: LinkText;",
+                     "--as-visited-link: VisitedText;", "--as-danger: CanvasText;", "--as-focus: Highlight;"
+                 })
+        {
+            Assert.Contains(declaration, document.HeadContent, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -139,6 +192,7 @@ public sealed class AppSurfaceThemeWebIntegrationTests
         Assert.Equal("shell", output.Attributes["class"]?.Value);
         Assert.Equal("appsurface", output.Attributes["data-as-theme"]?.Value);
         Assert.Equal("system", output.Attributes["data-as-theme-mode"]?.Value);
+        Assert.Equal(AppSurfaceThemeDocument.SchemaVersion, output.Attributes["data-as-theme-schema"]?.Value);
         Assert.Equal("color-scheme: light dark;", output.Attributes["style"]?.Value);
         Assert.NotNull(output.Attributes["appsurface-theme-root"]);
     }
@@ -225,6 +279,41 @@ public sealed class AppSurfaceThemeWebIntegrationTests
     }
 
     [Fact]
+    public void HeadTagHelper_ShouldEmitOnePayloadPerMvcRequest()
+    {
+        var viewContext = CreateViewContext();
+        var first = new AppSurfaceThemeHeadTagHelper(
+            new AppSurfaceThemeDocumentProvider(new StubResolver(CreateResolution(AppSurfaceThemeMode.Light))))
+        {
+            ViewContext = viewContext
+        };
+        var second = new AppSurfaceThemeHeadTagHelper(
+            new AppSurfaceThemeDocumentProvider(new StubResolver(CreateResolution(AppSurfaceThemeMode.Light))))
+        {
+            ViewContext = viewContext
+        };
+        var firstOutput = CreateOutput("appsurface-theme-head");
+        var secondOutput = CreateOutput("appsurface-theme-head");
+
+        first.Process(CreateContext(), firstOutput);
+        second.Process(CreateContext(), secondOutput);
+
+        var html = firstOutput.Content.GetContent() + secondOutput.Content.GetContent();
+        Assert.Equal(1, CountOccurrences(html, "<meta name=\"color-scheme\""));
+        Assert.Equal(1, CountOccurrences(html, "<style data-as-theme-critical"));
+    }
+
+    [Fact]
+    public void NeutralTheming_ShouldNotImplicitlyRegisterTheWebRenderingAdapter()
+    {
+        var services = new ServiceCollection();
+        services.AddAppSurfaceTheming(options => options.Pairs.Add(AppSurfaceThemePair.AppSurface()));
+        using var provider = services.BuildServiceProvider();
+
+        Assert.Null(provider.GetService<IAppSurfaceThemeDocumentProvider>());
+    }
+
+    [Fact]
     public void ThemeCspNonce_ShouldReadTheHostOwnedRequestValue()
     {
         var context = new DefaultHttpContext();
@@ -275,6 +364,31 @@ public sealed class AppSurfaceThemeWebIntegrationTests
             tagName,
             attributes ?? new TagHelperAttributeList(),
             (_, _) => Task.FromResult<TagHelperContent>(new DefaultTagHelperContent()));
+
+    private static ViewContext CreateViewContext() => new()
+    {
+        HttpContext = new DefaultHttpContext()
+    };
+
+    private static IEnumerable<(string Name, string Light, string Dark)> GetSemanticRoles()
+    {
+        var pair = AppSurfaceThemePair.AppSurface();
+        return
+        [
+            ("canvas", pair.Light.Canvas, pair.Dark.Canvas),
+            ("surface", pair.Light.Surface, pair.Dark.Surface),
+            ("raised-surface", pair.Light.RaisedSurface, pair.Dark.RaisedSurface),
+            ("text", pair.Light.Text, pair.Dark.Text),
+            ("muted-text", pair.Light.MutedText, pair.Dark.MutedText),
+            ("border", pair.Light.Border, pair.Dark.Border),
+            ("accent", pair.Light.Accent, pair.Dark.Accent),
+            ("accent-strong", pair.Light.AccentStrong, pair.Dark.AccentStrong),
+            ("link", pair.Light.Link, pair.Dark.Link),
+            ("visited-link", pair.Light.VisitedLink, pair.Dark.VisitedLink),
+            ("danger", pair.Light.Danger, pair.Dark.Danger),
+            ("focus", pair.Light.Focus, pair.Dark.Focus)
+        ];
+    }
 
     private static int CountOccurrences(string value, string needle)
     {

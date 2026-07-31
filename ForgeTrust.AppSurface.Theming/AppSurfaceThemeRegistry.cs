@@ -113,6 +113,8 @@ public sealed class AppSurfaceThemeValidationException : InvalidOperationExcepti
 /// <summary>Validates and resolves immutable semantic theme pairs.</summary>
 public sealed class AppSurfaceThemeRegistry : IAppSurfaceThemeRegistry, IAppSurfaceThemeResolver
 {
+    private const double TextContrastRatio = 4.5d;
+    private const double UserInterfaceContrastRatio = 3d;
     private readonly IReadOnlyDictionary<string, AppSurfaceThemePair> _pairs;
     private readonly IReadOnlyCollection<AppSurfaceThemeId> _themeIds;
     private readonly AppSurfaceThemeResolution _defaultResolution;
@@ -251,6 +253,33 @@ public sealed class AppSurfaceThemeRegistry : IAppSurfaceThemeRegistry, IAppSurf
         return diagnostics;
     }
 
+    /// <summary>
+    /// Determines whether a sealed resolution can be safely consumed by a package-owned adapter.
+    /// </summary>
+    /// <param name="resolution">The resolution to validate.</param>
+    /// <returns><see langword="true"/> when the resolution satisfies the neutral pair contract; otherwise <see langword="false"/>.</returns>
+    /// <remarks>
+    /// This predicate is intended for adapters that need a fail-closed boundary without serializing a Web document.
+    /// It applies the same identifier, mode, role, and contrast checks used for registry registration.
+    /// </remarks>
+    public static bool IsSafeResolution(AppSurfaceThemeResolution? resolution)
+    {
+        if (resolution is null
+            || !Enum.IsDefined(resolution.Mode)
+            || string.IsNullOrEmpty(resolution.Id.Value))
+        {
+            return false;
+        }
+
+        var options = new AppSurfaceThemeRegistryOptions
+        {
+            DefaultTheme = resolution.Id,
+            DefaultMode = resolution.Mode
+        };
+        options.Pairs.Add(new AppSurfaceThemePair(resolution.Id, resolution.Light, resolution.Dark));
+        return Validate(options).Count == 0;
+    }
+
     private static void ValidateRoles(
         AppSurfaceThemeId id,
         string branch,
@@ -283,12 +312,12 @@ public sealed class AppSurfaceThemeRegistry : IAppSurfaceThemeRegistry, IAppSurf
 
         foreach (var textRole in new[] { "Text", "MutedText", "Link", "VisitedLink", "Danger" })
         {
-            ValidateContrast(id, branch, textRole, parsed[textRole], 4.5, parsed, diagnostics);
+            ValidateContrast(id, branch, textRole, parsed[textRole], TextContrastRatio, parsed, diagnostics);
         }
 
         foreach (var nonTextRole in new[] { "Border", "Accent", "AccentStrong", "Focus" })
         {
-            ValidateContrast(id, branch, nonTextRole, parsed[nonTextRole], 3, parsed, diagnostics);
+            ValidateContrast(id, branch, nonTextRole, parsed[nonTextRole], UserInterfaceContrastRatio, parsed, diagnostics);
         }
     }
 

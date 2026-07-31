@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Encodings.Web;
-using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Theming;
 
 namespace ForgeTrust.AppSurface.Web.Theming;
@@ -39,7 +38,7 @@ public static partial class AppSurfaceThemeDocumentSerializer
         out AppSurfaceThemeDocument document)
     {
         document = AppSurfaceThemeDocument.Empty;
-        if (!IsSafeResolution(resolution))
+        if (!AppSurfaceThemeRegistry.IsSafeResolution(resolution))
         {
             return false;
         }
@@ -48,11 +47,16 @@ public static partial class AppSurfaceThemeDocumentSerializer
         var modeText = GetModeText(safeResolution.Mode);
         var colorScheme = GetColorScheme(safeResolution.Mode);
         var rootAttributes =
-            $"data-as-theme=\"{HtmlEncoder.Default.Encode(safeResolution.Id.Value)}\" data-as-theme-mode=\"{modeText}\"";
+            $"data-as-theme=\"{HtmlEncoder.Default.Encode(safeResolution.Id.Value)}\" data-as-theme-mode=\"{modeText}\" data-as-theme-schema=\"{AppSurfaceThemeDocument.SchemaVersion}\"";
         var rootStyle = $"color-scheme: {colorScheme};";
         var headContent = BuildHeadContent(safeResolution, colorScheme);
 
-        document = new AppSurfaceThemeDocument(rootAttributes, rootStyle, headContent);
+        document = new AppSurfaceThemeDocument(
+            safeResolution.Id.Value,
+            modeText,
+            rootAttributes,
+            rootStyle,
+            headContent);
         return true;
     }
 
@@ -71,30 +75,20 @@ public static partial class AppSurfaceThemeDocumentSerializer
         }
 
         var encodedNonce = HtmlEncoder.Default.Encode(nonce);
-        return StyleOpenTagRegex().Replace(
-            document.HeadContent,
-            _ => $"<style data-as-theme-critical nonce=\"{encodedNonce}\">",
-            1);
-    }
-
-    private static bool IsSafeResolution(AppSurfaceThemeResolution? resolution)
-    {
-        if (resolution is null
-            || !Enum.IsDefined(resolution.Mode)
-            || string.IsNullOrEmpty(resolution.Id.Value)
-            || !IsSafeRoles(resolution.Light)
-            || !IsSafeRoles(resolution.Dark))
+        var styleOpenIndex = document.HeadContent.IndexOf(StyleOpenTag, StringComparison.Ordinal);
+        if (styleOpenIndex < 0)
         {
-            return false;
+            return document.HeadContent;
         }
 
-        var options = new AppSurfaceThemeRegistryOptions
-        {
-            DefaultTheme = resolution.Id,
-            DefaultMode = resolution.Mode
-        };
-        options.Pairs.Add(new AppSurfaceThemePair(resolution.Id, resolution.Light, resolution.Dark));
-        return AppSurfaceThemeRegistry.Validate(options).Count == 0;
+        var insertionIndex = styleOpenIndex + StyleOpenTag.Length - 1;
+        return new StringBuilder(document.HeadContent.Length + encodedNonce.Length + 9)
+            .Append(document.HeadContent, 0, insertionIndex)
+            .Append(" nonce=\"")
+            .Append(encodedNonce)
+            .Append('"')
+            .Append(document.HeadContent, insertionIndex, document.HeadContent.Length - insertionIndex)
+            .ToString();
     }
 
     private static string BuildHeadContent(
@@ -136,8 +130,12 @@ public static partial class AppSurfaceThemeDocumentSerializer
         builder.Append("  border: 1px solid var(--rw-form-error-border, var(--as-danger));\n");
         builder.Append("  background-color: var(--rw-form-error-bg, var(--as-raised-surface));\n");
         builder.Append("  color: var(--rw-form-error-text, var(--as-text));\n");
+        builder.Append("  --rw-form-error-title: var(--as-text);\n");
         builder.Append("  border-radius: var(--rw-form-error-radius, 0.25rem);\n");
         builder.Append("  padding: var(--rw-form-error-spacing, 1rem);\n");
+        builder.Append("}\n");
+        builder.Append("[data-as-theme] [data-rw-form-error-generated=\"true\"]:focus-visible,\n");
+        builder.Append("[data-as-theme] [data-rw-form-error-generated=\"true\"]:focus-within {\n");
         builder.Append("  outline: 2px solid var(--rw-form-error-focus, var(--as-focus));\n");
         builder.Append("  outline-offset: 2px;\n");
         builder.Append("}\n");
@@ -160,6 +158,10 @@ public static partial class AppSurfaceThemeDocumentSerializer
         builder.Append("    border-color: CanvasText;\n");
         builder.Append("    background-color: Canvas;\n");
         builder.Append("    color: CanvasText;\n");
+        builder.Append("    --rw-form-error-title: CanvasText;\n");
+        builder.Append("  }\n");
+        builder.Append("  [data-as-theme] [data-rw-form-error-generated=\"true\"]:focus-visible,\n");
+        builder.Append("  [data-as-theme] [data-rw-form-error-generated=\"true\"]:focus-within {\n");
         builder.Append("    outline-color: Highlight;\n");
         builder.Append("  }\n");
         builder.Append("}\n");
@@ -208,36 +210,6 @@ public static partial class AppSurfaceThemeDocumentSerializer
         builder.Append(";\n");
     }
 
-    private static bool IsSafeRoles(AppSurfaceThemeRoles? roles)
-    {
-        return roles is not null
-            && IsSafeColor(roles.Canvas)
-            && IsSafeColor(roles.Surface)
-            && IsSafeColor(roles.RaisedSurface)
-            && IsSafeColor(roles.Text)
-            && IsSafeColor(roles.MutedText)
-            && IsSafeColor(roles.Border)
-            && IsSafeColor(roles.Accent)
-            && IsSafeColor(roles.AccentStrong)
-            && IsSafeColor(roles.Link)
-            && IsSafeColor(roles.VisitedLink)
-            && IsSafeColor(roles.Danger)
-            && IsSafeColor(roles.Focus);
-    }
-
-    private static bool IsSafeColor(string? value)
-    {
-        return value is not null
-            && value.Length == 7
-            && value[0] == '#'
-            && value.Skip(1).All(IsAsciiHexDigit);
-    }
-
-    private static bool IsAsciiHexDigit(char value) =>
-        value is >= '0' and <= '9'
-            or >= 'A' and <= 'F'
-            or >= 'a' and <= 'f';
-
     private static string GetModeText(AppSurfaceThemeMode mode) =>
         mode switch
         {
@@ -255,7 +227,4 @@ public static partial class AppSurfaceThemeDocumentSerializer
             AppSurfaceThemeMode.Dark => "dark",
             _ => throw new ArgumentOutOfRangeException(nameof(mode))
         };
-
-    [GeneratedRegex("<style data-as-theme-critical>", RegexOptions.CultureInvariant)]
-    private static partial Regex StyleOpenTagRegex();
 }

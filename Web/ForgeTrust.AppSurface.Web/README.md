@@ -65,7 +65,7 @@ Then import the TagHelpers and opt into the document root/head in the layout tha
 </head>
 ```
 
-The root helper emits `data-as-theme`, `data-as-theme-mode`, and a `color-scheme` declaration. The head helper emits `<meta name="color-scheme">` followed by a deterministic `data-as-theme-critical` stylesheet before external stylesheets. `System` emits light values and a dark `prefers-color-scheme` branch; `Light` and `Dark` emit only their selected branch. Neither helper emits scripts, page-hiding CSS, storage access, or a switcher.
+The root helper emits `data-as-theme`, `data-as-theme-mode`, a stable `data-as-theme-schema="1"` payload marker, and a `color-scheme` declaration. The head helper emits `<meta name="color-scheme">` followed by a deterministic `data-as-theme-critical` stylesheet before external stylesheets. `System` emits light values and a dark `prefers-color-scheme` branch; `Light` and `Dark` emit only their selected branch. Exactly one head payload is emitted per MVC request even if a layout or partial repeats the helper. Neither helper emits scripts, page-hiding CSS, storage access, or a switcher.
 
 The optional `nonce` attribute is copied only to the live inline critical style:
 

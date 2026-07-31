@@ -962,7 +962,8 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
     /// <c>docsVersionsUrl</c> client field is removed because version archive navigation is rendered server-side. When
     /// <paramref name="mountRootPath" /> and <paramref name="routeRootPath" /> are both the default <c>/docs</c>,
     /// rewrites only occur if <paramref name="requestPathBase" /> is non-empty so sub-path-hosted apps still emit
-    /// <c>/some-base/docs/...</c> links.
+    /// <c>/some-base/docs/...</c> links. Request-scoped CSP nonces are always removed from the generated AppSurface and
+    /// Docs critical-theme styles, because published output must remain a deterministic, reusable artifact.
     /// </remarks>
     internal static string RewriteHtml(
         string html,
@@ -980,16 +981,22 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
         canonicalRootPath = string.IsNullOrWhiteSpace(canonicalRootPath) ? mountRootPath : canonicalRootPath;
         var normalizedPublicOrigin = DocsUrlBuilder.NormalizePublicOriginOrNull(publicOrigin);
 
-        if (string.Equals(mountRootPath, DocsUrlBuilder.DocsEntryPath, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(routeRootPath, DocsUrlBuilder.DocsEntryPath, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(canonicalRootPath, mountRootPath, StringComparison.OrdinalIgnoreCase)
-            && !HasNonEmptyPathBase(requestPathBase)
-            && normalizedPublicOrigin is null)
+        var requiresMountRewrite = !string.Equals(mountRootPath, DocsUrlBuilder.DocsEntryPath, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(routeRootPath, DocsUrlBuilder.DocsEntryPath, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(canonicalRootPath, mountRootPath, StringComparison.OrdinalIgnoreCase)
+            || HasNonEmptyPathBase(requestPathBase)
+            || normalizedPublicOrigin is not null;
+        if (!requiresMountRewrite && !HasThemeStyleNonce(html))
         {
             return html;
         }
 
         var document = HtmlParser.ParseDocument(html);
+        foreach (var style in document.QuerySelectorAll("style[data-as-theme-critical][nonce], style[data-docs-theme-critical][nonce]"))
+        {
+            style.RemoveAttribute("nonce");
+        }
+
         foreach (var element in document.QuerySelectorAll("[href]"))
         {
             RewriteAttributeValue(
@@ -1056,6 +1063,14 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
         return html.TrimStart().StartsWith("<!DOCTYPE", StringComparison.OrdinalIgnoreCase)
             ? "<!DOCTYPE html>" + Environment.NewLine + serializedHtml
             : serializedHtml;
+    }
+
+    private static bool HasThemeStyleNonce(string html)
+    {
+        return html.Contains("data-as-theme-critical", StringComparison.Ordinal)
+               && html.Contains("nonce", StringComparison.Ordinal)
+               || html.Contains("data-docs-theme-critical", StringComparison.Ordinal)
+               && html.Contains("nonce", StringComparison.Ordinal);
     }
 
     /// <summary>
