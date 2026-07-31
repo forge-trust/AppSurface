@@ -331,18 +331,18 @@ packages:
   - project: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj
     classification: public
     publish_decision: do_not_publish
-    publish_reason: PostgreSQL Work provider held until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, and coordinated operational conformance.
-    readiness_note: Slice 3 is source-only infrastructure conformance with no hosted worker or production activation.
+    publish_reason: PostgreSQL Work and Flow source provider remains held until slices 5-6 prove Schedule, hosted runtime, drain/recovery, and coordinated operational conformance.
+    readiness_note: Slices 3-4 supply manually driven Work and crash-resumable Flow conformance with no hosted worker or production activation.
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/unreleased.md
     order: 48
-    use_when: Evaluate PostgreSQL-backed atomic Work acceptance and manually driven process-loss recovery from source without installing a hosted runtime.
-    includes: Explicit ordered schema management, StoreId and runtime-epoch fencing, caller-owned transaction acceptance, short-transaction Work client, scoped dispatch, leases, effect permits, retries, cancellation, terminal facts, and real PostgreSQL conformance proof.
-    does_not_include: Flow persistence, schedule execution, hosted polling, automatic startup DDL, health/drain hosting, endpoints, telemetry implementation, exactly-once external effects, destructive down migrations, or production support.
+    use_when: Evaluate PostgreSQL-backed atomic Work acceptance and manually driven crash-resumable Flow persistence from source without installing a hosted runtime.
+    includes: Explicit ordered schema management, StoreId and runtime-epoch fencing, caller-owned Work acceptance, short-transaction Work and Flow clients, payload-free dispatch, Flow waits/timers/activity projection, leases, effect permits, cancellation, terminal facts, and real PostgreSQL conformance proof.
+    does_not_include: Schedule execution, hosted polling, automatic startup DDL, health/drain hosting, endpoints, telemetry implementation, exactly-once external effects, destructive down migrations, or production support.
     start_here_path: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
-    recipe_summary: Evaluate the held PostgreSQL source provider only when one database must atomically own domain mutation and durable Work acceptance; slice 3 starts no worker.
+    recipe_summary: Evaluate the held PostgreSQL source provider when one database must atomically own Work and explicit one-transition Flow state; slices 3-4 start no worker.
     depends_on:
       - ForgeTrust.AppSurface.Durable
       - ForgeTrust.AppSurface.Durable.Provider
@@ -359,6 +359,16 @@ packages:
     release_notes_path: releases/unreleased.md
     order: 48
     note: Internal executable test helper; it is not a hosted runtime, production worker, or package adoption surface.
+  - project: Durable/compatibility/V2WorkHarness/V2WorkHarness.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    publish_reason: Tiny strict-CI consumer compiled only against packages rebuilt from the pinned slice-3 commit.
+    product_family: internal_support
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 48
+    note: Internal mixed-version compatibility harness; it is not a package, hosted runtime, or adoption surface.
   - project: Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj
     classification: public
     publish_decision: publish

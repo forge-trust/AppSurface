@@ -406,18 +406,23 @@ public sealed class CoverageRunWatchdogTests
     {
         using var output = TestDirectory.Create();
         using var console = new FakeInMemoryConsole();
+        var timeProvider = new FreezableTimeProvider();
+        var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var supervisor = new CoverageRunWatchdogSupervisor(
             CoverageRunWatchdogMode.Fail,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(10),
             console,
-            TimeProvider.System,
-            CancellationToken.None);
+            timeProvider,
+            CancellationToken.None,
+            processCleanupStarted: cleanupStarted.SetResult);
         supervisor.BindOutputDirectory(output.Path);
         using var operation = supervisor.Start("project", "tests/LateProcess.Tests/LateProcess.Tests.csproj");
         var lease = operation.ReserveProcess();
+        timeProvider.Release();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => Task.Delay(TimeSpan.FromSeconds(2), supervisor.CancellationToken));
+        await cleanupStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.False(File.Exists(Path.Join(output.Path, "coverage-watchdog.json")));
 
         using var process = Process.Start(CreateLongRunningProcess())!;
@@ -436,18 +441,23 @@ public sealed class CoverageRunWatchdogTests
     {
         using var output = TestDirectory.Create();
         using var console = new FakeInMemoryConsole();
+        var timeProvider = new FreezableTimeProvider();
+        var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var supervisor = new CoverageRunWatchdogSupervisor(
             CoverageRunWatchdogMode.Fail,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(10),
             console,
-            TimeProvider.System,
-            CancellationToken.None);
+            timeProvider,
+            CancellationToken.None,
+            processCleanupStarted: cleanupStarted.SetResult);
         supervisor.BindOutputDirectory(output.Path);
         using var operation = supervisor.Start("project", "tests/NoProcess.Tests/NoProcess.Tests.csproj");
         var lease = operation.ReserveProcess();
+        timeProvider.Release();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => Task.Delay(TimeSpan.FromSeconds(2), supervisor.CancellationToken));
+        await cleanupStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         Assert.False(File.Exists(Path.Join(output.Path, "coverage-watchdog.json")));
         lease.Complete();
