@@ -696,8 +696,30 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
 
     private static bool IsPatternOutputEntry(string name, bool isDirectory)
         => !isDirectory
-            && (name.StartsWith("junit-", StringComparison.Ordinal) || name.StartsWith("test-results-", StringComparison.Ordinal))
-            && name.EndsWith(".xml", StringComparison.Ordinal);
+            && ((name.StartsWith("junit-", StringComparison.Ordinal) || name.StartsWith("test-results-", StringComparison.Ordinal))
+                && name.EndsWith(".xml", StringComparison.Ordinal)
+                || IsSlowTestDiagnosticsTemporaryEntry(name));
+
+    private static bool IsSlowTestDiagnosticsTemporaryEntry(string name)
+        => IsSlowTestDiagnosticsTemporaryEntry(name, CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName)
+            || IsSlowTestDiagnosticsTemporaryEntry(name, CoverageRunSlowTestDiagnosticsWriter.JsonFileName);
+
+    private static bool IsSlowTestDiagnosticsTemporaryEntry(string name, string artifactName)
+    {
+        var prefix = $".{artifactName}.";
+        var suffix = name.EndsWith(".tmp", StringComparison.Ordinal)
+            ? ".tmp"
+            : name.EndsWith(".backup", StringComparison.Ordinal)
+                ? ".backup"
+                : null;
+        if (suffix is null || !name.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var identifier = name[prefix.Length..^suffix.Length];
+        return Guid.TryParseExact(identifier, "N", out _);
+    }
 
     private static SafeFileHandle? OpenAt(
         SafeFileHandle parent,

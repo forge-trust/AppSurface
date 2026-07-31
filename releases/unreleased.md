@@ -4,6 +4,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
+- [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog) now records monotonic per-operation progress, emits 30-second heartbeats by default, and warns after 10 minutes without observable progress. `--watchdog fail` additionally performs bounded whole-process-tree cleanup, writes privacy-minimized incident evidence when possible, and exits `124` with `ASCOV121`.
 - `appsurface secrets transfer plan|apply` now plans and applies declared LocalSecrets and Google Secret Manager
   promotion jobs against existing Google secrets only. Plans bind configuration digest, expiry, and destination
   preconditions; `--apply` is required for mutation, production jobs require explicit confirmation, and all text/JSON
@@ -61,6 +62,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## Migration watch
 
+- Existing silent coverage runs can retain that behavior with `--heartbeat-interval 0 --watchdog off`; use `--no-progress-timeout` to tune intentionally quiet suites without disabling watchdog classification.
 - Existing `appsurface coverage run` consumers that reference `coverlet.msbuild` must replace it with
   `coverlet.collector`, or explicitly pass `--coverage-driver msbuild` while completing the migration. The command never
   silently falls back between drivers.
