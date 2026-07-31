@@ -14,14 +14,12 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Narrative release note: [Upcoming release note](./releases/unreleased.md)
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
-- [`ForgeTrust.AppSurface.Docs`](./Web/ForgeTrust.AppSurface.Docs/README.md) search results now render safe Markdown emphasis and inline code without exposing raw Markdown markers. The additive `summaryPresentation` field preserves schema-v1 summaries, search ranking, and legacy-client fallback behavior.
-- [`appsurface coverage run`](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection) now defaults to the reliable VSTest `coverlet.collector` driver, validates runner and package compatibility before changing outputs, isolates and atomically normalizes collector artifacts, and retains `--coverage-driver msbuild` only as an explicit compatibility path with a reliability warning.
-- [`appsurface coverage run`](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog) now provides per-operation heartbeats and a no-progress watchdog. The default warns after 10 minutes without observable progress; `--watchdog fail` performs bounded whole-process-tree cleanup and exits `124` with `ASCOV121`.
-- `appsurface secrets transfer plan|apply` adds declared, value-safe LocalSecrets and Google promotion jobs. Plans bind exact endpoint mappings, configuration digest, expiry, and destination preconditions; Google destinations write the first enabled version when none exists, while `--replace` permits adding another enabled version to an existing Google secret.
-- [`ForgeTrust.AppSurface.Web` named canaries](./Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints) now return an additive bounded evidence envelope with required `name`, `ready`, and `status`, optional typed and predeclared detail fields, marker fingerprint correlation, and fixed privacy-bounded completion telemetry. Existing status-only evaluator construction remains source-compatible; polling, retries, triggers, aggregation, and readiness coupling remain outside this preview primitive.
-- [`ForgeTrust.AppSurface.Web` health and readiness probes](./Web/ForgeTrust.AppSurface.Web/README.md#health-and-readiness-probes) now default off, avoiding health-check service registration and `/health` plus `/ready` endpoint mapping unless a host explicitly sets `WebOptions.Health.Enabled = true`; enabled probes also avoid general route-handler binding during startup, and existing probe consumers must opt in during upgrade.
-- [`ForgeTrust.RazorWire`](./Web/ForgeTrust.RazorWire/README.md#choose-who-supplies-turbo) now emits its exact Turbo 8.0.23 UMD runtime from the package and same application origin by default. Apps can instead select a validated same-origin custom path or explicitly take full host-managed ownership of Turbo sourcing and load order. The 8.0.12-to-8.0.23 update preserves RazorWire APIs and runtime-source policy while adding risk-mapped Drive, Frame, Stream, form, island, and Behavior Kit compatibility evidence.
-- [`ForgeTrust.RazorWire` Form Interactions](./Web/ForgeTrust.RazorWire/Docs/form-interactions.md) now resets duplicated mark-for-removal fields to their authored inactive value instead of submitting an empty Boolean value that ASP.NET Core rejects during combined duplicate, add, and delete edits.
+
+## 0.2.0-preview.5 - 2026-07-31
+
+- Narrative release note: [v0.2.0-preview.5](./releases/v0.2.0-preview.5.md)
+- Release manifest: `releases/v0.2.0-preview.5.release.json`
+- Release evidence bundle: `releases/v0.2.0-preview.5.evidence.json`
 
 ## 0.2.0-preview.4 - 2026-07-18
 
