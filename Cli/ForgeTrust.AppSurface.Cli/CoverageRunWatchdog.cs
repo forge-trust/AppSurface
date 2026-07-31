@@ -468,6 +468,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     private readonly Action? _artifactResourcesDisposed;
     private readonly Action<string> _bootstrapDirectoryDelete;
     private readonly Action<string> _stagedArtifactDelete;
+    private readonly Action? _processCleanupStarted;
     private readonly List<OperationState> _operations = [];
     private readonly HashSet<CoverageRunProcessLease> _processLeases = [];
     private readonly TaskCompletionSource _terminalCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -499,6 +500,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     /// <param name="artifactResourcesDisposed">Optional test seam invoked after deferred artifact resources are released.</param>
     /// <param name="bootstrapDirectoryDelete">Optional test seam used to delete the private bootstrap artifact directory during disposal.</param>
     /// <param name="stagedArtifactDelete">Optional test seam used to delete a failed artifact staging file.</param>
+    /// <param name="processCleanupStarted">Optional test seam invoked after terminal cleanup captures its process-lease snapshot.</param>
     public CoverageRunWatchdogSupervisor(
         CoverageRunWatchdogMode mode,
         TimeSpan heartbeatInterval,
@@ -512,7 +514,8 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         Action? artifactIncidentQueued = null,
         Action? artifactResourcesDisposed = null,
         Action<string>? bootstrapDirectoryDelete = null,
-        Action<string>? stagedArtifactDelete = null)
+        Action<string>? stagedArtifactDelete = null,
+        Action? processCleanupStarted = null)
     {
         _mode = mode;
         _heartbeatInterval = heartbeatInterval;
@@ -526,6 +529,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         _artifactResourcesDisposed = artifactResourcesDisposed;
         _bootstrapDirectoryDelete = bootstrapDirectoryDelete ?? (static path => Directory.Delete(path, recursive: true));
         _stagedArtifactDelete = stagedArtifactDelete ?? File.Delete;
+        _processCleanupStarted = processCleanupStarted;
         _runStarted = timeProvider.GetTimestamp();
         _bootstrapDirectory = Directory.CreateTempSubdirectory("appsurface-coverage-watchdog-").FullName;
         _linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(externalCancellation, _watchdogCancellation.Token);
@@ -947,6 +951,8 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         {
             leases = _processLeases.ToArray();
         }
+
+        _processCleanupStarted?.Invoke();
 
         try
         {
