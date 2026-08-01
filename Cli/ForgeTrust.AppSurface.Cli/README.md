@@ -111,7 +111,7 @@ The command accepts only an application base URL, preserves any base path when i
 | 6 | `ASCAN406` | Caller-owned total deadline expired. | Increase `--timeout` only when the proof workflow genuinely needs longer. |
 | 130 | `ASCAN408` | Caller cancelled polling. | Rerun when the deployment operation should continue. |
 
-The default total timeout is `5m`, the default cadence is `5s`, and the default maximum consecutive recoverable transport failures is `3`. A valid `Retry-After` response is an advisory lower bound on the next wait; the CLI still owns scheduling and never sleeps beyond its total deadline. `--github-summary` writes an escaped, bounded step summary when `$GITHUB_STEP_SUMMARY` exists; `--no-github-summary` suppresses it. A summary write warning (`ASCAN407`) never changes the already-decided exit code.
+The default total timeout is `5m`, the default cadence is `5s`, and the default maximum consecutive recoverable transport failures is `3`. Any `--timeout` and `--interval` pair is capped at `300` scheduled attempts, preventing an accidental high-frequency poll from overwhelming the protected endpoint. A valid `Retry-After` response is an advisory lower bound on the next wait; the CLI still owns scheduling and never sleeps beyond its total deadline. Bearer and identity values are limited to 16 KiB; each custom header value is limited to 4 KiB and all custom header values together to 16 KiB. `--github-summary` writes an escaped, bounded step summary when `$GITHUB_STEP_SUMMARY` exists; `--no-github-summary` suppresses it. A summary write warning (`ASCAN407`) never changes the already-decided exit code.
 
 For GitHub Actions, pass values through `env:` and let the exit code gate the job:
 

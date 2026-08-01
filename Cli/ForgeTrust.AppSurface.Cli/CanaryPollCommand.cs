@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using CliFx;
 using CliFx.Binding;
 using CliFx.Infrastructure;
+using ForgeTrust.AppSurface.Web;
 
 namespace ForgeTrust.AppSurface.Cli;
 
@@ -56,11 +57,11 @@ internal sealed partial class CanaryPollCommand : ICommand
     public string[] HeaderEnvironmentVariables { get; set; } = [];
 
     /// <summary>Gets the total polling deadline.</summary>
-    [CommandOption("timeout", Description = "Total polling deadline. Supports a positive number followed by ms, s, m, or h. Default: 5m.")]
+    [CommandOption("timeout", Description = "Total polling deadline. Supports a positive number followed by ms, s, m, or h. The timeout/interval pair supports at most 300 attempts. Default: 5m.")]
     public string Timeout { get; set; } = "5m";
 
     /// <summary>Gets the interval between scheduled polls.</summary>
-    [CommandOption("interval", Description = "Polling interval. Supports a positive number followed by ms, s, m, or h. Default: 5s.")]
+    [CommandOption("interval", Description = "Polling interval. Supports a positive number followed by ms, s, m, or h. The timeout/interval pair supports at most 300 attempts. Default: 5s.")]
     public string Interval { get; set; } = "5s";
 
     /// <summary>Gets the maximum consecutive recoverable transport failures.</summary>
@@ -109,10 +110,6 @@ internal sealed partial class CanaryPollCommand : ICommand
             catch (CanaryPollInputException exception)
             {
                 result = CanaryPollResult.Invalid(exception.DiagnosticCode, exception.SafeMessage);
-            }
-            catch (OperationCanceledException)
-            {
-                result = CanaryPollResult.Cancelled();
             }
         }
 
@@ -211,11 +208,15 @@ internal sealed class CanaryPollWorkflow
                 continue;
             }
 
-            if (IsAlwaysProtocolFailure(response.StatusCode)
-                || response.Truncated
+            if (IsAlwaysProtocolFailure(response.StatusCode))
+            {
+                return CanaryPollResult.ProtocolFailure(attempts, _timeProvider.GetElapsedTime(startedAt));
+            }
+
+            if (response.Truncated
                 || !string.Equals(response.ContentType, "application/json", StringComparison.OrdinalIgnoreCase))
             {
-                if (IsRecoverableStatusCode(response.StatusCode) && !IsAlwaysProtocolFailure(response.StatusCode))
+                if (IsRecoverableStatusCode(response.StatusCode))
                 {
                     consecutiveTransientFailures++;
                     var recovered = await RetryAfterRecoverableFailureAsync(
@@ -262,6 +263,24 @@ internal sealed class CanaryPollWorkflow
                 }
 
                 return CanaryPollResult.ProtocolFailure(attempts, _timeProvider.GetElapsedTime(startedAt));
+            }
+
+            if (envelope.Status == "pass" && IsRecoverableStatusCode(response.StatusCode))
+            {
+                consecutiveTransientFailures++;
+                var recovered = await RetryAfterRecoverableFailureAsync(
+                    request,
+                    response.RetryAfter,
+                    startedAt,
+                    attempts,
+                    consecutiveTransientFailures,
+                    cancellationToken);
+                if (recovered is not null)
+                {
+                    return recovered;
+                }
+
+                continue;
             }
 
             consecutiveTransientFailures = 0;
@@ -406,13 +425,13 @@ internal sealed class CanaryPollHttpClient(HttpClient httpClient) : ICanaryPollH
         using var message = new HttpRequestMessage(HttpMethod.Get, request.Endpoint);
         if (request.Marker is not null)
         {
-            message.Headers.TryAddWithoutValidation("X-AppSurface-Canary-Marker", request.Marker);
+            message.Headers.TryAddWithoutValidation(AppSurfaceCanaryHeaderNames.Marker, request.Marker);
         }
 
         if (request.FreshSince is { } freshSince)
         {
             message.Headers.TryAddWithoutValidation(
-                "X-AppSurface-Canary-Fresh-Since",
+                AppSurfaceCanaryHeaderNames.FreshSince,
                 freshSince.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
         }
 
@@ -454,6 +473,7 @@ internal sealed record CanaryPollRetryAfter(TimeSpan? Delta, DateTimeOffset? Dat
 /// <summary>Parses the required named-canary compatibility core.</summary>
 internal static class CanaryPollEnvelopeParser
 {
+    private const int MaximumReasonCodeCharacters = 64;
     private static readonly Regex ReasonCodePattern = new("^[a-z0-9]+(?:-[a-z0-9]+)*$", RegexOptions.CultureInvariant);
 
     /// <summary>Parses a bounded response and validates it against the requested canary name.</summary>
@@ -505,7 +525,9 @@ internal static class CanaryPollEnvelopeParser
                         break;
                     case "reasonCode" when property.Value.ValueKind == JsonValueKind.String:
                         var candidateReason = property.Value.GetString();
-                        if (candidateReason is not null && candidateReason.Length is >= 1 and <= 64 && ReasonCodePattern.IsMatch(candidateReason))
+                        if (candidateReason is not null
+                            && candidateReason.Length is >= 1 and <= MaximumReasonCodeCharacters
+                            && ReasonCodePattern.IsMatch(candidateReason))
                         {
                             reasonCode = candidateReason;
                         }
@@ -553,7 +575,18 @@ internal sealed class CanaryPollProtocolException : Exception;
 /// <summary>Normalizes safe command options and resolves environment-sourced values.</summary>
 internal static class CanaryPollRequestFactory
 {
-    private const double MaximumCancellableDurationMilliseconds = uint.MaxValue - 1d;
+    internal const string InputDiagnosticCode = "ASCAN401";
+    internal const string CredentialDiagnosticCode = "ASCAN402";
+
+    internal const double MaximumCancellableDurationMilliseconds = uint.MaxValue - 1d;
+    internal const int MaximumAuthenticationHeaderUtf8Bytes = 16 * 1024;
+    internal const int MaximumCanaryNameCharacters = 128;
+    internal const int MaximumCustomHeaders = 8;
+    internal const int MaximumCustomHeaderNameCharacters = 128;
+    internal const int MaximumCustomHeaderValueUtf8Bytes = 4 * 1024;
+    internal const int MaximumCustomHeadersUtf8Bytes = 16 * 1024;
+    internal const int MaximumMarkerOrSummaryUtf8Bytes = 256;
+    internal const int MaximumPollingAttempts = 300;
     private static readonly Regex NamePattern = new("^[a-z0-9]+(?:-[a-z0-9]+)*(?:\\.[a-z0-9]+(?:-[a-z0-9]+)*)*$", RegexOptions.CultureInvariant);
     private static readonly Regex EnvironmentNamePattern = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant);
     private static readonly Regex HeaderNamePattern = new("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$", RegexOptions.CultureInvariant);
@@ -566,8 +599,8 @@ internal static class CanaryPollRequestFactory
         "Content-Length",
         "Connection",
         "Transfer-Encoding",
-        "X-AppSurface-Canary-Marker",
-        "X-AppSurface-Canary-Fresh-Since",
+        AppSurfaceCanaryHeaderNames.Marker,
+        AppSurfaceCanaryHeaderNames.FreshSince,
     };
 
     /// <summary>Creates a fully normalized request before any HTTP connection is opened.</summary>
@@ -593,20 +626,25 @@ internal static class CanaryPollRequestFactory
             throw Invalid("--url must be an absolute HTTPS URL (or HTTP loopback URL) with no user-info, query, or fragment.");
         }
 
-        if (string.IsNullOrWhiteSpace(name) || name.Length > 128 || !NamePattern.IsMatch(name))
+        if (string.IsNullOrWhiteSpace(name) || name.Length > MaximumCanaryNameCharacters || !NamePattern.IsMatch(name))
         {
             throw Invalid("--name must be a 1-128 character lowercase dot-separated canary name with internal hyphens only.");
         }
 
         var timeout = ParseDuration(timeoutText, "--timeout");
         var interval = ParseDuration(intervalText, "--interval");
+        if (ExceedsMaximumPollingAttempts(timeout, interval))
+        {
+            throw Invalid($"The --timeout and --interval combination may schedule at most {MaximumPollingAttempts} attempts.");
+        }
+
         if (maxTransientFailures < 0)
         {
             throw Invalid("--max-transient-failures must be zero or greater.");
         }
 
         var marker = ResolveEnvironmentValue(markerEnvironmentVariable, "--marker-env", required: false);
-        if (marker is not null && (!IsWellFormedControlFree(marker) || GetUtf8ByteCount(marker) > 256))
+        if (marker is not null && (!IsWellFormedControlFree(marker) || GetUtf8ByteCount(marker) > MaximumMarkerOrSummaryUtf8Bytes))
         {
             throw Invalid("The marker environment value must be control-free, well-formed Unicode, and at most 256 UTF-8 bytes.");
         }
@@ -625,6 +663,8 @@ internal static class CanaryPollRequestFactory
 
         var bearer = ResolveEnvironmentValue(bearerTokenEnvironmentVariable, "--bearer-token-env", required: false);
         var identity = ResolveEnvironmentValue(identityTokenEnvironmentVariable, "--identity-token-env", required: false);
+        EnsureHeaderValueLimit(bearer, "--bearer-token-env", MaximumAuthenticationHeaderUtf8Bytes);
+        EnsureHeaderValueLimit(identity, "--identity-token-env", MaximumAuthenticationHeaderUtf8Bytes);
         var headers = ResolveHeaders(headerEnvironmentVariables ?? []);
         if (new[] { bearer, identity, headers.Count == 0 ? null : "custom" }.Count(value => value is not null) > 1)
         {
@@ -634,7 +674,7 @@ internal static class CanaryPollRequestFactory
         var path = baseUri.AbsolutePath.TrimEnd('/');
         var endpointBuilder = new UriBuilder(baseUri)
         {
-            Path = $"{path}/_appsurface/canaries/{Uri.EscapeDataString(name)}",
+            Path = $"{path}{AppSurfaceCanaryEndpointDefaults.RoutePattern.Replace("{name}", Uri.EscapeDataString(name), StringComparison.Ordinal)}",
             Query = string.Empty,
             Fragment = string.Empty,
         };
@@ -653,17 +693,18 @@ internal static class CanaryPollRequestFactory
     /// <summary>Returns whether a server summary is safe to expose in terminal evidence.</summary>
     public static bool IsSafeSummary(string? summary) => summary is not null
         && IsWellFormedControlFree(summary)
-        && GetUtf8ByteCount(summary) <= 256;
+        && GetUtf8ByteCount(summary) <= MaximumMarkerOrSummaryUtf8Bytes;
 
     private static List<CanaryPollHeader> ResolveHeaders(IReadOnlyList<string> sources)
     {
-        if (sources.Count > 8)
+        if (sources.Count > MaximumCustomHeaders)
         {
             throw Invalid("--header-env supports at most eight headers.");
         }
 
         var result = new List<CanaryPollHeader>(sources.Count);
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var totalValueBytes = 0;
         foreach (var source in sources)
         {
             var separator = source?.IndexOf('=') ?? -1;
@@ -674,7 +715,8 @@ internal static class CanaryPollRequestFactory
 
             var headerName = source[..separator];
             var environmentName = source[(separator + 1)..];
-            if (!HeaderNamePattern.IsMatch(headerName)
+            if (headerName.Length > MaximumCustomHeaderNameCharacters
+                || !HeaderNamePattern.IsMatch(headerName)
                 || ReservedHeaders.Contains(headerName)
                 || !names.Add(headerName))
             {
@@ -682,6 +724,14 @@ internal static class CanaryPollRequestFactory
             }
 
             var value = ResolveEnvironmentValue(environmentName, "--header-env", required: true)!;
+            var valueBytes = GetUtf8ByteCount(value);
+            if (valueBytes > MaximumCustomHeaderValueUtf8Bytes
+                || totalValueBytes + valueBytes > MaximumCustomHeadersUtf8Bytes)
+            {
+                throw Credential("--header-env resolved to an environment value that exceeds the supported header size.");
+            }
+
+            totalValueBytes += valueBytes;
             result.Add(new CanaryPollHeader(headerName, value));
         }
 
@@ -712,6 +762,58 @@ internal static class CanaryPollRequestFactory
         }
 
         return value;
+    }
+
+    private static void EnsureHeaderValueLimit(string? value, string option, int maximumUtf8Bytes)
+    {
+        if (value is not null && GetUtf8ByteCount(value) > maximumUtf8Bytes)
+        {
+            throw Credential($"{option} resolved to an environment value that exceeds the supported header size.");
+        }
+    }
+
+    internal static bool ExceedsMaximumPollingAttempts(TimeSpan timeout, TimeSpan interval) =>
+        Math.Ceiling(timeout.TotalMilliseconds / interval.TotalMilliseconds) > MaximumPollingAttempts;
+
+    internal static void ValidateCustomHeader(string name, string value)
+    {
+        if (name.Length > MaximumCustomHeaderNameCharacters
+            || !HeaderNamePattern.IsMatch(name)
+            || ReservedHeaders.Contains(name))
+        {
+            throw new ArgumentException("The custom header name is invalid or reserved.", nameof(name));
+        }
+
+        if (!IsWellFormedControlFree(value) || GetUtf8ByteCount(value) > MaximumCustomHeaderValueUtf8Bytes)
+        {
+            throw new ArgumentException("The custom header value is invalid or exceeds the supported size.", nameof(value));
+        }
+    }
+
+    internal static void ValidateCustomHeaders(IReadOnlyList<CanaryPollHeader> headers)
+    {
+        if (headers.Count > MaximumCustomHeaders)
+        {
+            throw new ArgumentOutOfRangeException(nameof(headers));
+        }
+
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var totalValueBytes = 0;
+        foreach (var header in headers)
+        {
+            ArgumentNullException.ThrowIfNull(header);
+            ValidateCustomHeader(header.Name, header.Value);
+            if (!names.Add(header.Name))
+            {
+                throw new ArgumentException("Custom header names must be unique.", nameof(headers));
+            }
+
+            totalValueBytes += GetUtf8ByteCount(header.Value);
+            if (totalValueBytes > MaximumCustomHeadersUtf8Bytes)
+            {
+                throw new ArgumentOutOfRangeException(nameof(headers));
+            }
+        }
     }
 
     private static TimeSpan ParseDuration(string? value, string option)
@@ -750,7 +852,7 @@ internal static class CanaryPollRequestFactory
         || string.Equals(uri.DnsSafeHost, "127.0.0.1", StringComparison.Ordinal)
         || string.Equals(uri.DnsSafeHost, "::1", StringComparison.Ordinal);
 
-    private static bool IsWellFormedControlFree(string value)
+    internal static bool IsWellFormedControlFree(string value)
     {
         if (value.Any(char.IsControl))
         {
@@ -768,11 +870,11 @@ internal static class CanaryPollRequestFactory
         }
     }
 
-    private static int GetUtf8ByteCount(string value) => StrictUtf8.GetByteCount(value);
+    internal static int GetUtf8ByteCount(string value) => StrictUtf8.GetByteCount(value);
 
-    private static CanaryPollInputException Invalid(string message) => new("ASCAN401", message);
+    private static CanaryPollInputException Invalid(string message) => new(InputDiagnosticCode, message);
 
-    private static CanaryPollInputException Credential(string message) => new("ASCAN402", message);
+    private static CanaryPollInputException Credential(string message) => new(CredentialDiagnosticCode, message);
 }
 
 /// <summary>Contains normalized request metadata and non-renderable environment-sourced values.</summary>
@@ -791,6 +893,54 @@ internal sealed class CanaryPollRequest
     {
         Endpoint = endpoint ?? throw new ArgumentNullException(nameof(endpoint));
         Name = name ?? throw new ArgumentNullException(nameof(name));
+        ArgumentNullException.ThrowIfNull(customHeaders);
+        if (timeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout));
+        }
+
+        if (interval <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(interval));
+        }
+
+        if (CanaryPollRequestFactory.ExceedsMaximumPollingAttempts(timeout, interval))
+        {
+            throw new ArgumentOutOfRangeException(nameof(interval), $"The timeout and interval combination may schedule at most {CanaryPollRequestFactory.MaximumPollingAttempts} attempts.");
+        }
+
+        if (maxTransientFailures < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxTransientFailures));
+        }
+
+        if (timeout.TotalMilliseconds > CanaryPollRequestFactory.MaximumCancellableDurationMilliseconds)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout));
+        }
+
+        if (string.IsNullOrWhiteSpace(name)
+            || name.Length > CanaryPollRequestFactory.MaximumCanaryNameCharacters)
+        {
+            throw new ArgumentException("The canary name is invalid.", nameof(name));
+        }
+
+        if (marker is not null
+            && (!CanaryPollRequestFactory.IsSafeSummary(marker)
+                || Encoding.UTF8.GetByteCount(marker) > CanaryPollRequestFactory.MaximumMarkerOrSummaryUtf8Bytes))
+        {
+            throw new ArgumentException("The marker is invalid or exceeds the supported size.", nameof(marker));
+        }
+
+        if (bearerToken is not null
+            && (!CanaryPollRequestFactory.IsWellFormedControlFree(bearerToken)
+                || CanaryPollRequestFactory.GetUtf8ByteCount(bearerToken) > CanaryPollRequestFactory.MaximumAuthenticationHeaderUtf8Bytes))
+        {
+            throw new ArgumentException("The bearer token is invalid or exceeds the supported size.", nameof(bearerToken));
+        }
+
+        CanaryPollRequestFactory.ValidateCustomHeaders(customHeaders);
+
         Marker = marker;
         FreshSince = freshSince;
         BearerToken = bearerToken;
@@ -826,6 +976,7 @@ internal sealed class CanaryPollHeader
     {
         Name = name ?? throw new ArgumentNullException(nameof(name));
         Value = value ?? throw new ArgumentNullException(nameof(value));
+        CanaryPollRequestFactory.ValidateCustomHeader(Name, Value);
     }
 
     public string Name { get; }
@@ -866,7 +1017,7 @@ internal sealed record CanaryPollResult(
         new("pass", 0, "", name, attempts, ToMilliseconds(elapsed), "Continue the deployment decision.", reasonCode, summary);
 
     public static CanaryPollResult Invalid(string diagnosticCode, string message) =>
-        new(diagnosticCode == "ASCAN402" ? "credential-source" : "invalid-input", 2, diagnosticCode, null, 0, 0, message);
+        new(diagnosticCode == CanaryPollRequestFactory.CredentialDiagnosticCode ? "credential-source" : "invalid-input", 2, diagnosticCode, null, 0, 0, message);
 
     public static CanaryPollResult SemanticFailure(string status, string name, int attempts, TimeSpan elapsed, string? reasonCode, string? summary) =>
         new(status, 3, "ASCAN403", name, attempts, ToMilliseconds(elapsed), NextActionForStatus(status), reasonCode, summary);

@@ -19,6 +19,8 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.Contains("ASCAN401", readme, StringComparison.Ordinal);
         Assert.Contains("ASCAN408", readme, StringComparison.Ordinal);
         Assert.Contains("must never be put directly on the command line", readme, StringComparison.Ordinal);
+        Assert.Contains("capped at `300` scheduled attempts", readme, StringComparison.Ordinal);
+        Assert.Contains("Bearer and identity values are limited to 16 KiB", readme, StringComparison.Ordinal);
         Assert.Contains("APPSURFACE_CANARY_TOKEN: ${{ secrets.DEPLOY_OPERATOR_TOKEN }}", readme, StringComparison.Ordinal);
         Assert.Contains("does not ship a composite Action or a deployment controller", readme, StringComparison.Ordinal);
     }

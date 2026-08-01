@@ -3811,6 +3811,82 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_FailsWhenCanaryHelpDoesNotDescribeBothEnvironmentOptions()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            canaryHelpOutput: "USAGE\nappsurface canary poll --marker-env <variable>");
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("environment-sourced marker and bearer-token options", report.FirstFailure, StringComparison.Ordinal);
+        Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface canary poll pass");
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_FailsWhenCanaryPassOutputIsNotSafePassJson()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            canaryPassOutput: "{\"outcome\":\"stale\"}");
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("safe pass outcome", report.FirstFailure, StringComparison.Ordinal);
+        Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface canary poll non-pass");
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_CanaryFixtureRequiresCredentialsAndReturnsPassThenStale()
+    {
+        await using var fixture = CoverageCliConsumerProofWorkflow.CanaryProofFixture.Start();
+        using var client = new HttpClient();
+
+        using var firstRequest = CreateCanaryFixtureRequest(fixture.BaseUrl);
+        using var firstResponse = await client.SendAsync(firstRequest);
+        var firstBody = await firstResponse.Content.ReadAsStringAsync();
+
+        using var secondRequest = CreateCanaryFixtureRequest(fixture.BaseUrl);
+        using var secondResponse = await client.SendAsync(secondRequest);
+        var secondBody = await secondResponse.Content.ReadAsStringAsync();
+
+        Assert.Equal(System.Net.HttpStatusCode.OK, firstResponse.StatusCode);
+        Assert.Contains("\"status\":\"pass\"", firstBody, StringComparison.Ordinal);
+        Assert.Equal(System.Net.HttpStatusCode.OK, secondResponse.StatusCode);
+        Assert.Contains("\"status\":\"stale\"", secondBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CoverageCliConsumerProofWorkflow_FailsWhenIntentionalGateDoesNotWriteReports()
     {
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
@@ -4286,6 +4362,59 @@ public sealed class PackageArtifactValidationTests : IDisposable
                             ToolCommandName: "")
                     ]),
                 PackageVersion));
+        var duplicateEntries = Assert.Throws<PackageIndexException>(
+            () => CoverageCliConsumerProofWorkflow.SelectCliToolPackage(
+                new PackageArtifactValidationReport(
+                    PackageVersion,
+                    [
+                        new PackageArtifactValidationReportEntry(
+                            "ForgeTrust.AppSurface.Cli",
+                            "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                            PackagePublishDecision.Publish,
+                            [],
+                            "missing-a.nupkg",
+                            IsTool: true,
+                            ToolCommandName: "appsurface"),
+                        new PackageArtifactValidationReportEntry(
+                            "ForgeTrust.AppSurface.Cli",
+                            "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                            PackagePublishDecision.Publish,
+                            [],
+                            "missing-b.nupkg",
+                            IsTool: true,
+                            ToolCommandName: "appsurface")
+                    ]),
+                PackageVersion));
+        var missingArtifactPath = Assert.Throws<PackageIndexException>(
+            () => CoverageCliConsumerProofWorkflow.SelectCliToolPackage(
+                new PackageArtifactValidationReport(
+                    PackageVersion,
+                    [
+                        new PackageArtifactValidationReportEntry(
+                            "ForgeTrust.AppSurface.Cli",
+                            "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                            PackagePublishDecision.Publish,
+                            [],
+                            string.Empty,
+                            IsTool: true,
+                            ToolCommandName: "appsurface")
+                    ]),
+                PackageVersion));
+        var missingArtifact = Assert.Throws<PackageIndexException>(
+            () => CoverageCliConsumerProofWorkflow.SelectCliToolPackage(
+                new PackageArtifactValidationReport(
+                    PackageVersion,
+                    [
+                        new PackageArtifactValidationReportEntry(
+                            "ForgeTrust.AppSurface.Cli",
+                            "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                            PackagePublishDecision.Publish,
+                            [],
+                            "missing.nupkg",
+                            IsTool: true,
+                            ToolCommandName: "appsurface")
+                    ]),
+                PackageVersion));
         var wrongVersionArtifactDirectory = CombineSafeChildPath(_repositoryRoot, "wrong-version");
         Directory.CreateDirectory(wrongVersionArtifactDirectory);
         var wrongVersionArtifactPath = CombineSafeChildPath(
@@ -4301,6 +4430,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains(".NET tool", nonTool.Message, StringComparison.Ordinal);
         Assert.Contains("tool command", wrongCommand.Message, StringComparison.Ordinal);
         Assert.Contains("tool command", missingCommand.Message, StringComparison.Ordinal);
+        Assert.Contains("multiple validated package rows", duplicateEntries.Message, StringComparison.Ordinal);
+        Assert.Contains("artifact path", missingArtifactPath.Message, StringComparison.Ordinal);
+        Assert.Contains("does not exist", missingArtifact.Message, StringComparison.Ordinal);
         Assert.Contains("does not match package version", wrongVersion.Message, StringComparison.Ordinal);
     }
 
@@ -6433,6 +6565,16 @@ public sealed class PackageArtifactValidationTests : IDisposable
         return fileName;
     }
 
+    private static HttpRequestMessage CreateCanaryFixtureRequest(string baseUrl)
+    {
+        var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{baseUrl}/_appsurface/canaries/package.consumer-proof");
+        request.Headers.Add("Authorization", "Bearer package-proof-token");
+        request.Headers.Add("X-AppSurface-Canary-Marker", "package-proof-marker");
+        return request;
+    }
+
     private static PackageArtifactValidationReport CreateCliProofValidationReport(string cliArtifactPath)
     {
         return new PackageArtifactValidationReport(
@@ -6694,6 +6836,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
         private readonly bool _intentionallyFailingGateExitsNonZero;
         private readonly bool _emitCoverageRunExclusionEvidence;
         private readonly bool _createExcludedProjectArtifacts;
+        private readonly string _canaryHelpOutput;
+        private readonly string _canaryPassOutput;
 
         public CoverageProofRecordingCommandRunner(
             string packageVersion,
@@ -6705,7 +6849,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
             string? failTimeoutDescriptionContains = null,
             bool intentionallyFailingGateExitsNonZero = true,
             bool emitCoverageRunExclusionEvidence = true,
-            bool createExcludedProjectArtifacts = false)
+            bool createExcludedProjectArtifacts = false,
+            string? canaryHelpOutput = null,
+            string? canaryPassOutput = null)
         {
             _packageVersion = packageVersion;
             _createFailingGateReports = createFailingGateReports;
@@ -6717,6 +6863,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
             _intentionallyFailingGateExitsNonZero = intentionallyFailingGateExitsNonZero;
             _emitCoverageRunExclusionEvidence = emitCoverageRunExclusionEvidence;
             _createExcludedProjectArtifacts = createExcludedProjectArtifacts;
+            _canaryHelpOutput = canaryHelpOutput ?? "USAGE\nappsurface canary poll --marker-env <variable> --bearer-token-env <variable>";
+            _canaryPassOutput = canaryPassOutput ?? "{\"outcome\":\"pass\"}";
         }
 
         public List<ExternalCommandRequest> Requests { get; } = [];
@@ -6742,13 +6890,13 @@ public sealed class PackageArtifactValidationTests : IDisposable
             {
                 return Task.FromResult(new ExternalCommandResult(
                     0,
-                    "USAGE\nappsurface canary poll --marker-env <variable> --bearer-token-env <variable>",
+                    _canaryHelpOutput,
                     string.Empty));
             }
 
             if (request.OperationName == "appsurface canary poll pass")
             {
-                return Task.FromResult(new ExternalCommandResult(0, "{\"outcome\":\"pass\"}", string.Empty));
+                return Task.FromResult(new ExternalCommandResult(0, _canaryPassOutput, string.Empty));
             }
 
             if (request.OperationName == "appsurface canary poll non-pass")

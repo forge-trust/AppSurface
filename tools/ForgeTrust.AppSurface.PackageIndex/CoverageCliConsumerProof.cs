@@ -1014,7 +1014,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         return "'" + value.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
     }
 
-    private sealed class CanaryProofFixture : IAsyncDisposable
+    internal sealed class CanaryProofFixture : IAsyncDisposable
     {
         private readonly TcpListener _listener;
         private readonly CancellationTokenSource _cancellation = new();
