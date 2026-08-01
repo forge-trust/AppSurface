@@ -232,9 +232,7 @@ public sealed class VerifierContractTests
 
         var result = await fixture.RunAndSignalAsync(signal);
 
-        Assert.True(
-            result.ExitCode == expectedExitCode,
-            $"Expected verifier exit code {expectedExitCode}, but received {result.ExitCode}.{Environment.NewLine}{result.CombinedOutput}");
+        AssertExpectedExitCode(result, expectedExitCode);
         fixture.AssertStageSummaryReason(expectedReason);
         fixture.AssertNoChildrenRemain();
         fixture.AssertFailureEvidenceIsSafe();
@@ -252,13 +250,49 @@ public sealed class VerifierContractTests
 
         var result = await fixture.RunAndSignalTwiceAsync(signal, TimeSpan.FromSeconds(12));
 
-        Assert.True(
-            result.ExitCode == expectedExitCode,
-            $"Expected verifier exit code {expectedExitCode}, but received {result.ExitCode}.{Environment.NewLine}{result.CombinedOutput}");
+        AssertExpectedExitCode(result, expectedExitCode);
         Assert.Contains("[stage=CLEANUP reason=TERM_ESCALATED_TO_KILL]", result.CombinedOutput, StringComparison.Ordinal);
         fixture.AssertStageSummaryReason(expectedReason);
         fixture.AssertNoChildrenRemain();
         fixture.AssertFailureEvidenceIsSafe();
+    }
+
+    [Fact]
+    public async Task RepeatedSignal_CleanupHandlerTimeout_ReapsTheVerifierAndChild()
+    {
+        await using var fixture = await VerifierFixture.CreateAsync("resistant-child");
+
+        await Assert.ThrowsAsync<TimeoutException>(
+            () => fixture.RunAndSignalTwiceWithSimulatedCleanupHandlerTimeoutAsync(
+                "TERM",
+                TimeSpan.FromSeconds(12),
+                TimeSpan.FromMilliseconds(100)));
+
+        fixture.AssertNoChildrenRemain();
+    }
+
+    public static IEnumerable<object[]> CleanupSignalHandlerStartedMarkerSplitPositions =>
+        Enumerable.Range(1, VerifierFixture.CleanupSignalHandlerStartedMarker.Length - 1)
+            .Select(static splitPosition => new object[] { splitPosition });
+
+    [Theory]
+    [MemberData(nameof(CleanupSignalHandlerStartedMarkerSplitPositions))]
+    public void CleanupSignalHandlerMarker_IsDetectedAcrossEveryReadBoundary(int splitPosition)
+    {
+        var marker = VerifierFixture.CleanupSignalHandlerStartedMarker;
+        var output = new System.Text.StringBuilder().Append(marker[..splitPosition]);
+        var outputLengthBeforeAppend = output.Length;
+
+        output.Append(marker[splitPosition..]);
+
+        Assert.True(VerifierFixture.ContainsCleanupSignalHandlerStartedMarker(output, outputLengthBeforeAppend));
+    }
+
+    private static void AssertExpectedExitCode(VerifierResult result, int expectedExitCode)
+    {
+        Assert.True(
+            result.ExitCode == expectedExitCode,
+            $"Expected verifier exit code {expectedExitCode}, but received {result.ExitCode}.{Environment.NewLine}{result.CombinedOutput}");
     }
 
     [Fact]
@@ -304,6 +338,7 @@ public sealed class VerifierContractTests
 
     private sealed class VerifierFixture : IAsyncDisposable
     {
+        internal const string CleanupSignalHandlerStartedMarker = "[stage=CLEANUP] Received ";
         private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(10);
 
         private VerifierFixture(string root, string mode)
@@ -395,14 +430,34 @@ public sealed class VerifierContractTests
             return RunCoreAsync(port: null, timeout: "30", signal, processTimeout ?? DefaultTimeout);
         }
 
-        internal async Task<VerifierResult> RunAndSignalTwiceAsync(string signal, TimeSpan processTimeout)
+        internal Task<VerifierResult> RunAndSignalTwiceAsync(string signal, TimeSpan processTimeout)
         {
-            return await RunCoreAsync(
+            return RunAndSignalTwiceCore(signal, processTimeout, cleanupSignalHandlerTimeout: null, secondSignalReadinessOverride: null);
+        }
+
+        internal Task<VerifierResult> RunAndSignalTwiceWithSimulatedCleanupHandlerTimeoutAsync(
+            string signal,
+            TimeSpan processTimeout,
+            TimeSpan cleanupSignalHandlerTimeout)
+        {
+            var neverReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            return RunAndSignalTwiceCore(signal, processTimeout, cleanupSignalHandlerTimeout, neverReady.Task);
+        }
+
+        private Task<VerifierResult> RunAndSignalTwiceCore(
+            string signal,
+            TimeSpan processTimeout,
+            TimeSpan? cleanupSignalHandlerTimeout,
+            Task? secondSignalReadinessOverride)
+        {
+            return RunCoreAsync(
                 port: null,
                 timeout: "30",
                 signal: signal,
                 processTimeout: processTimeout,
-                sendSecondSignal: true);
+                sendSecondSignal: true,
+                cleanupSignalHandlerTimeout: cleanupSignalHandlerTimeout,
+                secondSignalReadinessOverride: secondSignalReadinessOverride);
         }
 
         internal string ReadEvents()
@@ -504,7 +559,9 @@ public sealed class VerifierContractTests
             string? timeout,
             string? signal,
             TimeSpan processTimeout,
-            bool sendSecondSignal = false)
+            bool sendSecondSignal = false,
+            TimeSpan? cleanupSignalHandlerTimeout = null,
+            Task? secondSignalReadinessOverride = null)
         {
             var startInfo = new ProcessStartInfo
             {
@@ -535,32 +592,42 @@ public sealed class VerifierContractTests
             var standardOutput = process.StandardOutput.ReadToEndAsync();
             var standardError = ReadStandardErrorAsync(process.StandardError, cleanupSignalHandlerStarted);
 
-            if (signal is not null)
-            {
-                await WaitForChildLaunchAsync(processTimeout);
-                await SendSignalAsync(process.Id, signal);
-                if (sendSecondSignal)
-                {
-                    await cleanupSignalHandlerStarted!.Task.WaitAsync(processTimeout);
-                    await SendSignalAsync(process.Id, signal, requireSuccess: false);
-                }
-            }
-
-            using var cancellation = new CancellationTokenSource(processTimeout);
             try
             {
-                await process.WaitForExitAsync(cancellation.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                process.Kill(entireProcessTree: true);
-                throw new TimeoutException($"Verifier fixture '{Mode}' exceeded {processTimeout}.");
-            }
+                if (signal is not null)
+                {
+                    await WaitForChildLaunchAsync(processTimeout);
+                    await SendSignalAsync(process.Id, signal);
+                    if (sendSecondSignal)
+                    {
+                        await (secondSignalReadinessOverride ?? cleanupSignalHandlerStarted!.Task)
+                            .WaitAsync(cleanupSignalHandlerTimeout ?? processTimeout);
+                        await SendSignalAsync(process.Id, signal, requireSuccess: false);
+                    }
+                }
 
-            return new VerifierResult(
-                process.ExitCode,
-                await standardOutput,
-                await standardError);
+                using var cancellation = new CancellationTokenSource(processTimeout);
+                try
+                {
+                    await process.WaitForExitAsync(cancellation.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw new TimeoutException($"Verifier fixture '{Mode}' exceeded {processTimeout}.");
+                }
+
+                return new VerifierResult(
+                    process.ExitCode,
+                    await standardOutput,
+                    await standardError);
+            }
+            catch
+            {
+                var cleanupDeadline = DateTime.UtcNow + processTimeout;
+                await TerminateProcessTreeAsync(process, cleanupDeadline);
+                await DrainOutputAsync(standardOutput, standardError, cleanupDeadline);
+                throw;
+            }
         }
 
         private static async Task<string> ReadStandardErrorAsync(
@@ -578,14 +645,69 @@ public sealed class VerifierContractTests
                     return output.ToString();
                 }
 
+                var outputLengthBeforeAppend = output.Length;
                 output.Append(buffer, 0, count);
                 if (waitingForCleanupSignalHandler
-                    && output.ToString().Contains("[stage=CLEANUP] Received ", StringComparison.Ordinal))
+                    && ContainsCleanupSignalHandlerStartedMarker(output, outputLengthBeforeAppend))
                 {
                     cleanupSignalHandlerStarted!.TrySetResult();
                     waitingForCleanupSignalHandler = false;
                 }
             }
+        }
+
+        internal static bool ContainsCleanupSignalHandlerStartedMarker(
+            System.Text.StringBuilder output,
+            int outputLengthBeforeAppend)
+        {
+            var searchStart = Math.Max(0, outputLengthBeforeAppend - CleanupSignalHandlerStartedMarker.Length + 1);
+            return output
+                .ToString(searchStart, output.Length - searchStart)
+                .Contains(CleanupSignalHandlerStartedMarker, StringComparison.Ordinal);
+        }
+
+        private static async Task TerminateProcessTreeAsync(Process process, DateTime cleanupDeadline)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // The process exited after HasExited was checked.
+            }
+
+            using var cancellation = new CancellationTokenSource(GetRemainingCleanupTime(cleanupDeadline));
+            try
+            {
+                await process.WaitForExitAsync(cancellation.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Preserve the exception that triggered cleanup.
+            }
+        }
+
+        private static async Task DrainOutputAsync(Task<string> standardOutput, Task<string> standardError, DateTime cleanupDeadline)
+        {
+            using var cancellation = new CancellationTokenSource(GetRemainingCleanupTime(cleanupDeadline));
+            try
+            {
+                await Task.WhenAll(standardOutput, standardError).WaitAsync(cancellation.Token);
+            }
+            catch
+            {
+                // Preserve the exception that triggered cleanup.
+            }
+        }
+
+        private static TimeSpan GetRemainingCleanupTime(DateTime cleanupDeadline)
+        {
+            var remaining = cleanupDeadline - DateTime.UtcNow;
+            return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
         }
 
         private async Task WaitForChildLaunchAsync(TimeSpan timeout)
