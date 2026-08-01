@@ -60,7 +60,7 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
             page,
             "/docs/packages",
             "Which AppSurface package should I install first?",
-            "AppSurface v0.1 package chooser",
+            "AppSurface package chooser",
             "GUIDE");
         await AssertFeaturedCardAsync(
             page,
@@ -129,6 +129,11 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
             "() => /^Release \\d/.test(document.querySelector('h1')?.textContent?.trim() ?? '')",
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
+        Assert.Contains("Tagged", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/releases/v0.2.0-preview.5");
+        await WaitForPathAsync(page, "/docs/releases/v0.2.0-preview.5");
+        Assert.Equal("Release 0.2.0-preview.5", (await page.TextContentAsync("h1"))?.Trim());
         Assert.Contains("Tagged", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
 
         await page.GotoAsync($"{_fixture.DocsUrl}/releases/v0.1-preview");

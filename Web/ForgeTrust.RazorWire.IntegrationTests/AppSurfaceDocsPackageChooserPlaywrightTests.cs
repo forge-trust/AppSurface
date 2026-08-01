@@ -8,6 +8,7 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
 {
     private const string PackageChooserCurrentReleasePath = "/docs/releases/current";
     private const string PackageChooserCurrentReleaseHeading = "Current coordinated release";
+    private const string PackageChooserHeading = "AppSurface package chooser";
     private const string WebPackageQuickstartPath = "/docs/start-here/first-success-path#package-first-path";
 
     private readonly AppSurfaceDocsPlaywrightFixture _fixture;
@@ -25,7 +26,7 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
 
         await page.GotoAsync($"{_fixture.DocsUrl}/packages");
         await page.WaitForFunctionAsync(
-            "() => document.querySelector('h1')?.textContent?.trim() === 'AppSurface v0.1 package chooser'",
+            $"() => document.querySelector('h1')?.textContent?.trim() === '{PackageChooserHeading}'",
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
         await page.WaitForSelectorAsync(".docs-trust-bar", new PageWaitForSelectorOptions
@@ -39,8 +40,8 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
             State = WaitForSelectorState.Visible
         });
 
-        Assert.Equal("AppSurface v0.1 package chooser", (await page.TextContentAsync("h1"))?.Trim());
-        Assert.Contains("v0.1 chooser", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(PackageChooserHeading, (await page.TextContentAsync("h1"))?.Trim());
+        Assert.Contains("Package chooser", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("dotnet package add ForgeTrust.AppSurface.Web", await page.InnerTextAsync(".docs-content"), StringComparison.Ordinal);
         Assert.Equal(
             WebPackageQuickstartPath,
@@ -115,7 +116,7 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
 
         await page.GotoAsync($"{_fixture.DocsUrl}/packages");
         await page.WaitForFunctionAsync(
-            "() => document.querySelector('h1')?.textContent?.trim() === 'AppSurface v0.1 package chooser'",
+            $"() => document.querySelector('h1')?.textContent?.trim() === '{PackageChooserHeading}'",
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
         await page.Locator(".docs-content a[href='/docs/releases/upgrade-policy']").First.ClickAsync();
@@ -147,7 +148,7 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
         Assert.Equal("/docs/releases", await page.GetAttributeAsync(".docs-content a[href='/docs/releases']", "href"));
 
         await page.Locator(".docs-content a[href='/docs/packages']").First.ClickAsync();
-        await WaitForPathAndHeadingAsync(page, "/docs/packages", "AppSurface v0.1 package chooser");
+        await WaitForPathAndHeadingAsync(page, "/docs/packages", PackageChooserHeading);
 
         await page.GotoAsync($"{_fixture.DocsUrl}/web/forgetrust.appsurface.web.openapi");
         await page.Locator(".docs-content a[href='/docs/releases']").First.ClickAsync();

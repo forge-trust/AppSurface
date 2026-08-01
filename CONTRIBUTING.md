@@ -1,6 +1,6 @@
 # Contributing to AppSurface
 
-AppSurface is putting its release contract in place before the first tagged version. This file explains the contribution rules that feed the public release surface.
+AppSurface maintains a coordinated release contract. This file explains the contribution rules that feed the public release surface.
 
 ## Feedback path
 

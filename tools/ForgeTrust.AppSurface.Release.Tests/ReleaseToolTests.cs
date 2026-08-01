@@ -4295,6 +4295,23 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Contains("- Release evidence bundle: `releases/v0.1.0-preview.1.evidence.json`", changelog, StringComparison.Ordinal);
         Assert.DoesNotContain("## No tagged releases yet", changelog, StringComparison.Ordinal);
 
+        var releaseNote = ReleaseNoteBuilder.Build(
+            version,
+            new DateOnly(2026, 5, 25),
+            "# Unreleased\n\nThis is the living release note for the next coordinated AppSurface version. It stays provisional until a tag is cut.\n");
+        Assert.Contains($"# Release {version}{Environment.NewLine}{Environment.NewLine}", releaseNote, StringComparison.Ordinal);
+
+        var packageIndex = PackageIndexEditor.UpdatePublicPublishedReleaseNotes(
+            """
+            packages:
+              - project: Core.csproj
+                classification: public
+                publish_decision: publish
+                order: 10
+            """,
+            "releases/v0.1.0-preview.1.md");
+        Assert.Contains("release_notes_path: releases/v0.1.0-preview.1.md", packageIndex, StringComparison.Ordinal);
+
         var appendedChangelog = ChangelogEditor.RollForward(
             "# Changelog\n",
             version,
@@ -4312,6 +4329,10 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.DoesNotContain("- Current work.", terminalUnreleasedChangelog, StringComparison.Ordinal);
         Assert.Contains("- Narrative release note: [Upcoming release note](./releases/unreleased.md)", terminalUnreleasedChangelog, StringComparison.Ordinal);
         Assert.Contains("## 0.1.0-preview.1 - 2026-05-25", terminalUnreleasedChangelog, StringComparison.Ordinal);
+        Assert.Contains(
+            $"- Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md){Environment.NewLine}{Environment.NewLine}## 0.1.0-preview.1 - 2026-05-25",
+            terminalUnreleasedChangelog,
+            StringComparison.Ordinal);
 
         var multiReleaseChangelog = ChangelogEditor.RollForward(
             "# Changelog\n\n## Unreleased\n\n## 0.0.1 - 2026-01-01\n\n- Previous work.\n",
