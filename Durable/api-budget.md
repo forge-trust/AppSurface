@@ -82,4 +82,3 @@ Slice 5 adds five public PostgreSQL schedule types:
 - `PostgreSqlDurableScheduleProcessRequest` specifies the lease owner and maximum schedules per pass.
 - `PostgreSqlDurableScheduleProcessResult` reports claimed schedules, recorded occurrences, materialized Work targets, and suspended schedules.
 - `PostgreSqlDurableScheduleProcessor` drives manual, bounded evaluation passes using separate dispatcher and runtime data sources.
-
