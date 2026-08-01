@@ -232,7 +232,9 @@ public sealed class VerifierContractTests
 
         var result = await fixture.RunAndSignalAsync(signal);
 
-        Assert.Equal(expectedExitCode, result.ExitCode);
+        Assert.True(
+            result.ExitCode == expectedExitCode,
+            $"Expected verifier exit code {expectedExitCode}, but received {result.ExitCode}.{Environment.NewLine}{result.CombinedOutput}");
         fixture.AssertStageSummaryReason(expectedReason);
         fixture.AssertNoChildrenRemain();
         fixture.AssertFailureEvidenceIsSafe();
@@ -250,7 +252,9 @@ public sealed class VerifierContractTests
 
         var result = await fixture.RunAndSignalTwiceAsync(signal, TimeSpan.FromSeconds(12));
 
-        Assert.Equal(expectedExitCode, result.ExitCode);
+        Assert.True(
+            result.ExitCode == expectedExitCode,
+            $"Expected verifier exit code {expectedExitCode}, but received {result.ExitCode}.{Environment.NewLine}{result.CombinedOutput}");
         Assert.Contains("[stage=CLEANUP reason=TERM_ESCALATED_TO_KILL]", result.CombinedOutput, StringComparison.Ordinal);
         fixture.AssertStageSummaryReason(expectedReason);
         fixture.AssertNoChildrenRemain();
@@ -525,8 +529,11 @@ public sealed class VerifierContractTests
 
             using var process = Process.Start(startInfo);
             Assert.NotNull(process);
+            var cleanupSignalHandlerStarted = sendSecondSignal
+                ? new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+                : null;
             var standardOutput = process.StandardOutput.ReadToEndAsync();
-            var standardError = process.StandardError.ReadToEndAsync();
+            var standardError = ReadStandardErrorAsync(process.StandardError, cleanupSignalHandlerStarted);
 
             if (signal is not null)
             {
@@ -534,7 +541,7 @@ public sealed class VerifierContractTests
                 await SendSignalAsync(process.Id, signal);
                 if (sendSecondSignal)
                 {
-                    await Task.Delay(100);
+                    await cleanupSignalHandlerStarted!.Task.WaitAsync(processTimeout);
                     await SendSignalAsync(process.Id, signal, requireSuccess: false);
                 }
             }
@@ -554,6 +561,31 @@ public sealed class VerifierContractTests
                 process.ExitCode,
                 await standardOutput,
                 await standardError);
+        }
+
+        private static async Task<string> ReadStandardErrorAsync(
+            StreamReader standardError,
+            TaskCompletionSource? cleanupSignalHandlerStarted)
+        {
+            var output = new System.Text.StringBuilder();
+            var buffer = new char[1024];
+            var waitingForCleanupSignalHandler = cleanupSignalHandlerStarted is not null;
+            while (true)
+            {
+                var count = await standardError.ReadAsync(buffer.AsMemory());
+                if (count == 0)
+                {
+                    return output.ToString();
+                }
+
+                output.Append(buffer, 0, count);
+                if (waitingForCleanupSignalHandler
+                    && output.ToString().Contains("[stage=CLEANUP] Received ", StringComparison.Ordinal))
+                {
+                    cleanupSignalHandlerStarted!.TrySetResult();
+                    waitingForCleanupSignalHandler = false;
+                }
+            }
         }
 
         private async Task WaitForChildLaunchAsync(TimeSpan timeout)
