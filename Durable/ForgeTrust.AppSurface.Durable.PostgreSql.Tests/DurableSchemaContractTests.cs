@@ -9,7 +9,7 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 public sealed class DurableSchemaContractTests
 {
     [Fact]
-    public void MigrationCatalog_IsExactlyThreeOrderedChecksummedResources()
+    public void MigrationCatalog_IsExactlyFourOrderedChecksummedResources()
     {
         var migrations = DurablePostgreSqlMigrationCatalog.Load();
 
@@ -65,6 +65,21 @@ public sealed class DurableSchemaContractTests
                     third.Sql,
                     StringComparison.Ordinal);
                 Assert.Contains("run Durable/configure-postgresql-roles.sql before granting SELECT", third.Sql, StringComparison.Ordinal);
+            },
+            fourth =>
+            {
+                Assert.Equal(4, fourth.Version);
+                Assert.Equal("schedule_protocol", fourth.Name);
+                Assert.Equal(64, fourth.Sha256.Length);
+                Assert.Contains("schedule_definition", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("schedule_generation", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("schedule_command", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("schedule_occurrence", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("schedule_dispatch", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("schedule_history", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("ensure_schedule_history_partitions", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("accepted_at_utc", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("FORCE ROW LEVEL SECURITY", fourth.Sql, StringComparison.Ordinal);
             });
         Assert.Equal(migrations.Count, DurablePostgreSqlMigrationCatalog.RequiredVersion);
         Assert.Equal(migrations.Count, PostgreSqlDurableRuntimeSchemaManager.RequiredVersion);
@@ -128,13 +143,17 @@ public sealed class DurableSchemaContractTests
         Assert.True(
             script.IndexOf("0002_forced_rls", StringComparison.Ordinal)
             < script.IndexOf("0003_flow_protocol", StringComparison.Ordinal));
+        Assert.True(
+            script.IndexOf("0003_flow_protocol", StringComparison.Ordinal)
+            < script.IndexOf("0004_schedule_protocol", StringComparison.Ordinal));
         Assert.Contains("pg_advisory_lock", script, StringComparison.Ordinal);
         Assert.DoesNotContain("0001_work_shared", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0002_forced_rls", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0003_flow_protocol", pendingOnly, StringComparison.Ordinal);
+        Assert.Contains("0004_schedule_protocol", pendingOnly, StringComparison.Ordinal);
         Assert.DoesNotContain("-- Migration", current, StringComparison.Ordinal);
         Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(-1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(4));
+        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(5));
     }
 
     [Theory]

@@ -18,7 +18,9 @@ certifies child Work process loss after an effect permit.
 
 The Docker path uses the immutable multi-platform image
 `postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302`.
-Use a disposable database. The workload applies forward-only schema (migrations `0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`) and supplies no destructive down migration.
+Use a disposable database. The workload requires forward-only Flow schema through `0003_flow_protocol`; the current
+provider may also apply later compatible migrations such as the Work-first Schedule `0004_schedule_protocol`. This
+workload does not exercise those later protocol facts and supplies no destructive down migration.
 
 ## Run the proof
 
@@ -50,7 +52,9 @@ For strict CI verification across all PostgreSQL integration tests including Flo
 
 ## What the workload proves
 
-1. **Schema Deployment**: Migration owner checks status, applies migrations `0001_work_shared.sql`, `0002_forced_rls.sql`, and `0003_flow_protocol.sql`, reads `StoreId`, and explicitly initializes the runtime epoch.
+1. **Schema Deployment**: Migration owner checks status, applies the current reviewed forward migrations (including the
+   Flow prerequisites `0001_work_shared.sql`, `0002_forced_rls.sql`, and `0003_flow_protocol.sql`), reads `StoreId`,
+   and explicitly initializes the runtime epoch.
 2. **Atomic Flow Start**: `PostgreSqlDurableFlowClient` commits each Flow start atomically in its own short transaction. Slice 4 exposes no caller-owned Flow transaction API. Re-using `start_idempotency_key` with identical payload returns `Duplicate`; divergent definition or a new start identity targeting an existing Flow instance returns `ASDUR206`.
 3. **Step Evaluation & Determinism**: Step evaluation advances Flow state machine (`ready` -> `evaluating`) and verifies definition fingerprint SHA-256 against registered code.
 4. **Child Work Activity Lifecycle**: Flow enqueues child activity Work item in `appsurface_durable.work` and enters `waiting_activity`. Work engine claims item, acquires effect permit, executes provider I/O, and commits terminal fact. Completion handler resolves `flow_wait` (`activity_completed`) and returns Flow to `ready`.

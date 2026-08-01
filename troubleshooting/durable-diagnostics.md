@@ -71,9 +71,23 @@ The persisted suspension descriptor, wait/timer lineage, or child-Work truth can
 Reconcile authoritative Work and Flow facts first; cancellation or an explicit evidence-backed repair is safer than a
 force-terminate shortcut.
 
-Schedule contracts reserve `ASDUR301`-`ASDUR307` for invalid definition, missing schedule, revision conflict, command
-conflict, access denial, evaluation incompatibility, and recovery-state mismatch. A provider must map these codes to its
-tested implementation without changing their meanings.
+## PostgreSQL Schedule provider diagnostics
+
+| Code | Meaning | Safe response |
+|---|---|---|
+| `ASDUR301` | Schedule or target is invalid | Correct the definition, registration, policy, or target codec; do not retry changed content under the same command identity. |
+| `ASDUR302` | Persisted Cron dialect or grammar is unsupported | Use `At`, `After`, or `Every` until the pinned Cron evaluator gate is complete; never reinterpret persisted Cron bytes. |
+| `ASDUR303` | Schedule not found in the authorized scope | Reload the authorized Schedule inventory; opaque identity alone is not authorization. |
+| `ASDUR304` | Schedule revision conflict | Reload the authoritative snapshot and retry the intended operation using its current revision. |
+| `ASDUR305` | Schedule command conflict | Retry only the exact original command/idempotency semantics, or use a new command identity for changed intent. |
+| `ASDUR306` | Schedule access or bridge-role denied | Use the authorized scoped client and exact configured runtime role; never set the RLS scope value manually. |
+| `ASDUR307` | Schedule evaluation changed or clock safety suspended the Schedule | Correct the evaluator/time source, then update the definition or delete/recreate. Recovery release cannot move the cursor. |
+
+The Work-first provider currently emits these codes for `At`, `After`, `Every`, and registered Work targets. Flow targets
+and Cron evaluation are rejected until their separate transaction/evaluator gates have executable evidence. A Schedule
+clock anomaly is not automatically retried: it records a suspension before any new occurrence or Work target is
+accepted. After a PostgreSQL exception, timeout, disconnect, or SQLSTATE failure, roll back the whole transaction
+before any bounded retry.
 
 ## PostgreSQL Work provider diagnostics
 

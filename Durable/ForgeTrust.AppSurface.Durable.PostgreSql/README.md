@@ -18,7 +18,7 @@ depends on PostgreSQL.
 
 ## First proof
 
-Run the source-evaluator [`slice 3 reference workload`](../slice3-reference-workload.md) or [`slice 4 reference workload`](../slice4-reference-workload.md). They apply schema explicitly,
+Run the source-evaluator [`slice 3 reference workload`](../slice3-reference-workload.md), [`slice 4 reference workload`](../slice4-reference-workload.md), or the Work-first [`Schedule protocol`](../schedule-protocol-v1.md). They apply schema explicitly,
 accept Work and start Flows atomically with domain mutations, force-terminate a separate process at the committed
 timer-winner checkpoint, verify the remaining recovery boundaries transactionally with fresh processors, and prove safe
 recovery for every provider-safety class and Flow state transition. They are not hosted-runtime demonstrations.
@@ -38,7 +38,7 @@ Runtime mutations take a shared, transaction-scoped advisory fence before valida
 and epoch rotation take the exclusive package lock, so they wait for in-flight runtime transactions and prevent an old
 epoch from committing new durable state after rotation.
 
-Runtime roles never own schema or apply DDL. The package has three migrations: Work/shared state (`0001_work_shared.sql`), forced RLS and privilege revocation (`0002_forced_rls.sql`), and Flow protocol persistence (`0003_flow_protocol.sql`). Schedule and runtime-heartbeat schema belong to slices 5-6. Applied schema is forward-only;
+Runtime roles never own schema or apply DDL. The package has four migrations: Work/shared state (`0001_work_shared.sql`), forced RLS and privilege revocation (`0002_forced_rls.sql`), Flow protocol persistence (`0003_flow_protocol.sql`), and the Work-first Schedule ledger (`0004_schedule_protocol.sql`). Runtime heartbeat and hosted operation remain Slice 6 work. Applied schema is forward-only;
 rolling application code back does not authorize destructive schema rollback. Execute generated SQL with a client that
 stops on the first error; `psql` callers must pass `-v ON_ERROR_STOP=1`.
 
@@ -75,21 +75,25 @@ grant options on the `appsurface_durable` schema or its objects. The migration o
 `NOLOGIN`.
 
 The `appsurface_durable` schema is package-reserved. The recipe serializes with migrations and runtime transactions,
-then transfers every table, partition, sequence, view, materialized view, and foreign table in that schema to the
-migration owner. Do not place application-owned objects there.
+then transfers every table, partition, sequence, view, materialized view, foreign table, and package function in that
+schema to the migration owner. Do not place application-owned objects there.
 
 | Principal | Allowed privileges |
 | --- | --- |
-| Dispatcher | Schema `USAGE`; global table `SELECT` on payload-free `dispatch` and `flow_dispatch` only. |
-| Runtime reads | Schema `USAGE`; table `SELECT` on package metadata, scoped Work relations, and all six scoped Flow relations. `flow_dispatch` is scope-filtered by transaction-local RLS. |
-| Runtime inserts | Table `INSERT` on scoped Work relations and all six scoped Flow relations. |
-| Runtime updates | Reviewed column-level `UPDATE` on mutable Work, Flow instance/wait/timer, and dispatch fields; no table-wide update grant. |
+| Dispatcher | Schema `USAGE`; global table `SELECT` on payload-free `dispatch` and `flow_dispatch`; `EXECUTE` only on the constrained Schedule claim function. It receives Schedule routing IDs and revision, never raw `schedule_dispatch` columns. |
+| Runtime reads | Schema `USAGE`; table `SELECT` on package metadata, scoped Work, Flow, and Schedule relations. Dispatch reads are scope-filtered by transaction-local RLS. |
+| Runtime inserts | Table `INSERT` on scoped Work, Flow, and Schedule protocol relations. |
+| Runtime updates | Reviewed column-level `UPDATE` on mutable Work, Flow instance/wait/timer, Schedule definition/occurrence/dispatch, and dispatch fields; no table-wide update grant. |
 | Runtime sequences | `USAGE` and `SELECT` on every sequence in the package schema. |
 
 Neither service credential receives schema `CREATE`, table-wide `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`,
 `TRIGGER`, or `MAINTAIN`; the dispatcher receives no sequence privileges. Forced RLS remains an additional scope fence,
 not the reason destructive privileges are safe. The recipe also rejects disabled or unforced RLS and any policy whose
 name, command, role target, permissiveness, `USING`, or `WITH CHECK` expression differs from the reviewed migration.
+
+Before the pre-created next month starts, a migration-owner operation must run
+`SELECT appsurface_durable.ensure_schedule_history_partitions();`. It retains the current and next Schedule-history
+partitions and reapplies their forced RLS policy. Runtime and dispatcher roles cannot execute this maintenance function.
 
 ## Options reuse across Work and Flow
 
@@ -173,6 +177,62 @@ mutation and Work acceptance. Use
 `PostgreSqlDurableWorkClient` with the same data source, registry, and options only when the package may own a short
 acceptance transaction.
 
+## Work-first Schedule pass
+
+`PostgreSqlDurableScheduleClient` persists the existing `IDurableScheduleClient` contract. The Gate A provider admits
+`At`, `After`, and `Every` schedules whose target is registered Work; `QueueOne` and `RunOnce` are their defaults. It
+captures one PostgreSQL `transaction_timestamp()` for each generation. `After` and unanchored `Every` derive their
+first nominal time from that stored value, never from caller time or the later Work `accepted_at` value.
+
+`PostgreSqlDurableScheduleProcessor` is intentionally passive. Construct it with a dispatcher data source and a
+separate runtime-role data source, then invoke one bounded pass:
+
+```csharp
+var processor = new PostgreSqlDurableScheduleProcessor(
+    dispatcherDataSource,
+    runtimeDataSource,
+    workRegistry,
+    workOptions,
+    new PostgreSqlDurableScheduleOptions("appsurface_durable_runtime"));
+
+var pass = await processor.ProcessDueAsync(
+    new PostgreSqlDurableScheduleProcessRequest("orders-schedule-pass", maximumSchedules: 8),
+    cancellationToken);
+```
+
+The dispatcher can only lease the narrow Schedule queue through a security-definer claim function. It has no raw
+`schedule_dispatch` table read, so due time and cadence remain inside the function; its result contains only scope,
+Schedule ID, and revision. Before the processor sets scoped RLS state or bridges an occurrence, it verifies
+`current_user` equals `PostgreSqlDurableScheduleOptions.RuntimeRole`. The Work bridge uses the existing caller-owned
+`PostgreSqlDurableWorkTransactionWriter`, so the occurrence link and one Work acceptance commit or roll back together.
+An empty pass returns zero counts. Cancellation stops before the next lease and cannot undo a previously committed fact.
+Do not call the processor in a request loop or register hosted work; hosted activation is reserved for Slice 6.
+
+The Schedule processor also compares persisted runtime-epoch and scope-generation fences before evaluating a due row.
+A mismatch suspends the Schedule before it can move a cursor or accept Work. Use `ReleaseAfterRecovery` only for an old
+runtime epoch; a scope-generation mismatch must be repaired with a public update or delete/recreate. The dispatcher
+claim function rejects blank/control-character owners and non-positive durations before leasing, preventing malformed
+or overlong calls from stranding a row. Schedule discovery leases are capped at ten minutes.
+
+For the admitted default `QueueOne` policy, one nonterminal target occupies the Schedule-wide slot. Later nominal
+instants coalesce into one pending occurrence. When that Work reaches a terminal state, the Work transaction requeues
+the Schedule dispatch row; the next manual pass materializes the pending occurrence immediately rather than waiting
+for another interval. Retries and suspended Work intentionally retain the slot. See the normative
+[`QueueOne occurrence rules`](../schedule-protocol-v1.md#occurrence-materialization) for transaction ownership and
+generation behavior.
+
+`ListAsync` returns payload-free Schedule inventory ordered by Schedule ID. When the requested page is not terminal, it
+returns a provider-issued continuation token; send that token back unchanged with the same scope and filters to obtain
+the next page. The token is an opaque cursor, not an authorization grant, and changing it can only change the caller's
+position within the already RLS-scoped inventory.
+
+CronosV1, Flow targets, and non-default overlap or misfire policies are intentionally rejected by this increment. Cron
+needs pinned evaluator/time-zone evidence; Flow has no caller-owned start transaction seam; `Skip`, bounded concurrency,
+and catch-up need occurrence-state semantics that arrive in a later gate. A Schedule that observes a database-clock
+advance beyond its configured safety window suspends instead of moving its cursor. `ReleaseAfterRecovery` only releases
+an old-epoch fence; it cannot clear a clock/evaluator suspension or rewrite a cursor. Repair with a public definition
+update or delete/recreate after the underlying cause is corrected.
+
 Endpoint/database matching is a configuration guard. Durable identity is `ExpectedStoreId`, which the writer reads
 through the supplied transaction. Notifications default to disabled; when enabled, they are payload-free latency hints
 and never replace authoritative discovery.
@@ -207,6 +267,6 @@ Read the normative [`Work protocol v1`](../work-protocol-v1.md), [`Flow protocol
 
 ## Release Guidance
 
-From the repository root, `./Durable/verify-postgresql.sh --quick` runs focused Work proof, `./Durable/verify-postgresql.sh --quick --flow` runs focused Flow proof, and `--ci` / `--ci --flow` run the strict
+From the repository root, `./Durable/verify-postgresql.sh --quick` runs focused Work proof, `./Durable/verify-postgresql.sh --quick --flow` runs focused Flow proof, and `./Durable/verify-postgresql.sh --quick --schedule` runs the real PostgreSQL Work-first Schedule proof. `--ci`, `--ci --flow`, and `--ci --schedule` run their strict
 real-PostgreSQL gates. The [`package chooser`](../../packages/README.md) is the generated adoption/publication source, and
 the [`release hub`](../../releases/README.md) owns coordinated release policy.

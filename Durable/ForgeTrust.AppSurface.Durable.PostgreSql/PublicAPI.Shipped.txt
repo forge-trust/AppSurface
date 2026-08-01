@@ -92,6 +92,53 @@ type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDura
   method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaApplyResult> ApplyAsync(System.Threading.CancellationToken cancellationToken = default)
   method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeSchemaStatus> GetStatusAsync(System.Threading.CancellationToken cancellationToken = default)
   property public static System.Int32 RequiredVersion { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleClient : ForgeTrust.AppSurface.Durable.IDurableScheduleClient
+  constructor public ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleClient(Npgsql.NpgsqlDataSource dataSource, ForgeTrust.AppSurface.Durable.IDurableWorkRegistry workRegistry, ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkOptions workOptions, ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleOptions scheduleOptions)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleExplanation>> ExplainNextOccurrencesAsync(ForgeTrust.AppSurface.Durable.DurableScheduleExplainRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleListResult>> ListAsync(ForgeTrust.AppSurface.Durable.DurableScheduleListRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult>> ApplyLifecycleCommandAsync(ForgeTrust.AppSurface.Durable.DurableScheduleCommand command, System.Threading.CancellationToken cancellationToken = default)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult>> CreateAsync(ForgeTrust.AppSurface.Durable.DurableScheduleCreateRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleMutationResult>> UpdateAsync(ForgeTrust.AppSurface.Durable.DurableScheduleUpdateRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleSnapshot>> GetAsync(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableScheduleId scheduleId, System.Threading.CancellationToken cancellationToken = default)
+type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleOptions : System.IEquatable<ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleOptions>
+  constructor public ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleOptions(System.String runtimeRole, System.Nullable<System.TimeSpan> maximumClockAdvance = null, System.Nullable<System.TimeSpan> leaseDuration = null)
+  method public ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleOptions <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleOptions? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleOptions? left, ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleOptions? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleOptions? left, ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleOptions? right)
+  property public System.String RuntimeRole { get: public; }
+  property public System.TimeSpan LeaseDuration { get: public; }
+  property public System.TimeSpan MaximumClockAdvance { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessRequest>
+  constructor public ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessRequest(System.String leaseOwner, System.Int32 maximumSchedules = 1)
+  method public ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessRequest? left, ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessRequest? left, ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessRequest? right)
+  property public System.Int32 MaximumSchedules { get: public; }
+  property public System.String LeaseOwner { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessResult : System.IEquatable<ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessResult>
+  constructor public ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessResult(System.Int32 claimedSchedules, System.Int32 recordedOccurrences, System.Int32 materializedWorkTargets, System.Int32 suspendedSchedules)
+  method public ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessResult? left, ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessResult? left, ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessResult? right)
+  property public System.Int32 ClaimedSchedules { get: public; }
+  property public System.Int32 MaterializedWorkTargets { get: public; }
+  property public System.Int32 RecordedOccurrences { get: public; }
+  property public System.Int32 SuspendedSchedules { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessor
+  constructor public ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessor(Npgsql.NpgsqlDataSource dispatcherDataSource, Npgsql.NpgsqlDataSource runtimeDataSource, ForgeTrust.AppSurface.Durable.IDurableWorkRegistry workRegistry, ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkOptions workOptions, ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleOptions scheduleOptions)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessResult> ProcessDueAsync(ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleProcessRequest request, System.Threading.CancellationToken cancellationToken = default)
 type public enum ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWakeNotificationMode : System.Int32
   enum-member Disabled = 0
   enum-member Enabled = 1
