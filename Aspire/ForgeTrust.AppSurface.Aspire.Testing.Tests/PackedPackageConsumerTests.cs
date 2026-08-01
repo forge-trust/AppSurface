@@ -15,8 +15,16 @@ public sealed class PackedPackageConsumerTests
         var workDirectory = Path.Join(Path.GetTempPath(), $"appsurface-aspire-testing-consumer-&-{Guid.NewGuid():N}");
         var feedDirectory = Path.Join(workDirectory, "feed");
         var consumerDirectory = Path.Join(workDirectory, "consumer");
+        var nugetHttpCacheDirectory = Path.Join(workDirectory, "nuget-http-cache");
         Directory.CreateDirectory(feedDirectory);
         Directory.CreateDirectory(consumerDirectory);
+        Directory.CreateDirectory(nugetHttpCacheDirectory);
+        var isolatedDotNetEnvironment = new Dictionary<string, string>
+        {
+            // This proof creates a disposable consumer, so keep restore state and file watching out of shared host state.
+            ["DOTNET_USE_POLLING_FILE_WATCHER"] = "1",
+            ["NUGET_HTTP_CACHE_PATH"] = nugetHttpCacheDirectory
+        };
 
         try
         {
@@ -45,7 +53,8 @@ public sealed class PackedPackageConsumerTests
                         feedDirectory,
                         $"/p:Version={PackageVersion}",
                         $"/p:PackageVersion={PackageVersion}"
-                    ]);
+                    ],
+                    isolatedDotNetEnvironment);
             }
 
             var packagePath = Assert.Single(
@@ -170,11 +179,12 @@ public sealed class PackedPackageConsumerTests
 
             await RunDotNetAsync(
                 consumerDirectory,
-                ["build", "Consumer.csproj", "--configfile", nugetConfigPath, "--nologo"]);
+                ["build", "Consumer.csproj", "--configfile", nugetConfigPath, "--nologo"],
+                isolatedDotNetEnvironment);
             await RunDotNetAsync(
                 consumerDirectory,
                 ["run", "--project", "Consumer.csproj", "--no-build", "--no-restore"],
-                new Dictionary<string, string>
+                new Dictionary<string, string>(isolatedDotNetEnvironment)
                 {
                     ["ASPIRE_DCP_PATH"] = "dummy",
                     ["ASPIRE_DASHBOARD_PATH"] = "dummy"
@@ -224,6 +234,7 @@ public sealed class PackedPackageConsumerTests
         };
         process.StartInfo.Environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
         process.StartInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
+        process.StartInfo.Environment["UseSharedCompilation"] = "false";
         if (environmentVariables is not null)
         {
             foreach (var (name, value) in environmentVariables)

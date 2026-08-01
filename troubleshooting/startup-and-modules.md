@@ -99,7 +99,7 @@ An optional package was installed before the base package or the package chooser
 
 ### Check
 
-Read the [AppSurface v0.1 package chooser](../packages/README.md). Start with the package that matches the app type.
+Read the [AppSurface package chooser](../packages/README.md). Start with the package that matches the app type.
 
 ### Fix
 
