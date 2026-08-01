@@ -1083,46 +1083,13 @@ internal sealed class PwaVerificationHttpClient(HttpClient httpClient) : IPwaVer
     public async Task<PwaHttpResponse> GetAsync(Uri uri, int maxBodyBytes, CancellationToken cancellationToken)
     {
         using var response = await httpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        var (bodyBytes, truncated) = await ReadBoundedBodyAsync(response.Content, maxBodyBytes, cancellationToken);
+        var body = await BoundedHttpBodyReader.ReadAsync(response.Content, maxBodyBytes, cancellationToken);
         return new PwaHttpResponse(
             response.StatusCode,
             response.Content.Headers.ContentType?.MediaType ?? string.Empty,
-            bodyBytes,
+            body.Bytes,
             response.Headers.Location?.OriginalString,
-            truncated);
-    }
-
-    private static async Task<(byte[] Body, bool Truncated)> ReadBoundedBodyAsync(
-        HttpContent content,
-        int maxBodyBytes,
-        CancellationToken cancellationToken)
-    {
-        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
-        using var buffer = new MemoryStream(Math.Min(maxBodyBytes, 81920));
-        var chunk = new byte[81920];
-        var total = 0;
-        while (true)
-        {
-            var read = await stream.ReadAsync(chunk.AsMemory(0, chunk.Length), cancellationToken);
-            if (read == 0)
-            {
-                return (buffer.ToArray(), false);
-            }
-
-            total += read;
-            if (total > maxBodyBytes)
-            {
-                var allowed = read - (total - maxBodyBytes);
-                if (allowed > 0)
-                {
-                    buffer.Write(chunk, 0, allowed);
-                }
-
-                return (buffer.ToArray(), true);
-            }
-
-            buffer.Write(chunk, 0, read);
-        }
+            body.Truncated);
     }
 }
 

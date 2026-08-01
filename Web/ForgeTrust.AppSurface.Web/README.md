@@ -158,7 +158,7 @@ AppSurface owns registration, the fixed protected route, request validation, and
 the proof query. The deploy caller triggers synthetic work before evaluation and owns polling, retries, and total timeout.
 Issue [#624](https://github.com/forge-trust/AppSurface/issues/624) adds a bounded evidence envelope and fixed
 completion telemetry. It constrains shape and exposure; it does not classify or redact application-authored text. Issue
-[#625](https://github.com/forge-trust/AppSurface/issues/625) adds caller-side polling, and
+[#625](https://github.com/forge-trust/AppSurface/issues/625) adds the [`appsurface canary poll` caller rail](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-canary-poll), and
 [#626](https://github.com/forge-trust/AppSurface/issues/626) adds a neutral end-to-end example. Until that operator rail is
 proved, this API remains preview. A separate [aggregate snapshot follow-up](https://github.com/forge-trust/AppSurface/issues/645)
 will compile multiple checks with bounded concurrency and deadlines after the safe envelope exists; #623 evaluates one

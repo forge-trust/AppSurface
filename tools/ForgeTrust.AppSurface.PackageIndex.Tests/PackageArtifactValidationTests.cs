@@ -3759,6 +3759,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 "dotnet new tool-manifest",
                 "dotnet tool install",
                 "appsurface --version",
+                "appsurface canary poll --help",
+                "appsurface canary poll pass",
+                "appsurface canary poll non-pass",
                 "appsurface coverage run",
                 "appsurface coverage run msbuild",
                 "appsurface coverage merge",
@@ -3766,7 +3769,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 "appsurface coverage gate"
             ],
             commandRunner.Requests
-                .Where(request => request.OperationName is "dotnet new tool-manifest" or "dotnet tool install" or "appsurface --version" or "appsurface coverage run" or "appsurface coverage run msbuild" or "appsurface coverage merge" or "appsurface coverage gate")
+                .Where(request => request.OperationName is "dotnet new tool-manifest" or "dotnet tool install" or "appsurface --version" or "appsurface canary poll --help" or "appsurface canary poll pass" or "appsurface canary poll non-pass" or "appsurface coverage run" or "appsurface coverage run msbuild" or "appsurface coverage merge" or "appsurface coverage gate")
                 .Select(request => request.OperationName)
                 .ToArray());
         var coverageRunRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface coverage run");
@@ -3779,6 +3782,18 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains(
             report.Artifacts,
             artifact => artifact.Description == "excluded project 'Smoke.Browser.Tests' produced no coverage artifacts" && artifact.Exists);
+        var canaryPassRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface canary poll pass");
+        Assert.Contains("--marker-env", canaryPassRequest.Arguments);
+        Assert.Contains("APPSURFACE_PACKAGE_PROOF_MARKER", canaryPassRequest.Arguments);
+        Assert.Contains("--bearer-token-env", canaryPassRequest.Arguments);
+        Assert.Contains("APPSURFACE_PACKAGE_PROOF_TOKEN", canaryPassRequest.Arguments);
+        Assert.NotNull(canaryPassRequest.Environment);
+        Assert.False(string.IsNullOrWhiteSpace(canaryPassRequest.Environment["APPSURFACE_PACKAGE_PROOF_MARKER"]));
+        Assert.False(string.IsNullOrWhiteSpace(canaryPassRequest.Environment["APPSURFACE_PACKAGE_PROOF_TOKEN"]));
+        var canaryNonPass = report.Commands.Single(command => command.OperationName == "appsurface canary poll non-pass");
+        Assert.True(canaryNonPass.ExpectedNonZeroExitCode);
+        Assert.Equal(3, canaryNonPass.ExitCode);
+        Assert.Contains("\"outcome\":\"stale\"", canaryNonPass.StandardOutput, StringComparison.Ordinal);
         var addPackageRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet add package");
         Assert.DoesNotContain("--configfile", addPackageRequest.Arguments);
         Assert.True(File.Exists(CombineSafeChildPath(report.WorkDirectory, "consumer/NuGet.config")));
@@ -4090,6 +4105,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [InlineData("dotnet new tool-manifest", null)]
     [InlineData("dotnet tool install", null)]
     [InlineData("appsurface --version", null)]
+    [InlineData("appsurface canary poll --help", null)]
+    [InlineData("appsurface canary poll pass", null)]
+    [InlineData("appsurface canary poll non-pass", null)]
     [InlineData("appsurface coverage run", null)]
     [InlineData("appsurface coverage run msbuild", null)]
     [InlineData("appsurface coverage merge", null)]
@@ -4121,7 +4139,12 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         Assert.False(report.Succeeded);
         Assert.Equal(failedOperationName, report.Commands.Last().OperationName);
-        Assert.Contains("Expected exit code 0", report.FirstFailure, StringComparison.Ordinal);
+        Assert.Contains(
+            failedOperationName == "appsurface canary poll non-pass"
+                ? "Expected packaged canary proof"
+                : "Expected exit code 0",
+            report.FirstFailure,
+            StringComparison.Ordinal);
         Assert.Equal(commandRunner.Requests.Count, report.Commands.Count);
         if (failedTimeoutDescription is not null)
         {
@@ -6713,6 +6736,24 @@ public sealed class PackageArtifactValidationTests : IDisposable
             if (request.OperationName == "appsurface --version")
             {
                 return Task.FromResult(new ExternalCommandResult(0, _packageVersion, string.Empty));
+            }
+
+            if (request.OperationName == "appsurface canary poll --help")
+            {
+                return Task.FromResult(new ExternalCommandResult(
+                    0,
+                    "USAGE\nappsurface canary poll --marker-env <variable> --bearer-token-env <variable>",
+                    string.Empty));
+            }
+
+            if (request.OperationName == "appsurface canary poll pass")
+            {
+                return Task.FromResult(new ExternalCommandResult(0, "{\"outcome\":\"pass\"}", string.Empty));
+            }
+
+            if (request.OperationName == "appsurface canary poll non-pass")
+            {
+                return Task.FromResult(new ExternalCommandResult(3, "{\"outcome\":\"stale\"}", string.Empty));
             }
 
             if (request.OperationName == "appsurface coverage run")

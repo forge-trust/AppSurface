@@ -7,6 +7,23 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class AppSurfaceCliReadmeContractTests
 {
     [Fact]
+    public void Readme_Should_Document_NamedCanaryPolling_GoldenPath()
+    {
+        var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());
+
+        Assert.Contains("### `appsurface canary poll`", readme, StringComparison.Ordinal);
+        Assert.Contains("dotnet tool run appsurface canary poll", readme, StringComparison.Ordinal);
+        Assert.Contains("--marker-env APPSURFACE_CANARY_MARKER", readme, StringComparison.Ordinal);
+        Assert.Contains("--bearer-token-env APPSURFACE_CANARY_TOKEN", readme, StringComparison.Ordinal);
+        Assert.Contains("PASS canary=forwarding.alpha-evidence", readme, StringComparison.Ordinal);
+        Assert.Contains("ASCAN401", readme, StringComparison.Ordinal);
+        Assert.Contains("ASCAN408", readme, StringComparison.Ordinal);
+        Assert.Contains("must never be put directly on the command line", readme, StringComparison.Ordinal);
+        Assert.Contains("APPSURFACE_CANARY_TOKEN: ${{ secrets.DEPLOY_OPERATOR_TOKEN }}", readme, StringComparison.Ordinal);
+        Assert.Contains("does not ship a composite Action or a deployment controller", readme, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Readme_Should_Link_AuthenticatedCommandDesign()
     {
         var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());

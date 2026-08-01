@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using System.Security;
 using System.Security.Cryptography;
 using System.Text;
@@ -6,12 +8,12 @@ using System.Text;
 namespace ForgeTrust.AppSurface.PackageIndex;
 
 /// <summary>
-/// Runs the pre-publish consumer proof for the packaged AppSurface coverage CLI.
+/// Runs the pre-publish consumer proof for the packaged AppSurface CLI.
 /// </summary>
 internal interface ICoverageCliConsumerProofWorkflow
 {
     /// <summary>
-    /// Installs the validated CLI artifact into an isolated fixture and exercises the public coverage commands.
+    /// Installs the validated CLI artifact into an isolated fixture and exercises public coverage commands plus canary-poll discovery.
     /// </summary>
     /// <param name="request">Proof request with repository, artifact, work-directory, and package-source settings.</param>
     /// <param name="validationReport">Validated package artifact report that selects the CLI tool artifact.</param>
@@ -30,7 +32,9 @@ internal interface ICoverageCliConsumerProofWorkflow
 /// <para>
 /// The proof runs before package publication. It selects the already validated CLI <c>.nupkg</c>, installs it with a
 /// local-first NuGet configuration, creates a clean xUnit fixture plus an excluded failing sentinel, and executes <c>coverage run</c>,
-/// <c>coverage merge</c>, a passing <c>coverage gate</c>, and an intentionally failing <c>coverage gate</c>.
+/// <c>coverage merge</c>, a passing <c>coverage gate</c>, an intentionally failing <c>coverage gate</c>, and
+/// <c>canary poll --help</c>, then runs the packed command against a local protected fixture for one <c>pass</c> and one
+/// <c>stale</c> result to prove its environment-only credential and operator-result paths are packed.
 /// </para>
 /// <para>
 /// Pitfall: the failing gate is considered successful only when the command exits non-zero and still writes
@@ -44,6 +48,11 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
     internal const string CliCommandName = "appsurface";
     internal const int DotNetCommandTimeoutMilliseconds = 180_000;
     internal const int CoverageRunTimeoutMilliseconds = 300_000;
+    private const string CanaryProofName = "package.consumer-proof";
+    private const string CanaryProofMarkerEnvironmentVariable = "APPSURFACE_PACKAGE_PROOF_MARKER";
+    private const string CanaryProofTokenEnvironmentVariable = "APPSURFACE_PACKAGE_PROOF_TOKEN";
+    private const string CanaryProofMarker = "package-proof-marker";
+    private const string CanaryProofToken = "package-proof-token";
 
     private readonly IExternalCommandRunner _commandRunner;
 
@@ -235,6 +244,65 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
                 Succeeded = false,
                 FailureReason = $"Expected '{CliCommandName} --version' to print '{request.PackageVersion}', but it printed '{versionCommand.StandardOutput.Trim()}'."
             };
+            return BuildReport(context, commands, artifacts);
+        }
+
+        if (!await RunRequiredAsync(ToolCommand(
+            context,
+            ["canary", "poll", "--help"],
+            "appsurface canary poll --help",
+            "checking packaged named-canary polling command")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        var canaryHelpCommand = commands[^1];
+        if (!canaryHelpCommand.StandardOutput.Contains("--marker-env", StringComparison.Ordinal)
+            || !canaryHelpCommand.StandardOutput.Contains("--bearer-token-env", StringComparison.Ordinal))
+        {
+            commands[^1] = canaryHelpCommand with
+            {
+                Succeeded = false,
+                FailureReason = $"Expected '{CliCommandName} canary poll --help' to describe environment-sourced marker and bearer-token options."
+            };
+            return BuildReport(context, commands, artifacts);
+        }
+
+        await using var canaryFixture = CanaryProofFixture.Start();
+        var canaryEnvironment = CreateCanaryProofEnvironment(context.DotNetHomePath, context.SharedPackagesPath);
+        if (!await RunRequiredAsync(ToolCommand(
+            context,
+            ["canary", "poll", "--url", canaryFixture.BaseUrl, "--name", CanaryProofName, "--marker-env", CanaryProofMarkerEnvironmentVariable, "--bearer-token-env", CanaryProofTokenEnvironmentVariable, "--json"],
+            "appsurface canary poll pass",
+            "proving packaged protected named-canary pass",
+            canaryEnvironment)))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        if (!commands[^1].StandardOutput.Contains("\"outcome\":\"pass\"", StringComparison.Ordinal))
+        {
+            commands[^1] = commands[^1] with { Succeeded = false, FailureReason = "Expected packaged canary proof to emit a safe pass outcome." };
+            return BuildReport(context, commands, artifacts);
+        }
+
+        var nonPass = await RunCommandAsync(
+            ToolCommand(
+                context,
+                ["canary", "poll", "--url", canaryFixture.BaseUrl, "--name", CanaryProofName, "--marker-env", CanaryProofMarkerEnvironmentVariable, "--bearer-token-env", CanaryProofTokenEnvironmentVariable, "--json"],
+                "appsurface canary poll non-pass",
+                "proving packaged protected named-canary non-pass",
+                canaryEnvironment),
+            logsDirectory,
+            commands.Count + 1,
+            ExpectedCommandExitCode.NonZero,
+            cancellationToken);
+        commands.Add(nonPass);
+        if (!nonPass.Succeeded
+            || nonPass.ExitCode != 3
+            || !nonPass.StandardOutput.Contains("\"outcome\":\"stale\"", StringComparison.Ordinal))
+        {
+            commands[^1] = nonPass with { Succeeded = false, FailureReason = "Expected packaged canary proof to emit a safe stale non-pass outcome." };
             return BuildReport(context, commands, artifacts);
         }
 
@@ -639,7 +707,8 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         CoverageCliConsumerProofContext context,
         IReadOnlyList<string> arguments,
         string operationName,
-        string timeoutDescription)
+        string timeoutDescription,
+        IReadOnlyDictionary<string, string?>? environment = null)
     {
         return new ExternalCommandRequest(
             "dotnet",
@@ -650,7 +719,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             operationName.StartsWith("appsurface coverage run", StringComparison.Ordinal)
                 ? CoverageRunTimeoutMilliseconds
                 : DotNetCommandTimeoutMilliseconds,
-            CreateProofEnvironment(context.DotNetHomePath, context.SharedPackagesPath));
+            environment ?? CreateProofEnvironment(context.DotNetHomePath, context.SharedPackagesPath));
     }
 
     private static async Task WriteSmokeFixtureAsync(string fixtureDirectory, CancellationToken cancellationToken)
@@ -908,6 +977,16 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         };
     }
 
+    private static IReadOnlyDictionary<string, string?> CreateCanaryProofEnvironment(string dotnetHomePath, string sharedPackagesPath)
+    {
+        var environment = new Dictionary<string, string?>(CreateProofEnvironment(dotnetHomePath, sharedPackagesPath))
+        {
+            [CanaryProofMarkerEnvironmentVariable] = CanaryProofMarker,
+            [CanaryProofTokenEnvironmentVariable] = CanaryProofToken,
+        };
+        return environment;
+    }
+
     private static string ComputeSha512(string path)
     {
         using var stream = File.OpenRead(path);
@@ -933,6 +1012,91 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
     private static string QuoteShellArgument(string value)
     {
         return "'" + value.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
+    }
+
+    private sealed class CanaryProofFixture : IAsyncDisposable
+    {
+        private readonly TcpListener _listener;
+        private readonly CancellationTokenSource _cancellation = new();
+        private readonly Task _serveTask;
+        private int _requestCount;
+
+        private CanaryProofFixture()
+        {
+            _listener = new TcpListener(IPAddress.Loopback, port: 0);
+            _listener.Start();
+            BaseUrl = $"http://127.0.0.1:{((IPEndPoint)_listener.LocalEndpoint).Port}";
+            _serveTask = ServeAsync();
+        }
+
+        public string BaseUrl { get; }
+
+        public static CanaryProofFixture Start() => new();
+
+        public async ValueTask DisposeAsync()
+        {
+            _cancellation.Cancel();
+            _listener.Stop();
+            try
+            {
+                await _serveTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            finally
+            {
+                _cancellation.Dispose();
+            }
+        }
+
+        private async Task ServeAsync()
+        {
+            try
+            {
+                while (!_cancellation.IsCancellationRequested && _requestCount < 2)
+                {
+                    using var client = await _listener.AcceptTcpClientAsync(_cancellation.Token);
+                    await using var stream = client.GetStream();
+                    var request = await ReadRequestHeadersAsync(stream, _cancellation.Token);
+                    var authorized = request.Contains($"\r\nAuthorization: Bearer {CanaryProofToken}\r\n", StringComparison.OrdinalIgnoreCase)
+                        && request.Contains($"\r\nX-AppSurface-Canary-Marker: {CanaryProofMarker}\r\n", StringComparison.OrdinalIgnoreCase);
+                    var status = Interlocked.Increment(ref _requestCount) == 1 ? "pass" : "stale";
+                    var body = authorized
+                        ? $"{{\"name\":\"{CanaryProofName}\",\"ready\":{(status == "pass" ? "true" : "false")},\"status\":\"{status}\"}}"
+                        : "{}";
+                    var bytes = Encoding.UTF8.GetBytes(body);
+                    var responseHeaders = $"HTTP/1.1 {(authorized ? 200 : 401)} {(authorized ? "OK" : "Unauthorized")}\r\nContent-Type: application/json\r\nContent-Length: {bytes.Length}\r\nConnection: close\r\n\r\n";
+                    await stream.WriteAsync(Encoding.ASCII.GetBytes(responseHeaders), _cancellation.Token);
+                    await stream.WriteAsync(bytes, _cancellation.Token);
+                }
+            }
+            catch (SocketException) when (_cancellation.IsCancellationRequested)
+            {
+            }
+        }
+
+        private static async Task<string> ReadRequestHeadersAsync(NetworkStream stream, CancellationToken cancellationToken)
+        {
+            var requestBuffer = new byte[4096];
+            var length = 0;
+            while (length < requestBuffer.Length)
+            {
+                var read = await stream.ReadAsync(requestBuffer.AsMemory(length), cancellationToken);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                length += read;
+                if (Encoding.ASCII.GetString(requestBuffer, 0, length).Contains("\r\n\r\n", StringComparison.Ordinal))
+                {
+                    break;
+                }
+            }
+
+            return Encoding.ASCII.GetString(requestBuffer, 0, length);
+        }
     }
 
     private enum ExpectedCommandExitCode

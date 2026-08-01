@@ -18,6 +18,8 @@ The CLI also includes public coverage commands for private-by-default CI coverag
 
 `appsurface pwa verify` checks the install metadata served by `ForgeTrust.AppSurface.Web`: secure origin posture, entry-page manifest discovery, redirect boundaries, manifest content, icon reachability and PNG dimensions, same-origin start URL and scope, head link presence, diagnostics exposure, and opt-in offline service worker plus fallback posture. It also recognizes push-worker configuration while keeping browser registration, permission, subscription, and delivery outside the verifier's claims.
 
+`appsurface canary poll` turns an existing protected named-canary evaluation into one bounded, read-only deployment decision. It owns the caller-visible poll cadence, deadline, response compatibility validation, and safe output; the application still owns authentication, proof evaluation, deployment actions, and traffic decisions.
+
 Future CLI authentication is design-only today. The [authenticated command design](docs/authenticated-command-design.md) keeps auth centered on protected command execution, uses `appsurface docs publish --archive ./dist/docs --site <site>` as the first protected command wedge, and requires browser/loopback PKCE, RFC 8628 device flow, CI no-prompt behavior, secure token-cache boundaries, `ASCLI1xx` diagnostics, and packed-tool readiness proof before auth commands ship.
 
 ## Release Guidance
@@ -66,6 +68,68 @@ dotnet tool run appsurface --version
 ```
 
 ## Commands
+
+### `appsurface canary poll`
+
+Use this command after an application has registered and protected a [named canary](../../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints). It is not a liveness or readiness probe, does not trigger synthetic work, and never changes deployment state.
+
+AppSurface is open source: this CLI is a reusable deployment-proof client, while each application remains responsible for its protected endpoint, authorization policy, and deployment decision.
+
+For a reproducible repository-local install, use this first-success path. The marker and token values remain in environment variables and must never be put directly on the command line:
+
+```bash
+dotnet tool install --local ForgeTrust.AppSurface.Cli --prerelease
+
+export APPSURFACE_CANARY_TOKEN="..."
+export APPSURFACE_CANARY_MARKER="deploy-$(git rev-parse --short HEAD)"
+
+dotnet tool run appsurface canary poll \
+  --url https://app.example.com \
+  --name forwarding.alpha-evidence \
+  --bearer-token-env APPSURFACE_CANARY_TOKEN \
+  --marker-env APPSURFACE_CANARY_MARKER \
+  --fresh-since 2026-07-30T00:00:00Z
+```
+
+A successful first result has this safe shape:
+
+```text
+PASS canary=forwarding.alpha-evidence attempts=1 elapsed=42ms
+```
+
+The command accepts only an application base URL, preserves any base path when it appends `/_appsurface/canaries/{name}`, and permits HTTP only for `localhost`, `127.0.0.1`, and `::1`. It does not follow redirects, sends no request before validating options and environment sources, and never renders markers, credentials, raw headers, raw URLs, or response bodies.
+
+`pass` is the sole successful outcome. `pending` waits until the caller-owned deadline; `fail`, `stale`, and `not-configured` immediately return exit `3` with their exact outcome in text or JSON. `--json` writes one machine-readable terminal result with a diagnostic code, next action, and documentation URL. All non-pass text results start with a stable `ASCAN4xx` diagnostic and include the next action plus this section's documentation link.
+
+| Exit | Diagnostic | Meaning | Operator action |
+| ---: | --- | --- | --- |
+| 0 | — | `pass` | Continue the deployment decision. |
+| 2 | `ASCAN401` / `ASCAN402` | Invalid local option or environment source. | Correct the option or environment variable before retrying. |
+| 3 | `ASCAN403` | `fail`, `stale`, or `not-configured`. | Read the exact result: investigate failure, refresh proof, or configure the host dependency. |
+| 4 | `ASCAN404` | Authorization, route, redirect, media, or envelope protocol failure. | Verify host authorization and the named-canary compatibility core. |
+| 5 | `ASCAN405` | Recoverable transport failures exceeded the configured allowance. | Restore target availability, then retry the deployment step. |
+| 6 | `ASCAN406` | Caller-owned total deadline expired. | Increase `--timeout` only when the proof workflow genuinely needs longer. |
+| 130 | `ASCAN408` | Caller cancelled polling. | Rerun when the deployment operation should continue. |
+
+The default total timeout is `5m`, the default cadence is `5s`, and the default maximum consecutive recoverable transport failures is `3`. A valid `Retry-After` response is an advisory lower bound on the next wait; the CLI still owns scheduling and never sleeps beyond its total deadline. `--github-summary` writes an escaped, bounded step summary when `$GITHUB_STEP_SUMMARY` exists; `--no-github-summary` suppresses it. A summary write warning (`ASCAN407`) never changes the already-decided exit code.
+
+For GitHub Actions, pass values through `env:` and let the exit code gate the job:
+
+```yaml
+- name: Verify named deployment canary
+  env:
+    APPSURFACE_CANARY_TOKEN: ${{ secrets.DEPLOY_OPERATOR_TOKEN }}
+    APPSURFACE_CANARY_MARKER: deploy-${{ github.run_id }}
+  run: >-
+    dotnet tool run appsurface canary poll
+    --url https://app.example.com
+    --name forwarding.alpha-evidence
+    --bearer-token-env APPSURFACE_CANARY_TOKEN
+    --marker-env APPSURFACE_CANARY_MARKER
+    --fresh-since 2026-07-30T00:00:00Z
+```
+
+Use `--identity-token-env` when the workflow already acquired an identity token. Hosts with another application-owned authorization header can use repeatable `--header-env HEADER=VARIABLE`; it is mutually exclusive with the Bearer modes and rejects reserved transport and canary headers. This command does not acquire, cache, or refresh tokens; does not install an authentication scheme; and does not ship a composite Action or a deployment controller.
 
 ### `appsurface pwa verify`
 
