@@ -108,6 +108,16 @@ public sealed class AppSurfaceWebPushValidationAndRenderingTests
     }
 
     [Fact]
+    public void ReadinessProvider_RequiresOptionsAndRouteRegistry()
+    {
+        var options = Options.Create(new AppSurfaceWebPushOptions());
+        var routeRegistry = new AppSurfaceWebPushRouteRegistry();
+
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceWebPushReadinessProvider(null!, routeRegistry));
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceWebPushReadinessProvider(options, null!));
+    }
+
+    [Fact]
     public void ReadinessProvider_ContainsOptionsAccessFailures()
     {
         var provider = new AppSurfaceWebPushReadinessProvider(

@@ -24,9 +24,9 @@ internal sealed class AppSurfaceWebPushReadinessProvider : IPwaPushReadinessProv
         {
             var configured = options.Value;
             var activeKeyId = configured.ActiveVapidKeyId;
-            if (!AppSurfaceWebPushValidation.IsSafeKeyId(activeKeyId)
-                || activeKeyId is null
-                || !configured.VapidKeys.TryGetValue(activeKeyId, out var activeKey)
+            if (activeKeyId is not { } safeActiveKeyId
+                || !AppSurfaceWebPushValidation.IsSafeKeyId(safeActiveKeyId)
+                || !configured.VapidKeys.TryGetValue(safeActiveKeyId, out var activeKey)
                 || activeKey is null)
             {
                 return null;
@@ -40,7 +40,7 @@ internal sealed class AppSurfaceWebPushReadinessProvider : IPwaPushReadinessProv
             }
 
             var fingerprint = "sha256-" + AppSurfaceWebPushValidation.Base64UrlEncode(SHA256.HashData(publicKeyBytes));
-            return new PwaPushReadiness(activeKeyId, fingerprint, routeRegistry.IsMapped);
+            return new PwaPushReadiness(safeActiveKeyId, fingerprint, routeRegistry.IsMapped);
         }
         catch
         {

@@ -1663,6 +1663,25 @@ public sealed class PwaVerifierTests
     }
 
     [Fact]
+    public async Task VerifyAsync_UsesConfiguredDiagnosticsPathForInstallVerification()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidInstallResponses(http, "https://app.example.test");
+        http.Add("https://app.example.test/_appsurface/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.BadGateway);
+        http.Add("https://app.example.test/operations/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.NotFound);
+
+        var report = await new PwaVerifier(http).VerifyAsync(
+            PwaVerificationOptions.Create(
+                new Uri("https://app.example.test"),
+                diagnosticsPath: "/operations/pwa"),
+            CancellationToken.None);
+
+        Assert.True(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA220");
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA221");
+    }
+
+    [Fact]
     public async Task VerifySurfaceAsync_PassesDisabledPushWithIndependentOfflineWorker()
     {
         var http = new FakePwaHttpClient();
@@ -1866,8 +1885,54 @@ public sealed class PwaVerifierTests
 
         var output = console.ReadOutputString();
         Assert.Contains("Surface: push", output, StringComparison.Ordinal);
+        Assert.Contains("Push expected: enabled; observed: unknown.", output, StringComparison.Ordinal);
         Assert.Contains("Fix:", output, StringComparison.Ordinal);
         Assert.Contains("Docs: https://forge-trust.com/docs/pwa-install#push-readiness-evidence", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WritesV3TextEvidenceForEnabledPushReadiness()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidPushResponses(http, "https://app.example.test");
+        var command = new PwaVerifyCommand(new PwaVerifier(http))
+        {
+            Url = "https://app.example.test",
+            Surface = "push"
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console);
+
+        var output = console.ReadOutputString();
+        Assert.Contains("Push expected: enabled; observed: enabled.", output, StringComparison.Ordinal);
+        Assert.Contains("Push configuration: configured; route mapping: mapped.", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WritesV3TextEvidenceForDisabledPushReadiness()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/", "<html><head></head><body></body></html>", "text/html");
+        AddPushStatus(
+            http,
+            "https://app.example.test",
+            pushEnabled: false,
+            registrationHelperPath: null,
+            readiness: new PwaPushReadinessProbe(1, "not-configured", null, null, null));
+        var command = new PwaVerifyCommand(new PwaVerifier(http))
+        {
+            Url = "https://app.example.test",
+            Surface = "push",
+            ExpectedPush = "disabled"
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console);
+
+        var output = console.ReadOutputString();
+        Assert.Contains("Push expected: disabled; observed: disabled.", output, StringComparison.Ordinal);
+        Assert.Contains("Push configuration: not-evaluated; route mapping: not-evaluated.", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2168,6 +2233,25 @@ public sealed class PwaVerifierTests
     {
         Assert.Throws<ArgumentException>(() =>
             PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: surface, expectedPush: expectedPush));
+    }
+
+    [Fact]
+    public void PwaVerificationOptions_RejectsSurfaceSpecificExpectationsAndEscapedDiagnosticsPaths()
+    {
+        var baseUrl = new Uri("https://app.example.test");
+
+        var installException = Assert.Throws<ArgumentException>(() =>
+            PwaVerificationOptions.Create(baseUrl, surface: "install", expectedPush: "enabled"));
+        var pushException = Assert.Throws<ArgumentException>(() =>
+            PwaVerificationOptions.Create(baseUrl, surface: "push", expectedStartUrl: "/"));
+        var diagnosticsException = Assert.Throws<ArgumentException>(() =>
+            PwaVerificationOptions.Create(baseUrl, diagnosticsPath: "/operations%2Fpwa"));
+
+        Assert.Equal("--expect-push is valid only with --surface push or --surface all.", installException.Message);
+        Assert.Equal("Install expectation options are valid only with --surface install or --surface all.", pushException.Message);
+        Assert.Equal(
+            "--diagnostics-path must be an app-root-relative endpoint path without percent escapes.",
+            diagnosticsException.Message);
     }
 
     private static void AddValidInstallResponses(FakePwaHttpClient http, string origin)

@@ -225,12 +225,15 @@ internal sealed partial class PwaVerifyCommand : ICommand
         }
     }
 
-    private static string FormatBoolean(bool? value) => value switch
+    private static string FormatBoolean(bool? value)
     {
-        true => "enabled",
-        false => "disabled",
-        _ => "unknown"
-    };
+        if (!value.HasValue)
+        {
+            return "unknown";
+        }
+
+        return value.Value ? "enabled" : "disabled";
+    }
 }
 
 internal sealed partial class PwaVerifier

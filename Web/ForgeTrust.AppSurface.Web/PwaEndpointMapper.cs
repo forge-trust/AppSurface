@@ -217,18 +217,11 @@ internal static class PwaEndpointMapper
             return false;
         }
 
-        try
-        {
-            var padded = encoded.Replace('-', '+').Replace('_', '/');
-            padded += new string('=', (4 - (padded.Length % 4)) % 4);
-            var decoded = Convert.FromBase64String(padded);
-            return decoded.Length == 32
-                && string.Equals(Convert.ToBase64String(decoded).TrimEnd('=').Replace('+', '-').Replace('/', '_'), encoded, StringComparison.Ordinal);
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
+        var padded = encoded.Replace('-', '+').Replace('_', '/');
+        padded += new string('=', (4 - (padded.Length % 4)) % 4);
+        var decoded = Convert.FromBase64String(padded);
+        return decoded.Length == 32
+            && string.Equals(Convert.ToBase64String(decoded).TrimEnd('=').Replace('+', '-').Replace('/', '_'), encoded, StringComparison.Ordinal);
     }
 
     private static bool IsAsciiAlphaNumeric(char character) =>

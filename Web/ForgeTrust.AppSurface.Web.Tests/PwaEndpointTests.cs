@@ -190,6 +190,25 @@ public sealed class PwaEndpointTests
     }
 
     [Fact]
+    public void Diagnostics_ServiceResolutionFailuresAreUnavailableWithoutProviderDetails()
+    {
+        var context = new DefaultHttpContext
+        {
+            RequestServices = new ThrowingServiceProvider()
+        };
+
+        var diagnostics = PwaEndpointMapper.BuildDiagnostics(context, new PwaOptions());
+
+        Assert.Equal("unavailable", diagnostics.PushReadiness.ConfigurationStatus);
+        Assert.Null(diagnostics.PushReadiness.ActiveVapidKeyId);
+        Assert.Null(diagnostics.PushReadiness.PublicKeyFingerprint);
+        Assert.Null(diagnostics.PushReadiness.RouteMapped);
+        var diagnostic = Assert.Single(diagnostics.Diagnostics, value => value.Code == "ASPWA028");
+        Assert.Equal("PWA push readiness evidence is unavailable.", diagnostic.Message);
+        Assert.DoesNotContain("secret resolution detail", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Diagnostics_DuplicateProvidersAreUnavailableWithoutCallingEitherProvider()
     {
         var called = false;
@@ -892,5 +911,11 @@ public sealed class PwaEndpointTests
     private sealed class DelegatePushReadinessProvider(Func<PwaPushReadiness?> callback) : IPwaPushReadinessProvider
     {
         public PwaPushReadiness? GetReadiness() => callback();
+    }
+
+    private sealed class ThrowingServiceProvider : IServiceProvider
+    {
+        public object? GetService(Type serviceType) =>
+            throw new InvalidOperationException("secret resolution detail");
     }
 }
