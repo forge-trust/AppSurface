@@ -11,6 +11,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
     private const string RoleRecipeUsername = "appsurface";
     private const string RoleRecipePassword = "appsurface-test-password";
     private const string RoleRecipeApplicationName = "durable-role-recipe";
+    private const string DispatcherRoleTestPassword = "durable-dispatcher-test-password";
     private const string RuntimeRoleTestPassword = "durable-runtime-test-password";
 
     [Fact]
@@ -44,7 +45,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missing.Compatibility);
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missingEpoch.Status.Compatibility);
-        Assert.Equal([1, 2], first.AppliedVersions);
+        Assert.Equal([1, 2, 3], first.AppliedVersions);
         Assert.Empty(second.AppliedVersions);
         Assert.True(compatible.IsCompatible);
         Assert.NotEqual(Guid.Empty, compatible.StoreId);
@@ -92,13 +93,13 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         var embedded = DurablePostgreSqlMigrationCatalog.Load();
         var failingMigration = new DurablePostgreSqlMigration(
-            2,
+            3,
             "forced_failure",
             "CREATE TABLE appsurface_durable.rollback_probe (id integer); SELECT 1 / 0;",
             new string('0', 64));
         var failingManager = new PostgreSqlDurableRuntimeSchemaManager(
             database.DataSource,
-            [embedded[0], failingMigration]);
+            [embedded[0], embedded[1], failingMigration]);
 
         var exception = await Assert.ThrowsAsync<PostgresException>(async () => await failingManager.ApplyAsync());
 
@@ -112,14 +113,14 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var retryManager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         var afterFailure = await retryManager.GetStatusAsync();
         Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, afterFailure.Compatibility);
-        Assert.Equal(1, afterFailure.InstalledVersion);
-        Assert.Equal([1], afterFailure.AppliedVersions);
+        Assert.Equal(2, afterFailure.InstalledVersion);
+        Assert.Equal([1, 2], afterFailure.AppliedVersions);
 
         var retry = await retryManager.ApplyAsync();
         var compatible = await retryManager.GetStatusAsync();
-        Assert.Equal([2], retry.AppliedVersions);
+        Assert.Equal([3], retry.AppliedVersions);
         Assert.True(compatible.IsCompatible);
-        Assert.Equal([1, 2], compatible.AppliedVersions);
+        Assert.Equal([1, 2, 3], compatible.AppliedVersions);
     }
 
     [Fact]
@@ -140,7 +141,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await using (var roles = dataSource.CreateCommand(
             $"""
             CREATE ROLE durable_owner NOLOGIN NOSUPERUSER NOBYPASSRLS;
-            CREATE ROLE durable_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE durable_dispatcher LOGIN PASSWORD '{DispatcherRoleTestPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE durable_runtime LOGIN PASSWORD '{RuntimeRoleTestPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE bypass_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
             CREATE ROLE createdb_dispatcher LOGIN NOSUPERUSER CREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
@@ -418,7 +419,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
                       <>
                         (
                             service.role_name = 'durable_dispatcher'
-                            AND relation.relname = 'dispatch'
+                            AND relation.relname IN ('dispatch', 'flow_dispatch')
                             AND privilege.privilege_name = 'SELECT'
                             OR service.role_name = 'durable_runtime'
                             AND
@@ -427,13 +428,16 @@ public sealed class PostgreSqlSchemaIntegrationTests
                                 AND relation.relname IN
                                 (
                                     'store_metadata', 'schema_migration', 'scope', 'work', 'dispatch',
-                                    'work_operator_command', 'effect_permit', 'scope_history', 'work_history'
+                                    'work_operator_command', 'effect_permit', 'scope_history', 'work_history',
+                                    'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer',
+                                    'flow_dispatch'
                                 )
                                 OR privilege.privilege_name = 'INSERT'
                                 AND relation.relname IN
                                 (
                                     'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
-                                    'scope_history', 'work_history'
+                                    'scope_history', 'work_history', 'flow_instance', 'flow_command',
+                                    'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch'
                                 )
                             )
                         )
@@ -452,7 +456,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
                       <>
                         (
                             service.role_name = 'durable_dispatcher'
-                            AND column_value.relname = 'dispatch'
+                            AND column_value.relname IN ('dispatch', 'flow_dispatch')
                             AND privilege.privilege_name = 'SELECT'
                             OR service.role_name = 'durable_runtime'
                             AND
@@ -461,13 +465,16 @@ public sealed class PostgreSqlSchemaIntegrationTests
                                 AND column_value.relname IN
                                 (
                                     'store_metadata', 'schema_migration', 'scope', 'work', 'dispatch',
-                                    'work_operator_command', 'effect_permit', 'scope_history', 'work_history'
+                                    'work_operator_command', 'effect_permit', 'scope_history', 'work_history',
+                                    'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer',
+                                    'flow_dispatch'
                                 )
                                 OR privilege.privilege_name = 'INSERT'
                                 AND column_value.relname IN
                                 (
                                     'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
-                                    'scope_history', 'work_history'
+                                    'scope_history', 'work_history', 'flow_instance', 'flow_command',
+                                    'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch'
                                 )
                                 OR privilege.privilege_name = 'UPDATE'
                                 AND
@@ -490,6 +497,30 @@ public sealed class PostgreSqlSchemaIntegrationTests
                                         ('status', 'resulting_state', 'resulting_revision', 'completed_at')
                                     OR column_value.relname = 'effect_permit'
                                     AND column_value.attname IN ('status', 'observed_at', 'details', 'runtime_epoch')
+                                    OR column_value.relname = 'flow_instance'
+                                    AND column_value.attname IN
+                                    (
+                                        'state', 'current_node_id', 'context_contract_id', 'context_schema_version',
+                                        'context_codec_id', 'context_payload', 'context_sha256', 'context_classification',
+                                        'context_retention', 'resume_event_name', 'resume_event_is_timeout',
+                                        'resume_event_contract_id', 'resume_event_schema_version', 'resume_event_codec_id',
+                                        'resume_event_payload', 'resume_event_sha256', 'resume_event_classification',
+                                        'resume_event_retention', 'activity_callsite_id', 'activity_result_contract_id',
+                                        'activity_result_schema_version', 'activity_result_codec_id', 'activity_result_payload',
+                                        'activity_result_sha256', 'activity_result_classification',
+                                        'activity_result_retention', 'lease_generation', 'lease_owner',
+                                        'lease_started_at', 'lease_expires_at', 'updated_at',
+                                        'cancellation_requested_at', 'terminal_at', 'terminal_code',
+                                        'suspension_descriptor', 'suspended_from_state', 'revision',
+                                        'scope_generation', 'runtime_epoch'
+                                    )
+                                    OR column_value.relname = 'flow_wait'
+                                    AND column_value.attname IN
+                                        ('state', 'resolved_revision', 'resolved_at', 'suspension_descriptor', 'updated_at')
+                                    OR column_value.relname = 'flow_timer'
+                                    AND column_value.attname IN ('state', 'resolved_at', 'updated_at')
+                                    OR column_value.relname = 'flow_dispatch'
+                                    AND column_value.attname IN ('due_at', 'state', 'expected_revision', 'updated_at')
                                 )
                             )
                         )
@@ -525,6 +556,77 @@ public sealed class PostgreSqlSchemaIntegrationTests
             reapplied.ExitCode == 0,
             $"Role recipe reapply failed with exit {reapplied.ExitCode}. stdout: {reapplied.Stdout} stderr: {reapplied.Stderr}");
 
+        await using (var flowDispatchPolicies = dataSource.CreateCommand(
+            """
+            SELECT policyname, roles, qual
+            FROM pg_policies
+            WHERE schemaname = 'appsurface_durable'
+              AND tablename = 'flow_dispatch'
+              AND policyname IN ('flow_dispatch_global_discovery', 'flow_dispatch_runtime_scope_select')
+            ORDER BY policyname;
+            """))
+        {
+            await using var reader = await flowDispatchPolicies.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal("flow_dispatch_global_discovery", reader.GetString(0));
+            Assert.Equal(["durable_dispatcher"], reader.GetFieldValue<string[]>(1));
+            Assert.Equal("true", reader.GetString(2));
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal("flow_dispatch_runtime_scope_select", reader.GetString(0));
+            Assert.Equal(["durable_runtime"], reader.GetFieldValue<string[]>(1));
+            Assert.Contains("appsurface_durable.scope_id", reader.GetString(2), StringComparison.Ordinal);
+            Assert.False(await reader.ReadAsync());
+        }
+
+        await using (var seedFlowDispatch = dataSource.CreateCommand(
+            """
+            INSERT INTO appsurface_durable.scope (scope_id)
+            VALUES ('flow-rls-scope-a'), ('flow-rls-scope-b');
+
+            INSERT INTO appsurface_durable.flow_instance
+            (
+                scope_id, flow_instance_id, flow_id, flow_version, manifest_id, authoring_model,
+                definition_fingerprint_schema, definition_fingerprint_sha256, current_node_id,
+                state, scope_generation, runtime_epoch
+            )
+            VALUES
+            (
+                'flow-rls-scope-a', 'flow-rls-instance-a', 'tests.flow', 'v1', 'tests.manifest', 'tests',
+                'sha256', repeat('0', 64), 'start', 'ready', 1, @runtime_epoch
+            ),
+            (
+                'flow-rls-scope-b', 'flow-rls-instance-b', 'tests.flow', 'v1', 'tests.manifest', 'tests',
+                'sha256', repeat('0', 64), 'start', 'ready', 1, @runtime_epoch
+            );
+
+            INSERT INTO appsurface_durable.flow_dispatch
+            (
+                dispatch_id, scope_id, kind, flow_instance_id, due_at, state, expected_revision
+            )
+            VALUES
+            (@dispatch_a, 'flow-rls-scope-a', 'flow', 'flow-rls-instance-a', clock_timestamp(), 'available', 1),
+            (@dispatch_b, 'flow-rls-scope-b', 'flow', 'flow-rls-instance-b', clock_timestamp(), 'available', 1);
+            """))
+        {
+            seedFlowDispatch.Parameters.AddWithValue("runtime_epoch", Guid.NewGuid());
+            seedFlowDispatch.Parameters.AddWithValue("dispatch_a", Guid.NewGuid());
+            seedFlowDispatch.Parameters.AddWithValue("dispatch_b", Guid.NewGuid());
+            Assert.Equal(6, await seedFlowDispatch.ExecuteNonQueryAsync());
+        }
+
+        var dispatcherConnectionString = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
+        {
+            Username = "durable_dispatcher",
+            Password = DispatcherRoleTestPassword,
+        }.ConnectionString;
+        await using var dispatcherDataSource = NpgsqlDataSource.Create(dispatcherConnectionString);
+        await using var dispatcherConnection = await dispatcherDataSource.OpenConnectionAsync();
+        await using (var dispatcherRead = dispatcherConnection.CreateCommand())
+        {
+            dispatcherRead.CommandText = "SELECT count(*) FROM appsurface_durable.flow_dispatch;";
+            Assert.Equal(2L, (long)(await dispatcherRead.ExecuteScalarAsync())!);
+        }
+
         var runtimeConnectionString = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
         {
             Username = "durable_runtime",
@@ -537,6 +639,55 @@ public sealed class PostgreSqlSchemaIntegrationTests
             allowedRead.CommandText =
                 "SELECT current_user = 'durable_runtime' AND EXISTS (SELECT 1 FROM appsurface_durable.store_metadata);";
             Assert.True((bool)(await allowedRead.ExecuteScalarAsync())!);
+        }
+
+        await using (var unscopedRead = runtimeConnection.CreateCommand())
+        {
+            unscopedRead.CommandText = "SELECT count(*) FROM appsurface_durable.flow_dispatch;";
+            Assert.Equal(0L, (long)(await unscopedRead.ExecuteScalarAsync())!);
+        }
+
+        await using (var scopedTransaction = await runtimeConnection.BeginTransactionAsync())
+        {
+            await using (var setScope = new NpgsqlCommand(
+                "SELECT set_config('appsurface_durable.scope_id', @scope_id, true);",
+                runtimeConnection,
+                scopedTransaction))
+            {
+                setScope.Parameters.AddWithValue("scope_id", "flow-rls-scope-a");
+                await setScope.ExecuteNonQueryAsync();
+            }
+
+            await using (var scopedRead = new NpgsqlCommand(
+                "SELECT scope_id FROM appsurface_durable.flow_dispatch ORDER BY scope_id;",
+                runtimeConnection,
+                scopedTransaction))
+            await using (var reader = await scopedRead.ExecuteReaderAsync())
+            {
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal("flow-rls-scope-a", reader.GetString(0));
+                Assert.False(await reader.ReadAsync());
+            }
+
+            await using (var scopedUpdate = new NpgsqlCommand(
+                "UPDATE appsurface_durable.flow_dispatch SET due_at = due_at + interval '1 second' WHERE scope_id = @scope_id;",
+                runtimeConnection,
+                scopedTransaction))
+            {
+                scopedUpdate.Parameters.AddWithValue("scope_id", "flow-rls-scope-a");
+                Assert.Equal(1, await scopedUpdate.ExecuteNonQueryAsync());
+            }
+
+            await using (var crossScopeUpdate = new NpgsqlCommand(
+                "UPDATE appsurface_durable.flow_dispatch SET due_at = due_at + interval '1 second' WHERE scope_id = @scope_id;",
+                runtimeConnection,
+                scopedTransaction))
+            {
+                crossScopeUpdate.Parameters.AddWithValue("scope_id", "flow-rls-scope-b");
+                Assert.Equal(0, await crossScopeUpdate.ExecuteNonQueryAsync());
+            }
+
+            await scopedTransaction.CommitAsync();
         }
 
         var denied = await Assert.ThrowsAsync<PostgresException>(async () =>
@@ -613,14 +764,14 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await ExecuteNonQueryAsync(
             database.DataSource,
             """
-            UPDATE appsurface_durable.store_metadata
-            SET schema_version = 2,
-                minimum_reader_version = 1,
-                maximum_reader_version = 1,
-                minimum_writer_version = 1,
-                maximum_writer_version = 1
-            WHERE singleton;
-            """);
+           UPDATE appsurface_durable.store_metadata
+           SET schema_version = 3,
+               minimum_reader_version = 1,
+               maximum_reader_version = 1,
+               minimum_writer_version = 1,
+               maximum_writer_version = 1
+           WHERE singleton;
+           """);
         var unsupported = await manager.GetStatusAsync();
         Assert.Equal(DurableRuntimeSchemaCompatibility.StoreTooNew, unsupported.Compatibility);
         Assert.Equal(1, unsupported.MaximumReaderVersion);
@@ -635,19 +786,19 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await ExecuteNonQueryAsync(
             database.DataSource,
             """
-            DELETE FROM appsurface_durable.schema_migration WHERE version = 2;
-            UPDATE appsurface_durable.store_metadata
-            SET schema_version = 1,
-                minimum_reader_version = 1,
-                maximum_reader_version = 1,
-                minimum_writer_version = 1,
-                maximum_writer_version = 1
-            WHERE singleton;
-            """);
+           DELETE FROM appsurface_durable.schema_migration WHERE version = 3;
+           UPDATE appsurface_durable.store_metadata
+           SET schema_version = 2,
+               minimum_reader_version = 1,
+               maximum_reader_version = 2,
+               minimum_writer_version = 1,
+               maximum_writer_version = 2
+           WHERE singleton;
+           """);
         var upgrade = await manager.GetStatusAsync();
         Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgrade.Compatibility);
-        Assert.Equal([1], upgrade.AppliedVersions);
-        Assert.Equal([2], upgrade.PendingVersions);
+        Assert.Equal([1, 2], upgrade.AppliedVersions);
+        Assert.Equal([3], upgrade.PendingVersions);
         var upgradeValidation = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
             async () => await manager.ValidateAsync());
         Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgradeValidation.Status.Compatibility);
@@ -668,12 +819,12 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var results = await Task.WhenAll(first.ApplyAsync().AsTask(), second.ApplyAsync().AsTask())
             .WaitAsync(TimeSpan.FromSeconds(30));
 
-        Assert.Equal([1, 2], results.SelectMany(result => result.AppliedVersions).Order().ToArray());
-        Assert.Contains(results, result => result.AppliedVersions.SequenceEqual([1, 2]));
+        Assert.Equal([1, 2, 3], results.SelectMany(result => result.AppliedVersions).Order().ToArray());
+        Assert.Contains(results, result => result.AppliedVersions.SequenceEqual([1, 2, 3]));
         Assert.Contains(results, result => result.AppliedVersions.Count == 0);
         await using var count = database.DataSource.CreateCommand(
             "SELECT count(*) FROM appsurface_durable.schema_migration;");
-        Assert.Equal(2, (long)(await count.ExecuteScalarAsync())!);
+        Assert.Equal(3, (long)(await count.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -699,7 +850,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3], applied.AppliedVersions);
     }
 
     [Fact]
@@ -764,7 +915,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3], applied.AppliedVersions);
     }
 
     [Fact]

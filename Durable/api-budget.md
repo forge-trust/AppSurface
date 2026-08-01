@@ -56,3 +56,20 @@ families. Its checked-in `PublicAPI.Shipped.txt` is the exhaustive member invent
 Discovery, recovery, claim, renew, preparation failure, permit, completion, cancellation, scope disablement,
 operator reconciliation, manual resolution, safe retry, recovery release, and stale-observation types remain internal.
 Slice 6 must prove the smallest hosting and operator SPI before any of those types become public.
+
+## Slice 4 PostgreSQL Flow API
+
+Slice 4 adds exactly one public PostgreSQL runtime type:
+`PostgreSqlDurableFlowClient : IDurableFlowClient`. Its constructor requires the scoped `NpgsqlDataSource`, exact
+`IDurableFlowRegistry`, explicit `IDurablePayloadCodecRegistry`, and the existing
+`PostgreSqlDurableWorkOptions`. Reusing the options type avoids a duplicate public configuration surface for StoreId,
+runtime epoch, and wake-hint behavior.
+
+The Flow processor, dispatch candidates/results, lease settings, barrier observer, command store, decision writer,
+timer resolver, child-Work acceptance seam, and Work-to-Flow projector remain internal. Hosted activation, health,
+drain, and public operator SPI decisions remain slice 6.
+
+The existing Flow list continuation-token shape is unchanged. Its validated preview bound increases from 200 to 512
+characters so the versioned base64url keyset token can carry an exact UTC update key and instance identity without
+truncation. Tokens remain opaque, payload-free, scope-local query inputs and reject unknown versions or malformed
+encodings.

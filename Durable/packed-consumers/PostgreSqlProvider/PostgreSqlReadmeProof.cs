@@ -32,5 +32,19 @@ internal static class PostgreSqlReadmeProof
         await transaction.CommitAsync(cancellationToken);
         return accepted;
     }
+
+    // docs:snippet durable-postgresql-options-reuse:start
+    internal static PostgreSqlDurableWorkOptions CreateSharedOptions(
+        Guid runtimeEpoch,
+        Guid expectedStoreId)
+    {
+        // PostgreSqlDurableWorkOptions is reused directly across Work and Flow operations to guarantee
+        // consistent ExpectedStoreId, active RuntimeEpoch, notification modes, and schema compatibility validation.
+        return new PostgreSqlDurableWorkOptions(
+            runtimeEpoch,
+            expectedStoreId,
+            PostgreSqlDurableWakeNotificationMode.Disabled);
+    }
+    // docs:snippet durable-postgresql-options-reuse:end
 }
 // docs:snippet durable-postgresql-accept-work:end

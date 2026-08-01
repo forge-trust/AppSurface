@@ -50,4 +50,4 @@ Console startup is the AppSurface path for CLI commands and worker-style process
 
 The package chooser is the generated install map for the coordinated AppSurface package family. Use it before adding optional modules.
 
-Read it here: [AppSurface v0.1 package chooser](../packages/README.md)
+Read it here: [AppSurface package chooser](../packages/README.md)
