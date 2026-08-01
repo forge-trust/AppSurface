@@ -566,7 +566,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
     [Fact]
     public async Task ConfigureWebApplication_Versioning_ServesRecommendedAliasAndRewritesExactVersionTrees()
     {
-        var tempDirectory = Path.Combine(
+        var tempDirectory = TestPathUtils.PathUnder(
             Path.GetTempPath(),
             "appsurfacedocs-published-tree-regression-tests",
             Guid.NewGuid().ToString("N"));
@@ -577,7 +577,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
             var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
             var publishedTree = CreatePublishedExactTree(tempDirectory, "1.2.3");
             var releaseManifestSha256 = WriteReleaseManifest(publishedTree);
-            var catalogPath = Path.Combine(tempDirectory, "catalog.json");
+            var catalogPath = TestPathUtils.PathUnder(tempDirectory, "catalog.json");
             File.WriteAllText(
                 catalogPath,
                 $$"""
@@ -732,7 +732,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
     [Fact]
     public async Task ConfigureWebApplication_Versioning_PreservesCurrentPointerWithinEachPublishedTree()
     {
-        var tempDirectory = Path.Combine(
+        var tempDirectory = TestPathUtils.PathUnder(
             Path.GetTempPath(),
             "appsurfacedocs-published-release-navigation-tests",
             Guid.NewGuid().ToString("N"));
@@ -745,7 +745,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
             var currentTree = CreatePublishedReleaseNavigationTree(tempDirectory, "1.2.4");
             var historicalManifestSha256 = WriteReleaseManifest(historicalTree);
             var currentManifestSha256 = WriteReleaseManifest(currentTree);
-            var catalogPath = Path.Combine(tempDirectory, "catalog.json");
+            var catalogPath = TestPathUtils.PathUnder(tempDirectory, "catalog.json");
             File.WriteAllText(
                 catalogPath,
                 $$"""
@@ -827,7 +827,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
     [Fact]
     public async Task ConfigureWebApplication_Versioning_MergesCurrentAndHistoricalSearchResultsWithoutCrossTreeReleasePointerLeakage()
     {
-        var tempDirectory = Path.Combine(
+        var tempDirectory = TestPathUtils.PathUnder(
             Path.GetTempPath(),
             "appsurfacedocs-published-search-regression-tests",
             Guid.NewGuid().ToString("N"));
@@ -842,7 +842,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
             WritePublishedReleaseSearchIndex(currentTree, "1.2.4");
             var historicalManifestSha256 = WriteReleaseManifest(historicalTree);
             var currentManifestSha256 = WriteReleaseManifest(currentTree);
-            var catalogPath = Path.Combine(tempDirectory, "catalog.json");
+            var catalogPath = TestPathUtils.PathUnder(tempDirectory, "catalog.json");
             File.WriteAllText(
                 catalogPath,
                 $$"""
@@ -1182,18 +1182,18 @@ public class AppSurfaceDocsWebModuleRegressionTests
     [Fact]
     public async Task ConfigureEndpoints_Versioning_ServesPreviewSearchAssetsFromLiveWebRoot_WhenAppSurfaceDocsIsRootModule()
     {
-        var tempDirectory = Path.Combine(
+        var tempDirectory = TestPathUtils.PathUnder(
             Path.GetTempPath(),
             "appsurfacedocs-preview-asset-tests",
             Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(Path.Combine(tempDirectory, "docs"));
+        Directory.CreateDirectory(TestPathUtils.PathUnder(tempDirectory, "docs"));
 
         try
         {
-            File.WriteAllText(Path.Combine(tempDirectory, "docs", "search.css"), "body { background: #111827; }");
-            File.WriteAllText(Path.Combine(tempDirectory, "docs", "minisearch.min.js"), "window.MiniSearch = {};");
-            File.WriteAllText(Path.Combine(tempDirectory, "docs", "search-client.js"), "window.__previewAsset = true;");
-            File.WriteAllText(Path.Combine(tempDirectory, "docs", "outline-client.js"), "window.__outlineAsset = true;");
+            File.WriteAllText(TestPathUtils.PathUnder(tempDirectory, "docs", "search.css"), "body { background: #111827; }");
+            File.WriteAllText(TestPathUtils.PathUnder(tempDirectory, "docs", "minisearch.min.js"), "window.MiniSearch = {};");
+            File.WriteAllText(TestPathUtils.PathUnder(tempDirectory, "docs", "search-client.js"), "window.__previewAsset = true;");
+            File.WriteAllText(TestPathUtils.PathUnder(tempDirectory, "docs", "outline-client.js"), "window.__outlineAsset = true;");
 
             var module = new AppSurfaceDocsWebModule();
             var context = new StartupContext([], module);
@@ -1328,11 +1328,11 @@ public class AppSurfaceDocsWebModuleRegressionTests
     [Fact]
     public async Task ConfigureEndpoints_Versioning_ServesEmbeddedPreviewAssets_WhenWebRootAssetFileIsMissing()
     {
-        var tempDirectory = Path.Combine(
+        var tempDirectory = TestPathUtils.PathUnder(
             Path.GetTempPath(),
             "appsurfacedocs-preview-asset-missing-file-tests",
             Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(Path.Combine(tempDirectory, "docs"));
+        Directory.CreateDirectory(TestPathUtils.PathUnder(tempDirectory, "docs"));
 
         try
         {
@@ -1404,7 +1404,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
     [Fact]
     public async Task ConfigureWebApplication_Versioning_KeepsPreviewSearchAssetsAvailable_WhenRecommendedReleaseIsUnavailable()
     {
-        var tempDirectory = Path.Combine(
+        var tempDirectory = TestPathUtils.PathUnder(
             Path.GetTempPath(),
             "appsurfacedocs-versioning-degraded-asset-tests",
             Guid.NewGuid().ToString("N"));
@@ -1413,11 +1413,11 @@ public class AppSurfaceDocsWebModuleRegressionTests
         try
         {
             var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-            var brokenTree = Path.Combine(tempDirectory, "broken");
+            var brokenTree = TestPathUtils.PathUnder(tempDirectory, "broken");
             Directory.CreateDirectory(brokenTree);
-            File.WriteAllText(Path.Combine(brokenTree, "index.html"), "<html>broken</html>");
+            File.WriteAllText(TestPathUtils.PathUnder(brokenTree, "index.html"), "<html>broken</html>");
 
-            var catalogPath = Path.Combine(tempDirectory, "catalog.json");
+            var catalogPath = TestPathUtils.PathUnder(tempDirectory, "catalog.json");
             File.WriteAllText(
                 catalogPath,
                 """
@@ -2673,10 +2673,10 @@ public class AppSurfaceDocsWebModuleRegressionTests
 
     private static string CreatePublishedExactTree(string parentDirectory, string version)
     {
-        var root = Path.Combine(parentDirectory, version);
+        var root = TestPathUtils.PathUnder(parentDirectory, version);
         Directory.CreateDirectory(root);
         File.WriteAllText(
-            Path.Combine(root, "index.html"),
+            TestPathUtils.PathUnder(root, "index.html"),
             $$"""
             <!DOCTYPE html>
             <html>
@@ -2697,7 +2697,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
             </html>
             """);
         File.WriteAllText(
-            Path.Combine(root, "search.html"),
+            TestPathUtils.PathUnder(root, "search.html"),
             """
             <!DOCTYPE html>
             <html>
@@ -2710,14 +2710,14 @@ public class AppSurfaceDocsWebModuleRegressionTests
             </body>
             </html>
             """);
-        File.WriteAllText(Path.Combine(root, "guide.html"), "<!DOCTYPE html><html><body data-tree=\"release-guide\">Guide</body></html>");
-        File.WriteAllText(Path.Combine(root, "search.css"), "body { color: #fff; }");
-        File.WriteAllText(Path.Combine(root, "search-client.js"), "window.__releaseTree = true;");
-        File.WriteAllText(Path.Combine(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
-        File.WriteAllText(Path.Combine(root, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
-        File.WriteAllText(Path.Combine(root, "search-index.json"), "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\"}]}");
+        File.WriteAllText(TestPathUtils.PathUnder(root, "guide.html"), "<!DOCTYPE html><html><body data-tree=\"release-guide\">Guide</body></html>");
+        File.WriteAllText(TestPathUtils.PathUnder(root, "search.css"), "body { color: #fff; }");
+        File.WriteAllText(TestPathUtils.PathUnder(root, "search-client.js"), "window.__releaseTree = true;");
+        File.WriteAllText(TestPathUtils.PathUnder(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
+        File.WriteAllText(TestPathUtils.PathUnder(root, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
+        File.WriteAllText(TestPathUtils.PathUnder(root, "search-index.json"), "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\"}]}");
         File.WriteAllText(
-            Path.Join(root, ".appsurface-docs-route-manifest.json"),
+            TestPathUtils.PathUnder(root, ".appsurface-docs-route-manifest.json"),
             """
             {
               "schema": "appsurface-docs-route-manifest-v1",
@@ -2737,11 +2737,11 @@ public class AppSurfaceDocsWebModuleRegressionTests
     private static string CreatePublishedReleaseNavigationTree(string parentDirectory, string version)
     {
         var root = CreatePublishedExactTree(parentDirectory, version);
-        Directory.CreateDirectory(Path.Combine(root, "packages"));
-        Directory.CreateDirectory(Path.Combine(root, "releases"));
+        Directory.CreateDirectory(TestPathUtils.PathUnder(root, "packages"));
+        Directory.CreateDirectory(TestPathUtils.PathUnder(root, "releases"));
 
         File.WriteAllText(
-            Path.Combine(root, "packages", "index.html"),
+            TestPathUtils.PathUnder(root, "packages", "index.html"),
             """
             <!DOCTYPE html>
             <html><body>
@@ -2750,7 +2750,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
             </body></html>
             """);
         File.WriteAllText(
-            Path.Combine(root, "releases", "current.html"),
+            TestPathUtils.PathUnder(root, "releases", "current.html"),
             $$"""
             <!DOCTYPE html>
             <html><body>
@@ -2759,10 +2759,10 @@ public class AppSurfaceDocsWebModuleRegressionTests
             </body></html>
             """);
         File.WriteAllText(
-            Path.Combine(root, "releases", $"v{version}.html"),
+            TestPathUtils.PathUnder(root, "releases", $"v{version}.html"),
             $"<!DOCTYPE html><html><body><h1>Release {version}</h1></body></html>");
         File.WriteAllText(
-            Path.Join(root, ".appsurface-docs-route-manifest.json"),
+            TestPathUtils.PathUnder(root, ".appsurface-docs-route-manifest.json"),
             $$"""
             {
               "schema": "appsurface-docs-route-manifest-v1",
@@ -2794,7 +2794,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
     private static void WritePublishedReleaseSearchIndex(string root, string version)
     {
         File.WriteAllText(
-            Path.Combine(root, "search-index.json"),
+            TestPathUtils.PathUnder(root, "search-index.json"),
             $$"""
             {
               "documents": [

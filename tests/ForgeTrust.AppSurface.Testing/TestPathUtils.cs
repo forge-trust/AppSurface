@@ -9,6 +9,9 @@ using System.Diagnostics.CodeAnalysis;
 /// These helpers make test path intent explicit instead of relying on <see cref="Path.Combine(string, string)" />,
 /// whose rooted later segments can discard earlier arguments. They normalize syntactic separators and full paths, but
 /// they do not resolve symlink targets; use them for test fixture construction, not as a production filesystem sandbox.
+/// When a test fixture creates a path beneath a known root, prefer <see cref="PathUnder(string, string[])" /> over
+/// raw <see cref="Path.Combine(string, string)" /> or <see cref="Path.Join(string, string)" /> composition, even when
+/// the current segments are literals. The containment contract should survive later fixture changes.
 /// </remarks>
 public static class TestPathUtils
 {
