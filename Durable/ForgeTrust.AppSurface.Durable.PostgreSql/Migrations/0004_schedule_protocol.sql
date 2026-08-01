@@ -78,6 +78,12 @@ CREATE TABLE appsurface_durable.schedule_generation
     )
 );
 
+CREATE INDEX ix_schedule_definition_scope_state_schedule
+    ON appsurface_durable.schedule_definition (scope_id, state, schedule_id);
+
+CREATE INDEX ix_schedule_definition_scope_runtime_epoch_state_schedule
+    ON appsurface_durable.schedule_definition (scope_id, runtime_epoch, state, schedule_id);
+
 CREATE TABLE appsurface_durable.schedule_command
 (
     scope_id text NOT NULL,
@@ -135,6 +141,10 @@ CREATE UNIQUE INDEX ux_schedule_occurrence_pending_coalesced
     ON appsurface_durable.schedule_occurrence (scope_id, schedule_id, generation)
     WHERE occurrence_kind = 'coalesced' AND state = 'pending';
 
+CREATE INDEX ix_schedule_occurrence_materialized_work
+    ON appsurface_durable.schedule_occurrence (scope_id, schedule_id)
+    WHERE state = 'materialized' AND target_kind = 'work';
+
 CREATE TABLE appsurface_durable.schedule_dispatch
 (
     dispatch_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -189,6 +199,7 @@ DECLARE
     after_next_month date := (date_trunc('month', CURRENT_DATE) + interval '2 months')::date;
     current_child text := format('schedule_history_%s', to_char(current_month, 'YYYYMM'));
     next_child text := format('schedule_history_%s', to_char(next_month, 'YYYYMM'));
+    child_name text;
 BEGIN
     EXECUTE format(
         'CREATE TABLE IF NOT EXISTS appsurface_durable.schedule_history_%s PARTITION OF appsurface_durable.schedule_history FOR VALUES FROM (%L) TO (%L)',
@@ -196,14 +207,14 @@ BEGIN
     EXECUTE format(
         'CREATE TABLE IF NOT EXISTS appsurface_durable.schedule_history_%s PARTITION OF appsurface_durable.schedule_history FOR VALUES FROM (%L) TO (%L)',
         to_char(next_month, 'YYYYMM'), next_month, after_next_month);
-    FOREACH current_child IN ARRAY ARRAY[current_child, next_child]
+    FOREACH child_name IN ARRAY ARRAY[current_child, next_child]
     LOOP
-        EXECUTE format('ALTER TABLE appsurface_durable.%I ENABLE ROW LEVEL SECURITY', current_child);
-        EXECUTE format('ALTER TABLE appsurface_durable.%I FORCE ROW LEVEL SECURITY', current_child);
-        EXECUTE format('DROP POLICY IF EXISTS schedule_history_scope_isolation ON appsurface_durable.%I', current_child);
+        EXECUTE format('ALTER TABLE appsurface_durable.%I ENABLE ROW LEVEL SECURITY', child_name);
+        EXECUTE format('ALTER TABLE appsurface_durable.%I FORCE ROW LEVEL SECURITY', child_name);
+        EXECUTE format('DROP POLICY IF EXISTS schedule_history_scope_isolation ON appsurface_durable.%I', child_name);
         EXECUTE format(
             'CREATE POLICY schedule_history_scope_isolation ON appsurface_durable.%I USING (scope_id = nullif(current_setting(''appsurface_durable.scope_id'', true), '''')) WITH CHECK (scope_id = nullif(current_setting(''appsurface_durable.scope_id'', true), ''''))',
-            current_child);
+            child_name);
     END LOOP;
 END;
 $$;

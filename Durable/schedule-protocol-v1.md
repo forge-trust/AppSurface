@@ -124,13 +124,15 @@ an empty pass, and observes cancellation before starting the next lease. Cancell
 does not roll back a committed Schedule fact. Applications must not call it in an
 ASP.NET request loop or register it as hosted work; Slice 6 owns hosted activation.
 
-## Crash boundaries and proof
+## Deferred crash-proof criteria
 
-The TestHost proof names these barriers: `schedule-decision-before-commit`,
+Gate A does not yet include an executable TestHost crash-proof suite. Its planned proof
+criteria name these barriers: `schedule-decision-before-commit`,
 `schedule-decision-after-commit`, `schedule-bridge-before-commit`,
-`schedule-link-after-commit`, and `schedule-work-after-acceptance`. Recovery must
-produce one occurrence and one accepted Work identity. The Work provider safety mode
-governs provider effects; Schedule never claims universal effect-exactly-once.
+`schedule-link-after-commit`, and `schedule-work-after-acceptance`. A future proof must
+show that recovery produces one occurrence and one accepted Work identity. The Work
+provider safety mode governs provider effects; Schedule never claims universal
+effect-exactly-once.
 
 ## Operations and compatibility
 
@@ -148,4 +150,5 @@ Schedule API validation and domain conflicts return durable problem results. Dat
 timeouts, disconnects, and SQLSTATE failures abort the transaction and require a
 bounded retry only after rollback. Access-denied and non-runtime bridge-role failures
 are not retriable. Clock or evaluator mismatches suspend before target acceptance;
-repair them with definition update or delete/recreate, not recovery release.
+preserve their durable evidence and create a new Schedule identity after resolving the
+cause. Recovery release applies only to admitted stale-runtime-epoch fences.

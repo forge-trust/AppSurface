@@ -26,10 +26,10 @@ one `ProcessDueAsync` call. Expected durable facts are:
 
 | Fact | Expected result |
 |---|---|
-| Schedule create | `Created`, then `Duplicate` with the original command result and acceptance anchor |
+| Schedule create | `Created`, then `Duplicate` with the same persisted commit timestamp |
 | Dispatch pass | one claimed queue row, one recorded occurrence, one materialized Work target |
-| Ledger | one `schedule_occurrence` row with one Work target link |
-| Work store | one accepted Work aggregate in the same scoped bridge transaction |
+| Ledger | one `schedule_occurrence` row |
+| Work store | one accepted Work aggregate |
 | Public snapshot | no next occurrence for the terminal one-time Schedule |
 
 The provider also checks `After` and unanchored `Every` explanation semantics without opening a database. The stored

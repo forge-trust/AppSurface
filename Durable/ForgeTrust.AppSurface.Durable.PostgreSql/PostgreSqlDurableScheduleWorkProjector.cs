@@ -19,6 +19,11 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 /// </remarks>
 internal static class PostgreSqlDurableScheduleWorkProjector
 {
+    /// <summary>Requeues a pending coalesced Schedule occurrence after its Work target becomes terminal.</summary>
+    /// <param name="transaction">The authoritative Work transition transaction.</param>
+    /// <param name="scopeId">The durable scope containing the completed Work target.</param>
+    /// <param name="workId">The terminal Work target that may release one QueueOne Schedule slot.</param>
+    /// <param name="cancellationToken">Cancels the database operation before it commits.</param>
     internal static async ValueTask RequeuePendingOccurrenceAsync(
         NpgsqlTransaction transaction,
         DurableScopeId scopeId,
@@ -70,6 +75,9 @@ internal static class PostgreSqlDurableScheduleWorkProjector
                         AND pending.occurrence_kind = 'coalesced'
                         AND pending.state = 'pending'
                   )
+                  -- The dispatcher claims this row without taking the definition lock. Do not clear its
+                  -- transient lease while a Work terminal transition is requeueing a coalesced occurrence.
+                  AND dispatch.state <> 'leased'
                 RETURNING dispatch.scope_id, dispatch.schedule_id, definition.active_generation
             )
             INSERT INTO appsurface_durable.schedule_history

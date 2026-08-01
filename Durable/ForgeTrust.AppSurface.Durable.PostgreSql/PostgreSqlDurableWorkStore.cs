@@ -1868,6 +1868,8 @@ internal sealed class PostgreSqlDurableWorkStore
             }
         }
 
+        // Scope disable leaves Schedule definitions active but fences their processor at scope validation. Do not requeue
+        // terminal Work here: doing so would make a coalesced Schedule dispatch available despite the disabled scope.
         await SuspendScopeFlowsAsync(
             connection,
             transaction,

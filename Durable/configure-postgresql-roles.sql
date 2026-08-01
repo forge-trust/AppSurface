@@ -221,6 +221,52 @@ WHERE namespace.nspname = 'appsurface_durable'
   SELECT 1 / 0;
 \endif
 
+WITH schedule_history_child AS
+(
+  SELECT child.oid, child.relrowsecurity, child.relforcerowsecurity
+  FROM pg_catalog.pg_inherits AS inheritance
+  JOIN pg_catalog.pg_class AS parent ON parent.oid = inheritance.inhparent
+  JOIN pg_catalog.pg_namespace AS parent_namespace ON parent_namespace.oid = parent.relnamespace
+  JOIN pg_catalog.pg_class AS child ON child.oid = inheritance.inhrelid
+  JOIN pg_catalog.pg_namespace AS child_namespace ON child_namespace.oid = child.relnamespace
+  WHERE parent_namespace.nspname = 'appsurface_durable'
+    AND parent.relname = 'schedule_history'
+    AND child_namespace.nspname = 'appsurface_durable'
+),
+actual_child_policy AS
+(
+  SELECT child.relrowsecurity,
+         child.relforcerowsecurity,
+         policy.polname AS policy_name,
+         policy.polcmd::text AS command_name,
+         policy.polpermissive,
+         policy.polroles,
+         pg_catalog.pg_get_expr(policy.polqual, policy.polrelid) AS using_expression,
+         pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid) AS check_expression
+  FROM schedule_history_child AS child
+  LEFT JOIN pg_catalog.pg_policy AS policy ON policy.polrelid = child.oid
+)
+SELECT NOT EXISTS
+(
+  SELECT 1
+  FROM actual_child_policy
+  WHERE NOT relrowsecurity
+    OR NOT relforcerowsecurity
+    OR policy_name IS DISTINCT FROM 'schedule_history_scope_isolation'
+    OR command_name IS DISTINCT FROM '*'
+    OR NOT polpermissive
+    OR polroles IS DISTINCT FROM ARRAY[0]::oid[]
+    OR using_expression IS DISTINCT FROM
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'
+    OR check_expression IS DISTINCT FROM
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'
+) AS schedule_history_child_policies_are_exact \gset
+\if :schedule_history_child_policies_are_exact
+\else
+  \echo 'Every schedule_history partition must have forced RLS and the exact scope-isolation policy.'
+  SELECT 1 / 0;
+\endif
+
 WITH expected_policy(relation_name, policy_name, command_name, using_expression, check_expression) AS
 (
   VALUES

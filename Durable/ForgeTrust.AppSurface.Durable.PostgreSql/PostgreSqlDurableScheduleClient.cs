@@ -117,11 +117,12 @@ internal sealed class PostgreSqlDurableScheduleStore
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var scopeGeneration = await ValidateStoreSetScopeAndLockActiveScopeAsync(
+            var scopeGeneration = await ValidateStoreSetScopeAndReadActiveScopeAsync(
                 connection,
                 transaction,
                 request.ScopeId,
                 createScope: true,
+                lockScope: true,
                 cancellationToken).ConfigureAwait(false);
             if (scopeGeneration is null)
             {
@@ -154,6 +155,17 @@ internal sealed class PostgreSqlDurableScheduleStore
                 return existing.Fingerprint.Compare(request.Fingerprint) == DurableCommandFingerprintMatch.Exact
                     ? DurableOperationResult<DurableScheduleMutationResult>.Success(existing.ToDuplicate())
                     : CommandConflict<DurableScheduleMutationResult>(request.CommandId.Value);
+            }
+
+            if (await ScheduleExistsAsync(connection, transaction, request.ScopeId, request.ScheduleId, cancellationToken).ConfigureAwait(false))
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return Failure<DurableScheduleMutationResult>(
+                    DurableScheduleProblemCodes.ScheduleInvalid,
+                    "The Schedule identity already exists in this durable scope.",
+                    "Schedule identities are durable audit keys and cannot be created twice, even after deletion.",
+                    "Use a new Schedule identity, or update the existing active or paused Schedule with its current revision.",
+                    request.ScheduleId.Value);
             }
 
             var acceptedAtUtc = await CaptureAcceptedAtUtcAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
@@ -246,11 +258,12 @@ internal sealed class PostgreSqlDurableScheduleStore
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var scopeGeneration = await ValidateStoreSetScopeAndLockActiveScopeAsync(
+            var scopeGeneration = await ValidateStoreSetScopeAndReadActiveScopeAsync(
                 connection,
                 transaction,
                 request.ScopeId,
                 createScope: false,
+                lockScope: true,
                 cancellationToken).ConfigureAwait(false);
             if (scopeGeneration is null)
             {
@@ -310,6 +323,17 @@ internal sealed class PostgreSqlDurableScheduleStore
                     request.ScheduleId.Value);
             }
 
+            if (current.State == "suspended")
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return Failure<DurableScheduleMutationResult>(
+                    DurableScheduleProblemCodes.ScheduleInvalid,
+                    "A suspended Schedule cannot be updated or revived.",
+                    "A safety fence suspended this Schedule, so a definition update must not clear its durable recovery evidence.",
+                    "Use ReleaseAfterRecovery when it is admitted for the fence, or create a new Schedule identity after resolving the cause.",
+                    request.ScheduleId.Value);
+            }
+
             var generation = checked(current.Generation + 1);
             var revision = checked(current.Revision + 1);
             var acceptedAtUtc = await CaptureAcceptedAtUtcAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
@@ -318,7 +342,7 @@ internal sealed class PostgreSqlDurableScheduleStore
             const string updateSql = """
                 UPDATE appsurface_durable.schedule_definition
                 SET display_name = @display_name,
-                    state = 'active',
+                    state = @state,
                     active_generation = @generation,
                     revision = @revision,
                     accepted_at_utc = @accepted_at_utc,
@@ -343,6 +367,7 @@ internal sealed class PostgreSqlDurableScheduleStore
                     cursorUtc,
                     nextDueUtc,
                     scopeGeneration.Value);
+                update.Parameters.AddWithValue("state", current.State);
                 update.Parameters.AddWithValue("expected_revision", request.ExpectedRevision);
                 if (await update.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
                 {
@@ -357,7 +382,15 @@ internal sealed class PostgreSqlDurableScheduleStore
             await InsertCommandAsync(connection, transaction, request.ScopeId, request.CommandId, null, request.ScheduleId, "update", request.Fingerprint, "updated", generation, revision, acceptedAtUtc, cancellationToken)
                 .ConfigureAwait(false);
             await InsertHistoryAsync(connection, transaction, request.ScopeId, request.ScheduleId, generation, null, "updated", cancellationToken).ConfigureAwait(false);
-            await UpsertDispatchAsync(connection, transaction, request.ScopeId, request.ScheduleId, revision, nextDueUtc, "available", cancellationToken).ConfigureAwait(false);
+            await UpsertDispatchAsync(
+                connection,
+                transaction,
+                request.ScopeId,
+                request.ScheduleId,
+                revision,
+                nextDueUtc,
+                current.State == "paused" ? "suspended" : "available",
+                cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return DurableOperationResult<DurableScheduleMutationResult>.Success(new DurableScheduleMutationResult(
                 request.ScheduleId,
@@ -383,11 +416,12 @@ internal sealed class PostgreSqlDurableScheduleStore
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var scopeGeneration = await ValidateStoreSetScopeAndLockActiveScopeAsync(
+            var scopeGeneration = await ValidateStoreSetScopeAndReadActiveScopeAsync(
                 connection,
                 transaction,
                 command.ScopeId,
                 createScope: false,
+                lockScope: true,
                 cancellationToken).ConfigureAwait(false);
             if (scopeGeneration is null)
             {
@@ -523,7 +557,13 @@ internal sealed class PostgreSqlDurableScheduleStore
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var scopeGeneration = await ValidateStoreSetScopeAndLockActiveScopeAsync(connection, transaction, scopeId, false, cancellationToken).ConfigureAwait(false);
+            var scopeGeneration = await ValidateStoreSetScopeAndReadActiveScopeAsync(
+                connection,
+                transaction,
+                scopeId,
+                createScope: false,
+                lockScope: false,
+                cancellationToken).ConfigureAwait(false);
             if (scopeGeneration is null)
             {
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -554,7 +594,13 @@ internal sealed class PostgreSqlDurableScheduleStore
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var scopeGeneration = await ValidateStoreSetScopeAndLockActiveScopeAsync(connection, transaction, request.ScopeId, false, cancellationToken).ConfigureAwait(false);
+            var scopeGeneration = await ValidateStoreSetScopeAndReadActiveScopeAsync(
+                connection,
+                transaction,
+                request.ScopeId,
+                createScope: false,
+                lockScope: false,
+                cancellationToken).ConfigureAwait(false);
             if (scopeGeneration is null)
             {
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -562,16 +608,22 @@ internal sealed class PostgreSqlDurableScheduleStore
             }
 
             const string sql = """
-                SELECT schedule_id
-                FROM appsurface_durable.schedule_definition
-                WHERE scope_id = @scope_id
-                  AND (@state IS NULL OR state = @state)
-                  AND (@recovery IS NULL OR (runtime_epoch <> @runtime_epoch AND state <> 'deleted') = @recovery)
-                  AND (@after_schedule_id IS NULL OR schedule_id > @after_schedule_id)
-                ORDER BY schedule_id
+                SELECT d.schedule_id, d.display_name, d.state, d.active_generation, d.revision, d.next_due_utc, d.runtime_epoch,
+                       g.schedule_kind, g.overlap_kind, g.overlap_limit, g.misfire_kind, g.misfire_limit,
+                       g.target_kind, g.target_name, g.target_version, g.target_provider_safety
+                FROM appsurface_durable.schedule_definition AS d
+                JOIN appsurface_durable.schedule_generation AS g
+                  ON g.scope_id = d.scope_id
+                 AND g.schedule_id = d.schedule_id
+                 AND g.generation = d.active_generation
+                WHERE d.scope_id = @scope_id
+                  AND (@state IS NULL OR d.state = @state)
+                  AND (@recovery IS NULL OR (d.runtime_epoch <> @runtime_epoch AND d.state <> 'deleted') = @recovery)
+                  AND (@after_schedule_id IS NULL OR d.schedule_id > @after_schedule_id)
+                ORDER BY d.schedule_id
                 LIMIT @limit;
                 """;
-            var identifiers = new List<DurableScheduleId>();
+            var schedules = new List<StoredScheduleList>();
             await using (var command = new NpgsqlCommand(sql, connection, transaction))
             {
                 command.Parameters.AddWithValue("scope_id", request.ScopeId.Value);
@@ -592,29 +644,19 @@ internal sealed class PostgreSqlDurableScheduleStore
                 await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
                 while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    identifiers.Add(new DurableScheduleId(reader.GetString(0)));
+                    schedules.Add(ReadStoredScheduleList(reader));
                 }
-
-                await reader.DisposeAsync().ConfigureAwait(false);
             }
 
-            var hasMore = identifiers.Count > request.PageSize;
+            var hasMore = schedules.Count > request.PageSize;
             if (hasMore)
             {
-                identifiers.RemoveAt(identifiers.Count - 1);
+                schedules.RemoveAt(schedules.Count - 1);
             }
 
-            var items = new List<DurableScheduleListItem>(identifiers.Count);
-            foreach (var scheduleId in identifiers)
-            {
-                var stored = await ReadScheduleAsync(connection, transaction, request.ScopeId, scheduleId, cancellationToken).ConfigureAwait(false);
-                if (stored is not null)
-                {
-                    items.Add(stored.ToListItem(_workOptions.RuntimeEpoch));
-                }
-            }
+            var items = schedules.Select(schedule => schedule.ToListItem(_workOptions.RuntimeEpoch)).ToArray();
 
-            var next = hasMore && identifiers.Count > 0 ? EncodeContinuation(identifiers[^1].Value) : null;
+            var next = hasMore && schedules.Count > 0 ? EncodeContinuation(schedules[^1].ScheduleId.Value) : null;
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return DurableOperationResult<DurableScheduleListResult>.Success(new DurableScheduleListResult(items, next));
         }
@@ -698,11 +740,12 @@ internal sealed class PostgreSqlDurableScheduleStore
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var scopeGeneration = await ValidateStoreSetScopeAndLockActiveScopeAsync(
+            var scopeGeneration = await ValidateStoreSetScopeAndReadActiveScopeAsync(
                 connection,
                 transaction,
                 claim.ScopeId,
                 createScope: false,
+                lockScope: true,
                 cancellationToken).ConfigureAwait(false);
             if (scopeGeneration is null)
             {
@@ -721,11 +764,11 @@ internal sealed class PostgreSqlDurableScheduleStore
 
             if (processing.State is "deleted" or "paused" or "suspended")
             {
-                var state = processing?.State == "deleted" ? "terminal" : "suspended";
+                var state = processing.State == "deleted" ? "terminal" : "suspended";
                 await SetDispatchStateAsync(connection, transaction, claim.ScopeId, claim.ScheduleId, claim.DispatchRevision, state, cancellationToken)
                     .ConfigureAwait(false);
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-                return processing?.State == "suspended" ? ScheduleProcessOutcome.Suspended : ScheduleProcessOutcome.None;
+                return processing.State == "suspended" ? ScheduleProcessOutcome.Suspended : ScheduleProcessOutcome.None;
             }
 
             if (processing.RuntimeEpoch != _workOptions.RuntimeEpoch || processing.ScopeGeneration != scopeGeneration.Value)
@@ -1455,11 +1498,12 @@ internal sealed class PostgreSqlDurableScheduleStore
 
     private sealed record ScheduleContinuationToken(int Version, string ScheduleId);
 
-    internal async ValueTask<long?> ValidateStoreSetScopeAndLockActiveScopeAsync(
+    internal async ValueTask<long?> ValidateStoreSetScopeAndReadActiveScopeAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         DurableScopeId scopeId,
         bool createScope,
+        bool lockScope,
         CancellationToken cancellationToken)
     {
         await AssertRuntimeRoleAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
@@ -1514,12 +1558,15 @@ internal sealed class PostgreSqlDurableScheduleStore
             await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        await using var lockScope = new NpgsqlCommand(
-            "SELECT generation, state FROM appsurface_durable.scope WHERE scope_id = @scope_id FOR UPDATE;",
+        var scopeSql = lockScope
+            ? "SELECT generation, state FROM appsurface_durable.scope WHERE scope_id = @scope_id FOR UPDATE;"
+            : "SELECT generation, state FROM appsurface_durable.scope WHERE scope_id = @scope_id;";
+        await using var selectScope = new NpgsqlCommand(
+            scopeSql,
             connection,
             transaction);
-        lockScope.Parameters.AddWithValue("scope_id", scopeId.Value);
-        await using var scopeReader = await lockScope.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        selectScope.Parameters.AddWithValue("scope_id", scopeId.Value);
+        await using var scopeReader = await selectScope.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         if (!await scopeReader.ReadAsync(cancellationToken).ConfigureAwait(false) || scopeReader.GetString(1) != "active")
         {
             return null;
@@ -1661,7 +1708,10 @@ internal sealed class PostgreSqlDurableScheduleStore
             return null;
         }
 
-        return new StoredSchedule(
+        return ReadStoredSchedule(reader);
+    }
+
+    private static StoredSchedule ReadStoredSchedule(NpgsqlDataReader reader) => new(
             new DurableScheduleId(reader.GetString(0)),
             reader.IsDBNull(1) ? null : reader.GetString(1),
             reader.GetString(2),
@@ -1692,6 +1742,44 @@ internal sealed class PostgreSqlDurableScheduleStore
             reader.IsDBNull(27) ? null : reader.GetString(27),
             reader.IsDBNull(28) ? null : reader.GetString(28),
             reader.IsDBNull(29) ? null : reader.GetString(29));
+
+    private static StoredScheduleList ReadStoredScheduleList(NpgsqlDataReader reader) => new(
+        new DurableScheduleId(reader.GetString(0)),
+        reader.IsDBNull(1) ? null : reader.GetString(1),
+        reader.GetString(2),
+        reader.GetInt64(3),
+        reader.GetInt64(4),
+        reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5),
+        reader.GetGuid(6),
+        Enum.Parse<DurableScheduleKind>(reader.GetString(7), ignoreCase: true),
+        reader.GetString(8),
+        reader.GetInt32(9),
+        reader.GetString(10),
+        reader.GetInt32(11),
+        Enum.Parse<DurableScheduleTargetKind>(reader.GetString(12), ignoreCase: true),
+        reader.GetString(13),
+        reader.GetString(14),
+        reader.IsDBNull(15) ? null : reader.GetString(15));
+
+    private static async ValueTask<bool> ScheduleExistsAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        DurableScopeId scopeId,
+        DurableScheduleId scheduleId,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT EXISTS
+            (
+                SELECT 1
+                FROM appsurface_durable.schedule_definition
+                WHERE scope_id = @scope_id AND schedule_id = @schedule_id
+            );
+            """;
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        command.Parameters.AddWithValue("scope_id", scopeId.Value);
+        command.Parameters.AddWithValue("schedule_id", scheduleId.Value);
+        return (bool)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
     }
 
     private async ValueTask InsertDefinitionAsync(
@@ -2419,16 +2507,55 @@ internal sealed class PostgreSqlDurableScheduleStore
             ToTargetSnapshot(),
             NextDueUtc);
 
+        internal DurableScheduleListItem ToListItem(Guid activeRuntimeEpoch)
+        {
+            var schedule = ToSchedule();
+            return new DurableScheduleListItem(
+                ScheduleId,
+                DisplayName,
+                FromState(State),
+                Generation,
+                Revision,
+                schedule.Kind,
+                schedule.OverlapPolicy,
+                schedule.MisfirePolicy,
+                TargetKind == "work" ? DurableScheduleTargetKind.Work : DurableScheduleTargetKind.Flow,
+                TargetName,
+                TargetVersion,
+                TargetProviderSafety is null ? null : FromProviderSafety(TargetProviderSafety),
+                NextDueUtc,
+                State != "deleted" && RuntimeEpoch != activeRuntimeEpoch);
+        }
+    }
+
+    private sealed record StoredScheduleList(
+        DurableScheduleId ScheduleId,
+        string? DisplayName,
+        string State,
+        long Generation,
+        long Revision,
+        DateTimeOffset? NextDueUtc,
+        Guid RuntimeEpoch,
+        DurableScheduleKind ScheduleKind,
+        string OverlapKind,
+        int OverlapLimit,
+        string MisfireKind,
+        int MisfireLimit,
+        DurableScheduleTargetKind TargetKind,
+        string TargetName,
+        string TargetVersion,
+        string? TargetProviderSafety)
+    {
         internal DurableScheduleListItem ToListItem(Guid activeRuntimeEpoch) => new(
             ScheduleId,
             DisplayName,
             FromState(State),
             Generation,
             Revision,
-            ToSchedule().Kind,
-            ToSchedule().OverlapPolicy,
-            ToSchedule().MisfirePolicy,
-            TargetKind == "work" ? DurableScheduleTargetKind.Work : DurableScheduleTargetKind.Flow,
+            ScheduleKind,
+            FromOverlap(OverlapKind, OverlapLimit),
+            FromMisfire(MisfireKind, MisfireLimit),
+            TargetKind,
             TargetName,
             TargetVersion,
             TargetProviderSafety is null ? null : FromProviderSafety(TargetProviderSafety),

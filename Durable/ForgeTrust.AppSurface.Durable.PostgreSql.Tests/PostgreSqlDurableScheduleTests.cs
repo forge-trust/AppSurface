@@ -123,6 +123,17 @@ public sealed class PostgreSqlDurableScheduleTests
 
         Assert.False(mixedIdentity.IsSuccess);
         Assert.Equal(DurableScheduleProblemCodes.CommandConflict, mixedIdentity.Problem!.Code);
+
+        var duplicateSchedule = await client.CreateAsync(new DurableScheduleCreateRequest(
+            scope,
+            new DurableCommandId("schedule-command-c"),
+            "schedule-key-c",
+            new DurableScheduleId("schedule-a"),
+            DurableSchedule.At(DateTimeOffset.UtcNow + TimeSpan.FromDays(1)),
+            target));
+
+        Assert.False(duplicateSchedule.IsSuccess);
+        Assert.Equal(DurableScheduleProblemCodes.ScheduleInvalid, duplicateSchedule.Problem!.Code);
         Assert.Equal(2, await CountAsync(database.DataSource, scope, "schedule_definition"));
     }
 
@@ -191,6 +202,15 @@ public sealed class PostgreSqlDurableScheduleTests
         catch
         {
             await blockingTransaction.RollbackAsync();
+            try
+            {
+                await Task.WhenAll(firstTask, secondTask);
+            }
+            catch
+            {
+                // Preserve the lock-observation failure after both commands have observed the rollback.
+            }
+
             throw;
         }
 
@@ -264,13 +284,15 @@ public sealed class PostgreSqlDurableScheduleTests
         var candidate = Assert.Single(await workStore.DiscoverAsync(1));
         var claim = await workStore.TryClaimAsync(candidate, "queue-one-worker");
         Assert.NotNull(claim);
+        await SetScheduleDispatchLeaseAsync(database.DataSource, scope, scheduleId);
         var completion = await workStore.RecordCompletionAsync(
             claim!,
             new PostgreSqlWorkCompletion(PostgreSqlWorkCompletionKind.FailedTerminal, "test_terminal", "{}"));
         Assert.Equal(PostgreSqlWorkObservationOutcome.Applied, completion.Outcome);
         Assert.Equal(DurableWorkState.FailedTerminal, completion.State);
+        Assert.Equal("leased", await ReadScheduleDispatchStateAsync(database.DataSource, scope, scheduleId));
 
-        await ForceQueueOneTestScheduleDueAsync(database.DataSource, scope, scheduleId, wakeDispatch: false);
+        await ForceQueueOneTestScheduleDueAsync(database.DataSource, scope, scheduleId, wakeDispatch: true);
         var terminalPass = await processor.ProcessDueAsync(new PostgreSqlDurableScheduleProcessRequest("queue-one-scheduler", 1));
 
         Assert.Equal(1, terminalPass.MaterializedWorkTargets);
@@ -607,19 +629,37 @@ public sealed class PostgreSqlDurableScheduleTests
         Assert.True(deletedSnapshot.IsSuccess);
         Assert.Equal(DurableScheduleState.Deleted, deletedSnapshot.Value!.State);
 
-        await SuspendAsync(database.DataSource, scope, scheduleId, Guid.NewGuid(), DurableScheduleProblemCodes.EvaluationChanged);
+        var suspendedScheduleId = new DurableScheduleId("lifecycle-suspended-schedule");
+        var suspendedCreated = await client.CreateAsync(new DurableScheduleCreateRequest(
+            scope,
+            new DurableCommandId("lifecycle-suspended-create"),
+            "lifecycle-suspended-key",
+            suspendedScheduleId,
+            DurableSchedule.At(DateTimeOffset.UtcNow + TimeSpan.FromDays(1)),
+            DurableScheduleTarget.Work(contract.WorkName, contract.WorkVersion, new byte[] { 4, 2 }, codec)));
+        Assert.True(suspendedCreated.IsSuccess);
+        await SuspendAsync(database.DataSource, scope, suspendedScheduleId, Guid.NewGuid(), DurableScheduleProblemCodes.EvaluationChanged);
+        var suspendedUpdate = await client.UpdateAsync(new DurableScheduleUpdateRequest(
+            scope,
+            new DurableCommandId("lifecycle-suspended-update"),
+            suspendedScheduleId,
+            suspendedCreated.Value!.Revision,
+            DurableSchedule.After(TimeSpan.FromMinutes(5)),
+            DurableScheduleTarget.Work(contract.WorkName, contract.WorkVersion, new byte[] { 4, 2 }, codec)));
         var evaluationRelease = await client.ApplyLifecycleCommandAsync(new DurableScheduleCommand(
             DurableScheduleCommandKind.ReleaseAfterRecovery,
             scope,
             new DurableCommandId("lifecycle-evaluation-release"),
-            scheduleId,
+            suspendedScheduleId,
             "operator",
             "test",
-            deletedSnapshot.Value.Revision));
+            suspendedCreated.Value.Revision));
 
+        Assert.False(suspendedUpdate.IsSuccess);
+        Assert.Equal(DurableScheduleProblemCodes.ScheduleInvalid, suspendedUpdate.Problem!.Code);
         Assert.True(evaluationRelease.IsSuccess);
         Assert.Equal(DurableScheduleMutationCode.Unchanged, evaluationRelease.Value!.Code);
-        var suspendedSnapshot = await client.GetAsync(scope, scheduleId);
+        var suspendedSnapshot = await client.GetAsync(scope, suspendedScheduleId);
         Assert.True(suspendedSnapshot.IsSuccess);
         Assert.Equal(DurableScheduleState.Suspended, suspendedSnapshot.Value!.State);
     }
@@ -916,6 +956,25 @@ public sealed class PostgreSqlDurableScheduleTests
         Assert.Equal(DurableScheduleMutationCode.Duplicate, duplicate.Value!.Code);
         Assert.Equal(updated.Value.Revision, duplicate.Value.Revision);
 
+        var paused = await client.ApplyLifecycleCommandAsync(new DurableScheduleCommand(
+            DurableScheduleCommandKind.Pause,
+            scope,
+            new DurableCommandId("update-results-pause"),
+            scheduleId,
+            "operator",
+            "test",
+            updated.Value.Revision));
+        Assert.True(paused.IsSuccess);
+        var pausedUpdate = await client.UpdateAsync(new DurableScheduleUpdateRequest(
+            scope,
+            new DurableCommandId("update-results-while-paused"),
+            scheduleId,
+            paused.Value!.Revision,
+            DurableSchedule.At(DateTimeOffset.UtcNow + TimeSpan.FromDays(2)),
+            target));
+        Assert.True(pausedUpdate.IsSuccess);
+        Assert.Equal(DurableScheduleState.Paused, (await client.GetAsync(scope, scheduleId)).Value!.State);
+
         var deleted = await client.ApplyLifecycleCommandAsync(new DurableScheduleCommand(
             DurableScheduleCommandKind.Delete,
             scope,
@@ -923,7 +982,7 @@ public sealed class PostgreSqlDurableScheduleTests
             scheduleId,
             "operator",
             "test",
-            updated.Value.Revision));
+            pausedUpdate.Value!.Revision));
         Assert.True(deleted.IsSuccess);
         var updateDeleted = await client.UpdateAsync(new DurableScheduleUpdateRequest(
             scope,
@@ -1764,6 +1823,66 @@ public sealed class PostgreSqlDurableScheduleTests
         await transaction.CommitAsync();
     }
 
+    private static async ValueTask SetScheduleDispatchLeaseAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scopeId,
+        DurableScheduleId scheduleId)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using (var scope = new NpgsqlCommand(
+                         "SELECT set_config('appsurface_durable.scope_id', @scope_id, true);",
+                         connection,
+                         transaction))
+        {
+            scope.Parameters.AddWithValue("scope_id", scopeId.Value);
+            await scope.ExecuteNonQueryAsync();
+        }
+
+        await using var lease = new NpgsqlCommand(
+            """
+            UPDATE appsurface_durable.schedule_dispatch
+            SET state = 'leased',
+                lease_owner = 'active-test-owner',
+                lease_expires_at = clock_timestamp() + interval '1 minute',
+                updated_at = clock_timestamp()
+            WHERE scope_id = @scope_id AND schedule_id = @schedule_id;
+            """,
+            connection,
+            transaction);
+        lease.Parameters.AddWithValue("scope_id", scopeId.Value);
+        lease.Parameters.AddWithValue("schedule_id", scheduleId.Value);
+        Assert.Equal(1, await lease.ExecuteNonQueryAsync());
+        await transaction.CommitAsync();
+    }
+
+    private static async ValueTask<string> ReadScheduleDispatchStateAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scopeId,
+        DurableScheduleId scheduleId)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using (var scope = new NpgsqlCommand(
+                         "SELECT set_config('appsurface_durable.scope_id', @scope_id, true);",
+                         connection,
+                         transaction))
+        {
+            scope.Parameters.AddWithValue("scope_id", scopeId.Value);
+            await scope.ExecuteNonQueryAsync();
+        }
+
+        await using var command = new NpgsqlCommand(
+            "SELECT state FROM appsurface_durable.schedule_dispatch WHERE scope_id = @scope_id AND schedule_id = @schedule_id;",
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("scope_id", scopeId.Value);
+        command.Parameters.AddWithValue("schedule_id", scheduleId.Value);
+        var state = (string)(await command.ExecuteScalarAsync())!;
+        await transaction.CommitAsync();
+        return state;
+    }
+
     private static async ValueTask SetPersistedTargetKindAsync(
         NpgsqlDataSource dataSource,
         DurableScopeId scopeId,
@@ -2021,7 +2140,7 @@ public sealed class PostgreSqlDurableScheduleTests
                 return;
             }
 
-            await Task.Yield();
+            await Task.Delay(TimeSpan.FromMilliseconds(25));
         }
 
         throw new TimeoutException($"Expected {expectedCount} Schedule commands to wait on the scoped PostgreSQL row lock.");

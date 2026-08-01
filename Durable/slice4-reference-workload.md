@@ -80,7 +80,7 @@ For strict CI verification across all PostgreSQL integration tests including Flo
 The compiled reference workload requires:
 
 1. Construct `PostgreSqlDurableRuntimeSchemaManager` with a migration-owner data source.
-2. Call `GetStatusAsync`, `ApplyAsync` (applying migrations `0001`-`0003`), and `InitializeRuntimeEpochAsync`; capture StoreId and active epoch.
+2. Call `GetStatusAsync`, `ApplyAsync` (applying current reviewed forward migrations; Slice 4 requires Flow facts through `0003_flow_protocol.sql`), and `InitializeRuntimeEpochAsync`; capture StoreId and active epoch.
 3. Construct `PostgreSqlDurableWorkOptions` with `RuntimeEpoch` and `ExpectedStoreId`.
 4. Construct `PostgreSqlDurableFlowClient` with the scoped data source, Flow registry, payload codec registry, and shared PostgreSQL options.
 5. Invoke `IDurableFlowClient.StartAsync` or `IDurableFlowClient.RaiseEventAsync`. The manually driven Slice 4 processor discovers and evaluates steps through `PostgreSqlDurableFlowProcessor.DiscoverAsync` and `TryProcessAsync`; no public `ExecuteStepAsync` API exists.

@@ -18,10 +18,12 @@ depends on PostgreSQL.
 
 ## First proof
 
-Run the source-evaluator [`slice 3 reference workload`](../slice3-reference-workload.md), [`slice 4 reference workload`](../slice4-reference-workload.md), or the Work-first [`Schedule protocol`](../schedule-protocol-v1.md). They apply schema explicitly,
-accept Work and start Flows atomically with domain mutations, force-terminate a separate process at the committed
-timer-winner checkpoint, verify the remaining recovery boundaries transactionally with fresh processors, and prove safe
-recovery for every provider-safety class and Flow state transition. They are not hosted-runtime demonstrations.
+Run the source-evaluator [`slice 3 reference workload`](../slice3-reference-workload.md) and
+[`slice 4 reference workload`](../slice4-reference-workload.md) to apply schema explicitly, accept Work and start Flows
+atomically with domain mutations, force-terminate a separate process at the committed timer-winner checkpoint, and verify
+the remaining recovery boundaries transactionally with fresh processors. The Work-first
+[`Schedule protocol`](../schedule-protocol-v1.md) is currently a bounded Gate A Work-only protocol check; its deterministic
+crash-proof evidence remains deferred. None of these are hosted-runtime demonstrations.
 
 ## Explicit schema and epoch deployment
 
@@ -267,6 +269,5 @@ Read the normative [`Work protocol v1`](../work-protocol-v1.md), [`Flow protocol
 
 ## Release Guidance
 
-From the repository root, `./Durable/verify-postgresql.sh --quick` runs focused Work proof, `./Durable/verify-postgresql.sh --quick --flow` runs focused Flow proof, and `./Durable/verify-postgresql.sh --quick --schedule` runs the real PostgreSQL Work-first Schedule proof. `--ci`, `--ci --flow`, and `--ci --schedule` run their strict
-real-PostgreSQL gates. The [`package chooser`](../../packages/README.md) is the generated adoption/publication source, and
+From the repository root, `./Durable/verify-postgresql.sh --quick` runs focused Work proof, `./Durable/verify-postgresql.sh --quick --flow` runs focused Flow proof, and `./Durable/verify-postgresql.sh --quick --schedule` runs the real PostgreSQL Work-first Schedule proof. `--ci` runs the complete strict real-PostgreSQL suite; `--ci --flow` performs its compatibility preflight before that suite, while `--ci --schedule` selects Schedule validation but likewise runs the complete suite. The [`package chooser`](../../packages/README.md) is the generated adoption/publication source, and
 the [`release hub`](../../releases/README.md) owns coordinated release policy.

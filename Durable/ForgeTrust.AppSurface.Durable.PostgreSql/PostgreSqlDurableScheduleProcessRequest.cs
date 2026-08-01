@@ -41,6 +41,10 @@ public sealed record PostgreSqlDurableScheduleProcessRequest
 public sealed record PostgreSqlDurableScheduleProcessResult
 {
     /// <summary>Initializes the result of one bounded Schedule processing pass.</summary>
+    /// <param name="claimedSchedules">The number of dispatch rows leased by this pass.</param>
+    /// <param name="recordedOccurrences">The number of occurrence facts inserted or extended by this pass.</param>
+    /// <param name="materializedWorkTargets">The number of Work targets materialized by this pass.</param>
+    /// <param name="suspendedSchedules">The number of Schedules suspended by this pass.</param>
     public PostgreSqlDurableScheduleProcessResult(
         int claimedSchedules,
         int recordedOccurrences,
