@@ -164,7 +164,8 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("RELEASE_PREP_POLICY_BASE_REF", prep, StringComparison.Ordinal);
         Assert.Contains("RELEASE_PREP_POLICY_VERSION", prep, StringComparison.Ordinal);
         Assert.Contains("ReleasePreparationChangePolicyValidatesPullRequestDiff", prep, StringComparison.Ordinal);
-        Assert.Contains("No versioned release manifest changed; validating release-prep policy tests without applying the release-artifact diff gate.", prep, StringComparison.Ordinal);
+        Assert.Contains("No versioned release manifest changed; validating the complete release test suite without applying the release-artifact diff gate.", prep, StringComparison.Ordinal);
+        Assert.DoesNotContain("--filter FullyQualifiedName~ReleaseWorkflowPolicyTests", prep, StringComparison.Ordinal);
         Assert.Contains("release_prep_changes", prep, StringComparison.Ordinal);
         Assert.Contains("git diff --no-renames --name-status", prep, StringComparison.Ordinal);
         Assert.Contains("current_pointer_markdown_added", prep, StringComparison.Ordinal);

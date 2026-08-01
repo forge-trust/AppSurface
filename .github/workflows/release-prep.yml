@@ -182,9 +182,8 @@ jobs:
               echo "Release-prep-owned paths changed without exactly one added or modified versioned release manifest. Non-release pull requests may update releases/unreleased.md and may bootstrap both releases/current.md and releases/current.md.yml together." >&2
               exit 1
             fi
-            echo "No versioned release manifest changed; validating release-prep policy tests without applying the release-artifact diff gate."
-            dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj \
-              --filter FullyQualifiedName~ReleaseWorkflowPolicyTests
+            echo "No versioned release manifest changed; validating the complete release test suite without applying the release-artifact diff gate."
+            dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj
             exit 0
           fi
           if [[ "${#manifests[@]}" -ne 1 ]]; then

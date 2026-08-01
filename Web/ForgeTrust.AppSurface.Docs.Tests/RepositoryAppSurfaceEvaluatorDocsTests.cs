@@ -158,10 +158,19 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
         Assert.Equal("release-note", pointer.Metadata?.PageType);
         Assert.Equal("Tree-local coordinated release pointer", pointer.Metadata?.Trust?.Status);
 
+        const string currentReleasePrefix = "<!-- appsurface-current-coordinated-release: ";
+        const string currentReleaseSuffix = " -->";
+        var currentReleaseMarker = Assert.Single(
+            pointer.Content.Split('\n'),
+            line => line.StartsWith(currentReleasePrefix, StringComparison.Ordinal));
+        Assert.EndsWith(currentReleaseSuffix, currentReleaseMarker, StringComparison.Ordinal);
+        var currentReleaseTag = currentReleaseMarker[currentReleasePrefix.Length..^currentReleaseSuffix.Length];
+        Assert.False(string.IsNullOrWhiteSpace(currentReleaseTag));
+
         var aggregator = CreateAggregator(docs);
         var details = await aggregator.GetDocDetailsAsync("releases/current.md");
         Assert.NotNull(details);
-        Assert.Contains("v0.2.0-preview.4", details!.Document.Content, StringComparison.Ordinal);
+        Assert.Contains(currentReleaseTag, details!.Document.Content, StringComparison.Ordinal);
 
         var searchIndex = await aggregator.GetSearchIndexPayloadAsync();
         var searchDocument = Assert.Single(
