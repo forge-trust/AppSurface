@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using CliFx.Infrastructure;
+using ForgeTrust.AppSurface.Testing;
 using ForgeTrust.RazorWire.Cli;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -491,7 +492,7 @@ public sealed class CanaryPollTests
     [Fact]
     public async Task GithubSummaryWriter_Should_EscapeSafeFieldsWithoutChangingTheResult()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"appsurface-canary-{Guid.NewGuid():N}.md");
+        var path = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-canary-{Guid.NewGuid():N}.md");
         var result = CanaryPollResult.SemanticFailure(
             "stale",
             "canary|name",
@@ -953,6 +954,14 @@ public sealed class CanaryPollTests
         Assert.False(await CanaryPollGithubSummaryWriter.TryWriteAsync(null, oversizedResult));
         Assert.False(await CanaryPollGithubSummaryWriter.TryWriteAsync(Path.GetTempPath(), oversizedResult));
         Assert.False(await CanaryPollGithubSummaryWriter.TryWriteAsync("\0", oversizedResult));
+    }
+
+    [Fact]
+    public async Task GithubSummaryWriter_Should_ReturnFalse_WhenWritingANullNamedResultToADirectory()
+    {
+        var result = CanaryPollResult.ProtocolFailure(1, TimeSpan.Zero);
+
+        Assert.False(await CanaryPollGithubSummaryWriter.TryWriteAsync(Path.GetTempPath(), result));
     }
 
     [Fact]

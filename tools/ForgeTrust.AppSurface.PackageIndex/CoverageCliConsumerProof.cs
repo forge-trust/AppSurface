@@ -712,7 +712,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
     {
         return new ExternalCommandRequest(
             "dotnet",
-            ["tool", "run", CliCommandName, .. arguments],
+            ["tool", "run", CliCommandName, "--", .. arguments],
             context.FixtureDirectory,
             operationName,
             timeoutDescription,
@@ -1041,8 +1041,9 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             {
                 await _serveTask;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (_cancellation.IsCancellationRequested)
             {
+                // Stopping the loopback listener intentionally cancels the fixture's accept loop.
             }
             finally
             {
@@ -1073,6 +1074,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             }
             catch (SocketException) when (_cancellation.IsCancellationRequested)
             {
+                // Listener.Stop interrupts a pending accept during expected fixture shutdown.
             }
         }
 

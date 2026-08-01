@@ -3783,6 +3783,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
             report.Artifacts,
             artifact => artifact.Description == "excluded project 'Smoke.Browser.Tests' produced no coverage artifacts" && artifact.Exists);
         var canaryPassRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface canary poll pass");
+        Assert.All(
+            commandRunner.Requests.Where(request => request.OperationName.StartsWith("appsurface", StringComparison.Ordinal)),
+            request => Assert.Equal(["tool", "run", "appsurface", "--"], request.Arguments.Take(4).ToArray()));
         Assert.Contains("--marker-env", canaryPassRequest.Arguments);
         Assert.Contains("APPSURFACE_PACKAGE_PROOF_MARKER", canaryPassRequest.Arguments);
         Assert.Contains("--bearer-token-env", canaryPassRequest.Arguments);
