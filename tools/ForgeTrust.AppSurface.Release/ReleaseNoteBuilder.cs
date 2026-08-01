@@ -14,7 +14,7 @@ internal static class ReleaseNoteBuilder
     /// <returns>Tagged release Markdown with a generated comment header and a trailing newline.</returns>
     /// <remarks>
     /// The method first parses Markdown to catch syntax problems, but it does not use the returned syntax tree to rewrite content.
-    /// It then replaces only the exact top-level <c># Unreleased</c> heading and two known narrative phrases using ordinal matching.
+    /// It then replaces only the exact top-level <c># Unreleased</c> heading without consuming its following blank line, and two known narrative phrases using ordinal matching.
     /// Variants in casing or wording are left unchanged. Output is deterministic apart from the supplied version and date, uses
     /// <see cref="Environment.NewLine"/> for generated sections, and trims trailing whitespace from the source body. Callers should run
     /// release readiness checks first because duplicate headings, missing phrases, or concurrently edited Markdown are not treated as errors.
@@ -22,7 +22,7 @@ internal static class ReleaseNoteBuilder
     internal static string Build(SemVer version, DateOnly date, string unreleased)
     {
         Markdown.Parse(unreleased);
-        var body = Regex.Replace(unreleased, "^#\\s+Unreleased\\s*$", $"# Release {version}", RegexOptions.Multiline);
+        var body = Regex.Replace(unreleased, "^#[ \\t]+Unreleased[ \\t]*\\r?$", $"# Release {version}", RegexOptions.Multiline);
         body = body.Replace("living release note for the next coordinated AppSurface version", $"release note for AppSurface {version}", StringComparison.Ordinal);
         body = body.Replace("provisional until a tag is cut", $"finalized on {date:yyyy-MM-dd}", StringComparison.Ordinal);
 

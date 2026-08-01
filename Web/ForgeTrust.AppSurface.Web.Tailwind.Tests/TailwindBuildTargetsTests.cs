@@ -1712,8 +1712,11 @@ exit 0
         string workingDirectory,
         params (string Name, string Value)[] environmentVariables)
     {
+        // Nested builds must not reuse a Roslyn server from another isolated worktree.
+        // That server may not have permission to write this test's temporary build outputs.
+        var isolatedArgs = args.Append("-p:UseSharedCompilation=false");
         var command = Cli.Wrap("dotnet")
-            .WithArguments(args)
+            .WithArguments(isolatedArgs)
             .WithWorkingDirectory(workingDirectory)
             .WithValidation(CommandResultValidation.None);
 
