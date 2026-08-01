@@ -137,6 +137,6 @@ five-character SQLSTATE. Never log or serialize inner message text, detail, hint
 | `ASDUR404` | Activator stale | Persisted heartbeat and configured stale bound |
 | `ASDUR405` | Worker identity conflict | Persisted process ownership and drain/handoff behavior |
 
-Slices 3 and 4 intentionally have no hosted worker runbook or production activation command. Canonical proofs are the
-source-evaluator [slice 3 reference workload](../Durable/slice3-reference-workload.md) and [slice 4 reference workload](../Durable/slice4-reference-workload.md), which manually drive protocol operations
+Slices 3, 4, and 5 intentionally have no hosted worker runbook or production activation command. Canonical proofs are the
+source-evaluator [slice 3 reference workload](../Durable/slice3-reference-workload.md), [slice 4 reference workload](../Durable/slice4-reference-workload.md), and [Schedule protocol v1](../Durable/schedule-protocol-v1.md), which manually drive protocol operations
 against real PostgreSQL.
