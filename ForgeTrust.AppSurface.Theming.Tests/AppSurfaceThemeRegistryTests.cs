@@ -155,6 +155,34 @@ public sealed class AppSurfaceThemeRegistryTests
     }
 
     [Fact]
+    public void Validate_ShouldReportDefaultPairIdentifierAndMissingDefaultTheme()
+    {
+        var pair = AppSurfaceThemePair.AppSurface();
+        var options = new AppSurfaceThemeRegistryOptions();
+        options.Pairs.Add(new AppSurfaceThemePair(default, pair.Light, pair.Dark));
+
+        var diagnostics = AppSurfaceThemeRegistry.Validate(options);
+
+        Assert.Collection(
+            diagnostics,
+            diagnostic => Assert.Equal("ASTHEME003", diagnostic.Code),
+            diagnostic => Assert.Equal("ASTHEME002", diagnostic.Code));
+    }
+
+    [Fact]
+    public void ThemeContracts_ShouldRejectNullConfigurationAndRoleSets()
+    {
+        var pair = AppSurfaceThemePair.AppSurface();
+
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceThemeRegistry(null!));
+        Assert.Throws<ArgumentNullException>(() => AppSurfaceThemeRegistry.Validate(null!));
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceThemePair(pair.Id, null!, pair.Dark));
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceThemePair(pair.Id, pair.Light, null!));
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.System, null!, pair.Dark));
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.System, pair.Light, null!));
+    }
+
+    [Fact]
     public void Registry_ShouldExposeSafeDiagnosticsForInvalidConfiguration()
     {
         var exception = Assert.Throws<AppSurfaceThemeValidationException>(

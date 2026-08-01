@@ -148,6 +148,32 @@ public sealed class AppSurfaceDocsThemePairTests
         Assert.NotEmpty(theme.CssVariableStyle);
     }
 
+    [Fact]
+    public void SharedPolicy_ShouldFallBackToSemanticTokensForAnUnsupportedMode()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Theme = new AppSurfaceDocsThemeOptions
+            {
+                Colors = new AppSurfaceDocsThemeColorOptions
+                {
+                    AccentColor = "#1d4ed8"
+                }
+            }
+        };
+        AppSurfaceDocsThemePolicy.Normalize(options.Theme);
+        var pair = AppSurfaceThemePair.AppSurface();
+        var unsupportedResolution = new AppSurfaceThemeResolution(pair.Id, (AppSurfaceThemeMode)99, pair.Light, pair.Dark);
+
+        var theme = AppSurfaceDocsThemePolicy.ResolveShared(
+            AppSurfaceDocsThemePolicy.Resolve(options.Theme),
+            options.Theme,
+            unsupportedResolution);
+
+        Assert.Contains("--docs-color-accent:var(--as-accent);", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.DoesNotContain("--docs-color-accent:#1d4ed8;", theme.CriticalCss, StringComparison.Ordinal);
+    }
+
     private sealed class StubThemeResolver(AppSurfaceThemeResolution resolution) : IAppSurfaceThemeResolver
     {
         public AppSurfaceThemeResolution ResolveDefault() => resolution;

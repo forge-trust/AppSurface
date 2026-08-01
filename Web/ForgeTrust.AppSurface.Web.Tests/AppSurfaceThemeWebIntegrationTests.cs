@@ -289,6 +289,12 @@ public sealed class AppSurfaceThemeWebIntegrationTests
     }
 
     [Fact]
+    public void Serializer_ShouldRejectANullDocumentWhenSerializingHeadContent()
+    {
+        Assert.Throws<ArgumentNullException>(() => AppSurfaceThemeDocumentSerializer.SerializeHeadContent(null!));
+    }
+
+    [Fact]
     public void HeadTagHelper_ShouldEmitOnePayloadPerMvcRequest()
     {
         var viewContext = CreateViewContext();
