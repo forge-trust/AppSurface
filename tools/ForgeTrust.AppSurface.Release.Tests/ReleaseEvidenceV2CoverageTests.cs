@@ -78,6 +78,33 @@ public sealed class ReleaseEvidenceV2CoverageTests
     }
 
     [Fact]
+    public void ValidateTagRejectsMismatchedTagCommit()
+    {
+        var fixture = CreateFixture();
+        var bundle = fixture.Bundle with
+        {
+            Commits = fixture.Bundle.Commits with { TagCommit = new string('c', 40) }
+        };
+
+        var result = ValidateTag(fixture, ReleaseEvidenceV2.Serialize(ReleaseEvidenceV2.RefreshSubject(bundle)));
+
+        AssertDiagnostic(result, "release-evidence-tag-commit-mismatch");
+    }
+
+    [Fact]
+    public void ValidateTagRejectsInvalidNestedJson()
+    {
+        var fixture = CreateFixture();
+        var root = JsonNode.Parse(ReleaseEvidenceV2.Serialize(fixture.Bundle))!.AsObject();
+        root["commits"] = new JsonArray();
+
+        var result = ValidateTag(fixture, root.ToJsonString(ReleaseJson.Options));
+
+        AssertDiagnostic(result, "release-evidence-schema-invalid");
+        Assert.Null(result.Summary);
+    }
+
+    [Fact]
     public void ValidateTagRejectsDuplicateCoordinatedResolutions()
     {
         var fixture = CreateFixture();

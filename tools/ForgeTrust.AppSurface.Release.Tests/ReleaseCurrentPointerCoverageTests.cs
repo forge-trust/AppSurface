@@ -96,6 +96,21 @@ public sealed class ReleaseCurrentPointerCoverageTests
         Assert.Empty(diagnostics);
     }
 
+    [Fact]
+    public async Task GateIgnoresInvalidSemanticVersionTagAlongsideReachableAnnotatedTag()
+    {
+        var target = SemVer.Parse("1.0.1");
+        var tag = "v1.0.0";
+        var runner = new FakeCommandRunner();
+        runner.Add(TagListCommand, new CommandResult(0, "vnot-semver\n" + tag + "\n", ""));
+        AddReachableAnnotatedTag(runner, tag, "commit");
+        runner.Add(TargetLookupCommand(target), MissingTarget);
+
+        var diagnostics = await ValidateAsync(runner, target, ReleaseCurrentPointer.Build(SemVer.Parse("1.0.0")));
+
+        Assert.Empty(diagnostics);
+    }
+
     [Theory]
     [InlineData(128, "", "broken tag object")]
     [InlineData(0, " \n", "")]
