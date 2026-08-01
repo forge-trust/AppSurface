@@ -420,6 +420,12 @@ public sealed class AppSurfaceCanaryEndpointTests
         Assert.Equal(HttpStatusCode.BadRequest, missingResponse.StatusCode);
         Assert.Contains("ASCAN201", await missingResponse.Content.ReadAsStringAsync(), StringComparison.Ordinal);
 
+        using var missingFreshnessRequest = AuthorizedRequest(SnapshotRoute());
+        missingFreshnessRequest.Headers.Add(AppSurfaceCanaryHeaderNames.Marker, "marker-secret");
+        using var missingFreshnessResponse = await host.Client.SendAsync(missingFreshnessRequest);
+        Assert.Equal(HttpStatusCode.BadRequest, missingFreshnessResponse.StatusCode);
+        Assert.Contains("ASCAN201", await missingFreshnessResponse.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+
         using var request = AuthorizedRequest(SnapshotRoute());
         request.Headers.Add(AppSurfaceCanaryHeaderNames.Marker, "marker-secret");
         request.Headers.Add(AppSurfaceCanaryHeaderNames.FreshSince, "2026-07-16T00:30:00-04:00");
@@ -1620,6 +1626,49 @@ public sealed class AppSurfaceCanaryEndpointTests
     public void PublicSnapshotConsumer_RejectsInvalidAggregateContract(string json)
     {
         Assert.Throws<JsonException>(() => CanarySnapshotEnvelopeConsumer.Parse(json));
+    }
+
+    [Theory]
+    [InlineData("""{ "ready": false, "overallTimedOut": false, "results": [{ "name": "a.b", "outcome": "failed", "code": "ASCAN301" }] }""")]
+    [InlineData("""{ "ready": false, "overallTimedOut": false, "elapsedMilliseconds": "1", "results": [{ "name": "a.b", "outcome": "failed", "code": "ASCAN301" }] }""")]
+    [InlineData("""{ "ready": false, "overallTimedOut": false, "elapsedMilliseconds": 1 }""")]
+    [InlineData("""{ "ready": 0, "overallTimedOut": false, "elapsedMilliseconds": 1, "results": [{ "name": "a.b", "outcome": "failed", "code": "ASCAN301" }] }""")]
+    [InlineData("""{ "ready": false, "overallTimedOut": 0, "elapsedMilliseconds": 1, "results": [{ "name": "a.b", "outcome": "failed", "code": "ASCAN301" }] }""")]
+    [InlineData("""{ "ready": false, "overallTimedOut": false, "elapsedMilliseconds": 1, "results": [{ "outcome": "failed", "code": "ASCAN301" }] }""")]
+    [InlineData("""{ "ready": false, "overallTimedOut": false, "elapsedMilliseconds": 1, "results": [{ "name": "a.b", "code": "ASCAN301" }] }""")]
+    [InlineData("""{ "ready": false, "overallTimedOut": false, "elapsedMilliseconds": 1, "results": [{ "name": "a.b", "outcome": "failed", "result": {} }] }""")]
+    public void PublicSnapshotConsumer_RejectsMissingOrMalformedRequiredFields(string json)
+    {
+        Assert.Throws<JsonException>(() => CanarySnapshotEnvelopeConsumer.Parse(json));
+    }
+
+    [Fact]
+    public void SnapshotItem_ProjectsTypedStatesToStableWireValues()
+    {
+        var completed = AppSurfaceCanarySnapshotItem.Completed(
+            Name,
+            new AppSurfaceCanaryResult(AppSurfaceCanaryStatus.Pass),
+            elapsedMilliseconds: 1);
+        var failed = AppSurfaceCanarySnapshotItem.Failed(Name);
+        var perCheckTimedOut = AppSurfaceCanarySnapshotItem.PerCheckTimedOut(Name);
+        var overallTimedOut = AppSurfaceCanarySnapshotItem.OverallTimedOut(Name);
+        var notStarted = AppSurfaceCanarySnapshotItem.NotStarted(Name);
+
+        Assert.Equal(AppSurfaceCanarySnapshotItemState.Completed, completed.State);
+        Assert.Equal("completed", completed.Outcome);
+        Assert.Null(completed.ReasonCode);
+        Assert.True(completed.Ready);
+        Assert.False(completed.BoundedByOverallDeadline);
+        Assert.Equal("ASCAN301", failed.ReasonCode);
+        Assert.Equal("ASCAN302", perCheckTimedOut.ReasonCode);
+        Assert.Equal("ASCAN303", overallTimedOut.ReasonCode);
+        Assert.Equal("ASCAN304", notStarted.ReasonCode);
+        Assert.Equal("timed-out", perCheckTimedOut.Outcome);
+        Assert.Equal("timed-out", overallTimedOut.Outcome);
+        Assert.Equal("not-started", notStarted.Outcome);
+        Assert.True(overallTimedOut.BoundedByOverallDeadline);
+        Assert.True(notStarted.BoundedByOverallDeadline);
+        Assert.False(failed.Ready);
     }
 
     [Theory]
