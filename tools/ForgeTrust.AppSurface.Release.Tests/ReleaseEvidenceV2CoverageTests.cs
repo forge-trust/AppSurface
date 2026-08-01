@@ -19,6 +19,23 @@ public sealed class ReleaseEvidenceV2CoverageTests
     }
 
     [Fact]
+    public async Task ValidatePreparedRejectsMalformedRootJson()
+    {
+        var fixture = CreateFixture();
+
+        var result = await ReleaseEvidenceV2.ValidatePreparedAsync(
+            fixture.Workspace,
+            fixture.Version,
+            fixture.Classification,
+            fixture.BaseCommit,
+            "{",
+            CancellationToken.None);
+
+        AssertDiagnostic(result, "release-evidence-schema-invalid");
+        Assert.Null(result.Summary);
+    }
+
+    [Fact]
     public void ValidateTagRejectsNonObjectRootJson()
     {
         var fixture = CreateFixture();
@@ -102,6 +119,30 @@ public sealed class ReleaseEvidenceV2CoverageTests
 
         AssertDiagnostic(result, "release-evidence-schema-invalid");
         Assert.Null(result.Summary);
+    }
+
+    [Fact]
+    public void ValidateTagRejectsNullRequiredTopLevelValue()
+    {
+        var fixture = CreateFixture();
+        var root = JsonNode.Parse(ReleaseEvidenceV2.Serialize(fixture.Bundle))!.AsObject();
+        root["subject"] = null;
+
+        var result = ValidateTag(fixture, root.ToJsonString(ReleaseJson.Options));
+
+        AssertDiagnostic(result, "release-evidence-schema-invalid");
+        Assert.Null(result.Summary);
+    }
+
+    [Fact]
+    public void ValidateTagRejectsUnsupportedV2Schema()
+    {
+        var fixture = CreateFixture();
+        var bundle = ReleaseEvidenceV2.RefreshSubject(fixture.Bundle with { Schema = "unsupported" });
+
+        var result = ValidateTag(fixture, ReleaseEvidenceV2.Serialize(bundle));
+
+        AssertDiagnostic(result, "release-evidence-schema-invalid");
     }
 
     [Fact]
@@ -223,6 +264,20 @@ public sealed class ReleaseEvidenceV2CoverageTests
             releaseManifestContent: invalidManifest);
 
         AssertDiagnostic(result, "release-evidence-release-manifest-schema-invalid");
+    }
+
+    [Fact]
+    public void ValidateTagRejectsMismatchedReleaseManifestDigest()
+    {
+        var fixture = CreateFixture();
+        var bundle = ReleaseEvidenceV2.RefreshSubject(fixture.Bundle with
+        {
+            ReleaseManifestDigest = new ReleaseEvidenceFileDigest("sha256", new string('b', 64))
+        });
+
+        var result = ValidateTag(fixture, ReleaseEvidenceV2.Serialize(bundle));
+
+        AssertDiagnostic(result, "release-evidence-release-manifest-digest-mismatch");
     }
 
     [Fact]

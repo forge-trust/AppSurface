@@ -35,6 +35,35 @@ public sealed class ReleaseEvidenceCoverageTests
     }
 
     [Fact]
+    public async Task ValidatePreparedRejectsUnsupportedEvidenceSchema()
+    {
+        var root = Path.Join(Path.GetTempPath(), "ReleaseEvidenceCoverage", Guid.NewGuid().ToString("N"));
+        var workspace = new ReleaseWorkspace(root);
+        var manifest = CreateV1Manifest("abc123");
+        var bundle = CreateV1Bundle(manifest) with { Schema = "unsupported" };
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(workspace.ReleaseEvidencePath(Version))!);
+            await File.WriteAllTextAsync(workspace.ReleaseEvidencePath(Version), ReleaseEvidence.Serialize(bundle));
+
+            var result = await ReleaseEvidence.ValidatePreparedAsync(
+                workspace,
+                Version,
+                ReleaseClassification,
+                "abc123",
+                CancellationToken.None);
+
+            Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-schema-invalid");
+            Assert.Null(result.Bundle);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ValidateTagRejectsMalformedV1ReleaseManifestJson()
     {
         const string malformedManifest = "{";
@@ -147,6 +176,27 @@ public sealed class ReleaseEvidenceCoverageTests
         Assert.Equal("release-preparation-base-commit-not-contained-by-tag", exception.Diagnostic.Code);
     }
 
+    [Fact]
+    public async Task PublishRejectsV2EvidenceWhoseManifestOmitsTaggedPublicPackage()
+    {
+        var fixture = CreateV2Fixture();
+        var packageIndex = """
+            packages:
+              - project: Core/ForgeTrust.AppSurface.Core.csproj
+                classification: public
+                publish_decision: publish
+                release_track: coordinated
+            """;
+
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() =>
+            PublishAsync(
+                fixture,
+                preparationBaseMergeBaseResult: new CommandResult(0, string.Empty, string.Empty),
+                packageIndex: packageIndex));
+
+        Assert.Equal("release-evidence-package-set-mismatch", exception.Diagnostic.Code);
+    }
+
     private static ReleaseEvidenceBundle CreateV1Bundle(string manifest)
     {
         var workspace = new ReleaseWorkspace(Path.GetTempPath());
@@ -249,7 +299,10 @@ public sealed class ReleaseEvidenceCoverageTests
             fixture.CurrentReleaseSidecar);
     }
 
-    private static async Task<PublishOutputs> PublishAsync(V2Fixture fixture, CommandResult? preparationBaseMergeBaseResult)
+    private static async Task<PublishOutputs> PublishAsync(
+        V2Fixture fixture,
+        CommandResult? preparationBaseMergeBaseResult,
+        string packageIndex = "packages: []\n")
     {
         var runner = new FakeCommandRunner();
         var tag = Version.TagName;
@@ -268,7 +321,7 @@ public sealed class ReleaseEvidenceCoverageTests
             new CommandResult(0, ReleaseEvidence.Serialize(fixture.Bundle), string.Empty));
         runner.Add($"git show {tag}:{PackageReleaseLink.CoordinatedReleaseNotesPath}", new CommandResult(0, fixture.CurrentRelease, string.Empty));
         runner.Add($"git show {tag}:{PackageReleaseLink.CoordinatedReleaseSidecarPath}", new CommandResult(0, fixture.CurrentReleaseSidecar, string.Empty));
-        runner.Add($"git show {tag}:packages/package-index.yml", new CommandResult(0, "packages: []\n", string.Empty));
+        runner.Add($"git show {tag}:packages/package-index.yml", new CommandResult(0, packageIndex, string.Empty));
         if (preparationBaseMergeBaseResult is not null)
         {
             runner.Add(
