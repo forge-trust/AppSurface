@@ -20,6 +20,11 @@ This is the living release note for the next coordinated AppSurface version afte
   schema-v2 install default while `--surface push|all` emits schema-v3 server-known readiness evidence. It verifies
   worker/helper discovery, direct JavaScript responses, headers, and cache behavior, and clearly marks browser,
   permission, subscription, notification, and delivery observations as not evaluated.
+- [`ForgeTrust.AppSurface.Web` named canaries](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints)
+  now include a bounded protected aggregate snapshot at `GET /_appsurface/canaries`. Operators can select registered
+  canaries by exact name or durable tag, receive ordinal partial outcomes under explicit concurrency and deadline caps,
+  and parse a privacy-safe envelope with fixed telemetry. The feature does not add triggers, retries, polling, readiness
+  effects, or authorization-policy ownership; hosts retain those decisions.
 - Add release-facing changes here.
 
 ## Migration watch

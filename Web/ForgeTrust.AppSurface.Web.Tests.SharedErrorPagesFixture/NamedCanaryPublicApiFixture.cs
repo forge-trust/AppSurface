@@ -46,6 +46,7 @@ public sealed class NamedCanaryPublicApiFixture : IAppSurfaceWebModule
             {
                 canary.RequireMarker();
                 canary.RequireFreshSince();
+                canary.Tags.Add("deploy-critical");
                 canary.AllowedDetailKeys.Add(ForwardingCanaryEvaluator.ProofKindDetailKey);
             });
     }
@@ -60,7 +61,15 @@ public sealed class NamedCanaryPublicApiFixture : IAppSurfaceWebModule
 
     public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapAppSurfaceCanaries("DeployOperators");
+        endpoints.MapAppSurfaceCanaries(
+            "DeployOperators",
+            options =>
+            {
+                options.Snapshot.MaxSelectedCanaries = 64;
+                options.Snapshot.MaxConcurrency = 4;
+                options.Snapshot.PerCheckTimeout = TimeSpan.FromSeconds(10);
+                options.Snapshot.OverallTimeout = TimeSpan.FromSeconds(30);
+            });
     }
     // docs:snippet appsurface-canary-mapping:end
 
