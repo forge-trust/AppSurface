@@ -4,7 +4,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
-- Add merged public changes here as they land.
+- Applications can now persist PostgreSQL-backed `At`, `After`, and `Every` Schedules for registered durable Work, then run a bounded, externally triggered due pass without introducing a hosted scheduler. The Work-first gate keeps each occurrence's Work acceptance and Schedule facts in one transaction, coalesces overlapping QueueOne runs, and suspends rather than silently crossing clock, runtime-epoch, or scope-generation safety fences. Start with the [Schedule protocol](../Durable/schedule-protocol-v1.md) and the [PostgreSQL provider guide](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md).
 
 ## Included in the next coordinated version
 
@@ -15,7 +15,9 @@ This is the living release note for the next coordinated AppSurface version afte
   canaries by exact name or durable tag, receive ordinal partial outcomes under explicit concurrency and deadline caps,
   and parse a privacy-safe envelope with fixed telemetry. The feature does not add triggers, retries, polling, readiness
   effects, or authorization-policy ownership; hosts retain those decisions.
+- The PostgreSQL durable schema adds the Schedule ledger, payload-free dispatch leases, forced-RLS history partitions, and a reviewed role recipe. Operators can use the [migration and role setup guidance](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#explicit-schema-and-epoch-deployment) before enabling the manual processor.
 
 ## Migration watch
 
-- Record-breaking or behavior-changing guidance here before it moves into the tagged release note.
+- Apply `0004_schedule_protocol.sql` with the migration-owner workflow before constructing Schedule clients or processors. Runtime credentials must remain distinct non-owner, non-`BYPASSRLS` dispatcher and scoped-runtime roles; use [`configure-postgresql-roles.sql`](../Durable/configure-postgresql-roles.sql) rather than granting table access directly.
+- Schedule history partitions cover the current and following UTC months. Before the boundary is crossed, an operator must run `appsurface_durable.ensure_schedule_history_partitions()` as the migration owner; a missing partition fails writes visibly rather than routing data elsewhere.

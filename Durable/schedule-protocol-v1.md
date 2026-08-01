@@ -23,8 +23,10 @@ anchored `Every` schedules persist their UTC value unchanged. The later Work
 acceptance timestamp is deliberately not used: the Work protocol owns a separate
 `clock_timestamp()` sample.
 
-Definitions are append-only generations. Updating a definition creates a new
-generation and never rewrites its target snapshot. The active `schedule_definition`
+Definitions are append-only generations. Updating an active or suspended definition
+creates a new generation and never rewrites its target snapshot. Deletion is terminal
+for that Schedule identity; a later update cannot revive it, so an operator creates a
+new identity when the definition must be restored. The active `schedule_definition`
 row records lifecycle state, revision, active generation, runtime epoch, scope
 generation, and the materialization cursor. An occurrence identity is stable across
 processor retries:
@@ -41,9 +43,12 @@ return the original target link rather than enqueue another Work.
 
 `nominal` occurrences have one UTC instant. `recovery` and `coalesced` occurrences
 have an inclusive range `[first_nominal_utc, last_nominal_utc]`. A pending coalesced
-row may only move its last nominal instant forward. Legal materialization states are
+row may only move its last nominal instant forward. The schema reserves
 `pending`, `claimed`, `materialized`, `skipped`, `superseded`, `canceled`, and
-`suspended`; only an expired claim can return to `pending`.
+`suspended` as materialization states. Gate A writes only `pending`, `materialized`,
+and `superseded`; it does not claim individual occurrence rows. A future gate that
+introduces `claimed` must define its lease expiry and the only permitted return to
+`pending` before that state is used.
 
 For the default `QueueOne` plus `RunOnce` policy, a nonterminal target occupies the
 Schedule-wide slot. Subsequent overlapping nominal instants are represented by at

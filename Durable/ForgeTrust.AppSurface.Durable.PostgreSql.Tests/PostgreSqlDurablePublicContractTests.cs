@@ -70,6 +70,16 @@ public sealed class PostgreSqlDurablePublicContractTests
         await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.CreateAsync(null!));
         await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.UpdateAsync(null!));
         await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.ApplyLifecycleCommandAsync(null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.ListAsync(null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.ExplainNextOccurrencesAsync(null!));
+        var processor = new PostgreSqlDurableScheduleProcessor(dataSource, dataSource, registry, workOptions, scheduleOptions);
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await processor.ProcessDueAsync(null!));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await client.ListAsync(new DurableScheduleListRequest(
+            new DurableScopeId("schedule-contract-scope"),
+            continuationToken: "not-a-schedule-continuation-token")));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await client.ListAsync(new DurableScheduleListRequest(
+            new DurableScopeId("schedule-contract-scope"),
+            continuationToken: "eyJWZXJzaW9uIjoyLCJTY2hlZHVsZUlkIjoic2NoZWR1bGUtY29udHJhY3QifQ")));
 
         Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableScheduleClient(null!, registry, workOptions, scheduleOptions));
         Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableScheduleClient(dataSource, null!, workOptions, scheduleOptions));

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using ForgeTrust.AppSurface.Durable;
 using Npgsql;
 using NpgsqlTypes;
@@ -13,6 +14,11 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 /// This client persists Schedule command, generation, and occurrence facts but does not start a hosted loop. Use
 /// <see cref="PostgreSqlDurableScheduleProcessor"/> to run one bounded, manually invoked due pass. The initial
 /// implementation admits Work targets only because it can atomically compose the existing caller-owned Work writer.
+/// Callers must authorize the Schedule scope before invoking this client. Configure distinct non-owner, non-
+/// <c>BYPASSRLS</c> dispatcher and runtime login roles with the documented
+/// <see href="https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql">PostgreSQL role recipe</see>,
+/// and apply schema version 4 before accepting Schedule work. Hosted activation is intentionally deferred; this client
+/// and processor never register or start a background loop.
 /// </remarks>
 public sealed class PostgreSqlDurableScheduleClient : IDurableScheduleClient
 {
@@ -291,6 +297,17 @@ internal sealed class PostgreSqlDurableScheduleStore
             {
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
                 return RevisionConflict<DurableScheduleMutationResult>(request.ScheduleId.Value);
+            }
+
+            if (current.State == "deleted")
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return Failure<DurableScheduleMutationResult>(
+                    DurableScheduleProblemCodes.ScheduleInvalid,
+                    "A deleted Schedule cannot be updated or revived.",
+                    "Deletion is terminal for the Schedule identity and preserves its immutable audit history.",
+                    "Create a new Schedule identity for the corrected definition.",
+                    request.ScheduleId.Value);
             }
 
             var generation = checked(current.Generation + 1);
@@ -1398,9 +1415,45 @@ internal sealed class PostgreSqlDurableScheduleStore
         return $"{prefix}-{Convert.ToHexStringLower(SHA256.HashData(data))}";
     }
 
-    private static string EncodeContinuation(string scheduleId) => scheduleId;
+    private static string EncodeContinuation(string scheduleId)
+    {
+        var json = JsonSerializer.Serialize(new ScheduleContinuationToken(1, scheduleId));
+        return Convert.ToBase64String(Encoding.UTF8.GetBytes(json))
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+    }
 
-    private static string? DecodeContinuation(string? token) => token;
+    private static string? DecodeContinuation(string? token)
+    {
+        if (token is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var padded = token.Replace('-', '+').Replace('_', '/');
+            padded = padded.PadRight((padded.Length + 3) / 4 * 4, '=');
+            var decoded = JsonSerializer.Deserialize<ScheduleContinuationToken>(
+                Encoding.UTF8.GetString(Convert.FromBase64String(padded)));
+            if (decoded is null || decoded.Version != 1)
+            {
+                throw new FormatException();
+            }
+
+            return new DurableScheduleId(decoded.ScheduleId).Value;
+        }
+        catch (Exception exception) when (exception is FormatException or JsonException or ArgumentException)
+        {
+            throw new ArgumentException(
+                "The Schedule continuation token is malformed or uses an unknown version.",
+                nameof(token),
+                exception);
+        }
+    }
+
+    private sealed record ScheduleContinuationToken(int Version, string ScheduleId);
 
     internal async ValueTask<long?> ValidateStoreSetScopeAndLockActiveScopeAsync(
         NpgsqlConnection connection,

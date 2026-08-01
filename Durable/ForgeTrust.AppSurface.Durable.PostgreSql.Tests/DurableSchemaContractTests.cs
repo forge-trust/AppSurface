@@ -78,6 +78,8 @@ public sealed class DurableSchemaContractTests
                 Assert.Contains("schedule_dispatch", fourth.Sql, StringComparison.Ordinal);
                 Assert.Contains("schedule_history", fourth.Sql, StringComparison.Ordinal);
                 Assert.Contains("ensure_schedule_history_partitions", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("SET TimeZone = 'UTC'", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("state = 'leased' AND lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL", fourth.Sql, StringComparison.Ordinal);
                 Assert.Contains("accepted_at_utc", fourth.Sql, StringComparison.Ordinal);
                 Assert.Contains("FORCE ROW LEVEL SECURITY", fourth.Sql, StringComparison.Ordinal);
             });

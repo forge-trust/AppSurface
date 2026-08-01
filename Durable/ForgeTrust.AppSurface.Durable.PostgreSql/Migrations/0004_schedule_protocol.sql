@@ -56,16 +56,19 @@ CREATE TABLE appsurface_durable.schedule_generation
     CHECK
     (
         (schedule_kind = 'at' AND at_utc IS NOT NULL AND delay_interval IS NULL AND interval_value IS NULL
-            AND anchor_utc IS NULL AND cron_expression IS NULL AND cron_time_zone IS NULL)
+            AND anchor_utc IS NULL AND cron_expression IS NULL AND cron_time_zone IS NULL
+            AND cron_dialect IS NULL AND cron_grammar IS NULL)
         OR
         (schedule_kind = 'after' AND at_utc IS NULL AND delay_interval > interval '0 seconds' AND interval_value IS NULL
-            AND anchor_utc IS NULL AND cron_expression IS NULL AND cron_time_zone IS NULL)
+            AND anchor_utc IS NULL AND cron_expression IS NULL AND cron_time_zone IS NULL
+            AND cron_dialect IS NULL AND cron_grammar IS NULL)
         OR
         (schedule_kind = 'every' AND at_utc IS NULL AND delay_interval IS NULL AND interval_value > interval '0 seconds'
-            AND cron_expression IS NULL AND cron_time_zone IS NULL)
+            AND cron_expression IS NULL AND cron_time_zone IS NULL AND cron_dialect IS NULL AND cron_grammar IS NULL)
         OR
         (schedule_kind = 'cron' AND at_utc IS NULL AND delay_interval IS NULL AND interval_value IS NULL
-            AND cron_expression IS NOT NULL AND cron_time_zone IS NOT NULL AND cron_dialect IS NOT NULL AND cron_grammar IS NOT NULL)
+            AND anchor_utc IS NULL AND cron_expression IS NOT NULL AND cron_time_zone IS NOT NULL
+            AND cron_dialect IS NOT NULL AND cron_grammar IS NOT NULL)
     ),
     CHECK
     (
@@ -144,6 +147,12 @@ CREATE TABLE appsurface_durable.schedule_dispatch
     lease_generation bigint NOT NULL DEFAULT 0 CHECK (lease_generation >= 0),
     lease_expires_at timestamp with time zone,
     updated_at timestamp with time zone NOT NULL DEFAULT clock_timestamp(),
+    CHECK
+    (
+        (state = 'leased' AND lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)
+        OR
+        (state <> 'leased' AND lease_owner IS NULL AND lease_expires_at IS NULL)
+    ),
     UNIQUE (scope_id, schedule_id),
     FOREIGN KEY (scope_id, schedule_id) REFERENCES appsurface_durable.schedule_definition(scope_id, schedule_id)
 );
@@ -172,6 +181,7 @@ RETURNS void
 LANGUAGE plpgsql
 SECURITY INVOKER
 SET search_path = pg_catalog, appsurface_durable
+SET TimeZone = 'UTC'
 AS $$
 DECLARE
     current_month date := date_trunc('month', CURRENT_DATE)::date;
