@@ -81,10 +81,12 @@ try {
 
     if (-not $ready) {
         if (Test-Path -LiteralPath $stdoutPath) {
-            Get-Content -LiteralPath $stdoutPath | Write-Error
+            Write-Host "--- child stdout ---"
+            Get-Content -LiteralPath $stdoutPath | Write-Host
         }
         if (Test-Path -LiteralPath $stderrPath) {
-            Get-Content -LiteralPath $stderrPath | Write-Error
+            Write-Host "--- child stderr ---"
+            Get-Content -LiteralPath $stderrPath | Write-Host
         }
         throw "The example host did not become ready within $StartupTimeoutSeconds seconds."
     }

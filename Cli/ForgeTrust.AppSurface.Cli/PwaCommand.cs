@@ -641,7 +641,7 @@ internal sealed partial class PwaVerifier
             }
 
             return new PwaPushVerificationResult(
-                BuildPushEvidence(expectedPush, false, configurationStatus, worker, helper, vapid, routeMapping),
+                BuildPushEvidence(expectedPush, status.PushEnabled, configurationStatus, worker, helper, vapid, routeMapping),
                 diagnostics);
         }
 
@@ -762,9 +762,10 @@ internal sealed partial class PwaVerifier
         List<PwaVerificationDiagnostic> diagnostics,
         CancellationToken cancellationToken)
     {
+        var diagnosticsUri = GetDiagnosticsStatusUri(target, diagnosticsPath);
         var diagnosticsResponse = await FetchAsync(
             target,
-            GetDiagnosticsStatusUri(target, diagnosticsPath),
+            diagnosticsUri,
             "diagnostics",
             MaxTextResponseBytes,
             diagnostics,
@@ -776,13 +777,17 @@ internal sealed partial class PwaVerifier
 
         if (diagnosticsResponse.StatusCode == HttpStatusCode.NotFound)
         {
-            diagnostics.Add(Info("ASPWA220", "AppSurface PWA diagnostics are not exposed at /_appsurface/pwa/status.json. This is expected for production defaults."));
+            diagnostics.Add(Info(
+                "ASPWA220",
+                $"AppSurface PWA diagnostics are not exposed at {EvidencePath(diagnosticsUri)}. This is expected for production defaults."));
             return;
         }
 
         if (!diagnosticsResponse.IsSuccess)
         {
-            diagnostics.Add(Warning("ASPWA221", $"AppSurface PWA diagnostics returned HTTP {(int)diagnosticsResponse.StatusCode}."));
+            diagnostics.Add(Warning(
+                "ASPWA221",
+                $"AppSurface PWA diagnostics at {EvidencePath(diagnosticsUri)} returned HTTP {(int)diagnosticsResponse.StatusCode}."));
             return;
         }
 
@@ -2123,16 +2128,25 @@ internal sealed record PwaRegistrationHelperEvidence(
 /// <summary>Captures the safe VAPID identity contributed by the optional Push package.</summary>
 internal sealed record PwaVapidEvidence(string? ActiveKeyId, string? PublicKeyFingerprint);
 
+/// <summary>Pairs schema-v3 push evidence with diagnostics collected while verifying it.</summary>
+/// <param name="Evidence">The bounded server-known push evidence.</param>
+/// <param name="Diagnostics">Diagnostics emitted while collecting the evidence.</param>
 internal sealed record PwaPushVerificationResult(
     PwaPushEvidence Evidence,
     IReadOnlyList<PwaVerificationDiagnostic> Diagnostics);
 
+/// <summary>Holds validated readiness evidence or the sanitized unavailable state.</summary>
+/// <param name="ConfigurationStatus">The configured, not-configured, or unavailable readiness state.</param>
+/// <param name="ActiveVapidKeyId">The safe active VAPID key identifier, when configured.</param>
+/// <param name="PublicKeyFingerprint">The safe SHA-256 public-key fingerprint, when configured.</param>
+/// <param name="RouteMapped">Whether the package-owned route is mapped, or null when not evaluated.</param>
 internal sealed record PwaNormalizedPushReadiness(
     string ConfigurationStatus,
     string? ActiveVapidKeyId,
     string? PublicKeyFingerprint,
     bool? RouteMapped)
 {
+    /// <summary>Gets the fixed redacted result used when readiness evidence cannot be trusted.</summary>
     public static PwaNormalizedPushReadiness Unavailable { get; } = new("unavailable", null, null, null);
 }
 
@@ -2349,20 +2363,33 @@ internal sealed record PwaVerificationOptions(
 /// <summary>Identifies the public PWA verification surface.</summary>
 internal enum PwaVerificationSurface
 {
+    /// <summary>Verifies the schema-v2 PWA install surface.</summary>
     Install,
+
+    /// <summary>Verifies the schema-v3 server-known push-readiness surface.</summary>
     Push,
+
+    /// <summary>Verifies both install and push-readiness surfaces.</summary>
     All
 }
 
 /// <summary>Identifies the expected server-known push posture.</summary>
 internal enum PwaExpectedPush
 {
+    /// <summary>Requires diagnostics to report enabled push handling.</summary>
     Enabled,
+
+    /// <summary>Requires diagnostics to report disabled push handling.</summary>
     Disabled
 }
 
+/// <summary>Parses the accepted install, push, and all PWA verification surface values.</summary>
 internal static class PwaVerificationSurfaceParser
 {
+    /// <summary>Parses an optional PWA verification surface value.</summary>
+    /// <param name="value">An optional install, push, or all value.</param>
+    /// <returns>The parsed surface; a missing value selects install.</returns>
+    /// <exception cref="ArgumentException">The value is not install, push, or all.</exception>
     public static PwaVerificationSurface Parse(string? value) => value?.Trim().ToLowerInvariant() switch
     {
         null or "" or "install" => PwaVerificationSurface.Install,
@@ -2372,8 +2399,13 @@ internal static class PwaVerificationSurfaceParser
     };
 }
 
+/// <summary>Parses the accepted enabled and disabled push-expectation values.</summary>
 internal static class PwaExpectedPushParser
 {
+    /// <summary>Parses an optional expected push posture value.</summary>
+    /// <param name="value">An optional enabled or disabled value.</param>
+    /// <returns>The parsed posture; a missing value selects enabled.</returns>
+    /// <exception cref="ArgumentException">The value is not enabled or disabled.</exception>
     public static PwaExpectedPush Parse(string? value) => value?.Trim().ToLowerInvariant() switch
     {
         null or "" or "enabled" => PwaExpectedPush.Enabled,

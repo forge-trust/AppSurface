@@ -265,6 +265,7 @@ The worker and helper support `GET` and `HEAD`; `HEAD` returns the same headers 
 App-root-relative settings do not include `PathBase`. A host mounted at `/tenant-a` turns `/service-worker.js` into `/tenant-a/service-worker.js` and `/` scope into `/tenant-a/`. Validate and verify the externally visible URL; do not configure `/tenant-a` twice.
 
 <a id="push-readiness-evidence"></a>
+
 ## Push-readiness evidence
 
 `appsurface pwa verify --surface push` and `--surface all` consume a deliberately narrow, schema-versioned readiness contribution from the Web diagnostics document. This is readiness-posture evidence: it answers whether the server can describe the worker/helper foundation and, when present, the optional AppSurface push rail and its mapped route. A host with no provider may report the rail as `not-configured` while still passing valid worker/helper checks; this is not a browser or delivery claim.

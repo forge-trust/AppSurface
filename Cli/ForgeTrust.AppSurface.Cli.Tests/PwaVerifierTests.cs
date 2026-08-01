@@ -1677,8 +1677,27 @@ public sealed class PwaVerifierTests
             CancellationToken.None);
 
         Assert.True(report.Passed);
-        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA220");
+        var diagnostic = Assert.Single(report.Diagnostics, value => value.Code == "ASPWA220");
+        Assert.Contains("/operations/pwa/status.json", diagnostic.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA221");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_WarnsWithConfiguredDiagnosticsPathWhenEndpointErrors()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidInstallResponses(http, "https://app.example.test");
+        http.Add("https://app.example.test/operations/pwa/status.json", "nope", "text/plain", HttpStatusCode.BadGateway);
+
+        var report = await new PwaVerifier(http).VerifyAsync(
+            PwaVerificationOptions.Create(
+                new Uri("https://app.example.test"),
+                diagnosticsPath: "/operations/pwa"),
+            CancellationToken.None);
+
+        Assert.True(report.Passed);
+        var diagnostic = Assert.Single(report.Diagnostics, value => value.Code == "ASPWA221");
+        Assert.Contains("/operations/pwa/status.json", diagnostic.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1989,6 +2008,7 @@ public sealed class PwaVerifierTests
             CancellationToken.None);
 
         Assert.False(report.Passed);
+        Assert.True(report.Push.Enabled);
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA272");
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA273");
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA274");
