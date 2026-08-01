@@ -8,18 +8,37 @@ namespace ForgeTrust.AppSurface.Web;
 public sealed class AppSurfaceCanarySnapshotOptions
 {
     /// <summary>Gets or sets the maximum selected canaries. The default is 64 and the supported range is 1-256.</summary>
+    /// <remarks>
+    /// <c>MapAppSurfaceCanaries</c> throws <see cref="ArgumentException"/> when this value is outside its supported
+    /// range.
+    /// </remarks>
     public int MaxSelectedCanaries { get; set; } = 64;
 
-    /// <summary>Gets or sets the maximum concurrent evaluator invocations. The default is 4.</summary>
+    /// <summary>Gets or sets the maximum concurrent evaluator invocations. The default is 4 and the supported range is 1-64.</summary>
+    /// <remarks>
+    /// <c>MapAppSurfaceCanaries</c> throws <see cref="ArgumentException"/> when this value is outside its supported
+    /// range.
+    /// </remarks>
     public int MaxConcurrency { get; set; } = 4;
 
-    /// <summary>Gets or sets the timeout applied to each started evaluator. The default is 10 seconds.</summary>
+    /// <summary>
+    /// Gets or sets the timeout applied to each started evaluator. The default is 10 seconds; the value must be
+    /// positive and no greater than <see cref="OverallTimeout"/>.
+    /// </summary>
+    /// <remarks>
+    /// <c>MapAppSurfaceCanaries</c> throws <see cref="ArgumentException"/> when this constraint is violated.
+    /// </remarks>
     public TimeSpan PerCheckTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// Gets or sets the total snapshot admission deadline. The default is 30 seconds and the configured value must not
-    /// be shorter than <see cref="PerCheckTimeout"/>.
+    /// Gets or sets the total snapshot admission deadline. The default is 30 seconds; the value must be positive and
+    /// not shorter than <see cref="PerCheckTimeout"/>.
     /// </summary>
+    /// <remarks>
+    /// Reaching this deadline cancels every started evaluator. An evaluator that observes that cancellation reports
+    /// <c>ASCAN303</c>; a separate non-cancellation evaluator failure remains <c>ASCAN301</c>.
+    /// <c>MapAppSurfaceCanaries</c> throws <see cref="ArgumentException"/> when this constraint is violated.
+    /// </remarks>
     public TimeSpan OverallTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>Creates an internal immutable-at-mapping copy of these host settings.</summary>

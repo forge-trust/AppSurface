@@ -39,9 +39,14 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
     /// <param name="authorizationPolicyName">The nonblank host-owned ASP.NET Core authorization policy name.</param>
     /// <param name="configure">
     /// An optional callback that controls completed-result HTTP status mapping and host-owned snapshot limits. Snapshot
-    /// concurrency and timeouts must be positive, and the overall timeout must not be shorter than the per-check timeout.
+    /// concurrency must be 1-64, timeouts must be positive, and the overall timeout must not be shorter than the
+    /// per-check timeout.
     /// </param>
-    /// <returns>The route handler builder so the host can add ordinary endpoint conventions.</returns>
+    /// <returns>
+    /// The handler builder for the fixed detail route <c>GET /_appsurface/canaries/{name}</c> so the host can add
+    /// ordinary endpoint conventions. The aggregate snapshot route is mapped as part of the same call but is not
+    /// returned.
+    /// </returns>
     /// <remarks>
     /// The default response mode returns 200 for <see cref="AppSurfaceCanaryStatus.Pass"/> and 503 for every other
     /// completed status. Choose <see cref="AppSurfaceCanaryCompletedResponseMode.AlwaysOk"/> only for authenticated
@@ -51,7 +56,10 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
     /// route groups are rejected because they would relocate the fixed route.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="endpoints"/> is null.</exception>
-    /// <exception cref="ArgumentException">The policy name is blank or configured response mode is undefined.</exception>
+    /// <exception cref="ArgumentException">
+    /// The policy name is blank, configured response mode is undefined, or snapshot limits are outside their supported
+    /// ranges.
+    /// </exception>
     /// <exception cref="InvalidOperationException">Registrations or authorization services are missing, names are duplicated, the route family was already mapped, or mapping through a route group would relocate the fixed route.</exception>
     public static RouteHandlerBuilder MapAppSurfaceCanaries(
         this IEndpointRouteBuilder endpoints,
@@ -179,6 +187,32 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         }
     }
 
+    private static async Task<bool> IsSafelyProtectedAsync(
+        HttpContext httpContext,
+        string authorizationPolicyName,
+        string failureTitle)
+    {
+        var endpoint = httpContext.GetEndpoint();
+        var hasRequiredPolicy = endpoint?.Metadata
+            .OfType<IAuthorizeData>()
+            .Any(data => string.Equals(data.Policy, authorizationPolicyName, StringComparison.Ordinal)) == true;
+        if (endpoint?.Metadata.GetMetadata<IAllowAnonymous>() is null && hasRequiredPolicy)
+        {
+            return true;
+        }
+
+        SetNoStoreHeaders(httpContext);
+        await CreateProblem(
+                StatusCodes.Status500InternalServerError,
+                failureTitle,
+                "ASCAN113",
+                "The named canary endpoint is not safely protected.",
+                "Anonymous endpoint metadata or a removed policy bypassed the required authorization policy.",
+                "Remove AllowAnonymous metadata and retain the host-owned operator policy.")
+            .ExecuteAsync(httpContext);
+        return false;
+    }
+
     private static async Task HandleRequestAsync(
         HttpContext httpContext,
         AppSurfaceCanaryCompletedResponseMode responseMode,
@@ -186,21 +220,11 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         string applicationName,
         string environmentName)
     {
-        var endpoint = httpContext.GetEndpoint();
-        var hasRequiredPolicy = endpoint?.Metadata
-            .OfType<IAuthorizeData>()
-            .Any(data => string.Equals(data.Policy, authorizationPolicyName, StringComparison.Ordinal)) == true;
-        if (endpoint?.Metadata.GetMetadata<IAllowAnonymous>() is not null || !hasRequiredPolicy)
+        if (!await IsSafelyProtectedAsync(
+                httpContext,
+                authorizationPolicyName,
+                "AppSurface canary evaluation failed"))
         {
-            SetNoStoreHeaders(httpContext);
-            await CreateProblem(
-                    StatusCodes.Status500InternalServerError,
-                    "AppSurface canary evaluation failed",
-                    "ASCAN113",
-                    "The named canary endpoint is not safely protected.",
-                    "Anonymous endpoint metadata or a removed policy bypassed the required authorization policy.",
-                    "Remove AllowAnonymous metadata and retain the host-owned operator policy.")
-                .ExecuteAsync(httpContext);
             return;
         }
 
@@ -246,7 +270,7 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         {
             throw;
         }
-        catch (Exception exception) when (IsNonFatalEvaluationFailure(exception))
+        catch (Exception exception) when (AppSurfaceCanaryEvaluationFailurePolicy.IsNonFatal(exception))
         {
             LogEvaluationFailure(
                 httpContext.RequestServices.GetRequiredService<ILogger<AppSurfaceCanaryEvaluationRunner>>(),
@@ -314,21 +338,11 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         string environmentName,
         AppSurfaceCanarySnapshotOptions snapshotOptions)
     {
-        var endpoint = httpContext.GetEndpoint();
-        var hasRequiredPolicy = endpoint?.Metadata
-            .OfType<IAuthorizeData>()
-            .Any(data => string.Equals(data.Policy, authorizationPolicyName, StringComparison.Ordinal)) == true;
-        if (endpoint?.Metadata.GetMetadata<IAllowAnonymous>() is not null || !hasRequiredPolicy)
+        if (!await IsSafelyProtectedAsync(
+                httpContext,
+                authorizationPolicyName,
+                "AppSurface canary snapshot failed"))
         {
-            SetNoStoreHeaders(httpContext);
-            await CreateProblem(
-                    StatusCodes.Status500InternalServerError,
-                    "AppSurface canary snapshot failed",
-                    "ASCAN113",
-                    "The named canary endpoint is not safely protected.",
-                    "Anonymous endpoint metadata or a removed policy bypassed the required authorization policy.",
-                    "Remove AllowAnonymous metadata and retain the host-owned operator policy.")
-                .ExecuteAsync(httpContext);
             return;
         }
 
@@ -411,16 +425,47 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
             : StatusCodes.Status503ServiceUnavailable;
         var logger = httpContext.RequestServices.GetRequiredService<ILogger<AppSurfaceCanaryEvaluationRunner>>();
 
-        foreach (var item in snapshot.Items.Where(item => item.Result is not null))
+        var startedCount = 0;
+        var completed = 0;
+        var timedOut = 0;
+        var failed = 0;
+        var notStarted = 0;
+        foreach (var item in snapshot.Items)
         {
-            var result = item.Result!;
+            switch (item.State)
+            {
+                case AppSurfaceCanarySnapshotItemState.Completed:
+                    startedCount++;
+                    completed++;
+                    break;
+                case AppSurfaceCanarySnapshotItemState.Failed:
+                    startedCount++;
+                    failed++;
+                    break;
+                case AppSurfaceCanarySnapshotItemState.PerCheckTimedOut:
+                case AppSurfaceCanarySnapshotItemState.OverallTimedOut:
+                    startedCount++;
+                    timedOut++;
+                    break;
+                case AppSurfaceCanarySnapshotItemState.NotStarted:
+                    notStarted++;
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(item.State), item.State, "The snapshot item state must be defined.");
+            }
+
+            if (item.Result is not { } result)
+            {
+                continue;
+            }
+
             CanaryEvaluationCompleted(
                 logger,
                 item.Name,
                 ToWireStatus(result.Status),
                 item.Ready,
                 result.ObservedAt,
-                freshSince?.ToUniversalTime(),
+                normalizedFreshSince,
                 result.MatchedCount,
                 item.ElapsedMilliseconds ?? 0,
                 applicationName,
@@ -430,11 +475,11 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         CanarySnapshotCompleted(
             logger,
             descriptors.Count,
-            snapshot.Items.Count(item => item.Outcome != "not-started"),
-            snapshot.Items.Count(item => item.Outcome == "completed"),
-            snapshot.Items.Count(item => item.Outcome == "timed-out"),
-            snapshot.Items.Count(item => item.Outcome == "failed"),
-            snapshot.Items.Count(item => item.Outcome == "not-started"),
+            startedCount,
+            completed,
+            timedOut,
+            failed,
+            notStarted,
             ready,
             elapsedMilliseconds,
             applicationName,
@@ -676,15 +721,6 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         AppSurfaceCanaryStatus.NotConfigured => "not-configured",
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, "The AppSurface canary status must be defined."),
     };
-
-    /// <summary>Determines whether an evaluator failure can be converted into a safe package-owned problem response.</summary>
-    /// <param name="exception">The exception raised during evaluator activation or execution.</param>
-    /// <returns><see langword="false"/> for fatal process/runtime exceptions; otherwise <see langword="true"/>.</returns>
-    internal static bool IsNonFatalEvaluationFailure(Exception exception) =>
-        exception is not OutOfMemoryException
-            and not StackOverflowException
-            and not AccessViolationException
-            and not AppDomainUnloadedException;
 
     private static void LogEvaluationFailure(ILogger logger, string canaryName, string exceptionType) =>
         logger.LogError(

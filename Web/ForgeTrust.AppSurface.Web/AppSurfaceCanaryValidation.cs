@@ -27,7 +27,7 @@ internal static partial class AppSurfaceCanaryValidation
     {
         ArgumentNullException.ThrowIfNull(name);
 
-        if (name.Length is 0 or > MaximumNameLength || !NameRegex().IsMatch(name))
+        if (!IsValidName(name))
         {
             throw new ArgumentException(
                 "ASCAN101: The canary name must be 1-128 lowercase characters in dot-separated segments containing letters, digits, and internal hyphens.",

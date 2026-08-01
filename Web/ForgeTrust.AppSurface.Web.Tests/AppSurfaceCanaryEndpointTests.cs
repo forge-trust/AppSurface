@@ -1390,11 +1390,11 @@ public sealed class AppSurfaceCanaryEndpointTests
     [Fact]
     public void EvaluationFailureFilter_DoesNotCatchFatalExceptions()
     {
-        Assert.True(AppSurfaceCanaryEndpointRouteBuilderExtensions.IsNonFatalEvaluationFailure(new InvalidOperationException()));
-        Assert.False(AppSurfaceCanaryEndpointRouteBuilderExtensions.IsNonFatalEvaluationFailure(new OutOfMemoryException()));
-        Assert.False(AppSurfaceCanaryEndpointRouteBuilderExtensions.IsNonFatalEvaluationFailure(new StackOverflowException()));
-        Assert.False(AppSurfaceCanaryEndpointRouteBuilderExtensions.IsNonFatalEvaluationFailure(new AccessViolationException()));
-        Assert.False(AppSurfaceCanaryEndpointRouteBuilderExtensions.IsNonFatalEvaluationFailure(new AppDomainUnloadedException()));
+        Assert.True(AppSurfaceCanaryEvaluationFailurePolicy.IsNonFatal(new InvalidOperationException()));
+        Assert.False(AppSurfaceCanaryEvaluationFailurePolicy.IsNonFatal(new OutOfMemoryException()));
+        Assert.False(AppSurfaceCanaryEvaluationFailurePolicy.IsNonFatal(new StackOverflowException()));
+        Assert.False(AppSurfaceCanaryEvaluationFailurePolicy.IsNonFatal(new AccessViolationException()));
+        Assert.False(AppSurfaceCanaryEvaluationFailurePolicy.IsNonFatal(new AppDomainUnloadedException()));
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             AppSurfaceCanaryEndpointRouteBuilderExtensions.ToWireStatus((AppSurfaceCanaryStatus)99));
     }

@@ -426,8 +426,8 @@ curl --fail-with-body \
 
 Snapshots select at most 64 canaries by default, start at most four evaluations concurrently, apply a 10-second
 per-check deadline and a 30-second overall admission deadline. Configure the host-owned limits through
-`options.Snapshot`; concurrency and both timeouts must be positive, the overall timeout must not be shorter than the
-per-check timeout, selected-item limits are 1–256, and cancellation is cooperative.
+`options.Snapshot`; concurrency is 1–64, both timeouts must be positive, the overall timeout must not be shorter than
+the per-check timeout, selected-item limits are 1–256, and cancellation is cooperative.
 An evaluator that ignores cancellation delays the response but is never detached after it.
 
 The completed response contains a required compatibility core and omits optional evidence that is absent:
@@ -964,6 +964,7 @@ stable event, canary name, diagnostic code, and exception type.
 | `ASCAN114` | Repeated mapping | The fixed route family was mapped more than once. | Map it exactly once. |
 | `ASCAN115` | Fixed/reserved route conflict | Mapping through a route group relocated the fixed route, or a host endpoint overlaps the canary namespace. | Map on the application root and move host routes outside `/_appsurface/canaries`. |
 | `ASCAN116` | Invalid response mode | The mapper callback assigned an undefined enum value. | Choose `StatusCode` or `AlwaysOk`. |
+| `ASCAN117` | Invalid snapshot limits | A selected-item or concurrency limit is outside its supported range, a timeout is non-positive, or the overall timeout is shorter than the per-check timeout. | Correct `options.Snapshot` before building the host: selected items must be 1–256, concurrency 1–64, and the positive overall timeout must be at least the positive per-check timeout. |
 | `ASCAN201` | Required header missing | A registration-required marker or freshness value is blank/absent. | Supply the named header and retry. |
 | `ASCAN202` | Header invalid | A header is repeated, malformed, unsafe, or too large. | Follow the marker or strict freshness rules above. |
 | `ASCAN203` | Canary not found | The exact route name is not registered. | Register it or correct the lowercase name. |
