@@ -153,7 +153,7 @@ public sealed class ReleaseCurrentPointerCoverageTests
 
     private const string TagListCommand = "git for-each-ref --format=%(refname:short) refs/tags/v*";
 
-    private static readonly string RepositoryRoot = Path.Join(Path.GetTempPath(), "release-current-pointer-coverage");
+    private static readonly string RepositoryRoot = TestPathUtils.PathUnder(Path.GetTempPath(), "release-current-pointer-coverage");
 
     private static ReleaseCurrentPointerGate CreateGate(ICommandRunner runner) =>
         new(new ReleaseWorkspace(RepositoryRoot), runner);

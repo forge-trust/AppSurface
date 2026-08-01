@@ -37,7 +37,7 @@ public sealed class ReleaseEvidenceCoverageTests
     [Fact]
     public async Task ValidatePreparedRejectsUnsupportedEvidenceSchema()
     {
-        var root = Path.Join(Path.GetTempPath(), "ReleaseEvidenceCoverage", Guid.NewGuid().ToString("N"));
+        var root = TestPathUtils.PathUnder(Path.GetTempPath(), "ReleaseEvidenceCoverage", Guid.NewGuid().ToString("N"));
         var workspace = new ReleaseWorkspace(root);
         var manifest = CreateV1Manifest("abc123");
         var bundle = CreateV1Bundle(manifest) with { Schema = "unsupported" };

@@ -399,12 +399,12 @@ public sealed class ReleaseEvidenceV2CoverageTests
     public async Task StableDocsArchiveGateRejectsMissingCatalogForV2Evidence()
     {
         var fixture = CreateFixture("stable");
-        var root = Path.Join(Path.GetTempPath(), "ReleaseEvidenceV2Coverage", Guid.NewGuid().ToString("N"));
+        var root = TestPathUtils.PathUnder(Path.GetTempPath(), "ReleaseEvidenceV2Coverage", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
 
         try
         {
-            var options = CreateDocsOptions(fixture, root, catalogPath: Path.Join(root, "missing-versions.json"));
+            var options = CreateDocsOptions(fixture, root, catalogPath: TestPathUtils.PathUnder(root, "missing-versions.json"));
             var result = await ReleaseDocsArchiveGate.ValidateStableAsync(
                 fixture.Workspace,
                 options,
@@ -423,9 +423,9 @@ public sealed class ReleaseEvidenceV2CoverageTests
     public async Task StableDocsArchiveGateRejectsInvalidCatalogBindingForV2Evidence()
     {
         var fixture = CreateFixture("stable");
-        var root = Path.Join(Path.GetTempPath(), "ReleaseEvidenceV2Coverage", Guid.NewGuid().ToString("N"));
+        var root = TestPathUtils.PathUnder(Path.GetTempPath(), "ReleaseEvidenceV2Coverage", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        var catalogPath = Path.Join(root, "versions.json");
+        var catalogPath = TestPathUtils.PathUnder(root, "versions.json");
         await File.WriteAllTextAsync(
             catalogPath,
             $$"""{"versions":[{"version":"1.2.3","exactTreePath":"releases/1.2.3","releaseManifestSha256":"{{new string('b', 64)}}","visibility":"Public"}]}""");
@@ -451,9 +451,9 @@ public sealed class ReleaseEvidenceV2CoverageTests
     public async Task StableDocsArchiveGateRejectsUnsafeCatalogPathForV2Evidence()
     {
         var fixture = CreateFixture("stable");
-        var root = Path.Join(Path.GetTempPath(), "ReleaseEvidenceV2Coverage", Guid.NewGuid().ToString("N"));
+        var root = TestPathUtils.PathUnder(Path.GetTempPath(), "ReleaseEvidenceV2Coverage", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        var catalogPath = Path.Join(root, "versions.json");
+        var catalogPath = TestPathUtils.PathUnder(root, "versions.json");
         var digest = new string('a', 64);
         await File.WriteAllTextAsync(
             catalogPath,
@@ -515,7 +515,7 @@ public sealed class ReleaseEvidenceV2CoverageTests
         string baseCommit)
     {
         var workspace = new ReleaseWorkspace(
-            Path.Join(Path.GetTempPath(), "ReleaseEvidenceV2Coverage", Guid.NewGuid().ToString("N")));
+            TestPathUtils.PathUnder(Path.GetTempPath(), "ReleaseEvidenceV2Coverage", Guid.NewGuid().ToString("N")));
         var releaseNote = $"# Release {version}\n";
         var releaseSidecar = $"title: Release {version}\n";
         var currentRelease = ReleaseCurrentPointer.Build(version);

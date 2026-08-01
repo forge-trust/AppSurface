@@ -936,7 +936,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     {
         await WriteProgramRepoAsync();
         await WriteFileAsync("releases/current.md", "# Current release\n");
-        var manifestPath = Path.Combine(_repositoryRoot, "packages", "package-index.yml");
+        var manifestPath = TestPathUtils.PathUnder(_repositoryRoot, "packages", "package-index.yml");
         var manifest = await File.ReadAllTextAsync(manifestPath);
         await File.WriteAllTextAsync(
             manifestPath,
@@ -959,7 +959,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     public async Task GenerateDocumentsAsync_RejectsCoordinatedReleaseTrackWhenCurrentPointerIsMissing()
     {
         await WriteProgramRepoAsync();
-        var manifestPath = Path.Combine(_repositoryRoot, "packages", "package-index.yml");
+        var manifestPath = TestPathUtils.PathUnder(_repositoryRoot, "packages", "package-index.yml");
         var manifest = await File.ReadAllTextAsync(manifestPath);
         await File.WriteAllTextAsync(
             manifestPath,

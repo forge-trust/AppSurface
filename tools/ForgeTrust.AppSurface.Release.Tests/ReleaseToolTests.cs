@@ -517,8 +517,8 @@ public sealed class ReleaseToolTests : IDisposable
         });
 
         var sourceRoot = FindSourceRoot();
-        using var manifestSchema = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(sourceRoot, "tools/ForgeTrust.AppSurface.Release/schemas/release-manifest-v2.schema.json")));
-        using var evidenceSchema = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(sourceRoot, "tools/ForgeTrust.AppSurface.Release/schemas/release-evidence-v2.schema.json")));
+        using var manifestSchema = JsonDocument.Parse(await File.ReadAllTextAsync(TestPathUtils.PathUnder(sourceRoot, "tools/ForgeTrust.AppSurface.Release/schemas/release-manifest-v2.schema.json")));
+        using var evidenceSchema = JsonDocument.Parse(await File.ReadAllTextAsync(TestPathUtils.PathUnder(sourceRoot, "tools/ForgeTrust.AppSurface.Release/schemas/release-evidence-v2.schema.json")));
         Assert.False(manifestSchema.RootElement.GetProperty("additionalProperties").GetBoolean());
         Assert.False(evidenceSchema.RootElement.GetProperty("additionalProperties").GetBoolean());
         Assert.Contains("coordinatedPackageReleaseNoteResolutions", manifestSchema.RootElement.GetProperty("required").EnumerateArray().Select(item => item.GetString()));
@@ -1021,7 +1021,7 @@ public sealed class ReleaseToolTests : IDisposable
 
         await SeedRepositoryAsync();
         var releasesPath = RepositoryPath("releases");
-        var externalReleasesPath = Path.Join(_externalRoot, "releases");
+        var externalReleasesPath = TestPathUtils.PathUnder(_externalRoot, "releases");
         Directory.CreateDirectory(_externalRoot);
         Directory.Move(releasesPath, externalReleasesPath);
         Directory.CreateSymbolicLink(releasesPath, externalReleasesPath);
@@ -1032,7 +1032,7 @@ public sealed class ReleaseToolTests : IDisposable
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("Code: release-preparation-output-path-unsafe", result.Stderr, StringComparison.Ordinal);
-        Assert.False(File.Exists(Path.Join(externalReleasesPath, "v0.1.0-preview.1.md")));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(externalReleasesPath, "v0.1.0-preview.1.md")));
     }
 
     [Fact]
@@ -1046,7 +1046,7 @@ public sealed class ReleaseToolTests : IDisposable
         await SeedRepositoryAsync();
         Directory.CreateDirectory(_externalRoot);
         var currentReleasePath = RepositoryPath("releases/current.md");
-        var externalCurrentReleasePath = Path.Join(_externalRoot, "current.md");
+        var externalCurrentReleasePath = TestPathUtils.PathUnder(_externalRoot, "current.md");
         File.Move(currentReleasePath, externalCurrentReleasePath);
         File.CreateSymbolicLink(currentReleasePath, externalCurrentReleasePath);
 
@@ -1919,10 +1919,10 @@ public sealed class ReleaseToolTests : IDisposable
     public async Task HistoricalV1ReleaseFixturesRemainReadableWithoutMutation()
     {
         var sourceRoot = FindSourceRoot();
-        var evidencePath = Path.Join(sourceRoot, "releases", "v0.1.0.evidence.json");
-        var manifestPath = Path.Join(sourceRoot, "releases", "v0.1.0.release.json");
-        var notePath = Path.Join(sourceRoot, "releases", "v0.1.0.md");
-        var sidecarPath = Path.Join(sourceRoot, "releases", "v0.1.0.md.yml");
+        var evidencePath = TestPathUtils.PathUnder(sourceRoot, "releases", "v0.1.0.evidence.json");
+        var manifestPath = TestPathUtils.PathUnder(sourceRoot, "releases", "v0.1.0.release.json");
+        var notePath = TestPathUtils.PathUnder(sourceRoot, "releases", "v0.1.0.md");
+        var sidecarPath = TestPathUtils.PathUnder(sourceRoot, "releases", "v0.1.0.md.yml");
         var evidence = await File.ReadAllTextAsync(evidencePath);
         var manifest = await File.ReadAllTextAsync(manifestPath);
         var note = await File.ReadAllTextAsync(notePath);
@@ -5743,7 +5743,7 @@ public sealed class ReleaseToolTests : IDisposable
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
         {
-            if (File.Exists(Path.Join(directory.FullName, "ForgeTrust.AppSurface.slnx")))
+            if (File.Exists(TestPathUtils.PathUnder(directory.FullName, "ForgeTrust.AppSurface.slnx")))
             {
                 return directory.FullName;
             }
