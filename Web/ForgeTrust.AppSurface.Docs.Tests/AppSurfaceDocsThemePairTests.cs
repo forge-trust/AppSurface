@@ -18,6 +18,15 @@ public sealed class AppSurfaceDocsThemePairTests
         Assert.NotNull(theme.CriticalCss);
         Assert.StartsWith("html[data-as-theme]{", theme.CriticalCss, StringComparison.Ordinal);
         Assert.Contains("--docs-color-surface-canvas:var(--as-canvas);", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-border-accent:color-mix(in srgb, var(--as-accent-strong) 42%, transparent);", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-border-accent-hover:color-mix(in srgb, var(--as-accent) 56%, transparent);", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-border-accent-muted:color-mix(in srgb, var(--as-accent-strong) 34%, transparent);", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-border-accent-active:color-mix(in srgb, var(--as-accent) 48%, transparent);", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-border-accent-subtle:color-mix(in srgb, var(--as-accent-strong) 22%, transparent);", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-border-accent-faint:color-mix(in srgb, var(--as-accent-strong) 12%, transparent);", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-border-accent-strong:color-mix(in srgb, var(--as-accent) 70%, transparent);", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-border-accent-readable:color-mix(in srgb, var(--as-accent) 62%, transparent);", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-accent-glow:color-mix(in srgb, var(--as-accent) 12%, transparent);", theme.CriticalCss, StringComparison.Ordinal);
         Assert.Contains("--docs-color-syntax-keyword:var(--as-visited-link);", theme.CriticalCss, StringComparison.Ordinal);
         Assert.Contains("--docs-focus-outline:2px solid var(--as-focus);", theme.CriticalCss, StringComparison.Ordinal);
         Assert.Contains("@media (forced-colors: active)", theme.CriticalCss, StringComparison.Ordinal);

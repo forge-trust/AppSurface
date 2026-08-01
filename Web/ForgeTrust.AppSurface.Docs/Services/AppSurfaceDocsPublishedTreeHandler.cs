@@ -935,7 +935,8 @@ internal sealed record AppSurfaceDocsPublishedTreeMount
 /// root wins, and then the rewriter adjusts exported stable-root URLs so they point at that mounted surface. The
 /// default stable <c>/docs</c> surface only needs HTML rewrites when the host adds a non-empty request
 /// <c>PathBase</c>; when the mount root and route root are still <c>/docs</c> and no <c>PathBase</c> applies, the
-/// exported HTML is already correct and is returned unchanged unless a distinct canonical root or public origin applies.
+/// exported HTML is already correct and is returned unchanged unless a distinct canonical root, public origin, or
+/// generated critical-style nonce applies.
 /// </remarks>
 internal static class AppSurfaceDocsPublishedTreeContentRewriter
 {
@@ -943,6 +944,12 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
     private static readonly Regex DocsClientConfigRegex = new(
         @"window\.__appSurfaceDocsConfig\s*=\s*(\{.*?\})\s*;",
         RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly Regex ThemeStyleTagRegex = new(
+        @"<style\b(?=[^>]*\b(?:data-as-theme-critical|data-docs-theme-critical)\b)[^>]*>",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex NonceAttributeRegex = new(
+        @"\s+nonce(?:\s*=\s*(?:""[^""]*""|'[^']*'|[^\s>]+))?",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     /// <summary>
     /// Rewrites stable-root HTML so docs-local links, assets, and client config point at the supplied mount root.
@@ -986,9 +993,11 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
             || !string.Equals(canonicalRootPath, mountRootPath, StringComparison.OrdinalIgnoreCase)
             || HasNonEmptyPathBase(requestPathBase)
             || normalizedPublicOrigin is not null;
-        if (!requiresMountRewrite && !HasThemeStyleNonce(html))
+        if (!requiresMountRewrite)
         {
-            return html;
+            return HasThemeStyleNonce(html)
+                ? RemoveThemeStyleNonces(html)
+                : html;
         }
 
         var document = HtmlParser.ParseDocument(html);
@@ -1067,32 +1076,22 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
 
     private static bool HasThemeStyleNonce(string html)
     {
-        return HasStyleNonce(html, "data-as-theme-critical")
-               || HasStyleNonce(html, "data-docs-theme-critical");
-    }
-
-    private static bool HasStyleNonce(string html, string themeAttribute)
-    {
-        var searchStart = 0;
-        while (true)
+        foreach (Match style in ThemeStyleTagRegex.Matches(html))
         {
-            var attributeIndex = html.IndexOf(themeAttribute, searchStart, StringComparison.Ordinal);
-            if (attributeIndex < 0)
-            {
-                return false;
-            }
-
-            var styleStart = html.LastIndexOf("<style", attributeIndex, StringComparison.OrdinalIgnoreCase);
-            var styleEnd = html.IndexOf('>', styleStart >= 0 ? styleStart : attributeIndex);
-            if (styleStart >= 0
-                && attributeIndex < styleEnd
-                && html.IndexOf("nonce", styleStart, styleEnd - styleStart, StringComparison.OrdinalIgnoreCase) >= 0)
+            if (NonceAttributeRegex.IsMatch(style.Value))
             {
                 return true;
             }
-
-            searchStart = attributeIndex + themeAttribute.Length;
         }
+
+        return false;
+    }
+
+    private static string RemoveThemeStyleNonces(string html)
+    {
+        return ThemeStyleTagRegex.Replace(
+            html,
+            static match => NonceAttributeRegex.Replace(match.Value, string.Empty));
     }
 
     /// <summary>

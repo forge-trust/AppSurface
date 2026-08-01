@@ -90,6 +90,12 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     /// registration can nest authorizer wrappers and obscure the intended channel policy.
     /// </para>
     /// <para>
+    /// When no <see cref="IAppSurfaceThemeResolver"/> is registered, this method adds the built-in AppSurface pair
+    /// with the legacy <see cref="AppSurfaceThemeMode.Dark"/> default. It always registers the Web theme-document
+    /// services so the package layout can emit the root and head theme integration. Register a host-selected pair and
+    /// resolver before this method to use System, Light, or a different Dark pair.
+    /// </para>
+    /// <para>
     /// <c>AppSurfaceDocs:Diagnostics:OperatorReadPolicy</c> names an optional host-owned ASP.NET Core authorization
     /// policy for exposed diagnostics read routes such as <c>{DocsRootPath}/_harvest</c>,
     /// <c>{DocsRootPath}/_routes</c>, and <c>{DocsRootPath}/_routes.json</c>. It also protects

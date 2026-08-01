@@ -47,8 +47,14 @@ sealed class AcmeThemeSettingsProvider : IAppSurfaceThemeExtensionProvider<AcmeT
 {
     public bool TryGet(AppSurfaceThemeId themeId, out AcmeThemeSettings settings)
     {
-        settings = new AcmeThemeSettings("/assets/acme-mark.svg", true);
-        return themeId.Value == "appsurface";
+        if (themeId.Value == "appsurface")
+        {
+            settings = new AcmeThemeSettings("/assets/acme-mark.svg", true);
+            return true;
+        }
+
+        settings = null!;
+        return false;
     }
 }
 ```
@@ -77,4 +83,4 @@ Every startup diagnostic follows **Problem / Cause / Fix / Docs** ordering and i
 
 The Web adapter preserves a conflicting host `color-scheme` declaration and exposes `data-as-theme-color-scheme-conflict="true"`; resolve the conflict explicitly rather than expecting AppSurface to overwrite host CSS.
 
-Do not use this package for a switcher, local-storage/cookie precedence, tenant lookup, or client-hint selection. Those features require a separate policy, privacy, CSP, caching, and first-paint design. See the repository [deferred work list](../TODOS.md) for the current follow-ons.
+Do not use this package for a switcher, local-storage/cookie precedence, tenant lookup, or client-hint selection. Those features require a separate policy, privacy, CSP, caching, and first-paint design. Follow-on work is tracked in [#704](https://github.com/forge-trust/AppSurface/issues/704), [#705](https://github.com/forge-trust/AppSurface/issues/705), [#706](https://github.com/forge-trust/AppSurface/issues/706), [#707](https://github.com/forge-trust/AppSurface/issues/707), and [#708](https://github.com/forge-trust/AppSurface/issues/708).

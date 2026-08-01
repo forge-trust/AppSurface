@@ -37,7 +37,7 @@ public static class AppSurfaceThemeServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(options);
 
         var registry = new AppSurfaceThemeRegistry(options);
-        services.AddSingleton<IAppSurfaceThemeRegistry>(
+        services.AddSingleton<AppSurfaceThemeRegistry>(
             serviceProvider =>
             {
                 foreach (var validator in serviceProvider.GetServices<IAppSurfaceThemeExtensionValidator>())
@@ -47,8 +47,10 @@ public static class AppSurfaceThemeServiceCollectionExtensions
 
                 return registry;
             });
+        services.AddSingleton<IAppSurfaceThemeRegistry>(
+            serviceProvider => serviceProvider.GetRequiredService<AppSurfaceThemeRegistry>());
         services.AddSingleton<IAppSurfaceThemeResolver>(
-            serviceProvider => (IAppSurfaceThemeResolver)serviceProvider.GetRequiredService<IAppSurfaceThemeRegistry>());
+            serviceProvider => serviceProvider.GetRequiredService<AppSurfaceThemeRegistry>());
         return services;
     }
 
@@ -58,6 +60,11 @@ public static class AppSurfaceThemeServiceCollectionExtensions
     /// <typeparam name="TSettings">Application-owned non-null settings type.</typeparam>
     /// <param name="services">Service collection receiving the required-provider validator.</param>
     /// <returns>The original <paramref name="services"/> instance.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="services"/> is <see langword="null"/>.</exception>
+    /// <exception cref="AppSurfaceThemeValidationException">
+    /// Thrown when <see cref="IAppSurfaceThemeRegistry"/> is first resolved and the provider is missing (ASTHEME201)
+    /// or supplies no non-null setting for a registered pair (ASTHEME202). This method itself does not throw it.
+    /// </exception>
     /// <remarks>
     /// Register <see cref="IAppSurfaceThemeExtensionProvider{TSettings}"/> before the neutral registry is first
     /// resolved. The provider remains application-owned: this method verifies only provider presence and one

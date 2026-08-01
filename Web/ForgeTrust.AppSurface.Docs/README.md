@@ -1402,6 +1402,8 @@ services.AddAppSurfaceDocs();
 
 Docs preserves density, chrome, layout override behavior, and the default dark experience when no shared resolver is registered. The package layout emits the Web root/head opt-ins plus a Docs-critical variable mapping before the package stylesheet. Published-tree rewriting preserves that root metadata and both critical styles, so static archives match live output apart from a host-request CSP nonce.
 
+`AddAppSurfaceDocs()` always registers the Web theme-document adapter. When no `IAppSurfaceThemeResolver` is already registered, it also adds the built-in pair with the legacy `Dark` default. Register them explicitly before `AddAppSurfaceDocs()` only when the host needs a different pair or System/Light behavior.
+
 For a nonce-based `style-src` policy, the host stores its per-response nonce before Razor executes. The package layout applies it only to the two live critical styles; static exports remain nonce-free and deterministic.
 
 ```csharp

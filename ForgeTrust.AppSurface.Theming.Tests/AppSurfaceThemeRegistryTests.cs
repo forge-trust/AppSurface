@@ -30,6 +30,7 @@ public sealed class AppSurfaceThemeRegistryTests
     [InlineData("theme-")]
     [InlineData("theme--alt")]
     [InlineData("Theme")]
+    [InlineData("theme\n")]
     [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
     public void AppSurfaceThemeId_ShouldRejectMalformedOrOversizedValues(string? value)
     {
@@ -106,6 +107,23 @@ public sealed class AppSurfaceThemeRegistryTests
         Assert.Throws<ArgumentNullException>(() => AppSurfaceThemeServiceCollectionExtensions.AddRequiredThemeExtension<string>(null!));
 
         using var provider = services.BuildServiceProvider();
+        var registry = provider.GetRequiredService<AppSurfaceThemeRegistry>();
+
+        Assert.Same(registry, provider.GetRequiredService<IAppSurfaceThemeRegistry>());
+        Assert.Same(registry, provider.GetRequiredService<IAppSurfaceThemeResolver>());
+        Assert.Equal("appsurface", registry.ResolveDefault().Id.Value);
+    }
+
+    [Fact]
+    public void ServiceRegistration_ShouldKeepTheResolverAvailableWhenTheRegistryServiceIsReplaced()
+    {
+        var services = new ServiceCollection();
+        services.AddAppSurfaceTheming(CreateOptions());
+        services.AddSingleton<IAppSurfaceThemeRegistry>(new RegistryWithoutResolver());
+
+        using var provider = services.BuildServiceProvider();
+
+        Assert.IsType<RegistryWithoutResolver>(provider.GetRequiredService<IAppSurfaceThemeRegistry>());
         Assert.Equal("appsurface", provider.GetRequiredService<IAppSurfaceThemeResolver>().ResolveDefault().Id.Value);
     }
 
@@ -410,6 +428,13 @@ public sealed class AppSurfaceThemeRegistryTests
             role == "Focus" ? value : roles.Focus);
 
     private sealed record ExtensionSettings(string Name);
+
+    private sealed class RegistryWithoutResolver : IAppSurfaceThemeRegistry
+    {
+        public IReadOnlyCollection<AppSurfaceThemeId> ThemeIds => [];
+
+        public AppSurfaceThemePair GetRequired(AppSurfaceThemeId id) => throw new KeyNotFoundException();
+    }
 
     private sealed class MissingExtensionProvider : IAppSurfaceThemeExtensionProvider<ExtensionSettings>
     {

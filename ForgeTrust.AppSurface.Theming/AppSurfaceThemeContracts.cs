@@ -19,7 +19,7 @@ public enum AppSurfaceThemeMode
 /// <summary>Identifies a registered semantic theme pair.</summary>
 public readonly record struct AppSurfaceThemeId
 {
-    private static readonly Regex Pattern = new("^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){0,62}$", RegexOptions.CultureInvariant);
+    private static readonly Regex Pattern = new("^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){0,62}\\z", RegexOptions.CultureInvariant);
 
     /// <summary>Initializes a canonical theme-pair identifier.</summary>
     /// <param name="value">A lowercase identifier beginning with a letter and containing only lowercase letters, digits, and single interior hyphens.</param>

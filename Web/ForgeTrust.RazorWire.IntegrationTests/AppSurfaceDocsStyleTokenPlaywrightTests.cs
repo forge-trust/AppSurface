@@ -209,11 +209,12 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
     }
 
     [Fact]
-    public async Task ThemeDocument_ShouldResolveSystemLightSystemDarkAndExplicitLightBranches()
+    public async Task ThemeDocument_ShouldResolveSystemLightSystemDarkAndExplicitLightDarkBranches()
     {
         await AssertThemeDocumentAsync(AppSurfaceThemeMode.System, ColorScheme.Light, "#f8fafc", "#0f172a", "light dark");
         await AssertThemeDocumentAsync(AppSurfaceThemeMode.System, ColorScheme.Dark, "#0f172a", "#f8fafc", "light dark");
         await AssertThemeDocumentAsync(AppSurfaceThemeMode.Light, ColorScheme.Dark, "#f8fafc", "#0f172a", "light");
+        await AssertThemeDocumentAsync(AppSurfaceThemeMode.Dark, ColorScheme.Light, "#0f172a", "#f8fafc", "dark");
     }
 
     [Fact]

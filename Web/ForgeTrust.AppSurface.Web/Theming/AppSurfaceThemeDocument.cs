@@ -33,6 +33,18 @@ public sealed record AppSurfaceThemeDocument
         RootSchemaVersion = GetAttributeValue(rootAttributes, "data-as-theme-schema");
     }
 
+    /// <summary>
+    /// Initializes a theme document with canonical root metadata and serialized fragments.
+    /// </summary>
+    /// <param name="rootThemeId">Validated theme identifier emitted on the root.</param>
+    /// <param name="rootThemeMode">Validated rendering mode emitted on the root.</param>
+    /// <param name="rootAttributes">Serialized attributes placed on the theme root.</param>
+    /// <param name="rootStyle">The safe <c>color-scheme</c> declaration for the theme root.</param>
+    /// <param name="headContent">Serialized head metadata and critical CSS without a nonce.</param>
+    /// <remarks>
+    /// This serializer-only overload retains the supplied canonical identifier and mode instead of the values parsed
+    /// from <paramref name="rootAttributes"/>. It always uses <see cref="SchemaVersion"/> for the payload schema.
+    /// </remarks>
     internal AppSurfaceThemeDocument(
         string rootThemeId,
         string rootThemeMode,

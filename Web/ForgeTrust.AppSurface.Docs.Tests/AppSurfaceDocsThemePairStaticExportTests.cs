@@ -35,6 +35,11 @@ public sealed class AppSurfaceDocsThemePairStaticExportTests
         var rewritten = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(html, "/docs");
         var document = new HtmlParser().ParseDocument(rewritten);
 
+        Assert.Equal(
+            """
+            <!DOCTYPE html><html data-as-theme="appsurface"><head><style data-as-theme-critical>html{--as-canvas:#f8fafc;}</style><style data-docs-theme-critical>html{--docs-color-surface-canvas:var(--as-canvas);}</style><script nonce="preserve-me">window.staticExport = true;</script></head><body></body></html>
+            """,
+            rewritten);
         Assert.Null(document.QuerySelector("style[data-as-theme-critical]")?.GetAttribute("nonce"));
         Assert.Null(document.QuerySelector("style[data-docs-theme-critical]")?.GetAttribute("nonce"));
         Assert.Equal("preserve-me", document.QuerySelector("script")?.GetAttribute("nonce"));
