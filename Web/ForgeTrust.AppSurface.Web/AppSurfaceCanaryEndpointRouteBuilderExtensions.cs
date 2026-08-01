@@ -25,17 +25,28 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
     private const string DocsLink = "https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints";
     private const int MaximumHostNameUtf8Bytes = 128;
     private const int MaximumMarkerUtf8Bytes = 256;
+    private const int MaximumSnapshotNames = 64;
+    private const int MaximumSnapshotTags = 16;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static readonly EventId EvaluationFailureEvent = new(62301, "AppSurfaceCanaryEvaluationFailed");
     private static readonly JsonSerializerOptions ResponseJsonOptions = CreateResponseJsonOptions();
 
     /// <summary>
-    /// Maps <c>GET /_appsurface/canaries/{name}</c> with a required host-owned authorization policy.
+    /// Maps the protected named-canary route family: <c>GET /_appsurface/canaries/{name}</c> evaluates one canary and
+    /// <c>GET /_appsurface/canaries</c> evaluates a bounded aggregate snapshot.
     /// </summary>
     /// <param name="endpoints">The endpoint route builder that receives the fixed route family.</param>
     /// <param name="authorizationPolicyName">The nonblank host-owned ASP.NET Core authorization policy name.</param>
-    /// <param name="configure">An optional callback that controls completed-result HTTP status mapping.</param>
-    /// <returns>The route handler builder so the host can add ordinary endpoint conventions.</returns>
+    /// <param name="configure">
+    /// An optional callback that controls completed-result HTTP status mapping and host-owned snapshot limits. Snapshot
+    /// concurrency must be 1-64, timeouts must be positive, and the overall timeout must not be shorter than the
+    /// per-check timeout.
+    /// </param>
+    /// <returns>
+    /// The handler builder for the fixed detail route <c>GET /_appsurface/canaries/{name}</c> so the host can add
+    /// ordinary endpoint conventions. The aggregate snapshot route is mapped as part of the same call but is not
+    /// returned.
+    /// </returns>
     /// <remarks>
     /// The default response mode returns 200 for <see cref="AppSurfaceCanaryStatus.Pass"/> and 503 for every other
     /// completed status. Choose <see cref="AppSurfaceCanaryCompletedResponseMode.AlwaysOk"/> only for authenticated
@@ -45,7 +56,10 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
     /// route groups are rejected because they would relocate the fixed route.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="endpoints"/> is null.</exception>
-    /// <exception cref="ArgumentException">The policy name is blank or configured response mode is undefined.</exception>
+    /// <exception cref="ArgumentException">
+    /// The policy name is blank, configured response mode is undefined, or snapshot limits are outside their supported
+    /// ranges.
+    /// </exception>
     /// <exception cref="InvalidOperationException">Registrations or authorization services are missing, names are duplicated, the route family was already mapped, or mapping through a route group would relocate the fixed route.</exception>
     public static RouteHandlerBuilder MapAppSurfaceCanaries(
         this IEndpointRouteBuilder endpoints,
@@ -88,7 +102,9 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
                 nameof(configure));
         }
 
+        ValidateSnapshotOptions(options.Snapshot);
         var responseMode = options.CompletedResponseMode;
+        var snapshotOptions = options.Snapshot.Copy();
         var hostEnvironment = services.GetService<IHostEnvironment>();
         var applicationName = NormalizeHostName(hostEnvironment?.ApplicationName);
         var environmentName = NormalizeHostName(hostEnvironment?.EnvironmentName);
@@ -100,6 +116,21 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
             throw new InvalidOperationException(
                 "ASCAN114: MapAppSurfaceCanaries may be called only once for a host.");
         }
+
+        _ = endpoints
+            .MapGet(
+                AppSurfaceCanaryEndpointDefaults.SnapshotRoutePattern,
+                (Func<HttpContext, Task>)(httpContext => HandleSnapshotRequestAsync(
+                    httpContext,
+                    responseMode,
+                    authorizationPolicyName,
+                    applicationName,
+                    environmentName,
+                    snapshotOptions)))
+            .WithDisplayName("AppSurface named canary snapshot")
+            .WithMetadata(AppSurfaceCanaryRouteMetadata.Instance)
+            .ExcludeFromDescription()
+            .RequireAuthorization(authorizationPolicyName);
 
         return endpoints
             .MapGet(
@@ -114,6 +145,19 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
             .WithMetadata(AppSurfaceCanaryRouteMetadata.Instance)
             .ExcludeFromDescription()
             .RequireAuthorization(authorizationPolicyName);
+    }
+
+    private static void ValidateSnapshotOptions(AppSurfaceCanarySnapshotOptions options)
+    {
+        if (options.MaxSelectedCanaries is < 1 or > 256
+            || options.MaxConcurrency is < 1 or > 64
+            || options.PerCheckTimeout <= TimeSpan.Zero
+            || options.OverallTimeout < options.PerCheckTimeout)
+        {
+            throw new ArgumentException(
+                "ASCAN117: Snapshot limits must be positive; MaxSelectedCanaries is 1-256, MaxConcurrency is 1-64, and OverallTimeout must not be shorter than PerCheckTimeout.",
+                "configure");
+        }
     }
 
     private static bool HasAuthorizationServices(IServiceProvider services)
@@ -143,6 +187,32 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         }
     }
 
+    private static async Task<bool> IsSafelyProtectedAsync(
+        HttpContext httpContext,
+        string authorizationPolicyName,
+        string failureTitle)
+    {
+        var endpoint = httpContext.GetEndpoint();
+        var hasRequiredPolicy = endpoint?.Metadata
+            .OfType<IAuthorizeData>()
+            .Any(data => string.Equals(data.Policy, authorizationPolicyName, StringComparison.Ordinal)) == true;
+        if (endpoint?.Metadata.GetMetadata<IAllowAnonymous>() is null && hasRequiredPolicy)
+        {
+            return true;
+        }
+
+        SetNoStoreHeaders(httpContext);
+        await CreateProblem(
+                StatusCodes.Status500InternalServerError,
+                failureTitle,
+                "ASCAN113",
+                "The named canary endpoint is not safely protected.",
+                "Anonymous endpoint metadata or a removed policy bypassed the required authorization policy.",
+                "Remove AllowAnonymous metadata and retain the host-owned operator policy.")
+            .ExecuteAsync(httpContext);
+        return false;
+    }
+
     private static async Task HandleRequestAsync(
         HttpContext httpContext,
         AppSurfaceCanaryCompletedResponseMode responseMode,
@@ -150,21 +220,11 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         string applicationName,
         string environmentName)
     {
-        var endpoint = httpContext.GetEndpoint();
-        var hasRequiredPolicy = endpoint?.Metadata
-            .OfType<IAuthorizeData>()
-            .Any(data => string.Equals(data.Policy, authorizationPolicyName, StringComparison.Ordinal)) == true;
-        if (endpoint?.Metadata.GetMetadata<IAllowAnonymous>() is not null || !hasRequiredPolicy)
+        if (!await IsSafelyProtectedAsync(
+                httpContext,
+                authorizationPolicyName,
+                "AppSurface canary evaluation failed"))
         {
-            SetNoStoreHeaders(httpContext);
-            await CreateProblem(
-                    StatusCodes.Status500InternalServerError,
-                    "AppSurface canary evaluation failed",
-                    "ASCAN113",
-                    "The named canary endpoint is not safely protected.",
-                    "Anonymous endpoint metadata or a removed policy bypassed the required authorization policy.",
-                    "Remove AllowAnonymous metadata and retain the host-owned operator policy.")
-                .ExecuteAsync(httpContext);
             return;
         }
 
@@ -210,16 +270,12 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         {
             throw;
         }
-        catch (Exception exception) when (IsNonFatalEvaluationFailure(exception))
+        catch (Exception exception) when (AppSurfaceCanaryEvaluationFailurePolicy.IsNonFatal(exception))
         {
-            httpContext.RequestServices
-                .GetRequiredService<ILogger<AppSurfaceCanaryEvaluationRunner>>()
-                .LogError(
-                    EvaluationFailureEvent,
-                    "Named canary {CanaryName} failed with diagnostic {DiagnosticCode} and exception type {ExceptionType}.",
-                    descriptor.Name,
-                    "ASCAN301",
-                    exception.GetType().FullName);
+            LogEvaluationFailure(
+                httpContext.RequestServices.GetRequiredService<ILogger<AppSurfaceCanaryEvaluationRunner>>(),
+                descriptor.Name,
+                exception.GetType().FullName ?? exception.GetType().Name);
 
             await CreateProblem(
                     StatusCodes.Status500InternalServerError,
@@ -272,6 +328,204 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
                 statusCode: statusCode,
                 contentType: $"{MediaTypeNames.Application.Json}; charset={Encoding.UTF8.WebName}")
             .ExecuteAsync(httpContext);
+    }
+
+    private static async Task HandleSnapshotRequestAsync(
+        HttpContext httpContext,
+        AppSurfaceCanaryCompletedResponseMode responseMode,
+        string authorizationPolicyName,
+        string applicationName,
+        string environmentName,
+        AppSurfaceCanarySnapshotOptions snapshotOptions)
+    {
+        if (!await IsSafelyProtectedAsync(
+                httpContext,
+                authorizationPolicyName,
+                "AppSurface canary snapshot failed"))
+        {
+            return;
+        }
+
+        SetNoStoreHeaders(httpContext);
+        if (!TryReadSnapshotSelectors(httpContext, out var names, out var tags, out var selectorProblem))
+        {
+            await selectorProblem!.ExecuteAsync(httpContext);
+            return;
+        }
+
+        var coordinator = httpContext.RequestServices.GetRequiredService<AppSurfaceCanarySnapshotCoordinator>();
+        if (!coordinator.ContainsAllNames(names))
+        {
+            await CreateProblem(
+                    StatusCodes.Status404NotFound,
+                    "AppSurface canary selection not found",
+                    "ASCAN203",
+                    "No registered canary matched the requested selection.",
+                    "An exact name selector did not match a registered canary.",
+                    "Correct the selector or register the canary with its exact lowercase name.")
+                .ExecuteAsync(httpContext);
+            return;
+        }
+
+        if (!coordinator.TrySelect(names, tags, snapshotOptions.MaxSelectedCanaries, out var descriptors))
+        {
+            await CreateProblem(
+                    StatusCodes.Status400BadRequest,
+                    "Invalid AppSurface canary request",
+                    "ASCAN204",
+                    "The selected canary set exceeds the configured limit.",
+                    "The requested names/tags select more canaries than this host allows in one snapshot.",
+                    "Narrow the selectors or ask the host to configure an appropriate snapshot cap.")
+                .ExecuteAsync(httpContext);
+            return;
+        }
+
+        if (descriptors.Count == 0)
+        {
+            await CreateProblem(
+                    StatusCodes.Status404NotFound,
+                    "AppSurface canary selection not found",
+                    "ASCAN203",
+                    "No registered canary matched the requested selection.",
+                    "The supplied name or tag did not select a registered canary.",
+                    "Correct the selector or register a canary with the required durable tag.")
+                .ExecuteAsync(httpContext);
+            return;
+        }
+
+        if (!TryReadMarker(httpContext, descriptors.Any(descriptor => descriptor.MarkerRequired), out var marker, out var markerProblem))
+        {
+            await markerProblem!.ExecuteAsync(httpContext);
+            return;
+        }
+
+        if (!TryReadFreshSince(httpContext, descriptors.Any(descriptor => descriptor.FreshSinceRequired), out var freshSince, out var freshnessProblem))
+        {
+            await freshnessProblem!.ExecuteAsync(httpContext);
+            return;
+        }
+
+        var started = Stopwatch.GetTimestamp();
+        var snapshot = await coordinator.EvaluateAsync(
+            descriptors,
+            marker,
+            freshSince,
+            snapshotOptions,
+            httpContext.RequestAborted);
+        var markerFingerprint = marker is null ? null : CreateMarkerFingerprint(marker);
+        var normalizedFreshSince = freshSince?.ToUniversalTime();
+        var responseItems = snapshot.Items.Select(item => AppSurfaceCanarySnapshotResponseItem.From(
+            item,
+            markerFingerprint,
+            normalizedFreshSince)).ToArray();
+        var elapsedMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        var ready = snapshot.Ready;
+        var statusCode = responseMode == AppSurfaceCanaryCompletedResponseMode.AlwaysOk || ready
+            ? StatusCodes.Status200OK
+            : StatusCodes.Status503ServiceUnavailable;
+        var logger = httpContext.RequestServices.GetRequiredService<ILogger<AppSurfaceCanaryEvaluationRunner>>();
+
+        var startedCount = 0;
+        var completed = 0;
+        var timedOut = 0;
+        var failed = 0;
+        var notStarted = 0;
+        foreach (var item in snapshot.Items)
+        {
+            switch (item.State)
+            {
+                case AppSurfaceCanarySnapshotItemState.Completed:
+                    startedCount++;
+                    completed++;
+                    break;
+                case AppSurfaceCanarySnapshotItemState.Failed:
+                    startedCount++;
+                    failed++;
+                    break;
+                case AppSurfaceCanarySnapshotItemState.PerCheckTimedOut:
+                case AppSurfaceCanarySnapshotItemState.OverallTimedOut:
+                    startedCount++;
+                    timedOut++;
+                    break;
+                case AppSurfaceCanarySnapshotItemState.NotStarted:
+                    notStarted++;
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(item.State), item.State, "The snapshot item state must be defined.");
+            }
+
+            if (item.Result is not { } result)
+            {
+                continue;
+            }
+
+            CanaryEvaluationCompleted(
+                logger,
+                item.Name,
+                ToWireStatus(result.Status),
+                item.Ready,
+                result.ObservedAt,
+                normalizedFreshSince,
+                result.MatchedCount,
+                item.ElapsedMilliseconds ?? 0,
+                applicationName,
+                environmentName);
+        }
+
+        CanarySnapshotCompleted(
+            logger,
+            descriptors.Count,
+            startedCount,
+            completed,
+            timedOut,
+            failed,
+            notStarted,
+            ready,
+            elapsedMilliseconds,
+            applicationName,
+            environmentName);
+
+        await Results.Json(
+                new AppSurfaceCanarySnapshotResponse(
+                    ready,
+                    snapshot.OverallTimedOut,
+                    elapsedMilliseconds,
+                    responseItems),
+                options: ResponseJsonOptions,
+                statusCode: statusCode,
+                contentType: $"{MediaTypeNames.Application.Json}; charset={Encoding.UTF8.WebName}")
+            .ExecuteAsync(httpContext);
+    }
+
+    private static bool TryReadSnapshotSelectors(
+        HttpContext httpContext,
+        out IReadOnlyCollection<string> names,
+        out IReadOnlyCollection<string> tags,
+        out IResult? problem)
+    {
+        var requestedNames = httpContext.Request.Query["name"].Select(value => value ?? string.Empty).ToArray();
+        var requestedTags = httpContext.Request.Query["tag"].Select(value => value ?? string.Empty).ToArray();
+        names = [];
+        tags = [];
+        problem = null;
+        if (requestedNames.Length > MaximumSnapshotNames
+            || requestedTags.Length > MaximumSnapshotTags
+            || requestedNames.Any(name => !AppSurfaceCanaryValidation.IsValidName(name))
+            || requestedTags.Any(tag => !AppSurfaceCanaryValidation.IsValidTag(tag)))
+        {
+            problem = CreateProblem(
+                StatusCodes.Status400BadRequest,
+                "Invalid AppSurface canary request",
+                "ASCAN202",
+                "A snapshot selector is invalid.",
+                "Names and tags must use the same bounded lowercase grammar as their registrations and include at most 64 name values and 16 tag values.",
+                "Send at most 64 repeated name values and 16 repeated tag values using registered identifier grammar.");
+            return false;
+        }
+
+        names = requestedNames.Distinct(StringComparer.Ordinal).ToArray();
+        tags = requestedTags.Distinct(StringComparer.Ordinal).ToArray();
+        return true;
     }
 
     /// <summary>
@@ -468,14 +722,13 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, "The AppSurface canary status must be defined."),
     };
 
-    /// <summary>Determines whether an evaluator failure can be converted into a safe package-owned problem response.</summary>
-    /// <param name="exception">The exception raised during evaluator activation or execution.</param>
-    /// <returns><see langword="false"/> for fatal process/runtime exceptions; otherwise <see langword="true"/>.</returns>
-    internal static bool IsNonFatalEvaluationFailure(Exception exception) =>
-        exception is not OutOfMemoryException
-            and not StackOverflowException
-            and not AccessViolationException
-            and not AppDomainUnloadedException;
+    private static void LogEvaluationFailure(ILogger logger, string canaryName, string exceptionType) =>
+        logger.LogError(
+            EvaluationFailureEvent,
+            "Named canary {CanaryName} failed with diagnostic {DiagnosticCode} and exception type {ExceptionType}.",
+            canaryName,
+            "ASCAN301",
+            exceptionType);
 
     [LoggerMessage(
         EventId = 62401,
@@ -490,6 +743,24 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
         DateTimeOffset? observedAt,
         DateTimeOffset? freshSince,
         int? matchedCount,
+        double elapsedMilliseconds,
+        string applicationName,
+        string environmentName);
+
+    [LoggerMessage(
+        EventId = 62402,
+        Level = LogLevel.Information,
+        EventName = "AppSurfaceCanarySnapshotCompleted",
+        Message = "Named canary snapshot selected {Selected}; started {Started}; completed {Completed}; timed out {TimedOut}; failed {Failed}; not started {NotStarted}; ready {Ready}; elapsed {ElapsedMilliseconds}; application {ApplicationName}; environment {EnvironmentName}.")]
+    private static partial void CanarySnapshotCompleted(
+        ILogger logger,
+        int selected,
+        int started,
+        int completed,
+        int timedOut,
+        int failed,
+        int notStarted,
+        bool ready,
         double elapsedMilliseconds,
         string applicationName,
         string environmentName);
@@ -542,6 +813,66 @@ public static partial class AppSurfaceCanaryEndpointRouteBuilderExtensions
 
         [JsonPropertyName("correlationId")]
         public string? CorrelationId { get; } = correlationId;
+    }
+
+    private sealed class AppSurfaceCanarySnapshotResponse(
+        bool ready,
+        bool overallTimedOut,
+        double elapsedMilliseconds,
+        IReadOnlyList<AppSurfaceCanarySnapshotResponseItem> results)
+    {
+        [JsonPropertyName("ready")]
+        public bool Ready { get; } = ready;
+
+        [JsonPropertyName("overallTimedOut")]
+        public bool OverallTimedOut { get; } = overallTimedOut;
+
+        [JsonPropertyName("elapsedMilliseconds")]
+        public double ElapsedMilliseconds { get; } = elapsedMilliseconds;
+
+        [JsonPropertyName("results")]
+        public IReadOnlyList<AppSurfaceCanarySnapshotResponseItem> Results { get; } = results;
+    }
+
+    private sealed class AppSurfaceCanarySnapshotResponseItem(
+        string name,
+        string outcome,
+        AppSurfaceCanaryResponse? result,
+        string? code)
+    {
+        [JsonPropertyName("name")] public string Name { get; } = name;
+        [JsonPropertyName("outcome")] public string Outcome { get; } = outcome;
+        [JsonPropertyName("result")] public AppSurfaceCanaryResponse? Result { get; } = result;
+        [JsonPropertyName("code")] public string? Code { get; } = code;
+
+        internal static AppSurfaceCanarySnapshotResponseItem From(
+            AppSurfaceCanarySnapshotItem item,
+            string? markerFingerprint,
+            DateTimeOffset? freshSince)
+        {
+            if (item.Result is null)
+            {
+                return new AppSurfaceCanarySnapshotResponseItem(item.Name, item.Outcome, null, item.ReasonCode);
+            }
+
+            var result = item.Result;
+            return new AppSurfaceCanarySnapshotResponseItem(
+                item.Name,
+                item.Outcome,
+                new AppSurfaceCanaryResponse(
+                    item.Name,
+                    item.Ready,
+                    ToWireStatus(result.Status),
+                    markerFingerprint,
+                    freshSince,
+                    result.ObservedAt,
+                    result.MatchedCount,
+                    result.ReasonCode,
+                    result.Summary,
+                    result.Details.Count == 0 ? null : result.Details,
+                    result.CorrelationId),
+                null);
+        }
     }
 
     /// <summary>Reads and writes named-canary timestamps using the canonical UTC wire format.</summary>
