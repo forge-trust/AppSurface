@@ -55,6 +55,12 @@ internal sealed partial class PwaVerifyCommand : ICommand
     public string? ExpectedPush { get; set; }
 
     /// <summary>
+    /// Gets the app-root-relative PWA diagnostics base path.
+    /// </summary>
+    [CommandOption("diagnostics-path", Description = "App-root-relative PWA diagnostics base path. Defaults to /_appsurface/pwa.")]
+    public string? DiagnosticsPath { get; set; }
+
+    /// <summary>
     /// Gets the expected manifest start_url value.
     /// </summary>
     [CommandOption("expect-start-url", Description = "Expected manifest start_url value.")]
@@ -118,7 +124,8 @@ internal sealed partial class PwaVerifyCommand : ICommand
                 ExpectedBackgroundColor,
                 ExpectedIcons,
                 Surface,
-                ExpectedPush);
+                ExpectedPush,
+                DiagnosticsPath);
             _ = PwaVerificationTarget.Create(options.BaseUrl, options.EntryPath);
         }
         catch (ArgumentException ex)
@@ -330,7 +337,7 @@ internal sealed partial class PwaVerifier
                 "Pass --entry-path for a real app page that renders the PWA head metadata."));
         }
 
-        await ValidateDiagnosticsAsync(target, diagnostics, cancellationToken);
+        await ValidateDiagnosticsAsync(target, options.DiagnosticsPath, diagnostics, cancellationToken);
 
         var manifest = await FetchAsync(target, manifestUri, "manifest", MaxTextResponseBytes, diagnostics, cancellationToken);
         if (manifest.RedirectLimitExceeded)
@@ -485,7 +492,7 @@ internal sealed partial class PwaVerifier
             diagnostics.AddRange(install.Diagnostics);
         }
 
-        var pushResult = await VerifyPushAsync(target, options.ExpectedPush, cancellationToken);
+        var pushResult = await VerifyPushAsync(target, options.ExpectedPush, options.DiagnosticsPath, cancellationToken);
         diagnostics.AddRange(pushResult.Diagnostics);
         return new PwaVerificationV3Report(
             3,
@@ -503,13 +510,14 @@ internal sealed partial class PwaVerifier
     private async Task<PwaPushVerificationResult> VerifyPushAsync(
         PwaVerificationTarget target,
         PwaExpectedPush expectedPush,
+        string diagnosticsPath,
         CancellationToken cancellationToken)
     {
         var diagnostics = new List<PwaVerificationDiagnostic>();
         var entry = await FetchAsync(target, target.EntryUri, "entry", MaxTextResponseBytes, diagnostics, cancellationToken);
         var statusResponse = await FetchAsync(
             target,
-            new Uri(target.BaseUri, "_appsurface/pwa/status.json"),
+            GetDiagnosticsStatusUri(target, diagnosticsPath),
             "diagnostics",
             MaxTextResponseBytes,
             diagnostics,
@@ -747,12 +755,13 @@ internal sealed partial class PwaVerifier
 
     private async Task ValidateDiagnosticsAsync(
         PwaVerificationTarget target,
+        string diagnosticsPath,
         List<PwaVerificationDiagnostic> diagnostics,
         CancellationToken cancellationToken)
     {
         var diagnosticsResponse = await FetchAsync(
             target,
-            new Uri(target.BaseUri, "_appsurface/pwa/status.json"),
+            GetDiagnosticsStatusUri(target, diagnosticsPath),
             "diagnostics",
             MaxTextResponseBytes,
             diagnostics,
@@ -1071,22 +1080,26 @@ internal sealed partial class PwaVerifier
         CancellationToken cancellationToken)
     {
         if (!ResolvesToOrigin(target, target.BaseUri, workerPath, out var workerUri)
-            || !IsUnderBasePath(target, workerUri.AbsolutePath))
+            || !ResolvesToOrigin(target, target.BaseUri, workerScope, out var workerScopeUri)
+            || !IsUnderBasePath(target, workerUri.AbsolutePath)
+            || !IsUnderBasePath(target, workerScopeUri.AbsolutePath)
+            || !PwaScopePathMatcher.IsPathWithinScope(workerScopeUri.AbsolutePath, target.BasePath)
+            || !PwaScopePathMatcher.IsPathWithinScope(workerUri.AbsolutePath, workerScopeUri.AbsolutePath))
         {
             diagnostics.Add(PushError(
                 "ASPWA283",
-                "The diagnostics worker path must resolve under the verified app origin and base path.",
-                "diagnostics.workerPath",
-                "same-origin-path",
+                "The diagnostics worker path and scope must resolve under the verified app origin and base path.",
+                "diagnostics.worker",
+                "same-origin-path-and-scope",
                 "out-of-base",
-                "Expose the generated shared worker beneath the externally verified application base URL."));
+                "Expose the generated shared worker and its scope beneath the externally verified application base URL."));
             return new PwaWorkerEvidence(workerPath, workerScope, "failed", "failed", "failed", "failed");
         }
 
         var response = await FetchNoRedirectAsync(target, workerUri, "push-worker", MaxTextResponseBytes, diagnostics, cancellationToken);
-        if (!response.IsSuccess || IsRedirect(response.StatusCode))
+        if (!response.IsSuccess || IsRedirect(response.StatusCode) || response.Response.BodyTruncated)
         {
-            if (!IsRedirect(response.StatusCode))
+            if (!response.IsSuccess && !IsRedirect(response.StatusCode))
             {
                 diagnostics.Add(PushError(
                     "ASPWA284",
@@ -1174,9 +1187,9 @@ internal sealed partial class PwaVerifier
         }
 
         var response = await FetchNoRedirectAsync(target, helperUri, "push-registration-helper", MaxTextResponseBytes, diagnostics, cancellationToken);
-        if (!response.IsSuccess || IsRedirect(response.StatusCode))
+        if (!response.IsSuccess || IsRedirect(response.StatusCode) || response.Response.BodyTruncated)
         {
-            if (!IsRedirect(response.StatusCode))
+            if (!response.IsSuccess && !IsRedirect(response.StatusCode))
             {
                 diagnostics.Add(PushError(
                     "ASPWA289",
@@ -1797,6 +1810,14 @@ internal sealed partial class PwaVerifier
             || path.StartsWith(target.BasePath, StringComparison.Ordinal);
     }
 
+    private static Uri GetDiagnosticsStatusUri(PwaVerificationTarget target, string diagnosticsPath)
+    {
+        var relativePath = diagnosticsPath.Trim('/');
+        return new Uri(
+            target.BaseUri,
+            string.IsNullOrEmpty(relativePath) ? "status.json" : relativePath + "/status.json");
+    }
+
     private static string RedactUriValue(string value)
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
@@ -2237,6 +2258,7 @@ internal sealed record PwaVerificationTarget(Uri Origin, Uri BaseUri, string Bas
 /// <param name="ExpectedIcons">Parsed icon size and purpose assertions.</param>
 /// <param name="Surface">The requested public verification surface.</param>
 /// <param name="ExpectedPush">The expected server-known push posture for schema-v3 surfaces.</param>
+/// <param name="DiagnosticsPath">The normalized app-root-relative PWA diagnostics base path.</param>
 /// <remarks>Target safety is enforced by <see cref="PwaVerificationTarget.Create(Uri, string)"/> before network access.</remarks>
 internal sealed record PwaVerificationOptions(
     Uri BaseUrl,
@@ -2248,7 +2270,8 @@ internal sealed record PwaVerificationOptions(
     string? ExpectedBackgroundColor,
     IReadOnlyList<PwaExpectedIcon> ExpectedIcons,
     PwaVerificationSurface Surface,
-    PwaExpectedPush ExpectedPush)
+    PwaExpectedPush ExpectedPush,
+    string DiagnosticsPath)
 {
     /// <summary>
     /// Creates verification options and parses repeated icon assertions.
@@ -2263,6 +2286,7 @@ internal sealed record PwaVerificationOptions(
     /// <param name="expectedIcons">Repeated WIDTHxHEIGHT or WIDTHxHEIGHT:purpose assertions.</param>
     /// <param name="surface">Install (default), push, or all.</param>
     /// <param name="expectedPush">Enabled (default) or disabled for push/all surfaces.</param>
+    /// <param name="diagnosticsPath">The app-root-relative PWA diagnostics base path.</param>
     /// <returns>Normalized options for <see cref="PwaVerifier"/>.</returns>
     /// <exception cref="ArgumentException">An icon assertion is malformed.</exception>
     public static PwaVerificationOptions Create(
@@ -2275,7 +2299,8 @@ internal sealed record PwaVerificationOptions(
         string? expectedBackgroundColor = null,
         IReadOnlyList<string>? expectedIcons = null,
         string? surface = null,
-        string? expectedPush = null)
+        string? expectedPush = null,
+        string? diagnosticsPath = null)
     {
         var parsedSurface = PwaVerificationSurfaceParser.Parse(surface);
         var parsedExpectedPush = PwaExpectedPushParser.Parse(expectedPush);
@@ -2295,6 +2320,14 @@ internal sealed record PwaVerificationOptions(
             throw new ArgumentException("Install expectation options are valid only with --surface install or --surface all.");
         }
 
+        var normalizedDiagnosticsPath = PwaVerificationTarget.Create(
+            baseUrl,
+            string.IsNullOrWhiteSpace(diagnosticsPath) ? "/_appsurface/pwa" : diagnosticsPath).EntryPath;
+        if (normalizedDiagnosticsPath.Contains('%'))
+        {
+            throw new ArgumentException("--diagnostics-path must be an app-root-relative endpoint path without percent escapes.");
+        }
+
         return new PwaVerificationOptions(
             baseUrl,
             string.IsNullOrWhiteSpace(entryPath) ? "/" : entryPath,
@@ -2305,7 +2338,8 @@ internal sealed record PwaVerificationOptions(
             expectedBackgroundColor,
             (expectedIcons ?? []).Select(PwaExpectedIcon.Parse).ToArray(),
             parsedSurface,
-            parsedExpectedPush);
+            parsedExpectedPush,
+            normalizedDiagnosticsPath);
     }
 }
 

@@ -458,7 +458,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.5.md
+    release_notes_path: releases/unreleased.md
     order: 70
     use_when: Install this first for a normal ASP.NET Core app with AppSurface modules when you want the base web startup pipeline, opt-in health/readiness probes, [protected preview named deploy evidence](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints) with a bounded result envelope, conventional browser affordances, PWA install metadata, application badging, push-worker plumbing, or server-known push-readiness posture evidence, or authenticated config-audit diagnostics before layering on optional UI or docs packages.
     includes: Base ASP.NET Core hosting, opt-in public `/health` and `/ready` ASP.NET Core health-check probes, pre-routing and endpoint-aware middleware composition, endpoint composition, opt-in protected single-evaluation named canary endpoints with typed and declared bounded response evidence plus fixed completion telemetry, conventional browser error-page hooks, opt-in PWA manifest/head/diagnostic/shared-worker endpoints, default-off page and active-worker application-badging adapters, explicit offline behavior, push-event plumbing, an inert service-worker registration helper, the privacy-safe `IPwaPushReadinessProvider` contribution point for readiness-posture evidence, opt-in authenticated config audit diagnostics endpoint mapping, and the core AppSurface web module contract.
@@ -491,7 +491,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/unreleased.md
+    release_notes_path: releases/v0.2.0-preview.5.md
     order: 80
     use_when: Add this after the base web package when you want generated OpenAPI endpoints for an AppSurface web app.
     includes: AddOpenApi wiring, endpoint explorer setup, endpoint mapping, and default OpenAPI document transforms.
@@ -682,7 +682,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/v0.2.0-preview.5.md
+    release_notes_path: releases/unreleased.md
     order: 120
     tool_command_name: appsurface
     use_when: Install this when you want repository-level AppSurface tooling from a global or local .NET tool command.

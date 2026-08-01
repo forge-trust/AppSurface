@@ -2403,6 +2403,7 @@ public sealed class CoverageRunTests
         var browserTest = Assert.Single(tests, command => command.Arguments[1] == browser);
         var parallelTests = tests.Where(command => command.Arguments[1] != browser).ToArray();
         Assert.Equal([first, second], parallelTests.Select(command => command.Arguments[1]).OrderBy(path => path));
+        Assert.True(parallelTests.Max(command => command.StartedAt) < parallelTests.Min(command => command.FinishedAt));
         Assert.All(parallelTests, command => Assert.True(browserTest.StartedAt >= command.FinishedAt));
         Assert.Contains("(exclusive)", console.ReadOutputString(), StringComparison.Ordinal);
     }
