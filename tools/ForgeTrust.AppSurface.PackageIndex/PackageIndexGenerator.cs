@@ -423,7 +423,7 @@ internal sealed class PackageIndexGenerator
     /// Keep this thin adapter around the shared resolver so package-index diagnostics retain the project path that a maintainer
     /// can correct. Callers must still validate that the resulting repository-relative file exists.
     /// </remarks>
-    internal static PackageReleaseLink? ResolveReleaseLink(PackageManifestEntry entry)
+    internal static PackageReleaseLink ResolveReleaseLink(PackageManifestEntry entry)
     {
         if (PackageReleaseLinkResolver.TryResolve(
                 entry.ReleaseTrack,
@@ -1036,9 +1036,7 @@ internal sealed class PackageIndexGenerator
         string outputPath)
     {
         var releaseLink = ResolveReleaseLink(entry);
-        return releaseLink is null
-            ? "Not declared"
-            : FormatMarkdownLink("notes", GetRelativeDocPath(request, releaseLink.ReleaseNotesPath, outputPath));
+        return FormatMarkdownLink("notes", GetRelativeDocPath(request, releaseLink.ReleaseNotesPath, outputPath));
     }
 
     private static string FormatReadinessStatus(PackageReadinessStatus status)
@@ -1060,9 +1058,7 @@ internal sealed class PackageIndexGenerator
     {
         var releaseNotePaths = publicEntries
             .Where(entry => entry.Manifest.PublishDecision == PackagePublishDecision.Publish)
-            .Select(entry => ResolveReleaseLink(entry.Manifest)?.ReleaseNotesPath)
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Cast<string>()
+            .Select(entry => ResolveReleaseLink(entry.Manifest).ReleaseNotesPath)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
@@ -1370,10 +1366,7 @@ internal sealed class PackageIndexGenerator
         }
 
         var releaseLink = ResolveReleaseLink(entry);
-        if (releaseLink is not null)
-        {
-            parts.Add(FormatMarkdownLink("notes", GetRelativeDocPath(request, releaseLink.ReleaseNotesPath)));
-        }
+        parts.Add(FormatMarkdownLink("notes", GetRelativeDocPath(request, releaseLink.ReleaseNotesPath)));
 
         return parts.Count == 0 ? "Not declared" : string.Join("<br />", parts);
     }
@@ -1592,13 +1585,6 @@ internal static class PackageReadinessEvaluator
         try
         {
             var releaseLink = PackageIndexGenerator.ResolveReleaseLink(entry.Manifest);
-            if (releaseLink is null)
-            {
-                blockingReasons.Add("release_notes_path is missing.");
-                fixHints.Add($"Add release_track: coordinated or release_notes_path to {entry.Manifest.Project} in packages/package-index.yml.");
-                return;
-            }
-
             PackageIndexGenerator.ResolveRepositoryFilePath(
                 repositoryRoot,
                 releaseLink.ReleaseNotesPath,
@@ -1931,8 +1917,7 @@ internal static class PackageGateValidator
             throw new PackageIndexException($"Manifest entry '{entry.Manifest.Project}' must define 'commercial_status'.");
         }
 
-        var releaseLink = PackageIndexGenerator.ResolveReleaseLink(entry.Manifest)
-            ?? throw new PackageIndexException($"Manifest entry '{entry.Manifest.Project}' must define 'release_notes_path' or 'release_track'.");
+        var releaseLink = PackageIndexGenerator.ResolveReleaseLink(entry.Manifest);
         PackageIndexGenerator.ResolveRepositoryFilePath(
             repositoryRoot,
             releaseLink.ReleaseNotesPath,

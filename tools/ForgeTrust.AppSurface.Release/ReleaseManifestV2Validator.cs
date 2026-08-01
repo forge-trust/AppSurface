@@ -78,6 +78,7 @@ internal static class ReleaseManifestV2Validator
             var projects = parsed.PublishedPackageProjects.ToArray();
             var resolutionProjects = parsed.CoordinatedPackageReleaseNoteResolutions.Select(item => item.Project).ToArray();
             if (!projects.SequenceEqual(projects.OrderBy(project => project, StringComparer.Ordinal), StringComparer.Ordinal)
+                || projects.Distinct(StringComparer.Ordinal).Count() != projects.Length
                 || !resolutionProjects.SequenceEqual(resolutionProjects.OrderBy(project => project, StringComparer.Ordinal), StringComparer.Ordinal)
                 || resolutionProjects.Distinct(StringComparer.Ordinal).Count() != resolutionProjects.Length
                 || parsed.CoordinatedPackageReleaseNoteResolutions.Any(item =>

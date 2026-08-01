@@ -119,19 +119,6 @@ internal sealed class ReleaseCurrentPointerGate
         }
 
         var ordered = tags.OrderBy(item => item.Version).ToArray();
-        for (var index = 1; index < ordered.Length; index++)
-        {
-            if (ordered[index - 1].Version.CompareTo(ordered[index].Version) == 0)
-            {
-                diagnostics.Add(ReleaseDiagnostic.Error(
-                    "release-current-page-tag-ambiguous",
-                    "Two reachable annotated tags have equal SemVer precedence.",
-                    $"'{ordered[index - 1].Tag}' and '{ordered[index].Tag}' both describe version '{ordered[index].Version}'.",
-                    "Remove or rename the ambiguous tag before preparing another release.",
-                    "releases/coordinated-release-links.md"));
-            }
-        }
-
         var latest = ordered.LastOrDefault();
         if (marker is null)
         {

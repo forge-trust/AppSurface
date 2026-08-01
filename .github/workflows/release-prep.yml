@@ -144,7 +144,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin "${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}"
-          mapfile -t release_prep_paths < <(git diff --no-renames --name-only "origin/${GITHUB_BASE_REF}...HEAD" -- \
+          if ! release_prep_changes="$(git diff --no-renames --name-status "origin/${GITHUB_BASE_REF}...HEAD" -- \
             CHANGELOG.md \
             releases/current.md \
             releases/current.md.yml \
@@ -153,11 +153,33 @@ jobs:
             ':(glob)releases/v*.md' \
             ':(glob)releases/v*.md.yml' \
             ':(glob)releases/v*.release.json' \
-            ':(glob)releases/v*.evidence.json')
-          mapfile -t manifests < <(git diff --no-renames --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- ':(glob)releases/v*.release.json')
+            ':(glob)releases/v*.evidence.json')"; then
+            echo "Could not inspect release-preparation paths in the pull request diff." >&2
+            exit 1
+          fi
+          if ! manifest_paths="$(git diff --no-renames --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- ':(glob)releases/v*.release.json')"; then
+            echo "Could not inspect versioned release manifests in the pull request diff." >&2
+            exit 1
+          fi
+          manifests=()
+          while IFS= read -r manifest; do
+            [[ -n "${manifest}" ]] && manifests+=("${manifest}")
+          done <<< "${manifest_paths}"
           if [[ "${#manifests[@]}" -eq 0 ]]; then
-            if [[ "${#release_prep_paths[@]}" -ne 0 ]]; then
-              echo "Release-prep-owned paths changed without exactly one added or modified versioned release manifest: ${release_prep_paths[*]}" >&2
+            current_pointer_markdown_added=false
+            current_pointer_sidecar_added=false
+            requires_release_manifest=false
+            while IFS=$'\t' read -r status path; do
+              [[ -z "${status}" ]] && continue
+              case "${status}:${path}" in
+                M:releases/unreleased.md) ;;
+                A:releases/current.md) current_pointer_markdown_added=true ;;
+                A:releases/current.md.yml) current_pointer_sidecar_added=true ;;
+                *) requires_release_manifest=true ;;
+              esac
+            done <<< "${release_prep_changes}"
+            if [[ "${requires_release_manifest}" == true || "${current_pointer_markdown_added}" != "${current_pointer_sidecar_added}" ]]; then
+              echo "Release-prep-owned paths changed without exactly one added or modified versioned release manifest. Non-release pull requests may update releases/unreleased.md and may bootstrap both releases/current.md and releases/current.md.yml together." >&2
               exit 1
             fi
             echo "No versioned release manifest changed; validating release-prep policy tests without applying the release-artifact diff gate."

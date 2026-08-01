@@ -10,7 +10,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
-- Add release-facing changes here.
+- Coordinated package documentation now follows the release that was current when that documentation tree was published: current docs use the stable `releases/current.md` pointer, while historical trees retain their original versioned release notes. The release tool records and validates that contract through versioned manifest and evidence V2 artifacts, preserving V1 evidence compatibility and rejecting incomplete, conflicting, or unknown package release-link declarations.
 
 ## Migration watch
 

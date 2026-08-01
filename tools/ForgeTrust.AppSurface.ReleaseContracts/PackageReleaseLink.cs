@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace ForgeTrust.AppSurface.ReleaseContracts;
 
 /// <summary>
@@ -49,7 +51,7 @@ public static class PackageReleaseLinkResolver
     /// <param name="releaseNotesPath">Optional <c>release_notes_path</c> YAML value.</param>
     /// <param name="link">The resolved link when validation succeeds.</param>
     /// <param name="error">A maintainer-facing validation error when validation fails.</param>
-    /// <returns><see langword="true"/> when the fields describe a supported link.</returns>
+    /// <returns><see langword="true"/> when the fields describe a supported link and <paramref name="link"/> is non-null.</returns>
     /// <remarks>
     /// Rows without <c>release_track</c> retain the historical explicit-path meaning when they declare a non-empty
     /// <c>release_notes_path</c>, so old release manifests and archived package-index snapshots remain readable. Every
@@ -59,6 +61,7 @@ public static class PackageReleaseLinkResolver
     public static bool TryResolve(
         string? releaseTrack,
         string? releaseNotesPath,
+        [NotNullWhen(true)]
         out PackageReleaseLink? link,
         out string? error)
     {

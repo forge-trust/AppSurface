@@ -343,6 +343,21 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Theory]
+    [InlineData("\r\n")]
+    [InlineData("\r")]
+    public void CurrentPointerAcceptsCanonicalCrLfAndCrLineEndings(string lineEnding)
+    {
+        var initialContent = ReleaseCurrentPointer.BuildNone().Replace("\n", lineEnding, StringComparison.Ordinal);
+        Assert.True(ReleaseCurrentPointer.TryParse(initialContent, out var initial));
+        Assert.Null(initial);
+
+        var expectedVersion = SemVer.Parse("1.2.3");
+        var versionedContent = ReleaseCurrentPointer.Build(expectedVersion).Replace("\n", lineEnding, StringComparison.Ordinal);
+        Assert.True(ReleaseCurrentPointer.TryParse(versionedContent, out var parsed));
+        Assert.Equal(expectedVersion, parsed);
+    }
+
+    [Theory]
     [InlineData("1.0.0-alpha.2", "1.0.0-alpha.10", -1)]
     [InlineData("1.0.0-alpha.1", "1.0.0-alpha.beta", -1)]
     [InlineData("1.0.0-99999999999999999999", "1.0.0-100000000000000000000", -1)]
@@ -504,8 +519,8 @@ public sealed class ReleaseToolTests : IDisposable
         var sourceRoot = FindSourceRoot();
         using var manifestSchema = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(sourceRoot, "tools/ForgeTrust.AppSurface.Release/schemas/release-manifest-v2.schema.json")));
         using var evidenceSchema = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(sourceRoot, "tools/ForgeTrust.AppSurface.Release/schemas/release-evidence-v2.schema.json")));
-        Assert.True(manifestSchema.RootElement.GetProperty("additionalProperties").GetBoolean() == false);
-        Assert.True(evidenceSchema.RootElement.GetProperty("additionalProperties").GetBoolean() == false);
+        Assert.False(manifestSchema.RootElement.GetProperty("additionalProperties").GetBoolean());
+        Assert.False(evidenceSchema.RootElement.GetProperty("additionalProperties").GetBoolean());
         Assert.Contains("coordinatedPackageReleaseNoteResolutions", manifestSchema.RootElement.GetProperty("required").EnumerateArray().Select(item => item.GetString()));
         Assert.Contains("coordinatedPackageReleaseNoteResolutions", evidenceSchema.RootElement.GetProperty("required").EnumerateArray().Select(item => item.GetString()));
     }
@@ -536,6 +551,10 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.False(ReleaseManifestV2Validator.TryDeserialize(validManifest.Replace("\"preparationBaseCommit\":\"abc123\"", "\"preparationBaseCommit\":null", StringComparison.Ordinal), out var missingValueManifest, out var missingValueIssue));
         Assert.Null(missingValueManifest);
         Assert.Equal("Release manifest has missing required V2 values.", missingValueIssue);
+
+        Assert.False(ReleaseManifestV2Validator.TryDeserialize(validManifest.Replace("\"publishedPackageProjects\":[]", "\"publishedPackageProjects\":[\"Core/ForgeTrust.AppSurface.Core.csproj\",\"Core/ForgeTrust.AppSurface.Core.csproj\"]", StringComparison.Ordinal), out var duplicateProjectManifest, out var duplicateProjectIssue));
+        Assert.Null(duplicateProjectManifest);
+        Assert.Equal("Release manifest V2 package resolutions are invalid or not ordinally sorted.", duplicateProjectIssue);
     }
 
     [Fact]
@@ -4300,17 +4319,6 @@ public sealed class ReleaseToolTests : IDisposable
             new DateOnly(2026, 5, 25),
             "# Unreleased\n\nThis is the living release note for the next coordinated AppSurface version. It stays provisional until a tag is cut.\n");
         Assert.Contains($"# Release {version}{Environment.NewLine}{Environment.NewLine}", releaseNote, StringComparison.Ordinal);
-
-        var packageIndex = PackageIndexEditor.UpdatePublicPublishedReleaseNotes(
-            """
-            packages:
-              - project: Core.csproj
-                classification: public
-                publish_decision: publish
-                order: 10
-            """,
-            "releases/v0.1.0-preview.1.md");
-        Assert.Contains("release_notes_path: releases/v0.1.0-preview.1.md", packageIndex, StringComparison.Ordinal);
 
         var appendedChangelog = ChangelogEditor.RollForward(
             "# Changelog\n",
