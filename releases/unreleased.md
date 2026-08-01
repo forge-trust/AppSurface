@@ -10,6 +10,11 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
+- [`ForgeTrust.AppSurface.Web` named canaries](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints)
+  now include a bounded protected aggregate snapshot at `GET /_appsurface/canaries`. Operators can select registered
+  canaries by exact name or durable tag, receive ordinal partial outcomes under explicit concurrency and deadline caps,
+  and parse a privacy-safe envelope with fixed telemetry. The feature does not add triggers, retries, polling, readiness
+  effects, or authorization-policy ownership; hosts retain those decisions.
 - Coordinated package documentation now follows the release that was current when that documentation tree was published: current docs use the stable `releases/current.md` pointer, while historical trees retain their original versioned release notes. The release tool records and validates that contract through versioned manifest and evidence V2 artifacts, preserving V1 evidence compatibility and rejecting incomplete, conflicting, or unknown package release-link declarations.
 
 ## Migration watch
