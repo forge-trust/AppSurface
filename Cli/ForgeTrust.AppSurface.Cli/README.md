@@ -101,6 +101,8 @@ The verifier reports stable `ASPWA2xx` diagnostics for manifest reachability, re
 Push/all examples write named artifacts so CI can retain the bounded result:
 
 ```bash
+mkdir -p artifacts
+
 # Server-known push readiness only; writes schema-v3 evidence.
 appsurface pwa verify \
   --surface push \

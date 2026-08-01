@@ -33,6 +33,8 @@ The sample registers `AddAppSurfaceWebPushDevelopmentProofTransport(environment)
 Verify that posture explicitly and save the result as a named artifact:
 
 ```bash
+mkdir -p artifacts
+
 appsurface pwa verify --surface push \
   --base-url https://app.example.com \
   --entry-path /account/resume \

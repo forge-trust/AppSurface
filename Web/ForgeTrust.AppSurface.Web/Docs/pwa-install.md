@@ -269,7 +269,13 @@ App-root-relative settings do not include `PathBase`. A host mounted at `/tenant
 
 `appsurface pwa verify --surface push` and `--surface all` consume a deliberately narrow, schema-versioned readiness contribution from the Web diagnostics document. This is readiness-posture evidence: it answers whether the server can describe the worker/helper foundation and, when present, the optional AppSurface push rail and its mapped route. A host with no provider may report the rail as `not-configured` while still passing valid worker/helper checks; this is not a browser or delivery claim.
 
-The optional contributor API is `IPwaPushReadinessProvider.GetReadiness()`. A provider returns either `null` or the fixed `PwaPushReadiness` record containing only `ActiveVapidKeyId`, a SHA-256 `PublicKeyFingerprint` of the decoded canonical public key, and `RouteMapped`. The Web package publishes this contribution as a versioned `pushReadiness` object. Contributors must not return private keys, subscription endpoints or keys, bearer tokens, payloads, provider responses, exception text, or arbitrary route values. A provider failure is contained as unavailable evidence.
+The optional contributor API is `IPwaPushReadinessProvider.GetReadiness()`. Register exactly one provider when the host owns a compatible push rail:
+
+```csharp
+builder.Services.AddSingleton<IPwaPushReadinessProvider, ContosoPushReadinessProvider>();
+```
+
+A provider returns either `null` or the fixed `PwaPushReadiness` record containing only `ActiveVapidKeyId`, a SHA-256 `PublicKeyFingerprint` of the decoded canonical public key, and `RouteMapped`. The Web package publishes this contribution as a versioned `pushReadiness` object. Zero providers reports `not-configured`; multiple providers, invalid evidence, or a provider exception report `unavailable`. Contributors must not return private keys, subscription endpoints or keys, bearer tokens, payloads, provider responses, exception text, or arbitrary route values. A provider failure is contained as unavailable evidence.
 
 `ASPWA2xx` diagnostics remain the authoritative remediation contract. A failed diagnostic names the bounded subject, expected posture, safe observed posture, and a remediation hint. When a diagnostic has canonical documentation, its `Docs` value points to this stable `#push-readiness-evidence` anchor. Fix the named server configuration, package registration, route mapping, or generated entry-page metadata; a `not-configured` optional rail is an intentional no-VAPID posture, not a remediation failure when worker/helper evidence is the requested proof. Do not infer browser or delivery success from a passing diagnostic. The verifier's `passed` value and process exit code describe only the requested server-known checks.
 
@@ -306,6 +312,8 @@ appsurface pwa verify \
 For push or combined evidence, direct JSON to a named artifact and honor the process result:
 
 ```bash
+mkdir -p artifacts
+
 appsurface pwa verify --surface push \
   --base-url https://app.example.com \
   --entry-path /account/resume \

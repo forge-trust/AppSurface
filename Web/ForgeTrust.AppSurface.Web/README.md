@@ -56,6 +56,8 @@ The base Web package exposes the optional `IPwaPushReadinessProvider` contributi
 Use the CLI explicitly when this evidence is needed:
 
 ```bash
+mkdir -p artifacts
+
 appsurface pwa verify --surface push \
   --base-url https://app.example.com \
   --entry-path /account/resume \
