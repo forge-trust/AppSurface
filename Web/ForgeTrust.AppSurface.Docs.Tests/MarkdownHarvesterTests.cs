@@ -1132,7 +1132,7 @@ public class MarkdownHarvesterTests : IDisposable
         await File.WriteAllTextAsync(
             Path.Combine(packagesDir, "README.md.yml"),
             """
-            title: AppSurface v0.1 package chooser
+            title: AppSurface package chooser
             summary: Start with the package chooser first.
             page_type: guide
             nav_group: Start Here
@@ -1142,7 +1142,7 @@ public class MarkdownHarvesterTests : IDisposable
               - Start Here
               - Packages
             trust:
-              status: v0.1 chooser
+              status: Package chooser
               summary: Generated from package metadata.
               freshness: Regenerated on main.
               change_scope: Repository-wide.
@@ -1158,14 +1158,14 @@ public class MarkdownHarvesterTests : IDisposable
         var results = (await _harvester.HarvestAsync(_testRoot)).ToList();
         var doc = results.Single(node => node.Path == "packages/README.md");
 
-        Assert.Equal("AppSurface v0.1 package chooser", doc.Title);
+        Assert.Equal("AppSurface package chooser", doc.Title);
         Assert.Equal("Start with the package chooser first.", doc.Metadata?.Summary);
         Assert.Equal("guide", doc.Metadata?.PageType);
         Assert.Equal("Start Here", doc.Metadata?.NavGroup);
         Assert.Equal(5, doc.Metadata?.Order);
         Assert.True(doc.Metadata?.SectionLanding);
         Assert.Equal(["Start Here", "Packages"], doc.Metadata?.Breadcrumbs);
-        Assert.Equal("v0.1 chooser", doc.Metadata?.Trust?.Status);
+        Assert.Equal("Package chooser", doc.Metadata?.Trust?.Status);
         Assert.Equal("Generated from package metadata.", doc.Metadata?.Trust?.Summary);
         Assert.Equal("Regenerated on main.", doc.Metadata?.Trust?.Freshness);
         Assert.Equal("Repository-wide.", doc.Metadata?.Trust?.ChangeScope);

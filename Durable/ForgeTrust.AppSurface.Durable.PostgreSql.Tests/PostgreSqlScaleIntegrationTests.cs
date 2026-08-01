@@ -35,6 +35,106 @@ public sealed class PostgreSqlScaleIntegrationTests
     }
 
     [Fact]
+    public async Task FlowDiscovery_UsesDueIndexAcrossOneHundredThousandRowsAndOneHundredScopes()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        await SeedReadyFlowsAsync(database.DataSource, epoch, flowCount: 100_000, scopeCount: 100);
+
+        await using var command = database.DataSource.CreateCommand(
+            """
+            EXPLAIN (FORMAT JSON)
+            SELECT dispatch_id, scope_id, kind, flow_instance_id, timer_id,
+                   due_at, expected_revision, priority
+            FROM appsurface_durable.flow_dispatch
+            WHERE state IN ('available', 'leased')
+              AND due_at <= clock_timestamp()
+            ORDER BY due_at, priority DESC, dispatch_id
+            LIMIT 1000;
+            """);
+        var plan = (string)(await command.ExecuteScalarAsync()
+            ?? throw new InvalidOperationException("PostgreSQL returned no Flow discovery plan."));
+
+        Assert.Contains("ix_flow_dispatch_due", plan, StringComparison.Ordinal);
+        Assert.DoesNotContain("Seq Scan", plan, StringComparison.Ordinal);
+        Assert.Equal(1_000, await CountAsync(
+            database.DataSource,
+            """
+            SELECT count(*)
+            FROM
+            (
+                SELECT dispatch_id
+                FROM appsurface_durable.flow_dispatch
+                WHERE state IN ('available', 'leased')
+                  AND due_at <= clock_timestamp()
+                ORDER BY due_at, priority DESC, dispatch_id
+                LIMIT 1000
+            ) AS candidates;
+            """));
+    }
+
+    [Fact]
+    public async Task FlowTransitions_RecordBoundedWalGrowthWithoutLockWaits()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        const int flowCount = 1_000;
+        await SeedReadyFlowsAsync(database.DataSource, epoch, flowCount, scopeCount: 10);
+
+        var before = await ReadWalLocationAsync(database.DataSource);
+        var stopwatch = Stopwatch.StartNew();
+        await using (var command = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.flow_instance
+            SET state = 'evaluating',
+                lease_generation = lease_generation + 1,
+                lease_owner = 'scale-worker',
+                lease_started_at = clock_timestamp(),
+                lease_expires_at = clock_timestamp() + interval '1 minute',
+                revision = revision + 1,
+                updated_at = clock_timestamp()
+            WHERE state = 'ready';
+
+            UPDATE appsurface_durable.flow_dispatch
+            SET state = 'leased',
+                expected_revision = expected_revision + 1,
+                updated_at = clock_timestamp()
+            WHERE state = 'available';
+
+            INSERT INTO appsurface_durable.flow_history
+                (scope_id, flow_instance_id, aggregate_revision, transition_kind, details)
+            SELECT scope_id, flow_instance_id, revision, 'scale_claimed', '{}'::jsonb
+            FROM appsurface_durable.flow_instance;
+            """))
+        {
+            await command.ExecuteNonQueryAsync();
+        }
+
+        stopwatch.Stop();
+        var after = await ReadWalLocationAsync(database.DataSource);
+        var walBytes = await ReadWalDifferenceAsync(database.DataSource, after, before);
+
+        Assert.True(walBytes > 0, "Flow transitions must produce measurable WAL.");
+        Assert.True(
+            walBytes / flowCount < 32 * 1024,
+            $"Flow claim/history transitions wrote {walBytes / flowCount:N0} WAL bytes per Flow.");
+        Assert.True(
+            stopwatch.Elapsed < TimeSpan.FromSeconds(30),
+            $"Flow claim/history transitions took {stopwatch.Elapsed} for {flowCount:N0} Flows.");
+        Assert.Equal(0, await CountAsync(
+            database.DataSource,
+            """
+            SELECT count(*)
+            FROM pg_stat_activity
+            WHERE wait_event_type = 'Lock'
+              AND datname = current_database()
+              AND pid <> pg_backend_pid();
+            """));
+    }
+
+    [Fact]
     public async Task DisableScope_ProjectsTenThousandWorkItemsWithinThirtySeconds()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -139,6 +239,79 @@ public sealed class PostgreSqlScaleIntegrationTests
         command.Parameters.AddWithValue("work_count", workCount);
         command.Parameters.AddWithValue("epoch", epoch);
         await command.ExecuteNonQueryAsync();
+    }
+
+    private static async ValueTask SeedReadyFlowsAsync(
+        NpgsqlDataSource dataSource,
+        Guid epoch,
+        int flowCount,
+        int scopeCount)
+    {
+        await using var command = dataSource.CreateCommand(
+            """
+            INSERT INTO appsurface_durable.scope (scope_id)
+            SELECT 'flow-scope-' || value
+            FROM generate_series(1, @scope_count) AS value;
+
+            INSERT INTO appsurface_durable.flow_instance
+            (
+                scope_id, flow_instance_id, flow_id, flow_version, manifest_id, authoring_model,
+                definition_fingerprint_schema, definition_fingerprint_sha256, current_node_id,
+                state, revision, scope_generation, runtime_epoch
+            )
+            SELECT
+                'flow-scope-' || (((value - 1) % @scope_count) + 1),
+                'flow-' || value,
+                'scale-flow',
+                'v1',
+                'scale-manifest',
+                'generated-v1',
+                'durable-flow-definition-v1',
+                repeat('0', 64),
+                'start',
+                'ready',
+                1,
+                1,
+                @epoch
+            FROM generate_series(1, @flow_count) AS value;
+
+            INSERT INTO appsurface_durable.flow_dispatch
+                (dispatch_id, scope_id, kind, flow_instance_id, due_at, state, expected_revision)
+            SELECT md5('flow-dispatch-' || row_number() OVER ())::uuid,
+                   scope_id,
+                   'flow',
+                   flow_instance_id,
+                   clock_timestamp() - interval '1 minute',
+                   'available',
+                   revision
+            FROM appsurface_durable.flow_instance;
+
+            ANALYZE appsurface_durable.flow_dispatch;
+            """);
+        command.Parameters.AddWithValue("scope_count", scopeCount);
+        command.Parameters.AddWithValue("flow_count", flowCount);
+        command.Parameters.AddWithValue("epoch", epoch);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async ValueTask<string> ReadWalLocationAsync(NpgsqlDataSource dataSource)
+    {
+        await using var command = dataSource.CreateCommand("SELECT pg_current_wal_insert_lsn()::text;");
+        return (string)(await command.ExecuteScalarAsync()
+            ?? throw new InvalidOperationException("PostgreSQL returned no WAL location."));
+    }
+
+    private static async ValueTask<long> ReadWalDifferenceAsync(
+        NpgsqlDataSource dataSource,
+        string later,
+        string earlier)
+    {
+        await using var command = dataSource.CreateCommand(
+            "SELECT pg_wal_lsn_diff(@later::pg_lsn, @earlier::pg_lsn)::bigint;");
+        command.Parameters.AddWithValue("later", later);
+        command.Parameters.AddWithValue("earlier", earlier);
+        return (long)(await command.ExecuteScalarAsync()
+            ?? throw new InvalidOperationException("PostgreSQL returned no WAL difference."));
     }
 
     private static async ValueTask<long> CountAsync(NpgsqlDataSource dataSource, string sql)

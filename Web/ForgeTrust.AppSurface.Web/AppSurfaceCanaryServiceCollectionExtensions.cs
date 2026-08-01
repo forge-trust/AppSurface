@@ -50,6 +50,10 @@ public static class AppSurfaceCanaryServiceCollectionExtensions
             new AppSurfaceCanaryEvaluationRunner(
                 serviceProvider.GetRequiredService<AppSurfaceCanaryRegistry>(),
                 serviceProvider));
+        services.TryAddScoped(serviceProvider =>
+            new AppSurfaceCanarySnapshotCoordinator(
+                serviceProvider.GetRequiredService<AppSurfaceCanaryRegistry>(),
+                serviceProvider.GetRequiredService<AppSurfaceCanaryEvaluationRunner>()));
         services.TryAddSingleton(_ => new AppSurfaceCanaryMappingState());
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IStartupFilter, AppSurfaceCanaryStartupValidator>());

@@ -60,7 +60,7 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
             page,
             "/docs/packages",
             "Which AppSurface package should I install first?",
-            "AppSurface v0.1 package chooser",
+            "AppSurface package chooser",
             "GUIDE");
         await AssertFeaturedCardAsync(
             page,
@@ -105,14 +105,14 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
 
         Assert.Equal("Releases", (await page.TextContentAsync("h1"))?.Trim());
         Assert.Contains("Release contract", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("v0.2.0-preview.3", await page.InnerTextAsync(".docs-content"), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("v0.2.0-preview.5", await page.InnerTextAsync(".docs-content"), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Unreleased", await page.InnerTextAsync(".docs-content"), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("living proof artifact", await page.InnerTextAsync(".docs-content"), StringComparison.OrdinalIgnoreCase);
 
-        await page.Locator(".docs-content a[href='/docs/releases/v0.2.0-preview.3']").First.ClickAsync();
-        await WaitForPathAsync(page, "/docs/releases/v0.2.0-preview.3");
+        await page.Locator(".docs-content a[href='/docs/releases/v0.2.0-preview.5']").First.ClickAsync();
+        await WaitForPathAsync(page, "/docs/releases/v0.2.0-preview.5");
         await page.WaitForFunctionAsync(
-            "() => document.querySelector('h1')?.textContent?.trim() === 'Release 0.2.0-preview.3'",
+            "() => document.querySelector('h1')?.textContent?.trim() === 'Release 0.2.0-preview.5'",
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
         await page.WaitForSelectorAsync(".docs-trust-bar", new PageWaitForSelectorOptions
@@ -121,7 +121,7 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
             State = WaitForSelectorState.Visible
         });
 
-        Assert.Equal("Release 0.2.0-preview.3", (await page.TextContentAsync("h1"))?.Trim());
+        Assert.Equal("Release 0.2.0-preview.5", (await page.TextContentAsync("h1"))?.Trim());
         Assert.Contains("Tagged", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
 
         await page.GotoAsync($"{_fixture.DocsUrl}/releases/v0.1-preview");

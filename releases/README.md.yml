@@ -7,9 +7,9 @@ breadcrumbs:
   - Releases
 trust:
   status: Release contract
-  summary: This hub is the public agreement for how AppSurface explains unreleased work, tagged releases, and upgrade risk before automation is in place.
+  summary: This hub is the public agreement for how AppSurface explains unreleased work, tagged releases, and upgrade risk.
   freshness: Updated whenever the release policy, release-note structure, or public proof artifacts change on main.
-  change_scope: Repository-wide. AppSurface plans to release the entire monorepo in unison.
+  change_scope: Repository-wide. AppSurface releases the entire monorepo in unison.
   migration:
     label: Read the pre-1.0 upgrade policy
     href: /docs/releases/upgrade-policy
@@ -17,6 +17,6 @@ trust:
   sources:
     - CHANGELOG.md
     - releases/v0.1.0.md
-    - releases/v0.2.0-preview.3.md
+    - releases/v0.2.0-preview.5.md
     - releases/unreleased.md
     - releases/release-authoring-checklist.md

@@ -836,7 +836,8 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
         var markdown = await generator.GenerateAsync(CreateRequest());
 
-        Assert.Contains("# AppSurface v0.1 package chooser", markdown, StringComparison.Ordinal);
+        Assert.Contains("# AppSurface package chooser", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("# AppSurface v0.1 package chooser", markdown, StringComparison.Ordinal);
         Assert.Contains("```bash", markdown, StringComparison.Ordinal);
         Assert.Contains("dotnet package add ForgeTrust.AppSurface.Web", markdown, StringComparison.Ordinal);
         Assert.Contains("[Package-first quickstart](../start-here/first-success-path.md#package-first-path)", markdown, StringComparison.Ordinal);
@@ -1022,7 +1023,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     [Fact]
     public async Task GenerateAsync_RendersAlsoBuildingListAndSupportStartHereLinks()
     {
-        await WriteFileAsync("packages/README.md.yml", "title: AppSurface v0.1 package chooser");
+        await WriteFileAsync("packages/README.md.yml", "title: AppSurface package chooser");
         await WriteFileAsync(
             "packages/package-index.yml",
             """
@@ -1290,7 +1291,8 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.True(File.Exists(request.ChooserOutputPath));
         Assert.True(File.Exists(request.ReadinessOutputPath));
         var markdown = await File.ReadAllTextAsync(request.ChooserOutputPath);
-        Assert.Contains("# AppSurface v0.1 package chooser", markdown, StringComparison.Ordinal);
+        Assert.Contains("# AppSurface package chooser", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("# AppSurface v0.1 package chooser", markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2837,6 +2839,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.False(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.AppSurface.Web/bin/Release/net10.0/Generated.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.AppSurface.Web/obj/Release/net10.0/Generated.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("node_modules/package/Generated.csproj"));
+        Assert.False(PackageProjectScanner.IsCandidateProject("artifacts/packages/coverage-cli-consumer-proof/consumer/Smoke/Smoke.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("examples/web-app/WebAppExample.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.RazorWire.IntegrationTests/ForgeTrust.RazorWire.IntegrationTests.csproj"));
@@ -3169,7 +3172,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync(
             "packages/README.md.yml",
             """
-            title: AppSurface v0.1 package chooser
+            title: AppSurface package chooser
             """);
         await WriteFileAsync(
             "packages/package-index.yml",
@@ -3255,7 +3258,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync(
             "packages/README.md.yml",
             """
-            title: AppSurface v0.1 package chooser
+            title: AppSurface package chooser
             """);
         await WriteFileAsync(
             "packages/package-index.yml",

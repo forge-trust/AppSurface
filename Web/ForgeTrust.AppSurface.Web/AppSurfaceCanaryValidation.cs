@@ -27,13 +27,20 @@ internal static partial class AppSurfaceCanaryValidation
     {
         ArgumentNullException.ThrowIfNull(name);
 
-        if (name.Length is 0 or > MaximumNameLength || !NameRegex().IsMatch(name))
+        if (!IsValidName(name))
         {
             throw new ArgumentException(
                 "ASCAN101: The canary name must be 1-128 lowercase characters in dot-separated segments containing letters, digits, and internal hyphens.",
                 nameof(name));
         }
     }
+
+    /// <summary>Determines whether a query name has the same grammar as a registration name.</summary>
+    internal static bool IsValidName(string? name) =>
+        name is { Length: > 0 and <= MaximumNameLength } && NameRegex().IsMatch(name);
+
+    /// <summary>Determines whether a query tag has the same grammar as a registration tag.</summary>
+    internal static bool IsValidTag(string? tag) => tag is not null && TagRegex().IsMatch(tag);
 
     /// <summary>
     /// Validates configured metadata and creates an immutable descriptor snapshot.

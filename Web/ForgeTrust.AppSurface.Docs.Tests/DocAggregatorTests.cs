@@ -2800,6 +2800,39 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetSearchIndexPayloadAsync_ShouldAddRichSummaryPresentation_WithoutChangingTheV1SummaryContract()
+    {
+        const string summary = "Use **strong** emphasis with `code`.";
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Guide",
+                "guides/guide.md",
+                "<p>Body</p>",
+                Metadata: new DocMetadata
+                {
+                    Summary = summary
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var payload = await _aggregator.GetSearchIndexPayloadAsync();
+        var indexedDocument = Assert.Single(payload.Documents);
+        var json = System.Text.Json.JsonSerializer.Serialize(payload);
+
+        using var jsonDocument = System.Text.Json.JsonDocument.Parse(json);
+        var serializedDocument = jsonDocument.RootElement.GetProperty("documents")[0];
+
+        Assert.Equal("1", payload.Metadata.Version);
+        Assert.Equal(summary, indexedDocument.Summary);
+        Assert.NotNull(indexedDocument.SummaryPresentation);
+        Assert.Contains(indexedDocument.SummaryPresentation!, node => node.Kind == "strong");
+        Assert.Contains(indexedDocument.SummaryPresentation!, node => node.Kind == "code");
+        Assert.Equal(summary, serializedDocument.GetProperty("summary").GetString());
+        Assert.Equal(System.Text.Json.JsonValueKind.Array, serializedDocument.GetProperty("summaryPresentation").ValueKind);
+    }
+
+    [Fact]
     public async Task GetSearchIndexPayloadAsync_ShouldProjectReaderIntentRankingMetadata()
     {
         var harvestedDocs = new List<DocNode>

@@ -1,16 +1,10 @@
 # Unreleased
 
-This is the living release note for the next coordinated AppSurface version after `0.2.0-preview.4`. It stays provisional until the next tag is cut.
+This is the living release note for the next coordinated AppSurface version after `0.2.0-preview.5`. It stays provisional until the next tag is cut.
 
 ## What is taking shape
 
-- `appsurface secrets transfer plan|apply` now plans and applies declared LocalSecrets and Google Secret Manager
-  promotion jobs against existing Google secrets only. Plans bind configuration digest, expiry, and destination
-  preconditions; `--apply` is required for mutation, production jobs require explicit confirmation, and all text/JSON
-  diagnostics stay value-safe.
-- [`ForgeTrust.AppSurface.Aspire.Testing`](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md) now closes Aspire 13.4.4's partial-provider cleanup gap for profile tests. The builder captures the verified Aspire root provider immediately before host resolution, disposes it immediately when a non-process-fatal host construction fails, retains it for best-effort builder disposal after a process-fatal failure, preserves the original non-process-fatal build exception when cleanup also fails, and transfers ownership unchanged to the returned application after a successful build. Aspire dependencies now publish 13.4.4 as a minimum instead of an exact constraint, so consumers can select later versions without `NU1608`; an unfamiliar host-registration shape emits a trace warning and continues without the additional cleanup.
-- `ForgeTrust.RazorWire` now owns a deterministic Turbo 8.0.23 default: `<rw:scripts />` emits an exact package-carried, same-origin runtime before RazorWire, while explicit custom and host-managed policies cover app-owned same-origin files or fully host-owned URL, integrity, CSP, and load-order requirements. The upgrade from 8.0.12 is API-neutral and carries an explicit upstream-risk review plus focused Drive, Frame, Stream, form, island, and Behavior Kit compatibility evidence.
-- `ForgeTrust.RazorWire` Form Interactions now keeps duplicated mark-for-removal fields model-bindable by restoring the app-authored inactive value, defaulting to `false`, while identity and concurrency fields still clear. Combined duplicate, add, mark-delete, and submit workflows no longer fail with an empty Boolean value.
+- Add merged public changes here as they land.
 
 ## Included in the next coordinated version
 
@@ -53,8 +47,12 @@ This is the living release note for the next coordinated AppSurface version afte
   remain outside this primitive.
 - [`ForgeTrust.AppSurface.Web` health and readiness probes](../Web/ForgeTrust.AppSurface.Web/README.md#health-and-readiness-probes) are now opt-in. New hosts avoid ASP.NET Core health-check registration and `/health` plus `/ready` endpoint mapping unless `WebOptions.Health.Enabled` is explicitly set to `true`; enabled probes also avoid general route-handler binding during startup. Hosts whose deployment or monitoring infrastructure consumes those probes must enable the shared flag; paths, readiness tags, response semantics, validation, and authorization behavior are unchanged.
 - [`ForgeTrust.RazorWire`](../Web/ForgeTrust.RazorWire/README.md#choose-who-supplies-turbo) upgrades its package-owned Turbo UMD payload from 8.0.12 to 8.0.23 while preserving the existing `Bundled`, same-origin `CustomPath`, and `HostManaged` runtime-source contract. Static CDN and hybrid exports continue to materialize the exact bundled runtime.
+- [`ForgeTrust.AppSurface.Web` named canaries](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints)
+  now include a bounded protected aggregate snapshot at `GET /_appsurface/canaries`. Operators can select registered
+  canaries by exact name or durable tag, receive ordinal partial outcomes under explicit concurrency and deadline caps,
+  and parse a privacy-safe envelope with fixed telemetry. The feature does not add triggers, retries, polling, readiness
+  effects, or authorization-policy ownership; hosts retain those decisions.
 
 ## Migration watch
 
-- Existing hosts that consume `/health` or `/ready` must set `WebOptions.Health.Enabled = true` when upgrading.
-- Hosts using `HostManaged` with a Turbo version other than 8.0.23 own compatibility testing for that version. Turbo 8.0.23 removes upstream-deprecated `Turbo.clearCache()`, `data-turbo-cache="false"`, and legacy form polyfills; these were never AppSurface-defined APIs.
+- Record-breaking or behavior-changing guidance here before it moves into the tagged release note.

@@ -8,4 +8,7 @@ public sealed class AppSurfaceCanaryEndpointOptions
     /// <see cref="AppSurfaceCanaryCompletedResponseMode.StatusCode"/>.
     /// </summary>
     public AppSurfaceCanaryCompletedResponseMode CompletedResponseMode { get; set; }
+
+    /// <summary>Gets the bounded aggregate snapshot settings. Defaults are safe for deploy-operator requests.</summary>
+    public AppSurfaceCanarySnapshotOptions Snapshot { get; } = new();
 }

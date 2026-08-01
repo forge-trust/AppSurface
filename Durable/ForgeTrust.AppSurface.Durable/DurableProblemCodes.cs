@@ -59,7 +59,7 @@ public static class DurableProblemCodes
     public const string FlowEventDuplicate = "ASDUR204";
     /// <summary>The application did not authorize access to the scoped Flow operation.</summary>
     public const string FlowAccessDenied = "ASDUR205";
-    /// <summary>A Flow start identity was reused with different semantic content.</summary>
+    /// <summary>A Flow start identity conflicts with existing semantics or an existing Flow instance.</summary>
     public const string FlowStartConflict = "ASDUR206";
     /// <summary>A Flow command or event identity was reused with different semantic content.</summary>
     public const string FlowCommandConflict = "ASDUR207";
