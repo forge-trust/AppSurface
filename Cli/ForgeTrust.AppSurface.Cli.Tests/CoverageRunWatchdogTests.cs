@@ -406,27 +406,42 @@ public sealed class CoverageRunWatchdogTests
     {
         using var output = TestDirectory.Create();
         using var console = new FakeInMemoryConsole();
+        var timeProvider = new FreezableTimeProvider();
+        var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var processKilled = new TaskCompletionSource<Process>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var processKillCount = 0;
         await using var supervisor = new CoverageRunWatchdogSupervisor(
             CoverageRunWatchdogMode.Fail,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(10),
             console,
-            TimeProvider.System,
-            CancellationToken.None);
+            timeProvider,
+            CancellationToken.None,
+            processCleanupStarted: cleanupStarted.SetResult,
+            processKiller: process =>
+            {
+                Interlocked.Increment(ref processKillCount);
+                process.Kill();
+                processKilled.TrySetResult(process);
+            });
         supervisor.BindOutputDirectory(output.Path);
         using var operation = supervisor.Start("project", "tests/LateProcess.Tests/LateProcess.Tests.csproj");
         var lease = operation.ReserveProcess();
+        timeProvider.Release();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => Task.Delay(TimeSpan.FromSeconds(2), supervisor.CancellationToken));
+        await cleanupStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.False(File.Exists(Path.Join(output.Path, "coverage-watchdog.json")));
 
         using var process = Process.Start(CreateLongRunningProcess())!;
         lease.Attach(process);
-        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Same(process, await processKilled.Task.WaitAsync(TimeSpan.FromSeconds(2)));
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2));
         lease.Complete();
         await WaitForFileAsync(Path.Join(output.Path, "coverage-watchdog.json"));
 
         Assert.True(process.HasExited);
+        Assert.Equal(1, Volatile.Read(ref processKillCount));
         var exception = Assert.Throws<CommandException>(supervisor.ThrowIfFailed);
         Assert.Contains("Cleanup: complete", exception.Message, StringComparison.Ordinal);
     }
@@ -436,18 +451,23 @@ public sealed class CoverageRunWatchdogTests
     {
         using var output = TestDirectory.Create();
         using var console = new FakeInMemoryConsole();
+        var timeProvider = new FreezableTimeProvider();
+        var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var supervisor = new CoverageRunWatchdogSupervisor(
             CoverageRunWatchdogMode.Fail,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(10),
             console,
-            TimeProvider.System,
-            CancellationToken.None);
+            timeProvider,
+            CancellationToken.None,
+            processCleanupStarted: cleanupStarted.SetResult);
         supervisor.BindOutputDirectory(output.Path);
         using var operation = supervisor.Start("project", "tests/NoProcess.Tests/NoProcess.Tests.csproj");
         var lease = operation.ReserveProcess();
+        timeProvider.Release();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => Task.Delay(TimeSpan.FromSeconds(2), supervisor.CancellationToken));
+        await cleanupStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         Assert.False(File.Exists(Path.Join(output.Path, "coverage-watchdog.json")));
         lease.Complete();
@@ -734,6 +754,39 @@ public sealed class CoverageRunWatchdogTests
     }
 
     [Fact]
+    public async Task ProcessLease_ShouldInvokeTestProcessKillerOnceForAttachedProcess()
+    {
+        var processKillCount = 0;
+        var lease = new CoverageRunProcessLease(
+            owner: null,
+            processKiller: process =>
+            {
+                Interlocked.Increment(ref processKillCount);
+                process.Kill();
+            });
+        using var process = Process.Start(CreateLongRunningProcess())!;
+        lease.Attach(process);
+
+        await lease.TerminateAsync();
+
+        Assert.Equal(1, Volatile.Read(ref processKillCount));
+        Assert.True(process.HasExited);
+    }
+
+    [Fact]
+    public async Task ProcessLease_ShouldSuppressExpectedTestProcessKillerExceptions()
+    {
+        var lease = new CoverageRunProcessLease(
+            owner: null,
+            processKiller: _ => throw new InvalidOperationException("process already exited"));
+        using var process = Process.Start(CreateCompletedProcess())!;
+        await process.WaitForExitAsync();
+
+        lease.Attach(process);
+        await lease.TerminateAsync();
+    }
+
+    [Fact]
     public async Task ProcessLease_ShouldHandleAlreadyExitedAndDisposedProcesses()
     {
         var exitedLease = CoverageRunProcessLease.Detached();
@@ -931,7 +984,7 @@ public sealed class CoverageRunWatchdogTests
 
             await cleanupAttempted.Task.WaitAsync(TimeSpan.FromSeconds(2));
             await WaitForErrorOccurrencesAsync(console, "ASCOV122", 1);
-            listener.Flush();
+            await WaitForTraceAsync(trace, listener, "Coverage watchdog staging artifact cleanup failed");
 
             Assert.Contains("Coverage watchdog staging artifact cleanup failed", trace.ToString(), StringComparison.Ordinal);
             Assert.Contains("UnauthorizedAccessException: staging cleanup denied", trace.ToString(), StringComparison.Ordinal);
@@ -996,10 +1049,26 @@ public sealed class CoverageRunWatchdogTests
         }
     }
 
+    private static async Task WaitForTraceAsync(StringWriter trace, TraceListener listener, string value)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        while (true)
+        {
+            listener.Flush();
+            if (trace.ToString().Contains(value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            await Task.Delay(10, timeout.Token);
+        }
+    }
+
     private static ProcessStartInfo CreateLongRunningProcess()
         => OperatingSystem.IsWindows()
-            ? new ProcessStartInfo("cmd.exe", "/c ping 127.0.0.1 -n 30 > nul") { UseShellExecute = false, CreateNoWindow = true }
-            : new ProcessStartInfo("/bin/sh", "-c \"sleep 30\"") { UseShellExecute = false };
+            ? new ProcessStartInfo("ping.exe", "127.0.0.1 -n 30") { UseShellExecute = false, CreateNoWindow = true }
+            // Launch the process under test directly so its termination is not coupled to shell process-tree behavior.
+            : new ProcessStartInfo("/bin/sleep", "30") { UseShellExecute = false };
 
     private static ProcessStartInfo CreateCompletedProcess()
         => OperatingSystem.IsWindows()

@@ -14,13 +14,17 @@ using Microsoft.Extensions.Logging;
 public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
 {
     private const string AspireProfileActivatorCategory = "ForgeTrust.AppSurface.Aspire.AspireProfileActivator";
+    private const string UsePollingFileWatcherEnvironmentVariable = "DOTNET_USE_POLLING_FILE_WATCHER";
     private readonly string? _originalDcpPath = Environment.GetEnvironmentVariable("ASPIRE_DCP_PATH");
     private readonly string? _originalDashboardPath = Environment.GetEnvironmentVariable("ASPIRE_DASHBOARD_PATH");
+    private readonly string? _originalUsePollingFileWatcher = Environment.GetEnvironmentVariable(UsePollingFileWatcherEnvironmentVariable);
 
     public AppSurfaceAspireTestingBuilderTests()
     {
         Environment.SetEnvironmentVariable("ASPIRE_DCP_PATH", "dummy");
         Environment.SetEnvironmentVariable("ASPIRE_DASHBOARD_PATH", "dummy");
+        // Coverlet writes beneath the AppHost test directory; polling prevents recursive native watcher callbacks.
+        Environment.SetEnvironmentVariable(UsePollingFileWatcherEnvironmentVariable, "1");
         TestModule.LastProbe = null;
         TestModule.LastActivationArgs = null;
         CancellationTriggerComponent.Source = null;
@@ -1174,6 +1178,7 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
     {
         Environment.SetEnvironmentVariable("ASPIRE_DCP_PATH", _originalDcpPath);
         Environment.SetEnvironmentVariable("ASPIRE_DASHBOARD_PATH", _originalDashboardPath);
+        Environment.SetEnvironmentVariable(UsePollingFileWatcherEnvironmentVariable, _originalUsePollingFileWatcher);
         TestModule.LastProbe = null;
         TestModule.LastActivationArgs = null;
         CancelingModule.Source = null;

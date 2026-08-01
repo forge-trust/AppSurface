@@ -2,6 +2,8 @@ import {
   createMiniSearchConfiguration,
   createMiniSearchDocument,
   defaultSearchOptions,
+  isSummaryPresentationContainer,
+  isSummaryPresentationLeaf,
   isSafeSearchResultPath,
   normalizeCodeLanguage,
   normalizePageTypeAlias,
@@ -1134,6 +1136,10 @@ declare global {
       return false;
     }
 
+    if (url.hash) {
+      return false;
+    }
+
     const normalizedPath = normalizeComparablePath(url.pathname);
     if (normalizedPath === docsRootPath) {
       return false;
@@ -1233,6 +1239,67 @@ declare global {
     }
 
     return fragment;
+  }
+
+  function createSummaryPresentationFragment(nodes, tokens) {
+    if (!Array.isArray(nodes) || nodes.length === 0) {
+      return null;
+    }
+
+    const fragment = document.createDocumentFragment();
+    for (const node of nodes) {
+      if (!appendSummaryPresentationNode(fragment, node, tokens)) {
+        return null;
+      }
+    }
+
+    return fragment.childNodes.length === 0 ? null : fragment;
+  }
+
+  function appendSummaryPresentationNode(container, node, tokens) {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) {
+      return false;
+    }
+
+    if (node.kind === 'text' || node.kind === 'code') {
+      if (!isSummaryPresentationLeaf(node)) {
+        return false;
+      }
+
+      if (node.kind === 'text') {
+        container.append(createHighlightedFragment(String(node.text ?? ''), tokens));
+      } else {
+        const code = createElement('code');
+        code.append(createHighlightedFragment(String(node.text ?? ''), tokens));
+        container.append(code);
+      }
+
+      return true;
+    }
+
+    if (node.kind === 'strong' || node.kind === 'emphasis') {
+      if (!isSummaryPresentationContainer(node)) {
+        return false;
+      }
+
+      const wrapper = node.kind === 'strong' ? createElement('strong') : createElement('em');
+      const candidateChildren = document.createDocumentFragment();
+      for (const child of node.children) {
+        if (!appendSummaryPresentationNode(candidateChildren, child, tokens)) {
+          return false;
+        }
+      }
+
+      if (candidateChildren.childNodes.length === 0) {
+        return false;
+      }
+
+      wrapper.append(candidateChildren);
+      container.append(wrapper);
+      return true;
+    }
+
+    return false;
   }
 
   function buildBreadcrumbLabels(doc) {
@@ -1381,10 +1448,16 @@ declare global {
       link.append(badgeRow);
     }
 
-    const snippetText = doc.summary || doc.snippet || '';
-    if (snippetText) {
+    const summaryPresentation = createSummaryPresentationFragment(doc.summaryPresentation, queryTokens);
+    const fallbackSnippet = doc.summary || doc.snippet;
+    if (summaryPresentation || fallbackSnippet) {
       const snippet = createElement('p', 'docs-search-result-snippet');
-      snippet.append(createHighlightedFragment(snippetText, queryTokens));
+      if (summaryPresentation) {
+        snippet.append(summaryPresentation);
+      } else if (fallbackSnippet) {
+        snippet.append(createHighlightedFragment(fallbackSnippet, queryTokens));
+      }
+
       link.append(snippet);
     }
 

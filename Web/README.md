@@ -2,7 +2,7 @@
 
 This directory contains libraries and tools specifically for web application development within the AppSurface ecosystem.
 
-Need install guidance first? Start with the [AppSurface v0.1 package chooser](../packages/README.md), then come back here for the deeper web-surface breakdown.
+Need install guidance first? Start with the [AppSurface package chooser](../packages/README.md), then come back here for the deeper web-surface breakdown.
 
 ## Contents
 

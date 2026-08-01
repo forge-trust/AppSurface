@@ -120,10 +120,14 @@ public sealed class ExportSourceResolver
     /// </exception>
     /// <exception cref="TimeoutException">
     /// Thrown when a launched project or DLL does not publish a listening URL within
-    /// <see cref="ListeningUrlTimeout"/>.
+    /// <see cref="ListeningUrlTimeout"/> or does not become ready within
+    /// <see cref="AppReadyTimeout"/>.
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// Thrown when a launched process exits before becoming crawlable or reports an unusable startup state.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when <paramref name="cancellationToken"/> is canceled while publishing, launching, or probing the source.
     /// </exception>
     public async Task<ResolvedExportSource> ResolveAsync(
         ExportSourceRequest request,
@@ -949,12 +953,21 @@ public sealed class ExportSourceResolver
         ConcurrentQueue<string> logs,
         CancellationToken cancellationToken)
     {
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var timeoutCts = new CancellationTokenSource();
         timeoutCts.CancelAfter(AppReadyTimeout);
+        using var readinessCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
         using var client = _httpClientFactory.CreateClient("ExportEngine");
 
-        while (!timeoutCts.Token.IsCancellationRequested)
+        while (true)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (timeoutCts.Token.IsCancellationRequested)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                throw new TimeoutException(
+                    $"Target application did not become ready within {AppReadyTimeout.TotalSeconds} seconds.{Environment.NewLine}{GetRecentLogs(logs)}");
+            }
+
             if (process.HasExited || processExited())
             {
                 throw new InvalidOperationException(
@@ -963,7 +976,7 @@ public sealed class ExportSourceResolver
 
             try
             {
-                using var response = await client.GetAsync(baseUrl, timeoutCts.Token);
+                using var response = await client.GetAsync(baseUrl, readinessCts.Token);
                 // Any HTTP response proves the app is reachable; we don't require a specific status code.
                 _logger.LogDebug(
                     "Readiness probe returned {StatusCode} for {BaseUrl}",
@@ -984,7 +997,7 @@ public sealed class ExportSourceResolver
             {
                 // Retry until global timeout.
             }
-            catch (TaskCanceledException) when (timeoutCts.IsCancellationRequested)
+            catch (TaskCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
             {
                 throw new TimeoutException(
                     $"Target application did not become ready within {AppReadyTimeout.TotalSeconds} seconds.{Environment.NewLine}{GetRecentLogs(logs)}");
@@ -992,21 +1005,19 @@ public sealed class ExportSourceResolver
 
             try
             {
-                await Task.Delay(AppReadyPollInterval, timeoutCts.Token);
+                await Task.Delay(AppReadyPollInterval, readinessCts.Token);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw new OperationCanceledException(cancellationToken);
             }
-            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
             {
-                throw new TimeoutException(
-                    $"Target application did not become ready within {AppReadyTimeout.TotalSeconds} seconds.{Environment.NewLine}{GetRecentLogs(logs)}");
+                // Classify the linked cancellation at the top of the next iteration.
+                continue;
             }
         }
 
-        throw new TimeoutException(
-            $"Target application did not become ready within {AppReadyTimeout.TotalSeconds} seconds.{Environment.NewLine}{GetRecentLogs(logs)}");
     }
 
     private static string GetRecentLogs(ConcurrentQueue<string> logs)

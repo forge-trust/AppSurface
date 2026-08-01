@@ -524,6 +524,73 @@ public sealed class ProgramEntryPointTests
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task EntryPoint_ShouldPrintCoverageRunWatchdogHelpAndDefaults()
+    {
+        var result = await InvokeEntryPointAsync(["coverage", "run", "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("--watchdog", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Stall handling mode: warn, fail, or off. Defaults to warn.", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--heartbeat-interval", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Heartbeat interval using 500ms, 30s, 10m, or 1h syntax. Defaults to 30s; 0 disables heartbeats.", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--no-progress-timeout", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Positive no-observable-progress timeout. Defaults to 10m.", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EntryPoint_ShouldParseCoverageRunWatchdogOptions()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-watchdog-options-");
+        var projectDirectory = Path.Join(temp.Path, "tests", "Sample.Tests");
+        Directory.CreateDirectory(projectDirectory);
+        var project = Path.Join(projectDirectory, "Sample.Tests.csproj");
+        await File.WriteAllTextAsync(
+            project,
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+              <ItemGroup>
+                <PackageReference Include="coverlet.collector" Version="6.0.4" />
+              </ItemGroup>
+            </Project>
+            """);
+        var output = Path.Join(temp.Path, "coverage-output");
+
+        var result = await InvokeEntryPointAsync(
+            [
+                "coverage", "run",
+                "--test-project", project,
+                "--output", output,
+                "--dry-run",
+                "--watchdog", "off",
+                "--heartbeat-interval", "0",
+                "--no-progress-timeout", "1h",
+            ]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("  Output:", result.AllText, StringComparison.Ordinal);
+        Assert.Contains(output, result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("ASCOV101", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("--watchdog", "unexpected")]
+    [InlineData("--heartbeat-interval", "1M")]
+    [InlineData("--no-progress-timeout", "0")]
+    public async Task EntryPoint_ShouldRejectInvalidCoverageRunWatchdogOptions(string option, string value)
+    {
+        var result = await InvokeEntryPointAsync(["coverage", "run", option, value]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("ASCOV101", result.AllText, StringComparison.Ordinal);
+        Assert.Contains(option, result.AllText, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("0.1.0", "0.1.0")]
     [InlineData("0.1.0-rc.1", "0.1.0-rc.1")]

@@ -43,7 +43,7 @@ internal static class ChangelogEditor
         var markerIndex = changelog.IndexOf(marker, StringComparison.Ordinal);
         if (markerIndex < 0)
         {
-            return changelog.TrimEnd() + Environment.NewLine + Environment.NewLine + unreleasedSection + insert;
+            return changelog.TrimEnd() + Environment.NewLine + Environment.NewLine + unreleasedSection + Environment.NewLine + insert;
         }
 
         const string firstReleasePlaceholder = "## No tagged releases yet";
@@ -63,6 +63,6 @@ internal static class ChangelogEditor
             }
         }
 
-        return changelog[..markerIndex].TrimEnd() + Environment.NewLine + Environment.NewLine + unreleasedSection + insert + suffix;
+        return changelog[..markerIndex].TrimEnd() + Environment.NewLine + Environment.NewLine + unreleasedSection + Environment.NewLine + insert + suffix;
     }
 }
