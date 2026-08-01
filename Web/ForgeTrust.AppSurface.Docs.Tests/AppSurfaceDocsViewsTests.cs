@@ -3972,6 +3972,30 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
+    public async Task DetailsView_ShouldLabelDownloadOnlyProvenanceStripAsDownloads()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var doc = new DocNode("Quickstart", "guides/quickstart.md", "<p>Guide body</p>");
+        var model = CreateDetailsViewModel(doc) with
+        {
+            CanDownloadMarkdown = true,
+            MarkdownDownloadUrl = "/docs/_markdown/guides/quickstart"
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/Details.cshtml",
+            model);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+
+        var provenanceStrip = document.QuerySelector(".docs-provenance-strip");
+        Assert.NotNull(provenanceStrip);
+        Assert.Equal("Downloads", provenanceStrip!.GetAttribute("aria-label"));
+        Assert.Equal("Downloads", provenanceStrip.QuerySelector(".docs-provenance-label")?.TextContent.Trim());
+        Assert.NotNull(provenanceStrip.QuerySelector("a[href='/docs/_markdown/guides/quickstart'][data-turbo='false']"));
+    }
+
+    [Fact]
     public async Task DetailsView_ShouldRenderExternalMigrationAndFilteredSources()
     {
         var doc = new DocNode(

@@ -84,6 +84,16 @@ public sealed class AppSurfaceDocsOptions
     public AppSurfaceDocsHarvestOptions Harvest { get; set; } = new();
 
     /// <summary>
+    /// Gets protected source-faithful Markdown download settings.
+    /// </summary>
+    /// <remarks>
+    /// Markdown downloads are disabled by default. When enabled, the later download route requires a host-owned
+    /// ASP.NET Core authorization policy named by <see cref="AppSurfaceDocsMarkdownDownloadOptions.AuthorizationPolicy"/>
+    /// and limits the harvested Markdown snapshot to the configured byte budget.
+    /// </remarks>
+    public AppSurfaceDocsMarkdownDownloadOptions MarkdownDownload { get; set; } = new();
+
+    /// <summary>
     /// Gets diagnostics settings for maintainer-facing AppSurface Docs inspection surfaces.
     /// </summary>
     public AppSurfaceDocsDiagnosticsOptions Diagnostics { get; set; } = new();
@@ -717,6 +727,54 @@ public sealed class AppSurfaceDocsHarvestHealthOptions
 }
 
 /// <summary>
+/// Settings for the protected, source-faithful Markdown download surface.
+/// </summary>
+/// <remarks>
+/// This object defines the options contract only. The download surface is disabled by default and is exposed by later
+/// route code only when explicitly enabled with a host-registered authorization policy.
+/// </remarks>
+public sealed class AppSurfaceDocsMarkdownDownloadOptions
+{
+    /// <summary>
+    /// Gets the default maximum Markdown snapshot size in bytes.
+    /// </summary>
+    public const long DefaultMaxSnapshotBytes = 8L * 1024L * 1024L;
+
+    /// <summary>
+    /// Gets the smallest supported Markdown snapshot size in bytes.
+    /// </summary>
+    public const long MinMaxSnapshotBytes = 1;
+
+    /// <summary>
+    /// Gets the largest supported Markdown snapshot size in bytes.
+    /// </summary>
+    public const long MaxMaxSnapshotBytes = 32L * 1024L * 1024L;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the Markdown download surface is enabled.
+    /// </summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the host-owned authorization policy required by the Markdown download surface when enabled.
+    /// </summary>
+    /// <remarks>
+    /// This value must name an ASP.NET Core authorization policy registered by the host when <see cref="Enabled"/> is
+    /// <see langword="true"/>. AppSurface Docs does not register the policy or any authentication schemes.
+    /// </remarks>
+    public string? AuthorizationPolicy { get; set; }
+
+    /// <summary>
+    /// Gets or sets the maximum source-faithful Markdown snapshot size in bytes.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see cref="DefaultMaxSnapshotBytes"/> bytes. The value must be between
+    /// <see cref="MinMaxSnapshotBytes"/> and <see cref="MaxMaxSnapshotBytes"/>, inclusive.
+    /// </remarks>
+    public long MaxSnapshotBytes { get; set; } = DefaultMaxSnapshotBytes;
+}
+
+/// <summary>
 /// Enumerates environment-aware exposure policies for AppSurface Docs harvest health surfaces.
 /// </summary>
 /// <remarks>
@@ -1347,6 +1405,7 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         var identity = options.Identity;
         var theme = options.Theme;
         var harvest = options.Harvest;
+        var markdownDownload = options.MarkdownDownload;
         var diagnostics = options.Diagnostics;
         var metrics = options.Metrics;
         var bundle = options.Bundle;
@@ -1367,6 +1426,26 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         {
             failures.Add(
                 $"AppSurfaceDocs:CacheExpirationMinutes must be a finite number between {AppSurfaceDocsOptions.MinCacheExpirationMinutes} and {AppSurfaceDocsOptions.MaxCacheExpirationMinutes} minutes that maps to a whole number of seconds.");
+        }
+
+        if (markdownDownload is null)
+        {
+            failures.Add("AppSurfaceDocs:MarkdownDownload must not be null.");
+        }
+        else
+        {
+            if (markdownDownload.Enabled && string.IsNullOrWhiteSpace(markdownDownload.AuthorizationPolicy))
+            {
+                failures.Add(
+                    "AppSurfaceDocs:MarkdownDownload:AuthorizationPolicy is required when AppSurfaceDocs:MarkdownDownload:Enabled is true.");
+            }
+
+            if (markdownDownload.MaxSnapshotBytes < AppSurfaceDocsMarkdownDownloadOptions.MinMaxSnapshotBytes
+                || markdownDownload.MaxSnapshotBytes > AppSurfaceDocsMarkdownDownloadOptions.MaxMaxSnapshotBytes)
+            {
+                failures.Add(
+                    $"AppSurfaceDocs:MarkdownDownload:MaxSnapshotBytes must be between {AppSurfaceDocsMarkdownDownloadOptions.MinMaxSnapshotBytes} and {AppSurfaceDocsMarkdownDownloadOptions.MaxMaxSnapshotBytes} bytes.");
+            }
         }
 
         if (identity is null)

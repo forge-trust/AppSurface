@@ -78,6 +78,116 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestWithSourceAsync_ShouldRetainExactEligibleUtf8Bytes()
+    {
+        var sourcePath = Path.Combine(_testRoot, "Guide.md");
+        var sourceText = "---\r\ndownload_markdown: true\r\n---\r\n<!-- retained -->\r\n# Guide\r\nSee [next](./next.md).\r\n";
+        var sourceBytes = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true).GetPreamble()
+            .Concat(Encoding.UTF8.GetBytes(sourceText))
+            .ToArray();
+        await File.WriteAllBytesAsync(sourcePath, sourceBytes);
+        var harvester = new MarkdownHarvester(
+            _loggerFake,
+            File.ReadAllTextAsync,
+            new AppSurfaceDocsOptions
+            {
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader"
+                }
+            });
+
+        var result = await harvester.HarvestWithSourceAsync(CreateContextWithDefaultPolicy());
+
+        Assert.Single(result.Nodes);
+        Assert.Equal(sourceBytes, Assert.Single(result.SourceByPath).Value);
+    }
+
+    [Theory]
+    [InlineData("download_markdown: \"true\"")]
+    [InlineData("download_markdown: True")]
+    [InlineData("download_markdown: 1")]
+    [InlineData("download_markdown:\n  enabled: true")]
+    public async Task HarvestWithSourceAsync_ShouldRejectNonStrictEligibilityDeclaration(string declaration)
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_testRoot, "Guide.md"),
+            $"---\n{declaration}\n---\n# Guide\n");
+        var harvester = new MarkdownHarvester(
+            _loggerFake,
+            File.ReadAllTextAsync,
+            new AppSurfaceDocsOptions
+            {
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader"
+                }
+            });
+
+        var result = await harvester.HarvestWithSourceAsync(CreateContextWithDefaultPolicy());
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(harvester).GetHarvestDiagnostics();
+
+        Assert.Single(result.Nodes);
+        Assert.Empty(result.SourceByPath);
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.MarkdownDownloadInvalidEligibility);
+    }
+
+    [Fact]
+    public async Task HarvestWithSourceAsync_ShouldNeverGrantEligibilityFromSidecarMetadata()
+    {
+        var sourcePath = Path.Combine(_testRoot, "Guide.md");
+        await File.WriteAllTextAsync(sourcePath, "# Guide\n");
+        await File.WriteAllTextAsync(sourcePath + ".yml", "download_markdown: true\n");
+        var harvester = new MarkdownHarvester(
+            _loggerFake,
+            File.ReadAllTextAsync,
+            new AppSurfaceDocsOptions
+            {
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader"
+                }
+            });
+
+        var result = await harvester.HarvestWithSourceAsync(CreateContextWithDefaultPolicy());
+
+        Assert.Single(result.Nodes);
+        Assert.Empty(result.SourceByPath);
+    }
+
+    [Fact]
+    public async Task HarvestWithSourceAsync_ShouldOmitInvalidUtf8SourceAndPreserveRendering()
+    {
+        var sourcePath = Path.Combine(_testRoot, "Guide.md");
+        await File.WriteAllBytesAsync(
+            sourcePath,
+            [0xff, .. Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# Guide\n")]);
+        var harvester = new MarkdownHarvester(
+            _loggerFake,
+            File.ReadAllTextAsync,
+            new AppSurfaceDocsOptions
+            {
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader"
+                }
+            });
+
+        var result = await harvester.HarvestWithSourceAsync(CreateContextWithDefaultPolicy());
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(harvester).GetHarvestDiagnostics();
+
+        Assert.Single(result.Nodes);
+        Assert.Empty(result.SourceByPath);
+        Assert.Contains(
+            diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.MarkdownDownloadInvalidEncoding);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldApplyConfiguredHarvestPathPolicy()
     {
         var harvester = new MarkdownHarvester(

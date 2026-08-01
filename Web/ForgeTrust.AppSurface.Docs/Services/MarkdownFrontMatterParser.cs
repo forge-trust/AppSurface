@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Docs.Models;
 using YamlDotNet.Core;
 using YamlDotNet.Serialization;
@@ -7,6 +8,10 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 
 internal static class MarkdownFrontMatterParser
 {
+    private static readonly Regex MarkdownDownloadDeclarationPattern = new(
+        @"^(?<indent>[\t ]*)download_markdown\s*:\s*(?<value>[^\r\n]*)$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.Multiline);
+
     private static readonly IDeserializer Deserializer = new DeserializerBuilder()
         .WithNamingConvention(UnderscoredNamingConvention.Instance)
         .IgnoreUnmatchedProperties()
@@ -162,6 +167,52 @@ internal static class MarkdownFrontMatterParser
         };
 
         return new MarkdownMetadataParseResult(metadata, diagnostics);
+    }
+
+    /// <summary>
+    /// Determines whether inline front matter explicitly opts a Markdown document into protected source download.
+    /// </summary>
+    /// <param name="markdown">The original Markdown text decoded from a valid UTF-8 source file.</param>
+    /// <returns>
+    /// A value that is eligible only for the exact top-level plain declaration <c>download_markdown: true</c>. A present
+    /// declaration with another shape is marked invalid so harvest health can guide the document author.
+    /// </returns>
+    /// <remarks>
+    /// This intentionally does not use general metadata binding or paired sidecars. Download eligibility is a security
+    /// declaration: quoted strings, nested fields, duplicate declarations, alternative casing, and truthy-looking values
+    /// must not accidentally expose raw source.
+    /// </remarks>
+    internal static MarkdownDownloadEligibility GetMarkdownDownloadEligibility(string markdown)
+    {
+        ArgumentNullException.ThrowIfNull(markdown);
+
+        if (!TrySplitFrontMatter(markdown, out var frontMatter, out _))
+        {
+            return MarkdownDownloadEligibility.NotDeclared;
+        }
+
+        var matches = MarkdownDownloadDeclarationPattern.Matches(frontMatter);
+        if (matches.Count == 0)
+        {
+            return MarkdownDownloadEligibility.NotDeclared;
+        }
+
+        if (matches.Count != 1
+            || matches[0].Groups["indent"].Length != 0
+            || !string.Equals(matches[0].Groups["value"].Value.Trim(), "true", StringComparison.Ordinal))
+        {
+            return MarkdownDownloadEligibility.Invalid;
+        }
+
+        try
+        {
+            _ = Deserializer.Deserialize<Dictionary<string, object?>>(frontMatter);
+            return MarkdownDownloadEligibility.Eligible;
+        }
+        catch (YamlException)
+        {
+            return MarkdownDownloadEligibility.Invalid;
+        }
     }
 
     private static bool TrySplitFrontMatter(string markdown, out string frontMatter, out string body)
@@ -1119,4 +1170,19 @@ internal static class MarkdownFrontMatterParser
 
         public string? Href { get; init; }
     }
+}
+
+/// <summary>
+/// Describes whether an inline Markdown source declaration grants protected download eligibility.
+/// </summary>
+internal enum MarkdownDownloadEligibility
+{
+    /// <summary>The document contains no top-level download declaration.</summary>
+    NotDeclared = 0,
+
+    /// <summary>The document contains exactly <c>download_markdown: true</c>.</summary>
+    Eligible = 1,
+
+    /// <summary>The document attempted a declaration outside the strict v1 shape.</summary>
+    Invalid = 2
 }

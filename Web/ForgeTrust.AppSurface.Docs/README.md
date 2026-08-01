@@ -8,6 +8,47 @@ Documentation site generation and hosting for AppSurface web applications.
 
 If you are evaluating AppSurface Docs for your own repository, start with [Use AppSurface Docs in your repository](./use-appsurface-docs.md). That page explains the consumer model, host shape, authoring metadata, and adoption checklist before you drill into this package reference.
 
+## Protected Markdown download
+
+AppSurface Docs can expose the exact source bytes for explicitly opted-in Markdown pages as a browser attachment. This v1 feature is disabled by default:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "MarkdownDownload": {
+      "Enabled": false,
+      "AuthorizationPolicy": "DocsMarkdownReader",
+      "MaxSnapshotBytes": 8388608
+    }
+  }
+}
+```
+
+When enabled, `AuthorizationPolicy` is required and must name a host-owned ASP.NET Core reader policy with at least one requirement, such as `RequireAuthenticatedUser()`. The package does not create an identity system, authentication handler, or authorization policy. Hosts must register authentication and place `UseAuthentication()` before `UseAuthorization()` in endpoint-aware middleware. `MaxSnapshotBytes` defaults to `8,388,608` and accepts values from `1` through `33,554,432`.
+
+Pages opt in only with this exact top-level inline front-matter value:
+
+```markdown
+---
+download_markdown: true
+---
+```
+
+Paired `.md.yml` and `.md.yaml` sidecars never grant this capability. Quoted truthy strings, `True`, `1`, nested or duplicate values, and malformed front matter do not opt a page in. This deliberately keeps the permission close to the source bytes that will be disclosed; use the [source-boundary guidance](./use-appsurface-docs.md#define-the-public-source-boundary) and [Markdown authoring guidance](./use-appsurface-docs.md#author-the-first-useful-page-set) when deciding what belongs in a public repository.
+
+For an opted-in canonical Markdown page, browser `GET` and `HEAD` requests use `{DocsRootPath}/_markdown/{canonical path}`. `_markdown` is a package-reserved route namespace and cannot be used for a document or alias. A successful response is `text/markdown`, marked as an attachment, and includes `Cache-Control: private, no-store`. The body is the exact original valid UTF-8 byte sequence, including BOM, front matter, comments, line endings, and relative links. Disabled or unavailable features, noncanonical and alias paths, generated pages, and archive paths return `404`. Enabled anonymous or forbidden requests use the normal host policy challenge/forbid behavior.
+
+This is a browser attachment primitive only. It has no API, batch, vendor, or automatic “second-brain” synchronization integration. Treat the endpoint as a source-disclosure boundary: do not opt in secrets, credentials, private notes, generated output, or any other source that is not intentionally public. `MaxSnapshotBytes` limits the returned source snapshot; it is not a substitute for a deliberate harvest boundary.
+
+| Status | Meaning |
+| --- | --- |
+| `404` | The feature is disabled/unavailable, the request is not canonical, the page is not exactly opted in, or the target is an alias, generated page, or archive. |
+| `401`/`403` | The feature is enabled and the host's normal reader policy challenged or forbade the request. |
+| Policy startup error | `AuthorizationPolicy` is blank, does not resolve to a host-registered policy, or has no reader requirements. |
+| Snapshot-size rejection | The source exceeds `MaxSnapshotBytes`; use a value in the documented range only for an intentional page. |
+
+See the [five-minute setup path](./use-appsurface-docs.md#five-minute-protected-markdown-download) for a copyable policy, middleware order, fixture, and verification flow.
+
 ## Preview and Export Commands
 
 Use the AppSurface CLI when working with this repository's AppSurface Docs surface:

@@ -474,6 +474,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         var currentMetricsCollectPattern = TrimLeadingSlash(docsUrlBuilder.BuildMetricsCollectUrl());
         var currentSearchQualityPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchQualityUrl());
         var currentSectionPattern = TrimLeadingSlash(DocsUrlBuilder.JoinPath(docsUrlBuilder.CurrentDocsRootPath, "sections/{sectionSlug}"));
+        var currentMarkdownDownloadPattern = TrimLeadingSlash(DocsUrlBuilder.JoinPath(docsUrlBuilder.CurrentDocsRootPath, "_markdown/{*path}"));
         var currentDetailsPattern = TrimLeadingSlash(DocsUrlBuilder.JoinPath(docsUrlBuilder.CurrentDocsRootPath, "{*path}"));
 
         if (ShouldMapRootDocsRedirect(context, docsUrlBuilder))
@@ -658,6 +659,37 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 controller = "Docs",
                 action = "Section"
             });
+
+        endpoints.MapMethods(
+            currentMarkdownDownloadPattern,
+            [
+                HttpMethods.Delete,
+                HttpMethods.Connect,
+                HttpMethods.Options,
+                HttpMethods.Patch,
+                HttpMethods.Post,
+                HttpMethods.Put,
+                HttpMethods.Trace
+            ],
+            RejectMarkdownDownloadUnsupportedMethodAsync);
+
+        var markdownDownload = endpoints.MapControllerRoute(
+                name: "appsurfacedocs_markdown_download",
+                pattern: currentMarkdownDownloadPattern,
+                defaults: new
+                {
+                    controller = "Docs",
+                    action = "DownloadMarkdown"
+                })
+            .WithMetadata(new HttpMethodMetadata([HttpMethods.Get, HttpMethods.Head]));
+        if (docsOptions.MarkdownDownload?.Enabled == true)
+        {
+            markdownDownload.RequireAuthorization(docsOptions.MarkdownDownload.AuthorizationPolicy!);
+        }
+        else
+        {
+            AllowAnonymousFallbackBypass(markdownDownload);
+        }
 
         endpoints.MapControllerRoute(
             name: "appsurfacedocs_doc",
@@ -938,6 +970,19 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     private static Task ReturnNotFoundAsync(HttpContext context)
     {
         context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return Task.CompletedTask;
+    }
+
+    private static Task RejectMarkdownDownloadUnsupportedMethodAsync(HttpContext context)
+    {
+        var statusCodePages = context.Features.Get<IStatusCodePagesFeature>();
+        if (statusCodePages is not null)
+        {
+            statusCodePages.Enabled = false;
+        }
+
+        context.Response.Headers["Allow"] = "GET, HEAD";
+        context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
         return Task.CompletedTask;
     }
 

@@ -147,6 +147,20 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
+    public void AppSurfaceDocsOptions_ShouldDisableMarkdownDownloadByDefault()
+    {
+        var options = new AppSurfaceDocsOptions();
+
+        Assert.NotNull(options.MarkdownDownload);
+        Assert.False(options.MarkdownDownload.Enabled);
+        Assert.Null(options.MarkdownDownload.AuthorizationPolicy);
+        Assert.Equal(8_388_608, options.MarkdownDownload.MaxSnapshotBytes);
+        Assert.Equal(AppSurfaceDocsMarkdownDownloadOptions.DefaultMaxSnapshotBytes, options.MarkdownDownload.MaxSnapshotBytes);
+        Assert.Equal(1, AppSurfaceDocsMarkdownDownloadOptions.MinMaxSnapshotBytes);
+        Assert.Equal(33_554_432, AppSurfaceDocsMarkdownDownloadOptions.MaxMaxSnapshotBytes);
+    }
+
+    [Fact]
     public void AppSurfaceDocsOptions_ShouldDisableStrictJavaScriptEventDocletsByDefault()
     {
         var options = new AppSurfaceDocsOptions();
@@ -2123,6 +2137,97 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.True(result.Failed);
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:Health must not be null", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("\t")]
+    public void Validator_ShouldRejectEnabledMarkdownDownloadWithoutAuthorizationPolicy(string? authorizationPolicy)
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+            {
+                Enabled = true,
+                AuthorizationPolicy = authorizationPolicy
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("MarkdownDownload:AuthorizationPolicy is required", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectNullMarkdownDownloadOptions()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            MarkdownDownload = null!
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("AppSurfaceDocs:MarkdownDownload must not be null", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldAllowEnabledMarkdownDownloadWithAuthorizationPolicyAtSnapshotBounds()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+            {
+                Enabled = true,
+                AuthorizationPolicy = "DocsMarkdownDownload",
+                MaxSnapshotBytes = AppSurfaceDocsMarkdownDownloadOptions.MinMaxSnapshotBytes
+            }
+        };
+
+        var minimumResult = validator.Validate(Options.DefaultName, options);
+
+        Assert.False(minimumResult.Failed);
+
+        options.MarkdownDownload.MaxSnapshotBytes = AppSurfaceDocsMarkdownDownloadOptions.MaxMaxSnapshotBytes;
+
+        var maximumResult = validator.Validate(Options.DefaultName, options);
+
+        Assert.False(maximumResult.Failed);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(33_554_433)]
+    [InlineData(long.MaxValue)]
+    public void Validator_ShouldRejectMarkdownDownloadSnapshotSizesOutsideBounds(long maxSnapshotBytes)
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+            {
+                MaxSnapshotBytes = maxSnapshotBytes
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("MarkdownDownload:MaxSnapshotBytes must be between", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

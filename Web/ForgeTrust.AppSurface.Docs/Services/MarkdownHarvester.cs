@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using ForgeTrust.AppSurface.Docs.Models;
 using Markdig;
 using Markdig.Renderers.Html;
@@ -249,7 +250,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     /// </remarks>
     public async Task<IReadOnlyList<DocNode>> HarvestAsync(string rootPath, CancellationToken cancellationToken = default)
     {
-        return await HarvestAsync(rootPath, _pathPolicy, cancellationToken);
+        return (await HarvestWithSourceAsync(rootPath, _pathPolicy, cancellationToken)).Nodes;
     }
 
     /// <summary>
@@ -272,19 +273,41 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
             return await ((IDocHarvester)this).HarvestAsync(context.RepositoryRoot, cancellationToken);
         }
 
-        return await HarvestAsync(context.RepositoryRoot, context.PathPolicy, cancellationToken);
+        return (await HarvestWithSourceAsync(context.RepositoryRoot, context.PathPolicy, cancellationToken)).Nodes;
     }
 
-    private async Task<IReadOnlyList<DocNode>> HarvestAsync(
+    /// <summary>
+    /// Harvests the built-in Markdown surface and, when enabled, retains eligible valid-UTF-8 source bytes for the
+    /// aggregator's private download sidecar.
+    /// </summary>
+    internal async Task<MarkdownHarvestResult> HarvestWithSourceAsync(
+        DocHarvestContext context,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (GetType() != typeof(MarkdownHarvester))
+        {
+            return new MarkdownHarvestResult(
+                await ((IDocHarvester)this).HarvestAsync(context.RepositoryRoot, cancellationToken),
+                new Dictionary<string, byte[]>(StringComparer.Ordinal));
+        }
+
+        return await HarvestWithSourceAsync(context.RepositoryRoot, context.PathPolicy, cancellationToken);
+    }
+
+    private async Task<MarkdownHarvestResult> HarvestWithSourceAsync(
         string rootPath,
         IHarvestPathPolicy pathPolicy,
         CancellationToken cancellationToken)
     {
         var nodes = new List<DocNode>();
+        var sourceByPath = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         var diagnostics = new List<DocHarvestDiagnostic>();
         try
         {
             var markdownOptions = _options.Harvest?.Markdown ?? new AppSurfaceDocsMarkdownHarvestOptions();
+            var markdownDownloadOptions = _options.MarkdownDownload ?? new AppSurfaceDocsMarkdownDownloadOptions();
             foreach (var file in EnumerateMarkdownSourceFiles(rootPath, pathPolicy, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -301,7 +324,33 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                         continue;
                     }
 
-                    var content = await _readAllTextAsync(file, cancellationToken);
+                    byte[]? sourceBytes = null;
+                    string content;
+                    if (markdownDownloadOptions.Enabled)
+                    {
+                        var bytes = await File.ReadAllBytesAsync(file, cancellationToken);
+                        if (TryDecodeValidUtf8(bytes, out var decodedContent))
+                        {
+                            sourceBytes = bytes;
+                            content = decodedContent;
+                        }
+                        else
+                        {
+                            content = await _readAllTextAsync(file, cancellationToken);
+                            diagnostics.Add(new DocHarvestDiagnostic(
+                                DocHarvestDiagnosticCodes.MarkdownDownloadInvalidEncoding,
+                                DocHarvestDiagnosticSeverity.Warning,
+                                HarvesterType,
+                                $"Markdown download was unavailable for '{relativePath}' because the source is not valid UTF-8.",
+                                "The rendered Docs page can continue through its existing text-reader behavior, but byte-faithful download accepts only valid UTF-8 source.",
+                                "Save the source as UTF-8, then rebuild the Docs snapshot before retrying the protected download."));
+                        }
+                    }
+                    else
+                    {
+                        content = await _readAllTextAsync(file, cancellationToken);
+                    }
+
                     var (markdownBody, frontMatterResult) = MarkdownFrontMatterParser.ExtractWithDiagnostics(content);
                     ReportMetadataDiagnostics(relativePath, frontMatterResult.Diagnostics, diagnostics);
                     var sidecarMetadata = await ReadMetadataSidecarAsync(file, relativePath, cancellationToken, diagnostics);
@@ -328,6 +377,25 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                     var outline = DocOutlinePolicy.Apply(ExtractOutline(document), metadata);
 
                     nodes.Add(new DocNode(resolvedTitle, relativePath, html, Metadata: metadata, Outline: outline));
+
+                    if (sourceBytes is not null)
+                    {
+                        var eligibility = MarkdownFrontMatterParser.GetMarkdownDownloadEligibility(content);
+                        if (eligibility == MarkdownDownloadEligibility.Eligible)
+                        {
+                            sourceByPath[relativePath] = sourceBytes;
+                        }
+                        else if (eligibility == MarkdownDownloadEligibility.Invalid)
+                        {
+                            diagnostics.Add(new DocHarvestDiagnostic(
+                                DocHarvestDiagnosticCodes.MarkdownDownloadInvalidEligibility,
+                                DocHarvestDiagnosticSeverity.Warning,
+                                HarvesterType,
+                                $"Markdown download was unavailable for '{relativePath}' because download_markdown must be the exact top-level inline declaration 'download_markdown: true'.",
+                                "Raw source download is a security-sensitive opt-in and the declaration was quoted, nested, duplicated, malformed, or otherwise not the strict v1 shape.",
+                                "Use one plain top-level download_markdown: true value in inline front matter; paired sidecar metadata never enables source download."));
+                        }
+                    }
                 }
                 catch (OperationCanceledException)
                 {
@@ -339,11 +407,30 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                 }
             }
 
-            return nodes;
+            return new MarkdownHarvestResult(nodes, sourceByPath);
         }
         finally
         {
             _lastDiagnostics = diagnostics.ToArray();
+        }
+    }
+
+    private static bool TryDecodeValidUtf8(byte[] bytes, out string content)
+    {
+        try
+        {
+            content = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(bytes);
+            if (content.Length > 0 && content[0] == '\uFEFF')
+            {
+                content = content[1..];
+            }
+
+            return true;
+        }
+        catch (DecoderFallbackException)
+        {
+            content = string.Empty;
+            return false;
         }
     }
 
@@ -807,3 +894,14 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         return builder.ToString();
     }
 }
+
+/// <summary>
+/// Private built-in Markdown harvest output used to retain source bytes beside the rendered Docs graph.
+/// </summary>
+/// <remarks>
+/// This type intentionally stays internal. Raw Markdown must not become part of <see cref="DocNode"/>, the search
+/// index, or the public custom-harvester contract.
+/// </remarks>
+internal sealed record MarkdownHarvestResult(
+    IReadOnlyList<DocNode> Nodes,
+    IReadOnlyDictionary<string, byte[]> SourceByPath);

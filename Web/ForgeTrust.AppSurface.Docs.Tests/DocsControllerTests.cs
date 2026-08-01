@@ -16,6 +16,7 @@ using Ganss.Xss;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.Controllers;
@@ -5852,6 +5853,56 @@ public class DocsControllerTests : IDisposable
 
         Assert.False(result.IsAllowed);
         Assert.Equal(SearchIndexRefreshAuthorizationFailure.MissingPolicyProvider, result.Reason);
+    }
+
+    [Fact]
+    public async Task DownloadMarkdown_ShouldReturnTheSnapshotBytesForAnExactCanonicalRawTarget()
+    {
+        var repositoryRoot = Path.Combine(Path.GetTempPath(), "AppSurfaceDocsTests_MarkdownDownload", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repositoryRoot);
+        try
+        {
+            var sourceBytes = Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# Guide\n");
+            await File.WriteAllBytesAsync(Path.Combine(repositoryRoot, "Guide.md"), sourceBytes);
+            var options = new AppSurfaceDocsOptions
+            {
+                Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = repositoryRoot },
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader"
+                }
+            };
+            var (controller, cache, memo) = CreateController(
+                options,
+                [new MarkdownHarvester(NullLogger<MarkdownHarvester>.Instance, File.ReadAllTextAsync, options)]);
+            using (cache)
+            using (memo)
+            {
+                var httpContext = new DefaultHttpContext();
+                httpContext.Request.PathBase = "/tenant";
+                httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget = "/tenant/docs/_markdown/guide?ingest=second-brain";
+                controller.ControllerContext = CreateControllerContext(httpContext);
+
+                var result = await controller.DownloadMarkdown("guide");
+
+                var file = Assert.IsType<FileContentResult>(result);
+                Assert.Equal(sourceBytes, file.FileContents);
+                Assert.Equal("text/markdown; charset=utf-8", file.ContentType);
+                Assert.Equal("guide.md", file.FileDownloadName);
+                Assert.Equal("private, no-store", controller.Response.Headers.CacheControl.ToString());
+
+                httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget = "/tenant/docs/_markdown/GUIDE";
+
+                var tamperedResult = await controller.DownloadMarkdown("guide");
+
+                Assert.IsType<NotFoundResult>(tamperedResult);
+            }
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
     }
 
     public void Dispose()

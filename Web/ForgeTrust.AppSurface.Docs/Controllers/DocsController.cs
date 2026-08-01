@@ -7,6 +7,7 @@ using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Bridge;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
@@ -28,6 +29,8 @@ public class DocsController : Controller
     private const int SearchFallbackBucketCount = 5;
     private const int MetricsRequestMaxBodyBytes = 8192;
     private const int MetricsRequestMaxProperties = 16;
+    // Keep the attachment filename within a broadly compatible 120 ASCII-character limit, including the .md extension.
+    private const int MaxMarkdownDownloadFileNameBaseLength = 116;
     private static readonly string[] DefaultProofPathStageLabels = ["Understand", "See Proof", "Adopt Next"];
     private static readonly HashSet<string> AcceptedDocsMetricsEvents = new(StringComparer.Ordinal)
     {
@@ -351,6 +354,18 @@ public class DocsController : Controller
         var docs = await _aggregator.GetDocsAsync(HttpContext.RequestAborted);
         var sections = await _aggregator.GetPublicSectionsAsync(HttpContext.RequestAborted);
         var viewModel = BuildDetailsViewModel(docDetails, docs, sections);
+        if (_options.MarkdownDownload?.Enabled == true
+            && !string.IsNullOrWhiteSpace(routeResolution.PublicRoutePath)
+            && await _aggregator.GetMarkdownDownloadSourceAsync(
+                routeResolution.PublicRoutePath,
+                HttpContext.RequestAborted) is { } markdownDownload)
+        {
+            viewModel = viewModel with
+            {
+                CanDownloadMarkdown = true,
+                MarkdownDownloadUrl = _docsUrlBuilder.BuildMarkdownDownloadUrl(markdownDownload.CanonicalPath)
+            };
+        }
 
         if (servesPartial)
         {
@@ -358,6 +373,33 @@ public class DocsController : Controller
         }
 
         return View(viewModel);
+    }
+
+    /// <summary>
+    /// Returns an authorized, source-faithful Markdown attachment for one exact canonical Docs page.
+    /// </summary>
+    /// <param name="path">The Docs-relative canonical route path supplied by the reserved download route.</param>
+    /// <returns>A Markdown attachment, or <c>404</c> when the feature, route, or source entry is unavailable.</returns>
+    /// <remarks>
+    /// Route registration owns authorization. This action defensively preserves the disabled-feature and canonical-route
+    /// contract so direct invocation, source-shaped aliases, and normalized alternate paths cannot surface raw Markdown.
+    /// Successful responses return the original harvested bytes, not rendered HTML or regenerated Markdown.
+    /// </remarks>
+    public async Task<IActionResult> DownloadMarkdown(string path)
+    {
+        if (_options.MarkdownDownload?.Enabled != true || !IsExactMarkdownDownloadRequest(path))
+        {
+            return NotFound();
+        }
+
+        var source = await _aggregator.GetMarkdownDownloadSourceAsync(path, HttpContext.RequestAborted);
+        if (source is null)
+        {
+            return NotFound();
+        }
+
+        Response.Headers.CacheControl = "private, no-store";
+        return File(source.Bytes, "text/markdown; charset=utf-8", BuildMarkdownDownloadFileName(source.CanonicalPath));
     }
 
     private async Task<DocRouteResolution> ResolvePartialRouteAsync(
@@ -2113,6 +2155,83 @@ public class DocsController : Controller
         return string.Equals(appRelativeUrl, "/", StringComparison.Ordinal)
             ? normalizedPathBase + "/"
             : normalizedPathBase + appRelativeUrl;
+    }
+
+    private bool IsExactMarkdownDownloadRequest(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        string expectedPath;
+        try
+        {
+            expectedPath = PathBaseAware(_docsUrlBuilder.BuildMarkdownDownloadUrl(path));
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+
+        var rawTarget = HttpContext.Features.Get<IHttpRequestFeature>()?.RawTarget;
+        if (string.IsNullOrEmpty(rawTarget))
+        {
+            return false;
+        }
+
+        var queryIndex = rawTarget.IndexOf('?', StringComparison.Ordinal);
+        var rawPath = queryIndex < 0 ? rawTarget : rawTarget[..queryIndex];
+        return string.Equals(rawPath, expectedPath, StringComparison.Ordinal);
+    }
+
+    private static string BuildMarkdownDownloadFileName(string canonicalPath)
+    {
+        var baseName = string.Join('-', canonicalPath.Split('/', StringSplitOptions.RemoveEmptyEntries));
+        var builder = new System.Text.StringBuilder(baseName.Length);
+        var previousWasDash = false;
+        foreach (var character in baseName)
+        {
+            var safe = character is >= 'a' and <= 'z'
+                or >= 'A' and <= 'Z'
+                or >= '0' and <= '9'
+                or '.'
+                or '_'
+                or '-';
+            if (safe)
+            {
+                builder.Append(character);
+                previousWasDash = character == '-';
+            }
+            else if (!previousWasDash)
+            {
+                builder.Append('-');
+                previousWasDash = true;
+            }
+        }
+
+        var normalized = builder.ToString().Trim('-', '.');
+        if (normalized.Length == 0 || IsWindowsDeviceName(normalized))
+        {
+            normalized = "document";
+        }
+
+        return normalized.Length > MaxMarkdownDownloadFileNameBaseLength
+            ? normalized[..MaxMarkdownDownloadFileNameBaseLength].TrimEnd('-', '.') + ".md"
+            : normalized + ".md";
+    }
+
+    private static bool IsWindowsDeviceName(string value)
+    {
+        var baseName = value.Split('.', 2)[0];
+        return baseName.Equals("CON", StringComparison.OrdinalIgnoreCase)
+               || baseName.Equals("PRN", StringComparison.OrdinalIgnoreCase)
+               || baseName.Equals("AUX", StringComparison.OrdinalIgnoreCase)
+               || baseName.Equals("NUL", StringComparison.OrdinalIgnoreCase)
+               || (baseName.Length == 4
+                   && (baseName.StartsWith("COM", StringComparison.OrdinalIgnoreCase)
+                       || baseName.StartsWith("LPT", StringComparison.OrdinalIgnoreCase))
+                   && baseName[3] is >= '1' and <= '9');
     }
 
     private static string AppendQueryStringBeforeFragment(string url, QueryString queryString)

@@ -30,9 +30,15 @@
     var provenance = Model.ContributorProvenance;
     var sourceHref = string.IsNullOrWhiteSpace(provenance?.SourceHref) ? null : provenance!.SourceHref!.Trim();
     var editHref = string.IsNullOrWhiteSpace(provenance?.EditHref) ? null : provenance!.EditHref!.Trim();
-    var provenanceLabel = string.IsNullOrWhiteSpace(provenance?.Label) ? "Source of truth" : provenance!.Label.Trim();
     var lastUpdatedUtc = provenance?.LastUpdatedUtc?.ToUniversalTime();
-    var showContributorProvenance = sourceHref is not null || editHref is not null || lastUpdatedUtc is not null;
+    var markdownDownloadUrl = Model.CanDownloadMarkdown && !string.IsNullOrWhiteSpace(Model.MarkdownDownloadUrl)
+        ? Model.MarkdownDownloadUrl
+        : null;
+    var hasContributorProvenance = sourceHref is not null || editHref is not null || lastUpdatedUtc is not null;
+    var provenanceLabel = hasContributorProvenance
+        ? string.IsNullOrWhiteSpace(provenance?.Label) ? "Source of truth" : provenance!.Label.Trim()
+        : "Downloads";
+    var showContributorProvenance = hasContributorProvenance || markdownDownloadUrl is not null;
     var outlineItems = Model.Outline
         .Where(item => item is not null && !string.IsNullOrWhiteSpace(item.Id) && !string.IsNullOrWhiteSpace(item.Title))
         .Select(item => new
@@ -183,6 +189,12 @@
                         <span class="docs-provenance-pencil" aria-hidden="true">✎</span>
                         <span>Edit this page</span>
                     </a>
+                }
+                @if (markdownDownloadUrl is not null)
+                {
+                    <a href="@Url.PathBaseAware(markdownDownloadUrl)"
+                       class="docs-provenance-link docs-provenance-link--secondary"
+                       data-turbo="false">Download Markdown</a>
                 }
                 @if (lastUpdatedUtc is not null)
                 {
