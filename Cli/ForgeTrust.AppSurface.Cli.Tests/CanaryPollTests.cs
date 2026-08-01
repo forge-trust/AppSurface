@@ -11,6 +11,20 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CanaryPollTests
 {
     [Fact]
+    public void Constructors_Should_RejectNullDependencies()
+    {
+        var commandException = Assert.Throws<ArgumentNullException>(() => new CanaryPollCommand(null!));
+        var httpClientException = Assert.Throws<ArgumentNullException>(() => new CanaryPollWorkflow(null!, TimeProvider.System, new RecordingDelay()));
+        var timeProviderException = Assert.Throws<ArgumentNullException>(() => new CanaryPollWorkflow(new QueueCanaryPollHttpClient(), null!, new RecordingDelay()));
+        var delayException = Assert.Throws<ArgumentNullException>(() => new CanaryPollWorkflow(new QueueCanaryPollHttpClient(), TimeProvider.System, null!));
+
+        Assert.Equal("workflow", commandException.ParamName);
+        Assert.Equal("httpClient", httpClientException.ParamName);
+        Assert.Equal("timeProvider", timeProviderException.ParamName);
+        Assert.Equal("delay", delayException.ParamName);
+    }
+
+    [Fact]
     public void RequestFactory_Should_Preserve_ApplicationBasePath_And_Resolve_EnvironmentOnlyMarker()
     {
         using var marker = new EnvironmentVariableScope("APPSURFACE_CANARY_MARKER", "deploy-marker-secret");
@@ -427,6 +441,17 @@ public sealed class CanaryPollTests
         }
     }
 
+    [Fact]
+    public void Result_Should_ClassifyCredentialInputAndRetryableOutcomes()
+    {
+        var credentialInput = CanaryPollResult.Invalid(CanaryPollRequestFactory.CredentialDiagnosticCode, "Credential source is unavailable.");
+
+        Assert.Equal("credential-source", credentialInput.Outcome);
+        Assert.True(CanaryPollResult.TransientExhausted(1, TimeSpan.Zero).IsRetryable);
+        Assert.True(CanaryPollResult.Deadline(1, TimeSpan.Zero).IsRetryable);
+        Assert.False(CanaryPollResult.ProtocolFailure(1, TimeSpan.Zero).IsRetryable);
+    }
+
     [Theory]
     [InlineData("fail")]
     [InlineData("stale")]
@@ -446,6 +471,25 @@ public sealed class CanaryPollTests
 
         var output = console.ReadOutputString();
         Assert.StartsWith($"ASCAN403 outcome={outcome} canary=forwarding.alpha-evidence", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TextRenderer_Should_RenderAPassingSummaryWithoutFailureFollowup()
+    {
+        using var console = new FakeInMemoryConsole();
+        var result = CanaryPollResult.Pass(
+            "forwarding.alpha-evidence",
+            attempts: 2,
+            TimeSpan.FromMilliseconds(42),
+            reasonCode: "fresh",
+            summary: "The named canary passed.");
+
+        await CanaryPollResultRenderer.WriteAsync(console, result, json: false);
+
+        var output = console.ReadOutputString();
+        Assert.Contains("PASS canary=forwarding.alpha-evidence attempts=2 elapsed=42ms reason=fresh summary=The named canary passed.", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Next:", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Docs:", output, StringComparison.Ordinal);
     }
 
     [Fact]
