@@ -698,7 +698,15 @@ public sealed class VerifierContractTests
             {
                 await Task.WhenAll(standardOutput, standardError).WaitAsync(cancellation.Token);
             }
-            catch
+            catch (OperationCanceledException)
+            {
+                // Preserve the exception that triggered cleanup.
+            }
+            catch (IOException)
+            {
+                // Preserve the exception that triggered cleanup.
+            }
+            catch (ObjectDisposedException)
             {
                 // Preserve the exception that triggered cleanup.
             }
