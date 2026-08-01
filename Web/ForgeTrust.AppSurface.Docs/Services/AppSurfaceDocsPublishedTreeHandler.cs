@@ -1067,10 +1067,32 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
 
     private static bool HasThemeStyleNonce(string html)
     {
-        return html.Contains("data-as-theme-critical", StringComparison.Ordinal)
-               && html.Contains("nonce", StringComparison.Ordinal)
-               || html.Contains("data-docs-theme-critical", StringComparison.Ordinal)
-               && html.Contains("nonce", StringComparison.Ordinal);
+        return HasStyleNonce(html, "data-as-theme-critical")
+               || HasStyleNonce(html, "data-docs-theme-critical");
+    }
+
+    private static bool HasStyleNonce(string html, string themeAttribute)
+    {
+        var searchStart = 0;
+        while (true)
+        {
+            var attributeIndex = html.IndexOf(themeAttribute, searchStart, StringComparison.Ordinal);
+            if (attributeIndex < 0)
+            {
+                return false;
+            }
+
+            var styleStart = html.LastIndexOf("<style", attributeIndex, StringComparison.OrdinalIgnoreCase);
+            var styleEnd = html.IndexOf('>', styleStart >= 0 ? styleStart : attributeIndex);
+            if (styleStart >= 0
+                && attributeIndex < styleEnd
+                && html.IndexOf("nonce", styleStart, styleEnd - styleStart, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            searchStart = attributeIndex + themeAttribute.Length;
+        }
     }
 
     /// <summary>

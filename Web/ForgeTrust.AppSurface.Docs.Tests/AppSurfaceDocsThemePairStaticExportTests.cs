@@ -29,7 +29,7 @@ public sealed class AppSurfaceDocsThemePairStaticExportTests
     public void PublishedTreeRewrite_ShouldRemoveThemeNoncesOnTheDefaultStableMount()
     {
         const string html = """
-            <!DOCTYPE html><html data-as-theme="appsurface"><head><style data-as-theme-critical nonce="request-theme-nonce">html{--as-canvas:#f8fafc;}</style><style data-docs-theme-critical nonce="request-docs-nonce">html{--docs-color-surface-canvas:var(--as-canvas);}</style><script nonce="preserve-me">window.staticExport = true;</script></head><body></body></html>
+            <!DOCTYPE html><html data-as-theme="appsurface"><head><style nonce="request-theme-nonce" data-as-theme-critical>html{--as-canvas:#f8fafc;}</style><style data-docs-theme-critical nonce="request-docs-nonce">html{--docs-color-surface-canvas:var(--as-canvas);}</style><script nonce="preserve-me">window.staticExport = true;</script></head><body></body></html>
             """;
 
         var rewritten = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(html, "/docs");
@@ -41,6 +41,14 @@ public sealed class AppSurfaceDocsThemePairStaticExportTests
     }
 
     [Fact]
+    public void PublishedTreeRewrite_ShouldNotParseStableOutputForAnUnrelatedNonce()
+    {
+        const string html = "<!DOCTYPE html><html data-as-theme=\"appsurface\"><head><style data-as-theme-critical>html{--as-canvas:#f8fafc;}</style><style data-docs-theme-critical>html{--docs-color-surface-canvas:var(--as-canvas);}</style><script nonce=\"preserve-me\">window.staticExport = true;</script></head><body></body></html>";
+
+        Assert.Equal(html, AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(html, "/docs"));
+    }
+
+    [Fact]
     public void PublishedTreeRewrite_ShouldMatchTheLiveCanonicalThemePayloadAfterNonceRemoval()
     {
         var pair = AppSurfaceThemePair.AppSurface();
@@ -49,7 +57,7 @@ public sealed class AppSurfaceDocsThemePairStaticExportTests
         var liveHeadContent = AppSurfaceThemeDocumentSerializer.SerializeHeadContent(themeDocument, "live-theme-nonce");
         var docsTheme = new AppSurfaceDocsThemeResolver(
             new AppSurfaceDocsOptions(),
-            [new StubThemeResolver(resolution)]).Theme;
+            new StubThemeResolver(resolution)).Theme;
         var liveHtml = $"""
             <!DOCTYPE html><html {themeDocument.RootAttributes} style="{themeDocument.RootStyle}"><head>{liveHeadContent}<style data-docs-theme-critical nonce="live-docs-nonce">{docsTheme.CriticalCss}</style><script nonce="preserve-me">window.staticExport = true;</script></head><body><a href="/docs/getting-started">Start</a></body></html>
             """;

@@ -5,7 +5,8 @@ namespace ForgeTrust.AppSurface.Web.Theming;
 /// </summary>
 /// <remarks>
 /// The document contains no request-specific values. In particular, <see cref="HeadContent"/> never contains a CSP
-/// nonce; the live head TagHelper adds one only to its inline <c>style</c> element.
+/// nonce; the live head TagHelper adds one only to its inline <c>style</c> element. Only the package serializer can
+/// create a renderable instance, so adapters cannot accidentally bypass the validated neutral-theme boundary.
 /// </remarks>
 public sealed record AppSurfaceThemeDocument
 {
@@ -22,7 +23,7 @@ public sealed record AppSurfaceThemeDocument
     /// <param name="rootAttributes">Serialized attributes placed on the theme root.</param>
     /// <param name="rootStyle">The safe <c>color-scheme</c> declaration for the theme root.</param>
     /// <param name="headContent">Serialized head metadata and critical CSS without a nonce.</param>
-    public AppSurfaceThemeDocument(string rootAttributes, string rootStyle, string headContent)
+    internal AppSurfaceThemeDocument(string rootAttributes, string rootStyle, string headContent)
     {
         RootAttributes = rootAttributes ?? throw new ArgumentNullException(nameof(rootAttributes));
         RootStyle = rootStyle ?? throw new ArgumentNullException(nameof(rootStyle));

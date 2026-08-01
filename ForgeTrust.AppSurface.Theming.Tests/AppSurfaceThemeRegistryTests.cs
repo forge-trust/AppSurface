@@ -204,6 +204,40 @@ public sealed class AppSurfaceThemeRegistryTests
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == "ASTHEME101" && diagnostic.Cause.Contains("Light.Text", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [MemberData(nameof(ContrastRoleCases))]
+    public void Validate_ShouldRejectEveryContrastRoleAgainstEachBranchBackground(string branch, string role)
+    {
+        var pair = AppSurfaceThemePair.AppSurface();
+        var branchRoles = branch == "Light" ? pair.Light : pair.Dark;
+        var unsafeRoles = ReplaceRole(branchRoles, role, branchRoles.Canvas);
+        var options = new AppSurfaceThemeRegistryOptions();
+        options.Pairs.Add(
+            new AppSurfaceThemePair(
+                pair.Id,
+                branch == "Light" ? unsafeRoles : pair.Light,
+                branch == "Dark" ? unsafeRoles : pair.Dark));
+
+        var diagnostics = AppSurfaceThemeRegistry.Validate(options);
+
+        Assert.Equal(
+            3,
+            diagnostics.Count(
+                diagnostic => diagnostic.Code == "ASTHEME101"
+                              && diagnostic.Cause.Contains($"{branch}.{role}", StringComparison.Ordinal)));
+    }
+
+    public static IEnumerable<object[]> ContrastRoleCases()
+    {
+        foreach (var branch in new[] { "Light", "Dark" })
+        {
+            foreach (var role in new[] { "Text", "MutedText", "Link", "VisitedLink", "Danger", "Border", "Accent", "AccentStrong", "Focus" })
+            {
+                yield return [branch, role];
+            }
+        }
+    }
+
     [Fact]
     public void Registry_ShouldRejectUnknownPair()
     {
@@ -301,6 +335,21 @@ public sealed class AppSurfaceThemeRegistryTests
         var pair = AppSurfaceThemePair.AppSurface();
         return new AppSurfaceThemePair(new AppSurfaceThemeId("appsurface-alt"), pair.Light, pair.Dark);
     }
+
+    private static AppSurfaceThemeRoles ReplaceRole(AppSurfaceThemeRoles roles, string role, string value) =>
+        new(
+            roles.Canvas,
+            roles.Surface,
+            roles.RaisedSurface,
+            role == "Text" ? value : roles.Text,
+            role == "MutedText" ? value : roles.MutedText,
+            role == "Border" ? value : roles.Border,
+            role == "Accent" ? value : roles.Accent,
+            role == "AccentStrong" ? value : roles.AccentStrong,
+            role == "Link" ? value : roles.Link,
+            role == "VisitedLink" ? value : roles.VisitedLink,
+            role == "Danger" ? value : roles.Danger,
+            role == "Focus" ? value : roles.Focus);
 
     private sealed record ExtensionSettings(string Name);
 

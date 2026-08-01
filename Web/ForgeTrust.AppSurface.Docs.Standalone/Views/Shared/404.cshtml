@@ -53,39 +53,6 @@
             }
         }
 
-        @@media (forced-colors: active) {
-            :root {
-                --docs-404-canvas: Canvas;
-                --docs-404-canvas-mid: Canvas;
-                --docs-404-surface: Canvas;
-                --docs-404-text: CanvasText;
-                --docs-404-muted: GrayText;
-                --docs-404-subtle: GrayText;
-                --docs-404-border: GrayText;
-                --docs-404-accent: LinkText;
-                --docs-404-accent-fill: Highlight;
-                --docs-404-accent-text: HighlightText;
-            }
-
-            body {
-                background: Canvas;
-            }
-
-            code,
-            .recovery-row {
-                border-color: GrayText;
-                background: Canvas;
-            }
-
-            .primary-action,
-            .primary-action:hover,
-            .primary-action:focus-visible,
-            .recovery-row:hover,
-            .recovery-row:focus-visible {
-                outline-color: Highlight;
-            }
-        }
-
         body {
             margin: 0;
             min-height: 100vh;
@@ -220,6 +187,39 @@
             .recovery-row {
                 grid-template-columns: 1fr;
                 gap: 0.3rem;
+            }
+        }
+
+        @@media (forced-colors: active) {
+            :root {
+                --docs-404-canvas: Canvas;
+                --docs-404-canvas-mid: Canvas;
+                --docs-404-surface: Canvas;
+                --docs-404-text: CanvasText;
+                --docs-404-muted: GrayText;
+                --docs-404-subtle: GrayText;
+                --docs-404-border: GrayText;
+                --docs-404-accent: LinkText;
+                --docs-404-accent-fill: Highlight;
+                --docs-404-accent-text: HighlightText;
+            }
+
+            body {
+                background: Canvas;
+            }
+
+            code,
+            .recovery-row {
+                border-color: GrayText;
+                background: Canvas;
+            }
+
+            .primary-action,
+            .primary-action:hover,
+            .primary-action:focus-visible,
+            .recovery-row:hover,
+            .recovery-row:focus-visible {
+                outline-color: Highlight;
             }
         }
     </style>

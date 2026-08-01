@@ -12,7 +12,7 @@ public sealed class AppSurfaceDocsThemePairTests
         var pair = AppSurfaceThemePair.AppSurface();
         var resolution = new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.System, pair.Light, pair.Dark);
 
-        var theme = new AppSurfaceDocsThemeResolver(options, [new StubThemeResolver(resolution)]).Theme;
+        var theme = new AppSurfaceDocsThemeResolver(options, new StubThemeResolver(resolution)).Theme;
 
         Assert.True(theme.UsesSharedTheme);
         Assert.NotNull(theme.CriticalCss);
@@ -44,7 +44,7 @@ public sealed class AppSurfaceDocsThemePairTests
         var pair = AppSurfaceThemePair.AppSurface();
         var resolution = new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.Light, pair.Light, pair.Dark);
 
-        var theme = new AppSurfaceDocsThemeResolver(options, [new StubThemeResolver(resolution)]).Theme;
+        var theme = new AppSurfaceDocsThemeResolver(options, new StubThemeResolver(resolution)).Theme;
 
         Assert.False(theme.UsesSharedTheme);
         Assert.Null(theme.CriticalCss);
@@ -52,7 +52,7 @@ public sealed class AppSurfaceDocsThemePairTests
     }
 
     [Fact]
-    public void Resolver_ShouldPreserveShortHexOverridesWhenMappingSharedPair()
+    public void Resolver_ShouldPreserveShortHexOverridesWhenMappingSharedDarkPair()
     {
         var options = new AppSurfaceDocsOptions
         {
@@ -69,12 +69,37 @@ public sealed class AppSurfaceDocsThemePairTests
         };
         AppSurfaceDocsThemePolicy.Normalize(options.Theme);
         var pair = AppSurfaceThemePair.AppSurface();
-        var resolution = new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.Light, pair.Light, pair.Dark);
+        var resolution = new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.Dark, pair.Light, pair.Dark);
 
-        var theme = new AppSurfaceDocsThemeResolver(options, [new StubThemeResolver(resolution)]).Theme;
+        var theme = new AppSurfaceDocsThemeResolver(options, new StubThemeResolver(resolution)).Theme;
 
         Assert.Contains("--docs-color-accent:#0af;", theme.CriticalCss, StringComparison.Ordinal);
         Assert.Contains("--docs-color-link:#9cf;", theme.CriticalCss, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(AppSurfaceThemeMode.Light)]
+    [InlineData(AppSurfaceThemeMode.System)]
+    public void Resolver_ShouldFallBackToSemanticTokensForUnsafeSharedLightOverrides(AppSurfaceThemeMode mode)
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Theme = new AppSurfaceDocsThemeOptions
+            {
+                Colors = new AppSurfaceDocsThemeColorOptions
+                {
+                    LinkColor = "#9cf"
+                }
+            }
+        };
+        AppSurfaceDocsThemePolicy.Normalize(options.Theme);
+        var pair = AppSurfaceThemePair.AppSurface();
+        var resolution = new AppSurfaceThemeResolution(pair.Id, mode, pair.Light, pair.Dark);
+
+        var theme = new AppSurfaceDocsThemeResolver(options, new StubThemeResolver(resolution)).Theme;
+
+        Assert.Contains("--docs-color-link:var(--as-link);", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.DoesNotContain("--docs-color-link:#9cf;", theme.CriticalCss, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -88,7 +113,7 @@ public sealed class AppSurfaceDocsThemePairTests
             pair.Light.Danger, pair.Light.Focus);
         var resolution = new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.System, unsafeLight, pair.Dark);
 
-        var theme = new AppSurfaceDocsThemeResolver(options, [new StubThemeResolver(resolution)]).Theme;
+        var theme = new AppSurfaceDocsThemeResolver(options, new StubThemeResolver(resolution)).Theme;
 
         Assert.False(theme.UsesSharedTheme);
         Assert.Null(theme.CriticalCss);

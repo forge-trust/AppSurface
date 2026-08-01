@@ -38,6 +38,9 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
         Assert.Contains("@media (prefers-color-scheme: dark)", html);
         Assert.Contains("--docs-404-canvas: #0f172a", html);
         Assert.Contains("@media (forced-colors: active)", html);
+        Assert.True(
+            html.IndexOf("@media (forced-colors: active)", StringComparison.Ordinal)
+            > html.IndexOf("background: color-mix(in srgb, var(--docs-404-surface) 74%, transparent)", StringComparison.Ordinal));
         Assert.Contains("/docs/missing-page", html);
     }
 

@@ -109,9 +109,12 @@ public class AppSurfaceDocsViewsTests
         var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
 
         Assert.Single(document.QuerySelectorAll("html[data-as-theme='appsurface']"));
+        Assert.Equal("dark", document.DocumentElement?.GetAttribute("data-as-theme-mode"));
         Assert.Equal("1", document.DocumentElement?.GetAttribute("data-as-theme-schema"));
         Assert.Single(document.QuerySelectorAll("meta[name='color-scheme']"));
         Assert.Single(document.QuerySelectorAll("style[data-as-theme-critical]"));
+        var docsCriticalStyle = Assert.Single(document.QuerySelectorAll("style[data-docs-theme-critical]"));
+        Assert.Contains("--docs-color-surface-canvas:var(--as-canvas);", docsCriticalStyle.TextContent, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -20,7 +20,7 @@ internal sealed class AppSurfaceDocsThemeResolver
     /// </summary>
     /// <param name="options">The normalized AppSurface Docs options.</param>
     public AppSurfaceDocsThemeResolver(AppSurfaceDocsOptions options)
-        : this(options, [])
+        : this(options, null)
     {
     }
 
@@ -28,21 +28,19 @@ internal sealed class AppSurfaceDocsThemeResolver
     /// Initializes a new instance of the <see cref="AppSurfaceDocsThemeResolver"/> with optional shared theme support.
     /// </summary>
     /// <param name="options">The normalized AppSurface Docs options.</param>
-    /// <param name="themeResolvers">Registered shared theme resolvers. An empty sequence preserves the legacy Docs contract.</param>
+    /// <param name="themeResolver">The shared resolver selected by the container, or <see langword="null"/> for the legacy Docs contract.</param>
     public AppSurfaceDocsThemeResolver(
         AppSurfaceDocsOptions options,
-        IEnumerable<IAppSurfaceThemeResolver> themeResolvers)
+        IAppSurfaceThemeResolver? themeResolver)
     {
         ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(themeResolvers);
 
         var legacyTheme = AppSurfaceDocsThemePolicy.Resolve(options.Theme);
-        var sharedResolver = themeResolvers.LastOrDefault();
-        var sharedResolution = sharedResolver?.ResolveDefault();
+        var sharedResolution = themeResolver?.ResolveDefault();
         Theme = sharedResolution is not null
             && legacyTheme.Preset == AppSurfaceDocsThemePreset.AppSurfaceDark
             && AppSurfaceThemeRegistry.IsSafeResolution(sharedResolution)
-            ? AppSurfaceDocsThemePolicy.ResolveShared(legacyTheme, options.Theme)
+            ? AppSurfaceDocsThemePolicy.ResolveShared(legacyTheme, options.Theme, sharedResolution)
             : legacyTheme;
     }
 
@@ -215,17 +213,20 @@ internal static class AppSurfaceDocsThemePolicy
     /// </summary>
     /// <param name="legacyTheme">Resolved Docs compatibility values.</param>
     /// <param name="options">Normalized Docs theme options, including supported legacy color overrides.</param>
+    /// <param name="resolution">The safe shared semantic pair selected by the host.</param>
     /// <returns>A Docs theme that consumes shared semantic variables without exposing Docs-local variables publicly.</returns>
     public static AppSurfaceDocsResolvedTheme ResolveShared(
         AppSurfaceDocsResolvedTheme legacyTheme,
-        AppSurfaceDocsThemeOptions? options)
+        AppSurfaceDocsThemeOptions? options,
+        AppSurfaceThemeResolution resolution)
     {
         ArgumentNullException.ThrowIfNull(legacyTheme);
+        ArgumentNullException.ThrowIfNull(resolution);
 
         return legacyTheme with
         {
             UsesSharedTheme = true,
-            CriticalCss = BuildSharedCriticalCss(options?.Colors)
+            CriticalCss = BuildSharedCriticalCss(options?.Colors, resolution)
         };
     }
 
@@ -510,12 +511,14 @@ internal static class AppSurfaceDocsThemePolicy
         return builder.ToString();
     }
 
-    private static string BuildSharedCriticalCss(AppSurfaceDocsThemeColorOptions? colors)
+    private static string BuildSharedCriticalCss(
+        AppSurfaceDocsThemeColorOptions? colors,
+        AppSurfaceThemeResolution resolution)
     {
-        var accent = ResolveOverride(colors?.AccentColor, "var(--as-accent)");
-        var accentStrong = ResolveOverride(colors?.AccentStrongColor, "var(--as-accent-strong)");
-        var link = ResolveOverride(colors?.LinkColor, "var(--as-link)");
-        var visitedLink = ResolveOverride(colors?.VisitedLinkColor, "var(--as-visited-link)");
+        var accent = ResolveSharedOverride(colors?.AccentColor, "var(--as-accent)", resolution, TextContrastRatio);
+        var accentStrong = ResolveSharedOverride(colors?.AccentStrongColor, "var(--as-accent-strong)", resolution, UserInterfaceContrastRatio);
+        var link = ResolveSharedOverride(colors?.LinkColor, "var(--as-link)", resolution, TextContrastRatio);
+        var visitedLink = ResolveSharedOverride(colors?.VisitedLinkColor, "var(--as-visited-link)", resolution, TextContrastRatio);
         var variables = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["--docs-brand-blue"] = accentStrong,
@@ -707,12 +710,46 @@ internal static class AppSurfaceDocsThemePolicy
         builder.Append(';');
     }
 
-    private static string ResolveOverride(string? value, string fallback)
+    private static string ResolveSharedOverride(
+        string? value,
+        string fallback,
+        AppSurfaceThemeResolution resolution,
+        double requiredContrast)
     {
-        return AppSurfaceDocsIdentityPath.TryNormalizeCssHexColor(value, out var normalized, out _)
-            && normalized is not null
+        if (!AppSurfaceDocsIdentityPath.TryNormalizeCssHexColor(value, out var normalized, out _)
+            || normalized is null)
+        {
+            return fallback;
+        }
+
+        return IsSharedOverrideSafe(normalized, resolution, requiredContrast)
             ? normalized
             : fallback;
+    }
+
+    private static bool IsSharedOverrideSafe(
+        string overrideColor,
+        AppSurfaceThemeResolution resolution,
+        double requiredContrast)
+    {
+        return resolution.Mode switch
+        {
+            AppSurfaceThemeMode.Light => HasRequiredContrast(overrideColor, resolution.Light, requiredContrast),
+            AppSurfaceThemeMode.Dark => HasRequiredContrast(overrideColor, resolution.Dark, requiredContrast),
+            AppSurfaceThemeMode.System => HasRequiredContrast(overrideColor, resolution.Light, requiredContrast)
+                                           && HasRequiredContrast(overrideColor, resolution.Dark, requiredContrast),
+            _ => false
+        };
+    }
+
+    private static bool HasRequiredContrast(
+        string foreground,
+        AppSurfaceThemeRoles roles,
+        double requiredContrast)
+    {
+        return ContrastRatio(foreground, roles.Canvas) >= requiredContrast
+               && ContrastRatio(foreground, roles.Surface) >= requiredContrast
+               && ContrastRatio(foreground, roles.RaisedSurface) >= requiredContrast;
     }
 
     private static string ToPresetAttribute(AppSurfaceDocsThemePreset preset)
