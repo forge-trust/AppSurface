@@ -39,6 +39,31 @@ public sealed class ReleaseWorkflowPolicyTests
     }
 
     [Fact]
+    public void ReleasePreparationChangePolicyRejectsAnActuallyEmptyDiff()
+    {
+        var result = ReleasePreparationChangePolicy.Validate("1.2.3", []);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => error.Contains("diff is empty", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ReleasePreparationChangePolicyRejectsUnsupportedGitStatuses()
+    {
+        var result = ReleasePreparationChangePolicy.Validate(
+            "1.2.3",
+            [
+                new("C", "README.md"),
+                new("M", "CHANGELOG.md"),
+                new("M", "CHANGELOG.md")
+            ]);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => error.Contains("Unsupported Git change status 'C'", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, error => error.Contains("path appears more than once: CHANGELOG.md", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ReleasePreparationChangePolicyRejectsSidecarUnexpectedChangesDeletesAndRenames()
     {
         var result = ReleasePreparationChangePolicy.Validate(

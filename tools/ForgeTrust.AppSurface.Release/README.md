@@ -37,7 +37,7 @@ For stable releases, `check` also validates prepared release evidence and verifi
 - `releases/v{version}.release.json`
 - `releases/v{version}.evidence.json`
 - `CHANGELOG.md` compact rollover entries
-- [`packages/package-index.yml`](../../packages/package-index.yml) release-link contracts for every `classification: public` plus `publish_decision: publish` package; see the [coordinated release-links guide](../../releases/coordinated-release-links.md)
+- `packages/package-index.yml` release-link contracts for every `classification: public` plus `publish_decision: publish` package; see the [coordinated release-links guide](../../releases/coordinated-release-links.md)
 - reset `releases/unreleased.md` and `releases/unreleased.md.yml`
 
 The changelog is a compact ledger, not the detailed release narrative. During preparation, the detailed `CHANGELOG.md` `Unreleased`
@@ -92,7 +92,7 @@ Historical evidence uses schema `appsurface-release-evidence-bundle-v1`. New coo
 
 The bundle records release identity, release note and sidecar paths, the release JSON digest, ordered coordinated resolutions, optional AppSurface Docs archive catalog fields, split commit identities, generator metadata, and a deterministic subject SHA-256. V2 calls the original checked-out SHA `preparationBaseCommit`; later `releasePreparationCommit` and `tagCommit` identities remain nullable in preparation evidence and are populated only by the appropriate later release phase. V2 binds the frozen pointer to the tagged note for this docs tree; it never performs a global current-version lookup. The subject digest excludes the generated timestamp, workflow run, release-preparation commit, and tag commit so maintainers can review those later identities without churning the proof. Optional GitHub artifact attestations are not required; default workflows must not request attestation permissions unless a future explicit attestation mode is added.
 
-The authoritative Draft 2020-12 definitions are [`schemas/release-manifest-v2.schema.json`](./schemas/release-manifest-v2.schema.json) and [`schemas/release-evidence-v2.schema.json`](./schemas/release-evidence-v2.schema.json). The release tool also checks raw schema names before typed deserialization, rejects V1-only fields in V2, and validates ordinal ordering because JSON Schema cannot express arbitrary lexical ordering. Existing V1 readers remain separate: do not relabel or rewrite historical `v0.1.0` artifacts when adding V2 releases.
+The authoritative Draft 2020-12 definitions are `schemas/release-manifest-v2.schema.json` and `schemas/release-evidence-v2.schema.json`. The release tool also checks raw schema names before typed deserialization, rejects V1-only fields in V2, and validates ordinal ordering because JSON Schema cannot express arbitrary lexical ordering. Existing V1 readers remain separate: do not relabel or rewrite historical `v0.1.0` artifacts when adding V2 releases.
 
 Before preparation, `releases/current.md` must be exactly one canonical template: the initial `none` marker with no release link, or the marker and link for the latest reachable annotated `v*` tag. Preparation accepts `none` only before the first qualifying tag, rejects stale or malformed markers, and renders the target template rather than editing prose in place. The sidecar remains permanent input. Immediately before the first write, preparation rechecks both the captured base commit and pointer/sidecar digests so concurrent changes cannot produce a mixed release set.
 
