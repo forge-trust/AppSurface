@@ -125,6 +125,7 @@ public sealed class AppSurfaceThemeWebIntegrationTests
         Assert.Same(AppSurfaceThemeDocument.Empty, nullDocument);
         Assert.False(AppSurfaceThemeDocumentSerializer.TrySerialize(invalidMode, out var invalidModeDocument));
         Assert.Same(AppSurfaceThemeDocument.Empty, invalidModeDocument);
+        Assert.Same(AppSurfaceThemeDocument.Empty, AppSurfaceThemeDocumentSerializer.Serialize(invalidMode));
         Assert.False(AppSurfaceThemeDocumentSerializer.TrySerialize(emptyId, out var emptyIdDocument));
         Assert.Same(AppSurfaceThemeDocument.Empty, emptyIdDocument);
         Assert.False(AppSurfaceThemeDocumentSerializer.TrySerialize(invalidRoles, out var invalidRolesDocument));
@@ -279,6 +280,15 @@ public sealed class AppSurfaceThemeWebIntegrationTests
     }
 
     [Fact]
+    public void Serializer_ShouldLeaveHeadContentUnchangedWithoutANonce()
+    {
+        var document = AppSurfaceThemeDocumentSerializer.Serialize(CreateResolution(AppSurfaceThemeMode.Light));
+
+        Assert.Equal(document.HeadContent, AppSurfaceThemeDocumentSerializer.SerializeHeadContent(document));
+        Assert.Equal(document.HeadContent, AppSurfaceThemeDocumentSerializer.SerializeHeadContent(document, string.Empty));
+    }
+
+    [Fact]
     public void HeadTagHelper_ShouldEmitOnePayloadPerMvcRequest()
     {
         var viewContext = CreateViewContext();
@@ -320,6 +330,18 @@ public sealed class AppSurfaceThemeWebIntegrationTests
         context.Items[AppSurfaceThemeCspNonce.HttpContextItemKey] = "nonce-value";
 
         Assert.Equal("nonce-value", AppSurfaceThemeCspNonce.Get(context));
+    }
+
+    [Fact]
+    public void ThemeCspNonce_ShouldReturnNullWhenTheHostHasNotSuppliedAStringNonce()
+    {
+        var context = new DefaultHttpContext();
+
+        Assert.Null(AppSurfaceThemeCspNonce.Get(context));
+
+        context.Items[AppSurfaceThemeCspNonce.HttpContextItemKey] = 42;
+
+        Assert.Null(AppSurfaceThemeCspNonce.Get(context));
     }
 
     [Fact]

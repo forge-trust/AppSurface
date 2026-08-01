@@ -77,6 +77,34 @@ public sealed class AppSurfaceDocsThemePairTests
         Assert.Contains("--docs-color-link:#9cf;", theme.CriticalCss, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Resolver_ShouldPreserveContrastSafeOverridesWhenMappingSharedLightPair()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Theme = new AppSurfaceDocsThemeOptions
+            {
+                Colors = new AppSurfaceDocsThemeColorOptions
+                {
+                    AccentColor = "#1d4ed8",
+                    AccentStrongColor = "#1d4ed8",
+                    LinkColor = "#1d4ed8",
+                    VisitedLinkColor = "#6d28d9"
+                }
+            }
+        };
+        AppSurfaceDocsThemePolicy.Normalize(options.Theme);
+        var pair = AppSurfaceThemePair.AppSurface();
+        var resolution = new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.Light, pair.Light, pair.Dark);
+
+        var theme = new AppSurfaceDocsThemeResolver(options, new StubThemeResolver(resolution)).Theme;
+
+        Assert.Contains("--docs-color-accent:#1d4ed8;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-accent-strong:#1d4ed8;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-link:#1d4ed8;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-link-visited:#6d28d9;", theme.CriticalCss, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(AppSurfaceThemeMode.Light)]
     [InlineData(AppSurfaceThemeMode.System)]

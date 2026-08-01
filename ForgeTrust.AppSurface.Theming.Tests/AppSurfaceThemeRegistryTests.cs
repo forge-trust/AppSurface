@@ -259,6 +259,21 @@ public sealed class AppSurfaceThemeRegistryTests
     }
 
     [Fact]
+    public void Registry_ShouldReturnRegisteredPairAsDefensiveSnapshot()
+    {
+        var options = CreateOptions();
+        var configuredPair = Assert.Single(options.Pairs);
+        var registry = new AppSurfaceThemeRegistry(options);
+
+        var snapshot = registry.GetRequired(configuredPair.Id);
+
+        Assert.Equal(configuredPair, snapshot);
+        Assert.NotSame(configuredPair, snapshot);
+        Assert.NotSame(configuredPair.Light, snapshot.Light);
+        Assert.NotSame(configuredPair.Dark, snapshot.Dark);
+    }
+
+    [Fact]
     public void ValidationException_ShouldSnapshotDiagnostics()
     {
         var diagnostics = new List<AppSurfaceThemeDiagnostic>
@@ -293,6 +308,21 @@ public sealed class AppSurfaceThemeRegistryTests
         services.AddAppSurfaceTheming(options => options.Pairs.Add(AppSurfaceThemePair.AppSurface()));
         services.AddRequiredThemeExtension<ExtensionSettings>();
         services.AddSingleton<IAppSurfaceThemeExtensionProvider<ExtensionSettings>>(new MissingExtensionProvider());
+        using var provider = services.BuildServiceProvider();
+
+        var exception = Assert.Throws<AppSurfaceThemeValidationException>(
+            () => provider.GetRequiredService<IAppSurfaceThemeRegistry>());
+
+        Assert.Equal("ASTHEME202", Assert.Single(exception.Diagnostics).Code);
+    }
+
+    [Fact]
+    public void RequiredExtension_ShouldFailWhenAProviderReturnsNullSettings()
+    {
+        var services = new ServiceCollection();
+        services.AddAppSurfaceTheming(options => options.Pairs.Add(AppSurfaceThemePair.AppSurface()));
+        services.AddRequiredThemeExtension<ExtensionSettings>();
+        services.AddSingleton<IAppSurfaceThemeExtensionProvider<ExtensionSettings>>(new NullSettingsExtensionProvider());
         using var provider = services.BuildServiceProvider();
 
         var exception = Assert.Throws<AppSurfaceThemeValidationException>(
@@ -370,6 +400,15 @@ public sealed class AppSurfaceThemeRegistryTests
         {
             RequestedThemeIds.Add(themeId);
             settings = new ExtensionSettings(themeId.Value);
+            return true;
+        }
+    }
+
+    private sealed class NullSettingsExtensionProvider : IAppSurfaceThemeExtensionProvider<ExtensionSettings>
+    {
+        public bool TryGet(AppSurfaceThemeId themeId, out ExtensionSettings settings)
+        {
+            settings = null!;
             return true;
         }
     }
