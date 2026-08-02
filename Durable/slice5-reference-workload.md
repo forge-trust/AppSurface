@@ -1,7 +1,7 @@
 # Slice 5 Work-first Schedule reference workload
 
 This is the checked PostgreSQL Gate A proof for the source-only preview. It creates a one-time Work Schedule, runs one
-manual pass, and verifies one immutable occurrence linked to one accepted Work. It proves durable identity and target
+manual pass, and verifies one immutable occurrence and one accepted Work. It proves durable identity and target
 acceptance; external provider effects remain governed by the Work registration's provider-safety policy.
 
 ## Prerequisites

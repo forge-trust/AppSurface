@@ -10,6 +10,7 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 /// </remarks>
 public sealed record PostgreSqlDurableScheduleOptions
 {
+    // Mirrors the ten-minute fence in migration 0004's appsurface_durable.claim_schedule_dispatch function.
     private static readonly TimeSpan MaximumLeaseDuration = TimeSpan.FromMinutes(10);
 
     /// <summary>

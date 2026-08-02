@@ -46,7 +46,7 @@ Release and readiness:
 - Add `ForgeTrust.AppSurface.Workers.DurableTask` after `ForgeTrust.AppSurface.Workers` and `ForgeTrust.AppSurface.Flow.DurableTask` when worker contracts should be driven by Durable Task orchestration decisions.
 - Reference the source-preview `ForgeTrust.AppSurface.Durable` contract for portable authoring and registration; no runtime starts until a provider is installed explicitly.
 - Reference the source-preview Provider SPI only when implementing or hosting a durable runtime; applications normally depend on `ForgeTrust.AppSurface.Durable` alone.
-- Evaluate the held PostgreSQL source provider when one database must atomically own Work, explicit one-transition Flow state, and Work-first Schedule storage; slices 3-5 start no worker.
+- Evaluate the held PostgreSQL source provider when one database must atomically own Work, explicit one-transition Flow state, and [Work-first Schedule storage](../Durable/schedule-protocol-v1.md); slices 3-5 start no worker.
 - Start with `ForgeTrust.AppSurface.Console` for CLI commands or worker-style processes that should share AppSurface module composition.
 - Add `ForgeTrust.AppSurface.Dependency.Autofac` when your app already uses Autofac and your modules need Autofac-specific registrations.
 - Add [`ForgeTrust.AppSurface.Deployment`](../Deployment/ForgeTrust.AppSurface.Deployment/README.md) directly only when authoring a deployment provider or inspecting portable deployment intent; normal Aspire consumers receive it transitively.

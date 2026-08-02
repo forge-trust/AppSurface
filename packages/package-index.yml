@@ -342,7 +342,7 @@ packages:
     includes: Explicit ordered schema management, StoreId and runtime-epoch fencing, caller-owned Work acceptance, short-transaction Work and Flow clients, Work-first Schedule client and manual processor, payload-free dispatch, Flow waits/timers/activity projection, leases, effect permits, cancellation, terminal facts, and real PostgreSQL conformance proof.
     does_not_include: Hosted background scheduler, hosted polling, automatic startup DDL, health/drain hosting, endpoints, telemetry implementation, exactly-once external effects, destructive down migrations, or production support.
     start_here_path: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
-    recipe_summary: Evaluate the held PostgreSQL source provider when one database must atomically own Work, explicit one-transition Flow state, and Work-first Schedule storage; slices 3-5 start no worker.
+    recipe_summary: Evaluate the held PostgreSQL source provider when one database must atomically own Work, explicit one-transition Flow state, and [Work-first Schedule storage](../Durable/schedule-protocol-v1.md); slices 3-5 start no worker.
     depends_on:
       - ForgeTrust.AppSurface.Durable
       - ForgeTrust.AppSurface.Durable.Provider

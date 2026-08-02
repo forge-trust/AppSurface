@@ -64,11 +64,15 @@ public sealed class PostgreSqlDurablePublicContractTests
         Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleOptions("durable", TimeSpan.FromTicks(-1)));
         Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleOptions("durable", leaseDuration: TimeSpan.Zero));
         Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleOptions("durable", leaseDuration: TimeSpan.FromMinutes(11)));
+        var maximumOptions = new PostgreSqlDurableScheduleOptions(new string('r', 63), leaseDuration: TimeSpan.FromMinutes(10));
+        Assert.Equal(TimeSpan.FromMinutes(10), maximumOptions.LeaseDuration);
         Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleProcessRequest("pass", 0));
         Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleProcessRequest("pass", 129));
         Assert.Throws<ArgumentException>(() => new PostgreSqlDurableScheduleProcessRequest(" "));
         Assert.Throws<ArgumentException>(() => new PostgreSqlDurableScheduleProcessRequest(new string('p', 201)));
         Assert.Throws<ArgumentException>(() => new PostgreSqlDurableScheduleProcessRequest("pass\u0001"));
+        var maximumRequest = new PostgreSqlDurableScheduleProcessRequest(new string('p', 200), 128);
+        Assert.Equal(128, maximumRequest.MaximumSchedules);
 
         var empty = new PostgreSqlDurableScheduleProcessResult(0, 0, 0, 0);
         Assert.Equal(0, empty.ClaimedSchedules);

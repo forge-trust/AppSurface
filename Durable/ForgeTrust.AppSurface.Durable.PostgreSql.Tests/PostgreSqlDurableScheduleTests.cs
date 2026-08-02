@@ -1402,6 +1402,8 @@ public sealed class PostgreSqlDurableScheduleTests
 
         Assert.Equal(ScheduleProcessOutcome.Suspended, result);
         Assert.Equal(DurableScheduleProblemCodes.DialectUnsupported, await ReadSuspensionCodeAsync(database.DataSource, scope, scheduleId));
+        Assert.Equal(3, await CountAsync(database.DataSource, scope, "schedule_history"));
+        Assert.True(await HasHistoryEventAsync(database.DataSource, scope, scheduleId, "unsupported-target-suspended"));
         Assert.Equal(1, await CountAsync(database.DataSource, scope, "schedule_occurrence"));
         Assert.Equal(0, await CountAsync(database.DataSource, scope, "work"));
     }
@@ -1697,6 +1699,7 @@ public sealed class PostgreSqlDurableScheduleTests
             anchor));
 
         Assert.Empty(pastAt.Value!.NextOccurrencesUtc);
+        Assert.Equal("At is earlier than the requested anchor, so no future occurrence remains.", Assert.Single(pastAt.Value!.Notes));
         Assert.Equal(DurableScheduleProblemCodes.DialectUnsupported, cron.Problem!.Code);
     }
 
@@ -2566,6 +2569,35 @@ public sealed class PostgreSqlDurableScheduleTests
         await reader.DisposeAsync();
         await transaction.CommitAsync();
         return result;
+    }
+
+    private static async ValueTask<bool> HasHistoryEventAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scopeId,
+        DurableScheduleId scheduleId,
+        string eventType)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using (var scope = new NpgsqlCommand(
+                         "SELECT set_config('appsurface_durable.scope_id', @scope_id, true);",
+                         connection,
+                         transaction))
+        {
+            scope.Parameters.AddWithValue("scope_id", scopeId.Value);
+            await scope.ExecuteNonQueryAsync();
+        }
+
+        await using var command = new NpgsqlCommand(
+            "SELECT EXISTS (SELECT 1 FROM appsurface_durable.schedule_history WHERE scope_id = @scope_id AND schedule_id = @schedule_id AND event_type = @event_type);",
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("scope_id", scopeId.Value);
+        command.Parameters.AddWithValue("schedule_id", scheduleId.Value);
+        command.Parameters.AddWithValue("event_type", eventType);
+        var exists = (bool)(await command.ExecuteScalarAsync())!;
+        await transaction.CommitAsync();
+        return exists;
     }
 
     private static string StableIdentity(string prefix, params string[] values) =>

@@ -719,6 +719,7 @@ internal sealed class PostgreSqlDurableScheduleStore
 
         var notes = request.Schedule switch
         {
+            DurableAtSchedule at when at.AtUtc < anchor => new[] { "At is earlier than the requested anchor, so no future occurrence remains." },
             DurableAfterSchedule => new[] { "After is anchored to the provider acceptance transaction timestamp." },
             DurableEverySchedule { AnchorUtc: null } => new[] { "Every uses the provider acceptance transaction timestamp when no anchor is supplied." },
             _ => Array.Empty<string>(),
@@ -1038,7 +1039,7 @@ internal sealed class PostgreSqlDurableScheduleStore
                     var first = NextAfter(anchor, every.Interval, cursorUtc);
                     if (first <= cutoffUtc)
                     {
-                        var count = (long)Math.Floor((cutoffUtc - first).Ticks / (double)every.Interval.Ticks);
+                        var count = (cutoffUtc - first).Ticks / every.Interval.Ticks;
                         var last = first + TimeSpan.FromTicks(checked(every.Interval.Ticks * count));
                         due = new ScheduleDueRange(first, last, last + every.Interval, first == last ? "nominal" : "recovery");
                         return true;
@@ -1385,6 +1386,8 @@ internal sealed class PostgreSqlDurableScheduleStore
         command.Parameters.AddWithValue("revision", revision);
         command.Parameters.AddWithValue("suspension_code", DurableScheduleProblemCodes.DialectUnsupported);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await InsertHistoryAsync(connection, transaction, processing.ScopeId, processing.ScheduleId, processing.Generation, null, "unsupported-target-suspended", cancellationToken)
+            .ConfigureAwait(false);
         await SetDispatchStateAsync(connection, transaction, processing.ScopeId, processing.ScheduleId, revision, "suspended", cancellationToken).ConfigureAwait(false);
     }
 

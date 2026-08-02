@@ -22,8 +22,8 @@ public, testable contracts without friend access to the application package. The
 `ForgeTrust.AppSurface.Durable.PostgreSql` → `ForgeTrust.AppSurface.Durable.Provider` → `ForgeTrust.AppSurface.Durable`
 
 The application package registers only passive registries. A provider is selected explicitly by the host. The PostgreSQL
-source preview adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`, `0004_schedule_protocol`) and one-operation-at-a-time Work, Flow, and Work-first Schedule persistence, but no polling host, scheduling
-execution, hosted service, endpoint, or telemetry implementation.
+source preview adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`, `0004_schedule_protocol`) and one-operation-at-a-time Work, Flow, and Work-first Schedule persistence, but no polling host or hosted
+scheduling activation, hosted service, endpoint, or telemetry implementation.
 
 ## Scale and transport boundary
 

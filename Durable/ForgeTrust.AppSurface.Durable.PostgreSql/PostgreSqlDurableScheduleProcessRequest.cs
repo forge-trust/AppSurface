@@ -10,8 +10,8 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 public sealed record PostgreSqlDurableScheduleProcessRequest
 {
     /// <summary>Initializes one bounded Schedule processing pass.</summary>
-    /// <param name="leaseOwner">Opaque processor identity used only for a short dispatch lease.</param>
-    /// <param name="maximumSchedules">Maximum dispatch rows this pass may claim; defaults to one.</param>
+    /// <param name="leaseOwner">Opaque processor identity of 1 to 200 non-control characters used only for a short dispatch lease.</param>
+    /// <param name="maximumSchedules">Maximum dispatch rows this pass may claim, from 1 to 128; defaults to one.</param>
     public PostgreSqlDurableScheduleProcessRequest(string leaseOwner, int maximumSchedules = 1)
     {
         if (string.IsNullOrWhiteSpace(leaseOwner) || leaseOwner.Length > 200 || leaseOwner.Any(char.IsControl))
@@ -21,7 +21,7 @@ public sealed record PostgreSqlDurableScheduleProcessRequest
 
         if (maximumSchedules is < 1 or > 128)
         {
-            throw new ArgumentOutOfRangeException(nameof(maximumSchedules));
+            throw new ArgumentOutOfRangeException(nameof(maximumSchedules), "The maximum Schedule count must be from 1 to 128.");
         }
 
         LeaseOwner = leaseOwner;

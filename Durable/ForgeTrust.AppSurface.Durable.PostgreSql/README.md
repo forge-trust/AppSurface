@@ -213,7 +213,7 @@ Do not call the processor in a request loop or register hosted work; hosted acti
 The Schedule processor also compares persisted runtime-epoch and scope-generation fences before evaluating a due row.
 A mismatch suspends the Schedule before it can move a cursor or accept Work. Use `ReleaseAfterRecovery` only for an old
 runtime epoch; a scope-generation mismatch must be repaired with a public update or delete/recreate. The dispatcher
-claim function rejects blank/control-character owners and non-positive durations before leasing, preventing malformed
+claim function rejects blank/control-character owners and null or non-positive durations before leasing, preventing malformed
 or overlong calls from stranding a row. Schedule discovery leases are capped at ten minutes.
 
 For the admitted default `QueueOne` policy, one nonterminal target occupies the Schedule-wide slot. Later nominal
@@ -269,5 +269,5 @@ Read the normative [`Work protocol v1`](../work-protocol-v1.md), [`Flow protocol
 
 ## Release Guidance
 
-From the repository root, `./Durable/verify-postgresql.sh --quick` runs focused Work proof, `./Durable/verify-postgresql.sh --quick --flow` runs focused Flow proof, and `./Durable/verify-postgresql.sh --quick --schedule` runs the real PostgreSQL Work-first Schedule proof. `--ci` runs the complete strict real-PostgreSQL suite; `--ci --flow` performs its compatibility preflight before that suite, while `--ci --schedule` selects Schedule validation but likewise runs the complete suite. The [`package chooser`](../../packages/README.md) is the generated adoption/publication source, and
+From the repository root, `./Durable/verify-postgresql.sh --quick` runs focused Work proof, `./Durable/verify-postgresql.sh --quick --flow` runs focused Flow proof, and `./Durable/verify-postgresql.sh --quick --schedule` runs the real PostgreSQL Work-first Schedule proof. `--ci` runs the complete strict real-PostgreSQL suite; `--ci --flow` performs its compatibility preflight before that suite, while `--ci --schedule` also runs the complete suite without a Schedule-specific filter. The [`package chooser`](../../packages/README.md) is the generated adoption/publication source, and
 the [`release hub`](../../releases/README.md) owns coordinated release policy.
