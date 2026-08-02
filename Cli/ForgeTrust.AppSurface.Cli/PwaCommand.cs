@@ -12,9 +12,9 @@ using ForgeTrust.AppSurface.Web;
 namespace ForgeTrust.AppSurface.Cli;
 
 /// <summary>
-/// Verifies that a running web app exposes AppSurface-compatible PWA install metadata.
+/// Verifies that a running web app exposes AppSurface-compatible PWA install or push-readiness evidence.
 /// </summary>
-[Command("pwa verify", Description = "Verify PWA install metadata for a running AppSurface Web app.")]
+[Command("pwa verify", Description = "Verify PWA install metadata or privacy-safe server-known push readiness for a running AppSurface Web app.")]
 internal sealed partial class PwaVerifyCommand : ICommand
 {
     private readonly PwaVerifier _verifier;
@@ -37,10 +37,28 @@ internal sealed partial class PwaVerifyCommand : ICommand
     public string? BaseUrl { get; set; }
 
     /// <summary>
-    /// Gets the app-root-relative entry path whose HTML should expose the manifest link.
+    /// Gets the app-root-relative entry path whose HTML should expose the manifest link or push registration helper.
     /// </summary>
-    [CommandOption("entry-path", Description = "App-root-relative page path to verify for manifest discovery, for example /account/resume.")]
+    [CommandOption("entry-path", Description = "App-root-relative page path used for manifest (install), registration-helper (push), or both (all) discovery.")]
     public string EntryPath { get; set; } = "/";
+
+    /// <summary>
+    /// Gets the verification surface. Install retains the schema-v2 default contract.
+    /// </summary>
+    [CommandOption("surface", Description = "Verification surface: install (default), push, or all.")]
+    public string Surface { get; set; } = "install";
+
+    /// <summary>
+    /// Gets the expected server-known push posture for push or all verification.
+    /// </summary>
+    [CommandOption("expect-push", Description = "Expected push posture for push or all: enabled (default) or disabled.")]
+    public string? ExpectedPush { get; set; }
+
+    /// <summary>
+    /// Gets the app-root-relative PWA diagnostics base path.
+    /// </summary>
+    [CommandOption("diagnostics-path", Description = "App-root-relative PWA diagnostics base path. Defaults to /_appsurface/pwa.")]
+    public string? DiagnosticsPath { get; set; }
 
     /// <summary>
     /// Gets the expected manifest start_url value.
@@ -104,7 +122,10 @@ internal sealed partial class PwaVerifyCommand : ICommand
                 ExpectedDisplay,
                 ExpectedThemeColor,
                 ExpectedBackgroundColor,
-                ExpectedIcons);
+                ExpectedIcons,
+                Surface,
+                ExpectedPush,
+                DiagnosticsPath);
             _ = PwaVerificationTarget.Create(options.BaseUrl, options.EntryPath);
         }
         catch (ArgumentException ex)
@@ -112,17 +133,37 @@ internal sealed partial class PwaVerifyCommand : ICommand
             throw new CommandException(ex.Message);
         }
 
-        var report = await _verifier.VerifyAsync(options, console.RegisterCancellationHandler());
+        if (options.Surface == PwaVerificationSurface.Install)
+        {
+            var report = await _verifier.VerifyAsync(options, console.RegisterCancellationHandler());
+            if (Json)
+            {
+                await console.Output.WriteLineAsync(JsonSerializer.Serialize(report, PwaVerifier.JsonOptions));
+            }
+            else
+            {
+                await WriteTextReportAsync(console, report);
+            }
+
+            if (!report.Passed)
+            {
+                throw new CommandException("PWA verification failed.");
+            }
+
+            return;
+        }
+
+        var v3Report = await _verifier.VerifySurfaceAsync(options, console.RegisterCancellationHandler());
         if (Json)
         {
-            await console.Output.WriteLineAsync(JsonSerializer.Serialize(report, PwaVerifier.JsonOptions));
+            await console.Output.WriteLineAsync(JsonSerializer.Serialize(v3Report, PwaVerifier.V3JsonOptions));
         }
         else
         {
-            await WriteTextReportAsync(console, report);
+            await WriteTextReportAsync(console, v3Report);
         }
 
-        if (!report.Passed)
+        if (!v3Report.Passed)
         {
             throw new CommandException("PWA verification failed.");
         }
@@ -155,6 +196,44 @@ internal sealed partial class PwaVerifyCommand : ICommand
                 $"{diagnostic.Severity.ToUpperInvariant()} {diagnostic.Code}{details}: {diagnostic.Message}");
         }
     }
+
+    private static async Task WriteTextReportAsync(IConsole console, PwaVerificationV3Report report)
+    {
+        await console.Output.WriteLineAsync(report.Passed
+            ? "PWA verification passed."
+            : "PWA verification failed.");
+        await console.Output.WriteLineAsync($"Surface: {report.Surface}");
+        await console.Output.WriteLineAsync($"Entry: {report.EntryUrl}");
+        await console.Output.WriteLineAsync($"Push expected: {report.Push.Expected}; observed: {FormatBoolean(report.Push.Enabled)}.");
+        await console.Output.WriteLineAsync($"Push configuration: {report.Push.ConfigurationStatus}; route mapping: {report.Push.RouteMapping}.");
+        foreach (var diagnostic in report.Diagnostics)
+        {
+            var details = string.IsNullOrWhiteSpace(diagnostic.Subject)
+                ? string.Empty
+                : $" [{diagnostic.Subject}]";
+            await console.Output.WriteLineAsync(
+                $"{diagnostic.Severity.ToUpperInvariant()} {diagnostic.Code}{details}: {diagnostic.Message}");
+            if (!string.IsNullOrWhiteSpace(diagnostic.Fix))
+            {
+                await console.Output.WriteLineAsync($"  Fix: {diagnostic.Fix}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(diagnostic.DocsUrl))
+            {
+                await console.Output.WriteLineAsync($"  Docs: {diagnostic.DocsUrl}");
+            }
+        }
+    }
+
+    private static string FormatBoolean(bool? value)
+    {
+        if (!value.HasValue)
+        {
+            return "unknown";
+        }
+
+        return value.Value ? "enabled" : "disabled";
+    }
 }
 
 internal sealed partial class PwaVerifier
@@ -166,6 +245,12 @@ internal sealed partial class PwaVerifier
     internal static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        WriteIndented = true
+    };
+
+    internal static readonly JsonSerializerOptions V3JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.Never,
         WriteIndented = true
     };
 
@@ -255,7 +340,7 @@ internal sealed partial class PwaVerifier
                 "Pass --entry-path for a real app page that renders the PWA head metadata."));
         }
 
-        await ValidateDiagnosticsAsync(target, diagnostics, cancellationToken);
+        await ValidateDiagnosticsAsync(target, options.DiagnosticsPath, diagnostics, cancellationToken);
 
         var manifest = await FetchAsync(target, manifestUri, "manifest", MaxTextResponseBytes, diagnostics, cancellationToken);
         if (manifest.RedirectLimitExceeded)
@@ -388,14 +473,299 @@ internal sealed partial class PwaVerifier
         return BuildReport(target, manifestUri, manifestDocument, iconEvidence, diagnostics);
     }
 
+    /// <summary>
+    /// Verifies the additive schema-v3 push or combined readiness surface without modifying the default install path.
+    /// </summary>
+    internal async Task<PwaVerificationV3Report> VerifySurfaceAsync(
+        PwaVerificationOptions options,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        if (options.Surface == PwaVerificationSurface.Install)
+        {
+            throw new ArgumentException("Schema-v3 verification requires the push or all surface.", nameof(options));
+        }
+
+        var target = PwaVerificationTarget.Create(options.BaseUrl, options.EntryPath);
+        PwaVerificationReport? install = null;
+        var diagnostics = new List<PwaVerificationDiagnostic>();
+        if (options.Surface == PwaVerificationSurface.All)
+        {
+            install = await VerifyAsync(options, cancellationToken);
+            diagnostics.AddRange(install.Diagnostics);
+        }
+
+        var pushResult = await VerifyPushAsync(target, options.ExpectedPush, options.DiagnosticsPath, cancellationToken);
+        diagnostics.AddRange(pushResult.Diagnostics);
+        return new PwaVerificationV3Report(
+            3,
+            diagnostics.All(diagnostic => diagnostic.Severity != "error"),
+            options.Surface.ToString().ToLowerInvariant(),
+            target.Origin.ToString().TrimEnd('/'),
+            target.BaseUri.ToString().TrimEnd('/'),
+            target.EntryPath,
+            target.EntryUri.ToString(),
+            install is null ? null : BuildInstallEvidence(install),
+            pushResult.Evidence,
+            diagnostics);
+    }
+
+    private async Task<PwaPushVerificationResult> VerifyPushAsync(
+        PwaVerificationTarget target,
+        PwaExpectedPush expectedPush,
+        string diagnosticsPath,
+        CancellationToken cancellationToken)
+    {
+        var diagnostics = new List<PwaVerificationDiagnostic>();
+        var entry = await FetchAsync(target, target.EntryUri, "entry", MaxTextResponseBytes, diagnostics, cancellationToken);
+        var statusResponse = await FetchAsync(
+            target,
+            GetDiagnosticsStatusUri(target, diagnosticsPath),
+            "diagnostics",
+            MaxTextResponseBytes,
+            diagnostics,
+            cancellationToken);
+
+        PwaStatusProbe? status = null;
+        if (statusResponse.RedirectLimitExceeded || !statusResponse.IsSuccess)
+        {
+            diagnostics.Add(PushError(
+                "ASPWA270",
+                "Push verification requires the existing PWA diagnostics status document.",
+                "diagnostics",
+                "exposed-status-json",
+                statusResponse.RedirectLimitExceeded ? "redirect-limit" : $"HTTP {(int)statusResponse.StatusCode}",
+                "Enable the existing PWA diagnostics endpoint through its explicit exposure policy."));
+        }
+        else
+        {
+            try
+            {
+                status = JsonSerializer.Deserialize<PwaStatusProbe>(statusResponse.Body, JsonOptions);
+                if (status is null)
+                {
+                    diagnostics.Add(PushError(
+                        "ASPWA271",
+                        "PWA diagnostics did not contain a status document.",
+                        "diagnostics.json",
+                        "status-document",
+                        "null",
+                        "Upgrade the Web package and expose the generated PWA diagnostics endpoint."));
+                }
+            }
+            catch (JsonException)
+            {
+                diagnostics.Add(PushError(
+                    "ASPWA271",
+                    "PWA diagnostics JSON is not a safe current readiness document.",
+                    "diagnostics.json",
+                    "valid-current-json",
+                    "invalid-json",
+                    "Upgrade the Web package and expose its generated PWA diagnostics endpoint."));
+            }
+        }
+
+        var worker = new PwaWorkerEvidence(
+            status?.WorkerPath,
+            status?.WorkerScope,
+            "not-evaluated",
+            "not-evaluated",
+            "not-evaluated",
+            "not-evaluated");
+        var helper = new PwaRegistrationHelperEvidence(
+            status?.RegistrationHelperPath,
+            "not-evaluated",
+            "not-evaluated",
+            "not-evaluated",
+            "not-evaluated",
+            "not-evaluated");
+        var configurationStatus = "not-evaluated";
+        var vapid = new PwaVapidEvidence(null, null);
+        var routeMapping = "not-evaluated";
+
+        if (status is null)
+        {
+            return new PwaPushVerificationResult(
+                BuildPushEvidence(expectedPush, null, configurationStatus, worker, helper, vapid, routeMapping),
+                diagnostics);
+        }
+
+        if (expectedPush == PwaExpectedPush.Disabled)
+        {
+            if (status.PushEnabled)
+            {
+                diagnostics.Add(PushError(
+                    "ASPWA272",
+                    "The host reports push enabled while disabled push readiness was requested.",
+                    "diagnostics.pushEnabled",
+                    "false",
+                    "true",
+                    "Disable Pwa.Push.Enabled or verify with --expect-push enabled."));
+            }
+
+            if (!string.IsNullOrWhiteSpace(status.RegistrationHelperPath))
+            {
+                diagnostics.Add(PushError(
+                    "ASPWA273",
+                    "The host reports a registration helper while disabled push readiness was requested.",
+                    "diagnostics.registrationHelperPath",
+                    "absent",
+                    "present",
+                    "Disable Pwa.Push.Enabled so the generated registration helper is not exposed."));
+            }
+
+            if (!entry.RedirectLimitExceeded
+                && entry.IsSuccess
+                && entry.ContentType.StartsWith("text/html", StringComparison.OrdinalIgnoreCase))
+            {
+                if (ContainsPwaRegistrationHelper(entry.Body))
+                {
+                    diagnostics.Add(PushError(
+                        "ASPWA274",
+                        "The entry document still references an AppSurface push registration helper.",
+                        "entry.head.registrationHelper",
+                        "absent",
+                        "present",
+                        "Remove the generated PWA push helper by disabling Pwa.Push.Enabled."));
+                }
+            }
+            else if (!entry.RedirectLimitExceeded)
+            {
+                diagnostics.Add(PushError(
+                    "ASPWA275",
+                    "Push verification requires an HTML entry document to prove helper absence.",
+                    "entry",
+                    "text/html",
+                    entry.IsSuccess ? entry.ContentType : $"HTTP {(int)entry.StatusCode}",
+                    "Pass --entry-path for a page rendered by the AppSurface PWA layout."));
+            }
+
+            return new PwaPushVerificationResult(
+                BuildPushEvidence(expectedPush, status.PushEnabled, configurationStatus, worker, helper, vapid, routeMapping),
+                diagnostics);
+        }
+
+        if (!status.PushEnabled)
+        {
+            diagnostics.Add(PushError(
+                "ASPWA276",
+                "The host does not report enabled push worker handling.",
+                "diagnostics.pushEnabled",
+                "true",
+                "false",
+                "Enable Pwa.Push.Enabled before requesting enabled push readiness."));
+        }
+
+        if (!status.WorkerEnabled)
+        {
+            diagnostics.Add(PushError(
+                "ASPWA282",
+                "Enabled push diagnostics must report enabled shared-worker handling.",
+                "diagnostics.workerEnabled",
+                "true",
+                "false",
+                "Enable the generated shared worker before requesting enabled push readiness."));
+        }
+
+        if (string.IsNullOrWhiteSpace(status.WorkerPath) || string.IsNullOrWhiteSpace(status.WorkerScope))
+        {
+            diagnostics.Add(PushError(
+                "ASPWA277",
+                "Enabled push diagnostics must include a worker path and scope.",
+                "diagnostics.worker",
+                "path-and-scope",
+                "missing",
+                "Use the generated AppSurface shared worker configuration."));
+        }
+
+        if (string.IsNullOrWhiteSpace(status.RegistrationHelperPath))
+        {
+            diagnostics.Add(PushError(
+                "ASPWA278",
+                "Enabled push diagnostics must include a registration-helper path.",
+                "diagnostics.registrationHelperPath",
+                "configured-path",
+                "missing",
+                "Use the generated AppSurface PWA head metadata on the verified entry page."));
+        }
+
+        var readiness = NormalizePushReadiness(status.PushReadiness, diagnostics);
+        configurationStatus = readiness.ConfigurationStatus;
+        vapid = new PwaVapidEvidence(readiness.ActiveVapidKeyId, readiness.PublicKeyFingerprint);
+        routeMapping = readiness.RouteMapped switch
+        {
+            true => "mapped",
+            false => "not-mapped",
+            _ => "not-evaluated"
+        };
+        if (configurationStatus == "unavailable")
+        {
+            diagnostics.Add(PushError(
+                "ASPWA279",
+                "Push diagnostics expose an unavailable readiness contributor, so its safe posture cannot be trusted.",
+                "diagnostics.pushReadiness.configurationStatus",
+                "configured-or-not-configured",
+                configurationStatus,
+                "Fix the Web readiness provider or expose a current generated PWA diagnostics document."));
+        }
+        else if (configurationStatus == "configured" && readiness.RouteMapped is not true)
+        {
+            diagnostics.Add(PushError(
+                "ASPWA280",
+                "The optional Push subscription rail has not been mapped.",
+                "diagnostics.pushReadiness.routeMapped",
+                "true",
+                "false",
+                "Map the package-owned Push endpoints before verifying readiness."));
+        }
+
+        if (!entry.RedirectLimitExceeded
+            && entry.IsSuccess
+            && entry.ContentType.StartsWith("text/html", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(status.RegistrationHelperPath)
+            && !string.IsNullOrWhiteSpace(status.WorkerPath)
+            && !string.IsNullOrWhiteSpace(status.WorkerScope))
+        {
+            helper = await VerifyRegistrationHelperAsync(
+                target,
+                entry,
+                status.RegistrationHelperPath,
+                status.WorkerPath,
+                status.WorkerScope,
+                diagnostics,
+                cancellationToken);
+        }
+        else if (!entry.RedirectLimitExceeded)
+        {
+            diagnostics.Add(PushError(
+                "ASPWA281",
+                "Enabled push verification requires an HTML entry document and complete worker diagnostics.",
+                "entry",
+                "html-and-worker-metadata",
+                entry.IsSuccess ? entry.ContentType : $"HTTP {(int)entry.StatusCode}",
+                "Use a generated AppSurface PWA entry page and expose current diagnostics."));
+        }
+
+        if (!string.IsNullOrWhiteSpace(status.WorkerPath) && !string.IsNullOrWhiteSpace(status.WorkerScope))
+        {
+            worker = await VerifyWorkerAsync(target, status.WorkerPath, status.WorkerScope, diagnostics, cancellationToken);
+        }
+
+        return new PwaPushVerificationResult(
+            BuildPushEvidence(expectedPush, status.PushEnabled, configurationStatus, worker, helper, vapid, routeMapping),
+            diagnostics);
+    }
+
     private async Task ValidateDiagnosticsAsync(
         PwaVerificationTarget target,
+        string diagnosticsPath,
         List<PwaVerificationDiagnostic> diagnostics,
         CancellationToken cancellationToken)
     {
+        var diagnosticsUri = GetDiagnosticsStatusUri(target, diagnosticsPath);
         var diagnosticsResponse = await FetchAsync(
             target,
-            new Uri(target.BaseUri, "_appsurface/pwa/status.json"),
+            diagnosticsUri,
             "diagnostics",
             MaxTextResponseBytes,
             diagnostics,
@@ -407,13 +777,17 @@ internal sealed partial class PwaVerifier
 
         if (diagnosticsResponse.StatusCode == HttpStatusCode.NotFound)
         {
-            diagnostics.Add(Info("ASPWA220", "AppSurface PWA diagnostics are not exposed at /_appsurface/pwa/status.json. This is expected for production defaults."));
+            diagnostics.Add(Info(
+                "ASPWA220",
+                $"AppSurface PWA diagnostics are not exposed at {EvidencePath(diagnosticsUri)}. This is expected for production defaults."));
             return;
         }
 
         if (!diagnosticsResponse.IsSuccess)
         {
-            diagnostics.Add(Warning("ASPWA221", $"AppSurface PWA diagnostics returned HTTP {(int)diagnosticsResponse.StatusCode}."));
+            diagnostics.Add(Warning(
+                "ASPWA221",
+                $"AppSurface PWA diagnostics at {EvidencePath(diagnosticsUri)} returned HTTP {(int)diagnosticsResponse.StatusCode}."));
             return;
         }
 
@@ -704,6 +1078,453 @@ internal sealed partial class PwaVerifier
                 $"HTTP {(int)serviceWorker.StatusCode}",
                 "Remove the service-worker endpoint or enable offline diagnostics intentionally."));
         }
+    }
+
+    private async Task<PwaWorkerEvidence> VerifyWorkerAsync(
+        PwaVerificationTarget target,
+        string workerPath,
+        string workerScope,
+        List<PwaVerificationDiagnostic> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        if (!ResolvesToOrigin(target, target.BaseUri, workerPath, out var workerUri)
+            || !ResolvesToOrigin(target, target.BaseUri, workerScope, out var workerScopeUri)
+            || !IsUnderBasePath(target, workerUri.AbsolutePath)
+            || !IsUnderBasePath(target, workerScopeUri.AbsolutePath)
+            || !PwaScopePathMatcher.IsPathWithinScope(workerScopeUri.AbsolutePath, target.BasePath)
+            || !PwaScopePathMatcher.IsPathWithinScope(workerUri.AbsolutePath, workerScopeUri.AbsolutePath))
+        {
+            diagnostics.Add(PushError(
+                "ASPWA283",
+                "The diagnostics worker path and scope must resolve under the verified app origin and base path.",
+                "diagnostics.worker",
+                "same-origin-path-and-scope",
+                "out-of-base",
+                "Expose the generated shared worker and its scope beneath the externally verified application base URL."));
+            return new PwaWorkerEvidence(workerPath, workerScope, "failed", "failed", "failed", "failed");
+        }
+
+        var response = await FetchNoRedirectAsync(target, workerUri, "push-worker", MaxTextResponseBytes, diagnostics, cancellationToken);
+        if (!response.IsSuccess || IsRedirect(response.StatusCode) || response.Response.BodyTruncated)
+        {
+            if (!response.IsSuccess && !IsRedirect(response.StatusCode))
+            {
+                diagnostics.Add(PushError(
+                    "ASPWA284",
+                    "The push worker did not return a successful response.",
+                    "worker.fetch",
+                    "2xx",
+                    $"HTTP {(int)response.StatusCode}",
+                    "Map the generated shared worker at the diagnostics worker path."));
+            }
+
+            return new PwaWorkerEvidence(workerPath, workerScope, "failed", "failed", "failed", "failed");
+        }
+
+        var contentType = IsJavaScript(response.ContentType) ? "passed" : "failed";
+        if (contentType == "failed")
+        {
+            diagnostics.Add(PushError(
+                "ASPWA285",
+                "The push worker must be served as JavaScript.",
+                "worker.contentType",
+                "javascript",
+                response.ContentType,
+                "Serve the generated worker with a JavaScript media type."));
+        }
+
+        var nosniff = HasExactlyOneHeader(response, "X-Content-Type-Options", "nosniff") ? "passed" : "failed";
+        if (nosniff == "failed")
+        {
+            diagnostics.Add(PushError(
+                "ASPWA286",
+                "The push worker must return exactly one X-Content-Type-Options: nosniff header.",
+                "worker.nosniff",
+                "exactly-one-nosniff",
+                HeaderCount(response, "X-Content-Type-Options").ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "Use the generated worker endpoint without a conflicting proxy header."));
+        }
+
+        var cacheControl = HasCacheDirective(response, "no-cache") ? "passed" : "failed";
+        if (cacheControl == "failed")
+        {
+            diagnostics.Add(PushError(
+                "ASPWA287",
+                "The push worker must return Cache-Control containing no-cache.",
+                "worker.cacheControl",
+                "no-cache",
+                "missing",
+                "Preserve the generated worker cache policy through the deployed proxy."));
+        }
+
+        var allowed = HasExactlyOneHeader(response, "Service-Worker-Allowed", workerScope) ? "passed" : "failed";
+        if (allowed == "failed")
+        {
+            diagnostics.Add(PushError(
+                "ASPWA288",
+                "The push worker must return one Service-Worker-Allowed header matching the diagnostics scope.",
+                "worker.serviceWorkerAllowed",
+                workerScope,
+                "missing-or-mismatched",
+                "Preserve the generated Service-Worker-Allowed header through the deployed proxy."));
+        }
+
+        return new PwaWorkerEvidence(workerPath, workerScope, "passed", contentType, nosniff, cacheControl);
+    }
+
+    private async Task<PwaRegistrationHelperEvidence> VerifyRegistrationHelperAsync(
+        PwaVerificationTarget target,
+        PwaFetchedResponse entry,
+        string helperPath,
+        string workerPath,
+        string workerScope,
+        List<PwaVerificationDiagnostic> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        if (!TryFindRegistrationHelper(
+                target,
+                entry.FinalUri,
+                entry.Body,
+                helperPath,
+                workerPath,
+                workerScope,
+                diagnostics,
+                out var helperUri))
+        {
+            return new PwaRegistrationHelperEvidence(helperPath, "failed", "not-evaluated", "not-evaluated", "not-evaluated", "not-evaluated");
+        }
+
+        var response = await FetchNoRedirectAsync(target, helperUri, "push-registration-helper", MaxTextResponseBytes, diagnostics, cancellationToken);
+        if (!response.IsSuccess || IsRedirect(response.StatusCode) || response.Response.BodyTruncated)
+        {
+            if (!response.IsSuccess && !IsRedirect(response.StatusCode))
+            {
+                diagnostics.Add(PushError(
+                    "ASPWA289",
+                    "The push registration helper did not return a successful response.",
+                    "registrationHelper.fetch",
+                    "2xx",
+                    $"HTTP {(int)response.StatusCode}",
+                    "Expose the generated registration helper on the verified entry page."));
+            }
+
+            return new PwaRegistrationHelperEvidence(helperPath, "passed", "failed", "failed", "failed", "failed");
+        }
+
+        var contentType = IsJavaScript(response.ContentType) ? "passed" : "failed";
+        if (contentType == "failed")
+        {
+            diagnostics.Add(PushError(
+                "ASPWA290",
+                "The push registration helper must be served as JavaScript.",
+                "registrationHelper.contentType",
+                "javascript",
+                response.ContentType,
+                "Serve the generated helper with a JavaScript media type."));
+        }
+
+        var nosniff = HasExactlyOneHeader(response, "X-Content-Type-Options", "nosniff") ? "passed" : "failed";
+        if (nosniff == "failed")
+        {
+            diagnostics.Add(PushError(
+                "ASPWA291",
+                "The push registration helper must return exactly one X-Content-Type-Options: nosniff header.",
+                "registrationHelper.nosniff",
+                "exactly-one-nosniff",
+                HeaderCount(response, "X-Content-Type-Options").ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "Use the generated helper endpoint without a conflicting proxy header."));
+        }
+
+        var cacheControl = HasCacheDirective(response, "immutable") ? "passed" : "failed";
+        if (cacheControl == "failed")
+        {
+            diagnostics.Add(PushError(
+                "ASPWA292",
+                "The versioned push registration helper must return Cache-Control containing immutable.",
+                "registrationHelper.cacheControl",
+                "immutable",
+                "missing",
+                "Preserve the generated helper cache policy through the deployed proxy."));
+        }
+
+        return new PwaRegistrationHelperEvidence(helperPath, "passed", "passed", contentType, nosniff, cacheControl);
+    }
+
+    private async Task<PwaFetchedResponse> FetchNoRedirectAsync(
+        PwaVerificationTarget target,
+        Uri requestUri,
+        string subject,
+        int maxBytes,
+        List<PwaVerificationDiagnostic> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        var response = await _httpClient.GetAsync(requestUri, maxBytes, cancellationToken);
+        if (response.BodyTruncated)
+        {
+            diagnostics.Add(PushError(
+                "ASPWA293",
+                "A strict push resource response exceeded the bounded verifier read limit.",
+                subject,
+                $"<={maxBytes} bytes",
+                $">{maxBytes} bytes",
+                "Serve a smaller generated worker or helper response."));
+        }
+
+        if (IsRedirect(response.StatusCode))
+        {
+            diagnostics.Add(PushError(
+                "ASPWA294",
+                "Push worker and registration-helper proof does not permit redirects.",
+                subject,
+                "direct-2xx",
+                $"HTTP {(int)response.StatusCode}",
+                "Serve the generated resource directly at the diagnostics path."));
+        }
+
+        return new PwaFetchedResponse(requestUri, response);
+    }
+
+    private static PwaNormalizedPushReadiness NormalizePushReadiness(
+        PwaPushReadinessProbe? source,
+        List<PwaVerificationDiagnostic> diagnostics)
+    {
+        if (source is null)
+        {
+            diagnostics.Add(PushError(
+                "ASPWA295",
+                "The diagnostics status document is legacy and has no pushReadiness source object.",
+                "diagnostics.pushReadiness",
+                "schema-version-1",
+                "missing",
+                "Upgrade ForgeTrust.AppSurface.Web before requesting push readiness evidence."));
+            return PwaNormalizedPushReadiness.Unavailable;
+        }
+
+        if (source.SchemaVersion != 1)
+        {
+            diagnostics.Add(PushError(
+                "ASPWA296",
+                "The pushReadiness source object has an unsupported schema version.",
+                "diagnostics.pushReadiness.schemaVersion",
+                "1",
+                source.SchemaVersion.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "Upgrade the CLI and Web packages as a compatible family."));
+            return PwaNormalizedPushReadiness.Unavailable;
+        }
+
+        var status = source.ConfigurationStatus;
+        var valuesAreNull = source.ActiveVapidKeyId is null
+            && source.PublicKeyFingerprint is null
+            && source.RouteMapped is null;
+        if (string.Equals(status, "configured", StringComparison.Ordinal)
+            && SafeKeyIdPattern().IsMatch(source.ActiveVapidKeyId ?? string.Empty)
+            && FingerprintPattern().IsMatch(source.PublicKeyFingerprint ?? string.Empty)
+            && source.RouteMapped is not null)
+        {
+            return new PwaNormalizedPushReadiness("configured", source.ActiveVapidKeyId, source.PublicKeyFingerprint, source.RouteMapped);
+        }
+
+        if ((string.Equals(status, "not-configured", StringComparison.Ordinal)
+                || string.Equals(status, "unavailable", StringComparison.Ordinal))
+            && valuesAreNull)
+        {
+            return new PwaNormalizedPushReadiness(status!, null, null, null);
+        }
+
+        diagnostics.Add(PushError(
+            "ASPWA297",
+            "The pushReadiness source object contains an unsafe or internally inconsistent state.",
+            "diagnostics.pushReadiness",
+            "normalized-schema-version-1",
+            "malformed",
+            "Upgrade the Web package or correct the safe readiness-provider implementation."));
+        return PwaNormalizedPushReadiness.Unavailable;
+    }
+
+    private static PwaPushEvidence BuildPushEvidence(
+        PwaExpectedPush expected,
+        bool? enabled,
+        string configurationStatus,
+        PwaWorkerEvidence worker,
+        PwaRegistrationHelperEvidence helper,
+        PwaVapidEvidence vapid,
+        string routeMapping)
+    {
+        return new PwaPushEvidence(
+            expected.ToString().ToLowerInvariant(),
+            enabled,
+            configurationStatus,
+            worker,
+            helper,
+            vapid,
+            routeMapping,
+            "not-evaluated",
+            "not-evaluated",
+            "not-evaluated",
+            "not-evaluated",
+            "not-evaluated",
+            "not-evaluated",
+            "not-evaluated",
+            "not-evaluated");
+    }
+
+    private static PwaInstallEvidence BuildInstallEvidence(PwaVerificationReport report)
+    {
+        return new PwaInstallEvidence(
+            report.ManifestPath,
+            report.StartUrl,
+            report.Scope,
+            report.Display,
+            report.ThemeColor,
+            report.BackgroundColor,
+            report.Icons);
+    }
+
+    private static bool TryFindRegistrationHelper(
+        PwaVerificationTarget target,
+        Uri entryUri,
+        string html,
+        string expectedHelperPath,
+        string expectedWorkerPath,
+        string expectedWorkerScope,
+        List<PwaVerificationDiagnostic> diagnostics,
+        out Uri helperUri)
+    {
+        helperUri = target.BaseUri;
+        var head = HeadRegex().Match(html);
+        if (!head.Success)
+        {
+            diagnostics.Add(PushError(
+                "ASPWA298",
+                "The entry HTML has no document head for push registration-helper discovery.",
+                "entry.head.registrationHelper",
+                "one-matching-script",
+                "missing-head",
+                "Render the generated AppSurface PWA head metadata in the verified entry layout."));
+            return false;
+        }
+
+        var candidates = new List<(Uri Uri, IReadOnlyDictionary<string, string> Attributes)>();
+        foreach (Match script in ScriptTagRegex().Matches(head.Groups["content"].Value))
+        {
+            if (!TryReadScriptAttributes(script.Groups["attributes"].Value, out var attributes))
+            {
+                continue;
+            }
+
+            if (!attributes.TryGetValue("src", out var source)
+                || !ResolvesToOrigin(target, entryUri, source, out var resolved)
+                || !IsUnderBasePath(target, resolved.AbsolutePath)
+                || !string.Equals(resolved.AbsolutePath, expectedHelperPath, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            candidates.Add((resolved, attributes));
+        }
+
+        if (candidates.Count != 1)
+        {
+            diagnostics.Add(PushError(
+                "ASPWA299",
+                "The entry head must contain exactly one matching push registration-helper script.",
+                "entry.head.registrationHelper",
+                "exactly-one-script",
+                candidates.Count == 0 ? "missing" : "duplicate",
+                "Render exactly one generated AppSurface PWA helper script in the entry document head."));
+            return false;
+        }
+
+        var candidate = candidates[0];
+        if (CountQueryParameter(candidate.Uri, "v") != 1
+            || !candidate.Attributes.TryGetValue("data-appsurface-pwa-worker", out var worker)
+            || !string.Equals(worker, expectedWorkerPath, StringComparison.Ordinal)
+            || !candidate.Attributes.TryGetValue("data-appsurface-pwa-scope", out var scope)
+            || !string.Equals(scope, expectedWorkerScope, StringComparison.Ordinal))
+        {
+            diagnostics.Add(PushError(
+                "ASPWA300",
+                "The matching registration-helper script has an invalid version or worker metadata contract.",
+                "entry.head.registrationHelper",
+                "one-v-and-matching-worker-scope",
+                "mismatched",
+                "Use the generated AppSurface PWA head metadata without rewriting helper attributes."));
+            return false;
+        }
+
+        helperUri = candidate.Uri;
+        return true;
+    }
+
+    private static bool ContainsPwaRegistrationHelper(string html)
+    {
+        var head = HeadRegex().Match(html);
+        return head.Success && ScriptTagRegex().IsMatch(head.Groups["content"].Value)
+            && head.Groups["content"].Value.Contains("data-appsurface-pwa-worker", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryReadScriptAttributes(string source, out IReadOnlyDictionary<string, string> attributes)
+    {
+        var parsed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match attribute in HtmlAttributeRegex().Matches(source))
+        {
+            var name = attribute.Groups["name"].Value;
+            if (!parsed.TryAdd(name, WebUtility.HtmlDecode(attribute.Groups["value"].Value)))
+            {
+                attributes = parsed;
+                return false;
+            }
+        }
+
+        attributes = parsed;
+        return true;
+    }
+
+    private static int CountQueryParameter(Uri uri, string name)
+    {
+        return uri.Query.TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Count(part => string.Equals(Uri.UnescapeDataString(part.Split('=', 2)[0]), name, StringComparison.Ordinal));
+    }
+
+    private static bool IsJavaScript(string contentType)
+    {
+        return contentType.StartsWith("application/javascript", StringComparison.OrdinalIgnoreCase)
+            || contentType.StartsWith("text/javascript", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasExactlyOneHeader(PwaFetchedResponse response, string name, string expectedValue)
+    {
+        return response.HeaderValues(name).Count == 1
+            && string.Equals(response.HeaderValues(name)[0].Trim(), expectedValue, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int HeaderCount(PwaFetchedResponse response, string name) => response.HeaderValues(name).Count;
+
+    private static bool HasCacheDirective(PwaFetchedResponse response, string expectedDirective)
+    {
+        return response.HeaderValues("Cache-Control")
+            .SelectMany(value => value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Any(directive => string.Equals(directive.Split('=', 2)[0], expectedDirective, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static PwaVerificationDiagnostic PushError(
+        string code,
+        string message,
+        string? subject = null,
+        string? expected = null,
+        string? actual = null,
+        string? fix = null)
+    {
+        return new PwaVerificationDiagnostic(
+            code,
+            "error",
+            message,
+            subject,
+            expected,
+            actual,
+            fix,
+            "https://forge-trust.com/docs/pwa-install#push-readiness-evidence");
     }
 
     private async Task<PwaFetchedResponse> FetchAsync(
@@ -997,6 +1818,14 @@ internal sealed partial class PwaVerifier
             || path.StartsWith(target.BasePath, StringComparison.Ordinal);
     }
 
+    private static Uri GetDiagnosticsStatusUri(PwaVerificationTarget target, string diagnosticsPath)
+    {
+        var relativePath = diagnosticsPath.Trim('/');
+        return new Uri(
+            target.BaseUri,
+            string.IsNullOrEmpty(relativePath) ? "status.json" : relativePath + "/status.json");
+    }
+
     private static string RedactUriValue(string value)
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
@@ -1042,6 +1871,12 @@ internal sealed partial class PwaVerifier
     [GeneratedRegex("""<link\b[^>]*>""", RegexOptions.IgnoreCase)]
     private static partial Regex LinkTagRegex();
 
+    [GeneratedRegex("""<script\b(?<attributes>[^>]*)>""", RegexOptions.IgnoreCase)]
+    private static partial Regex ScriptTagRegex();
+
+    [GeneratedRegex("""(?<name>[A-Za-z_:][A-Za-z0-9_:.\-]*)\s*=\s*["'](?<value>[^"']*)["']""", RegexOptions.IgnoreCase)]
+    private static partial Regex HtmlAttributeRegex();
+
     [GeneratedRegex("""\brel\s*=\s*["'](?<value>[^"']+)["']""", RegexOptions.IgnoreCase)]
     private static partial Regex RelAttributeRegex();
 
@@ -1050,6 +1885,12 @@ internal sealed partial class PwaVerifier
 
     [GeneratedRegex("^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")]
     private static partial Regex HexColorPattern();
+
+    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")]
+    private static partial Regex SafeKeyIdPattern();
+
+    [GeneratedRegex("^sha256-[A-Za-z0-9_-]{43}$")]
+    private static partial Regex FingerprintPattern();
 }
 
 /// <summary>
@@ -1089,7 +1930,33 @@ internal sealed class PwaVerificationHttpClient(HttpClient httpClient) : IPwaVer
             response.Content.Headers.ContentType?.MediaType ?? string.Empty,
             bodyBytes,
             response.Headers.Location?.OriginalString,
-            truncated);
+            truncated,
+            CollectRequiredHeaders(response));
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> CollectRequiredHeaders(HttpResponseMessage response)
+    {
+        var headers = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in new[] { "X-Content-Type-Options", "Cache-Control", "Service-Worker-Allowed" })
+        {
+            var values = new List<string>();
+            if (response.Headers.TryGetValues(name, out var responseValues))
+            {
+                values.AddRange(responseValues);
+            }
+
+            if (response.Content.Headers.TryGetValues(name, out var contentValues))
+            {
+                values.AddRange(contentValues);
+            }
+
+            if (values.Count > 0)
+            {
+                headers[name] = values;
+            }
+        }
+
+        return headers;
     }
 
     private static async Task<(byte[] Body, bool Truncated)> ReadBoundedBodyAsync(
@@ -1134,12 +2001,14 @@ internal sealed class PwaVerificationHttpClient(HttpClient httpClient) : IPwaVer
 /// <param name="BodyBytes">The retained response bytes, capped by the requested read limit.</param>
 /// <param name="RedirectLocation">The unmodified Location header value, when present.</param>
 /// <param name="BodyTruncated">Whether bytes beyond the configured read limit were discarded.</param>
+/// <param name="Headers">Only the three response-header observations required by strict push verification, preserving duplicate values.</param>
 internal sealed record PwaHttpResponse(
     HttpStatusCode StatusCode,
     string ContentType,
     byte[] BodyBytes,
     string? RedirectLocation,
-    bool BodyTruncated)
+    bool BodyTruncated,
+    IReadOnlyDictionary<string, IReadOnlyList<string>>? Headers = null)
 {
     /// <summary>
     /// Gets whether the actual response status is in the HTTP 2xx range.
@@ -1151,6 +2020,12 @@ internal sealed record PwaHttpResponse(
     /// </summary>
     /// <remarks>Binary consumers should use <see cref="BodyBytes"/> instead.</remarks>
     public string Body => Encoding.UTF8.GetString(BodyBytes);
+
+    /// <summary>Gets bounded captured values for one strict-verification response header.</summary>
+    public IReadOnlyList<string> HeaderValues(string name)
+    {
+        return Headers is not null && Headers.TryGetValue(name, out var values) ? values : [];
+    }
 }
 
 /// <summary>
@@ -1188,6 +2063,92 @@ internal sealed record PwaVerificationReport(
     string? BackgroundColor,
     IReadOnlyList<PwaIconEvidence> Icons,
     IReadOnlyList<PwaVerificationDiagnostic> Diagnostics);
+
+/// <summary>
+/// Represents the schema-v3 report used only for explicitly requested push or combined PWA readiness verification.
+/// </summary>
+internal sealed record PwaVerificationV3Report(
+    int SchemaVersion,
+    bool Passed,
+    string Surface,
+    string Origin,
+    string BaseUrl,
+    string EntryPath,
+    string EntryUrl,
+    PwaInstallEvidence? Install,
+    PwaPushEvidence Push,
+    IReadOnlyList<PwaVerificationDiagnostic> Diagnostics);
+
+/// <summary>Captures install observations embedded in a schema-v3 combined report.</summary>
+internal sealed record PwaInstallEvidence(
+    string ManifestPath,
+    string? StartUrl,
+    string? Scope,
+    string? Display,
+    string? ThemeColor,
+    string? BackgroundColor,
+    IReadOnlyList<PwaIconEvidence> Icons);
+
+/// <summary>Captures only server-known, privacy-safe push-readiness evidence.</summary>
+internal sealed record PwaPushEvidence(
+    string Expected,
+    bool? Enabled,
+    string ConfigurationStatus,
+    PwaWorkerEvidence Worker,
+    PwaRegistrationHelperEvidence RegistrationHelper,
+    PwaVapidEvidence Vapid,
+    string RouteMapping,
+    string BrowserSupport,
+    string Installation,
+    string Permission,
+    string Subscription,
+    string NotificationDisplay,
+    string NotificationClick,
+    string Unsubscribe,
+    string Delivery);
+
+/// <summary>Captures bounded shared-worker fetch evidence.</summary>
+internal sealed record PwaWorkerEvidence(
+    string? Path,
+    string? Scope,
+    string Fetch,
+    string ContentType,
+    string Nosniff,
+    string CacheControl);
+
+/// <summary>Captures bounded registration-helper discovery and fetch evidence.</summary>
+internal sealed record PwaRegistrationHelperEvidence(
+    string? Path,
+    string HeadReference,
+    string Fetch,
+    string ContentType,
+    string Nosniff,
+    string CacheControl);
+
+/// <summary>Captures the safe VAPID identity contributed by the optional Push package.</summary>
+internal sealed record PwaVapidEvidence(string? ActiveKeyId, string? PublicKeyFingerprint);
+
+/// <summary>Pairs schema-v3 push evidence with diagnostics collected while verifying it.</summary>
+/// <param name="Evidence">The bounded server-known push evidence.</param>
+/// <param name="Diagnostics">Diagnostics emitted while collecting the evidence.</param>
+internal sealed record PwaPushVerificationResult(
+    PwaPushEvidence Evidence,
+    IReadOnlyList<PwaVerificationDiagnostic> Diagnostics);
+
+/// <summary>Holds validated readiness evidence or the sanitized unavailable state.</summary>
+/// <param name="ConfigurationStatus">The configured, not-configured, or unavailable readiness state.</param>
+/// <param name="ActiveVapidKeyId">The safe active VAPID key identifier, when configured.</param>
+/// <param name="PublicKeyFingerprint">The safe SHA-256 public-key fingerprint, when configured.</param>
+/// <param name="RouteMapped">Whether the package-owned route is mapped, or null when not evaluated.</param>
+internal sealed record PwaNormalizedPushReadiness(
+    string ConfigurationStatus,
+    string? ActiveVapidKeyId,
+    string? PublicKeyFingerprint,
+    bool? RouteMapped)
+{
+    /// <summary>Gets the fixed redacted result used when readiness evidence cannot be trusted.</summary>
+    public static PwaNormalizedPushReadiness Unavailable { get; } = new("unavailable", null, null, null);
+}
 
 /// <summary>
 /// Represents one stable, structured PWA verification observation.
@@ -1312,6 +2273,9 @@ internal sealed record PwaVerificationTarget(Uri Origin, Uri BaseUri, string Bas
 /// <param name="ExpectedThemeColor">An optional exact manifest theme_color assertion.</param>
 /// <param name="ExpectedBackgroundColor">An optional exact manifest background_color assertion.</param>
 /// <param name="ExpectedIcons">Parsed icon size and purpose assertions.</param>
+/// <param name="Surface">The requested public verification surface.</param>
+/// <param name="ExpectedPush">The expected server-known push posture for schema-v3 surfaces.</param>
+/// <param name="DiagnosticsPath">The normalized app-root-relative PWA diagnostics base path.</param>
 /// <remarks>Target safety is enforced by <see cref="PwaVerificationTarget.Create(Uri, string)"/> before network access.</remarks>
 internal sealed record PwaVerificationOptions(
     Uri BaseUrl,
@@ -1321,7 +2285,10 @@ internal sealed record PwaVerificationOptions(
     string? ExpectedDisplay,
     string? ExpectedThemeColor,
     string? ExpectedBackgroundColor,
-    IReadOnlyList<PwaExpectedIcon> ExpectedIcons)
+    IReadOnlyList<PwaExpectedIcon> ExpectedIcons,
+    PwaVerificationSurface Surface,
+    PwaExpectedPush ExpectedPush,
+    string DiagnosticsPath)
 {
     /// <summary>
     /// Creates verification options and parses repeated icon assertions.
@@ -1334,6 +2301,9 @@ internal sealed record PwaVerificationOptions(
     /// <param name="expectedThemeColor">An optional exact theme_color assertion.</param>
     /// <param name="expectedBackgroundColor">An optional exact background_color assertion.</param>
     /// <param name="expectedIcons">Repeated WIDTHxHEIGHT or WIDTHxHEIGHT:purpose assertions.</param>
+    /// <param name="surface">Install (default), push, or all.</param>
+    /// <param name="expectedPush">Enabled (default) or disabled for push/all surfaces.</param>
+    /// <param name="diagnosticsPath">The app-root-relative PWA diagnostics base path.</param>
     /// <returns>Normalized options for <see cref="PwaVerifier"/>.</returns>
     /// <exception cref="ArgumentException">An icon assertion is malformed.</exception>
     public static PwaVerificationOptions Create(
@@ -1344,8 +2314,37 @@ internal sealed record PwaVerificationOptions(
         string? expectedDisplay = null,
         string? expectedThemeColor = null,
         string? expectedBackgroundColor = null,
-        IReadOnlyList<string>? expectedIcons = null)
+        IReadOnlyList<string>? expectedIcons = null,
+        string? surface = null,
+        string? expectedPush = null,
+        string? diagnosticsPath = null)
     {
+        var parsedSurface = PwaVerificationSurfaceParser.Parse(surface);
+        var parsedExpectedPush = PwaExpectedPushParser.Parse(expectedPush);
+        var hasInstallExpectation = !string.IsNullOrWhiteSpace(expectedStartUrl)
+            || !string.IsNullOrWhiteSpace(expectedScope)
+            || !string.IsNullOrWhiteSpace(expectedDisplay)
+            || !string.IsNullOrWhiteSpace(expectedThemeColor)
+            || !string.IsNullOrWhiteSpace(expectedBackgroundColor)
+            || (expectedIcons?.Count ?? 0) > 0;
+        if (parsedSurface == PwaVerificationSurface.Install && !string.IsNullOrWhiteSpace(expectedPush))
+        {
+            throw new ArgumentException("--expect-push is valid only with --surface push or --surface all.");
+        }
+
+        if (parsedSurface == PwaVerificationSurface.Push && hasInstallExpectation)
+        {
+            throw new ArgumentException("Install expectation options are valid only with --surface install or --surface all.");
+        }
+
+        var normalizedDiagnosticsPath = PwaVerificationTarget.Create(
+            baseUrl,
+            string.IsNullOrWhiteSpace(diagnosticsPath) ? "/_appsurface/pwa" : diagnosticsPath).EntryPath;
+        if (normalizedDiagnosticsPath.Contains('%'))
+        {
+            throw new ArgumentException("--diagnostics-path must be an app-root-relative endpoint path without percent escapes.");
+        }
+
         return new PwaVerificationOptions(
             baseUrl,
             string.IsNullOrWhiteSpace(entryPath) ? "/" : entryPath,
@@ -1354,8 +2353,65 @@ internal sealed record PwaVerificationOptions(
             expectedDisplay,
             expectedThemeColor,
             expectedBackgroundColor,
-            (expectedIcons ?? []).Select(PwaExpectedIcon.Parse).ToArray());
+            (expectedIcons ?? []).Select(PwaExpectedIcon.Parse).ToArray(),
+            parsedSurface,
+            parsedExpectedPush,
+            normalizedDiagnosticsPath);
     }
+}
+
+/// <summary>Identifies the public PWA verification surface.</summary>
+internal enum PwaVerificationSurface
+{
+    /// <summary>Verifies the schema-v2 PWA install surface.</summary>
+    Install,
+
+    /// <summary>Verifies the schema-v3 server-known push-readiness surface.</summary>
+    Push,
+
+    /// <summary>Verifies both install and push-readiness surfaces.</summary>
+    All
+}
+
+/// <summary>Identifies the expected server-known push posture.</summary>
+internal enum PwaExpectedPush
+{
+    /// <summary>Requires diagnostics to report enabled push handling.</summary>
+    Enabled,
+
+    /// <summary>Requires diagnostics to report disabled push handling.</summary>
+    Disabled
+}
+
+/// <summary>Parses the accepted install, push, and all PWA verification surface values.</summary>
+internal static class PwaVerificationSurfaceParser
+{
+    /// <summary>Parses an optional PWA verification surface value.</summary>
+    /// <param name="value">An optional install, push, or all value.</param>
+    /// <returns>The parsed surface; a missing value selects install.</returns>
+    /// <exception cref="ArgumentException">The value is not install, push, or all.</exception>
+    public static PwaVerificationSurface Parse(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        null or "" or "install" => PwaVerificationSurface.Install,
+        "push" => PwaVerificationSurface.Push,
+        "all" => PwaVerificationSurface.All,
+        _ => throw new ArgumentException("--surface must be install, push, or all.")
+    };
+}
+
+/// <summary>Parses the accepted enabled and disabled push-expectation values.</summary>
+internal static class PwaExpectedPushParser
+{
+    /// <summary>Parses an optional expected push posture value.</summary>
+    /// <param name="value">An optional enabled or disabled value.</param>
+    /// <returns>The parsed posture; a missing value selects enabled.</returns>
+    /// <exception cref="ArgumentException">The value is not enabled or disabled.</exception>
+    public static PwaExpectedPush Parse(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        null or "" or "enabled" => PwaExpectedPush.Enabled,
+        "disabled" => PwaExpectedPush.Disabled,
+        _ => throw new ArgumentException("--expect-push must be enabled or disabled.")
+    };
 }
 
 /// <summary>
@@ -1422,6 +2478,9 @@ internal sealed record PwaFetchedResponse(Uri FinalUri, PwaHttpResponse Response
 
     /// <summary>Gets whether the actual final response is in the HTTP 2xx range.</summary>
     public bool IsSuccess => Response.IsSuccess;
+
+    /// <summary>Gets bounded captured values for one strict-verification response header.</summary>
+    public IReadOnlyList<string> HeaderValues(string name) => Response.HeaderValues(name);
 }
 
 /// <summary>
@@ -1501,6 +2560,7 @@ internal sealed record PwaIconProbe(
 /// <param name="PushEnabled">Whether push event handling is enabled in the shared service worker.</param>
 /// <param name="WorkerScope">The effective registration scope for the shared service worker.</param>
 /// <param name="RegistrationHelperPath">The registration-helper path exposed when push is enabled.</param>
+/// <param name="PushReadiness">The additive schema-versioned safe readiness contribution, when supported by the server.</param>
 /// <remarks>These server-known values do not prove browser runtime capability or registration state.</remarks>
 internal sealed record PwaStatusProbe(
     bool Enabled,
@@ -1512,4 +2572,13 @@ internal sealed record PwaStatusProbe(
     string? WorkerPath = null,
     bool PushEnabled = false,
     string? WorkerScope = null,
-    string? RegistrationHelperPath = null);
+    string? RegistrationHelperPath = null,
+    PwaPushReadinessProbe? PushReadiness = null);
+
+/// <summary>Models the versioned, sanitized push-readiness source object emitted by current Web servers.</summary>
+internal sealed record PwaPushReadinessProbe(
+    int SchemaVersion,
+    string? ConfigurationStatus,
+    string? ActiveVapidKeyId,
+    string? PublicKeyFingerprint,
+    bool? RouteMapped);

@@ -90,6 +90,24 @@ With `<appsurface:pwa-head />` in the page head, applications can call `AppSurfa
 
 Start with the [PWA badging quick start](Docs/pwa-install.md#badging-only), then use the [executable accessible proof](../../examples/web-pwa-install/README.md). The full guide documents configuration, sanitized `ASPWAJS040`–`042` failures, PathBase, activation lag, privacy boundaries, and unsupported-browser behavior.
 
+### PWA push-readiness posture
+
+The base Web package exposes the optional `IPwaPushReadinessProvider` contribution point for privacy-safe, server-known push posture. A contributor may report only the active VAPID key identifier, a SHA-256 public-key fingerprint, and whether the package-owned route is mapped. Hosts without a provider can still pass worker/helper readiness with optional rail status `not-configured`. The canonical [push-readiness evidence contract](Docs/pwa-install.md#push-readiness-evidence) documents `ASPWA2xx` remediation, `Docs` links, redaction, and the boundary between server posture and browser/delivery state.
+
+Use the CLI explicitly when this evidence is needed:
+
+```bash
+mkdir -p artifacts
+
+appsurface pwa verify --surface push \
+  --base-url https://app.example.com \
+  --entry-path /account/resume \
+  --expect-push enabled \
+  --json > artifacts/pwa-push-readiness.json
+```
+
+This is readiness-posture evidence, not a browser compatibility, permission, subscription, scoring, or delivery proof. A nonzero CLI exit is authoritative even if a JSON artifact was produced.
+
 ### Health and Readiness Probes
 
 AppSurface Web can map public platform probe endpoints when a host explicitly enables them:
@@ -201,9 +219,9 @@ Issue [#624](https://github.com/forge-trust/AppSurface/issues/624) adds a bounde
 completion telemetry. It constrains shape and exposure; it does not classify or redact application-authored text. Issue
 [#625](https://github.com/forge-trust/AppSurface/issues/625) adds caller-side polling, and
 [#626](https://github.com/forge-trust/AppSurface/issues/626) adds a neutral end-to-end example. Until that operator rail is
-proved, this API remains preview. A separate [aggregate snapshot follow-up](https://github.com/forge-trust/AppSurface/issues/645)
-will compile multiple checks with bounded concurrency and deadlines after the safe envelope exists; #623 evaluates one
-registered name per request.
+proved, this API remains preview. The bounded aggregate snapshot composes registered checks for one protected deploy
+proof request ([#645](https://github.com/forge-trust/AppSurface/issues/645)); [#625](https://github.com/forge-trust/AppSurface/issues/625) remains responsible for caller polling,
+retry, exit codes, and CI rendering.
 
 Choose the surface by the question you need to answer:
 
@@ -394,6 +412,7 @@ public void ConfigureServices(StartupContext context, IServiceCollection service
         {
             canary.RequireMarker();
             canary.RequireFreshSince();
+            canary.Tags.Add("deploy-critical");
             canary.AllowedDetailKeys.Add(ForwardingCanaryEvaluator.ProofKindDetailKey);
         });
 }
@@ -429,7 +448,15 @@ public void ConfigureEndpointAwareMiddleware(StartupContext context, IApplicatio
 
 public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
 {
-    endpoints.MapAppSurfaceCanaries("DeployOperators");
+    endpoints.MapAppSurfaceCanaries(
+        "DeployOperators",
+        options =>
+        {
+            options.Snapshot.MaxSelectedCanaries = 64;
+            options.Snapshot.MaxConcurrency = 4;
+            options.Snapshot.PerCheckTimeout = TimeSpan.FromSeconds(10);
+            options.Snapshot.OverallTimeout = TimeSpan.FromSeconds(30);
+        });
 }
 ```
 <!-- /appsurface:snippet -->
@@ -443,6 +470,24 @@ curl --fail-with-body \
   -H "X-AppSurface-Canary-Fresh-Since: 2026-07-12T12:00:00Z" \
   https://app.example.com/_appsurface/canaries/forwarding.alpha-evidence
 ```
+
+Or take a bounded aggregate snapshot. Omit selectors to select the entire registered set, repeat `name` and `tag` to
+form their union, and use tags only for durable host-owned groups. Retagging deliberately changes future tag selections.
+Each request may supply at most 64 repeated `name` values and 16 repeated `tag` values before duplicate normalization.
+
+```bash
+curl --fail-with-body \
+  -H "Authorization: Bearer $DEPLOY_OPERATOR_TOKEN" \
+  -H "X-AppSurface-Canary-Marker: deploy-42" \
+  -H "X-AppSurface-Canary-Fresh-Since: 2026-07-12T12:00:00Z" \
+  'https://app.example.com/_appsurface/canaries?tag=deploy-critical&name=forwarding.alpha-evidence'
+```
+
+Snapshots select at most 64 canaries by default, start at most four evaluations concurrently, apply a 10-second
+per-check deadline and a 30-second overall admission deadline. Configure the host-owned limits through
+`options.Snapshot`; concurrency is 1–64, both timeouts must be positive, the overall timeout must not be shorter than
+the per-check timeout, selected-item limits are 1–256, and cancellation is cooperative.
+An evaluator that ignores cancellation delays the response but is never detached after it.
 
 The completed response contains a required compatibility core and omits optional evidence that is absent:
 
@@ -475,8 +520,41 @@ omitted when absent; an empty details collection is omitted.
 
 #### Status and HTTP contract
 
-`MapAppSurfaceCanaries` maps one GET route, `/_appsurface/canaries/{name}`, for the whole named registry. It is excluded
-from API Explorer/OpenAPI and every package-owned response sets `Cache-Control: no-store` and `Pragma: no-cache`.
+`MapAppSurfaceCanaries` maps two GET routes for the whole named registry: `/_appsurface/canaries/{name}` evaluates one
+check and `/_appsurface/canaries` returns a bounded snapshot. Both are excluded from API Explorer/OpenAPI and every
+package-owned response sets `Cache-Control: no-store` and `Pragma: no-cache`.
+
+The snapshot response always contains `ready`, `overallTimedOut`, non-negative `elapsedMilliseconds`, and ordinally
+ordered `results`. A `completed` item carries the complete existing safe response inside `result`; it has no `code`.
+`failed` has only `code: "ASCAN301"`; `timed-out` has `ASCAN302` (per-check) or `ASCAN303` (overall after start); and
+`not-started` has `ASCAN304` (overall deadline before admission). Non-completed items omit `result`. Aggregate `ready`
+is true only when every selected result completed and passed. Parse this additive preview shape by property name,
+tolerate unknown fields, and never treat it as platform readiness.
+
+```json
+{
+  "ready": false,
+  "overallTimedOut": true,
+  "elapsedMilliseconds": 30017.4,
+  "results": [
+    {
+      "name": "forwarding.alpha-evidence",
+      "outcome": "completed",
+      "result": {
+        "name": "forwarding.alpha-evidence",
+        "ready": false,
+        "status": "pending",
+        "reasonCode": "proof-not-observed"
+      }
+    },
+    {
+      "name": "migrations.ready",
+      "outcome": "timed-out",
+      "code": "ASCAN303"
+    }
+  ]
+}
+```
 
 | Evaluator status | Meaning for a caller | Typical caller action | Default HTTP status |
 |---|---|---|---:|
@@ -626,6 +704,146 @@ public static class CanaryEnvelopeConsumer
         _ => throw new JsonException("The named-canary status is not recognized."),
     };
 }
+
+/// <summary>Represents one parsed aggregate snapshot item.</summary>
+/// <param name="Name">The exact registered canary name.</param>
+/// <param name="Outcome">The aggregate outcome: completed, failed, timed-out, or not-started.</param>
+/// <param name="Result">The nested completed envelope, present only for completed items.</param>
+/// <param name="Code">The safe aggregate diagnostic, present only for non-completed items.</param>
+public sealed record CanarySnapshotConsumerItem(
+    string Name,
+    string Outcome,
+    CanaryConsumerResult? Result,
+    string? Code);
+
+/// <summary>Represents the required aggregate snapshot compatibility core.</summary>
+/// <param name="Ready">Whether every selected canary completed with pass evidence.</param>
+/// <param name="OverallTimedOut">Whether the overall deadline stopped or canceled any selected evaluation.</param>
+/// <param name="ElapsedMilliseconds">The non-negative aggregate elapsed time.</param>
+/// <param name="Results">The ordered settled result for every selected canary.</param>
+public sealed record CanarySnapshotConsumerResult(
+    bool Ready,
+    bool OverallTimedOut,
+    double ElapsedMilliseconds,
+    IReadOnlyList<CanarySnapshotConsumerItem> Results);
+
+/// <summary>Parses the bounded aggregate snapshot by required field names and outcome-specific omission rules.</summary>
+public static class CanarySnapshotEnvelopeConsumer
+{
+    /// <summary>Parses and validates the aggregate snapshot compatibility core.</summary>
+    /// <param name="json">The non-null aggregate JSON envelope to parse.</param>
+    /// <returns>The validated aggregate fields and settled item results.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="json"/> is null.</exception>
+    /// <exception cref="JsonException">A required aggregate field or outcome-specific item shape is invalid.</exception>
+    public static CanarySnapshotConsumerResult Parse(string json)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException("The named-canary snapshot must be a JSON object.");
+        }
+
+        var ready = ReadRequiredBoolean(root, "ready");
+        var overallTimedOut = ReadRequiredBoolean(root, "overallTimedOut");
+        if (!root.TryGetProperty("elapsedMilliseconds", out var elapsedProperty)
+            || elapsedProperty.ValueKind != JsonValueKind.Number
+            || !elapsedProperty.TryGetDouble(out var elapsedMilliseconds)
+            || elapsedMilliseconds < 0)
+        {
+            throw new JsonException("The named-canary snapshot elapsedMilliseconds field is required and must be non-negative.");
+        }
+
+        if (!root.TryGetProperty("results", out var resultsProperty)
+            || resultsProperty.ValueKind != JsonValueKind.Array)
+        {
+            throw new JsonException("The named-canary snapshot results field is required and must be an array.");
+        }
+
+        var results = resultsProperty.EnumerateArray().Select(ParseItem).ToArray();
+        if (results.Length == 0)
+        {
+            throw new JsonException("The named-canary snapshot results array must not be empty.");
+        }
+
+        if (ready != results.All(item => item.Result?.Ready == true))
+        {
+            throw new JsonException("The named-canary snapshot ready projection does not match its settled results.");
+        }
+
+        if (overallTimedOut != results.Any(item => item.Code is "ASCAN303" or "ASCAN304"))
+        {
+            throw new JsonException("The named-canary snapshot overallTimedOut projection does not match its settled results.");
+        }
+
+        return new CanarySnapshotConsumerResult(ready, overallTimedOut, elapsedMilliseconds, results);
+    }
+
+    private static CanarySnapshotConsumerItem ParseItem(JsonElement item)
+    {
+        if (item.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException("Every named-canary snapshot result must be a JSON object.");
+        }
+
+        var name = ReadRequiredString(item, "name");
+        var outcome = ReadRequiredString(item, "outcome");
+        var hasResult = item.TryGetProperty("result", out var resultProperty);
+        var hasCode = item.TryGetProperty("code", out var codeProperty);
+        if (outcome == "completed")
+        {
+            if (!hasResult || resultProperty.ValueKind != JsonValueKind.Object || hasCode)
+            {
+                throw new JsonException("A completed named-canary snapshot result requires result and omits code.");
+            }
+
+            return new CanarySnapshotConsumerItem(name, outcome, CanaryEnvelopeConsumer.Parse(resultProperty.GetRawText()), null);
+        }
+
+        var expectedCode = outcome switch
+        {
+            "failed" => "ASCAN301",
+            "timed-out" => null,
+            "not-started" => "ASCAN304",
+            _ => throw new JsonException("The named-canary snapshot outcome is not recognized."),
+        };
+        if (hasResult
+            || !hasCode
+            || codeProperty.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(codeProperty.GetString())
+            || (expectedCode is not null && !string.Equals(codeProperty.GetString(), expectedCode, StringComparison.Ordinal))
+            || (outcome == "timed-out" && codeProperty.GetString() is not ("ASCAN302" or "ASCAN303")))
+        {
+            throw new JsonException("A non-completed named-canary snapshot result requires its matching code and omits result.");
+        }
+
+        return new CanarySnapshotConsumerItem(name, outcome, null, codeProperty.GetString());
+    }
+
+    private static bool ReadRequiredBoolean(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var property)
+            || property.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+        {
+            throw new JsonException($"The named-canary snapshot {propertyName} field is required and must be Boolean.");
+        }
+
+        return property.GetBoolean();
+    }
+
+    private static string ReadRequiredString(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var property)
+            || property.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(property.GetString()))
+        {
+            throw new JsonException($"The named-canary snapshot {propertyName} field is required and must be a nonblank string.");
+        }
+
+        return property.GetString()!;
+    }
+}
 ```
 <!-- /appsurface:snippet -->
 
@@ -766,8 +984,10 @@ fails after a valid completion, the completion event remains accurate and the wr
   it adds the evaluator as transient. Singleton, scoped, and transient overrides are supported; one request resolves the
   concrete evaluator exactly once from its request scope.
 - An unknown route name returns `404`. `not-configured` is different: the name is registered and its evaluator ran.
-- One request performs one evaluation. Request abort cancellation propagates. The package adds no evaluator timeout,
-  retry, polling loop, cache, fan-out, trigger, or readiness effect.
+- The detail route performs one evaluation. The snapshot route has bounded fan-out: the default cap is 64 selected
+  canaries, four may start concurrently, each has a 10-second cooperative deadline, and the overall admission deadline
+  is 30 seconds. Request-abort cancellation propagates. The package adds no retry, polling loop, cache, trigger, or
+  readiness effect.
 
 #### Authorization and route sharp edges
 
@@ -803,10 +1023,15 @@ stable event, canary name, diagnostic code, and exception type.
 | `ASCAN114` | Repeated mapping | The fixed route family was mapped more than once. | Map it exactly once. |
 | `ASCAN115` | Fixed/reserved route conflict | Mapping through a route group relocated the fixed route, or a host endpoint overlaps the canary namespace. | Map on the application root and move host routes outside `/_appsurface/canaries`. |
 | `ASCAN116` | Invalid response mode | The mapper callback assigned an undefined enum value. | Choose `StatusCode` or `AlwaysOk`. |
+| `ASCAN117` | Invalid snapshot limits | A selected-item or concurrency limit is outside its supported range, a timeout is non-positive, or the overall timeout is shorter than the per-check timeout. | Correct `options.Snapshot` before building the host: selected items must be 1–256, concurrency 1–64, and the positive overall timeout must be at least the positive per-check timeout. |
 | `ASCAN201` | Required header missing | A registration-required marker or freshness value is blank/absent. | Supply the named header and retry. |
 | `ASCAN202` | Header invalid | A header is repeated, malformed, unsafe, or too large. | Follow the marker or strict freshness rules above. |
 | `ASCAN203` | Canary not found | The exact route name is not registered. | Register it or correct the lowercase name. |
+| `ASCAN204` | Snapshot selection too large | Query names/tags selected more canaries than the host cap. | Narrow selectors or adjust the host-owned cap. |
 | `ASCAN301` | Evaluation failed | Activation failed, the evaluator threw/canceled independently, returned null, returned invalid result state, or returned a detail key not declared for this canary. | Correct the evaluator or declare the bounded key; inspect host-local evaluator diagnostics because rejected values remain redacted. Caller retry policy remains external. |
+| `ASCAN302` | Snapshot check timed out | A started evaluator did not finish by its per-check deadline. | Inspect evaluator cancellation behavior and tune the host limit only when warranted. |
+| `ASCAN303` | Snapshot overall deadline reached | A started evaluator was canceled by the overall snapshot deadline. | Narrow the selection, inspect evaluator latency, or tune the host deadline. |
+| `ASCAN304` | Snapshot check not started | The overall deadline elapsed before the selected evaluator acquired an admission slot. | Narrow the selection, increase bounded concurrency, or tune the host deadline. |
 
 ### PWA Install and Push-Worker Foundation
 

@@ -7,7 +7,7 @@ port="${APP_SURFACE_WEB_PWA_PORT:-5055}"
 project="$repo_root/examples/web-pwa-install/WebPwaInstallExample.csproj"
 cli_project="$repo_root/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"
 log_file="$(mktemp)"
-evidence_file="${APP_SURFACE_WEB_PWA_EVIDENCE:-$repo_root/examples/web-pwa-install/pwa-verify.json}"
+evidence_file="${APP_SURFACE_WEB_PWA_EVIDENCE:-$repo_root/examples/web-pwa-install/pwa-verify-v3.json}"
 
 cleanup() {
   if [[ -n "${app_pid:-}" ]]; then
@@ -40,7 +40,9 @@ if [[ "$ready" != "1" ]]; then
 fi
 
 curl -fsS "http://127.0.0.1:$port/_appsurface/pwa/status.json" >/dev/null
+mkdir -p "$(dirname "$evidence_file")"
 dotnet run --project "$cli_project" -p:UseSharedCompilation=false -- pwa verify \
+  --surface all \
   --base-url "http://127.0.0.1:$port" \
   --entry-path /account/resume \
   --expect-start-url / \
@@ -50,6 +52,7 @@ dotnet run --project "$cli_project" -p:UseSharedCompilation=false -- pwa verify 
   --expect-background-color '#ffffff' \
   --expect-icon 192x192 \
   --expect-icon 512x512 \
+  --expect-push enabled \
   --json >"$evidence_file"
 
-echo "Wrote PWA verification evidence to $evidence_file"
+echo "Wrote schema-v3 PWA verification evidence to $evidence_file"
