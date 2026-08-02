@@ -59,7 +59,10 @@ public sealed class ReleaseEvidenceCoverageTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
         }
     }
 
@@ -125,7 +128,7 @@ public sealed class ReleaseEvidenceCoverageTests
         var mutatedBundle = ReleaseEvidenceV2.RefreshSubject(fixture.Bundle with
         {
             ReleaseArtifactDigests = fixture.Bundle.ReleaseArtifactDigests
-                .Select((digest, index) => index == 0
+                .Select(digest => string.Equals(digest.Path, fixture.Bundle.ReleaseNotePath, StringComparison.Ordinal)
                     ? digest with { Path = "releases/not-the-versioned-note.md" }
                     : digest)
                 .ToArray()
@@ -352,21 +355,4 @@ public sealed class ReleaseEvidenceCoverageTests
         string ReleaseNote,
         string ReleaseSidecar);
 
-    private sealed class FakeCommandRunner : ICommandRunner
-    {
-        private readonly Dictionary<string, CommandResult> _results = new(StringComparer.Ordinal);
-
-        internal void Add(string command, CommandResult result)
-        {
-            _results[command] = result;
-        }
-
-        public Task<CommandResult> RunAsync(CommandInvocation invocation, CancellationToken cancellationToken)
-        {
-            var command = invocation.Executable + " " + string.Join(' ', invocation.Arguments);
-            return Task.FromResult(_results.TryGetValue(command, out var result)
-                ? result
-                : new CommandResult(1, string.Empty, "command not configured"));
-        }
-    }
 }

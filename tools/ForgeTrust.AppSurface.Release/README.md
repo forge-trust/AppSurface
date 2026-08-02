@@ -37,7 +37,7 @@ For stable releases, `check` also validates prepared release evidence and verifi
 - `releases/v{version}.release.json`
 - `releases/v{version}.evidence.json`
 - `CHANGELOG.md` compact rollover entries
-- `packages/package-index.yml` release-link contracts for every `classification: public` plus `publish_decision: publish` package; see the [coordinated release-links guide](../../releases/coordinated-release-links.md)
+- preserves existing `packages/package-index.yml` release-link contracts for every `classification: public` plus `publish_decision: publish` package; preparation does not rewrite package rows. See the [coordinated release-links guide](../../releases/coordinated-release-links.md)
 - reset `releases/unreleased.md` and `releases/unreleased.md.yml`
 
 The changelog is a compact ledger, not the detailed release narrative. During preparation, the detailed `CHANGELOG.md` `Unreleased`

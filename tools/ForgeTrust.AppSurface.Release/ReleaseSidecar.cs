@@ -126,5 +126,4 @@ internal sealed class ReleaseSidecar
                 - Tagged release notes carry the final migration narrative.
             """;
     }
-
 }

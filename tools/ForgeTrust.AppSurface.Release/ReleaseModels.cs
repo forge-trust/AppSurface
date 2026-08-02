@@ -84,6 +84,12 @@ internal sealed record ReleaseManifestV2(
 /// <summary>
 /// Records how a public package's coordinated release alias resolves in the prepared documentation tree.
 /// </summary>
+/// <param name="Project">Repository-relative project path for the public package.</param>
+/// <param name="Source">Resolution source. Schema V2 accepts only <c>coordinated</c>.</param>
+/// <param name="AliasPath">Tree-local alias path used by coordinated package documentation.</param>
+/// <param name="ResolvedPath">Immutable versioned release-note path selected by the alias in this documentation tree.</param>
+/// <param name="ReleaseTag">Annotated release tag for the immutable note.</param>
+/// <param name="PreparationBaseCommit">Preparation base commit; null only while a draft has not yet been bound to a concrete repository commit.</param>
 internal sealed record CoordinatedPackageReleaseNoteResolution(
     string Project,
     string Source,

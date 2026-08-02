@@ -54,13 +54,29 @@ public sealed class ReleaseManifestV2ValidatorCoverageTests
         AssertInvalid(json, "Release manifest schema must be 'appsurface-release-manifest-v2'.");
     }
 
-    [Fact]
-    public void TryDeserializeRejectsInvalidRequiredValue()
+    [Theory]
+    [InlineData("preparationBaseCommit")]
+    [InlineData("date")]
+    [InlineData("releaseClassification")]
+    public void TryDeserializeRejectsMissingRequiredValue(string property)
     {
         var json = ManifestJson();
-        json["preparationBaseCommit"] = null;
+        json[property] = null;
 
         AssertInvalid(json, "Release manifest has missing required V2 values.");
+    }
+
+    [Theory]
+    [InlineData("version", "not-a-version")]
+    [InlineData("tag", "v0.1.0-preview.2")]
+    [InlineData("date", "2026-05-25T00:00:00Z")]
+    [InlineData("releaseClassification", "canary")]
+    public void TryDeserializeRejectsInvalidIdentityValue(string property, string value)
+    {
+        var json = ManifestJson();
+        json[property] = value;
+
+        AssertInvalid(json, "Release manifest has invalid V2 identity values.");
     }
 
     [Fact]

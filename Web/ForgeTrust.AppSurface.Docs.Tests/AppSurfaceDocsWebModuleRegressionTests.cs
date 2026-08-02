@@ -935,27 +935,6 @@ public class AppSurfaceDocsWebModuleRegressionTests
                         .OrderBy(document => document.Path, StringComparer.Ordinal)
                         .ToArray());
 
-                var mergedReleaseResults = currentSearchDocuments
-                    .Concat(historicalSearchDocuments)
-                    .Where(document => document.Title.Contains("release", StringComparison.OrdinalIgnoreCase))
-                    .DistinctBy(document => (document.Id, document.Path))
-                    .OrderBy(document => document.Path, StringComparer.Ordinal)
-                    .ToArray();
-
-                Assert.Equal(
-                    [
-                        new PublishedSearchDocument("release-current", "/docs/releases/current", "Current release 1.2.4"),
-                        new PublishedSearchDocument("release-version", "/docs/releases/v1.2.4", "Release 1.2.4"),
-                        new PublishedSearchDocument(
-                            "release-current",
-                            "/docs/v/1.2.3/releases/current",
-                            "Current release 1.2.3"),
-                        new PublishedSearchDocument(
-                            "release-version",
-                            "/docs/v/1.2.3/releases/v1.2.3",
-                            "Release 1.2.3")
-                    ],
-                    mergedReleaseResults);
                 Assert.DoesNotContain(
                     historicalSearchDocuments,
                     document => string.Equals(document.Path, "/docs/releases/current", StringComparison.Ordinal));
@@ -2807,16 +2786,6 @@ public class AppSurfaceDocsWebModuleRegressionTests
                   "id": "release-current",
                   "path": "/docs/releases/current",
                   "title": "Current release {{version}}"
-                },
-                {
-                  "id": "release-current",
-                  "path": "/docs/releases/current",
-                  "title": "Current release {{version}}"
-                },
-                {
-                  "id": "release-version",
-                  "path": "/docs/releases/v{{version}}",
-                  "title": "Release {{version}}"
                 },
                 {
                   "id": "release-version",

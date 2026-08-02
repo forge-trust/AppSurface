@@ -161,7 +161,7 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
         const string currentReleasePrefix = "<!-- appsurface-current-coordinated-release: ";
         const string currentReleaseSuffix = " -->";
         var currentReleaseMarker = Assert.Single(
-            pointer.Content.Split('\n'),
+            pointer.Content.Split('\n').Select(line => line.TrimEnd('\r')),
             line => line.StartsWith(currentReleasePrefix, StringComparison.Ordinal));
         Assert.EndsWith(currentReleaseSuffix, currentReleaseMarker, StringComparison.Ordinal);
         var currentReleaseTag = currentReleaseMarker[currentReleasePrefix.Length..^currentReleaseSuffix.Length];

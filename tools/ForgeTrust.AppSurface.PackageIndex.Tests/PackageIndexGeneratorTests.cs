@@ -1368,6 +1368,27 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
+    public void GetRelativeRepositoryPath_ThrowsWhenPathIsRooted()
+    {
+        var rootedPath = Path.GetFullPath(Path.Join("releases", "coordinated-release-links.md"), _repositoryRoot);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => PackageIndexGenerator.GetRelativeRepositoryPath(CreateRequest(), rootedPath));
+
+        Assert.Contains("must be relative", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(rootedPath, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetRelativeRepositoryPath_ThrowsWhenPathEscapesRepositoryRoot()
+    {
+        var error = Assert.Throws<PackageIndexException>(
+            () => PackageIndexGenerator.GetRelativeRepositoryPath(CreateRequest(), "../outside.md"));
+
+        Assert.Contains("escapes the repository root", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task GenerateToFileAsync_CreatesOutputDirectoryAndWritesChooser()
     {
         await WriteCommonChooserFilesAsync(includeUnreleased: true);

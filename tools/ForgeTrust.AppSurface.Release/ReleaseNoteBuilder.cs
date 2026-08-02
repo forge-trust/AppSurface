@@ -77,7 +77,7 @@ internal static class ReleaseNoteBuilder
     /// <returns>Deterministic Markdown that links to the exact release note.</returns>
     /// <remarks>
     /// Do not replace this link with a global release lookup. Release archives copy this file into their immutable exact trees;
-    /// a historical <c>current</c> route must therefore point to the release current when that tree was published.
+    /// a historical <c>current</c> route must therefore point to the release that was current when that tree was published.
     /// </remarks>
     internal static string BuildCurrentReleasePointer(SemVer version)
     {

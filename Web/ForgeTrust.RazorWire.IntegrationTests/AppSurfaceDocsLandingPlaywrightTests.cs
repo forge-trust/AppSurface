@@ -129,6 +129,11 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
             "() => /^Release \\d/.test(document.querySelector('h1')?.textContent?.trim() ?? '')",
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
+        await page.WaitForSelectorAsync(".docs-trust-bar", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
         Assert.Contains("Tagged", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
 
         await page.GotoAsync($"{_fixture.DocsUrl}/releases/v0.2.0-preview.5");

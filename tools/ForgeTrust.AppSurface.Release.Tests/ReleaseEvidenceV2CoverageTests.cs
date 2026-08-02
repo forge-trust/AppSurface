@@ -631,15 +631,15 @@ public sealed class ReleaseEvidenceV2CoverageTests
             fixture.Workspace.RepositoryRoot,
             fixture.Version,
             fixture.Version.TagName,
-            null,
-            true,
-            null,
-            null,
-            false,
-            false,
-            "main",
-            catalogPath,
-            root);
+            Date: null,
+            DryRun: true,
+            ReportPath: null,
+            GitHubOutputPath: null,
+            FailOnWarnings: false,
+            AllowExistingTargets: false,
+            BaseRef: "main",
+            DocsCatalogPath: catalogPath,
+            DocsTrustedReleaseRootPath: root);
 
     private static void AssertDiagnostic(
         ReleaseEvidenceValidationResult result,

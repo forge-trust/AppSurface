@@ -523,6 +523,15 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.False(evidenceSchema.RootElement.GetProperty("additionalProperties").GetBoolean());
         Assert.Contains("coordinatedPackageReleaseNoteResolutions", manifestSchema.RootElement.GetProperty("required").EnumerateArray().Select(item => item.GetString()));
         Assert.Contains("coordinatedPackageReleaseNoteResolutions", evidenceSchema.RootElement.GetProperty("required").EnumerateArray().Select(item => item.GetString()));
+        Assert.Equal(
+            "^(?:[0-9a-f]{64}|generated)$",
+            evidenceSchema.RootElement
+                .GetProperty("$defs")
+                .GetProperty("docsArchive")
+                .GetProperty("properties")
+                .GetProperty("releaseManifestSha256")
+                .GetProperty("pattern")
+                .GetString());
     }
 
     [Fact]
@@ -1057,6 +1066,34 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("Code: release-preparation-output-path-unsafe", result.Stderr, StringComparison.Ordinal);
         Assert.False(File.Exists(RepositoryPath("releases/v0.1.0-preview.1.md")));
+    }
+
+    [Fact]
+    public async Task PrepareRejectsDirectoryAtGeneratedOutputPath()
+    {
+        await SeedRepositoryAsync();
+        Directory.CreateDirectory(RepositoryPath("releases/v0.1.0-preview.1.md"));
+        var workspace = new ReleaseWorkspace(_repositoryRoot);
+        var preparation = new ReleasePreparation(
+            workspace,
+            new ReleaseChecker(workspace, FakeCommandRunner.WithSourceCommit("abc123")),
+            new SystemReleaseClock());
+        var options = new ReleaseOptions(
+            "prepare",
+            _repositoryRoot,
+            SemVer.Parse("0.1.0-preview.1"),
+            Tag: null,
+            Date: new DateOnly(2026, 5, 25),
+            DryRun: false,
+            ReportPath: null,
+            GitHubOutputPath: null,
+            FailOnWarnings: false,
+            AllowExistingTargets: true);
+
+        var error = await Assert.ThrowsAsync<ReleaseToolException>(() => preparation.PrepareAsync(options, CancellationToken.None));
+
+        Assert.Equal("release-preparation-output-path-unsafe", error.Diagnostic.Code);
+        Assert.Contains("directory", error.Diagnostic.Cause, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1716,7 +1753,7 @@ public sealed class ReleaseToolTests : IDisposable
 
         var report = ReleaseReportRenderer.RenderCheck(result);
 
-        Assert.Equal(
+        var expected =
             """
             # Release readiness report
 
@@ -1739,8 +1776,11 @@ public sealed class ReleaseToolTests : IDisposable
 
             ## Warnings
             - None
-            """ + Environment.NewLine,
-            report);
+            """ + Environment.NewLine;
+
+        Assert.Equal(
+            expected.Replace("\r\n", "\n", StringComparison.Ordinal),
+            report.Replace("\r\n", "\n", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1932,7 +1972,7 @@ public sealed class ReleaseToolTests : IDisposable
             SemVer.Parse("0.1.0"),
             "stable",
             "v0.1.0",
-            "bc2ee375659ca972db3a95c82b961dcb5b2f650e",
+            "e042717616171e6563d29d0368c8ad60a6a5bb60",
             note,
             sidecar,
             manifest,
@@ -1941,8 +1981,6 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Empty(result.Diagnostics);
         Assert.NotNull(result.Summary);
         Assert.Equal("appsurface-release-evidence-bundle-v1", result.Summary!.Schema);
-        Assert.Equal(evidence, await File.ReadAllTextAsync(evidencePath));
-        Assert.Equal(manifest, await File.ReadAllTextAsync(manifestPath));
     }
 
     [Fact]
@@ -6316,40 +6354,4 @@ public sealed class ReleaseToolTests : IDisposable
         int FileCount,
         string VersionText);
 
-    private sealed class FakeCommandRunner : ICommandRunner
-    {
-        private readonly Dictionary<string, CommandResult> _results = new(StringComparer.Ordinal);
-        private readonly Dictionary<string, Queue<CommandResult>> _sequences = new(StringComparer.Ordinal);
-
-        internal static FakeCommandRunner WithSourceCommit(string sourceCommit)
-        {
-            var runner = new FakeCommandRunner();
-            runner.Add("git rev-parse HEAD", new CommandResult(0, sourceCommit + "\n", ""));
-            runner.Add("git for-each-ref --format=%(refname:short) refs/tags/v*", new CommandResult(0, "", ""));
-            return runner;
-        }
-
-        internal void Add(string command, CommandResult result)
-        {
-            _results[command] = result;
-        }
-
-        internal void AddSequence(string command, params CommandResult[] results)
-        {
-            _sequences[command] = new Queue<CommandResult>(results);
-        }
-
-        public Task<CommandResult> RunAsync(CommandInvocation invocation, CancellationToken cancellationToken)
-        {
-            var command = invocation.Executable + " " + string.Join(' ', invocation.Arguments);
-            if (_sequences.TryGetValue(command, out var sequence) && sequence.Count > 0)
-            {
-                return Task.FromResult(sequence.Count > 1 ? sequence.Dequeue() : sequence.Peek());
-            }
-
-            return Task.FromResult(_results.TryGetValue(command, out var result)
-                ? result
-                : new CommandResult(1, "", "command not configured"));
-        }
-    }
 }

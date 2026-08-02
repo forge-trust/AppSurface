@@ -26,16 +26,17 @@ public sealed class ReleaseWorkflowPolicyTests
     }
 
     [Theory]
-    [InlineData("")]
-    [InlineData("1.2.3", "releases/v1.2.3.md")]
-    [InlineData("1.2.3", "releases/v1.2.3.md.yml", "releases/v1.2.3.release.json", "releases/v1.2.3.evidence.json", "releases/current.md")]
-    public void ReleasePreparationChangePolicyRejectsEmptyOrPartialDiff(string version, params string[] paths)
+    [InlineData("", "A requested release version is required.")]
+    [InlineData("1.2.3", "Required release-preparation path is missing: releases/v1.2.3.md.yml.", "releases/v1.2.3.md")]
+    [InlineData("1.2.3", "Required release-preparation path is missing: releases/v1.2.3.md.", "releases/v1.2.3.md.yml", "releases/v1.2.3.release.json", "releases/v1.2.3.evidence.json", "releases/current.md")]
+    public void ReleasePreparationChangePolicyRejectsEmptyOrPartialDiff(string version, string expectedError, params string[] paths)
     {
         var result = ReleasePreparationChangePolicy.Validate(
             version,
             paths.Select(path => new ReleasePreparationChange("A", path)));
 
         Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => string.Equals(error, expectedError, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -110,14 +111,14 @@ public sealed class ReleaseWorkflowPolicyTests
     [Fact]
     public async Task ReleasePreparationChangePolicyValidatesPullRequestDiffWhenRequestedByWorkflow()
     {
-        if (!Environment.GetEnvironmentVariables().Contains("RELEASE_PREP_POLICY_VERSION"))
+        var version = Environment.GetEnvironmentVariable("RELEASE_PREP_POLICY_VERSION");
+        if (version is null)
         {
             return;
         }
 
         var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var baseRef = Environment.GetEnvironmentVariable("RELEASE_PREP_POLICY_BASE_REF");
-        var version = Environment.GetEnvironmentVariable("RELEASE_PREP_POLICY_VERSION") ?? string.Empty;
         Assert.False(string.IsNullOrWhiteSpace(baseRef), "RELEASE_PREP_POLICY_BASE_REF must be set by the release-prep workflow.");
 
         using var process = new Process
@@ -137,9 +138,11 @@ public sealed class ReleaseWorkflowPolicyTests
         process.StartInfo.ArgumentList.Add("--name-status");
         process.StartInfo.ArgumentList.Add($"origin/{baseRef}...HEAD");
         Assert.True(process.Start());
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync());
+        var output = await outputTask;
+        var error = await errorTask;
         Assert.True(process.ExitCode == 0, error);
 
         var result = ReleasePreparationChangePolicy.Validate(
@@ -162,7 +165,7 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("--fail-on-warnings", workflow, StringComparison.Ordinal);
         Assert.Contains("--allow-existing-targets", workflow, StringComparison.Ordinal);
         Assert.Contains("RELEASE_PREP_POLICY_VERSION", workflow, StringComparison.Ordinal);
-        Assert.Contains("ReleasePreparationChangePolicy", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("--filter FullyQualifiedName~ReleasePreparationChangePolicyValidatesPullRequestDiff", workflow, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -188,7 +191,7 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj", prep, StringComparison.Ordinal);
         Assert.Contains("RELEASE_PREP_POLICY_BASE_REF", prep, StringComparison.Ordinal);
         Assert.Contains("RELEASE_PREP_POLICY_VERSION", prep, StringComparison.Ordinal);
-        Assert.Contains("ReleasePreparationChangePolicyValidatesPullRequestDiff", prep, StringComparison.Ordinal);
+        Assert.DoesNotContain("--filter FullyQualifiedName~ReleasePreparationChangePolicyValidatesPullRequestDiff", prep, StringComparison.Ordinal);
         Assert.Contains("No versioned release manifest changed; validating the complete release test suite without applying the release-artifact diff gate.", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("--filter FullyQualifiedName~ReleaseWorkflowPolicyTests", prep, StringComparison.Ordinal);
         Assert.Contains("release_prep_changes", prep, StringComparison.Ordinal);

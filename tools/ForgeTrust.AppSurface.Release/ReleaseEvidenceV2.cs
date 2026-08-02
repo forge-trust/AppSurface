@@ -179,7 +179,7 @@ internal static class ReleaseEvidenceV2
                 docsPath);
             ValidateCurrentPointer(bundle, version, currentReleaseContent, diagnostics, docsPath);
         }
-        ValidateCommitAndManifest(bundle, ContentSourceCommit: null, releaseManifestContent, diagnostics, docsPath);
+        ValidateCommitAndManifest(bundle, contentSourceCommit: null, releaseManifestContent, diagnostics, docsPath);
         ValidateSubject(bundle, diagnostics, docsPath);
         ValidateDocsArchive(bundle, releaseClassification, diagnostics, docsPath);
 
@@ -390,7 +390,7 @@ internal static class ReleaseEvidenceV2
         }
     }
 
-    private static void ValidateCommitAndManifest(ReleaseEvidenceBundleV2 bundle, string? ContentSourceCommit, string? releaseManifestContent, List<ReleaseDiagnostic> diagnostics, string docsPath)
+    private static void ValidateCommitAndManifest(ReleaseEvidenceBundleV2 bundle, string? contentSourceCommit, string? releaseManifestContent, List<ReleaseDiagnostic> diagnostics, string docsPath)
     {
         if (releaseManifestContent is null)
         {
@@ -407,17 +407,17 @@ internal static class ReleaseEvidenceV2
         {
             AddError(diagnostics, "release-evidence-release-manifest-schema-invalid", "Release evidence could not parse a complete V2 release manifest.", issue, "Regenerate release JSON with the release tool.", docsPath);
         }
-        else if (!string.Equals(bundle.Commits.PreparationBaseCommit, manifest!.PreparationBaseCommit, StringComparison.Ordinal)
+        else if (!string.Equals(bundle.Commits.PreparationBaseCommit, manifest.PreparationBaseCommit, StringComparison.Ordinal)
                  || !bundle.CoordinatedPackageReleaseNoteResolutions.SequenceEqual(manifest.CoordinatedPackageReleaseNoteResolutions))
         {
             AddError(diagnostics, "release-evidence-release-manifest-schema-invalid", "V2 release evidence does not match the V2 release manifest.", "The preparation base commit or coordinated resolutions differ between generated artifacts.", "Regenerate evidence and release JSON together.", docsPath);
         }
 
-        if (!string.IsNullOrWhiteSpace(ContentSourceCommit)
+        if (!string.IsNullOrWhiteSpace(contentSourceCommit)
             && !string.IsNullOrWhiteSpace(bundle.Commits.ReleasePreparationCommit)
-            && !string.Equals(bundle.Commits.ReleasePreparationCommit, ContentSourceCommit, StringComparison.Ordinal))
+            && !string.Equals(bundle.Commits.ReleasePreparationCommit, contentSourceCommit, StringComparison.Ordinal))
         {
-            AddError(diagnostics, "release-evidence-release-preparation-commit-mismatch", "Release evidence was finalized for a different release-preparation commit.", $"Evidence commit `{bundle.Commits.ReleasePreparationCommit}` does not match `{ContentSourceCommit}`.", "Regenerate evidence from the current reviewed release state.", docsPath);
+            AddError(diagnostics, "release-evidence-release-preparation-commit-mismatch", "Release evidence was finalized for a different release-preparation commit.", $"Evidence commit `{bundle.Commits.ReleasePreparationCommit}` does not match `{contentSourceCommit}`.", "Regenerate evidence from the current reviewed release state.", docsPath);
         }
     }
 

@@ -95,7 +95,8 @@ internal sealed class ReleaseCurrentPointerGate
             return diagnostics;
         }
 
-        var tags = await DiscoverTagsAsync(preparationBaseCommit, diagnostics, cancellationToken);
+        var tagDiscovery = await DiscoverTagsAsync(preparationBaseCommit, diagnostics, cancellationToken);
+        var tags = tagDiscovery.Tags;
         var targetTag = await _commandRunner.RunAsync(
             new CommandInvocation("git", ["rev-parse", "--verify", "--quiet", $"refs/tags/{target.TagName}"], _workspace.RepositoryRoot),
             cancellationToken);
@@ -118,47 +119,50 @@ internal sealed class ReleaseCurrentPointerGate
                 "releases/coordinated-release-links.md"));
         }
 
-        var ordered = tags.OrderBy(item => item.Version).ToArray();
-        var latest = ordered.LastOrDefault();
-        if (marker is null)
+        if (tagDiscovery.Succeeded)
         {
-            if (latest is not null)
+            var ordered = tags.OrderBy(item => item.Version).ToArray();
+            var latest = ordered.LastOrDefault();
+            if (marker is null)
             {
-                diagnostics.Add(ReleaseDiagnostic.Error(
-                    "release-current-page-stale",
-                    "The current release pointer still uses the initial none marker despite a reachable coordinated tag.",
-                    $"The latest reachable tag is '{latest.Tag}'.",
-                    "Restore releases/current.md from the latest prepared release before preparing the next version.",
-                    "releases/coordinated-release-links.md"));
+                if (latest is not null)
+                {
+                    diagnostics.Add(ReleaseDiagnostic.Error(
+                        "release-current-page-stale",
+                        "The current release pointer still uses the initial none marker despite a reachable coordinated tag.",
+                        $"The latest reachable tag is '{latest.Tag}'.",
+                        "Restore releases/current.md from the latest prepared release before preparing the next version.",
+                        "releases/coordinated-release-links.md"));
+                }
             }
-        }
-        else
-        {
-            if (latest is null || marker.CompareTo(latest.Version) != 0)
+            else
             {
-                diagnostics.Add(ReleaseDiagnostic.Error(
-                    "release-current-page-stale",
-                    "The current release pointer does not identify the latest reachable coordinated tag.",
-                    $"Pointer marker is '{marker.TagName}', while the latest reachable tag is '{latest?.Tag ?? "none"}'.",
-                    "Restore releases/current.md from the latest prepared release before preparing the next version.",
-                    "releases/coordinated-release-links.md"));
-            }
+                if (latest is null || marker.CompareTo(latest.Version) != 0)
+                {
+                    diagnostics.Add(ReleaseDiagnostic.Error(
+                        "release-current-page-stale",
+                        "The current release pointer does not identify the latest reachable coordinated tag.",
+                        $"Pointer marker is '{marker.TagName}', while the latest reachable tag is '{latest?.Tag ?? "none"}'.",
+                        "Restore releases/current.md from the latest prepared release before preparing the next version.",
+                        "releases/coordinated-release-links.md"));
+                }
 
-            if (target.CompareTo(marker) <= 0)
-            {
-                diagnostics.Add(ReleaseDiagnostic.Error(
-                    "release-current-page-version-not-newer",
-                    $"Target version '{target}' is not newer than the current pointer marker '{marker}'.",
-                    "Release preparation may only advance the coordinated release pointer.",
-                    "Choose a SemVer version with higher precedence than the current marker.",
-                    "releases/coordinated-release-links.md"));
+                if (target.CompareTo(marker) <= 0)
+                {
+                    diagnostics.Add(ReleaseDiagnostic.Error(
+                        "release-current-page-version-not-newer",
+                        $"Target version '{target}' is not newer than the current pointer marker '{marker}'.",
+                        "Release preparation may only advance the coordinated release pointer.",
+                        "Choose a SemVer version with higher precedence than the current marker.",
+                        "releases/coordinated-release-links.md"));
+                }
             }
         }
 
         return diagnostics;
     }
 
-    private async Task<IReadOnlyList<ReachableReleaseTag>> DiscoverTagsAsync(
+    private async Task<TagDiscoveryResult> DiscoverTagsAsync(
         string preparationBaseCommit,
         List<ReleaseDiagnostic> diagnostics,
         CancellationToken cancellationToken)
@@ -174,10 +178,11 @@ internal sealed class ReleaseCurrentPointerGate
                 string.IsNullOrWhiteSpace(list.StandardError) ? "git for-each-ref returned a nonzero exit code." : list.StandardError.Trim(),
                 "Repair the Git worktree and rerun release preparation; do not treat a tag-discovery failure as an empty history.",
                 "releases/coordinated-release-links.md"));
-            return [];
+            return new TagDiscoveryResult([], Succeeded: false);
         }
 
         var results = new List<ReachableReleaseTag>();
+        var succeeded = true;
         foreach (var tag in list.StandardOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             if (!tag.StartsWith('v') || !SemVer.TryParse(tag[1..], out var version))
@@ -196,6 +201,7 @@ internal sealed class ReleaseCurrentPointerGate
                     string.IsNullOrWhiteSpace(annotated.StandardError) ? "git cat-file returned a nonzero exit code." : annotated.StandardError.Trim(),
                     "Repair the tag reference before preparing a release.",
                     "releases/coordinated-release-links.md"));
+                succeeded = false;
                 continue;
             }
 
@@ -213,9 +219,10 @@ internal sealed class ReleaseCurrentPointerGate
                 diagnostics.Add(ReleaseDiagnostic.Error(
                     "release-current-page-tag-unreadable",
                     $"Annotated release tag '{tag}' could not be resolved to a commit.",
-                    peeled.StandardError.Trim(),
+                    string.IsNullOrWhiteSpace(peeled.StandardError) ? "git rev-parse did not return a commit." : peeled.StandardError.Trim(),
                     "Repair or remove the broken tag before preparing a release.",
                     "releases/coordinated-release-links.md"));
+                succeeded = false;
                 continue;
             }
 
@@ -234,11 +241,14 @@ internal sealed class ReleaseCurrentPointerGate
                     string.IsNullOrWhiteSpace(reachable.StandardError) ? "git merge-base returned a nonzero exit code." : reachable.StandardError.Trim(),
                     "Repair the Git worktree and rerun release preparation.",
                     "releases/coordinated-release-links.md"));
+                succeeded = false;
             }
         }
 
-        return results;
+        return new TagDiscoveryResult(results, succeeded);
     }
+
+    private sealed record TagDiscoveryResult(IReadOnlyList<ReachableReleaseTag> Tags, bool Succeeded);
 
     private sealed record ReachableReleaseTag(string Tag, SemVer Version);
 }

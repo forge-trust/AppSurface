@@ -188,7 +188,7 @@ internal sealed class ReleaseChecker
                 var manifestJson = await File.ReadAllTextAsync(_workspace.ReleaseManifestPath(options.Version), cancellationToken);
                 if (ReleaseEvidence.IsV2(evidenceJson)
                     && ReleaseManifestV2Validator.TryDeserialize(manifestJson, out var manifest, out _)
-                    && !ReleaseManifestV2Validator.TryValidatePackageSet(manifest!, packageSummary.PublicPublishedPackages, out var issue))
+                    && !ReleaseManifestV2Validator.TryValidatePackageSet(manifest, packageSummary.PublicPublishedPackages, out var issue))
                 {
                     errors.Add(ReleaseDiagnostic.Error(
                         "release-evidence-package-set-mismatch",

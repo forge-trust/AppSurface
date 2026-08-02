@@ -26,6 +26,7 @@ internal sealed class PackageIndexGenerator
     private const string UnreleasedPath = "releases/unreleased.md";
     private const string ChangelogPath = "CHANGELOG.md";
     private const string UpgradePolicyPath = "releases/upgrade-policy.md";
+    private const string CoordinatedReleaseLinksGuidePath = "releases/coordinated-release-links.md";
     private const string WebExamplePath = "examples/web-app/README.md";
     private const string WebPackageQuickstartPath = "start-here/first-success-path.md";
     private const string WebPackageQuickstartFragment = "package-first-path";
@@ -821,7 +822,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine($"- Edit `packages/package-index.yml` when the public package story changes.");
         builder.AppendLine($"- Review {FormatMarkdownLink("package readiness evidence", GetRelativeOutputPath(request.ChooserOutputPath, request.ReadinessOutputPath))} when deciding whether the package manifest, release metadata, blockers, and dependency evidence are ready for release review.");
         builder.AppendLine("- Package readiness evidence is package-index review evidence. Per-version release consistency lives in `releases/v{version}.evidence.json` and is validated by the release cockpit.");
-        builder.AppendLine($"- Follow the {FormatMarkdownLink("coordinated release-links guide", GetRelativeRepositoryPath(request, "releases/coordinated-release-links.md"))}: use `release_track: coordinated` for the frozen tree-local current pointer, or `release_track: explicit` with `release_notes_path` for a package-specific historical story.");
+        builder.AppendLine($"- Follow the {FormatMarkdownLink("coordinated release-links guide", GetRelativeRepositoryPath(request, CoordinatedReleaseLinksGuidePath))}: use `release_track: coordinated` for the frozen tree-local current pointer, or `release_track: explicit` with `release_notes_path` for a package-specific historical story.");
         builder.AppendLine("- Keep `publish_decision` and `expected_dependency_package_ids` in `packages/package-index.yml` aligned with the package artifact workflow so the chooser and release contract share one package source of truth.");
         builder.AppendLine("- Keep `tool_command_name` aligned with each published .NET tool project's `ToolCommandName` so package validation, pre-publish coverage proof, and post-publish smoke tests run the command users will type. Tool smoke tests install the package, run `--help`, then require `--version` to match the package SemVer exactly, including stable or prerelease labels and excluding any leading `v` or build metadata. The command name value must be one file-name-safe command token, not a path: no whitespace, path separators, reserved `.`/`..` segments, trailing periods, Windows reserved device names or dotted aliases, control characters, or Windows-invalid file-name characters.");
         builder.AppendLine($"- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications, package READMEs, product families, readiness blockers, or readiness notes.");
@@ -986,7 +987,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine("- Edit `packages/package-index.yml` for product family, publish decision, release metadata, dependency expectations, blockers, and notes.");
         builder.AppendLine("- Use `readiness_blocker` only for same-repository ownership. When the underlying blocker is external, create a local tracking issue and put the external context in `readiness_note`.");
-        builder.AppendLine($"- Use the {FormatMarkdownLink("coordinated release-links guide", GetRelativeRepositoryPath(request, "releases/coordinated-release-links.md", request.ReadinessOutputPath))} to select `release_track: coordinated` or an explicit historical release note.");
+        builder.AppendLine($"- Use the {FormatMarkdownLink("coordinated release-links guide", GetRelativeRepositoryPath(request, CoordinatedReleaseLinksGuidePath, request.ReadinessOutputPath))} to select `release_track: coordinated` or an explicit historical release note.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` to refresh this dashboard and the adopter-facing package chooser.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify` before review to confirm both generated files are current.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` for package artifact proof; this dashboard does not replace that workflow.");
@@ -1090,7 +1091,7 @@ internal sealed class PackageIndexGenerator
     /// still names a repository-owned guide, while isolated callers can generate a package dashboard without recreating every guide.
     /// Package manifest entries continue to use the <c>GetRelativeDocPath</c> helpers and therefore require existing targets.
     /// </remarks>
-    private static string GetRelativeRepositoryPath(PackageIndexRequest request, string repositoryRelativePath, string? outputPath = null)
+    internal static string GetRelativeRepositoryPath(PackageIndexRequest request, string repositoryRelativePath, string? outputPath = null)
     {
         var normalizedRelativePath = repositoryRelativePath.Replace('/', Path.DirectorySeparatorChar);
         if (Path.IsPathRooted(normalizedRelativePath))

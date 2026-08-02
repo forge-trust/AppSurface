@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Text.Json;
 using ForgeTrust.AppSurface.ReleaseContracts;
 
@@ -29,7 +31,7 @@ internal static class ReleaseManifestV2Validator
         "warningIds"
     };
 
-    internal static bool TryDeserialize(string json, out ReleaseManifestV2? manifest, out string issue)
+    internal static bool TryDeserialize(string json, [NotNullWhen(true)] out ReleaseManifestV2? manifest, out string issue)
     {
         manifest = null;
         issue = string.Empty;
@@ -62,7 +64,9 @@ internal static class ReleaseManifestV2Validator
             if (manifest is null
                 || string.IsNullOrWhiteSpace(manifest.Version)
                 || string.IsNullOrWhiteSpace(manifest.Tag)
+                || string.IsNullOrWhiteSpace(manifest.Date)
                 || string.IsNullOrWhiteSpace(manifest.PreparationBaseCommit)
+                || string.IsNullOrWhiteSpace(manifest.ReleaseClassification)
                 || manifest.GeneratedFiles is null
                 || manifest.PublishedPackageProjects is null
                 || manifest.CoordinatedPackageReleaseNoteResolutions is null
@@ -70,6 +74,17 @@ internal static class ReleaseManifestV2Validator
                 || manifest.WarningIds is null)
             {
                 issue = "Release manifest has missing required V2 values.";
+                manifest = null;
+                return false;
+            }
+
+            if (!SemVer.TryParse(manifest.Version, out var version)
+                || version is null
+                || !string.Equals(manifest.Tag, version.TagName, StringComparison.Ordinal)
+                || !DateOnly.TryParseExact(manifest.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)
+                || !IsReleaseClassification(manifest.ReleaseClassification))
+            {
+                issue = "Release manifest has invalid V2 identity values.";
                 manifest = null;
                 return false;
             }
@@ -101,6 +116,10 @@ internal static class ReleaseManifestV2Validator
             return false;
         }
     }
+
+    private static bool IsReleaseClassification(string value) =>
+        string.Equals(value, "prerelease", StringComparison.Ordinal)
+        || string.Equals(value, "stable", StringComparison.Ordinal);
 
     /// <summary>
     /// Confirms that a V2 manifest attests to exactly the release surface declared by the package index.

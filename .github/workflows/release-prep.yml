@@ -200,8 +200,7 @@ jobs:
           fi
           RELEASE_PREP_POLICY_BASE_REF="${GITHUB_BASE_REF}" \
           RELEASE_PREP_POLICY_VERSION="${version}" \
-            dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj \
-              --filter FullyQualifiedName~ReleasePreparationChangePolicyValidatesPullRequestDiff
+            dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj
           if [[ "${version}" != *-* ]]; then
             evidence_path="releases/v${version}.evidence.json"
             docs_exact_tree_path="$(jq -r '.docsArchive.exactTreePath // ""' "${evidence_path}")"

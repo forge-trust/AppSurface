@@ -73,12 +73,13 @@ public sealed class ReleaseCurrentPointerCoverageTests
         runner.Add(CatFileTypeCommand(tag), new CommandResult(128, "", "tag inspection failed"));
         runner.Add(TargetLookupCommand(target), MissingTarget);
 
-        var diagnostics = await ValidateAsync(runner, target, ReleaseCurrentPointer.BuildNone());
+        var diagnostics = await ValidateAsync(runner, target, ReleaseCurrentPointer.Build(SemVer.Parse("1.0.0")));
 
         Assert.Contains(
             diagnostics,
             diagnostic => diagnostic.Code == "release-current-page-tag-discovery-failed"
                 && diagnostic.Cause == "tag inspection failed");
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Code == "release-current-page-stale");
     }
 
     [Fact]
@@ -112,9 +113,9 @@ public sealed class ReleaseCurrentPointerCoverageTests
     }
 
     [Theory]
-    [InlineData(128, "", "broken tag object")]
-    [InlineData(0, " \n", "")]
-    public async Task GateReportsUnreadablePeeledAnnotatedTag(int exitCode, string output, string error)
+    [InlineData(128, "", "broken tag object", "broken tag object")]
+    [InlineData(0, " \n", "", "git rev-parse did not return a commit.")]
+    public async Task GateReportsUnreadablePeeledAnnotatedTag(int exitCode, string output, string error, string expectedCause)
     {
         var target = SemVer.Parse("1.0.1");
         var tag = "v1.0.0";
@@ -124,9 +125,13 @@ public sealed class ReleaseCurrentPointerCoverageTests
         runner.Add(PeelCommand(tag), new CommandResult(exitCode, output, error));
         runner.Add(TargetLookupCommand(target), MissingTarget);
 
-        var diagnostics = await ValidateAsync(runner, target, ReleaseCurrentPointer.BuildNone());
+        var diagnostics = await ValidateAsync(runner, target, ReleaseCurrentPointer.Build(SemVer.Parse("1.0.0")));
 
-        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == "release-current-page-tag-unreadable");
+        Assert.Contains(
+            diagnostics,
+            diagnostic => diagnostic.Code == "release-current-page-tag-unreadable"
+                && diagnostic.Cause == expectedCause);
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Code == "release-current-page-stale");
     }
 
     [Fact]
@@ -194,21 +199,4 @@ public sealed class ReleaseCurrentPointerCoverageTests
     private static string MergeBaseCommand(string commit) =>
         $"git merge-base --is-ancestor {commit} base";
 
-    private sealed class FakeCommandRunner : ICommandRunner
-    {
-        private readonly Dictionary<string, CommandResult> _results = new(StringComparer.Ordinal);
-
-        internal void Add(string command, CommandResult result)
-        {
-            _results[command] = result;
-        }
-
-        public Task<CommandResult> RunAsync(CommandInvocation invocation, CancellationToken cancellationToken)
-        {
-            var command = invocation.Executable + " " + string.Join(' ', invocation.Arguments);
-            return Task.FromResult(_results.TryGetValue(command, out var result)
-                ? result
-                : new CommandResult(1, "", "command not configured"));
-        }
-    }
 }

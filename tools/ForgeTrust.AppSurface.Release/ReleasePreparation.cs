@@ -174,7 +174,13 @@ internal sealed class ReleasePreparation
 
         try
         {
-            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            var attributes = File.GetAttributes(path);
+            if ((attributes & FileAttributes.Directory) != 0)
+            {
+                throw UnsafePreparationOutput(path, "The existing output is a directory.");
+            }
+
+            if ((attributes & FileAttributes.ReparsePoint) != 0)
             {
                 throw UnsafePreparationOutput(path, "The existing output is a symlink, junction, or reparse point.");
             }

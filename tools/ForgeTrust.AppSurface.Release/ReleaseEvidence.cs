@@ -81,6 +81,17 @@ internal static class ReleaseEvidence
     /// <summary>
     /// Builds schema-v2 evidence for a release whose package links use the frozen coordinated current pointer.
     /// </summary>
+    /// <param name="workspace">Repository workspace that supplies the canonical artifact paths.</param>
+    /// <param name="version">Version represented by the generated evidence.</param>
+    /// <param name="releaseClassification">Release channel, either <c>prerelease</c> or <c>stable</c>.</param>
+    /// <param name="date">Release date recorded in the manifest and evidence.</param>
+    /// <param name="contentSourceCommit">Preparation base commit, when it is available.</param>
+    /// <param name="releaseNoteContent">Versioned release-note bytes included in the evidence digest set.</param>
+    /// <param name="releaseSidecarContent">Versioned release-note metadata bytes included in the evidence digest set.</param>
+    /// <param name="releaseManifestContent">Versioned V2 manifest bytes included in the evidence digest set.</param>
+    /// <param name="currentReleaseContent">Frozen tree-local current pointer bytes. Required for schema V2; schema V1 does not use this artifact.</param>
+    /// <param name="currentReleaseSidecarContent">Frozen tree-local current pointer metadata bytes. Required for schema V2; schema V1 does not use this artifact.</param>
+    /// <param name="coordinatedPackageReleaseNoteResolutions">Coordinated package links resolved through the frozen current pointer.</param>
     internal static ReleaseEvidenceBundleV2 BuildDraftV2(
         ReleaseWorkspace workspace,
         SemVer version,
@@ -207,6 +218,16 @@ internal static class ReleaseEvidence
     /// <summary>
     /// Validates release evidence read from an annotated tag.
     /// </summary>
+    /// <param name="version">Version claimed by the annotated tag.</param>
+    /// <param name="releaseClassification">Release channel expected for the tagged evidence.</param>
+    /// <param name="tag">Annotated tag name.</param>
+    /// <param name="tagCommit">Commit resolved from the annotated tag.</param>
+    /// <param name="releaseNoteJson">Tagged release-note content.</param>
+    /// <param name="releaseSidecarJson">Tagged release-note metadata content.</param>
+    /// <param name="releaseManifestJson">Tagged release-manifest content.</param>
+    /// <param name="evidenceJson">Tagged release-evidence content.</param>
+    /// <param name="currentReleaseContent">Optional frozen current-pointer content for schema V1; required with the sidecar for schema V2.</param>
+    /// <param name="currentReleaseSidecarContent">Optional frozen current-pointer metadata for schema V1; required with the pointer for schema V2.</param>
     internal static ReleaseEvidenceValidationResult ValidateTag(
         SemVer version,
         string releaseClassification,

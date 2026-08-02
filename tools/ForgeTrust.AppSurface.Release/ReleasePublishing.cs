@@ -104,7 +104,7 @@ internal sealed class ReleasePublishing
                 cancellationToken);
             var packageSummary = PackageIndexSummary.Load(packageIndex);
             if (!ReleaseManifestV2Validator.TryDeserialize(releaseManifest, out var manifest, out var issue)
-                || !ReleaseManifestV2Validator.TryValidatePackageSet(manifest!, packageSummary.PublicPublishedPackages, out issue))
+                || !ReleaseManifestV2Validator.TryValidatePackageSet(manifest, packageSummary.PublicPublishedPackages, out issue))
             {
                 throw new ReleaseToolException(ReleaseDiagnostic.Error(
                     "release-evidence-package-set-mismatch",
@@ -117,6 +117,7 @@ internal sealed class ReleasePublishing
 
         if (isV2Evidence && evidence.Bundle is not null)
         {
+            // V2 compatibility conversion maps PreparationBaseCommit to ContentSourceCommit.
             await ValidatePreparationBaseContainedByTagAsync(
                 tag,
                 evidence.Bundle.Commits.ContentSourceCommit,
