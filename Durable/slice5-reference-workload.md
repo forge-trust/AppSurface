@@ -8,7 +8,7 @@ acceptance; external provider effects remain governed by the Work registration's
 
 - PostgreSQL 17.5 through Docker/Testcontainers, or `APPSURFACE_POSTGRES_TEST_CONNECTION` pointing to PostgreSQL 17.5.
 - A migration-owner applies `0001` through `0004`, then runs
-  [`configure-postgresql-roles.sql`](configure-postgresql-roles.sql) with distinct migration-owner, dispatcher, and
+  [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) with distinct migration-owner, dispatcher, and
   runtime roles.
 - The Schedule processor receives a dispatcher data source, a separate runtime data source, immutable Work registry,
   validated `PostgreSqlDurableWorkOptions`, and
