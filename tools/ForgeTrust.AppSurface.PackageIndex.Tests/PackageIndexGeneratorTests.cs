@@ -956,7 +956,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
-    public async Task GenerateDocumentsAsync_RejectsCoordinatedReleaseTrackWhenCurrentPointerIsMissing()
+    public async Task GenerateDocumentsAsync_RendersFallbackWhenCoordinatedCurrentPointerIsMissing()
     {
         await WriteProgramRepoAsync();
         var manifestPath = TestPathUtils.PathUnder(_repositoryRoot, "packages", "package-index.yml");
@@ -971,10 +971,12 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 "ForgeTrust.AppSurface.Web")
         });
 
-        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.GenerateDocumentsAsync(CreateRequest()));
+        var documents = await generator.GenerateDocumentsAsync(CreateRequest());
 
-        Assert.Contains("releases/current.md", error.Message, StringComparison.Ordinal);
-        Assert.Contains("missing", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("release notes unavailable; package publication is blocked until the release link resolves.", documents.ChooserMarkdown, StringComparison.Ordinal);
+        Assert.Contains("release notes unavailable; package publication is blocked until the release link resolves.", documents.ReadinessMarkdown, StringComparison.Ordinal);
+        Assert.Contains("releases/current.md", documents.ReadinessMarkdown, StringComparison.Ordinal);
+        Assert.Contains("blocked", documents.ReadinessMarkdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1108,7 +1110,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
-    public async Task GenerateAsync_ThrowsWhenDeclaredReleaseNotesPathIsMissing()
+    public async Task GenerateAsync_RendersFallbackWhenDeclaredReleaseNotesPathIsMissing()
     {
         await WriteProgramRepoAsync(releaseNotesPath: "releases/v0.1-preview.md");
 
@@ -1119,10 +1121,9 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 "ForgeTrust.AppSurface.Web")
         });
 
-        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.GenerateAsync(CreateRequest()));
+        var markdown = await generator.GenerateAsync(CreateRequest());
 
-        Assert.Contains("Chooser link target 'releases/v0.1-preview.md'", error.Message, StringComparison.Ordinal);
-        Assert.Contains("missing documentation", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("release notes unavailable; package publication is blocked until the release link resolves.", markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1322,11 +1323,17 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
-    public async Task GenerateAsync_RejectsDeclaredReleaseLinksWhenTargetsAreMissing()
+    public async Task GenerateDocumentsAsync_RendersFallbackAndSharedReleaseHeaderWhenAReleaseLinkIsInvalid()
     {
-        await WriteCommonChooserFilesAsync(includeUnreleased: false);
-        File.Delete(Path.GetFullPath(Path.Join("releases", "v0.1-preview.md"), _repositoryRoot));
-        File.Delete(Path.GetFullPath(Path.Join("releases", "unreleased.md"), _repositoryRoot));
+        await WriteCommonChooserFilesAsync(includeUnreleased: true);
+        var manifestPath = TestPathUtils.PathUnder(_repositoryRoot, "packages", "package-index.yml");
+        var manifest = await File.ReadAllTextAsync(manifestPath);
+        await File.WriteAllTextAsync(
+            manifestPath,
+            manifest.Replace(
+                "release_track: coordinated\n    order: 10",
+                "release_track: invalid\n    order: 10",
+                StringComparison.Ordinal));
 
         var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
         {
@@ -1349,10 +1356,11 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 outputType: "Exe")
         });
 
-        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.GenerateAsync(CreateRequest()));
+        var documents = await generator.GenerateDocumentsAsync(CreateRequest());
 
-        Assert.Contains("releases/v0.1-preview.md", error.Message, StringComparison.Ordinal);
-        Assert.Contains("missing documentation", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[current release note](../releases/current.md)", documents.ChooserMarkdown, StringComparison.Ordinal);
+        Assert.Contains("release notes unavailable; package publication is blocked until the release link resolves.", documents.ChooserMarkdown, StringComparison.Ordinal);
+        Assert.Contains("release notes unavailable; package publication is blocked until the release link resolves.", documents.ReadinessMarkdown, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -27,6 +27,7 @@ internal sealed class PackageIndexGenerator
     private const string ChangelogPath = "CHANGELOG.md";
     private const string UpgradePolicyPath = "releases/upgrade-policy.md";
     private const string CoordinatedReleaseLinksGuidePath = "releases/coordinated-release-links.md";
+    private const string UnresolvedReleaseLinkMessage = "release notes unavailable; package publication is blocked until the release link resolves.";
     private const string WebExamplePath = "examples/web-app/README.md";
     private const string WebPackageQuickstartPath = "start-here/first-success-path.md";
     private const string WebPackageQuickstartFragment = "package-first-path";
@@ -682,7 +683,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine("Release and readiness:");
         builder.AppendLine($"- {FormatMarkdownLink("Release hub", GetRelativeDocPath(request, ReleaseHubPath))} keeps the public release story, adoption risk, and policy links in one place.");
-        var currentReleaseNotePath = GetSharedPublicReleaseNotePath(publicEntries);
+        var currentReleaseNotePath = GetSharedPublicReleaseNotePath(request, publicEntries);
         if (!string.IsNullOrWhiteSpace(currentReleaseNotePath)
             && !string.Equals(currentReleaseNotePath, UnreleasedPath, StringComparison.Ordinal)
             && RepositoryFileExists(repositoryRoot, currentReleaseNotePath))
@@ -1036,8 +1037,10 @@ internal sealed class PackageIndexGenerator
         PackageManifestEntry entry,
         string outputPath)
     {
-        var releaseLink = ResolveReleaseLink(entry);
-        return FormatMarkdownLink("notes", GetRelativeDocPath(request, releaseLink.ReleaseNotesPath, outputPath));
+        var releaseNotesPath = TryGetReleaseNotesPath(request, entry, outputPath);
+        return releaseNotesPath is null
+            ? UnresolvedReleaseLinkMessage
+            : FormatMarkdownLink("notes", GetRelativeDocPath(request, releaseNotesPath, outputPath));
     }
 
     private static string FormatReadinessStatus(PackageReadinessStatus status)
@@ -1053,17 +1056,38 @@ internal sealed class PackageIndexGenerator
     /// <summary>
     /// Finds the release note all publishable public package rows currently share.
     /// </summary>
+    /// <param name="request">Generation request that supplies the chooser output context used to validate release-note links.</param>
     /// <param name="publicEntries">Public chooser rows resolved from the package manifest.</param>
     /// <returns>The shared release-note path, or <see langword="null" /> when rows point at mixed or missing release notes.</returns>
-    private static string? GetSharedPublicReleaseNotePath(IReadOnlyList<ResolvedPackageEntry> publicEntries)
+    private static string? GetSharedPublicReleaseNotePath(
+        PackageIndexRequest request,
+        IReadOnlyList<ResolvedPackageEntry> publicEntries)
     {
         var releaseNotePaths = publicEntries
             .Where(entry => entry.Manifest.PublishDecision == PackagePublishDecision.Publish)
-            .Select(entry => ResolveReleaseLink(entry.Manifest).ReleaseNotesPath)
+            .Select(entry => TryGetReleaseNotesPath(request, entry.Manifest, request.ChooserOutputPath))
+            .OfType<string>()
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
         return releaseNotePaths.Length == 1 ? releaseNotePaths[0] : null;
+    }
+
+    private static string? TryGetReleaseNotesPath(
+        PackageIndexRequest request,
+        PackageManifestEntry entry,
+        string outputPath)
+    {
+        try
+        {
+            var releaseLink = ResolveReleaseLink(entry);
+            _ = GetRelativeDocPath(request, releaseLink.ReleaseNotesPath, outputPath);
+            return releaseLink.ReleaseNotesPath;
+        }
+        catch (PackageIndexException)
+        {
+            return null;
+        }
     }
 
     private static string GetRelativeDocPath(PackageIndexRequest request, string repositoryRelativePath)
@@ -1366,8 +1390,10 @@ internal sealed class PackageIndexGenerator
             parts.Add(FormatEnumLabel(entry.CommercialStatus));
         }
 
-        var releaseLink = ResolveReleaseLink(entry);
-        parts.Add(FormatMarkdownLink("notes", GetRelativeDocPath(request, releaseLink.ReleaseNotesPath)));
+        var releaseNotesPath = TryGetReleaseNotesPath(request, entry, request.ChooserOutputPath);
+        parts.Add(releaseNotesPath is null
+            ? UnresolvedReleaseLinkMessage
+            : FormatMarkdownLink("notes", GetRelativeDocPath(request, releaseNotesPath)));
 
         return parts.Count == 0 ? "Not declared" : string.Join("<br />", parts);
     }
