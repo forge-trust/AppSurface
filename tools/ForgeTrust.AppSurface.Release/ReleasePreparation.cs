@@ -74,7 +74,7 @@ internal sealed class ReleasePreparation
         var currentReleasePath = _workspace.CurrentReleasePath;
 
         var releaseNote = ReleaseNoteBuilder.Build(options.Version, date, unreleased);
-        var releaseSidecar = sidecar.ToTaggedRelease(options.Version, date);
+        var releaseSidecar = sidecar.ToPreparedRelease(options.Version, date);
         var currentRelease = ReleaseNoteBuilder.BuildCurrentReleasePointer(options.Version);
         var coordinatedResolutions = packageSummary.PublicPublishedPackages
             .Where(package => package.ReleaseLink?.Track == PackageReleaseTrack.Coordinated)

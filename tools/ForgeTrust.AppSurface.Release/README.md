@@ -8,13 +8,15 @@
 ./eng/release check --version 0.1.0-preview.1
 ./eng/release prepare --version 0.1.0-preview.1 --dry-run
 ./eng/release prepare --version 0.1.0-preview.1 --date 2026-05-25
+./eng/release tag-message --version 0.1.0-preview.1 > /tmp/appsurface-v0.1.0-preview.1-tag-message.txt
+./eng/release inspect --version 0.1.0-preview.1 --tag v0.1.0-preview.1 --base-ref main
 ./eng/release publish --version 0.1.0-preview.1 --tag v0.1.0-preview.1 --dry-run
 ./eng/release check --version 0.1.0 --allow-existing-targets --fail-on-warnings --docs-catalog ./dist/docs/versions.json --docs-trusted-release-root ./dist/docs
 ./eng/release publish --version 0.1.0 --tag v0.1.0 --base-ref release/0.1.0 --dry-run
 ./eng/release docs-publication --version 0.1.0 --tag v0.1.0 --docs-exact-tree ./dist/docs --archive-output ./artifacts/appsurface-docs-v0.1.0.tar.gz --pages-staging-root /tmp/appsurface-pages --plan-output ./artifacts/docs-publication-plan.json --expected-release-manifest-sha256 <sha256>
 ```
 
-Use `--version` without a leading `v`. Use `--tag v<version>` only for `publish`, where the tag must already exist and must be annotated. `publish` defaults `--base-ref` to `main`; pass the release branch, such as `--base-ref release/0.1.0`, when publishing from a maintained release branch. `--base-ref` accepts branch names plus `origin/<branch>`, `refs/heads/<branch>`, and `refs/remotes/origin/<branch>` refs, then normalizes them before checking reachability from `origin/<branch>`. Tags, full object IDs, empty branch names, and unsupported refs are rejected because the publish gate must prove protected branch reachability.
+Use `--version` without a leading `v`. `tag-message` derives the canonical tag ID from that version; `inspect` and `publish` require a matching annotated `--tag v<version>`. Both commands default `--base-ref` to `main`; pass the release branch, such as `--base-ref release/0.1.0`, when publishing from a maintained release branch. `--base-ref` accepts branch names plus `origin/<branch>`, `refs/heads/<branch>`, and `refs/remotes/origin/<branch>` refs, then normalizes them before checking reachability from `origin/<branch>`.
 
 ## Check
 
@@ -52,6 +54,25 @@ Release preparation ends at a pull request. Maintainers must manually review and
 or any publish workflow is started; automation and coding agents should stop at the ready-for-review PR unless a maintainer gives an
 explicit post-review instruction to continue.
 
+## Prepared-to-tagged state
+
+Versioned sidecars are committed source artifacts, not a claim that a release has shipped. `prepare` writes `release.schema: appsurface-release-sidecar-v1`, `release.state: prepared`, `release.id: v<version>`, and `trust.status: Prepared`; it does not claim a final narrative, tag-derived date, verified annotated tag, or GitHub Release. Prepared validation rejects those tagged-only terms even if a hand edit leaves `trust.status` as `Prepared`. The reset unreleased sidecar declares `release.state: unreleased`. V2 evidence digests this prepared sidecar alongside the frozen current pointer, manifest, and versioned note.
+
+`./eng/release tag-message --version <version>` validates the prepared artifacts at `HEAD` and emits the final four-line annotated-tag binding block: `AppSurface-Release-Id`, `AppSurface-Release-Prepared-Sidecar-Sha256`, `AppSurface-Release-Manifest-Sha256`, and `AppSurface-Release-Evidence-Subject-Sha256`. Trailers must be final, ordered, unique, and use lowercase 64-character SHA-256 values. Unknown `AppSurface-Release-*` trailers fail. Historical tags that have no explicit sidecar state fail new `inspect` and `publish` operations with `release-legacy-tag-binding-unsupported`; use their existing archives rather than retagging history.
+
+After merging a prepared release PR, use the local proof path before pushing:
+
+```bash
+git switch main
+git pull --ff-only origin main
+./eng/release tag-message --version 0.1.0-preview.1 > /tmp/appsurface-v0.1.0-preview.1-tag-message.txt
+git tag -a v0.1.0-preview.1 -F /tmp/appsurface-v0.1.0-preview.1-tag-message.txt
+./eng/release inspect --version 0.1.0-preview.1 --tag v0.1.0-preview.1 --base-ref main
+git push origin v0.1.0-preview.1
+```
+
+`inspect` emits the verified `tagged` projection without changing repository source. Its optional `--out` file must be an ordinary path outside the repository source tree: the output file and user-supplied parent directories must not be symbolic links or reparse points. It is written only after validation succeeds. The release-publish docs job writes this projection under `RUNNER_TEMP`, overlays it in its disposable detached checkout before docs export, and never commits it. `publish` uses the same resolver before it calls GitHub or checks package publication. For an unpushed failed tag, recreate it from a regenerated message; never move or retag a pushed tag.
+
 ## Compatibility and local validation
 
 Use the repository-owned `check` command as the compatibility gate before opening the release pull request. It validates the package-index release-link contract, generated target collisions, release manifest and evidence schemas, and warning IDs without mutating the worktree. For a migrated package-index row, validate both the legacy and coordinated interpretations: historical rows must still expose their explicit note path, while coordinated rows must resolve to `releases/current.md` and must not retain `release_notes_path`.
@@ -69,7 +90,7 @@ For stable releases, add the staged docs catalog and trusted release root to the
 
 ## Publish
 
-`publish` validates that the supplied tag is annotated, resolves to a commit reachable from `origin/<base-ref>`, and, for V2 evidence, contains the captured 40-character lowercase `preparationBaseCommit`. It also requires a successful protected NuGet publish run for the tag's release classification, a non-public GitHub Release state, and the versioned release note, sidecar, release manifest, and matching evidence bundle at the tag commit before GitHub Release publication. Prerelease tags require `nuget-prerelease-publish.yml` proof. Stable tags require `nuget-stable-publish.yml` proof before the public GitHub Release can be promoted, so `v0.1.0` cannot become a GitHub-only release. Existing draft releases may be reused by the workflow when they still point at the same tag; already-public releases remain no-clobber by default. The command writes `version`, `tag`, `tag_commit`, `note_path`, `notes_file`, `release_classification`, `evidence_path`, `evidence_subject_sha256`, `evidence_tag_commit`, `docs_release_manifest_sha256`, and `prerelease` outputs when `--github-output` is supplied. `--github-output` must be a file path, not a root directory; in GitHub Actions, pass the `GITHUB_OUTPUT` file supplied by the runner.
+`publish` first resolves the tag-bound projection: it validates annotation, protected-branch reachability, prepared sidecar state, V1 or V2 evidence, the V2 frozen pointer/package set when present, and canonical tag trailers from the tag’s own blobs. Only then does it check protected NuGet publication proof and GitHub Release state. Prerelease tags require `nuget-prerelease-publish.yml` proof. Stable tags require `nuget-stable-publish.yml` proof before the public GitHub Release can be promoted, so `v0.1.0` cannot become a GitHub-only release. Existing draft releases may be reused by the workflow when they still point at the same tag; already-public releases remain no-clobber by default. The command writes `version`, `tag`, `tag_commit`, `note_path`, `notes_file`, `release_classification`, `evidence_path`, `evidence_subject_sha256`, `evidence_tag_commit`, `docs_release_manifest_sha256`, and `prerelease` outputs when `--github-output` is supplied.
 
 Stable release docs publication is handled by the `docs-publication` command and the `release-publish.yml` workflow after package publish proof exists. The workflow exports docs from the annotated tag commit, creates the deterministic docs archive and `.sha256`, stages `versions.json` plus `releases/{version}/`, verifies the staged archive, deploys Pages, fetches the public catalog and exact-tree manifest, verifies the uploaded release asset digest, and only then promotes the draft GitHub Release.
 
@@ -88,7 +109,7 @@ Stable publication rejects release-manifest digest mismatches and recommended-ve
 
 ## Release Evidence Bundle
 
-Historical evidence uses schema `appsurface-release-evidence-bundle-v1`. New coordinated releases use `appsurface-release-evidence-bundle-v2` and `appsurface-release-manifest-v2`. The V2 manifest records the pre-write `preparationBaseCommit`, ordinal-sorted published package projects, and only the coordinated package resolutions. Each resolution fixes `releases/current.md` to `releases/v{version}.md`, the release tag, and the same preparation base commit. Explicit package links remain published-package metadata but never enter that resolution array. V2 evidence proves the tagged note, tagged sidecar, V2 release JSON, frozen `releases/current.md`, and current-pointer sidecar agree. Draft evidence is validated during release-prep pull request review. Tag-bound evidence is validated by `publish` against the resolved annotated tag commit.
+Historical evidence uses schema `appsurface-release-evidence-bundle-v1`. New coordinated releases use `appsurface-release-evidence-bundle-v2` and `appsurface-release-manifest-v2`. The V2 manifest records the pre-write `preparationBaseCommit`, ordinal-sorted published package projects, and only the coordinated package resolutions. Each resolution fixes `releases/current.md` to `releases/v{version}.md`, the release tag, and the same preparation base commit. Explicit package links remain published-package metadata but never enter that resolution array. V2 evidence proves the prepared note sidecar, V2 release JSON, frozen `releases/current.md`, and current-pointer sidecar agree. Draft evidence is validated during release-prep pull request review. Tag-bound evidence is validated by [`inspect`](#prepared-to-tagged-state) and `publish` against the resolved annotated tag commit.
 
 The bundle records release identity, release note and sidecar paths, the release JSON digest, ordered coordinated resolutions, optional AppSurface Docs archive catalog fields, split commit identities, generator metadata, and a deterministic subject SHA-256. V2 calls the original checked-out SHA `preparationBaseCommit`; later `releasePreparationCommit` and `tagCommit` identities remain nullable in preparation evidence and are populated only by the appropriate later release phase. V2 binds the frozen pointer to the tagged note for this docs tree; it never performs a global current-version lookup. The subject digest excludes the generated timestamp, workflow run, release-preparation commit, and tag commit so maintainers can review those later identities without churning the proof. Optional GitHub artifact attestations are not required; default workflows must not request attestation permissions unless a future explicit attestation mode is added.
 
@@ -147,3 +168,5 @@ Every failure uses the same envelope:
 - `Docs`
 
 Common codes include `release-version-leading-v`, `release-version-invalid`, `release-target-exists`, `release-sidecar-invalid`, `release-current-page-body-invalid`, `release-current-page-stale`, `release-current-page-version-not-newer`, `release-current-page-tag-ambiguous`, `release-current-page-target-tag-exists`, `release-preparation-base-commit-concurrent-update`, `release-preparation-base-commit-invalid`, `release-preparation-base-commit-not-contained-by-tag`, `release-preparation-output-path-unsafe`, `release-stable-package-policy-missing`, `release-stable-packages-not-published`, `release-prerelease-label-unprotected`, `release-prerelease-packages-not-published`, `release-base-ref-invalid`, `release-tag-lightweight`, `release-tag-unreachable-from-base-ref`, `release-github-output-path-invalid`, `release-github-release-exists`, `release-github-release-state-unavailable`, `release-evidence-missing`, `release-evidence-duplicate`, `release-evidence-schema-invalid`, `release-evidence-version-mismatch`, `release-evidence-artifact-digest-mismatch`, `release-evidence-content-source-commit-mismatch`, `release-evidence-release-manifest-schema-invalid`, `release-evidence-subject-digest-mismatch`, `release-evidence-docs-archive-required`, `release-evidence-docs-archive-incomplete`, `release-evidence-docs-exacttreepath-unsafe`, `release-evidence-docs-manifest-digest-mismatch`, `release-evidence-catalog-entry-mismatch`, `release-docs-catalog-input-missing`, `release-docs-catalog-version-unavailable`, `release-docs-archive-verification-failed`, `release-docs-publication-catalog-invalid`, `release-docs-publication-manifest-digest-mismatch`, `release-docs-publication-output-path-unsafe`, `release-docs-publication-recommended-downgrade`, and `release-evidence-tag-commit-mismatch`.
+
+The prepared-to-tagged contract adds `release-sidecar-schema-invalid`, `release-sidecar-state-invalid`, `release-sidecar-id-mismatch`, `release-sidecar-final-claim-invalid`, `release-legacy-tag-binding-unsupported`, `release-tag-trailer-missing`, `release-tag-trailer-invalid`, `release-tag-trailer-mismatch`, `release-tag-tagger-invalid`, and `release-inspect-output-path-invalid`.

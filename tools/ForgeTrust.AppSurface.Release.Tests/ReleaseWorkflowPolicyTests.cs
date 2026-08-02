@@ -234,6 +234,13 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("actual_tag_commit=\"$(git rev-parse \"refs/tags/${TAG}^{commit}\")\"", publish, StringComparison.Ordinal);
         Assert.Contains("Expected ${TAG} to resolve to ${TAG_COMMIT}; got ${actual_tag_commit}.", publish, StringComparison.Ordinal);
         Assert.Contains("git show \"${TAG_COMMIT}:releases/v${VERSION}.md\"", publish, StringComparison.Ordinal);
+        Assert.Contains("Resolve tag-bound sidecar for docs export", publish, StringComparison.Ordinal);
+        Assert.Contains("./eng/release inspect", publish, StringComparison.Ordinal);
+        Assert.Contains("--out \"${projection}\"", publish, StringComparison.Ordinal);
+        Assert.Contains("inspect_proof=\"${RUNNER_TEMP}/appsurface-tagged-release-inspect.txt\"", publish, StringComparison.Ordinal);
+        Assert.Contains("| tee \"${inspect_proof}\"", publish, StringComparison.Ordinal);
+        Assert.Contains("cat \"${inspect_proof}\" >> \"${GITHUB_STEP_SUMMARY}\"", publish, StringComparison.Ordinal);
+        Assert.Contains("cp \"${projection}\" \"releases/v${VERSION}.md.yml\"", publish, StringComparison.Ordinal);
         Assert.Contains("Export current docs root and exact docs tree", publish, StringComparison.Ordinal);
         Assert.Contains("AppSurfaceDocs__Contributor__DefaultBranch: ${{ inputs.base-ref }}", publish, StringComparison.Ordinal);
         Assert.Contains("AppSurfaceDocs__Contributor__SourceRef: ${{ needs.validate-release.outputs.tag_commit }}", publish, StringComparison.Ordinal);
@@ -253,6 +260,10 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.DoesNotContain("select(.isPrerelease == false)", publish, StringComparison.Ordinal);
         Assert.Contains("--existing-pages-root \"${EXISTING_PAGES_ROOT}\"", publish, StringComparison.Ordinal);
         Assert.Contains("curl -fsSL \"${root}/docs\"", publish, StringComparison.Ordinal);
+        var resolveProjectionIndex = publish.IndexOf("Resolve tag-bound sidecar for docs export", StringComparison.Ordinal);
+        var exportDocsIndex = publish.IndexOf("Export current docs root and exact docs tree", StringComparison.Ordinal);
+        Assert.True(resolveProjectionIndex >= 0, "Release publish must resolve the tag-bound projection before docs export.");
+        Assert.True(exportDocsIndex > resolveProjectionIndex, "Docs export must see the verified tagged projection, not committed prepared metadata.");
         var hydrateIndex = publish.IndexOf("Hydrate existing release docs archives", StringComparison.Ordinal);
         var planIndex = publish.IndexOf("Create docs publication plan", StringComparison.Ordinal);
         Assert.True(hydrateIndex >= 0, "Release publish must hydrate prior release archives.");
@@ -265,6 +276,7 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("gh release create \"${TAG}\" --verify-tag --draft", publish, StringComparison.Ordinal);
         Assert.Contains("gh release edit \"${TAG}\" --title \"${TITLE}\" --notes-file \"${notes_file}\"", publish, StringComparison.Ordinal);
         Assert.Contains("gh release upload \"${TAG}\" \"${ARCHIVE_PATH}\" \"${SHA256_PATH}\" --clobber", publish, StringComparison.Ordinal);
+        Assert.Contains("${{ runner.temp }}/appsurface-tagged-release-inspect.txt", publish, StringComparison.Ordinal);
         Assert.Contains("actions/upload-pages-artifact", publish, StringComparison.Ordinal);
         Assert.Contains("include-hidden-files: true", publish, StringComparison.Ordinal);
         Assert.Contains("actions/deploy-pages", publish, StringComparison.Ordinal);

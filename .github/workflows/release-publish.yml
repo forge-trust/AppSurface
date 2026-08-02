@@ -116,6 +116,25 @@ jobs:
       - name: Build AppSurface Docs exporter
         run: dotnet build ForgeTrust.AppSurface.slnx -c Release
 
+      - name: Resolve tag-bound sidecar for docs export
+        env:
+          VERSION: ${{ needs.validate-release.outputs.version }}
+          TAG: ${{ needs.validate-release.outputs.tag }}
+          BASE_REF: ${{ inputs.base-ref }}
+        run: |
+          set -euo pipefail
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          projection="${RUNNER_TEMP}/appsurface-tagged-release-sidecar.yml"
+          inspect_proof="${RUNNER_TEMP}/appsurface-tagged-release-inspect.txt"
+          ./eng/release inspect \
+            --version "${VERSION}" \
+            --tag "${TAG}" \
+            --base-ref "${BASE_REF}" \
+            --out "${projection}" | tee "${inspect_proof}"
+          cat "${inspect_proof}" >> "${GITHUB_STEP_SUMMARY}"
+          cp "${projection}" "releases/v${VERSION}.md.yml"
+
       - name: Export current docs root and exact docs tree
         env:
           VERSION: ${{ needs.validate-release.outputs.version }}
@@ -304,6 +323,7 @@ jobs:
         with:
           name: docs-publication-${{ needs.validate-release.outputs.version }}
           path: |
+            ${{ runner.temp }}/appsurface-tagged-release-inspect.txt
             ${{ runner.temp }}/docs-publication-plan.json
             ${{ steps.docs.outputs.archive_path }}
             ${{ steps.docs.outputs.sha256_path }}
