@@ -122,6 +122,7 @@
     <Project Path="tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj" />
+    <Project Path="tools/ForgeTrust.AppSurface.ReleaseContracts/ForgeTrust.AppSurface.ReleaseContracts.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.Release/ForgeTrust.AppSurface.Release.csproj" />
   </Folder>

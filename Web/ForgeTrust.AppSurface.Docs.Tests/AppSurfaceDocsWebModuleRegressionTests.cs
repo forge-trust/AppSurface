@@ -566,7 +566,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
     [Fact]
     public async Task ConfigureWebApplication_Versioning_ServesRecommendedAliasAndRewritesExactVersionTrees()
     {
-        var tempDirectory = Path.Combine(
+        var tempDirectory = TestPathUtils.PathUnder(
             Path.GetTempPath(),
             "appsurfacedocs-published-tree-regression-tests",
             Guid.NewGuid().ToString("N"));
@@ -577,7 +577,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
             var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
             var publishedTree = CreatePublishedExactTree(tempDirectory, "1.2.3");
             var releaseManifestSha256 = WriteReleaseManifest(publishedTree);
-            var catalogPath = Path.Combine(tempDirectory, "catalog.json");
+            var catalogPath = TestPathUtils.PathUnder(tempDirectory, "catalog.json");
             File.WriteAllText(
                 catalogPath,
                 $$"""
@@ -718,6 +718,233 @@ public class AppSurfaceDocsWebModuleRegressionTests
                 {
                     await host.StopAsync();
                 }
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(tempDirectory))
+            {
+                Directory.Delete(tempDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ConfigureWebApplication_Versioning_PreservesCurrentPointerWithinEachPublishedTree()
+    {
+        var tempDirectory = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "appsurfacedocs-published-release-navigation-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+            var historicalTree = CreatePublishedReleaseNavigationTree(tempDirectory, "1.2.3");
+            var currentTree = CreatePublishedReleaseNavigationTree(tempDirectory, "1.2.4");
+            var historicalManifestSha256 = WriteReleaseManifest(historicalTree);
+            var currentManifestSha256 = WriteReleaseManifest(currentTree);
+            var catalogPath = TestPathUtils.PathUnder(tempDirectory, "catalog.json");
+            File.WriteAllText(
+                catalogPath,
+                $$"""
+                {
+                  "recommendedVersion": "1.2.4",
+                  "versions": [
+                    {
+                      "version": "1.2.4",
+                      "label": "1.2.4",
+                      "exactTreePath": "1.2.4",
+                      "releaseManifestSha256": "{{currentManifestSha256}}",
+                      "supportState": "Current",
+                      "visibility": "Public",
+                      "advisoryState": "None"
+                    },
+                    {
+                      "version": "1.2.3",
+                      "label": "1.2.3",
+                      "exactTreePath": "1.2.3",
+                      "releaseManifestSha256": "{{historicalManifestSha256}}",
+                      "supportState": "Archived",
+                      "visibility": "Public",
+                      "advisoryState": "None"
+                    }
+                  ]
+                }
+                """);
+
+            var module = new AppSurfaceDocsWebModule();
+            var startup = new TestAppSurfaceDocsStartup(module);
+            var context = CreatePackagedModuleStartupContext(module);
+            var builder = ((IAppSurfaceStartup)startup).CreateHostBuilder(context);
+            builder.ConfigureAppConfiguration(
+                (_, configuration) =>
+                {
+                    configuration.AddInMemoryCollection(
+                        new Dictionary<string, string?>
+                        {
+                            ["AppSurfaceDocs:Source:RepositoryRoot"] = repoRoot,
+                            ["AppSurfaceDocs:Routing:DocsRootPath"] = "/docs/next",
+                            ["AppSurfaceDocs:Versioning:Enabled"] = "true",
+                            ["AppSurfaceDocs:Versioning:CatalogPath"] = catalogPath
+                        });
+                });
+            builder.ConfigureWebHost(webHost => webHost.UseUrls("http://127.0.0.1:0"));
+
+            using var host = builder.Build();
+            await host.StartAsync();
+
+            try
+            {
+                var server = host.Services.GetRequiredService<IServer>();
+                var addresses = server.Features.Get<IServerAddressesFeature>();
+                var baseAddress = Assert.Single(addresses!.Addresses);
+                using var client = new HttpClient
+                {
+                    BaseAddress = new Uri(baseAddress)
+                };
+
+                await AssertPublishedReleaseNavigationAsync(client, "/docs", "1.2.4");
+                await AssertPublishedReleaseNavigationAsync(client, "/docs/v/1.2.3", "1.2.3");
+                await AssertPublishedReleaseIsNotAvailableAsync(client, "/docs", "1.2.3");
+                await AssertPublishedReleaseIsNotAvailableAsync(client, "/docs/v/1.2.3", "1.2.4");
+            }
+            finally
+            {
+                await host.StopAsync();
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(tempDirectory))
+            {
+                Directory.Delete(tempDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ConfigureWebApplication_Versioning_MergesCurrentAndHistoricalSearchResultsWithoutCrossTreeReleasePointerLeakage()
+    {
+        var tempDirectory = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "appsurfacedocs-published-search-regression-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+            var historicalTree = CreatePublishedReleaseNavigationTree(tempDirectory, "1.2.3");
+            var currentTree = CreatePublishedReleaseNavigationTree(tempDirectory, "1.2.4");
+            WritePublishedReleaseSearchIndex(historicalTree, "1.2.3");
+            WritePublishedReleaseSearchIndex(currentTree, "1.2.4");
+            var historicalManifestSha256 = WriteReleaseManifest(historicalTree);
+            var currentManifestSha256 = WriteReleaseManifest(currentTree);
+            var catalogPath = TestPathUtils.PathUnder(tempDirectory, "catalog.json");
+            File.WriteAllText(
+                catalogPath,
+                $$"""
+                {
+                  "recommendedVersion": "1.2.4",
+                  "versions": [
+                    {
+                      "version": "1.2.4",
+                      "label": "1.2.4",
+                      "exactTreePath": "1.2.4",
+                      "releaseManifestSha256": "{{currentManifestSha256}}",
+                      "supportState": "Current",
+                      "visibility": "Public",
+                      "advisoryState": "None"
+                    },
+                    {
+                      "version": "1.2.3",
+                      "label": "1.2.3",
+                      "exactTreePath": "1.2.3",
+                      "releaseManifestSha256": "{{historicalManifestSha256}}",
+                      "supportState": "Archived",
+                      "visibility": "Public",
+                      "advisoryState": "None"
+                    }
+                  ]
+                }
+                """);
+
+            var module = new AppSurfaceDocsWebModule();
+            var startup = new TestAppSurfaceDocsStartup(module);
+            var context = CreatePackagedModuleStartupContext(module);
+            var builder = ((IAppSurfaceStartup)startup).CreateHostBuilder(context);
+            builder.ConfigureAppConfiguration(
+                (_, configuration) =>
+                {
+                    configuration.AddInMemoryCollection(
+                        new Dictionary<string, string?>
+                        {
+                            ["AppSurfaceDocs:Source:RepositoryRoot"] = repoRoot,
+                            ["AppSurfaceDocs:Routing:DocsRootPath"] = "/docs/next",
+                            ["AppSurfaceDocs:Versioning:Enabled"] = "true",
+                            ["AppSurfaceDocs:Versioning:CatalogPath"] = catalogPath
+                        });
+                });
+            builder.ConfigureWebHost(webHost => webHost.UseUrls("http://127.0.0.1:0"));
+
+            using var host = builder.Build();
+            await host.StartAsync();
+
+            try
+            {
+                var server = host.Services.GetRequiredService<IServer>();
+                var addresses = server.Features.Get<IServerAddressesFeature>();
+                var baseAddress = Assert.Single(addresses!.Addresses);
+                using var client = new HttpClient
+                {
+                    BaseAddress = new Uri(baseAddress)
+                };
+
+                var currentSearchDocuments = await ReadPublishedSearchDocumentsAsync(client, "/docs/search-index.json");
+                var historicalSearchDocuments = await ReadPublishedSearchDocumentsAsync(
+                    client,
+                    "/docs/v/1.2.3/search-index.json");
+
+                Assert.Equal(
+                    [
+                        new PublishedSearchDocument("release-current", "/docs/releases/current", "Current release 1.2.4"),
+                        new PublishedSearchDocument("release-version", "/docs/releases/v1.2.4", "Release 1.2.4")
+                    ],
+                    currentSearchDocuments
+                        .Where(document => document.Title.Contains("release", StringComparison.OrdinalIgnoreCase))
+                        .DistinctBy(document => (document.Id, document.Path))
+                        .OrderBy(document => document.Path, StringComparer.Ordinal)
+                        .ToArray());
+
+                Assert.Equal(
+                    [
+                        new PublishedSearchDocument(
+                            "release-current",
+                            "/docs/v/1.2.3/releases/current",
+                            "Current release 1.2.3"),
+                        new PublishedSearchDocument(
+                            "release-version",
+                            "/docs/v/1.2.3/releases/v1.2.3",
+                            "Release 1.2.3")
+                    ],
+                    historicalSearchDocuments
+                        .Where(document => document.Title.Contains("release", StringComparison.OrdinalIgnoreCase))
+                        .DistinctBy(document => (document.Id, document.Path))
+                        .OrderBy(document => document.Path, StringComparer.Ordinal)
+                        .ToArray());
+
+                Assert.DoesNotContain(
+                    historicalSearchDocuments,
+                    document => string.Equals(document.Path, "/docs/releases/current", StringComparison.Ordinal));
+                Assert.DoesNotContain(
+                    currentSearchDocuments,
+                    document => document.Path.StartsWith("/docs/v/1.2.3/", StringComparison.Ordinal));
+            }
+            finally
+            {
+                await host.StopAsync();
             }
         }
         finally
@@ -934,18 +1161,18 @@ public class AppSurfaceDocsWebModuleRegressionTests
     [Fact]
     public async Task ConfigureEndpoints_Versioning_ServesPreviewSearchAssetsFromLiveWebRoot_WhenAppSurfaceDocsIsRootModule()
     {
-        var tempDirectory = Path.Combine(
+        var tempDirectory = TestPathUtils.PathUnder(
             Path.GetTempPath(),
             "appsurfacedocs-preview-asset-tests",
             Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(Path.Combine(tempDirectory, "docs"));
+        Directory.CreateDirectory(TestPathUtils.PathUnder(tempDirectory, "docs"));
 
         try
         {
-            File.WriteAllText(Path.Combine(tempDirectory, "docs", "search.css"), "body { background: #111827; }");
-            File.WriteAllText(Path.Combine(tempDirectory, "docs", "minisearch.min.js"), "window.MiniSearch = {};");
-            File.WriteAllText(Path.Combine(tempDirectory, "docs", "search-client.js"), "window.__previewAsset = true;");
-            File.WriteAllText(Path.Combine(tempDirectory, "docs", "outline-client.js"), "window.__outlineAsset = true;");
+            File.WriteAllText(TestPathUtils.PathUnder(tempDirectory, "docs", "search.css"), "body { background: #111827; }");
+            File.WriteAllText(TestPathUtils.PathUnder(tempDirectory, "docs", "minisearch.min.js"), "window.MiniSearch = {};");
+            File.WriteAllText(TestPathUtils.PathUnder(tempDirectory, "docs", "search-client.js"), "window.__previewAsset = true;");
+            File.WriteAllText(TestPathUtils.PathUnder(tempDirectory, "docs", "outline-client.js"), "window.__outlineAsset = true;");
 
             var module = new AppSurfaceDocsWebModule();
             var context = new StartupContext([], module);
@@ -1080,11 +1307,11 @@ public class AppSurfaceDocsWebModuleRegressionTests
     [Fact]
     public async Task ConfigureEndpoints_Versioning_ServesEmbeddedPreviewAssets_WhenWebRootAssetFileIsMissing()
     {
-        var tempDirectory = Path.Combine(
+        var tempDirectory = TestPathUtils.PathUnder(
             Path.GetTempPath(),
             "appsurfacedocs-preview-asset-missing-file-tests",
             Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(Path.Combine(tempDirectory, "docs"));
+        Directory.CreateDirectory(TestPathUtils.PathUnder(tempDirectory, "docs"));
 
         try
         {
@@ -1156,7 +1383,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
     [Fact]
     public async Task ConfigureWebApplication_Versioning_KeepsPreviewSearchAssetsAvailable_WhenRecommendedReleaseIsUnavailable()
     {
-        var tempDirectory = Path.Combine(
+        var tempDirectory = TestPathUtils.PathUnder(
             Path.GetTempPath(),
             "appsurfacedocs-versioning-degraded-asset-tests",
             Guid.NewGuid().ToString("N"));
@@ -1165,11 +1392,11 @@ public class AppSurfaceDocsWebModuleRegressionTests
         try
         {
             var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-            var brokenTree = Path.Combine(tempDirectory, "broken");
+            var brokenTree = TestPathUtils.PathUnder(tempDirectory, "broken");
             Directory.CreateDirectory(brokenTree);
-            File.WriteAllText(Path.Combine(brokenTree, "index.html"), "<html>broken</html>");
+            File.WriteAllText(TestPathUtils.PathUnder(brokenTree, "index.html"), "<html>broken</html>");
 
-            var catalogPath = Path.Combine(tempDirectory, "catalog.json");
+            var catalogPath = TestPathUtils.PathUnder(tempDirectory, "catalog.json");
             File.WriteAllText(
                 catalogPath,
                 """
@@ -2425,10 +2652,10 @@ public class AppSurfaceDocsWebModuleRegressionTests
 
     private static string CreatePublishedExactTree(string parentDirectory, string version)
     {
-        var root = Path.Combine(parentDirectory, version);
+        var root = TestPathUtils.PathUnder(parentDirectory, version);
         Directory.CreateDirectory(root);
         File.WriteAllText(
-            Path.Combine(root, "index.html"),
+            TestPathUtils.PathUnder(root, "index.html"),
             $$"""
             <!DOCTYPE html>
             <html>
@@ -2449,7 +2676,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
             </html>
             """);
         File.WriteAllText(
-            Path.Combine(root, "search.html"),
+            TestPathUtils.PathUnder(root, "search.html"),
             """
             <!DOCTYPE html>
             <html>
@@ -2462,14 +2689,14 @@ public class AppSurfaceDocsWebModuleRegressionTests
             </body>
             </html>
             """);
-        File.WriteAllText(Path.Combine(root, "guide.html"), "<!DOCTYPE html><html><body data-tree=\"release-guide\">Guide</body></html>");
-        File.WriteAllText(Path.Combine(root, "search.css"), "body { color: #fff; }");
-        File.WriteAllText(Path.Combine(root, "search-client.js"), "window.__releaseTree = true;");
-        File.WriteAllText(Path.Combine(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
-        File.WriteAllText(Path.Combine(root, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
-        File.WriteAllText(Path.Combine(root, "search-index.json"), "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\"}]}");
+        File.WriteAllText(TestPathUtils.PathUnder(root, "guide.html"), "<!DOCTYPE html><html><body data-tree=\"release-guide\">Guide</body></html>");
+        File.WriteAllText(TestPathUtils.PathUnder(root, "search.css"), "body { color: #fff; }");
+        File.WriteAllText(TestPathUtils.PathUnder(root, "search-client.js"), "window.__releaseTree = true;");
+        File.WriteAllText(TestPathUtils.PathUnder(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
+        File.WriteAllText(TestPathUtils.PathUnder(root, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
+        File.WriteAllText(TestPathUtils.PathUnder(root, "search-index.json"), "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\"}]}");
         File.WriteAllText(
-            Path.Join(root, ".appsurface-docs-route-manifest.json"),
+            TestPathUtils.PathUnder(root, ".appsurface-docs-route-manifest.json"),
             """
             {
               "schema": "appsurface-docs-route-manifest-v1",
@@ -2484,6 +2711,147 @@ public class AppSurfaceDocsWebModuleRegressionTests
             }
             """);
         return root;
+    }
+
+    private static string CreatePublishedReleaseNavigationTree(string parentDirectory, string version)
+    {
+        var root = CreatePublishedExactTree(parentDirectory, version);
+        Directory.CreateDirectory(TestPathUtils.PathUnder(root, "packages"));
+        Directory.CreateDirectory(TestPathUtils.PathUnder(root, "releases"));
+
+        File.WriteAllText(
+            TestPathUtils.PathUnder(root, "packages", "index.html"),
+            """
+            <!DOCTYPE html>
+            <html><body>
+              <h1>AppSurface package chooser</h1>
+              <a href="/docs/releases/current">Current release</a>
+            </body></html>
+            """);
+        File.WriteAllText(
+            TestPathUtils.PathUnder(root, "releases", "current.html"),
+            $$"""
+            <!DOCTYPE html>
+            <html><body>
+              <h1>Current coordinated release {{version}}</h1>
+              <a href="/docs/releases/v{{version}}">Release {{version}}</a>
+            </body></html>
+            """);
+        File.WriteAllText(
+            TestPathUtils.PathUnder(root, "releases", $"v{version}.html"),
+            $"<!DOCTYPE html><html><body><h1>Release {version}</h1></body></html>");
+        File.WriteAllText(
+            TestPathUtils.PathUnder(root, ".appsurface-docs-route-manifest.json"),
+            $$"""
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "packages/README.md",
+                  "canonicalRoutePath": "packages",
+                  "recoveryAliases": [],
+                  "declaredAliases": []
+                },
+                {
+                  "sourcePath": "releases/current.md",
+                  "canonicalRoutePath": "releases/current",
+                  "recoveryAliases": [],
+                  "declaredAliases": []
+                },
+                {
+                  "sourcePath": "releases/v{{version}}.md",
+                  "canonicalRoutePath": "releases/v{{version}}",
+                  "recoveryAliases": [],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+        return root;
+    }
+
+    private static void WritePublishedReleaseSearchIndex(string root, string version)
+    {
+        File.WriteAllText(
+            TestPathUtils.PathUnder(root, "search-index.json"),
+            $$"""
+            {
+              "documents": [
+                {
+                  "id": "guide",
+                  "path": "/docs/guide.html",
+                  "title": "Guide"
+                },
+                {
+                  "id": "release-current",
+                  "path": "/docs/releases/current",
+                  "title": "Current release {{version}}"
+                },
+                {
+                  "id": "release-version",
+                  "path": "/docs/releases/v{{version}}",
+                  "title": "Release {{version}}"
+                }
+              ]
+            }
+            """);
+    }
+
+    private static async Task<IReadOnlyList<PublishedSearchDocument>> ReadPublishedSearchDocumentsAsync(
+        HttpClient client,
+        string requestPath)
+    {
+        using var response = await client.GetAsync(requestPath);
+        var json = await response.Content.ReadAsStringAsync();
+        Assert.True(
+            response.StatusCode == HttpStatusCode.OK,
+            $"Expected '{requestPath}' to return 200 but received {(int)response.StatusCode}. Body: {json}");
+
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement
+            .GetProperty("documents")
+            .EnumerateArray()
+            .Select(
+                item => new PublishedSearchDocument(
+                    item.GetProperty("id").GetString()!,
+                    item.GetProperty("path").GetString()!,
+                    item.GetProperty("title").GetString()!))
+            .ToArray();
+    }
+
+    private static async Task AssertPublishedReleaseNavigationAsync(HttpClient client, string docsRootPath, string version)
+    {
+        var expectedCurrentReleasePath = $"{docsRootPath}/releases/current";
+        var expectedVersionedReleasePath = $"{docsRootPath}/releases/v{version}";
+
+        using var packagesResponse = await client.GetAsync($"{docsRootPath}/packages");
+        var packagesHtml = await packagesResponse.Content.ReadAsStringAsync();
+        Assert.True(
+            packagesResponse.StatusCode == HttpStatusCode.OK,
+            $"Expected '{docsRootPath}/packages' to return 200 but received {(int)packagesResponse.StatusCode}. Body: {packagesHtml}");
+        Assert.Contains("<h1>AppSurface package chooser</h1>", packagesHtml, StringComparison.Ordinal);
+        Assert.Contains($"href=\"{expectedCurrentReleasePath}\"", packagesHtml, StringComparison.Ordinal);
+
+        using var currentReleaseResponse = await client.GetAsync(expectedCurrentReleasePath);
+        var currentReleaseHtml = await currentReleaseResponse.Content.ReadAsStringAsync();
+        Assert.True(
+            currentReleaseResponse.StatusCode == HttpStatusCode.OK,
+            $"Expected '{expectedCurrentReleasePath}' to return 200 but received {(int)currentReleaseResponse.StatusCode}. Body: {currentReleaseHtml}");
+        Assert.Contains($"<h1>Current coordinated release {version}</h1>", currentReleaseHtml, StringComparison.Ordinal);
+        Assert.Contains($"href=\"{expectedVersionedReleasePath}\"", currentReleaseHtml, StringComparison.Ordinal);
+
+        using var versionedReleaseResponse = await client.GetAsync(expectedVersionedReleasePath);
+        var versionedReleaseHtml = await versionedReleaseResponse.Content.ReadAsStringAsync();
+        Assert.True(
+            versionedReleaseResponse.StatusCode == HttpStatusCode.OK,
+            $"Expected '{expectedVersionedReleasePath}' to return 200 but received {(int)versionedReleaseResponse.StatusCode}. Body: {versionedReleaseHtml}");
+        Assert.Contains($"<h1>Release {version}</h1>", versionedReleaseHtml, StringComparison.Ordinal);
+    }
+
+    private static async Task AssertPublishedReleaseIsNotAvailableAsync(HttpClient client, string docsRootPath, string version)
+    {
+        using var response = await client.GetAsync($"{docsRootPath}/releases/v{version}");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     private static string WriteReleaseManifest(string root)
@@ -2720,6 +3088,8 @@ public class AppSurfaceDocsWebModuleRegressionTests
             throw new InvalidOperationException(RawFailureMessage);
         }
     }
+
+    private sealed record PublishedSearchDocument(string Id, string Path, string Title);
 
     private sealed record BuildCoordinates(string Configuration, string TargetFramework);
 }

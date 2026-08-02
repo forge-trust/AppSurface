@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -37,7 +38,7 @@ internal sealed record ReleaseOptions(
 /// <summary>
 /// Minimal SemVer 2.0 model used by release automation.
 /// </summary>
-internal sealed partial record SemVer(int Major, int Minor, int Patch, string? Prerelease)
+internal sealed partial record SemVer(int Major, int Minor, int Patch, string? Prerelease) : IComparable<SemVer>
 {
     /// <summary>
     /// Gets whether the version is a stable SemVer identity.
@@ -101,6 +102,87 @@ internal sealed partial record SemVer(int Major, int Minor, int Patch, string? P
             match.Groups["pre"].Success ? match.Groups["pre"].Value : null);
     }
 
+    /// <summary>
+    /// Tries to parse a SemVer value without producing a command-line diagnostic.
+    /// </summary>
+    /// <param name="value">Version text without the tag prefix.</param>
+    /// <param name="version">Parsed version when the input is valid.</param>
+    /// <returns><c>true</c> when the input is a supported SemVer value.</returns>
+    internal static bool TryParse(string value, [NotNullWhen(true)] out SemVer? version)
+    {
+        version = null;
+        if (value.StartsWith('v'))
+        {
+            return false;
+        }
+
+        var match = SemVerRegex().Match(value);
+        if (!match.Success
+            || !TryParseComponent(match.Groups["major"].Value, out var major)
+            || !TryParseComponent(match.Groups["minor"].Value, out var minor)
+            || !TryParseComponent(match.Groups["patch"].Value, out var patch))
+        {
+            return false;
+        }
+
+        version = new SemVer(major, minor, patch, match.Groups["pre"].Success ? match.Groups["pre"].Value : null);
+        return true;
+    }
+
+    /// <summary>
+    /// Compares two versions with SemVer 2.0 precedence.
+    /// </summary>
+    /// <param name="other">The version to compare.</param>
+    /// <returns>A negative value, zero, or a positive value according to SemVer precedence.</returns>
+    public int CompareTo(SemVer? other)
+    {
+        if (other is null)
+        {
+            return 1;
+        }
+
+        var major = Major.CompareTo(other.Major);
+        if (major != 0)
+        {
+            return major;
+        }
+
+        var minor = Minor.CompareTo(other.Minor);
+        if (minor != 0)
+        {
+            return minor;
+        }
+
+        var patch = Patch.CompareTo(other.Patch);
+        if (patch != 0)
+        {
+            return patch;
+        }
+
+        if (Prerelease is null)
+        {
+            return other.Prerelease is null ? 0 : 1;
+        }
+
+        if (other.Prerelease is null)
+        {
+            return -1;
+        }
+
+        var left = Prerelease.Split('.', StringSplitOptions.None);
+        var right = other.Prerelease.Split('.', StringSplitOptions.None);
+        for (var index = 0; index < Math.Min(left.Length, right.Length); index++)
+        {
+            var identifier = ComparePrereleaseIdentifier(left[index], right[index]);
+            if (identifier != 0)
+            {
+                return identifier;
+            }
+        }
+
+        return left.Length.CompareTo(right.Length);
+    }
+
     /// <inheritdoc />
     public override string ToString()
     {
@@ -118,5 +200,28 @@ internal sealed partial record SemVer(int Major, int Minor, int Patch, string? P
     private static bool TryParseComponent(string value, out int component)
     {
         return int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out component);
+    }
+
+    private static int ComparePrereleaseIdentifier(string left, string right)
+    {
+        var leftIsNumeric = left.All(char.IsAsciiDigit);
+        var rightIsNumeric = right.All(char.IsAsciiDigit);
+        if (leftIsNumeric && rightIsNumeric)
+        {
+            var length = left.Length.CompareTo(right.Length);
+            return length != 0 ? length : string.CompareOrdinal(left, right);
+        }
+
+        if (leftIsNumeric)
+        {
+            return -1;
+        }
+
+        if (rightIsNumeric)
+        {
+            return 1;
+        }
+
+        return string.CompareOrdinal(left, right);
     }
 }

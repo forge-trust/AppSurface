@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://forge-trust.com/schemas/appsurface/release-evidence-v2.schema.json",
+  "title": "AppSurface release evidence v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "tag", "releaseClassification", "releaseNotePath", "releaseSidecarPath", "releaseManifestPath", "evidencePath", "releaseManifestDigest", "releaseArtifactDigests", "coordinatedPackageReleaseNoteResolutions", "docsArchive", "commits", "generatedBy", "generatedAtUtc", "subject"],
+  "properties": {
+    "schema": { "const": "appsurface-release-evidence-bundle-v2" },
+    "version": { "$ref": "#/$defs/version" },
+    "tag": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" },
+    "releaseClassification": { "enum": ["prerelease", "stable"] },
+    "releaseNotePath": { "$ref": "#/$defs/repositoryPath" },
+    "releaseSidecarPath": { "$ref": "#/$defs/repositoryPath" },
+    "releaseManifestPath": { "$ref": "#/$defs/repositoryPath" },
+    "evidencePath": { "$ref": "#/$defs/repositoryPath" },
+    "releaseManifestDigest": { "$ref": "#/$defs/digest" },
+    "releaseArtifactDigests": { "type": "array", "items": { "$ref": "#/$defs/artifactDigest" }, "uniqueItems": true },
+    "coordinatedPackageReleaseNoteResolutions": { "type": "array", "items": { "$ref": "#/$defs/resolution" }, "uniqueItems": true },
+    "docsArchive": { "$ref": "#/$defs/docsArchive" },
+    "commits": { "$ref": "#/$defs/commits" },
+    "generatedBy": { "$ref": "#/$defs/generatedBy" },
+    "generatedAtUtc": { "type": "string", "format": "date-time" },
+    "subject": { "$ref": "#/$defs/subject" },
+    "attestation": { "$ref": "#/$defs/attestation" }
+  },
+  "$defs": {
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "repositoryPath": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" },
+    "digest": { "type": "object", "additionalProperties": false, "required": ["algorithm", "value"], "properties": { "algorithm": { "const": "sha256" }, "value": { "$ref": "#/$defs/sha256" } } },
+    "artifactDigest": { "type": "object", "additionalProperties": false, "required": ["path", "algorithm", "value"], "properties": { "path": { "$ref": "#/$defs/repositoryPath" }, "algorithm": { "const": "sha256" }, "value": { "$ref": "#/$defs/sha256" } } },
+    "resolution": { "type": "object", "additionalProperties": false, "required": ["project", "source", "aliasPath", "resolvedPath", "releaseTag", "preparationBaseCommit"], "properties": { "project": { "type": "string", "minLength": 1 }, "source": { "const": "coordinated" }, "aliasPath": { "const": "releases/current.md" }, "resolvedPath": { "$ref": "#/$defs/repositoryPath" }, "releaseTag": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" }, "preparationBaseCommit": { "$ref": "#/$defs/commit" } } },
+    "docsArchive": { "type": "object", "additionalProperties": false, "required": ["status", "exactTreePath", "releaseManifestSha256", "releaseManifestSchema", "fileCount", "catalogEntry"], "properties": { "status": { "type": "string" }, "exactTreePath": { "type": ["string", "null"] }, "releaseManifestSha256": { "type": ["string", "null"], "pattern": "^(?:[0-9a-f]{64}|generated)$" }, "releaseManifestSchema": { "type": ["string", "null"] }, "fileCount": { "type": ["integer", "null"], "minimum": 0 }, "catalogEntry": { "type": ["object", "null"], "additionalProperties": false, "required": ["exactTreePath", "releaseManifestSha256"], "properties": { "exactTreePath": { "$ref": "#/$defs/repositoryPath" }, "releaseManifestSha256": { "$ref": "#/$defs/sha256" } } } } },
+    "commits": { "type": "object", "additionalProperties": false, "required": ["preparationBaseCommit", "releasePreparationCommit", "tagCommit", "workflowRunId"], "properties": { "preparationBaseCommit": { "$ref": "#/$defs/commit" }, "releasePreparationCommit": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" }, "tagCommit": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" }, "workflowRunId": { "type": ["string", "null"] } } },
+    "generatedBy": { "type": "object", "additionalProperties": false, "required": ["tool"], "properties": { "tool": { "type": "string", "minLength": 1 } } },
+    "subject": { "type": "object", "additionalProperties": false, "required": ["name", "sha256"], "properties": { "name": { "const": "AppSurface release evidence" }, "sha256": { "$ref": "#/$defs/sha256" } } },
+    "attestation": { "type": ["object", "null"], "additionalProperties": false, "required": ["mode", "subjectName", "subjectSha256"], "properties": { "mode": { "type": "string" }, "subjectName": { "type": ["string", "null"] }, "subjectSha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" } } }
+  }
+}

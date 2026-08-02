@@ -5,7 +5,6 @@ This is the living release note for the next coordinated AppSurface version afte
 ## What is taking shape
 
 - `ForgeTrust.AppSurface.Theming` and the explicit `ForgeTrust.AppSurface.Web` Razor adapter now provide immutable semantic theme pairs with native System/Light/Dark browser output. Docs is part of the MVP: its default `AppSurfaceDark` path can consume the shared pair while preserving its public density, chrome, Graphite compatibility, short-hex overrides, static published-tree output, and internal token ownership. RazorWire styling remains limited to generated form-error nodes and uses the nonce-bearing critical stylesheet under strict CSP. Package discovery, quickstart, diagnostics, Docs migration, test commands, and deliberate non-goals ship with the feature; user preference persistence, tenant selection, shared Graphite, remote packs, and adoption telemetry remain separate policy work.
-- Applications can now persist PostgreSQL-backed `At`, `After`, and `Every` Schedules for registered durable Work, then run a bounded, externally triggered due pass without introducing a hosted scheduler. The Work-first gate keeps each occurrence's Work acceptance and Schedule facts in one transaction, coalesces overlapping QueueOne runs, and suspends rather than silently crossing clock, runtime-epoch, or scope-generation safety fences. Start with the [Schedule protocol](../Durable/schedule-protocol-v1.md) and the [PostgreSQL provider guide](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md).
 - Add merged public changes here as they land.
 
 ## Included in the next coordinated version
@@ -28,8 +27,11 @@ This is the living release note for the next coordinated AppSurface version afte
   and parse a privacy-safe envelope with fixed telemetry. The feature does not add triggers, retries, polling, readiness
   effects, or authorization-policy ownership; hosts retain those decisions.
 - The PostgreSQL durable schema adds the Schedule ledger, payload-free dispatch leases, forced-RLS history partitions, and a reviewed role recipe. Operators can use the [migration and role setup guidance](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#explicit-schema-and-epoch-deployment) before enabling the manual processor.
+- Coordinated package documentation now follows the release that was current when that documentation tree was published: current docs use the stable [`releases/current.md`](./current.md) pointer, while historical trees retain their original versioned release notes. The [release tool](../tools/ForgeTrust.AppSurface.Release/README.md) records and validates that contract through [versioned manifest and evidence V2 artifacts](./README.md#release-evidence-bundle), preserving V1 evidence compatibility and rejecting incomplete, conflicting, or unknown package release-link declarations.
+- Add release-facing changes here.
 
 ## Migration watch
 
 - Apply `0004_schedule_protocol.sql` with the migration-owner workflow before constructing Schedule clients or processors. Runtime credentials must remain distinct non-owner, non-`BYPASSRLS` dispatcher and scoped-runtime roles; use [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) rather than granting table access directly.
 - Schedule history partitions cover the current and following UTC months. Before the boundary is crossed, an operator must run `appsurface_durable.ensure_schedule_history_partitions()` as the migration owner; a missing partition fails writes visibly rather than routing data elsewhere.
+- Record-breaking or behavior-changing guidance here before it moves into the tagged release note.

@@ -62,6 +62,43 @@ internal sealed record ReleaseManifest(
     IReadOnlyList<string> WarningIds);
 
 /// <summary>
+/// Machine-readable schema-v2 release manifest for frozen coordinated release links.
+/// </summary>
+/// <remarks>
+/// V2 deliberately retains V1 as a separate type so checked-in historical manifests are never deserialized through a newer contract.
+/// Its package resolutions record the tree-local alias and the immutable tagged note it resolves to at preparation time.
+/// </remarks>
+internal sealed record ReleaseManifestV2(
+    string Schema,
+    string Version,
+    string Tag,
+    string Date,
+    string? PreparationBaseCommit,
+    string ReleaseClassification,
+    IReadOnlyList<string> GeneratedFiles,
+    IReadOnlyList<string> PublishedPackageProjects,
+    IReadOnlyList<CoordinatedPackageReleaseNoteResolution> CoordinatedPackageReleaseNoteResolutions,
+    IReadOnlyList<ReleaseDiagnosticRecord> Diagnostics,
+    IReadOnlyList<string> WarningIds);
+
+/// <summary>
+/// Records how a public package's coordinated release alias resolves in the prepared documentation tree.
+/// </summary>
+/// <param name="Project">Repository-relative project path for the public package.</param>
+/// <param name="Source">Resolution source. Schema V2 accepts only <c>coordinated</c>.</param>
+/// <param name="AliasPath">Tree-local alias path used by coordinated package documentation.</param>
+/// <param name="ResolvedPath">Immutable versioned release-note path selected by the alias in this documentation tree.</param>
+/// <param name="ReleaseTag">Annotated release tag for the immutable note.</param>
+/// <param name="PreparationBaseCommit">Preparation base commit; null only while a draft has not yet been bound to a concrete repository commit.</param>
+internal sealed record CoordinatedPackageReleaseNoteResolution(
+    string Project,
+    string Source,
+    string AliasPath,
+    string ResolvedPath,
+    string ReleaseTag,
+    string? PreparationBaseCommit);
+
+/// <summary>
 /// Package release note path update recorded in the release manifest.
 /// </summary>
 internal sealed record PackagePathUpdate(string Project, string PreviousReleaseNotesPath, string NextReleaseNotesPath);

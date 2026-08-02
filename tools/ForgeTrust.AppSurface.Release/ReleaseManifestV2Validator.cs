@@ -1,0 +1,160 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
+using System.Text.Json;
+using ForgeTrust.AppSurface.ReleaseContracts;
+
+namespace ForgeTrust.AppSurface.Release;
+
+/// <summary>
+/// Dispatches and validates the schema-v2 release-manifest contract before evidence consumes it.
+/// </summary>
+/// <remarks>
+/// This deliberately performs raw JSON validation before typed deserialization. System.Text.Json otherwise ignores unknown fields,
+/// which would make an accidental V1/V2 hybrid look valid even though the checked-in JSON schemas forbid it.
+/// </remarks>
+internal static class ReleaseManifestV2Validator
+{
+    internal const string Schema = "appsurface-release-manifest-v2";
+
+    private static readonly HashSet<string> RequiredProperties = new(StringComparer.Ordinal)
+    {
+        "schema",
+        "version",
+        "tag",
+        "date",
+        "preparationBaseCommit",
+        "releaseClassification",
+        "generatedFiles",
+        "publishedPackageProjects",
+        "coordinatedPackageReleaseNoteResolutions",
+        "diagnostics",
+        "warningIds"
+    };
+
+    internal static bool TryDeserialize(string json, [NotNullWhen(true)] out ReleaseManifestV2? manifest, out string issue)
+    {
+        manifest = null;
+        issue = string.Empty;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                issue = "Release manifest JSON must be an object.";
+                return false;
+            }
+
+            var propertyNames = document.RootElement.EnumerateObject().Select(property => property.Name).ToArray();
+            if (!propertyNames.All(RequiredProperties.Contains)
+                || RequiredProperties.Except(propertyNames, StringComparer.Ordinal).Any())
+            {
+                issue = "Release manifest has missing, unknown, or V1-only properties.";
+                return false;
+            }
+
+            if (!document.RootElement.TryGetProperty("schema", out var schema)
+                || schema.ValueKind != JsonValueKind.String
+                || !string.Equals(schema.GetString(), Schema, StringComparison.Ordinal))
+            {
+                issue = $"Release manifest schema must be '{Schema}'.";
+                return false;
+            }
+
+            manifest = JsonSerializer.Deserialize<ReleaseManifestV2>(json, ReleaseJson.Options);
+            if (manifest is null
+                || string.IsNullOrWhiteSpace(manifest.Version)
+                || string.IsNullOrWhiteSpace(manifest.Tag)
+                || string.IsNullOrWhiteSpace(manifest.Date)
+                || string.IsNullOrWhiteSpace(manifest.PreparationBaseCommit)
+                || string.IsNullOrWhiteSpace(manifest.ReleaseClassification)
+                || manifest.GeneratedFiles is null
+                || manifest.PublishedPackageProjects is null
+                || manifest.CoordinatedPackageReleaseNoteResolutions is null
+                || manifest.Diagnostics is null
+                || manifest.WarningIds is null)
+            {
+                issue = "Release manifest has missing required V2 values.";
+                manifest = null;
+                return false;
+            }
+
+            if (!SemVer.TryParse(manifest.Version, out var version)
+                || version is null
+                || !string.Equals(manifest.Tag, version.TagName, StringComparison.Ordinal)
+                || !DateOnly.TryParseExact(manifest.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)
+                || !IsReleaseClassification(manifest.ReleaseClassification))
+            {
+                issue = "Release manifest has invalid V2 identity values.";
+                manifest = null;
+                return false;
+            }
+
+            var parsed = manifest;
+            var projects = parsed.PublishedPackageProjects.ToArray();
+            var resolutionProjects = parsed.CoordinatedPackageReleaseNoteResolutions.Select(item => item.Project).ToArray();
+            if (!projects.SequenceEqual(projects.OrderBy(project => project, StringComparer.Ordinal), StringComparer.Ordinal)
+                || projects.Distinct(StringComparer.Ordinal).Count() != projects.Length
+                || !resolutionProjects.SequenceEqual(resolutionProjects.OrderBy(project => project, StringComparer.Ordinal), StringComparer.Ordinal)
+                || resolutionProjects.Distinct(StringComparer.Ordinal).Count() != resolutionProjects.Length
+                || parsed.CoordinatedPackageReleaseNoteResolutions.Any(item =>
+                    !string.Equals(item.Source, "coordinated", StringComparison.Ordinal)
+                    || !string.Equals(item.AliasPath, PackageReleaseLink.CoordinatedReleaseNotesPath, StringComparison.Ordinal)
+                    || !string.Equals(item.ResolvedPath, $"releases/v{parsed.Version}.md", StringComparison.Ordinal)
+                    || !string.Equals(item.ReleaseTag, parsed.Tag, StringComparison.Ordinal)
+                    || !string.Equals(item.PreparationBaseCommit, parsed.PreparationBaseCommit, StringComparison.Ordinal)))
+            {
+                issue = "Release manifest V2 package resolutions are invalid or not ordinally sorted.";
+                manifest = null;
+                return false;
+            }
+
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            issue = ex.Message;
+            return false;
+        }
+    }
+
+    private static bool IsReleaseClassification(string value) =>
+        string.Equals(value, "prerelease", StringComparison.Ordinal)
+        || string.Equals(value, "stable", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Confirms that a V2 manifest attests to exactly the release surface declared by the package index.
+    /// </summary>
+    /// <param name="manifest">The already validated V2 manifest.</param>
+    /// <param name="packages">Public publish package rows from the same release tree.</param>
+    /// <param name="issue">The mismatch explanation when validation fails.</param>
+    /// <returns><see langword="true"/> when the manifest and package index describe the same release surface.</returns>
+    internal static bool TryValidatePackageSet(
+        ReleaseManifestV2 manifest,
+        IReadOnlyList<PackageIndexEntry> packages,
+        out string issue)
+    {
+        var expectedPublishedProjects = packages
+            .Select(package => package.Project)
+            .OrderBy(project => project, StringComparer.Ordinal)
+            .ToArray();
+        var expectedCoordinatedProjects = packages
+            .Where(package => package.ReleaseLink?.Track == PackageReleaseTrack.Coordinated)
+            .Select(package => package.Project)
+            .OrderBy(project => project, StringComparer.Ordinal)
+            .ToArray();
+        var manifestProjects = manifest.PublishedPackageProjects.ToArray();
+        var resolutionProjects = manifest.CoordinatedPackageReleaseNoteResolutions
+            .Select(resolution => resolution.Project)
+            .ToArray();
+
+        if (!manifestProjects.SequenceEqual(expectedPublishedProjects, StringComparer.Ordinal)
+            || !resolutionProjects.SequenceEqual(expectedCoordinatedProjects, StringComparer.Ordinal))
+        {
+            issue = $"Manifest published packages [{string.Join(", ", manifestProjects)}] and coordinated resolutions [{string.Join(", ", resolutionProjects)}] must exactly match package-index public publish rows [{string.Join(", ", expectedPublishedProjects)}] and coordinated rows [{string.Join(", ", expectedCoordinatedProjects)}].";
+            return false;
+        }
+
+        issue = string.Empty;
+        return true;
+    }
+}
