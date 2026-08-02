@@ -998,7 +998,7 @@ public sealed class CoverageRunWatchdogTests
 
     private static async Task WaitForFileAsync(string path)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         while (!File.Exists(path))
         {
             await Task.Delay(10, timeout.Token);

@@ -14,6 +14,10 @@ public static class AppSurfaceWebPushServiceCollectionExtensions
     /// This method maps no route and does not enable the shared PWA worker. The host must separately enable
     /// <c>WebOptions.Pwa.Push.Enabled</c>, register <see cref="IAppSurfaceWebPushSubscriptionCustody"/>, and call one
     /// explicit protected mapping method.
+    /// Calling this method also registers one singleton
+    /// <see cref="IPwaPushReadinessProvider"/> for Web's additive PWA diagnostics contract. The provider exposes only
+    /// the active safe key identifier, a SHA-256 public-key fingerprint, and the synchronized route-mapped bit; it
+    /// never exposes key material, route values, or subscription data.
     /// Options are validated during host startup; incomplete keys, non-canonical origins, and mismatched key pairs fail startup.
     /// </remarks>
     /// <param name="services">The host service collection.</param>
@@ -36,6 +40,8 @@ public static class AppSurfaceWebPushServiceCollectionExtensions
         services.TryAddSingleton(provider =>
             new GuardedWebPushAdapter(provider.GetRequiredService<GuardedWebPushTransport>().Handler));
         services.TryAddSingleton<AppSurfaceWebPushRouteRegistry>();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IPwaPushReadinessProvider, AppSurfaceWebPushReadinessProvider>());
         services.TryAddScoped<IAppSurfaceWebPushSender, AppSurfaceWebPushSender>();
         return services;
     }
