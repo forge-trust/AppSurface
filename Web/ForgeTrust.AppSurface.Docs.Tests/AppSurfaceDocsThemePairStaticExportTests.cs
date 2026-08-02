@@ -35,20 +35,17 @@ public sealed class AppSurfaceDocsThemePairStaticExportTests
         var rewritten = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(html, "/docs");
         var document = new HtmlParser().ParseDocument(rewritten);
 
-        Assert.Equal(
-            """
-            <!DOCTYPE html><html data-as-theme="appsurface"><head><style data-as-theme-critical>html{--as-canvas:#f8fafc;}</style><style data-docs-theme-critical>html{--docs-color-surface-canvas:var(--as-canvas);}</style><script nonce="preserve-me">window.staticExport = true;</script></head><body></body></html>
-            """,
-            rewritten);
+        Assert.DoesNotContain("request-theme-nonce", rewritten, StringComparison.Ordinal);
+        Assert.DoesNotContain("request-docs-nonce", rewritten, StringComparison.Ordinal);
         Assert.Null(document.QuerySelector("style[data-as-theme-critical]")?.GetAttribute("nonce"));
         Assert.Null(document.QuerySelector("style[data-docs-theme-critical]")?.GetAttribute("nonce"));
         Assert.Equal("preserve-me", document.QuerySelector("script")?.GetAttribute("nonce"));
     }
 
     [Fact]
-    public void PublishedTreeRewrite_ShouldNotParseStableOutputForAnUnrelatedNonce()
+    public void PublishedTreeRewrite_ShouldPreserveUnrelatedThemeLikeAttributesOnTheDefaultStableMount()
     {
-        const string html = "<!DOCTYPE html><html data-as-theme=\"appsurface\"><head><style data-as-theme-critical>html{--as-canvas:#f8fafc;}</style><style data-docs-theme-critical>html{--docs-color-surface-canvas:var(--as-canvas);}</style><script nonce=\"preserve-me\">window.staticExport = true;</script></head><body></body></html>";
+        const string html = "<!DOCTYPE html><html data-as-theme=\"appsurface\"><head><style data-as-theme-critical>html{--as-canvas:#f8fafc;}</style><style data-docs-theme-critical>html{--docs-color-surface-canvas:var(--as-canvas);}</style><style data-as-theme-critical-extra nonce=\"preserve-suffixed-critical\">html{}</style><style data-as-theme-critical nonce-extra=\"preserve-suffixed-nonce\">html{}</style><style data-theme-note=\"data-docs-theme-critical\" nonce=\"preserve-marker-value\">html{}</style><script nonce=\"preserve-me\">window.staticExport = true;</script></head><body></body></html>";
 
         Assert.Equal(html, AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(html, "/docs"));
     }

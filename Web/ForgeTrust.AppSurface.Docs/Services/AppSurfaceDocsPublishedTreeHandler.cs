@@ -944,12 +944,6 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
     private static readonly Regex DocsClientConfigRegex = new(
         @"window\.__appSurfaceDocsConfig\s*=\s*(\{.*?\})\s*;",
         RegexOptions.Singleline | RegexOptions.Compiled);
-    private static readonly Regex ThemeStyleTagRegex = new(
-        @"<style\b(?=[^>]*\b(?:data-as-theme-critical|data-docs-theme-critical)\b)[^>]*>",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
-    private static readonly Regex NonceAttributeRegex = new(
-        @"\s+nonce(?:\s*=\s*(?:""[^""]*""|'[^']*'|[^\s>]+))?",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     /// <summary>
     /// Rewrites stable-root HTML so docs-local links, assets, and client config point at the supplied mount root.
@@ -995,9 +989,7 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
             || normalizedPublicOrigin is not null;
         if (!requiresMountRewrite)
         {
-            return HasThemeStyleNonce(html)
-                ? RemoveThemeStyleNonces(html)
-                : html;
+            return RemoveThemeStyleNonces(html);
         }
 
         var document = HtmlParser.ParseDocument(html);
@@ -1074,24 +1066,32 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
             : serializedHtml;
     }
 
-    private static bool HasThemeStyleNonce(string html)
-    {
-        foreach (Match style in ThemeStyleTagRegex.Matches(html))
-        {
-            if (NonceAttributeRegex.IsMatch(style.Value))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     private static string RemoveThemeStyleNonces(string html)
     {
-        return ThemeStyleTagRegex.Replace(
-            html,
-            static match => NonceAttributeRegex.Replace(match.Value, string.Empty));
+        if (!html.Contains("nonce", StringComparison.OrdinalIgnoreCase)
+            || (!html.Contains("data-as-theme-critical", StringComparison.OrdinalIgnoreCase)
+                && !html.Contains("data-docs-theme-critical", StringComparison.OrdinalIgnoreCase)))
+        {
+            return html;
+        }
+
+        var document = HtmlParser.ParseDocument(html);
+        var nonceRemoved = false;
+        foreach (var style in document.QuerySelectorAll("style[data-as-theme-critical][nonce], style[data-docs-theme-critical][nonce]"))
+        {
+            style.RemoveAttribute("nonce");
+            nonceRemoved = true;
+        }
+
+        if (!nonceRemoved)
+        {
+            return html;
+        }
+
+        var serializedHtml = document.DocumentElement?.OuterHtml ?? html;
+        return html.TrimStart().StartsWith("<!DOCTYPE", StringComparison.OrdinalIgnoreCase)
+            ? "<!DOCTYPE html>" + Environment.NewLine + serializedHtml
+            : serializedHtml;
     }
 
     /// <summary>

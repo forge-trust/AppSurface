@@ -680,6 +680,10 @@ internal static class AppSurfaceDocsThemePolicy
 
         foreach (var accent in new[]
                  {
+                     "--docs-color-border-accent", "--docs-color-border-accent-hover",
+                     "--docs-color-border-accent-muted", "--docs-color-border-accent-active",
+                     "--docs-color-border-accent-subtle", "--docs-color-border-accent-faint",
+                     "--docs-color-border-accent-strong", "--docs-color-border-accent-readable",
                      "--docs-color-accent", "--docs-color-accent-strong", "--docs-color-accent-blue",
                      "--docs-color-accent-soft", "--docs-color-accent-muted", "--docs-color-accent-fill-soft",
                      "--docs-color-accent-mark-fill", "--docs-color-accent-underline", "--docs-color-accent-soft-underline",
@@ -688,7 +692,8 @@ internal static class AppSurfaceDocsThemePolicy
                      "--docs-color-state-outline-fill", "--docs-color-state-outline-rail-start",
                      "--docs-color-state-outline-rail-mid", "--docs-color-state-outline-rail-hover-start",
                      "--docs-color-state-outline-rail-hover-mid", "--docs-color-page-wash", "--docs-color-syntax-keyword",
-                     "--docs-color-syntax-string", "--docs-color-syntax-parameter", "--docs-color-syntax-inserted"
+                     "--docs-color-syntax-string", "--docs-color-syntax-parameter", "--docs-color-syntax-inserted",
+                     "--docs-color-accent-glow"
                  })
         {
             AppendForcedColor(builder, accent, "Highlight");

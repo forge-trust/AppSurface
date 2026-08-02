@@ -34,6 +34,15 @@ public sealed class AppSurfaceDocsThemePairTests
         Assert.Contains("--docs-color-border-default:GrayText;", theme.CriticalCss, StringComparison.Ordinal);
         Assert.Contains("--docs-color-text-default:CanvasText;", theme.CriticalCss, StringComparison.Ordinal);
         Assert.Contains("--docs-color-accent:Highlight;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-border-accent:Highlight;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-border-accent-hover:Highlight;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-border-accent-muted:Highlight;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-border-accent-active:Highlight;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-border-accent-subtle:Highlight;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-border-accent-faint:Highlight;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-border-accent-strong:Highlight;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-border-accent-readable:Highlight;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-accent-glow:Highlight;", theme.CriticalCss, StringComparison.Ordinal);
         Assert.Contains("--docs-color-link:LinkText;", theme.CriticalCss, StringComparison.Ordinal);
         Assert.Contains("--docs-color-link-visited:VisitedText;", theme.CriticalCss, StringComparison.Ordinal);
         Assert.Contains("--docs-color-syntax-comment:GrayText;", theme.CriticalCss, StringComparison.Ordinal);
