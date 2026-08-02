@@ -9,7 +9,7 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 public sealed class DurableSchemaContractTests
 {
     [Fact]
-    public void MigrationCatalog_IsExactlyThreeOrderedChecksummedResources()
+    public void MigrationCatalog_IsExactlyFourOrderedChecksummedResources()
     {
         var migrations = DurablePostgreSqlMigrationCatalog.Load();
 
@@ -65,6 +65,28 @@ public sealed class DurableSchemaContractTests
                     third.Sql,
                     StringComparison.Ordinal);
                 Assert.Contains("run Durable/configure-postgresql-roles.sql before granting SELECT", third.Sql, StringComparison.Ordinal);
+            },
+            fourth =>
+            {
+                Assert.Equal(4, fourth.Version);
+                Assert.Equal("schedule_protocol", fourth.Name);
+                Assert.Equal(64, fourth.Sha256.Length);
+                Assert.Contains("schedule_definition", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("schedule_generation", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("schedule_command", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("schedule_occurrence", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("schedule_dispatch", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("schedule_history", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("ensure_schedule_history_partitions", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("SET TimeZone = 'UTC'", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("state = 'leased' AND lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("accepted_at_utc", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("FORCE ROW LEVEL SECURITY", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains("SECURITY DEFINER", fourth.Sql, StringComparison.Ordinal);
+                Assert.Contains(
+                    "REVOKE ALL ON FUNCTION appsurface_durable.claim_schedule_dispatch(text, interval) FROM PUBLIC;",
+                    fourth.Sql,
+                    StringComparison.Ordinal);
             });
         Assert.Equal(migrations.Count, DurablePostgreSqlMigrationCatalog.RequiredVersion);
         Assert.Equal(migrations.Count, PostgreSqlDurableRuntimeSchemaManager.RequiredVersion);
@@ -128,13 +150,17 @@ public sealed class DurableSchemaContractTests
         Assert.True(
             script.IndexOf("0002_forced_rls", StringComparison.Ordinal)
             < script.IndexOf("0003_flow_protocol", StringComparison.Ordinal));
+        Assert.True(
+            script.IndexOf("0003_flow_protocol", StringComparison.Ordinal)
+            < script.IndexOf("0004_schedule_protocol", StringComparison.Ordinal));
         Assert.Contains("pg_advisory_lock", script, StringComparison.Ordinal);
         Assert.DoesNotContain("0001_work_shared", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0002_forced_rls", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0003_flow_protocol", pendingOnly, StringComparison.Ordinal);
+        Assert.Contains("0004_schedule_protocol", pendingOnly, StringComparison.Ordinal);
         Assert.DoesNotContain("-- Migration", current, StringComparison.Ordinal);
         Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(-1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(4));
+        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(5));
     }
 
     [Theory]
@@ -320,6 +346,8 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("AS durable_objects_owned_by_migration_role", recipe, StringComparison.Ordinal);
         Assert.Contains("AS durable_rls_flags_are_exact", recipe, StringComparison.Ordinal);
         Assert.Contains("AS durable_rls_policies_are_exact", recipe, StringComparison.Ordinal);
+        Assert.Contains("AS schedule_history_child_policies_are_exact", recipe, StringComparison.Ordinal);
+        Assert.Contains("Every schedule_history partition must have forced RLS", recipe, StringComparison.Ordinal);
         Assert.Contains("pg_catalog.pg_policy", recipe, StringComparison.Ordinal);
         Assert.Contains("pg_catalog.pg_get_expr", recipe, StringComparison.Ordinal);
         Assert.Contains(
@@ -356,7 +384,7 @@ public sealed class DurableSchemaContractTests
             recipe,
             StringComparison.Ordinal);
         Assert.Contains(
-           "GRANT SELECT, INSERT ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch, appsurface_durable.flow_instance, appsurface_durable.flow_command, appsurface_durable.flow_history, appsurface_durable.flow_wait, appsurface_durable.flow_timer, appsurface_durable.flow_dispatch",
+           "GRANT SELECT, INSERT ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch, appsurface_durable.flow_instance, appsurface_durable.flow_command, appsurface_durable.flow_history, appsurface_durable.flow_wait, appsurface_durable.flow_timer, appsurface_durable.flow_dispatch, appsurface_durable.schedule_definition, appsurface_durable.schedule_generation, appsurface_durable.schedule_command, appsurface_durable.schedule_occurrence, appsurface_durable.schedule_dispatch",
             recipe,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -368,7 +396,7 @@ public sealed class DurableSchemaContractTests
             recipe,
             StringComparison.Ordinal);
         var revokeBroadUpdate = recipe.IndexOf(
-           "REVOKE UPDATE ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch, appsurface_durable.flow_instance, appsurface_durable.flow_command, appsurface_durable.flow_history, appsurface_durable.flow_wait, appsurface_durable.flow_timer, appsurface_durable.flow_dispatch",
+           "REVOKE UPDATE ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch, appsurface_durable.flow_instance, appsurface_durable.flow_command, appsurface_durable.flow_history, appsurface_durable.flow_wait, appsurface_durable.flow_timer, appsurface_durable.flow_dispatch, appsurface_durable.schedule_definition, appsurface_durable.schedule_generation, appsurface_durable.schedule_command, appsurface_durable.schedule_occurrence, appsurface_durable.schedule_dispatch",
             StringComparison.Ordinal);
         var grantScopedUpdate = recipe.IndexOf(
             "GRANT UPDATE (generation, state, updated_at) ON appsurface_durable.scope",

@@ -22,8 +22,8 @@ public, testable contracts without friend access to the application package. The
 `ForgeTrust.AppSurface.Durable.PostgreSql` → `ForgeTrust.AppSurface.Durable.Provider` → `ForgeTrust.AppSurface.Durable`
 
 The application package registers only passive registries. A provider is selected explicitly by the host. The PostgreSQL
-source preview adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`) and one-operation-at-a-time Work and Flow persistence, but no polling host, scheduling
-execution, hosted service, endpoint, or telemetry implementation.
+source preview adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`, `0004_schedule_protocol`) and one-operation-at-a-time Work, Flow, and Work-first Schedule persistence, but no polling host or hosted
+scheduling activation, hosted service, endpoint, or telemetry implementation.
 
 ## Scale and transport boundary
 
@@ -50,7 +50,7 @@ command fingerprints make ambiguity observable and fail closed.
 Operational failures use the shared [`ASDURxxx` diagnostics catalog](../troubleshooting/durable-diagnostics.md). Codes
 for later hosted-runtime behavior remain reserved there.
 
-For the PostgreSQL boundary, start with the [`slice 3 reference workload`](slice3-reference-workload.md) and [`slice 4 reference workload`](slice4-reference-workload.md), then use the
+For the PostgreSQL boundary, start with the [`slice 3 reference workload`](slice3-reference-workload.md), [`slice 4 reference workload`](slice4-reference-workload.md), and [`Schedule protocol v1`](schedule-protocol-v1.md), then use the
 normative [`Work protocol v1`](work-protocol-v1.md) and [`Flow protocol v1`](flow-protocol-v1.md). The
 [`slice 3 reconstruction ledger`](slice3-reconstruction.md) and [`slice 4 reconstruction ledger`](slice4-reconstruction.md) account for every artifact in the superseded branches.
 

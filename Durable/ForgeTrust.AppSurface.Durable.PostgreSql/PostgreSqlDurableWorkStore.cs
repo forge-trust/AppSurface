@@ -391,6 +391,15 @@ internal sealed class PostgreSqlDurableWorkStore
                 cancellationToken).ConfigureAwait(false);
         }
 
+        if (IsTerminal(transition.State))
+        {
+            await PostgreSqlDurableScheduleWorkProjector.RequeuePendingOccurrenceAsync(
+                transaction,
+                candidate.ScopeId,
+                candidate.WorkId,
+                cancellationToken).ConfigureAwait(false);
+        }
+
         if (onTransitionApplied is not null)
         {
             await onTransitionApplied(
@@ -881,6 +890,15 @@ internal sealed class PostgreSqlDurableWorkStore
                             cancellationToken).ConfigureAwait(false);
                     }
 
+                    if (IsTerminal(projectedState))
+                    {
+                        await PostgreSqlDurableScheduleWorkProjector.RequeuePendingOccurrenceAsync(
+                            transaction,
+                            canceledProjection.Claim.ScopeId,
+                            canceledProjection.Claim.WorkId,
+                            cancellationToken).ConfigureAwait(false);
+                    }
+
                     await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
                     return null;
                 }
@@ -1329,6 +1347,15 @@ internal sealed class PostgreSqlDurableWorkStore
                     cancellationToken).ConfigureAwait(false);
             }
 
+            if (IsTerminal(parsedState))
+            {
+                await PostgreSqlDurableScheduleWorkProjector.RequeuePendingOccurrenceAsync(
+                    transaction,
+                    claim.ScopeId,
+                    claim.WorkId,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return new PostgreSqlWorkCompletionResult(
                 PostgreSqlWorkObservationOutcome.Applied,
@@ -1569,6 +1596,15 @@ internal sealed class PostgreSqlDurableWorkStore
                     scopeId,
                     workId,
                     parsedState,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            if (IsTerminal(parsedState))
+            {
+                await PostgreSqlDurableScheduleWorkProjector.RequeuePendingOccurrenceAsync(
+                    transaction,
+                    scopeId,
+                    workId,
                     cancellationToken).ConfigureAwait(false);
             }
 
@@ -1832,6 +1868,8 @@ internal sealed class PostgreSqlDurableWorkStore
             }
         }
 
+        // Scope disable leaves Schedule definitions active but fences their processor at scope validation. Do not requeue
+        // terminal Work here: doing so would make a coalesced Schedule dispatch available despite the disabled scope.
         await SuspendScopeFlowsAsync(
             connection,
             transaction,
