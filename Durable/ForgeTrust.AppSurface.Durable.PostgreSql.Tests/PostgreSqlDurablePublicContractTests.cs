@@ -58,14 +58,24 @@ public sealed class PostgreSqlDurablePublicContractTests
         Assert.Equal(TimeSpan.FromDays(31), scheduleOptions.MaximumClockAdvance);
         Assert.Equal(TimeSpan.FromMinutes(2), scheduleOptions.LeaseDuration);
         Assert.Throws<ArgumentException>(() => new PostgreSqlDurableScheduleOptions(" "));
+        Assert.Throws<ArgumentException>(() => new PostgreSqlDurableScheduleOptions(new string('r', 64)));
+        Assert.Throws<ArgumentException>(() => new PostgreSqlDurableScheduleOptions("durable\u0001"));
         Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleOptions("durable", TimeSpan.Zero));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleOptions("durable", TimeSpan.FromTicks(-1)));
         Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleOptions("durable", leaseDuration: TimeSpan.Zero));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleOptions("durable", leaseDuration: TimeSpan.FromMinutes(11)));
         Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleProcessRequest("pass", 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleProcessRequest("pass", 129));
         Assert.Throws<ArgumentException>(() => new PostgreSqlDurableScheduleProcessRequest(" "));
+        Assert.Throws<ArgumentException>(() => new PostgreSqlDurableScheduleProcessRequest(new string('p', 201)));
+        Assert.Throws<ArgumentException>(() => new PostgreSqlDurableScheduleProcessRequest("pass\u0001"));
 
         var empty = new PostgreSqlDurableScheduleProcessResult(0, 0, 0, 0);
         Assert.Equal(0, empty.ClaimedSchedules);
         Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleProcessResult(-1, 0, 0, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleProcessResult(0, -1, 0, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleProcessResult(0, 0, -1, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleProcessResult(0, 0, 0, -1));
         var client = new PostgreSqlDurableScheduleClient(dataSource, registry, workOptions, scheduleOptions);
         await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.CreateAsync(null!));
         await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.UpdateAsync(null!));

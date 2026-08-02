@@ -75,6 +75,41 @@ public sealed class PostgreSqlDurableScheduleTests
     }
 
     [Fact]
+    public async Task Processor_CancelsBlockedDispatchClaim_AndCanRunAgain()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await manager.ApplyAsync();
+        var options = await CreateOptionsAsync(database.DataSource, Guid.NewGuid());
+        var processor = new PostgreSqlDurableScheduleProcessor(
+            database.DataSource,
+            database.DataSource,
+            new DurableWorkRegistry([]),
+            options,
+            new PostgreSqlDurableScheduleOptions("appsurface"));
+        await using var blocker = await database.DataSource.OpenConnectionAsync();
+        await using var blockerTransaction = await blocker.BeginTransactionAsync();
+        await using (var lockTable = new NpgsqlCommand(
+                         "LOCK TABLE appsurface_durable.schedule_dispatch IN ACCESS EXCLUSIVE MODE;",
+                         blocker,
+                         blockerTransaction))
+        {
+            await lockTable.ExecuteNonQueryAsync();
+        }
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await processor.ProcessDueAsync(
+                new PostgreSqlDurableScheduleProcessRequest("blocked-schedule-processor"),
+                cancellation.Token));
+
+        await blockerTransaction.RollbackAsync();
+        Assert.Equal(
+            new PostgreSqlDurableScheduleProcessResult(0, 0, 0, 0),
+            await processor.ProcessDueAsync(new PostgreSqlDurableScheduleProcessRequest("recovered-schedule-processor")));
+    }
+
+    [Fact]
     public async Task Create_RejectsConflictingCommandAndIdempotencyIdentitiesInsteadOfReturningAnArbitraryDuplicate()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -299,6 +334,18 @@ public sealed class PostgreSqlDurableScheduleTests
         Assert.Equal(2, await CountAsync(database.DataSource, scope, "work"));
         Assert.Equal(2, await CountOccurrenceStateAsync(database.DataSource, scope, "materialized"));
         Assert.Equal(1, await CountOccurrenceStateAsync(database.DataSource, scope, "pending"));
+
+        var exhaustedWork = Assert.Single(await workStore.DiscoverAsync(1));
+        await ForceQueueOneWorkRetryExhaustionAsync(database.DataSource, scope, exhaustedWork.WorkId, scheduleId);
+        Assert.Null(await workStore.TryClaimAsync(
+            Assert.Single(await workStore.DiscoverAsync(1)),
+            "queue-one-exhaustion-worker"));
+        Assert.Equal("available", await ReadScheduleDispatchStateAsync(database.DataSource, scope, scheduleId));
+
+        var requeuedPass = await processor.ProcessDueAsync(new PostgreSqlDurableScheduleProcessRequest("queue-one-scheduler", 1));
+        Assert.Equal(1, requeuedPass.MaterializedWorkTargets);
+        Assert.Equal(3, await CountAsync(database.DataSource, scope, "work"));
+        Assert.Equal(3, await CountOccurrenceStateAsync(database.DataSource, scope, "materialized"));
     }
 
     [Theory]
@@ -2218,6 +2265,87 @@ public sealed class PostgreSqlDurableScheduleTests
             wake.Parameters.AddWithValue("scope_id", scopeId.Value);
             wake.Parameters.AddWithValue("schedule_id", scheduleId.Value);
             Assert.Equal(1, await wake.ExecuteNonQueryAsync());
+        }
+
+        await transaction.CommitAsync();
+    }
+
+    private static async ValueTask ForceQueueOneWorkRetryExhaustionAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scopeId,
+        DurableWorkId workId,
+        DurableScheduleId scheduleId)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using (var scope = new NpgsqlCommand(
+                         "SELECT set_config('appsurface_durable.scope_id', @scope_id, true);",
+                         connection,
+                         transaction))
+        {
+            scope.Parameters.AddWithValue("scope_id", scopeId.Value);
+            await scope.ExecuteNonQueryAsync();
+        }
+
+        long revision;
+        await using (var exhaust = new NpgsqlCommand(
+                         """
+                         UPDATE appsurface_durable.work
+                         SET state = 'retry_wait',
+                             due_at = clock_timestamp(),
+                             attempt_number = maximum_attempts,
+                             lease_owner = NULL,
+                             lease_started_at = NULL,
+                             lease_expires_at = NULL,
+                             updated_at = clock_timestamp(),
+                             revision = revision + 1
+                         WHERE scope_id = @scope_id AND work_id = @work_id
+                         RETURNING revision;
+                         """,
+                         connection,
+                         transaction))
+        {
+            exhaust.Parameters.AddWithValue("scope_id", scopeId.Value);
+            exhaust.Parameters.AddWithValue("work_id", workId.Value);
+            revision = (long)(await exhaust.ExecuteScalarAsync())!;
+        }
+
+        await using (var dispatch = new NpgsqlCommand(
+                         """
+                         UPDATE appsurface_durable.dispatch
+                         SET state = 'available',
+                             due_at = clock_timestamp(),
+                             expected_revision = @revision,
+                             updated_at = clock_timestamp()
+                         WHERE scope_id = @scope_id
+                           AND aggregate_kind = 'work'
+                           AND aggregate_id = @work_id;
+                         """,
+                         connection,
+                         transaction))
+        {
+            dispatch.Parameters.AddWithValue("revision", revision);
+            dispatch.Parameters.AddWithValue("scope_id", scopeId.Value);
+            dispatch.Parameters.AddWithValue("work_id", workId.Value);
+            Assert.Equal(1, await dispatch.ExecuteNonQueryAsync());
+        }
+
+        await using (var delayScheduleDispatch = new NpgsqlCommand(
+                         """
+                         UPDATE appsurface_durable.schedule_dispatch
+                         SET state = 'available',
+                             due_at = clock_timestamp() + interval '1 hour',
+                             lease_owner = NULL,
+                             lease_expires_at = NULL,
+                             updated_at = clock_timestamp()
+                         WHERE scope_id = @scope_id AND schedule_id = @schedule_id;
+                         """,
+                         connection,
+                         transaction))
+        {
+            delayScheduleDispatch.Parameters.AddWithValue("scope_id", scopeId.Value);
+            delayScheduleDispatch.Parameters.AddWithValue("schedule_id", scheduleId.Value);
+            Assert.Equal(1, await delayScheduleDispatch.ExecuteNonQueryAsync());
         }
 
         await transaction.CommitAsync();
