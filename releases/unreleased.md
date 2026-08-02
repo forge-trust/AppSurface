@@ -4,7 +4,9 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
+- `ForgeTrust.AppSurface.Theming` and the explicit `ForgeTrust.AppSurface.Web` Razor adapter now provide immutable semantic theme pairs with native System/Light/Dark browser output. Docs is part of the MVP: its default `AppSurfaceDark` path can consume the shared pair while preserving its public density, chrome, Graphite compatibility, short-hex overrides, static published-tree output, and internal token ownership. RazorWire styling remains limited to generated form-error nodes and uses the nonce-bearing critical stylesheet under strict CSP. Package discovery, quickstart, diagnostics, Docs migration, test commands, and deliberate non-goals ship with the feature; user preference persistence, tenant selection, shared Graphite, remote packs, and adoption telemetry remain separate policy work.
 - Applications can now persist PostgreSQL-backed `At`, `After`, and `Every` Schedules for registered durable Work, then run a bounded, externally triggered due pass without introducing a hosted scheduler. The Work-first gate keeps each occurrence's Work acceptance and Schedule facts in one transaction, coalesces overlapping QueueOne runs, and suspends rather than silently crossing clock, runtime-epoch, or scope-generation safety fences. Start with the [Schedule protocol](../Durable/schedule-protocol-v1.md) and the [PostgreSQL provider guide](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md).
+- Add merged public changes here as they land.
 
 ## Included in the next coordinated version
 

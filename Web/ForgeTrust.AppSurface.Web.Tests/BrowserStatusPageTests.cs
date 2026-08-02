@@ -58,6 +58,9 @@ public sealed class BrowserStatusPageTests
         Assert.Contains(expectedMarker, html);
         Assert.Contains(BrowserStatusPageDefaults.GetAppViewPath(statusCode), html);
         Assert.Contains("data-rw-export-ignore=\"true\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-as-theme=", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-as-theme-schema=", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-as-theme-critical", html, StringComparison.Ordinal);
     }
 
     [Fact]

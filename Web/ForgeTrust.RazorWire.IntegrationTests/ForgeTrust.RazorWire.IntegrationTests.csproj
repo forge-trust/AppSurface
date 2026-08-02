@@ -36,9 +36,11 @@
 
   <ItemGroup>
     <ProjectReference Include="../../ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj" />
+    <ProjectReference Include="../../ForgeTrust.AppSurface.Theming/ForgeTrust.AppSurface.Theming.csproj" />
     <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Docs.ConsumerFixture/ForgeTrust.AppSurface.Docs.ConsumerFixture.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Docs.Standalone/ForgeTrust.AppSurface.Docs.Standalone.csproj" />
+    <ProjectReference Include="../ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj" />
   </ItemGroup>
 
 </Project>

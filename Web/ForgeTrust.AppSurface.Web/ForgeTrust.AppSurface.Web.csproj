@@ -12,6 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="../../Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj"/>
     <ProjectReference Include="../../ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"/>
+    <ProjectReference Include="../../ForgeTrust.AppSurface.Theming/ForgeTrust.AppSurface.Theming.csproj"/>
   </ItemGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App"/>
