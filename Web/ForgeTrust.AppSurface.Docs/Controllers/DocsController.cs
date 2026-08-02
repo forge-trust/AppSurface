@@ -2180,8 +2180,18 @@ public class DocsController : Controller
             return false;
         }
 
-        var queryIndex = rawTarget.IndexOf('?', StringComparison.Ordinal);
-        var rawPath = queryIndex < 0 ? rawTarget : rawTarget[..queryIndex];
+        var rawPathAndQuery = rawTarget;
+        if (Uri.TryCreate(rawTarget, UriKind.Absolute, out var absoluteTarget)
+            && (absoluteTarget.Scheme == Uri.UriSchemeHttp || absoluteTarget.Scheme == Uri.UriSchemeHttps)
+            && !string.IsNullOrEmpty(absoluteTarget.Host))
+        {
+            // Keep the escaped request-target path rather than Uri.AbsolutePath so alternate percent encodings fail closed.
+            var authorityEndIndex = rawTarget.IndexOf('/', rawTarget.IndexOf("://", StringComparison.Ordinal) + 3);
+            rawPathAndQuery = authorityEndIndex < 0 ? "/" : rawTarget[authorityEndIndex..];
+        }
+
+        var queryIndex = rawPathAndQuery.IndexOf('?', StringComparison.Ordinal);
+        var rawPath = queryIndex < 0 ? rawPathAndQuery : rawPathAndQuery[..queryIndex];
         return string.Equals(rawPath, expectedPath, StringComparison.Ordinal);
     }
 

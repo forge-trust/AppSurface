@@ -64,6 +64,8 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     private const string AppSurfaceDocsRootFaviconPath = "/favicon.ico";
     private const string AppSurfaceDocsRootStylesheetPath = "/css/site.gen.css";
     private const string EmbeddedAssetResourcePrefix = "AppSurfaceDocsEmbeddedAssets/";
+    private static readonly string[] MarkdownDownloadMethods = [HttpMethods.Get, HttpMethods.Head];
+    private static readonly string MarkdownDownloadAllowHeader = string.Join(", ", MarkdownDownloadMethods);
 
     /// <inheritdoc />
     public bool IncludeAsApplicationPart => true;
@@ -381,6 +383,14 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// rejects common non-POST verbs with HTTP 405 and an <c>Allow: POST</c> response header instead of letting the
     /// request fall through to reader document lookup or status-code-page rendering.
     /// </para>
+    /// <para>
+    /// The route named <c>appsurfacedocs_markdown_download</c> maps the reserved
+    /// <c>{DocsRootPath}/_markdown/{**path}</c> pattern to <c>DocsController.DownloadMarkdown</c>. It accepts only
+    /// <c>GET</c> and <c>HEAD</c>; other methods receive HTTP 405 with <c>Allow: GET, HEAD</c>. When
+    /// <c>MarkdownDownload.Enabled</c> is true, the route requires the named host-owned authorization policy; when it is
+    /// false, the route permits anonymous routing but the action returns 404. It is registered before the document
+    /// catch-all so reserved <c>_markdown</c> paths cannot fall through to document lookup.
+    /// </para>
     /// </remarks>
     /// <param name="context">Startup context for the application and environment.</param>
     /// <param name="endpoints">Endpoint route builder used to map the module's routes.</param>
@@ -681,7 +691,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                     controller = "Docs",
                     action = "DownloadMarkdown"
                 })
-            .WithMetadata(new HttpMethodMetadata([HttpMethods.Get, HttpMethods.Head]));
+            .WithMetadata(new HttpMethodMetadata(MarkdownDownloadMethods));
         if (docsOptions.MarkdownDownload?.Enabled == true)
         {
             markdownDownload.RequireAuthorization(docsOptions.MarkdownDownload.AuthorizationPolicy!);
@@ -981,7 +991,15 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             statusCodePages.Enabled = false;
         }
 
-        context.Response.Headers["Allow"] = "GET, HEAD";
+        context.Response.OnStarting(
+            static state =>
+            {
+                var httpContext = (HttpContext)state;
+                httpContext.Response.Headers["Allow"] = MarkdownDownloadAllowHeader;
+                return Task.CompletedTask;
+            },
+            context);
+        context.Response.Headers["Allow"] = MarkdownDownloadAllowHeader;
         context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
         return Task.CompletedTask;
     }

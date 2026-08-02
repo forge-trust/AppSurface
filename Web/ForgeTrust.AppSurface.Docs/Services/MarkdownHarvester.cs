@@ -23,6 +23,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     private readonly MarkdownPipeline _pipeline;
     private readonly ILogger<MarkdownHarvester> _logger;
     private readonly Func<string, CancellationToken, Task<string>> _readAllTextAsync;
+    private readonly Func<string, CancellationToken, Task<byte[]>> _readAllBytesAsync;
     private readonly AppSurfaceDocsHarvestPathPolicy _pathPolicy;
     private readonly AppSurfaceDocsOptions _options;
     private IReadOnlyList<DocHarvestDiagnostic> _lastDiagnostics = [];
@@ -117,7 +118,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     /// file reader and configured AppSurface Docs options.
     /// </summary>
     /// <param name="logger">Logger used for recording harvesting events and errors.</param>
-    /// <param name="readAllTextAsync">Delegate used to asynchronously read Markdown bodies and metadata sidecars.</param>
+    /// <param name="readAllTextAsync">Delegate used to asynchronously read metadata sidecars and Markdown when source capture is disabled.</param>
     /// <param name="options">AppSurface Docs options that provide Markdown resource limits.</param>
     /// <remarks>
     /// This overload supplies the default TextMate-based code highlighter and default harvest path policy. Prefer it when
@@ -136,6 +137,30 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                 NullLogger<TextMateSharpAppSurfaceDocsCodeHighlighter>.Instance),
             options,
             AppSurfaceDocsHarvestPathPolicy.CreateDefault())
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="MarkdownHarvester"/> for tests that need to control both text and
+    /// byte reads while preserving configured AppSurface Docs options.
+    /// </summary>
+    /// <param name="logger">Logger used for recording harvesting events and errors.</param>
+    /// <param name="readAllTextAsync">Delegate used for metadata sidecars and Markdown when source capture is disabled.</param>
+    /// <param name="options">AppSurface Docs options that provide Markdown resource limits.</param>
+    /// <param name="readAllBytesAsync">Delegate used to read original Markdown bytes when source capture is enabled.</param>
+    internal MarkdownHarvester(
+        ILogger<MarkdownHarvester> logger,
+        Func<string, CancellationToken, Task<string>> readAllTextAsync,
+        AppSurfaceDocsOptions options,
+        Func<string, CancellationToken, Task<byte[]>> readAllBytesAsync)
+        : this(
+            logger,
+            readAllTextAsync,
+            AppSurfaceDocsCodeBlockMarkdownExtension.CreateDefaultHighlighter(
+                NullLogger<TextMateSharpAppSurfaceDocsCodeHighlighter>.Instance),
+            options,
+            AppSurfaceDocsHarvestPathPolicy.CreateDefault(),
+            readAllBytesAsync ?? throw new ArgumentNullException(nameof(readAllBytesAsync)))
     {
     }
 
@@ -177,7 +202,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     /// reading, code highlighting, and harvest path policy.
     /// </summary>
     /// <param name="logger">Logger used for recording harvesting events and errors.</param>
-    /// <param name="readAllTextAsync">Delegate used to asynchronously read Markdown bodies and metadata sidecars.</param>
+    /// <param name="readAllTextAsync">Delegate used to asynchronously read metadata sidecars and Markdown when source capture is disabled.</param>
     /// <param name="codeHighlighter">Highlighter used when Markdown fenced code blocks are rendered to HTML.</param>
     /// <param name="pathPolicy">Shared harvest path policy used to decide which Markdown candidates publish.</param>
     /// <remarks>
@@ -203,6 +228,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     /// <param name="codeHighlighter">Highlighter used when Markdown fenced code blocks are rendered to HTML.</param>
     /// <param name="options">AppSurface Docs options that provide Markdown resource limits.</param>
     /// <param name="pathPolicy">Shared harvest path policy used to decide which Markdown candidates publish.</param>
+    /// <param name="readAllBytesAsync">Optional delegate used to read original Markdown bytes when source capture is enabled.</param>
     /// <remarks>
     /// This overload is the internal test seam for combining custom readers, highlighters, options, and path policy.
     /// Simpler overloads should be preferred when their defaults match the scenario because they keep tests focused on
@@ -213,7 +239,8 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         Func<string, CancellationToken, Task<string>> readAllTextAsync,
         IAppSurfaceDocsCodeHighlighter codeHighlighter,
         AppSurfaceDocsOptions options,
-        AppSurfaceDocsHarvestPathPolicy pathPolicy)
+        AppSurfaceDocsHarvestPathPolicy pathPolicy,
+        Func<string, CancellationToken, Task<byte[]>>? readAllBytesAsync = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(readAllTextAsync);
@@ -223,6 +250,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
 
         _logger = logger;
         _readAllTextAsync = readAllTextAsync;
+        _readAllBytesAsync = readAllBytesAsync ?? File.ReadAllBytesAsync;
         _pathPolicy = pathPolicy;
         _options = options;
         _pipeline = new MarkdownPipelineBuilder()
@@ -280,6 +308,11 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     /// Harvests the built-in Markdown surface and, when enabled, retains eligible valid-UTF-8 source bytes for the
     /// aggregator's private download sidecar.
     /// </summary>
+    /// <remarks>
+    /// This internal result is intentionally separate from <see cref="DocNode"/> so raw source never enters rendered
+    /// HTML, search indexes, or the public harvester contract. The byte-reader seam is used only for Markdown source
+    /// capture; metadata sidecars and disabled downloads continue through the configured text reader.
+    /// </remarks>
     internal async Task<MarkdownHarvestResult> HarvestWithSourceAsync(
         DocHarvestContext context,
         CancellationToken cancellationToken = default)
@@ -330,7 +363,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                     string content;
                     if (markdownDownloadOptions.Enabled)
                     {
-                        var bytes = await File.ReadAllBytesAsync(file, cancellationToken);
+                        var bytes = await _readAllBytesAsync(file, cancellationToken);
                         if (TryDecodeValidUtf8(bytes, out var decodedContent))
                         {
                             sourceBytes = bytes;
@@ -338,7 +371,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                         }
                         else
                         {
-                            content = DecodeUtf8WithReplacement(bytes);
+                            content = decodedContent;
                             diagnostics.Add(new DocHarvestDiagnostic(
                                 DocHarvestDiagnosticCodes.MarkdownDownloadInvalidEncoding,
                                 DocHarvestDiagnosticSeverity.Warning,
@@ -434,6 +467,15 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         }
     }
 
+    /// <summary>
+    /// Attempts a strict UTF-8 decode and falls back to replacement decoding.
+    /// </summary>
+    /// <param name="bytes">The raw Markdown source bytes.</param>
+    /// <param name="content">
+    /// The decoded text with a leading byte-order mark removed. This is populated on both outcomes; when the return
+    /// value is <see langword="false"/>, it contains the replacement-decoded content.
+    /// </param>
+    /// <returns><see langword="true"/> when <paramref name="bytes"/> is valid UTF-8; otherwise <see langword="false"/>.</returns>
     private static bool TryDecodeValidUtf8(byte[] bytes, out string content)
     {
         try

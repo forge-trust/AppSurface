@@ -1174,12 +1174,12 @@ public class DocAggregator
             return (new Dictionary<string, byte[]>(StringComparer.Ordinal), null);
         }
 
+        var eligibleSourceBytes = harvesterResults.Sum(result => result.MarkdownDownloadEligibleSourceBytes);
         if (harvesterResults.Any(result => result.MarkdownDownloadSourceCaptureExceededBudget))
         {
-            var capturedCandidateBytes = harvesterResults.Sum(result => result.MarkdownDownloadEligibleSourceBytes);
             return (
                 new Dictionary<string, byte[]>(StringComparer.Ordinal),
-                CreateSnapshotBudgetExceededDiagnostic(capturedCandidateBytes, options));
+                CreateSnapshotBudgetExceededDiagnostic(eligibleSourceBytes, options));
         }
 
         var sources = new Dictionary<string, byte[]>(StringComparer.Ordinal);
@@ -1200,7 +1200,9 @@ public class DocAggregator
                 sourceBytes = checked(sourceBytes + entry.Value.LongLength);
                 if (sourceBytes > options.MaxSnapshotBytes)
                 {
-                    return (new Dictionary<string, byte[]>(StringComparer.Ordinal), CreateSnapshotBudgetExceededDiagnostic(sourceBytes, options));
+                    return (
+                        new Dictionary<string, byte[]>(StringComparer.Ordinal),
+                        CreateSnapshotBudgetExceededDiagnostic(eligibleSourceBytes, options));
                 }
             }
         }
@@ -1290,7 +1292,7 @@ public class DocAggregator
                 var markdownResult = await markdownHarvester
                     .HarvestWithSourceAsync(context, timeoutCts.Token)
                     .WaitAsync(harvesterTimeout);
-                docs = markdownResult.Nodes;
+                docs = markdownResult.Nodes ?? [];
                 markdownDownloadSources = markdownResult.SourceByPath;
                 markdownDownloadEligibleSourceBytes = markdownResult.EligibleSourceBytes;
                 markdownDownloadSourceCaptureExceededBudget = markdownResult.SourceCaptureExceededBudget;
@@ -1486,11 +1488,6 @@ public class DocAggregator
         DocHarvestContext context,
         CancellationToken cancellationToken)
     {
-        if (harvester is MarkdownHarvester markdownHarvester)
-        {
-            return markdownHarvester.HarvestAsync(context, cancellationToken);
-        }
-
         if (harvester is CSharpDocHarvester csharpDocHarvester)
         {
             return csharpDocHarvester.HarvestAsync(context, cancellationToken);

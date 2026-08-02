@@ -192,26 +192,8 @@ internal static class MarkdownFrontMatterParser
     {
         ArgumentNullException.ThrowIfNull(markdown);
 
-        if (!TrySplitFrontMatter(markdown, out var frontMatter, out _))
-        {
-            return MarkdownDownloadEligibility.NotDeclared;
-        }
-
-        var eligibility = GetMarkdownDownloadEligibilityFromParsedFrontMatter(frontMatter);
-        if (eligibility != MarkdownDownloadEligibility.Eligible)
-        {
-            return eligibility;
-        }
-
-        try
-        {
-            _ = Deserializer.Deserialize<Dictionary<string, object?>>(frontMatter);
-            return MarkdownDownloadEligibility.Eligible;
-        }
-        catch (YamlException)
-        {
-            return MarkdownDownloadEligibility.Invalid;
-        }
+        var (_, result) = ExtractWithDiagnostics(markdown);
+        return result.DownloadEligibility;
     }
 
     private static MarkdownDownloadEligibility GetMarkdownDownloadEligibilityFromParsedFrontMatter(string frontMatter)

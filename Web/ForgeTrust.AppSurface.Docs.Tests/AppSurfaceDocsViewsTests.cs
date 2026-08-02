@@ -4029,9 +4029,29 @@ public class AppSurfaceDocsViewsTests
         Assert.Equal("Download Markdown", downloadLink.GetAttribute("title"));
         Assert.NotNull(downloadLink.QuerySelector("svg[aria-hidden='true']"));
         Assert.Null(document.QuerySelector(".docs-provenance-strip"));
+    }
+
+    [Fact]
+    public void Stylesheets_ShouldExpandMarkdownDownloadTouchTargetForCoarsePointers()
+    {
         var stylesheet = ReadTailwindEntryStylesheetMarkup();
-        Assert.Contains("@media (pointer: coarse)", stylesheet, StringComparison.Ordinal);
-        Assert.Contains("inset: -0.575rem;", stylesheet, StringComparison.Ordinal);
+
+        Assert.Contains(
+            """
+            @media (pointer: coarse) {
+                .docs-page-meta-download::before {
+                    position: absolute;
+                    inset: -0.575rem;
+                    content: "";
+                }
+            }
+            """,
+            stylesheet,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ".docs-page-meta-download:focus-visible {\n    outline: var(--docs-focus-outline);\n}",
+            stylesheet,
+            StringComparison.Ordinal);
     }
 
     [Fact]

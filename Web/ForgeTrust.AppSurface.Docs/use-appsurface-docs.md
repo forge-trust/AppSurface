@@ -108,9 +108,9 @@ Protected Markdown download is disabled by default. To enable the v1 browser att
    ---
    ```
 
-5. Verify an authenticated browser `GET` and `HEAD` at `{DocsRootPath}/_markdown/{canonical path}`. The response is a `text/markdown` attachment with `Cache-Control: private, no-store` and the exact original valid UTF-8 bytes, including any BOM, front matter, comments, line endings, and relative links. `{DocsRootPath}/_markdown` is package-reserved, so do not use it as a page or alias path.
+5. Verify an authenticated browser `GET` and `HEAD` at `{DocsRootPath}/_markdown/{canonical path}`. `GET` returns a `text/markdown` attachment with `Cache-Control: private, no-store` and the exact original valid UTF-8 bytes, including any BOM, front matter, comments, line endings, and relative links. `HEAD` returns matching attachment metadata without a body. `{DocsRootPath}/_markdown` is package-reserved, so do not use it as a page or alias path.
 
-Only the exact inline boolean `download_markdown: true` opts a page in. Quoted truthy strings, `True`, `1`, nested or duplicate keys, malformed front matter, aliases, generated pages, and archive paths do not. Disabled, unavailable, noncanonical, alias, generated, and archive requests return `404`; anonymous and forbidden enabled requests retain the host's normal challenge/forbid behavior.
+Only the exact inline boolean `download_markdown: true` opts a page in. Quoted truthy strings, `True`, `1`, nested or duplicate keys, malformed front matter, aliases, generated pages, and archive paths do not. Disabled, unavailable, noncanonical, alias, generated, archive, missing-snapshot, and invalid-UTF-8-source requests return `404`; unsupported methods return `405` with `Allow: GET, HEAD`; anonymous and forbidden enabled requests retain the host's normal challenge/forbid behavior.
 
 Source safety matters: this endpoint returns source bytes, not rendered or sanitized HTML. Keep secrets, private notes, credentials, generated build output, and other non-public material outside the configured [public source boundary](#define-the-public-source-boundary), and follow the [Markdown authoring guidance](#author-the-first-useful-page-set) when choosing inline front matter versus a sidecar. Browser attachment is v1 only; there is no API, batch, vendor, or automatic “second-brain” synchronization integration.
 

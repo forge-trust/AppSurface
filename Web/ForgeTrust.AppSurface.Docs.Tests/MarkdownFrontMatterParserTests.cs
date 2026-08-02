@@ -31,6 +31,17 @@ public sealed class MarkdownFrontMatterParserTests
     }
 
     [Fact]
+    public void ExtractWithDiagnostics_ShouldRejectDownloadEligibilityWhenTypedMetadataIsInvalid()
+    {
+        var markdown = "---\ndownload_markdown: true\norder: not-a-number\n---\n# Guide";
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Equal(MarkdownDownloadEligibility.Invalid, result.DownloadEligibility);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-yaml");
+    }
+
+    [Fact]
     public void Extract_ShouldReturnNullMetadata_WhenMarkdownIsEmpty()
     {
         var (body, metadata) = MarkdownFrontMatterParser.Extract(string.Empty);

@@ -645,6 +645,10 @@ body {
     color: var(--docs-color-accent-soft);
 }
 
+.docs-page-meta-download:focus-visible {
+    outline: var(--docs-focus-outline);
+}
+
 .docs-page-meta-download svg {
     width: 0.85rem;
     height: 0.85rem;

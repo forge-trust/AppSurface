@@ -5858,12 +5858,15 @@ public class DocsControllerTests : IDisposable
     [Fact]
     public async Task DownloadMarkdown_ShouldReturnTheSnapshotBytesForAnExactCanonicalRawTarget()
     {
-        var repositoryRoot = Path.Combine(Path.GetTempPath(), "AppSurfaceDocsTests_MarkdownDownload", Guid.NewGuid().ToString("N"));
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_MarkdownDownload",
+            Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(repositoryRoot);
         try
         {
             var sourceBytes = Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# Guide\n");
-            await File.WriteAllBytesAsync(Path.Combine(repositoryRoot, "Guide.md"), sourceBytes);
+            await File.WriteAllBytesAsync(TestPathUtils.PathUnder(repositoryRoot, "Guide.md"), sourceBytes);
             var options = new AppSurfaceDocsOptions
             {
                 Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = repositoryRoot },
@@ -5892,11 +5895,25 @@ public class DocsControllerTests : IDisposable
                 Assert.Equal("guide.md", file.FileDownloadName);
                 Assert.Equal("private, no-store", controller.Response.Headers.CacheControl.ToString());
 
+                httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget =
+                    "https://docs.example/tenant/docs/_markdown/guide?ingest=second-brain";
+
+                var absoluteFormResult = await controller.DownloadMarkdown("guide");
+
+                Assert.Equal(sourceBytes, Assert.IsType<FileContentResult>(absoluteFormResult).FileContents);
+
                 httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget = "/tenant/docs/_markdown/GUIDE";
 
                 var tamperedResult = await controller.DownloadMarkdown("guide");
 
                 Assert.IsType<NotFoundResult>(tamperedResult);
+
+                httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget =
+                    "https://docs.example/tenant/docs/_markdown/gu%69de";
+
+                var encodedAlternateResult = await controller.DownloadMarkdown("guide");
+
+                Assert.IsType<NotFoundResult>(encodedAlternateResult);
             }
         }
         finally
@@ -5908,12 +5925,15 @@ public class DocsControllerTests : IDisposable
     [Fact]
     public async Task Details_ShouldExposeMarkdownDownload_WhenCanonicalPageHasEligibleSource()
     {
-        var repositoryRoot = Path.Combine(Path.GetTempPath(), "AppSurfaceDocsTests_MarkdownDownload", Guid.NewGuid().ToString("N"));
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_MarkdownDownload",
+            Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(repositoryRoot);
         try
         {
             await File.WriteAllTextAsync(
-                Path.Combine(repositoryRoot, "Guide.md"),
+                TestPathUtils.PathUnder(repositoryRoot, "Guide.md"),
                 "---\ndownload_markdown: true\n---\n# Guide\n");
             var options = new AppSurfaceDocsOptions
             {
@@ -5971,6 +5991,11 @@ public class DocsControllerTests : IDisposable
             Assert.IsType<NotFoundResult>(await controller.DownloadMarkdown("Guide.md"));
 
             httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget = string.Empty;
+
+            Assert.IsType<NotFoundResult>(await controller.DownloadMarkdown("guide"));
+
+            options.MarkdownDownload.Enabled = false;
+            httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget = "/docs/_markdown/guide";
 
             Assert.IsType<NotFoundResult>(await controller.DownloadMarkdown("guide"));
         }

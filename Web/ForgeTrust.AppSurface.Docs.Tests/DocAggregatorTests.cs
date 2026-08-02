@@ -185,44 +185,72 @@ public class DocAggregatorTests : IDisposable
     [Fact]
     public async Task InvalidateCache_ShouldDiscardMarkdownSourcesFromAnObsoleteSnapshotGeneration()
     {
-        var firstHarvestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var firstHarvestRelease = new TaskCompletionSource<IReadOnlyList<DocNode>>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        var harvestCount = 0;
-        var harvester = A.Fake<IDocHarvester>();
-        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
-            .ReturnsLazily(
-                () =>
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_MarkdownDownload",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repositoryRoot);
+        try
+        {
+            var firstReadStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var firstReadRelease = new TaskCompletionSource<byte[]>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var readCount = 0;
+            var sourcePath = TestPathUtils.PathUnder(repositoryRoot, "Guide.md");
+            await File.WriteAllTextAsync(sourcePath, "---\ndownload_markdown: true\n---\n# Guide\n");
+            var options = new AppSurfaceDocsOptions
+            {
+                Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = repositoryRoot },
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
                 {
-                    if (Interlocked.Increment(ref harvestCount) == 1)
-                    {
-                        firstHarvestStarted.TrySetResult();
-                        return firstHarvestRelease.Task;
-                    }
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader"
+                }
+            };
 
-                    return Task.FromResult<IReadOnlyList<DocNode>>(
-                        [new DocNode("Fresh", "Fresh.md", "<p>Fresh</p>")]);
-                });
-        using var cache = new MemoryCache(new MemoryCacheOptions());
-        using var memo = new Memo(cache);
-        var aggregator = new DocAggregator(
-            [harvester],
-            new AppSurfaceDocsOptions(),
-            _envFake,
-            memo,
-            _sanitizerFake,
-            _loggerFake);
+            async Task<byte[]> ReadAllBytesAsync(string _, CancellationToken cancellationToken)
+            {
+                if (Interlocked.Increment(ref readCount) == 1)
+                {
+                    firstReadStarted.TrySetResult();
+                    return await firstReadRelease.Task.WaitAsync(cancellationToken);
+                }
 
-        var obsoleteSnapshot = aggregator.GetDocsAsync();
-        await firstHarvestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        aggregator.InvalidateCache();
-        firstHarvestRelease.TrySetResult([new DocNode("Obsolete", "Obsolete.md", "<p>Obsolete</p>")]);
+                return [0xC3, 0x28];
+            }
 
-        var obsoleteDocs = await obsoleteSnapshot;
-        var freshDocs = await aggregator.GetDocsAsync();
+            using var cache = new MemoryCache(new MemoryCacheOptions());
+            using var memo = new Memo(cache);
+            var aggregator = new DocAggregator(
+                [new MarkdownHarvester(
+                    NullLogger<MarkdownHarvester>.Instance,
+                    File.ReadAllTextAsync,
+                    options,
+                    ReadAllBytesAsync)],
+                options,
+                _envFake,
+                memo,
+                _sanitizerFake,
+                _loggerFake);
 
-        Assert.Equal("Obsolete", Assert.Single(obsoleteDocs).Title);
-        Assert.Equal("Fresh", Assert.Single(freshDocs).Title);
+            var obsoleteSnapshot = aggregator.GetDocsAsync();
+            await firstReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            aggregator.InvalidateCache();
+            firstReadRelease.TrySetResult(System.Text.Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# Obsolete\n"));
+
+            var obsoleteDocs = await obsoleteSnapshot;
+            var freshDocs = await aggregator.GetDocsAsync();
+            var source = await aggregator.GetMarkdownDownloadSourceAsync("guide");
+
+            Assert.Equal("Obsolete", Assert.Single(obsoleteDocs).Title);
+            Assert.Equal("Guide", Assert.Single(freshDocs).Title);
+            Assert.Equal(2, Volatile.Read(ref readCount));
+            Assert.Null(source);
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
     }
 
     [Fact]
@@ -236,7 +264,7 @@ public class DocAggregatorTests : IDisposable
         try
         {
             await File.WriteAllTextAsync(
-                Path.Combine(repositoryRoot, "Guide.md"),
+                TestPathUtils.PathUnder(repositoryRoot, "Guide.md"),
                 "---\ndownload_markdown: true\n---\n# Guide\n");
             var options = new AppSurfaceDocsOptions
             {
@@ -291,7 +319,7 @@ public class DocAggregatorTests : IDisposable
                 {
                     Enabled = true,
                     AuthorizationPolicy = "DocsReader",
-                    MaxSnapshotBytes = firstBytes.Length + secondBytes.Length - 1
+                    MaxSnapshotBytes = 1
                 }
             };
             var harvesterOptions = new AppSurfaceDocsOptions
@@ -315,9 +343,13 @@ public class DocAggregatorTests : IDisposable
             var health = await aggregator.GetHarvestHealthAsync();
 
             Assert.Null(source);
-            Assert.Contains(
+            var diagnostic = Assert.Single(
                 health.Diagnostics,
                 diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.MarkdownDownloadSnapshotBudgetExceeded);
+            Assert.Contains(
+                $"eligible source totaled {firstBytes.Length + secondBytes.Length} bytes",
+                diagnostic.Problem,
+                StringComparison.Ordinal);
         }
         finally
         {
