@@ -80,7 +80,7 @@ public class MarkdownHarvesterTests : IDisposable
     [Fact]
     public async Task HarvestWithSourceAsync_ShouldRetainExactEligibleUtf8Bytes()
     {
-        var sourcePath = Path.Combine(_testRoot, "Guide.md");
+        var sourcePath = TestPathUtils.PathUnder(_testRoot, "Guide.md");
         var sourceText = "---\r\ndownload_markdown: true\r\n---\r\n<!-- retained -->\r\n# Guide\r\nSee [next](./next.md).\r\n";
         var sourceBytes = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true).GetPreamble()
             .Concat(Encoding.UTF8.GetBytes(sourceText))
@@ -112,7 +112,7 @@ public class MarkdownHarvesterTests : IDisposable
     public async Task HarvestWithSourceAsync_ShouldRejectNonStrictEligibilityDeclaration(string declaration)
     {
         await File.WriteAllTextAsync(
-            Path.Combine(_testRoot, "Guide.md"),
+            TestPathUtils.PathUnder(_testRoot, "Guide.md"),
             $"---\n{declaration}\n---\n# Guide\n");
         var harvester = new MarkdownHarvester(
             _loggerFake,
@@ -137,7 +137,7 @@ public class MarkdownHarvesterTests : IDisposable
     [Fact]
     public async Task HarvestWithSourceAsync_ShouldNeverGrantEligibilityFromSidecarMetadata()
     {
-        var sourcePath = Path.Combine(_testRoot, "Guide.md");
+        var sourcePath = TestPathUtils.PathUnder(_testRoot, "Guide.md");
         await File.WriteAllTextAsync(sourcePath, "# Guide\n");
         await File.WriteAllTextAsync(sourcePath + ".yml", "download_markdown: true\n");
         var harvester = new MarkdownHarvester(
@@ -161,7 +161,7 @@ public class MarkdownHarvesterTests : IDisposable
     [Fact]
     public async Task HarvestWithSourceAsync_ShouldOmitInvalidUtf8SourceAndPreserveRendering()
     {
-        var sourcePath = Path.Combine(_testRoot, "Guide.md");
+        var sourcePath = TestPathUtils.PathUnder(_testRoot, "Guide.md");
         await File.WriteAllBytesAsync(
             sourcePath,
             [0xff, .. Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# Guide\n")]);
@@ -191,7 +191,7 @@ public class MarkdownHarvesterTests : IDisposable
     public async Task HarvestWithSourceAsync_ShouldNotRereadInvalidUtf8Markdown()
     {
         await File.WriteAllBytesAsync(
-            Path.Combine(_testRoot, "Guide.md"),
+            TestPathUtils.PathUnder(_testRoot, "Guide.md"),
             [0xff, .. Encoding.UTF8.GetBytes("# Guide\n")]);
         var harvester = new MarkdownHarvester(
             _loggerFake,
@@ -216,8 +216,8 @@ public class MarkdownHarvesterTests : IDisposable
     {
         var firstBytes = Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# First\n");
         var secondBytes = Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# Second\n");
-        await File.WriteAllBytesAsync(Path.Combine(_testRoot, "First.md"), firstBytes);
-        await File.WriteAllBytesAsync(Path.Combine(_testRoot, "Second.md"), secondBytes);
+        await File.WriteAllBytesAsync(TestPathUtils.PathUnder(_testRoot, "First.md"), firstBytes);
+        await File.WriteAllBytesAsync(TestPathUtils.PathUnder(_testRoot, "Second.md"), secondBytes);
         var harvester = new MarkdownHarvester(
             _loggerFake,
             File.ReadAllTextAsync,

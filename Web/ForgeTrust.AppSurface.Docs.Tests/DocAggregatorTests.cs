@@ -101,7 +101,7 @@ public class DocAggregatorTests : IDisposable
         try
         {
             var sourceBytes = System.Text.Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# Guide\n");
-            await File.WriteAllBytesAsync(Path.Combine(repositoryRoot, "Guide.md"), sourceBytes);
+            await File.WriteAllBytesAsync(TestPathUtils.PathUnder(repositoryRoot, "Guide.md"), sourceBytes);
             var options = new AppSurfaceDocsOptions
             {
                 Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = repositoryRoot },
@@ -145,7 +145,7 @@ public class DocAggregatorTests : IDisposable
         Directory.CreateDirectory(repositoryRoot);
         try
         {
-            var sourcePath = Path.Combine(repositoryRoot, "Guide.md");
+            var sourcePath = TestPathUtils.PathUnder(repositoryRoot, "Guide.md");
             var firstBytes = System.Text.Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# First\n");
             var secondBytes = System.Text.Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# Second\n");
             await File.WriteAllBytesAsync(sourcePath, firstBytes);
@@ -310,8 +310,8 @@ public class DocAggregatorTests : IDisposable
         {
             var firstBytes = System.Text.Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# First\n");
             var secondBytes = System.Text.Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# Second\n");
-            await File.WriteAllBytesAsync(Path.Combine(repositoryRoot, "First.md"), firstBytes);
-            await File.WriteAllBytesAsync(Path.Combine(repositoryRoot, "Second.md"), secondBytes);
+            await File.WriteAllBytesAsync(TestPathUtils.PathUnder(repositoryRoot, "First.md"), firstBytes);
+            await File.WriteAllBytesAsync(TestPathUtils.PathUnder(repositoryRoot, "Second.md"), secondBytes);
             var options = new AppSurfaceDocsOptions
             {
                 Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = repositoryRoot },
@@ -368,7 +368,7 @@ public class DocAggregatorTests : IDisposable
         try
         {
             await File.WriteAllTextAsync(
-                Path.Combine(repositoryRoot, "Guide.md"),
+                TestPathUtils.PathUnder(repositoryRoot, "Guide.md"),
                 "---\ndownload_markdown: true\n---\n# Markdown guide\n");
             var options = new AppSurfaceDocsOptions
             {
