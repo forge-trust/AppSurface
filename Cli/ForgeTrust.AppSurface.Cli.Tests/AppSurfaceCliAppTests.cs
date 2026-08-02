@@ -57,6 +57,7 @@ public sealed class AppSurfaceCliAppTests
         var targetUrl = $"http://127.0.0.1:{targetPort}/target";
         var redirectTask = ServeRedirectAsync(redirectListener, targetUrl);
         var targetRequestTask = AcceptRequestWithinAsync(targetListener, TimeSpan.FromMilliseconds(250));
+        using var configuredClient = provider.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(ICanaryPollHttpClient));
         var request = new CanaryPollRequest(
             new Uri($"http://127.0.0.1:{redirectPort}/_appsurface/canaries/forwarding.alpha-evidence"),
             "forwarding.alpha-evidence",
@@ -71,6 +72,7 @@ public sealed class AppSurfaceCliAppTests
         var client = provider.GetRequiredService<ICanaryPollHttpClient>();
         var response = await client.SendAsync(request, CancellationToken.None);
 
+        Assert.Equal(Timeout.InfiniteTimeSpan, configuredClient.Timeout);
         Assert.Equal(HttpStatusCode.Found, response.StatusCode);
         Assert.False(await targetRequestTask);
 

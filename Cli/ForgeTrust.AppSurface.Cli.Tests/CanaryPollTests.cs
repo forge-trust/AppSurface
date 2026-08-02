@@ -11,17 +11,19 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CanaryPollTests
 {
     [Fact]
-    public void Constructors_Should_RejectNullDependencies()
+    public void Constructors_Should_ValidateDependenciesAndAttemptTimeout()
     {
         var commandException = Assert.Throws<ArgumentNullException>(() => new CanaryPollCommand(null!));
         var httpClientException = Assert.Throws<ArgumentNullException>(() => new CanaryPollWorkflow(null!, TimeProvider.System, new RecordingDelay()));
         var timeProviderException = Assert.Throws<ArgumentNullException>(() => new CanaryPollWorkflow(new QueueCanaryPollHttpClient(), null!, new RecordingDelay()));
         var delayException = Assert.Throws<ArgumentNullException>(() => new CanaryPollWorkflow(new QueueCanaryPollHttpClient(), TimeProvider.System, null!));
+        var attemptTimeoutException = Assert.Throws<ArgumentOutOfRangeException>(() => new CanaryPollWorkflow(new QueueCanaryPollHttpClient(), TimeProvider.System, new RecordingDelay(), TimeSpan.Zero));
 
         Assert.Equal("workflow", commandException.ParamName);
         Assert.Equal("httpClient", httpClientException.ParamName);
         Assert.Equal("timeProvider", timeProviderException.ParamName);
         Assert.Equal("delay", delayException.ParamName);
+        Assert.Equal("maximumAttemptTimeout", attemptTimeoutException.ParamName);
     }
 
     [Fact]
@@ -52,6 +54,7 @@ public sealed class CanaryPollTests
     [InlineData("http://app.example.test")]
     [InlineData("http://127.0.0.2")]
     [InlineData("https://app.example.test/?unsafe=true")]
+    [InlineData("https://app.example.test/#unsafe")]
     [InlineData("https://user@app.example.test")]
     public void RequestFactory_Should_Reject_UnsafeUrls(string url)
     {
@@ -780,6 +783,24 @@ public sealed class CanaryPollTests
     }
 
     [Fact]
+    public void EnvelopeParser_Should_DropAnOverlengthReasonCode()
+    {
+        var body = JsonSerializer.Serialize(new
+        {
+            name = "forwarding.alpha-evidence",
+            ready = true,
+            status = "pass",
+            reasonCode = new string('a', 65),
+            summary = "accepted proof",
+        });
+
+        var envelope = CanaryPollEnvelopeParser.Parse(Encoding.UTF8.GetBytes(body), "forwarding.alpha-evidence");
+
+        Assert.Null(envelope.ReasonCode);
+        Assert.Equal("accepted proof", envelope.Summary);
+    }
+
+    [Fact]
     public async Task Workflow_Should_RetryTransportExceptions_ThenPass()
     {
         var delay = new RecordingDelay();
@@ -795,6 +816,49 @@ public sealed class CanaryPollTests
         Assert.Equal("pass", result.Outcome);
         Assert.Equal(2, result.Attempts);
         Assert.Equal([TimeSpan.FromSeconds(5)], delay.Delays);
+    }
+
+    [Fact]
+    public async Task Workflow_Should_RetryNonCallerCancellation_ThenPass()
+    {
+        using var unrelatedCancellation = new CancellationTokenSource();
+        var delay = new RecordingDelay();
+        var workflow = new CanaryPollWorkflow(
+            new ScriptedCanaryPollHttpClient(
+                (_, _) => Task.FromException<CanaryPollHttpResponse>(new OperationCanceledException(unrelatedCancellation.Token)),
+                (_, _) => Task.FromResult(JsonResponse(HttpStatusCode.OK, "pass", ready: true))),
+            TimeProvider.System,
+            delay);
+
+        var result = await workflow.RunAsync(CreateRequest(), CancellationToken.None);
+
+        Assert.Equal("pass", result.Outcome);
+        Assert.Equal(2, result.Attempts);
+        Assert.Equal([TimeSpan.FromSeconds(5)], delay.Delays);
+    }
+
+    [Fact]
+    public async Task Workflow_Should_RetryWhenAnAttemptDeadlineExpiresBeforeOverallDeadline()
+    {
+        var delay = new RecordingDelay();
+        var workflow = new CanaryPollWorkflow(
+            new ScriptedCanaryPollHttpClient(
+                async (_, cancellationToken) =>
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                    return null!;
+                },
+                (_, _) => Task.FromResult(JsonResponse(HttpStatusCode.OK, "pass", ready: true))),
+            TimeProvider.System,
+            delay,
+            TimeSpan.FromMilliseconds(10));
+        var request = CreateDirectRequest(TimeSpan.FromMilliseconds(300), TimeSpan.FromMilliseconds(1), []);
+
+        var result = await workflow.RunAsync(request, CancellationToken.None);
+
+        Assert.Equal("pass", result.Outcome);
+        Assert.Equal(2, result.Attempts);
+        Assert.Equal([TimeSpan.FromMilliseconds(1)], delay.Delays);
     }
 
     [Fact]
@@ -1006,6 +1070,23 @@ public sealed class CanaryPollTests
         var result = CanaryPollResult.ProtocolFailure(1, TimeSpan.Zero);
 
         Assert.False(await CanaryPollGithubSummaryWriter.TryWriteAsync(Path.GetTempPath(), result));
+    }
+
+    [Fact]
+    public async Task GithubSummaryWriter_Should_RenderAPlaceholder_WhenTheResultHasNoCanaryName()
+    {
+        var path = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-canary-{Guid.NewGuid():N}.md");
+        var result = CanaryPollResult.ProtocolFailure(1, TimeSpan.Zero);
+
+        try
+        {
+            Assert.True(await CanaryPollGithubSummaryWriter.TryWriteAsync(path, result));
+            Assert.Contains("| - |", await File.ReadAllTextAsync(path), StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [Fact]
@@ -1412,18 +1493,19 @@ public sealed class CanaryPollTests
         }
     }
 
-    private sealed class EnvironmentVariableScope : IDisposable
+}
+
+internal sealed class EnvironmentVariableScope : IDisposable
+{
+    private readonly string _name;
+    private readonly string? _previous;
+
+    public EnvironmentVariableScope(string name, string? value)
     {
-        private readonly string _name;
-        private readonly string? _previous;
-
-        public EnvironmentVariableScope(string name, string? value)
-        {
-            _name = name;
-            _previous = Environment.GetEnvironmentVariable(name);
-            Environment.SetEnvironmentVariable(name, value);
-        }
-
-        public void Dispose() => Environment.SetEnvironmentVariable(_name, _previous);
+        _name = name;
+        _previous = Environment.GetEnvironmentVariable(name);
+        Environment.SetEnvironmentVariable(name, value);
     }
+
+    public void Dispose() => Environment.SetEnvironmentVariable(_name, _previous);
 }

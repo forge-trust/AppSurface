@@ -138,15 +138,34 @@ internal sealed class CanaryPollWorkflow
     private readonly ICanaryPollHttpClient _httpClient;
     private readonly TimeProvider _timeProvider;
     private readonly ICanaryPollDelay _delay;
+    private readonly TimeSpan _maximumAttemptTimeout;
 
+    /// <summary>Creates a workflow with the production per-attempt deadline.</summary>
     public CanaryPollWorkflow(
         ICanaryPollHttpClient httpClient,
         TimeProvider timeProvider,
         ICanaryPollDelay delay)
+        : this(httpClient, timeProvider, delay, TimeSpan.FromSeconds(MaximumAttemptSeconds))
+    {
+    }
+
+    /// <summary>Creates a workflow with an explicit per-attempt deadline.</summary>
+    /// <remarks>Internal tests use this overload to verify attempt and total deadlines independently.</remarks>
+    internal CanaryPollWorkflow(
+        ICanaryPollHttpClient httpClient,
+        TimeProvider timeProvider,
+        ICanaryPollDelay delay,
+        TimeSpan maximumAttemptTimeout)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _delay = delay ?? throw new ArgumentNullException(nameof(delay));
+        if (maximumAttemptTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumAttemptTimeout));
+        }
+
+        _maximumAttemptTimeout = maximumAttemptTimeout;
     }
 
     /// <summary>Runs the caller-owned named-canary polling state machine.</summary>
@@ -170,9 +189,9 @@ internal sealed class CanaryPollWorkflow
                 return CanaryPollResult.Deadline(attempts, _timeProvider.GetElapsedTime(startedAt));
             }
 
-            var attemptTimeout = remaining < TimeSpan.FromSeconds(MaximumAttemptSeconds)
+            var attemptTimeout = remaining < _maximumAttemptTimeout
                 ? remaining
-                : TimeSpan.FromSeconds(MaximumAttemptSeconds);
+                : _maximumAttemptTimeout;
             using var attemptDeadline = new CancellationTokenSource(attemptTimeout);
             using var linkedAttempt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, attemptDeadline.Token);
             attempts++;
@@ -185,10 +204,6 @@ internal sealed class CanaryPollWorkflow
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 return CanaryPollResult.Cancelled(attempts, _timeProvider.GetElapsedTime(startedAt));
-            }
-            catch (OperationCanceledException) when (attemptDeadline.IsCancellationRequested)
-            {
-                return CanaryPollResult.Deadline(attempts, _timeProvider.GetElapsedTime(startedAt));
             }
             catch (Exception exception) when (IsRecoverableTransportException(exception))
             {
@@ -385,7 +400,7 @@ internal sealed class CanaryPollWorkflow
         or (HttpStatusCode)429
         || (int)statusCode >= 500;
 
-    private static bool IsRecoverableTransportException(Exception exception) => exception is HttpRequestException or IOException;
+    private static bool IsRecoverableTransportException(Exception exception) => exception is HttpRequestException or IOException or OperationCanceledException;
 }
 
 /// <summary>Performs one caller-owned delay in the polling state machine.</summary>
@@ -925,9 +940,7 @@ internal sealed class CanaryPollRequest
             throw new ArgumentException("The canary name is invalid.", nameof(name));
         }
 
-        if (marker is not null
-            && (!CanaryPollRequestFactory.IsSafeSummary(marker)
-                || Encoding.UTF8.GetByteCount(marker) > CanaryPollRequestFactory.MaximumMarkerOrSummaryUtf8Bytes))
+        if (marker is not null && !CanaryPollRequestFactory.IsSafeSummary(marker))
         {
             throw new ArgumentException("The marker is invalid or exceeds the supported size.", nameof(marker));
         }
@@ -944,7 +957,7 @@ internal sealed class CanaryPollRequest
         Marker = marker;
         FreshSince = freshSince;
         BearerToken = bearerToken;
-        CustomHeaders = customHeaders ?? throw new ArgumentNullException(nameof(customHeaders));
+        CustomHeaders = customHeaders;
         Timeout = timeout;
         Interval = interval;
         MaxTransientFailures = maxTransientFailures;

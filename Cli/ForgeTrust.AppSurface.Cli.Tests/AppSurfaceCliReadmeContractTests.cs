@@ -12,7 +12,7 @@ public sealed class AppSurfaceCliReadmeContractTests
         var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());
 
         Assert.Contains("### `appsurface canary poll`", readme, StringComparison.Ordinal);
-        Assert.Contains("dotnet tool run appsurface canary poll", readme, StringComparison.Ordinal);
+        Assert.Contains("dotnet tool run appsurface -- canary poll", readme, StringComparison.Ordinal);
         Assert.Contains("--marker-env APPSURFACE_CANARY_MARKER", readme, StringComparison.Ordinal);
         Assert.Contains("--bearer-token-env APPSURFACE_CANARY_TOKEN", readme, StringComparison.Ordinal);
         Assert.Contains("PASS canary=forwarding.alpha-evidence", readme, StringComparison.Ordinal);

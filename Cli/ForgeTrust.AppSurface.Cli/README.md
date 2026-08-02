@@ -83,7 +83,7 @@ dotnet tool install --local ForgeTrust.AppSurface.Cli --prerelease
 export APPSURFACE_CANARY_TOKEN="..."
 export APPSURFACE_CANARY_MARKER="deploy-$(git rev-parse --short HEAD)"
 
-dotnet tool run appsurface canary poll \
+dotnet tool run appsurface -- canary poll \
   --url https://app.example.com \
   --name forwarding.alpha-evidence \
   --bearer-token-env APPSURFACE_CANARY_TOKEN \
@@ -121,7 +121,7 @@ For GitHub Actions, pass values through `env:` and let the exit code gate the jo
     APPSURFACE_CANARY_TOKEN: ${{ secrets.DEPLOY_OPERATOR_TOKEN }}
     APPSURFACE_CANARY_MARKER: deploy-${{ github.run_id }}
   run: >-
-    dotnet tool run appsurface canary poll
+    dotnet tool run appsurface -- canary poll
     --url https://app.example.com
     --name forwarding.alpha-evidence
     --bearer-token-env APPSURFACE_CANARY_TOKEN

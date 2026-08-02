@@ -3786,6 +3786,13 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.All(
             commandRunner.Requests.Where(request => request.OperationName.StartsWith("appsurface", StringComparison.Ordinal)),
             request => Assert.Equal(["tool", "run", "appsurface", "--"], request.Arguments.Take(4).ToArray()));
+        Assert.All(
+            commandRunner.Requests.Where(request => request.OperationName is "appsurface canary poll pass" or "appsurface canary poll non-pass"),
+            request =>
+            {
+                Assert.Contains("--timeout", request.Arguments);
+                Assert.Contains("30s", request.Arguments);
+            });
         Assert.Contains("--marker-env", canaryPassRequest.Arguments);
         Assert.Contains("APPSURFACE_PACKAGE_PROOF_MARKER", canaryPassRequest.Arguments);
         Assert.Contains("--bearer-token-env", canaryPassRequest.Arguments);

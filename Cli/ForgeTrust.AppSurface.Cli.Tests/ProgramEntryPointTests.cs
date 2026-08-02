@@ -84,8 +84,7 @@ public sealed class ProgramEntryPointTests
     public async Task EntryPoint_Should_RenderOneSafeSemanticCanaryFailure_AndExitThree()
     {
         const string token = "canary-entrypoint-token-sentinel";
-        var previousToken = Environment.GetEnvironmentVariable("APPSURFACE_CANARY_TOKEN");
-        Environment.SetEnvironmentVariable("APPSURFACE_CANARY_TOKEN", token);
+        using var tokenScope = new EnvironmentVariableScope("APPSURFACE_CANARY_TOKEN", token);
         var client = new StaticCanaryPollHttpClient(
             new CanaryPollHttpResponse(
                 HttpStatusCode.ServiceUnavailable,
@@ -96,27 +95,20 @@ public sealed class ProgramEntryPointTests
                 false,
                 null));
 
-        try
-        {
-            var result = await InvokeEntryPointAsync(
-                [
-                    "canary", "poll",
-                    "--url", "https://app.example.test",
-                    "--name", "forwarding.alpha-evidence",
-                    "--bearer-token-env", "APPSURFACE_CANARY_TOKEN",
-                ],
-                options => RegisterCanaryPollHttpClient(options, client));
+        var result = await InvokeEntryPointAsync(
+            [
+                "canary", "poll",
+                "--url", "https://app.example.test",
+                "--name", "forwarding.alpha-evidence",
+                "--bearer-token-env", "APPSURFACE_CANARY_TOKEN",
+            ],
+            options => RegisterCanaryPollHttpClient(options, client));
 
-            Assert.Equal(3, result.ExitCode);
-            Assert.Contains("ASCAN403", result.AllText, StringComparison.Ordinal);
-            Assert.Contains("stale", result.AllText, StringComparison.Ordinal);
-            Assert.DoesNotContain("CliFx", result.AllText, StringComparison.Ordinal);
-            ValueSafeAssert.DoesNotExpose(token, result.AllText);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("APPSURFACE_CANARY_TOKEN", previousToken);
-        }
+        Assert.Equal(3, result.ExitCode);
+        Assert.Contains("ASCAN403", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("stale", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("CliFx", result.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(token, result.AllText);
     }
 
     [Fact]
@@ -3023,22 +3015,13 @@ public sealed class ProgramEntryPointTests
     public void AppSurfaceDocsPreviewUrlResolver_Should_Not_Default_When_Endpoint_Environment_Is_Configured()
     {
         using var repository = TempDirectory.Create("appsurface-docs-preview-repo-");
-        var previousValue = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
+        using var urlsScope = new EnvironmentVariableScope("ASPNETCORE_URLS", "http://127.0.0.1:61243");
 
-        try
-        {
-            Environment.SetEnvironmentVariable("ASPNETCORE_URLS", "http://127.0.0.1:61243");
+        var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(
+            ["--environment", "Development"],
+            repository.Path);
 
-            var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(
-                ["--environment", "Development"],
-                repository.Path);
-
-            Assert.Null(defaultUrl);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ASPNETCORE_URLS", previousValue);
-        }
+        Assert.Null(defaultUrl);
     }
 
     [Fact]
@@ -3064,20 +3047,11 @@ public sealed class ProgramEntryPointTests
     public void AppSurfaceDocsPreviewUrlResolver_Should_Ignore_Incomplete_Environment_Probe_Arguments(params string[] args)
     {
         using var repository = TempDirectory.Create("appsurface-docs-preview-repo-");
-        var previousValue = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        using var environmentScope = new EnvironmentVariableScope("ASPNETCORE_ENVIRONMENT", "Development");
 
-        try
-        {
-            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
+        var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(args, repository.Path);
 
-            var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(args, repository.Path);
-
-            Assert.StartsWith("http://localhost:", defaultUrl, StringComparison.Ordinal);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", previousValue);
-        }
+        Assert.StartsWith("http://localhost:", defaultUrl, StringComparison.Ordinal);
     }
 
     [Fact]

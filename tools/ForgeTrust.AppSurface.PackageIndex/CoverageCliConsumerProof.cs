@@ -272,7 +272,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         var canaryEnvironment = CreateCanaryProofEnvironment(context.DotNetHomePath, context.SharedPackagesPath);
         if (!await RunRequiredAsync(ToolCommand(
             context,
-            ["canary", "poll", "--url", canaryFixture.BaseUrl, "--name", CanaryProofName, "--marker-env", CanaryProofMarkerEnvironmentVariable, "--bearer-token-env", CanaryProofTokenEnvironmentVariable, "--json"],
+            ["canary", "poll", "--url", canaryFixture.BaseUrl, "--name", CanaryProofName, "--timeout", "30s", "--marker-env", CanaryProofMarkerEnvironmentVariable, "--bearer-token-env", CanaryProofTokenEnvironmentVariable, "--json"],
             "appsurface canary poll pass",
             "proving packaged protected named-canary pass",
             canaryEnvironment)))
@@ -289,7 +289,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         var nonPass = await RunCommandAsync(
             ToolCommand(
                 context,
-                ["canary", "poll", "--url", canaryFixture.BaseUrl, "--name", CanaryProofName, "--marker-env", CanaryProofMarkerEnvironmentVariable, "--bearer-token-env", CanaryProofTokenEnvironmentVariable, "--json"],
+                ["canary", "poll", "--url", canaryFixture.BaseUrl, "--name", CanaryProofName, "--timeout", "30s", "--marker-env", CanaryProofMarkerEnvironmentVariable, "--bearer-token-env", CanaryProofTokenEnvironmentVariable, "--json"],
                 "appsurface canary poll non-pass",
                 "proving packaged protected named-canary non-pass",
                 canaryEnvironment),
