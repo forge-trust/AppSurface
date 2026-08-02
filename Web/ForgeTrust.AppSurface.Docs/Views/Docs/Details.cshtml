@@ -35,10 +35,8 @@
         ? Model.MarkdownDownloadUrl
         : null;
     var hasContributorProvenance = sourceHref is not null || editHref is not null || lastUpdatedUtc is not null;
-    var provenanceLabel = hasContributorProvenance
-        ? string.IsNullOrWhiteSpace(provenance?.Label) ? "Source of truth" : provenance!.Label.Trim()
-        : "Downloads";
-    var showContributorProvenance = hasContributorProvenance || markdownDownloadUrl is not null;
+    var provenanceLabel = string.IsNullOrWhiteSpace(provenance?.Label) ? "Source of truth" : provenance!.Label.Trim();
+    var showContributorProvenance = hasContributorProvenance;
     var outlineItems = Model.Outline
         .Where(item => item is not null && !string.IsNullOrWhiteSpace(item.Id) && !string.IsNullOrWhiteSpace(item.Title))
         .Select(item => new
@@ -133,7 +131,7 @@
         </nav>
     }
 
-    @if (Model.PageTypeBadge is not null || Model.Component is not null || Model.Audience is not null || Model.CodeLanguageLabel is not null)
+    @if (Model.PageTypeBadge is not null || Model.Component is not null || Model.Audience is not null || Model.CodeLanguageLabel is not null || markdownDownloadUrl is not null)
     {
         <div class="docs-page-meta">
             @if (Model.PageTypeBadge is not null)
@@ -151,6 +149,21 @@
             @if (Model.Audience is not null)
             {
                 <span class="docs-metadata-chip">Audience: @Model.Audience</span>
+            }
+            @if (markdownDownloadUrl is not null)
+            {
+                <a href="@Url.PathBaseAware(markdownDownloadUrl)"
+                   class="docs-page-meta-download"
+                   data-turbo="false"
+                   aria-label="Download Markdown"
+                   title="Download Markdown">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 3v12"></path>
+                        <path d="m7 10 5 5 5-5"></path>
+                        <path d="M5 21h14"></path>
+                    </svg>
+                    <span class="sr-only">Download Markdown</span>
+                </a>
             }
         </div>
     }
@@ -189,12 +202,6 @@
                         <span class="docs-provenance-pencil" aria-hidden="true">✎</span>
                         <span>Edit this page</span>
                     </a>
-                }
-                @if (markdownDownloadUrl is not null)
-                {
-                    <a href="@Url.PathBaseAware(markdownDownloadUrl)"
-                       class="docs-provenance-link docs-provenance-link--secondary"
-                       data-turbo="false">Download Markdown</a>
                 }
                 @if (lastUpdatedUtc is not null)
                 {

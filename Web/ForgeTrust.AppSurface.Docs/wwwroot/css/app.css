@@ -607,8 +607,45 @@ body {
 .docs-page-meta {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 0.5rem;
     margin-bottom: 1rem;
+}
+
+.docs-page-meta-download {
+    display: inline-flex;
+    position: relative;
+    align-items: center;
+    justify-content: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    border: 1px solid var(--docs-color-border-default);
+    border-radius: 9999px;
+    color: var(--docs-color-text-muted);
+    transition:
+        border-color 120ms ease,
+        background-color 120ms ease,
+        color 120ms ease;
+}
+
+.docs-page-meta-download:hover,
+.docs-page-meta-download:focus-visible {
+    border-color: var(--docs-color-border-accent);
+    background: var(--docs-color-accent-fill-soft);
+    color: var(--docs-color-accent-soft);
+}
+
+.docs-page-meta-download svg {
+    width: 0.85rem;
+    height: 0.85rem;
+}
+
+@media (pointer: coarse) {
+    .docs-page-meta-download::before {
+        position: absolute;
+        inset: -0.575rem;
+        content: "";
+    }
 }
 
 .docs-provenance-strip {

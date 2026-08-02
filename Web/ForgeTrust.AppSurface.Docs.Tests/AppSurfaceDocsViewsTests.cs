@@ -3972,7 +3972,7 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
-    public async Task DetailsView_ShouldLabelDownloadOnlyProvenanceStripAsDownloads()
+    public async Task DetailsView_ShouldRenderDownloadIconInThePageMetaRow()
     {
         using var services = CreateServiceProvider(CreateDocs());
         var doc = new DocNode("Quickstart", "guides/quickstart.md", "<p>Guide body</p>");
@@ -3988,11 +3988,15 @@ public class AppSurfaceDocsViewsTests
             model);
         var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
 
-        var provenanceStrip = document.QuerySelector(".docs-provenance-strip");
-        Assert.NotNull(provenanceStrip);
-        Assert.Equal("Downloads", provenanceStrip!.GetAttribute("aria-label"));
-        Assert.Equal("Downloads", provenanceStrip.QuerySelector(".docs-provenance-label")?.TextContent.Trim());
-        Assert.NotNull(provenanceStrip.QuerySelector("a[href='/docs/_markdown/guides/quickstart'][data-turbo='false']"));
+        var downloadLink = document.QuerySelector("a.docs-page-meta-download[href='/docs/_markdown/guides/quickstart'][data-turbo='false']");
+        Assert.NotNull(downloadLink);
+        Assert.Equal("Download Markdown", downloadLink!.GetAttribute("aria-label"));
+        Assert.Equal("Download Markdown", downloadLink.GetAttribute("title"));
+        Assert.NotNull(downloadLink.QuerySelector("svg[aria-hidden='true']"));
+        Assert.Null(document.QuerySelector(".docs-provenance-strip"));
+        var stylesheet = ReadTailwindEntryStylesheetMarkup();
+        Assert.Contains("@media (pointer: coarse)", stylesheet, StringComparison.Ordinal);
+        Assert.Contains("inset: -0.575rem;", stylesheet, StringComparison.Ordinal);
     }
 
     [Fact]

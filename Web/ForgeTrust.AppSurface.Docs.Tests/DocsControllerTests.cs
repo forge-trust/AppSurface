@@ -5905,6 +5905,105 @@ public class DocsControllerTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task Details_ShouldExposeMarkdownDownload_WhenCanonicalPageHasEligibleSource()
+    {
+        var repositoryRoot = Path.Combine(Path.GetTempPath(), "AppSurfaceDocsTests_MarkdownDownload", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repositoryRoot);
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(repositoryRoot, "Guide.md"),
+                "---\ndownload_markdown: true\n---\n# Guide\n");
+            var options = new AppSurfaceDocsOptions
+            {
+                Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = repositoryRoot },
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader"
+                }
+            };
+            var (controller, cache, memo) = CreateController(
+                options,
+                [new MarkdownHarvester(NullLogger<MarkdownHarvester>.Instance, File.ReadAllTextAsync, options)]);
+            using (cache)
+            using (memo)
+            {
+                var result = await controller.Details("guide");
+
+                var view = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<DocDetailsViewModel>(view.Model);
+                Assert.True(model.CanDownloadMarkdown);
+                Assert.Equal("/docs/_markdown/guide", model.MarkdownDownloadUrl);
+            }
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadMarkdown_ShouldFailClosedForMissingSourcesAndInvalidRequests()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+            {
+                Enabled = true,
+                AuthorizationPolicy = "DocsReader"
+            }
+        };
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Guide", "Guide.md", "<p>Guide</p>")]);
+        var (controller, cache, memo) = CreateController(options, harvester);
+        using (cache)
+        using (memo)
+        {
+            var httpContext = new DefaultHttpContext();
+            httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget = "/docs/_markdown/guide";
+            controller.ControllerContext = CreateControllerContext(httpContext);
+
+            Assert.IsType<NotFoundResult>(await controller.DownloadMarkdown("guide"));
+            Assert.IsType<NotFoundResult>(await controller.DownloadMarkdown(" "));
+            Assert.IsType<NotFoundResult>(await controller.DownloadMarkdown("Guide.md"));
+
+            httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget = string.Empty;
+
+            Assert.IsType<NotFoundResult>(await controller.DownloadMarkdown("guide"));
+        }
+    }
+
+    [Theory]
+    [InlineData("aA1._-!", "aA1._.md")]
+    [InlineData("safe!name", "safe-name.md")]
+    [InlineData("", "document.md")]
+    [InlineData("CON", "document.md")]
+    [InlineData("PRN", "document.md")]
+    [InlineData("AUX", "document.md")]
+    [InlineData("NUL", "document.md")]
+    [InlineData("COM1", "document.md")]
+    [InlineData("COM9", "document.md")]
+    [InlineData("LPT1", "document.md")]
+    [InlineData("LPT9", "document.md")]
+    [InlineData("COM0", "COM0.md")]
+    public void BuildMarkdownDownloadFileName_ShouldSanitizeUnsafeAndDeviceNames(string canonicalPath, string expectedFileName)
+    {
+        var fileName = DocsController.BuildMarkdownDownloadFileName(canonicalPath);
+
+        Assert.Equal(expectedFileName, fileName);
+    }
+
+    [Fact]
+    public void BuildMarkdownDownloadFileName_ShouldTruncateLongNames()
+    {
+        var fileName = DocsController.BuildMarkdownDownloadFileName(new string('a', 117));
+
+        Assert.Equal(new string('a', 116) + ".md", fileName);
+    }
+
     public void Dispose()
     {
         foreach (var directory in _temporaryCatalogRoots)

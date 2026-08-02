@@ -1868,6 +1868,7 @@ public sealed class AppSurfaceDocsOptionsTests
                 };
                 options.Source = null!;
                 options.Harvest = null!;
+                options.MarkdownDownload = null!;
                 options.Diagnostics = null!;
                 options.Bundle = null!;
                 options.Sidebar = null!;
@@ -1886,6 +1887,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.NotNull(options.Source);
         Assert.NotNull(options.Harvest);
         Assert.NotNull(options.Harvest.Health);
+        Assert.NotNull(options.MarkdownDownload);
         Assert.NotNull(options.Diagnostics);
         Assert.NotNull(options.Harvest.Paths);
         Assert.NotNull(options.Harvest.Paths.DefaultExclusions);

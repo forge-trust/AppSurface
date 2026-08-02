@@ -55,7 +55,6 @@ internal sealed class AppSurfaceDocsMarkdownDownloadPolicyValidationService : IH
             throw new InvalidOperationException(
                 $"AppSurface Docs Markdown download requires the host to register authorization policy '{policyName}'.");
         }
-
     }
 
     /// <summary>

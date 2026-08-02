@@ -118,11 +118,13 @@ public class DocAggregatorTests : IDisposable
 
             var source = await aggregator.GetMarkdownDownloadSourceAsync("guide");
             var sourceShapedAlias = await aggregator.GetMarkdownDownloadSourceAsync("Guide.md");
+            var blankPath = await aggregator.GetMarkdownDownloadSourceAsync(" ");
 
             Assert.NotNull(source);
             Assert.Equal(sourceBytes, source.Bytes);
             Assert.Equal("guide", source.CanonicalPath);
             Assert.Null(sourceShapedAlias);
+            Assert.Null(blankPath);
         }
         finally
         {
@@ -172,6 +174,49 @@ public class DocAggregatorTests : IDisposable
         {
             Directory.Delete(repositoryRoot, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task InvalidateCache_ShouldDiscardMarkdownSourcesFromAnObsoleteSnapshotGeneration()
+    {
+        var firstHarvestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstHarvestRelease = new TaskCompletionSource<IReadOnlyList<DocNode>>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var harvestCount = 0;
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .ReturnsLazily(
+                () =>
+                {
+                    if (Interlocked.Increment(ref harvestCount) == 1)
+                    {
+                        firstHarvestStarted.TrySetResult();
+                        return firstHarvestRelease.Task;
+                    }
+
+                    return Task.FromResult<IReadOnlyList<DocNode>>(
+                        [new DocNode("Fresh", "Fresh.md", "<p>Fresh</p>")]);
+                });
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        using var memo = new Memo(cache);
+        var aggregator = new DocAggregator(
+            [harvester],
+            new AppSurfaceDocsOptions(),
+            _envFake,
+            memo,
+            _sanitizerFake,
+            _loggerFake);
+
+        var obsoleteSnapshot = aggregator.GetDocsAsync();
+        await firstHarvestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        aggregator.InvalidateCache();
+        firstHarvestRelease.TrySetResult([new DocNode("Obsolete", "Obsolete.md", "<p>Obsolete</p>")]);
+
+        var obsoleteDocs = await obsoleteSnapshot;
+        var freshDocs = await aggregator.GetDocsAsync();
+
+        Assert.Equal("Obsolete", Assert.Single(obsoleteDocs).Title);
+        Assert.Equal("Fresh", Assert.Single(freshDocs).Title);
     }
 
     [Fact]
@@ -237,8 +282,17 @@ public class DocAggregatorTests : IDisposable
                     MaxSnapshotBytes = firstBytes.Length + secondBytes.Length - 1
                 }
             };
+            var harvesterOptions = new AppSurfaceDocsOptions
+            {
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader",
+                    MaxSnapshotBytes = firstBytes.Length + secondBytes.Length
+                }
+            };
             var aggregator = new DocAggregator(
-                [new MarkdownHarvester(NullLogger<MarkdownHarvester>.Instance, File.ReadAllTextAsync, options)],
+                [new MarkdownHarvester(NullLogger<MarkdownHarvester>.Instance, File.ReadAllTextAsync, harvesterOptions)],
                 options,
                 _envFake,
                 _memo,

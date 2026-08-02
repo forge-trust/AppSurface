@@ -375,7 +375,9 @@ public class DocAggregator
         DocHarvestDiagnostic? Diagnostic,
         IReadOnlyList<DocHarvestDiagnostic>? AdditionalDiagnostics = null,
         bool ParticipatesInStrictHealth = true,
-        IReadOnlyDictionary<string, byte[]>? MarkdownDownloadSourcesByPath = null);
+        IReadOnlyDictionary<string, byte[]>? MarkdownDownloadSourcesByPath = null,
+        long MarkdownDownloadEligibleSourceBytes = 0,
+        bool MarkdownDownloadSourceCaptureExceededBudget = false);
 
     /// <summary>
     /// Initializes a new instance of <see cref="DocAggregator"/> with the provided dependencies and determines the repository root.
@@ -1165,38 +1167,58 @@ public class DocAggregator
         IReadOnlyList<HarvesterRunResult> harvesterResults,
         IReadOnlyDictionary<string, DocNode> docsByPath,
         IReadOnlySet<string> markdownDownloadSourceOwnerPaths,
-        AppSurfaceDocsMarkdownDownloadOptions? options)
+        AppSurfaceDocsMarkdownDownloadOptions options)
     {
-        if (options?.Enabled != true)
+        if (!options.Enabled)
         {
             return (new Dictionary<string, byte[]>(StringComparer.Ordinal), null);
         }
 
-        var eligibleSources = harvesterResults
-            .SelectMany(result => result.MarkdownDownloadSourcesByPath ?? new Dictionary<string, byte[]>(StringComparer.Ordinal))
-            .GroupBy(entry => entry.Key, StringComparer.Ordinal)
-            .Select(group => group.First())
-            .Where(entry => markdownDownloadSourceOwnerPaths.Contains(entry.Key)
-                            && docsByPath.TryGetValue(entry.Key, out var doc)
-                            && !string.IsNullOrWhiteSpace(doc.CanonicalPath))
-            .ToArray();
-        var sourceBytes = eligibleSources.Sum(entry => (long)entry.Value.LongLength);
-        if (sourceBytes <= options.MaxSnapshotBytes)
+        if (harvesterResults.Any(result => result.MarkdownDownloadSourceCaptureExceededBudget))
         {
+            var capturedCandidateBytes = harvesterResults.Sum(result => result.MarkdownDownloadEligibleSourceBytes);
             return (
-                eligibleSources.ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal),
-                null);
+                new Dictionary<string, byte[]>(StringComparer.Ordinal),
+                CreateSnapshotBudgetExceededDiagnostic(capturedCandidateBytes, options));
         }
 
-        return (
-            new Dictionary<string, byte[]>(StringComparer.Ordinal),
-            new DocHarvestDiagnostic(
-                DocHarvestDiagnosticCodes.MarkdownDownloadSnapshotBudgetExceeded,
-                DocHarvestDiagnosticSeverity.Warning,
-                nameof(MarkdownHarvester),
-                $"Markdown download was unavailable because eligible source totaled {sourceBytes} bytes and exceeds AppSurfaceDocs:MarkdownDownload:MaxSnapshotBytes ({options.MaxSnapshotBytes} bytes).",
-                "The source download sidecar is all-or-nothing so page traversal order cannot decide which protected documents are downloadable.",
-                "Reduce the number or size of opted-in Markdown files, or raise AppSurfaceDocs:MarkdownDownload:MaxSnapshotBytes within its supported limit."));
+        var sources = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        long sourceBytes = 0;
+        foreach (var harvesterResult in harvesterResults)
+        {
+            foreach (var entry in harvesterResult.MarkdownDownloadSourcesByPath
+                                   ?? new Dictionary<string, byte[]>(StringComparer.Ordinal))
+            {
+                if (!markdownDownloadSourceOwnerPaths.Contains(entry.Key)
+                    || !docsByPath.TryGetValue(entry.Key, out var doc)
+                    || string.IsNullOrWhiteSpace(doc.CanonicalPath)
+                    || !sources.TryAdd(entry.Key, entry.Value))
+                {
+                    continue;
+                }
+
+                sourceBytes = checked(sourceBytes + entry.Value.LongLength);
+                if (sourceBytes > options.MaxSnapshotBytes)
+                {
+                    return (new Dictionary<string, byte[]>(StringComparer.Ordinal), CreateSnapshotBudgetExceededDiagnostic(sourceBytes, options));
+                }
+            }
+        }
+
+        return (sources, null);
+    }
+
+    private static DocHarvestDiagnostic CreateSnapshotBudgetExceededDiagnostic(
+        long sourceBytes,
+        AppSurfaceDocsMarkdownDownloadOptions options)
+    {
+        return new DocHarvestDiagnostic(
+            DocHarvestDiagnosticCodes.MarkdownDownloadSnapshotBudgetExceeded,
+            DocHarvestDiagnosticSeverity.Warning,
+            nameof(MarkdownHarvester),
+            $"Markdown download was unavailable because eligible source totaled {sourceBytes} bytes and exceeds AppSurfaceDocs:MarkdownDownload:MaxSnapshotBytes ({options.MaxSnapshotBytes} bytes).",
+            "The source download sidecar is all-or-nothing so page traversal order cannot decide which protected documents are downloadable.",
+            "Reduce the number or size of opted-in Markdown files, or raise AppSurfaceDocs:MarkdownDownload:MaxSnapshotBytes within its supported limit.");
     }
 
     private static async Task<IReadOnlyList<HarvesterRunResult>> RunHarvestersAsync(
@@ -1261,6 +1283,8 @@ public class DocAggregator
 
             IReadOnlyList<DocNode> docs;
             IReadOnlyDictionary<string, byte[]>? markdownDownloadSources = null;
+            long markdownDownloadEligibleSourceBytes = 0;
+            var markdownDownloadSourceCaptureExceededBudget = false;
             if (harvester is MarkdownHarvester markdownHarvester)
             {
                 var markdownResult = await markdownHarvester
@@ -1268,6 +1292,8 @@ public class DocAggregator
                     .WaitAsync(harvesterTimeout);
                 docs = markdownResult.Nodes;
                 markdownDownloadSources = markdownResult.SourceByPath;
+                markdownDownloadEligibleSourceBytes = markdownResult.EligibleSourceBytes;
+                markdownDownloadSourceCaptureExceededBudget = markdownResult.SourceCaptureExceededBudget;
             }
             else
             {
@@ -1304,7 +1330,9 @@ public class DocAggregator
                 blockingDiagnostic,
                 supplementalDiagnostics,
                 ParticipatesInStrictHealth: participatesInStrictHealth,
-                MarkdownDownloadSourcesByPath: markdownDownloadSources);
+                MarkdownDownloadSourcesByPath: markdownDownloadSources,
+                MarkdownDownloadEligibleSourceBytes: markdownDownloadEligibleSourceBytes,
+                MarkdownDownloadSourceCaptureExceededBudget: markdownDownloadSourceCaptureExceededBudget);
         }
         catch (TimeoutException ex)
         {

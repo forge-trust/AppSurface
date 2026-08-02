@@ -1151,12 +1151,12 @@ public class AppSurfaceDocsWebModuleTests
                 routeEndpoint =>
                 {
                     var methods = routeEndpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
-                           return routeEndpoint.RoutePattern.RawText?.TrimStart('/') == "docs/_markdown/{*path}"
-                           && methods is not null
-                           && methods.Contains(HttpMethods.Post)
-                           && methods.Contains(HttpMethods.Connect)
-                           && methods.Contains(HttpMethods.Trace)
-                           && !methods.Contains(HttpMethods.Get);
+                    return routeEndpoint.RoutePattern.RawText?.TrimStart('/') == "docs/_markdown/{*path}"
+                    && methods is not null
+                    && methods.Contains(HttpMethods.Post)
+                    && methods.Contains(HttpMethods.Connect)
+                    && methods.Contains(HttpMethods.Trace)
+                    && !methods.Contains(HttpMethods.Get);
                 });
         var statusCodePages = A.Fake<IStatusCodePagesFeature>();
         statusCodePages.Enabled = true;
@@ -1168,6 +1168,13 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Equal(StatusCodes.Status405MethodNotAllowed, httpContext.Response.StatusCode);
         Assert.False(statusCodePages.Enabled);
         Assert.Equal("GET, HEAD", httpContext.Response.Headers.Allow);
+
+        var noStatusCodePagesContext = new DefaultHttpContext();
+
+        await endpoint.RequestDelegate!(noStatusCodePagesContext);
+
+        Assert.Equal(StatusCodes.Status405MethodNotAllowed, noStatusCodePagesContext.Response.StatusCode);
+        Assert.Equal("GET, HEAD", noStatusCodePagesContext.Response.Headers.Allow);
     }
 
     [Fact]
@@ -2292,6 +2299,25 @@ public class AppSurfaceDocsWebModuleTests
                 Directory.Delete(tempDirectory, recursive: true);
             }
         }
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldReserveMarkdownDownloadWhenOptionsAreNull()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        builder.Services.AddSingleton(new AppSurfaceDocsOptions { MarkdownDownload = null! });
+        using var app = builder.Build();
+
+        _module.ConfigureEndpoints(context, (IEndpointRouteBuilder)app);
+
+        var endpoints = GetRouteEndpoints((IEndpointRouteBuilder)app, "docs/_markdown/{*path}")
+            .Where(endpoint => endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains(HttpMethods.Get) == true)
+            .ToArray();
+        Assert.NotEmpty(endpoints);
+        Assert.All(endpoints, endpoint => Assert.NotNull(endpoint.Metadata.GetMetadata<AllowAnonymousAttribute>()));
     }
 
     [Fact]

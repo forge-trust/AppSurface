@@ -304,6 +304,8 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         var nodes = new List<DocNode>();
         var sourceByPath = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         var diagnostics = new List<DocHarvestDiagnostic>();
+        long eligibleSourceBytes = 0;
+        var sourceCaptureExceededBudget = false;
         try
         {
             var markdownOptions = _options.Harvest?.Markdown ?? new AppSurfaceDocsMarkdownHarvestOptions();
@@ -336,7 +338,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                         }
                         else
                         {
-                            content = await _readAllTextAsync(file, cancellationToken);
+                            content = DecodeUtf8WithReplacement(bytes);
                             diagnostics.Add(new DocHarvestDiagnostic(
                                 DocHarvestDiagnosticCodes.MarkdownDownloadInvalidEncoding,
                                 DocHarvestDiagnosticSeverity.Warning,
@@ -380,10 +382,23 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
 
                     if (sourceBytes is not null)
                     {
-                        var eligibility = MarkdownFrontMatterParser.GetMarkdownDownloadEligibility(content);
+                        var eligibility = frontMatterResult.DownloadEligibility;
                         if (eligibility == MarkdownDownloadEligibility.Eligible)
                         {
-                            sourceByPath[relativePath] = sourceBytes;
+                            eligibleSourceBytes = checked(eligibleSourceBytes + sourceBytes.LongLength);
+                            if (!sourceCaptureExceededBudget
+                                && eligibleSourceBytes <= markdownDownloadOptions.MaxSnapshotBytes)
+                            {
+                                sourceByPath[relativePath] = sourceBytes;
+                            }
+                            else
+                            {
+                                // The download sidecar is deliberately all-or-nothing. Clear retained bytes as soon as
+                                // the cap is crossed, then keep rendering the remaining documents without retaining raw
+                                // source so a large repository cannot build an unbounded transient source map.
+                                sourceByPath.Clear();
+                                sourceCaptureExceededBudget = true;
+                            }
                         }
                         else if (eligibility == MarkdownDownloadEligibility.Invalid)
                         {
@@ -407,7 +422,11 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                 }
             }
 
-            return new MarkdownHarvestResult(nodes, sourceByPath);
+            return new MarkdownHarvestResult(
+                nodes,
+                sourceByPath,
+                eligibleSourceBytes,
+                sourceCaptureExceededBudget);
         }
         finally
         {
@@ -429,9 +448,15 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         }
         catch (DecoderFallbackException)
         {
-            content = string.Empty;
+            content = DecodeUtf8WithReplacement(bytes);
             return false;
         }
+    }
+
+    private static string DecodeUtf8WithReplacement(byte[] bytes)
+    {
+        var content = Encoding.UTF8.GetString(bytes);
+        return content.Length > 0 && content[0] == '\uFEFF' ? content[1..] : content;
     }
 
     private IEnumerable<string> EnumerateMarkdownSourceFiles(
@@ -904,4 +929,6 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
 /// </remarks>
 internal sealed record MarkdownHarvestResult(
     IReadOnlyList<DocNode> Nodes,
-    IReadOnlyDictionary<string, byte[]> SourceByPath);
+    IReadOnlyDictionary<string, byte[]> SourceByPath,
+    long EligibleSourceBytes = 0,
+    bool SourceCaptureExceededBudget = false);

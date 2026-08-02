@@ -60,9 +60,10 @@ internal static class MarkdownFrontMatterParser
             return (markdown, new MarkdownMetadataParseResult(null, []));
         }
 
+        var downloadEligibility = GetMarkdownDownloadEligibilityFromParsedFrontMatter(frontMatter);
         try
         {
-            return (body, ParseMetadataYamlWithDiagnostics(frontMatter));
+            return (body, ParseMetadataYamlWithDiagnostics(frontMatter) with { DownloadEligibility = downloadEligibility });
         }
         catch (YamlException ex)
         {
@@ -79,7 +80,12 @@ internal static class MarkdownFrontMatterParser
                             "Inline front matter could not be parsed as YAML.",
                             ex.Message,
                             "Fix the YAML syntax or remove the front matter block.")
-                    ]));
+                    ])
+                {
+                    DownloadEligibility = downloadEligibility == MarkdownDownloadEligibility.Eligible
+                        ? MarkdownDownloadEligibility.Invalid
+                        : downloadEligibility
+                });
         }
     }
 
@@ -191,6 +197,25 @@ internal static class MarkdownFrontMatterParser
             return MarkdownDownloadEligibility.NotDeclared;
         }
 
+        var eligibility = GetMarkdownDownloadEligibilityFromParsedFrontMatter(frontMatter);
+        if (eligibility != MarkdownDownloadEligibility.Eligible)
+        {
+            return eligibility;
+        }
+
+        try
+        {
+            _ = Deserializer.Deserialize<Dictionary<string, object?>>(frontMatter);
+            return MarkdownDownloadEligibility.Eligible;
+        }
+        catch (YamlException)
+        {
+            return MarkdownDownloadEligibility.Invalid;
+        }
+    }
+
+    private static MarkdownDownloadEligibility GetMarkdownDownloadEligibilityFromParsedFrontMatter(string frontMatter)
+    {
         var matches = MarkdownDownloadDeclarationPattern.Matches(frontMatter);
         if (matches.Count == 0)
         {
@@ -204,15 +229,13 @@ internal static class MarkdownFrontMatterParser
             return MarkdownDownloadEligibility.Invalid;
         }
 
-        try
-        {
-            _ = Deserializer.Deserialize<Dictionary<string, object?>>(frontMatter);
-            return MarkdownDownloadEligibility.Eligible;
-        }
-        catch (YamlException)
+        var lines = frontMatter.Split('\n');
+        if (lines.Any(line => line.StartsWith('%') || line.Trim() is "---" or "..."))
         {
             return MarkdownDownloadEligibility.Invalid;
         }
+
+        return MarkdownDownloadEligibility.Eligible;
     }
 
     private static bool TrySplitFrontMatter(string markdown, out string frontMatter, out string body)

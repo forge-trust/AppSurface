@@ -18,6 +18,27 @@ public sealed class AppSurfaceDocsMarkdownDownloadPolicyValidationServiceTests
     }
 
     [Fact]
+    public async Task StartAsync_ShouldSkipPolicyResolutionWhenMarkdownDownloadOptionsAreNull()
+    {
+        var service = new AppSurfaceDocsMarkdownDownloadPolicyValidationService(
+            new AppSurfaceDocsOptions { MarkdownDownload = null! },
+            new ServiceCollection().BuildServiceProvider());
+
+        await service.StartAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public void Constructor_ShouldRejectNullDependencies()
+    {
+        var services = new ServiceCollection().BuildServiceProvider();
+
+        Assert.Throws<ArgumentNullException>(
+            () => new AppSurfaceDocsMarkdownDownloadPolicyValidationService(null!, services));
+        Assert.Throws<ArgumentNullException>(
+            () => new AppSurfaceDocsMarkdownDownloadPolicyValidationService(new AppSurfaceDocsOptions(), null!));
+    }
+
+    [Fact]
     public async Task StartAsync_ShouldRejectAnUnknownEnabledPolicy()
     {
         var policyProvider = A.Fake<IAuthorizationPolicyProvider>();

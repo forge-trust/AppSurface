@@ -2185,7 +2185,16 @@ public class DocsController : Controller
         return string.Equals(rawPath, expectedPath, StringComparison.Ordinal);
     }
 
-    private static string BuildMarkdownDownloadFileName(string canonicalPath)
+    /// <summary>
+    /// Builds a safe attachment filename for a canonical Docs-relative Markdown route.
+    /// </summary>
+    /// <remarks>
+    /// The route catalog normally supplies ASCII-safe segments. This internal boundary remains defensive so a future
+    /// caller cannot emit a device name, an empty filename, or an attachment name outside the compatibility limit.
+    /// </remarks>
+    /// <param name="canonicalPath">The canonical Docs-relative route path.</param>
+    /// <returns>An ASCII-safe Markdown attachment filename.</returns>
+    internal static string BuildMarkdownDownloadFileName(string canonicalPath)
     {
         var baseName = string.Join('-', canonicalPath.Split('/', StringSplitOptions.RemoveEmptyEntries));
         var builder = new System.Text.StringBuilder(baseName.Length);
