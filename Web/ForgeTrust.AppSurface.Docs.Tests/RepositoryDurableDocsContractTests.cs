@@ -10,10 +10,11 @@ public sealed class RepositoryDurableDocsContractTests
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
 
-        foreach (var path in new[] { "Durable/slice5-reference-workload.md", "releases/unreleased.md" })
-        {
-            var content = File.ReadAllText(Path.Join(repoRoot, path));
+        var contents = new[] { "Durable/slice5-reference-workload.md", "releases/unreleased.md" }
+            .Select(path => File.ReadAllText(TestPathUtils.PathUnder(repoRoot, path)));
 
+        foreach (var content in contents)
+        {
             Assert.Contains(
                 $"[`configure-postgresql-roles.sql`]({PostgreSqlRoleRecipeUrl})",
                 content,
