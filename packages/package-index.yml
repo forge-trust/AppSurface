@@ -11,6 +11,18 @@ packages:
     includes: Core module abstractions, dependency graph orchestration, AppSurfaceStartup, StartupContext, process utilities, and lexically contained path construction.
     does_not_include: ASP.NET Core hosting, CliFx command hosting, Aspire app-model helpers, or optional integrations.
     start_here_path: ForgeTrust.AppSurface.Core/README.md
+  - project: ForgeTrust.AppSurface.Theming/ForgeTrust.AppSurface.Theming.csproj
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
+    order: 15
+    use_when: Add this directly only when authoring a package-owned theme adapter; ASP.NET Core applications normally install ForgeTrust.AppSurface.Web, which carries the neutral contract and Razor integration.
+    includes: Immutable semantic light/dark pair contracts, strict opaque color and contrast validation, deterministic default resolution, and an opaque typed application-settings seam.
+    does_not_include: Consumer component styling, a browser switcher, persisted preference, request or tenant selection, theme packs, remote loading, or Docs-specific CSS variables.
+    start_here_path: ForgeTrust.AppSurface.Theming/README.md
   - project: Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj
     classification: public
     publish_decision: publish
@@ -468,6 +480,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Config
       - ForgeTrust.AppSurface.Core
+      - ForgeTrust.AppSurface.Theming
   - project: Web/ForgeTrust.AppSurface.Web.Push/ForgeTrust.AppSurface.Web.Push.csproj
     classification: public
     publish_decision: publish
@@ -599,7 +612,7 @@ packages:
     release_notes_path: releases/unreleased.md
     order: 200
     note: >-
-      Reusable docs package for harvesting repository docs into an AppSurface Docs UI, with source harvesting, search, release archives, diagnostics, and the dark-family Theme Contract v1 for branded docs chrome. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps. Its exact coordinated GHSA-pgww-w46g-26qg graph is `AngleSharp` `[1.5.2]`, `HtmlSanitizer` `[9.1.949-beta]`, and `AngleSharp.Css` `[1.0.0-beta.216]`; the beta pair is preview-only. Stable verification requires all three dependencies, rejects missing or malformed ranges and AngleSharp floors below 1.5.2, and blocks the beta pair until [issue #682](https://github.com/forge-trust/AppSurface/issues/682) lands compatible stable versions. The [Docs dependency security boundary](../Web/ForgeTrust.AppSurface.Docs/README.md#dependency-security-boundary) covers rendered package-documentation fragments, not general UGC or host CSP.
+      Reusable docs package for harvesting repository docs into an AppSurface Docs UI, with source harvesting, search, release archives, diagnostics, and a shared semantic System/Light/Dark theme-pair adapter for package-owned docs chrome. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps. Its exact coordinated GHSA-pgww-w46g-26qg graph is `AngleSharp` `[1.5.2]`, `HtmlSanitizer` `[9.1.949-beta]`, and `AngleSharp.Css` `[1.0.0-beta.216]`; the beta pair is preview-only. Stable verification requires all three dependencies, rejects missing or malformed ranges and AngleSharp floors below 1.5.2, and blocks the beta pair until [issue #682](https://github.com/forge-trust/AppSurface/issues/682) lands compatible stable versions. The [Docs dependency security boundary](../Web/ForgeTrust.AppSurface.Docs/README.md#dependency-security-boundary) covers rendered package-documentation fragments, not general UGC or host CSP.
     start_here_path: Web/ForgeTrust.AppSurface.Docs/README.md
     start_here_label: AppSurface Docs README
     expected_dependency_package_ids:
@@ -607,6 +620,8 @@ packages:
       - ForgeTrust.AppSurface.Caching
       - ForgeTrust.AppSurface.Config
       - ForgeTrust.AppSurface.Intelligence
+      - ForgeTrust.AppSurface.Theming
+      - ForgeTrust.AppSurface.Web
       - ForgeTrust.AppSurface.Web.Tailwind
       - ForgeTrust.RazorWire
   - project: Web/ForgeTrust.AppSurface.Docs.Standalone/ForgeTrust.AppSurface.Docs.Standalone.csproj

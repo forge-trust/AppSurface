@@ -130,6 +130,10 @@
     <Project Path="tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
     <Project Path="tests/ForgeTrust.AppSurface.Testing.Tests/ForgeTrust.AppSurface.Testing.Tests.csproj" />
   </Folder>
+  <Folder Name="/Theming/">
+    <Project Path="ForgeTrust.AppSurface.Theming.Tests/ForgeTrust.AppSurface.Theming.Tests.csproj" />
+    <Project Path="ForgeTrust.AppSurface.Theming/ForgeTrust.AppSurface.Theming.csproj" />
+  </Folder>
   <Folder Name="/Web/">
     <Project Path="Web/ForgeTrust.AppSurface.Web.Push.Tests/ForgeTrust.AppSurface.Web.Push.Tests.csproj" />
     <Project Path="Web/ForgeTrust.AppSurface.Web.Push/ForgeTrust.AppSurface.Web.Push.csproj" />

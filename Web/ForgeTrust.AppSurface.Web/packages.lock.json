@@ -5,8 +5,7 @@
       "forgetrust.appsurface.config": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
-          "Microsoft.Extensions.Options": "[10.0.8, )"
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.core": {
@@ -14,6 +13,9 @@
         "dependencies": {
           "CliWrap": "[3.10.1, )"
         }
+      },
+      "forgetrust.appsurface.theming": {
+        "type": "Project"
       },
       "CliWrap": {
         "type": "CentralTransitive",
