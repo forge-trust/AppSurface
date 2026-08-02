@@ -281,9 +281,10 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             return BuildReport(context, commands, artifacts);
         }
 
-        if (!IsExpectedCanaryTerminalResult(commands[^1], "pass", 0, canaryFixture.BaseUrl))
+        if (!IsExpectedCanaryTerminalResult(commands[^1], "pass", 0, canaryFixture.BaseUrl)
+            || canaryFixture.ValidRequestCount != 1)
         {
-            commands[^1] = commands[^1] with { Succeeded = false, FailureReason = "Expected packaged canary proof to emit a safe pass outcome." };
+            commands[^1] = commands[^1] with { Succeeded = false, FailureReason = "Expected packaged canary proof to send one valid request and emit a safe pass outcome." };
             return BuildReport(context, commands, artifacts);
         }
 
@@ -299,9 +300,10 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             ExpectedCommandExitCode.NonZero,
             cancellationToken);
         commands.Add(nonPass);
-        if (!IsExpectedCanaryTerminalResult(nonPass, "stale", 3, canaryFixture.BaseUrl))
+        if (!IsExpectedCanaryTerminalResult(nonPass, "stale", 3, canaryFixture.BaseUrl)
+            || canaryFixture.ValidRequestCount != 2)
         {
-            commands[^1] = nonPass with { Succeeded = false, FailureReason = "Expected packaged canary proof to emit a safe stale non-pass outcome." };
+            commands[^1] = nonPass with { Succeeded = false, FailureReason = "Expected packaged canary proof to send a second valid request and emit a safe stale non-pass outcome." };
             return BuildReport(context, commands, artifacts);
         }
 
@@ -1092,6 +1094,11 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         /// Gets the loopback HTTP server URL used by the packaged CLI proof.
         /// </summary>
         public string BaseUrl { get; }
+
+        /// <summary>
+        /// Gets the number of fully valid requests accepted by the loopback server.
+        /// </summary>
+        internal int ValidRequestCount => Volatile.Read(ref _requestCount);
 
         /// <summary>
         /// Starts and returns a newly initialized loopback canary fixture.

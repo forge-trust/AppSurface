@@ -3783,6 +3783,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             report.Artifacts,
             artifact => artifact.Description == "excluded project 'Smoke.Browser.Tests' produced no coverage artifacts" && artifact.Exists);
         var canaryPassRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface canary poll pass");
+        var canaryNonPassRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface canary poll non-pass");
         Assert.All(
             commandRunner.Requests.Where(request => request.OperationName.StartsWith("appsurface", StringComparison.Ordinal)),
             request => Assert.Equal(["tool", "run", "appsurface", "--"], request.Arguments.Take(4).ToArray()));
@@ -3794,13 +3795,16 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 Assert.InRange(timeoutIndex, 0, request.Arguments.Count - 2);
                 Assert.Equal("30s", request.Arguments[timeoutIndex + 1]);
             });
-        Assert.Contains("--marker-env", canaryPassRequest.Arguments);
-        Assert.Contains("APPSURFACE_PACKAGE_PROOF_MARKER", canaryPassRequest.Arguments);
-        Assert.Contains("--bearer-token-env", canaryPassRequest.Arguments);
-        Assert.Contains("APPSURFACE_PACKAGE_PROOF_TOKEN", canaryPassRequest.Arguments);
-        Assert.NotNull(canaryPassRequest.Environment);
-        Assert.Equal("package-proof-marker", canaryPassRequest.Environment["APPSURFACE_PACKAGE_PROOF_MARKER"]);
-        Assert.Equal("package-proof-token", canaryPassRequest.Environment["APPSURFACE_PACKAGE_PROOF_TOKEN"]);
+        Assert.All([canaryPassRequest, canaryNonPassRequest], request =>
+        {
+            Assert.Contains("--marker-env", request.Arguments);
+            Assert.Contains("APPSURFACE_PACKAGE_PROOF_MARKER", request.Arguments);
+            Assert.Contains("--bearer-token-env", request.Arguments);
+            Assert.Contains("APPSURFACE_PACKAGE_PROOF_TOKEN", request.Arguments);
+            Assert.NotNull(request.Environment);
+            Assert.Equal("package-proof-marker", request.Environment["APPSURFACE_PACKAGE_PROOF_MARKER"]);
+            Assert.Equal("package-proof-token", request.Environment["APPSURFACE_PACKAGE_PROOF_TOKEN"]);
+        });
         var canaryNonPass = report.Commands.Single(command => command.OperationName == "appsurface canary poll non-pass");
         Assert.True(canaryNonPass.ExpectedNonZeroExitCode);
         Assert.Equal(3, canaryNonPass.ExitCode);
@@ -3874,6 +3878,34 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         Assert.False(report.Succeeded);
         Assert.Contains("safe pass outcome", report.FirstFailure, StringComparison.Ordinal);
+        Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface canary poll non-pass");
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_FailsWhenCanaryPollDoesNotReachLoopbackFixture()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            sendCanaryRequests: false);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("send one valid request", report.FirstFailure, StringComparison.Ordinal);
         Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface canary poll non-pass");
     }
 
@@ -6944,6 +6976,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         private readonly string _canaryPassError;
         private readonly string _canaryNonPassOutput;
         private readonly string _canaryNonPassError;
+        private readonly bool _sendCanaryRequests;
 
         public CoverageProofRecordingCommandRunner(
             string packageVersion,
@@ -6960,7 +6993,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
             string? canaryPassOutput = null,
             string? canaryPassError = null,
             string? canaryNonPassOutput = null,
-            string? canaryNonPassError = null)
+            string? canaryNonPassError = null,
+            bool sendCanaryRequests = true)
         {
             _packageVersion = packageVersion;
             _createFailingGateReports = createFailingGateReports;
@@ -6977,6 +7011,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             _canaryPassError = canaryPassError ?? string.Empty;
             _canaryNonPassOutput = canaryNonPassOutput ?? "{\"outcome\":\"stale\"}";
             _canaryNonPassError = canaryNonPassError ?? string.Empty;
+            _sendCanaryRequests = sendCanaryRequests;
         }
 
         public List<ExternalCommandRequest> Requests { get; } = [];
@@ -7008,12 +7043,12 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
             if (request.OperationName == "appsurface canary poll pass")
             {
-                return Task.FromResult(new ExternalCommandResult(0, _canaryPassOutput, _canaryPassError));
+                return RunCanaryPollAsync(request, 0, _canaryPassOutput, _canaryPassError, _sendCanaryRequests, cancellationToken);
             }
 
             if (request.OperationName == "appsurface canary poll non-pass")
             {
-                return Task.FromResult(new ExternalCommandResult(3, _canaryNonPassOutput, _canaryNonPassError));
+                return RunCanaryPollAsync(request, 3, _canaryNonPassOutput, _canaryNonPassError, _sendCanaryRequests, cancellationToken);
             }
 
             if (request.OperationName == "appsurface coverage run")
@@ -7076,6 +7111,38 @@ public sealed class PackageArtifactValidationTests : IDisposable
             }
 
             return Task.FromResult(new ExternalCommandResult(0, $"{request.OperationName} passed", string.Empty));
+        }
+
+        private static async Task<ExternalCommandResult> RunCanaryPollAsync(
+            ExternalCommandRequest request,
+            int exitCode,
+            string standardOutput,
+            string standardError,
+            bool sendCanaryRequest,
+            CancellationToken cancellationToken)
+        {
+            if (sendCanaryRequest)
+            {
+                var environment = request.Environment ?? throw new InvalidOperationException("Expected canary proof environment.");
+                var markerEnvironmentVariable = ReadOption(request.Arguments, "--marker-env");
+                var tokenEnvironmentVariable = ReadOption(request.Arguments, "--bearer-token-env");
+                if (!environment.TryGetValue(markerEnvironmentVariable, out var marker)
+                    || !environment.TryGetValue(tokenEnvironmentVariable, out var token))
+                {
+                    throw new InvalidOperationException("Expected canary proof credentials.");
+                }
+
+                using var client = new HttpClient();
+                using var canaryRequest = new HttpRequestMessage(
+                    HttpMethod.Get,
+                    $"{ReadOption(request.Arguments, "--url")}/_appsurface/canaries/package.consumer-proof");
+                canaryRequest.Headers.Add("Authorization", $"Bearer {token}");
+                canaryRequest.Headers.Add("X-AppSurface-Canary-Marker", marker);
+                using var response = await client.SendAsync(canaryRequest, cancellationToken);
+                response.EnsureSuccessStatusCode();
+            }
+
+            return new ExternalCommandResult(exitCode, standardOutput, standardError);
         }
 
         private static string ReadOption(IReadOnlyList<string> arguments, string option)
