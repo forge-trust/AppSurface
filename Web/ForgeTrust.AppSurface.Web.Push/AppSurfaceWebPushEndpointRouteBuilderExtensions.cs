@@ -551,6 +551,18 @@ internal sealed class AppSurfaceWebPushRouteRegistry
     private readonly HashSet<string> paths = new(StringComparer.OrdinalIgnoreCase);
     private bool assetMapped;
 
+    /// <summary>Gets whether at least one package-owned Web Push route has been mapped.</summary>
+    public bool IsMapped
+    {
+        get
+        {
+            lock (gate)
+            {
+                return paths.Count > 0;
+            }
+        }
+    }
+
     /// <summary>Claims one base path and reports whether this caller owns the one-time client asset mapping.</summary>
     /// <param name="path">The previously validated literal base path.</param>
     /// <returns><see langword="true"/> only for the first successful claim in the application.</returns>
