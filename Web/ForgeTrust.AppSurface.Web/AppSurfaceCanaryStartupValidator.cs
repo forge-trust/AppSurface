@@ -48,6 +48,7 @@ internal sealed class AppSurfaceCanaryStartupValidator : IStartupFilter
             return;
         }
 
+        var frameworkRoutes = new List<string>();
         foreach (var endpoint in dataSources
             .SelectMany(dataSource => dataSource.Endpoints)
             .OfType<RouteEndpoint>())
@@ -55,15 +56,14 @@ internal sealed class AppSurfaceCanaryStartupValidator : IStartupFilter
             var route = Normalize(endpoint.RoutePattern.RawText);
             if (endpoint.Metadata.GetMetadata<AppSurfaceCanaryRouteMetadata>() is not null)
             {
-                if (!string.Equals(
-                    route,
-                    AppSurfaceCanaryEndpointDefaults.RoutePattern,
-                    StringComparison.Ordinal))
+                if (!string.Equals(route, AppSurfaceCanaryEndpointDefaults.RoutePattern, StringComparison.Ordinal)
+                    && !string.Equals(route, AppSurfaceCanaryEndpointDefaults.SnapshotRoutePattern, StringComparison.Ordinal))
                 {
                     throw new InvalidOperationException(
-                        $"ASCAN115: The AppSurface named-canary endpoint resolved to '{route}' instead of the fixed route '{AppSurfaceCanaryEndpointDefaults.RoutePattern}'. Map named canaries at the application root, outside route groups.");
+                        $"ASCAN115: The AppSurface named-canary endpoint resolved to '{route}' instead of one of the fixed routes '{AppSurfaceCanaryEndpointDefaults.SnapshotRoutePattern}' and '{AppSurfaceCanaryEndpointDefaults.RoutePattern}'. Map named canaries at the application root, outside route groups.");
                 }
 
+                frameworkRoutes.Add(route);
                 continue;
             }
 
@@ -73,6 +73,14 @@ internal sealed class AppSurfaceCanaryStartupValidator : IStartupFilter
                 throw new InvalidOperationException(
                     $"ASCAN115: Endpoint route '{route}' conflicts with the reserved AppSurface named-canary namespace '{ReservedPrefix}'. Move the host endpoint outside that namespace.");
             }
+        }
+
+        if (frameworkRoutes.Count(route => string.Equals(route, AppSurfaceCanaryEndpointDefaults.SnapshotRoutePattern, StringComparison.Ordinal)) != 1
+            || frameworkRoutes.Count(route => string.Equals(route, AppSurfaceCanaryEndpointDefaults.RoutePattern, StringComparison.Ordinal)) != 1
+            || frameworkRoutes.Count != 2)
+        {
+            throw new InvalidOperationException(
+                $"ASCAN115: Map AppSurface named canaries exactly once at '{AppSurfaceCanaryEndpointDefaults.SnapshotRoutePattern}' and '{AppSurfaceCanaryEndpointDefaults.RoutePattern}'.");
         }
     }
 

@@ -264,6 +264,28 @@ The worker and helper support `GET` and `HEAD`; `HEAD` returns the same headers 
 
 App-root-relative settings do not include `PathBase`. A host mounted at `/tenant-a` turns `/service-worker.js` into `/tenant-a/service-worker.js` and `/` scope into `/tenant-a/`. Validate and verify the externally visible URL; do not configure `/tenant-a` twice.
 
+<a id="push-readiness-evidence"></a>
+
+## Push-readiness evidence
+
+`appsurface pwa verify --surface push` and `--surface all` consume a deliberately narrow, schema-versioned readiness contribution from the Web diagnostics document. This is readiness-posture evidence: it answers whether the server can describe the worker/helper foundation and, when present, the optional AppSurface push rail and its mapped route. A host with no provider may report the rail as `not-configured` while still passing valid worker/helper checks; this is not a browser or delivery claim.
+
+The optional contributor API is `IPwaPushReadinessProvider.GetReadiness()`. Register exactly one provider when the host owns a compatible push rail:
+
+```csharp
+builder.Services.AddSingleton<IPwaPushReadinessProvider, ContosoPushReadinessProvider>();
+```
+
+A provider returns either `null` or the fixed `PwaPushReadiness` record containing only `ActiveVapidKeyId`, a SHA-256 `PublicKeyFingerprint` of the decoded canonical public key, and `RouteMapped`. The Web package publishes this contribution as a versioned `pushReadiness` object. Zero providers reports `not-configured`; multiple providers, invalid evidence, or a provider exception report `unavailable`. Contributors must not return private keys, subscription endpoints or keys, bearer tokens, payloads, provider responses, exception text, or arbitrary route values. A provider failure is contained as unavailable evidence.
+
+`ASPWA2xx` diagnostics remain the authoritative remediation contract. A failed diagnostic names the bounded subject, expected posture, safe observed posture, and a remediation hint. When a diagnostic has canonical documentation, its `Docs` value points to this stable `#push-readiness-evidence` anchor. Fix the named server configuration, package registration, route mapping, or generated entry-page metadata; a `not-configured` optional rail is an intentional no-VAPID posture, not a remediation failure when worker/helper evidence is the requested proof. Do not infer browser or delivery success from a passing diagnostic. The verifier's `passed` value and process exit code describe only the requested server-known checks.
+
+The safe fingerprint is an identity comparison aid, not key material and not proof that a key was accepted by a browser or push service. Mapping evidence says only that the package-owned route was registered. The verifier may also fetch the generated worker and registration helper to inspect bounded status, content type, security headers, and cache behavior. Those observations do not evaluate execution.
+
+Redaction is part of the contract: readiness JSON and diagnostics omit VAPID private keys, full public keys, endpoint URLs, subscription material, request bodies, notification payloads, response bodies, user identifiers, bearer credentials, and exception messages. Keep diagnostics development-only unless a host deliberately exposes the same sanitized contract behind its own access control.
+
+No field in this surface claims permission, installation, subscription, notification display, click handling, unsubscribe behavior, push-service acceptance, browser delivery, or end-to-end delivery.
+
 ## Diagnostics and CLI Verification
 
 Development diagnostics are available at `/_appsurface/pwa` and `/_appsurface/pwa/status.json` unless `DiagnosticsExposure` changes that policy. The status JSON distinguishes server-known capabilities with `workerEnabled`, `workerPath`, `pushEnabled`, `workerScope`, `registrationHelperPath`, `badgingEnabled`, and `badgingHelperPath` while preserving `manifestPath`, `offlineEnabled`, `serviceWorkerPath`, `configuredServiceWorkerPath`, and `offlineFallbackPath` for older tools. Disabled badging is explicit as `badgingEnabled: false` and `badgingHelperPath: null`.
@@ -272,7 +294,7 @@ Development diagnostics are available at `/_appsurface/pwa` and `/_appsurface/pw
 - Push-only mode reports the active worker through the new worker fields; legacy offline worker fields are `null`.
 - No-worker mode retains `configuredServiceWorkerPath` so compatible CLI versions can prove the endpoint is absent.
 
-Diagnostics report only server-known configuration and helper routing. They never claim that the current browser supports badging or that a visible badge exists. `appsurface pwa verify` remains on its existing schema and does not independently verify badging in this stage. When push configuration is observed, the verifier reports that registration, permission, subscription, and delivery were not evaluated. It does not turn server configuration into browser proof.
+Diagnostics report only server-known configuration and helper routing. They never claim that the current browser supports badging or that a visible badge exists. `appsurface pwa verify` keeps install as schema v2 by default; explicitly selecting `push` or `all` opts into schema v3 readiness-posture evidence. Install discovers the manifest link, push discovers the registration-helper metadata, and all requires both from the same entry page. `--expect-push enabled|disabled` is valid only for push/all, while install-only assertion flags are invalid for push. A no-provider or no-VAPID host may report optional rail status `not-configured` while worker/helper evidence passes. Browser registration, permission, subscription, and delivery remain unevaluated. It does not turn server configuration into browser proof.
 
 Server validation keeps generated paths unambiguous. `ASPWA026` is secure-context guidance for a badging-only configuration, not a browser-support verdict. `ASPWA027` rejects an invalid `Badging.HelperPath`; generated-route collisions continue to use `ASPWA023`, and a web-root file shadowing the active helper fails startup with `ASPWA024` when static-file middleware is otherwise enabled.
 
@@ -287,6 +309,28 @@ appsurface pwa verify \
   --expect-icon 512x512 \
   --json
 ```
+
+For push or combined evidence, direct JSON to a named artifact and honor the process result:
+
+```bash
+mkdir -p artifacts
+
+appsurface pwa verify --surface push \
+  --base-url https://app.example.com \
+  --entry-path /account/resume \
+  --expect-push enabled \
+  --json > artifacts/pwa-push-readiness.json
+
+appsurface pwa verify --surface all \
+  --base-url https://app.example.com \
+  --entry-path /account/resume \
+  --expect-push enabled \
+  --expect-start-url / \
+  --expect-scope / \
+  --json > artifacts/pwa-all-readiness.json
+```
+
+A nonzero exit is authoritative even when the JSON file exists. The artifact is server-known diagnostic evidence only; no browser or delivery state is evaluated.
 
 Browser diagnostics are stable and value-free:
 

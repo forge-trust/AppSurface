@@ -16,7 +16,7 @@ The CLI also includes public coverage commands for private-by-default CI coverag
 
 `appsurface secrets` manages the first-secret workflow for `ForgeTrust.AppSurface.Config.LocalSecrets`: initialize a local namespace, set one key, verify presence without printing the value, list names, delete keys, and run doctor diagnostics for platform availability.
 
-`appsurface pwa verify` checks the install metadata served by `ForgeTrust.AppSurface.Web`: secure origin posture, entry-page manifest discovery, redirect boundaries, manifest content, icon reachability and PNG dimensions, same-origin start URL and scope, head link presence, diagnostics exposure, and opt-in offline service worker plus fallback posture. It also recognizes push-worker configuration while keeping browser registration, permission, subscription, and delivery outside the verifier's claims.
+`appsurface pwa verify` checks install metadata or the optional server-known push-readiness surface served by `ForgeTrust.AppSurface.Web`. Push readiness includes worker/helper evidence and may report an optional VAPID-backed rail as `not-configured` on a no-provider sample. Install verification remains the default schema-v2 contract. Push verification is additive schema v3 evidence and keeps browser support, installation state, permission, subscription, notification display, and delivery outside the verifier's claims.
 
 `appsurface canary poll` turns an existing protected named-canary evaluation into one bounded, read-only deployment decision. It owns the caller-visible poll cadence, deadline, response compatibility validation, and safe output; the application still owns authentication, proof evaluation, deployment actions, and traffic decisions.
 
@@ -133,7 +133,7 @@ Use `--identity-token-env` when the workflow already acquired an identity token.
 
 ### `appsurface pwa verify`
 
-Verify PWA install metadata for a running AppSurface Web app:
+Verify a running AppSurface Web app:
 
 ```bash
 appsurface pwa verify --url https://app.example.com
@@ -141,6 +141,8 @@ appsurface pwa verify --base-url http://localhost:5055 --entry-path /account/res
 ```
 
 The verifier accepts HTTPS origins plus localhost, `127.0.0.1`, and `::1` development origins. Use `--entry-path` for the real HTML page a user lands on after auth, resume, or setup redirects; the path is app-root-relative and is resolved under any path base in `--url` or `--base-url`. The verifier follows same-origin, same-base-path redirects for entry, manifest, diagnostics, icon, service-worker, and offline fallback requests, and fails when a redirect leaves that boundary.
+
+`--surface install|push|all` selects the evidence surface. `install` is the default and preserves schema v2. `push` emits schema v3 server-known push-readiness evidence. `all` emits schema v3 with both install and push evidence. Entry-page discovery follows the selected surface: install looks for the manifest link, push looks for the AppSurface registration-helper metadata, and all checks both on the same entry page. `--expect-push enabled|disabled` applies only to `push` or `all` and defaults to `enabled`; passing it with `--surface install` is invalid. Install-only expectation flags are valid with `install` or `all`, not `push`. Use `--diagnostics-path /your/pwa-diagnostics` when the host changes `PwaOptions.DiagnosticsPath`; it defaults to `/_appsurface/pwa` and always probes that path's `status.json` child.
 
 Use explicit assertions when CI should prove a product contract instead of only checking generic installability:
 
@@ -159,6 +161,43 @@ appsurface pwa verify \
 ```
 
 The verifier reports stable `ASPWA2xx` diagnostics for manifest reachability, required manifest fields, required `192x192` and `512x512` icon tokens, optional expected icon declarations such as `512x512:maskable`, icon content types, decoded PNG dimensions when available, entry-page manifest links, `start_url`/`scope` consistency, development diagnostics, and offline service worker plus offline fallback reachability when the app enables an offline strategy. When diagnostics expose push configuration, `ASPWA257` records only that a push-capable worker was observed; registration, permission, subscription, and delivery were not evaluated. When no worker capability is enabled, the verifier probes the configured service-worker path and records proof that it is not mapped. JSON output uses `schemaVersion: 2`, preserves legacy `passed`, `origin`, `manifestPath`, and `diagnostics` fields, and adds `baseUrl`, entry URL, manifest fields, icon evidence, and structured diagnostic details for CI evidence. `origin` contains only scheme, host, and port; `baseUrl` includes the verified path base.
+
+Push/all examples write named artifacts so CI can retain the bounded result:
+
+```bash
+mkdir -p artifacts
+
+# Server-known push readiness only; writes schema-v3 evidence.
+appsurface pwa verify \
+  --surface push \
+  --base-url https://app.example.com \
+  --entry-path /account/resume \
+  --expect-push enabled \
+  --json > artifacts/pwa-push-readiness.json
+
+# Install plus server-known push readiness; writes schema-v3 evidence.
+appsurface pwa verify \
+  --surface all \
+  --base-url https://app.example.com \
+  --entry-path /account/resume \
+  --expect-start-url / \
+  --expect-scope / \
+  --expect-display standalone \
+  --expect-icon 192x192 \
+  --expect-icon 512x512 \
+  --expect-push enabled \
+  --json > artifacts/pwa-all-readiness.json
+
+# Prove that a host intentionally has no push posture; writes schema-v3 evidence.
+appsurface pwa verify \
+  --surface push \
+  --base-url https://install-only.example.com \
+  --entry-path / \
+  --expect-push disabled \
+  --json > artifacts/pwa-push-disabled.json
+```
+
+The process exit code is authoritative. Treat a nonzero exit as failed verification even when a JSON artifact was written; the artifact is evidence for diagnosis, not a replacement for the command result. These checks inspect server-known configuration, generated routes, response headers, and HTML metadata only. They do not evaluate browser compatibility, installation, permission prompts, subscription state, notification display, click behavior, unsubscribe behavior, or push-service/browser delivery.
 
 ### `appsurface secrets`
 

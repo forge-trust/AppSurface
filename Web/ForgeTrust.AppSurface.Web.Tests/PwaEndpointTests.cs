@@ -125,6 +125,111 @@ public sealed class PwaEndpointTests
         Assert.Contains("\"configuredServiceWorkerPath\": \"/service-worker.js\"", json, StringComparison.Ordinal);
         Assert.Contains("\"badgingEnabled\": false", json, StringComparison.Ordinal);
         Assert.Contains("\"badgingHelperPath\": null", json, StringComparison.Ordinal);
+        Assert.Contains("\"schemaVersion\": 1", json, StringComparison.Ordinal);
+        Assert.Contains("\"configurationStatus\": \"not-configured\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"activeVapidKeyId\": null", json, StringComparison.Ordinal);
+        Assert.Contains("\"publicKeyFingerprint\": null", json, StringComparison.Ordinal);
+        Assert.Contains("\"routeMapped\": null", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Diagnostics_OneValidProviderPublishesOnlySafeReadinessEvidence()
+    {
+        var context = CreateDiagnosticsContext(
+            new DelegatePushReadinessProvider(
+                () => new PwaPushReadiness(
+                    "Primary.v1-key",
+                    "sha256-aYvqY9xEo0RmP_FCmuoQhC3ye2uZHvJYZrLGwCzcxb4",
+                    true)));
+
+        var diagnostics = PwaEndpointMapper.BuildDiagnostics(context, new PwaOptions());
+
+        Assert.Equal(1, diagnostics.PushReadiness.SchemaVersion);
+        Assert.Equal("configured", diagnostics.PushReadiness.ConfigurationStatus);
+        Assert.Equal("Primary.v1-key", diagnostics.PushReadiness.ActiveVapidKeyId);
+        Assert.Equal(
+            "sha256-aYvqY9xEo0RmP_FCmuoQhC3ye2uZHvJYZrLGwCzcxb4",
+            diagnostics.PushReadiness.PublicKeyFingerprint);
+        Assert.True(diagnostics.PushReadiness.RouteMapped);
+        Assert.DoesNotContain(diagnostics.Diagnostics, diagnostic => diagnostic.Code == "ASPWA028");
+    }
+
+    [Fact]
+    public void Diagnostics_InvalidProviderOutcomesAreUnavailableWithoutProviderDetails()
+    {
+        var providers = new IPwaPushReadinessProvider[]
+        {
+            new DelegatePushReadinessProvider(() => throw new InvalidOperationException("secret provider detail")),
+            new DelegatePushReadinessProvider(() => null),
+            new DelegatePushReadinessProvider(() => new PwaPushReadiness("bad id", "not-a-fingerprint", false)),
+            new DelegatePushReadinessProvider(() => new PwaPushReadiness(
+                "primary",
+                "sha256-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+                false)),
+            new DelegatePushReadinessProvider(() => new PwaPushReadiness(
+                "primary",
+                "sha256-aYvqY9xEo0RmP_FCmuoQhC3ye2uZHvJYZrLGwCzcxb5",
+                false)),
+        };
+
+        foreach (var provider in providers)
+        {
+            var diagnostics = PwaEndpointMapper.BuildDiagnostics(
+                CreateDiagnosticsContext(provider),
+                new PwaOptions());
+
+            Assert.Equal("unavailable", diagnostics.PushReadiness.ConfigurationStatus);
+            Assert.Null(diagnostics.PushReadiness.ActiveVapidKeyId);
+            Assert.Null(diagnostics.PushReadiness.PublicKeyFingerprint);
+            Assert.Null(diagnostics.PushReadiness.RouteMapped);
+            var diagnostic = Assert.Single(diagnostics.Diagnostics, value => value.Code == "ASPWA028");
+            Assert.Equal("warning", diagnostic.Severity.ToString().ToLowerInvariant());
+            Assert.Equal("PWA push readiness evidence is unavailable.", diagnostic.Message);
+            Assert.DoesNotContain("secret provider detail", diagnostic.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void Diagnostics_ServiceResolutionFailuresAreUnavailableWithoutProviderDetails()
+    {
+        var context = new DefaultHttpContext
+        {
+            RequestServices = new ThrowingServiceProvider()
+        };
+
+        var diagnostics = PwaEndpointMapper.BuildDiagnostics(context, new PwaOptions());
+
+        Assert.Equal("unavailable", diagnostics.PushReadiness.ConfigurationStatus);
+        Assert.Null(diagnostics.PushReadiness.ActiveVapidKeyId);
+        Assert.Null(diagnostics.PushReadiness.PublicKeyFingerprint);
+        Assert.Null(diagnostics.PushReadiness.RouteMapped);
+        var diagnostic = Assert.Single(diagnostics.Diagnostics, value => value.Code == "ASPWA028");
+        Assert.Equal("PWA push readiness evidence is unavailable.", diagnostic.Message);
+        Assert.DoesNotContain("secret resolution detail", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Diagnostics_DuplicateProvidersAreUnavailableWithoutCallingEitherProvider()
+    {
+        var called = false;
+        var first = new DelegatePushReadinessProvider(
+            () =>
+            {
+                called = true;
+                return new PwaPushReadiness(
+                    "primary",
+                    "sha256-aYvqY9xEo0RmP_FCmuoQhC3ye2uZHvJYZrLGwCzcxb4",
+                    false);
+            });
+        var second = new DelegatePushReadinessProvider(() => null);
+
+        var diagnostics = PwaEndpointMapper.BuildDiagnostics(
+            CreateDiagnosticsContext(first, second),
+            new PwaOptions());
+
+        Assert.Equal("unavailable", diagnostics.PushReadiness.ConfigurationStatus);
+        Assert.False(called);
+        Assert.Single(diagnostics.Diagnostics, value => value.Code == "ASPWA028");
     }
 
     [Fact]
@@ -676,6 +781,20 @@ public sealed class PwaEndpointTests
         pwa.Icons.Add(new PwaIcon { Source = "/icons/app-512.png", Sizes = "512x512", Type = "image/png" });
     }
 
+    private static DefaultHttpContext CreateDiagnosticsContext(params IPwaPushReadinessProvider[] providers)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Scheme = "https";
+        var services = new ServiceCollection();
+        foreach (var provider in providers)
+        {
+            services.AddSingleton<IPwaPushReadinessProvider>(provider);
+        }
+
+        context.RequestServices = services.BuildServiceProvider();
+        return context;
+    }
+
     private static JsonElement ExtractWorkerConfiguration(string script)
     {
         const string marker = "const APPSURFACE_PWA_CONFIG = ";
@@ -787,5 +906,16 @@ public sealed class PwaEndpointTests
             await host.StopAsync();
             host.Dispose();
         }
+    }
+
+    private sealed class DelegatePushReadinessProvider(Func<PwaPushReadiness?> callback) : IPwaPushReadinessProvider
+    {
+        public PwaPushReadiness? GetReadiness() => callback();
+    }
+
+    private sealed class ThrowingServiceProvider : IServiceProvider
+    {
+        public object? GetService(Type serviceType) =>
+            throw new InvalidOperationException("secret resolution detail");
     }
 }
