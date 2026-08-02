@@ -804,7 +804,7 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
-    public async Task CheckRejectsPreparedReleaseEvidenceWithMismatchedPreparationBaseCommit()
+    public async Task CheckRejectsPreparedReleaseEvidenceWithV1EvidenceAndV2Manifest()
     {
         await SeedRepositoryAsync();
         var prepare = await RunAsync(
@@ -839,6 +839,36 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("release-evidence-release-manifest-schema-invalid", result.Stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("release-evidence-subject-digest-mismatch", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckRejectsPreparedReleaseEvidenceWhenV2PreparationBaseCommitDiffersFromManifest()
+    {
+        await SeedRepositoryAsync();
+        var prepare = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+        Assert.Equal(0, prepare.ExitCode);
+
+        var evidenceJson = await ReadFileAsync("releases/v0.1.0-preview.1.evidence.json");
+        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundleV2>(evidenceJson, ReleaseJson.Options)!;
+        const string mismatchedPreparationBaseCommit = "other-content-source";
+        var mismatched = ReleaseEvidenceV2.RefreshSubject(bundle with
+        {
+            Commits = bundle.Commits with { PreparationBaseCommit = mismatchedPreparationBaseCommit },
+            CoordinatedPackageReleaseNoteResolutions = bundle.CoordinatedPackageReleaseNoteResolutions
+                .Select(resolution => resolution with { PreparationBaseCommit = mismatchedPreparationBaseCommit })
+                .ToArray()
+        });
+        await WriteFileAsync("releases/v0.1.0-preview.1.evidence.json", ReleaseEvidence.Serialize(mismatched));
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1", "--allow-existing-targets"],
+            FakeCommandRunner.WithSourceCommit("release-prep-commit"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("release-evidence-release-manifest-schema-invalid", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("preparation base commit or coordinated resolutions differ", result.Stdout, StringComparison.Ordinal);
     }
 
     [Fact]

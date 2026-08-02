@@ -72,7 +72,7 @@ internal sealed class PackageIndexSummary
                     "A public package release link is invalid.",
                     $"Package '{package.Project}' {issue}.",
                     "Use release_track: coordinated with no release_notes_path, or release_track: explicit with a repository-relative release_notes_path.",
-                    "packages/README.md#release-links"));
+                    "releases/coordinated-release-links.md"));
             }
 
             publicPublishedPackages.Add(new PackageIndexEntry(
