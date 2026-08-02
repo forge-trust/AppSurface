@@ -21,19 +21,45 @@
     <title>Documentation page not found</title>
     <style>
         :root {
-            color-scheme: dark;
+            color-scheme: light dark;
+            /* Static recovery mirrors AppSurfaceThemePair.AppSurface() when the normal Docs shell cannot render. */
+            --docs-404-canvas: #f8fafc;
+            --docs-404-canvas-mid: #f1f5f9;
+            --docs-404-surface: #ffffff;
+            --docs-404-text: #0f172a;
+            --docs-404-muted: #475569;
+            --docs-404-subtle: #64748b;
+            --docs-404-border: #64748b;
+            --docs-404-accent: #2563eb;
+            --docs-404-accent-fill: #1d4ed8;
+            --docs-404-accent-text: #ffffff;
             font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            background: #0d182a;
-            color: #eef4ff;
+            background: var(--docs-404-canvas);
+            color: var(--docs-404-text);
+        }
+
+        @@media (prefers-color-scheme: dark) {
+            :root {
+                --docs-404-canvas: #0f172a;
+                --docs-404-canvas-mid: #172554;
+                --docs-404-surface: #1e293b;
+                --docs-404-text: #f8fafc;
+                --docs-404-muted: #cbd5e1;
+                --docs-404-subtle: #94a3b8;
+                --docs-404-border: #94a3b8;
+                --docs-404-accent: #60a5fa;
+                --docs-404-accent-fill: #93c5fd;
+                --docs-404-accent-text: #0f172a;
+            }
         }
 
         body {
             margin: 0;
             min-height: 100vh;
             background:
-                linear-gradient(180deg, rgba(22, 37, 61, 0.92), rgba(13, 24, 42, 1) 42%),
-                #0d182a;
-            color: #eef4ff;
+                linear-gradient(180deg, color-mix(in srgb, var(--docs-404-canvas-mid) 92%, transparent), var(--docs-404-canvas) 42%),
+                var(--docs-404-canvas);
+            color: var(--docs-404-text);
         }
 
         main {
@@ -44,7 +70,7 @@
 
         .eyebrow {
             margin: 0 0 0.9rem;
-            color: #7dd3fc;
+            color: var(--docs-404-accent);
             font-size: 0.78rem;
             font-weight: 800;
             letter-spacing: 0;
@@ -62,7 +88,7 @@
         .summary {
             max-width: 45rem;
             margin: 0;
-            color: #c8d7ee;
+            color: var(--docs-404-muted);
             font-size: 1.05rem;
             line-height: 1.7;
         }
@@ -70,10 +96,10 @@
         code {
             display: inline;
             padding: 0.12rem 0.35rem;
-            border: 1px solid rgba(148, 163, 184, 0.35);
+            border: 1px solid color-mix(in srgb, var(--docs-404-border) 45%, transparent);
             border-radius: 0.35rem;
-            background: rgba(15, 23, 42, 0.68);
-            color: #ffffff;
+            background: color-mix(in srgb, var(--docs-404-surface) 82%, transparent);
+            color: var(--docs-404-text);
             font-size: 0.95em;
             overflow-wrap: anywhere;
         }
@@ -91,10 +117,10 @@
             justify-content: center;
             min-height: 2.75rem;
             padding: 0 1.1rem;
-            border: 1px solid #7dd3fc;
+            border: 1px solid var(--docs-404-accent-fill);
             border-radius: 0.5rem;
-            background: #7dd3fc;
-            color: #07111f;
+            background: var(--docs-404-accent-fill);
+            color: var(--docs-404-accent-text);
             font-weight: 700;
             text-decoration: none;
         }
@@ -103,7 +129,7 @@
         .primary-action:focus-visible,
         .recovery-row:hover,
         .recovery-row:focus-visible {
-            outline: 3px solid rgba(125, 211, 252, 0.38);
+            outline: 3px solid color-mix(in srgb, var(--docs-404-accent-fill) 42%, transparent);
             outline-offset: 3px;
             text-decoration: none;
         }
@@ -114,7 +140,7 @@
 
         .browse h2 {
             margin: 0 0 0.9rem;
-            color: #ffffff;
+            color: var(--docs-404-text);
             font-size: 1rem;
             letter-spacing: 0;
         }
@@ -131,20 +157,20 @@
             gap: 1rem;
             min-height: 3.5rem;
             padding: 0.95rem 1rem;
-            border: 1px solid rgba(148, 163, 184, 0.28);
+            border: 1px solid color-mix(in srgb, var(--docs-404-border) 40%, transparent);
             border-radius: 0.5rem;
-            background: rgba(15, 23, 42, 0.54);
-            color: #dbeafe;
+            background: color-mix(in srgb, var(--docs-404-surface) 74%, transparent);
+            color: var(--docs-404-text);
             text-decoration: none;
         }
 
         .recovery-title {
-            color: #ffffff;
+            color: var(--docs-404-text);
             font-weight: 800;
         }
 
         .recovery-description {
-            color: #adc3df;
+            color: var(--docs-404-subtle);
             line-height: 1.45;
         }
 
@@ -161,6 +187,39 @@
             .recovery-row {
                 grid-template-columns: 1fr;
                 gap: 0.3rem;
+            }
+        }
+
+        @@media (forced-colors: active) {
+            :root {
+                --docs-404-canvas: Canvas;
+                --docs-404-canvas-mid: Canvas;
+                --docs-404-surface: Canvas;
+                --docs-404-text: CanvasText;
+                --docs-404-muted: GrayText;
+                --docs-404-subtle: GrayText;
+                --docs-404-border: GrayText;
+                --docs-404-accent: LinkText;
+                --docs-404-accent-fill: Highlight;
+                --docs-404-accent-text: HighlightText;
+            }
+
+            body {
+                background: Canvas;
+            }
+
+            code,
+            .recovery-row {
+                border-color: GrayText;
+                background: Canvas;
+            }
+
+            .primary-action,
+            .primary-action:hover,
+            .primary-action:focus-visible,
+            .recovery-row:hover,
+            .recovery-row:focus-visible {
+                outline-color: Highlight;
             }
         }
     </style>

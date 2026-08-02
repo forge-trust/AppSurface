@@ -77,10 +77,14 @@
         StringComparison.OrdinalIgnoreCase);
     var suppressSidebar = ViewData["SuppressSidebar"] is true;
     var docsThemeRootClass = $"h-full docs-shell-root {docsTheme.RootCssClass}";
-    var docsThemeStyle = $"scrollbar-gutter: stable; {docsTheme.CssVariableStyle}";
+    var themeCspNonce = AppSurfaceThemeCspNonce.Get(Context);
+    var docsThemeStyle = docsTheme.UsesSharedTheme
+        ? "scrollbar-gutter: stable;"
+        : $"scrollbar-gutter: stable; {docsTheme.CssVariableStyle}";
 }
 <!DOCTYPE html>
-<html lang="en"
+<html appsurface-theme-root
+      lang="en"
       class="@docsThemeRootClass"
       style="@docsThemeStyle"
       data-docs-theme-preset="@docsTheme.PresetAttribute"
@@ -90,6 +94,11 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>@ViewData["Title"] - @docsIdentity.DisplayName</title>
+    <appsurface-theme-head nonce="@themeCspNonce" />
+    @if (docsTheme.UsesSharedTheme && !string.IsNullOrWhiteSpace(docsTheme.CriticalCss))
+    {
+        <style data-docs-theme-critical nonce="@themeCspNonce">@Html.Raw(docsTheme.CriticalCss)</style>
+    }
     @if (!string.IsNullOrWhiteSpace(canonicalHref))
     {
         <link rel="canonical" href="@canonicalHref" />
