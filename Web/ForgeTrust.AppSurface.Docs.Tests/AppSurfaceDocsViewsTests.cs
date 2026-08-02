@@ -4028,6 +4028,7 @@ public class AppSurfaceDocsViewsTests
         Assert.Equal("Download Markdown", downloadLink!.GetAttribute("aria-label"));
         Assert.Equal("Download Markdown", downloadLink.GetAttribute("title"));
         Assert.NotNull(downloadLink.QuerySelector("svg[aria-hidden='true']"));
+        Assert.Null(downloadLink.QuerySelector(".sr-only"));
         Assert.Null(document.QuerySelector(".docs-provenance-strip"));
     }
 

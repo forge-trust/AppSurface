@@ -5989,6 +5989,7 @@ public class DocsControllerTests : IDisposable
             Assert.IsType<NotFoundResult>(await controller.DownloadMarkdown("guide"));
             Assert.IsType<NotFoundResult>(await controller.DownloadMarkdown(" "));
             Assert.IsType<NotFoundResult>(await controller.DownloadMarkdown("Guide.md"));
+            Assert.IsType<NotFoundResult>(await controller.DownloadMarkdown("guides/../guide"));
 
             httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget = string.Empty;
 

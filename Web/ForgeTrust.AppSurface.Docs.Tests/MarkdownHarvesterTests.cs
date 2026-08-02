@@ -182,9 +182,12 @@ public class MarkdownHarvesterTests : IDisposable
 
         Assert.Single(result.Nodes);
         Assert.Empty(result.SourceByPath);
-        Assert.Contains(
+        var diagnostic = Assert.Single(
             diagnostics,
             diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.MarkdownDownloadInvalidEncoding);
+        Assert.Equal(
+            "The rendered Docs page uses replacement-decoded content and can remain available, but byte-faithful download accepts only valid UTF-8 source.",
+            diagnostic.Cause);
     }
 
     [Fact]

@@ -377,7 +377,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                                 DocHarvestDiagnosticSeverity.Warning,
                                 HarvesterType,
                                 $"Markdown download was unavailable for '{relativePath}' because the source is not valid UTF-8.",
-                                "The rendered Docs page can continue through its existing text-reader behavior, but byte-faithful download accepts only valid UTF-8 source.",
+                                "The rendered Docs page uses replacement-decoded content and can remain available, but byte-faithful download accepts only valid UTF-8 source.",
                                 "Save the source as UTF-8, then rebuild the Docs snapshot before retrying the protected download."));
                         }
                     }
