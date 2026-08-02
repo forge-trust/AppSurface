@@ -93,7 +93,10 @@ public class DocAggregatorTests : IDisposable
     [Fact]
     public async Task GetMarkdownDownloadSourceAsync_ShouldReturnOnlyExactCanonicalOptedInMarkdown()
     {
-        var repositoryRoot = Path.Combine(Path.GetTempPath(), "AppSurfaceDocsTests_MarkdownDownload", Guid.NewGuid().ToString("N"));
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_MarkdownDownload",
+            Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(repositoryRoot);
         try
         {
@@ -135,7 +138,10 @@ public class DocAggregatorTests : IDisposable
     [Fact]
     public async Task InvalidateCache_ShouldReplaceMarkdownSourcesWithoutChangingAnAcquiredResponse()
     {
-        var repositoryRoot = Path.Combine(Path.GetTempPath(), "AppSurfaceDocsTests_MarkdownDownload", Guid.NewGuid().ToString("N"));
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_MarkdownDownload",
+            Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(repositoryRoot);
         try
         {
@@ -222,7 +228,10 @@ public class DocAggregatorTests : IDisposable
     [Fact]
     public async Task GetMarkdownDownloadSourceAsync_ShouldFailClosedWhenEligibleSourcesExceedBudget()
     {
-        var repositoryRoot = Path.Combine(Path.GetTempPath(), "AppSurfaceDocsTests_MarkdownDownload", Guid.NewGuid().ToString("N"));
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_MarkdownDownload",
+            Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(repositoryRoot);
         try
         {
@@ -264,7 +273,10 @@ public class DocAggregatorTests : IDisposable
     [Fact]
     public async Task GetMarkdownDownloadSourceAsync_ShouldFailClosedWhenEligibleSourcesCollectivelyExceedBudget()
     {
-        var repositoryRoot = Path.Combine(Path.GetTempPath(), "AppSurfaceDocsTests_MarkdownDownload", Guid.NewGuid().ToString("N"));
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_MarkdownDownload",
+            Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(repositoryRoot);
         try
         {
@@ -316,7 +328,10 @@ public class DocAggregatorTests : IDisposable
     [Fact]
     public async Task GetMarkdownDownloadSourceAsync_ShouldNotUseMarkdownBytesWhenAnotherHarvesterWinsTheSourcePath()
     {
-        var repositoryRoot = Path.Combine(Path.GetTempPath(), "AppSurfaceDocsTests_MarkdownDownload", Guid.NewGuid().ToString("N"));
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_MarkdownDownload",
+            Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(repositoryRoot);
         try
         {
