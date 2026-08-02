@@ -4007,6 +4007,55 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
+    public async Task DetailsView_ShouldRenderDownloadIconInThePageMetaRow()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var doc = new DocNode("Quickstart", "guides/quickstart.md", "<p>Guide body</p>");
+        var model = CreateDetailsViewModel(doc) with
+        {
+            CanDownloadMarkdown = true,
+            MarkdownDownloadUrl = "/docs/_markdown/guides/quickstart"
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/Details.cshtml",
+            model);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+
+        var downloadLink = document.QuerySelector("a.docs-page-meta-download[href='/docs/_markdown/guides/quickstart'][data-turbo='false']");
+        Assert.NotNull(downloadLink);
+        Assert.Equal("Download Markdown", downloadLink!.GetAttribute("aria-label"));
+        Assert.Equal("Download Markdown", downloadLink.GetAttribute("title"));
+        Assert.NotNull(downloadLink.QuerySelector("svg[aria-hidden='true']"));
+        Assert.Null(downloadLink.QuerySelector(".sr-only"));
+        Assert.Null(document.QuerySelector(".docs-provenance-strip"));
+    }
+
+    [Fact]
+    public void Stylesheets_ShouldExpandMarkdownDownloadTouchTargetForCoarsePointers()
+    {
+        var stylesheet = ReadTailwindEntryStylesheetMarkup();
+
+        Assert.Contains(
+            """
+            @media (pointer: coarse) {
+                .docs-page-meta-download::before {
+                    position: absolute;
+                    inset: -0.575rem;
+                    content: "";
+                }
+            }
+            """,
+            stylesheet,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ".docs-page-meta-download:focus-visible {\n    outline: var(--docs-focus-outline);\n}",
+            stylesheet,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task DetailsView_ShouldRenderExternalMigrationAndFilteredSources()
     {
         var doc = new DocNode(

@@ -490,6 +490,31 @@ public sealed class DocsUrlBuilderTests
     }
 
     [Fact]
+    public void BuildMarkdownDownloadUrl_ShouldEncodeCanonicalSegments()
+    {
+        var builder = new DocsUrlBuilder(new AppSurfaceDocsOptions());
+
+        var href = builder.BuildMarkdownDownloadUrl("releases/Café notes");
+
+        Assert.Equal("/docs/_markdown/releases/Caf%C3%A9%20notes", href);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("/")]
+    [InlineData("guides/intro/")]
+    [InlineData("guides//intro")]
+    [InlineData("guides/../intro")]
+    [InlineData("guides\\intro")]
+    [InlineData("guides/%2Fintro")]
+    public void BuildMarkdownDownloadUrl_ShouldRejectNonCanonicalPaths(string path)
+    {
+        var builder = new DocsUrlBuilder(new AppSurfaceDocsOptions());
+
+        Assert.Throws<ArgumentException>(() => builder.BuildMarkdownDownloadUrl(path));
+    }
+
+    [Fact]
     public void IsCurrentDocsPath_ShouldMatchPathsUnderConfiguredRoot()
     {
         var builder = new DocsUrlBuilder(

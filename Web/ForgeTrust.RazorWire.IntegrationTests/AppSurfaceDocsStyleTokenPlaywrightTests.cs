@@ -383,7 +383,8 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
         Assert.True(compact[0]);
         Assert.True(compact[1]);
 
-        await page.SetViewportSizeAsync(1280, 900);
+        // Stay above the 80rem desktop breakpoint when CI reserves space for a vertical scrollbar.
+        await page.SetViewportSizeAsync(1366, 900);
         var wide = await page.EvaluateAsync<bool[]>(
             """
             () => {

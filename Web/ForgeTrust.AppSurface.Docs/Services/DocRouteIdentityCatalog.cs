@@ -71,6 +71,7 @@ internal sealed class DocRouteIdentityCatalog
         "_harvest/rebuild",
         "_health",
         "_health.json",
+        "_markdown",
         "search.css",
         "search-client.js",
         "outline-client.js",
@@ -1042,6 +1043,7 @@ internal sealed class DocRouteIdentityCatalog
     {
         return routePath.StartsWith("sections/", StringComparison.OrdinalIgnoreCase)
                || routePath.StartsWith("_harvest/", StringComparison.OrdinalIgnoreCase)
+               || routePath.StartsWith("_markdown/", StringComparison.OrdinalIgnoreCase)
                || routePath.StartsWith("_search-index/", StringComparison.OrdinalIgnoreCase)
                || routePath.StartsWith("v/", StringComparison.OrdinalIgnoreCase);
     }
