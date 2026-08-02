@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Security;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.PackageIndex;
 
@@ -280,7 +281,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             return BuildReport(context, commands, artifacts);
         }
 
-        if (!commands[^1].StandardOutput.Contains("\"outcome\":\"pass\"", StringComparison.Ordinal))
+        if (!IsExpectedCanaryTerminalResult(commands[^1], "pass", 0, canaryFixture.BaseUrl))
         {
             commands[^1] = commands[^1] with { Succeeded = false, FailureReason = "Expected packaged canary proof to emit a safe pass outcome." };
             return BuildReport(context, commands, artifacts);
@@ -298,9 +299,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             ExpectedCommandExitCode.NonZero,
             cancellationToken);
         commands.Add(nonPass);
-        if (!nonPass.Succeeded
-            || nonPass.ExitCode != 3
-            || !nonPass.StandardOutput.Contains("\"outcome\":\"stale\"", StringComparison.Ordinal))
+        if (!IsExpectedCanaryTerminalResult(nonPass, "stale", 3, canaryFixture.BaseUrl))
         {
             commands[^1] = nonPass with { Succeeded = false, FailureReason = "Expected packaged canary proof to emit a safe stale non-pass outcome." };
             return BuildReport(context, commands, artifacts);
@@ -987,6 +986,63 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         return environment;
     }
 
+    private static bool IsExpectedCanaryTerminalResult(
+        CoverageCliConsumerProofCommandResult command,
+        string expectedOutcome,
+        int expectedExitCode,
+        string fixtureBaseUrl)
+    {
+        if (!command.Succeeded
+            || command.ExitCode != expectedExitCode
+            || ContainsCanaryProofSecret(command.StandardOutput, fixtureBaseUrl)
+            || ContainsCanaryProofSecret(command.StandardError, fixtureBaseUrl)
+            || !TryGetCanaryTerminalOutcome(command.StandardOutput, out var outcome))
+        {
+            return false;
+        }
+
+        return string.Equals(outcome, expectedOutcome, StringComparison.Ordinal);
+    }
+
+    private static bool ContainsCanaryProofSecret(string output, string fixtureBaseUrl)
+    {
+        return output.Contains(CanaryProofToken, StringComparison.Ordinal)
+            || output.Contains(CanaryProofMarker, StringComparison.Ordinal)
+            || output.Contains(fixtureBaseUrl, StringComparison.Ordinal);
+    }
+
+    private static bool TryGetCanaryTerminalOutcome(string standardOutput, out string? outcome)
+    {
+        outcome = null;
+        try
+        {
+            using var document = JsonDocument.Parse(standardOutput);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            var outcomeCount = 0;
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (property.NameEquals("outcome"))
+                {
+                    outcomeCount++;
+                    if (property.Value.ValueKind == JsonValueKind.String)
+                    {
+                        outcome = property.Value.GetString();
+                    }
+                }
+            }
+
+            return outcomeCount == 1 && !string.IsNullOrWhiteSpace(outcome);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     private static string ComputeSha512(string path)
     {
         using var stream = File.OpenRead(path);
@@ -1014,6 +1070,9 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         return "'" + value.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
     }
 
+    /// <summary>
+    /// Provides a protected named-canary fixture through a loopback HTTP server.
+    /// </summary>
     internal sealed class CanaryProofFixture : IAsyncDisposable
     {
         private readonly TcpListener _listener;
@@ -1029,10 +1088,19 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             _serveTask = ServeAsync();
         }
 
+        /// <summary>
+        /// Gets the loopback HTTP server URL used by the packaged CLI proof.
+        /// </summary>
         public string BaseUrl { get; }
 
+        /// <summary>
+        /// Starts and returns a newly initialized loopback canary fixture.
+        /// </summary>
         public static CanaryProofFixture Start() => new();
 
+        /// <summary>
+        /// Stops the loopback server and releases the fixture's resources.
+        /// </summary>
         public async ValueTask DisposeAsync()
         {
             _cancellation.Cancel();
@@ -1060,14 +1128,13 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
                     using var client = await _listener.AcceptTcpClientAsync(_cancellation.Token);
                     await using var stream = client.GetStream();
                     var request = await ReadRequestHeadersAsync(stream, _cancellation.Token);
-                    var authorized = request.Contains($"\r\nAuthorization: Bearer {CanaryProofToken}\r\n", StringComparison.OrdinalIgnoreCase)
-                        && request.Contains($"\r\nX-AppSurface-Canary-Marker: {CanaryProofMarker}\r\n", StringComparison.OrdinalIgnoreCase);
-                    var status = Interlocked.Increment(ref _requestCount) == 1 ? "pass" : "stale";
-                    var body = authorized
+                    var validRequest = IsExpectedCanaryRequest(request);
+                    var status = validRequest && Interlocked.Increment(ref _requestCount) == 1 ? "pass" : "stale";
+                    var body = validRequest
                         ? $"{{\"name\":\"{CanaryProofName}\",\"ready\":{(status == "pass" ? "true" : "false")},\"status\":\"{status}\"}}"
                         : "{}";
                     var bytes = Encoding.UTF8.GetBytes(body);
-                    var responseHeaders = $"HTTP/1.1 {(authorized ? 200 : 401)} {(authorized ? "OK" : "Unauthorized")}\r\nContent-Type: application/json\r\nContent-Length: {bytes.Length}\r\nConnection: close\r\n\r\n";
+                    var responseHeaders = $"HTTP/1.1 {(validRequest ? 200 : 401)} {(validRequest ? "OK" : "Unauthorized")}\r\nContent-Type: application/json\r\nContent-Length: {bytes.Length}\r\nConnection: close\r\n\r\n";
                     await stream.WriteAsync(Encoding.ASCII.GetBytes(responseHeaders), _cancellation.Token);
                     await stream.WriteAsync(bytes, _cancellation.Token);
                 }
@@ -1078,7 +1145,16 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             }
         }
 
-        private static async Task<string> ReadRequestHeadersAsync(NetworkStream stream, CancellationToken cancellationToken)
+        private static bool IsExpectedCanaryRequest(CanaryProofRequest request)
+        {
+            return request.IsWellFormed
+                && string.Equals(request.Method, HttpMethod.Get.Method, StringComparison.Ordinal)
+                && string.Equals(request.Path, $"/_appsurface/canaries/{CanaryProofName}", StringComparison.Ordinal)
+                && string.Equals(request.Authorization, $"Bearer {CanaryProofToken}", StringComparison.Ordinal)
+                && string.Equals(request.Marker, CanaryProofMarker, StringComparison.Ordinal);
+        }
+
+        private static async Task<CanaryProofRequest> ReadRequestHeadersAsync(NetworkStream stream, CancellationToken cancellationToken)
         {
             var requestBuffer = new byte[4096];
             var length = 0;
@@ -1097,7 +1173,64 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
                 }
             }
 
-            return Encoding.ASCII.GetString(requestBuffer, 0, length);
+            var lines = Encoding.ASCII.GetString(requestBuffer, 0, length).Split("\r\n", StringSplitOptions.None);
+            var requestLine = lines.FirstOrDefault() ?? string.Empty;
+            var requestLineParts = requestLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (requestLineParts.Length != 3)
+            {
+                return CanaryProofRequest.Invalid;
+            }
+
+            string? authorization = null;
+            string? marker = null;
+            var isWellFormed = true;
+            foreach (var line in lines.Skip(1))
+            {
+                if (line.Length == 0)
+                {
+                    break;
+                }
+
+                var delimiterIndex = line.IndexOf(':');
+                if (delimiterIndex <= 0)
+                {
+                    isWellFormed = false;
+                    continue;
+                }
+
+                var headerName = line[..delimiterIndex];
+                var headerValue = line[(delimiterIndex + 1)..].TrimStart(' ', '\t');
+                if (string.Equals(headerName, "Authorization", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (authorization is not null)
+                    {
+                        isWellFormed = false;
+                    }
+
+                    authorization = headerValue;
+                }
+                else if (string.Equals(headerName, "X-AppSurface-Canary-Marker", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (marker is not null)
+                    {
+                        isWellFormed = false;
+                    }
+
+                    marker = headerValue;
+                }
+            }
+
+            return new CanaryProofRequest(requestLineParts[0], requestLineParts[1], authorization, marker, isWellFormed);
+        }
+
+        private sealed record CanaryProofRequest(
+            string Method,
+            string Path,
+            string? Authorization,
+            string? Marker,
+            bool IsWellFormed)
+        {
+            internal static CanaryProofRequest Invalid { get; } = new(string.Empty, string.Empty, null, null, false);
         }
     }
 
