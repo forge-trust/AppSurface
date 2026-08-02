@@ -1347,26 +1347,26 @@ files should come from a repository-owned or deployment-mounted directory instea
 static web assets.
 
 - `AppSurfaceDocs:Theme:Preset`
-  - Optional dark-family theme preset for package-owned docs chrome.
+  - Optional compatibility preset for package-owned docs chrome.
   - Defaults to `AppSurfaceDark`.
   - Supported values are `AppSurfaceDark` and `GraphiteDark`.
   - Unknown enum values fail startup validation and list the supported values.
 - `AppSurfaceDocs:Theme:Colors:AccentColor`
   - Optional CSS hex color for primary accent text, active states, and highlights.
   - Blank values use the selected preset default.
-  - Must meet text contrast checks against the selected preset's dark shell backgrounds.
+  - Must meet text contrast checks against the selected preset's package-owned shell backgrounds.
 - `AppSurfaceDocs:Theme:Colors:AccentStrongColor`
   - Optional CSS hex color for focus rings, selected-state fills, and high-emphasis borders.
   - Blank values use the selected preset default.
-  - Must meet UI contrast checks against the selected preset's dark shell backgrounds.
+  - Must meet UI contrast checks against the selected preset's package-owned shell backgrounds.
 - `AppSurfaceDocs:Theme:Colors:LinkColor`
   - Optional CSS hex color for standard prose and chrome links.
   - Blank values use the selected preset default.
-  - Must meet text contrast checks against the selected preset's dark shell backgrounds.
+  - Must meet text contrast checks against the selected preset's package-owned shell backgrounds.
 - `AppSurfaceDocs:Theme:Colors:VisitedLinkColor`
   - Optional CSS hex color for visited prose links.
   - Blank values use the selected preset default.
-  - Must meet text contrast checks against the selected preset's dark shell backgrounds.
+  - Must meet text contrast checks against the selected preset's package-owned shell backgrounds.
 - `AppSurfaceDocs:Theme:Layout:Density`
   - Optional repeated-chrome density.
   - Defaults to `Comfortable`.
@@ -1414,7 +1414,48 @@ Environment variable spelling follows the normal double-underscore configuration
 
 Theme validation is part of the public contract. `Theme`, `Theme:Colors`, and `Theme:Layout` must not be null. Color values must be CSS hex colors, not CSS functions, variables, color names, or style declarations. Contrast failures name the config path, configured value, required ratio, tested preset background, and a fix hint so maintainers can correct the value without inspecting generated CSS.
 
-Use theme options when the host wants branded docs without owning views. Do not use them when the goal is a light/system theme, arbitrary text or surface overrides, syntax-highlighting replacement, selector-level CSS compatibility, external theme packages, or a bespoke documentation template. Static exports and published release archives freeze the resolved theme variables in exported HTML, so host config changes do not rewrite already-exported archives.
+Use theme options when the host wants branded docs without owning views. `AppSurfaceDark` also becomes the bridge to a registered shared AppSurface theme pair; see [Theme pairs migration](#theme-pairs-migration). Do not use these options for arbitrary text or surface overrides, selector-level CSS compatibility, external theme packages, or a bespoke documentation template. Static exports and published release archives freeze the resolved theme variables in exported HTML, so host config changes do not rewrite already-exported archives.
+
+### Theme pairs migration
+
+Docs is a first-class theme-pairs surface. Keep the existing `AppSurfaceDark` preset (the default), then register the shared pair and Web adapter before `AddAppSurfaceDocs()` runs:
+
+```csharp
+using ForgeTrust.AppSurface.Docs;
+using ForgeTrust.AppSurface.Web;
+using ForgeTrust.AppSurface.Theming;
+
+services.AddAppSurfaceTheming(options =>
+{
+    options.DefaultTheme = new AppSurfaceThemeId("appsurface");
+    options.DefaultMode = AppSurfaceThemeMode.System;
+    options.Pairs.Add(AppSurfaceThemePair.AppSurface());
+});
+services.AddAppSurfaceWebTheming();
+services.AddAppSurfaceDocs();
+```
+
+| Before | After |
+| --- | --- |
+| `AppSurfaceDark` produced only the established dark Docs variable graph. | It maps Docs-owned surfaces, code tokens, search states, tables, archive/status pages, and focus treatment to the shared System/Light/Dark semantic branch while keeping Docs variables internal. |
+| `GraphiteDark` was a dark preset. | It remains a Docs-local dark compatibility preset; it is not a shared pair. |
+| `#rgb` color overrides were accepted. | They remain accepted and apply only to the supported Docs accent/link roles. Shared role values remain strict `#RRGGBB`. When a shared Light or System branch cannot render an override at the documented contrast threshold, Docs keeps the safe semantic pair role for that branch instead of emitting the override. |
+
+Docs preserves density, chrome, layout override behavior, and the default dark experience when no shared resolver is registered. The package layout emits the Web root/head opt-ins plus a Docs-critical variable mapping before the package stylesheet. Published-tree rewriting preserves that root metadata and both critical styles, so static archives match live output apart from a host-request CSP nonce.
+
+`AddAppSurfaceDocs()` always registers the Web theme-document adapter. When no `IAppSurfaceThemeResolver` is already registered, it also adds the built-in pair with the legacy `Dark` default. Register them explicitly before `AddAppSurfaceDocs()` only when the host needs a different pair or System/Light behavior.
+
+For a nonce-based `style-src` policy, the host stores its per-response nonce before Razor executes. The package layout applies it only to the two live critical styles; static exports remain nonce-free and deterministic.
+
+```csharp
+using ForgeTrust.AppSurface.Web.Theming;
+
+context.Items[AppSurfaceThemeCspNonce.HttpContextItemKey] = hostGeneratedNonce;
+```
+
+Do not put the nonce in `AppSurfaceDocsOptions`, configuration files, logs, or static exports. The host owns nonce generation and CSP headers.
+
+Do not treat `--docs-*` variables as a consumer API. They are Docs implementation details derived from stable shared `--as-*` semantic inputs. The supported consumer contract is the neutral [theme-pair reference](../../ForgeTrust.AppSurface.Theming/README.md), this Docs options section, and the documented Razor layout override boundary.
 
 ### Default Razor layout and deliberate host overrides
 

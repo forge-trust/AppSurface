@@ -71,6 +71,18 @@ The default fallback CSS is injected once by the runtime and only targets genera
 }
 ```
 
+## AppSurface Theme Pairs
+
+When the host opts into [AppSurface theme pairs](../../ForgeTrust.AppSurface.Web/README.md#theme-pairs-quickstart), the nonce-bearing critical stylesheet supplies semantic fallback colors for **only** generated nodes:
+
+```css
+[data-as-theme] [data-rw-form-error-generated="true"]
+```
+
+It never targets `data-rw-form-failure`, ordinary forms, manually rendered errors, or server-handled RazorWire UI. Existing `--rw-form-error-*` values still win; the theme supplies `--as-danger`, `--as-raised-surface`, `--as-text`, and `--as-focus` only when the host has not supplied an error-specific value. This makes fallback styling available under strict CSP when the head helper receives the host's per-response nonce.
+
+Do not add a nonce-less dynamic style block to recover theme colors. Use `<appsurface-theme-head nonce="..." />` in the document layout and keep RazorWire's generated assets focused on behavior and markup.
+
 Use `data-rw-form-failure="manual"` when the app wants to render everything itself:
 
 ```cshtml

@@ -270,6 +270,16 @@ public sealed class PwaVerifierTests
         Assert.Contains("\"entryPath\": \"/account/resume\"", output, StringComparison.Ordinal);
         Assert.Contains("\"startUrl\": \"/\"", output, StringComparison.Ordinal);
         Assert.Contains("\"icons\": [", output, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(output);
+        Assert.Equal(
+            [
+                "schemaVersion", "passed", "origin", "baseUrl", "entryPath", "entryUrl", "manifestPath",
+                "startUrl", "scope", "display", "themeColor", "backgroundColor", "icons", "diagnostics"
+            ],
+            document.RootElement.EnumerateObject().Select(property => property.Name));
+        Assert.False(document.RootElement.TryGetProperty("surface", out _));
+        Assert.False(document.RootElement.TryGetProperty("install", out _));
+        Assert.False(document.RootElement.TryGetProperty("push", out _));
     }
 
     [Fact]
@@ -1584,12 +1594,768 @@ public sealed class PwaVerifierTests
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA238");
     }
 
+    [Fact]
+    public async Task VerifySurfaceAsync_EmitsExactV3PushEvidenceForConfiguredPushOnlyHost()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidPushResponses(http, "https://app.example.test");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push"),
+            CancellationToken.None);
+
+        Assert.True(report.Passed);
+        Assert.Equal(3, report.SchemaVersion);
+        Assert.Equal("push", report.Surface);
+        Assert.Null(report.Install);
+        Assert.Equal("configured", report.Push.ConfigurationStatus);
+        Assert.Equal("mapped", report.Push.RouteMapping);
+        Assert.Equal("passed", report.Push.Worker.Fetch);
+        Assert.Equal("passed", report.Push.RegistrationHelper.HeadReference);
+        Assert.Equal("not-evaluated", report.Push.Delivery);
+        var json = JsonSerializer.Serialize(report, PwaVerifier.V3JsonOptions);
+        Assert.Contains("\"install\": null", json, StringComparison.Ordinal);
+        Assert.Contains("\"browserSupport\": \"not-evaluated\"", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_EmitsCombinedV3InstallAndPushEvidence()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidPushResponses(http, "https://app.example.test");
+        http.Add(
+            "https://app.example.test/",
+            """<!doctype html><html><head><link rel="manifest" href="/manifest.webmanifest"><script src="/_appsurface/pwa/register.js?v=build-1" data-appsurface-pwa-scope="/" data-appsurface-pwa-worker="/service-worker.js"></script></head><body></body></html>""",
+            "text/html");
+        http.Add("https://app.example.test/manifest.webmanifest", ValidManifest(), "application/manifest+json");
+        http.Add("https://app.example.test/icons/app-192.png", "png", "image/png");
+        http.Add("https://app.example.test/icons/app-512.png", "png", "image/png");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "all"),
+            CancellationToken.None);
+
+        Assert.True(report.Passed);
+        Assert.Equal("all", report.Surface);
+        Assert.NotNull(report.Install);
+        Assert.Equal("/manifest.webmanifest", report.Install.ManifestPath);
+        Assert.Equal("configured", report.Push.ConfigurationStatus);
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_UsesConfiguredDiagnosticsPath()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidPushResponses(http, "https://app.example.test");
+        AddPushStatus(http, "https://app.example.test", diagnosticsPath: "/operations/pwa");
+
+        var report = await new PwaVerifier(http).VerifySurfaceAsync(
+            PwaVerificationOptions.Create(
+                new Uri("https://app.example.test"),
+                surface: "push",
+                diagnosticsPath: "/operations/pwa"),
+            CancellationToken.None);
+
+        Assert.True(report.Passed);
+        Assert.Equal("configured", report.Push.ConfigurationStatus);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_UsesConfiguredDiagnosticsPathForInstallVerification()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidInstallResponses(http, "https://app.example.test");
+        http.Add("https://app.example.test/_appsurface/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.BadGateway);
+        http.Add("https://app.example.test/operations/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.NotFound);
+
+        var report = await new PwaVerifier(http).VerifyAsync(
+            PwaVerificationOptions.Create(
+                new Uri("https://app.example.test"),
+                diagnosticsPath: "/operations/pwa"),
+            CancellationToken.None);
+
+        Assert.True(report.Passed);
+        var diagnostic = Assert.Single(report.Diagnostics, value => value.Code == "ASPWA220");
+        Assert.Contains("/operations/pwa/status.json", diagnostic.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA221");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_WarnsWithConfiguredDiagnosticsPathWhenEndpointErrors()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidInstallResponses(http, "https://app.example.test");
+        http.Add("https://app.example.test/operations/pwa/status.json", "nope", "text/plain", HttpStatusCode.BadGateway);
+
+        var report = await new PwaVerifier(http).VerifyAsync(
+            PwaVerificationOptions.Create(
+                new Uri("https://app.example.test"),
+                diagnosticsPath: "/operations/pwa"),
+            CancellationToken.None);
+
+        Assert.True(report.Passed);
+        var diagnostic = Assert.Single(report.Diagnostics, value => value.Code == "ASPWA221");
+        Assert.Contains("/operations/pwa/status.json", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_PassesDisabledPushWithIndependentOfflineWorker()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add(
+            "https://app.example.test/",
+            """<!doctype html><html><head></head><body></body></html>""",
+            "text/html");
+        http.Add(
+            "https://app.example.test/_appsurface/pwa/status.json",
+            """{"enabled":false,"offlineEnabled":true,"workerEnabled":true,"workerPath":"/service-worker.js","pushEnabled":false,"workerScope":"/","registrationHelperPath":null,"pushReadiness":{"schemaVersion":1,"configurationStatus":"not-configured","activeVapidKeyId":null,"publicKeyFingerprint":null,"routeMapped":null}}""",
+            "application/json");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push", expectedPush: "disabled"),
+            CancellationToken.None);
+
+        Assert.True(report.Passed);
+        Assert.False(report.Push.Enabled);
+        Assert.Equal("not-evaluated", report.Push.ConfigurationStatus);
+        Assert.Equal("/service-worker.js", report.Push.Worker.Path);
+        Assert.Equal("not-evaluated", report.Push.Worker.Fetch);
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_PassesEnabledWorkerReadinessWithoutOptionalPushPackage()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidPushResponses(http, "https://app.example.test");
+        http.Add(
+            "https://app.example.test/_appsurface/pwa/status.json",
+            """{"enabled":true,"offlineEnabled":true,"workerEnabled":true,"workerPath":"/service-worker.js","pushEnabled":true,"workerScope":"/","registrationHelperPath":"/_appsurface/pwa/register.js","pushReadiness":{"schemaVersion":1,"configurationStatus":"not-configured","activeVapidKeyId":null,"publicKeyFingerprint":null,"routeMapped":null}}""",
+            "application/json");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push"),
+            CancellationToken.None);
+
+        Assert.True(report.Passed);
+        Assert.Equal("not-configured", report.Push.ConfigurationStatus);
+        Assert.Null(report.Push.Vapid.ActiveKeyId);
+        Assert.Equal("not-evaluated", report.Push.RouteMapping);
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_FailsWhenEnabledPushDiagnosticsDisableTheWorker()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidPushResponses(http, "https://app.example.test");
+        http.Add(
+            "https://app.example.test/_appsurface/pwa/status.json",
+            """{"enabled":false,"offlineEnabled":false,"workerEnabled":false,"workerPath":"/service-worker.js","pushEnabled":true,"workerScope":"/","registrationHelperPath":"/_appsurface/pwa/register.js","pushReadiness":{"schemaVersion":1,"configurationStatus":"configured","activeVapidKeyId":"primary","publicKeyFingerprint":"sha256-aYvqY9xEo0RmP_FCmuoQhC3ye2uZHvJYZrLGwCzcxb4","routeMapped":true}}""",
+            "application/json");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push"),
+            CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA282");
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_FailsWhenHelperLeavesConfiguredPathBase()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add(
+            "https://app.example.test/tenant/",
+            """<!doctype html><html><head><script src="/_appsurface/pwa/register.js?v=build-1" data-appsurface-pwa-scope="/tenant/" data-appsurface-pwa-worker="/tenant/service-worker.js"></script></head><body></body></html>""",
+            "text/html");
+        http.Add(
+            "https://app.example.test/tenant/_appsurface/pwa/status.json",
+            """{"enabled":false,"offlineEnabled":false,"workerEnabled":true,"workerPath":"/tenant/service-worker.js","pushEnabled":true,"workerScope":"/tenant/","registrationHelperPath":"/_appsurface/pwa/register.js","pushReadiness":{"schemaVersion":1,"configurationStatus":"not-configured","activeVapidKeyId":null,"publicKeyFingerprint":null,"routeMapped":null}}""",
+            "application/json");
+        http.Add(
+            "https://app.example.test/tenant/service-worker.js",
+            "self.addEventListener('push', () => {});",
+            "text/javascript",
+            headers: StrictHeaders("no-cache", "/tenant/"));
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test/tenant/"), surface: "push"),
+            CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA299");
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_FailsWhenWorkerScopeLeavesVerifiedPathBase()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add(
+            "https://app.example.test/tenant/",
+            PushHtml(
+                workerPath: "/tenant/service-worker.js",
+                workerScope: "/",
+                helperPath: "/tenant/_appsurface/pwa/register.js"),
+            "text/html");
+        AddPushStatus(
+            http,
+            "https://app.example.test/tenant",
+            workerPath: "/tenant/service-worker.js",
+            workerScope: "/",
+            registrationHelperPath: "/tenant/_appsurface/pwa/register.js");
+        http.Add(
+            "https://app.example.test/tenant/service-worker.js",
+            "self.addEventListener('push', () => {});",
+            "text/javascript",
+            headers: StrictHeaders("no-cache", "/"));
+        http.Add(
+            "https://app.example.test/tenant/_appsurface/pwa/register.js?v=build-1",
+            "navigator.serviceWorker.register('/tenant/service-worker.js');",
+            "application/javascript",
+            headers: StrictHeaders("public, max-age=31536000, immutable"));
+
+        var report = await new PwaVerifier(http).VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test/tenant/"), surface: "push"),
+            CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA283");
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_FailsStrictHelperRedirectWithSafeDocumentationLink()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidPushResponses(http, "https://app.example.test");
+        http.AddRedirect("https://app.example.test/_appsurface/pwa/register.js?v=build-1", "/_appsurface/pwa/register.js?v=build-2");
+        var verifier = new PwaVerifier(http);
+
+        var report = await verifier.VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push"),
+            CancellationToken.None);
+
+        Assert.False(report.Passed);
+        var diagnostic = Assert.Single(report.Diagnostics, item => item.Code == "ASPWA294");
+        Assert.Equal("https://forge-trust.com/docs/pwa-install#push-readiness-evidence", diagnostic.DocsUrl);
+        Assert.DoesNotContain("build-", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_FailsLegacyOrMalformedPushReadinessSource()
+    {
+        var statuses = new[]
+        {
+            """{"enabled":false,"offlineEnabled":false,"workerEnabled":true,"workerPath":"/service-worker.js","pushEnabled":true,"workerScope":"/","registrationHelperPath":"/_appsurface/pwa/register.js"}""",
+            """{"enabled":false,"offlineEnabled":false,"workerEnabled":true,"workerPath":"/service-worker.js","pushEnabled":true,"workerScope":"/","registrationHelperPath":"/_appsurface/pwa/register.js","pushReadiness":{"schemaVersion":1,"configurationStatus":"configured","activeVapidKeyId":"primary","publicKeyFingerprint":"sha256-aYvqY9xEo0RmP_FCmuoQhC3ye2uZHvJYZrLGwCzcxb4","routeMapped":null}}""",
+        };
+
+        foreach (var status in statuses)
+        {
+            var http = new FakePwaHttpClient();
+            AddValidPushResponses(http, "https://app.example.test");
+            http.Add("https://app.example.test/_appsurface/pwa/status.json", status, "application/json");
+            var verifier = new PwaVerifier(http);
+
+            var report = await verifier.VerifySurfaceAsync(
+                PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push"),
+                CancellationToken.None);
+
+            Assert.False(report.Passed);
+            Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code is "ASPWA295" or "ASPWA297");
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RejectsSurfaceOptionConflictsBeforeNetworking()
+    {
+        var command = new PwaVerifyCommand(new PwaVerifier(new FakePwaHttpClient()))
+        {
+            Url = "https://app.example.test",
+            Surface = "push",
+            ExpectedStartUrl = "/"
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
+
+        Assert.Equal("Install expectation options are valid only with --surface install or --surface all.", exception.Message);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WritesV3TextRemediationForPushFailure()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/", "<html><head></head></html>", "text/html");
+        http.Add("https://app.example.test/_appsurface/pwa/status.json", string.Empty, "text/plain", HttpStatusCode.NotFound);
+        var command = new PwaVerifyCommand(new PwaVerifier(http))
+        {
+            Url = "https://app.example.test",
+            Surface = "push"
+        };
+        using var console = new FakeInMemoryConsole();
+
+        _ = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
+
+        var output = console.ReadOutputString();
+        Assert.Contains("Surface: push", output, StringComparison.Ordinal);
+        Assert.Contains("Push expected: enabled; observed: unknown.", output, StringComparison.Ordinal);
+        Assert.Contains("Fix:", output, StringComparison.Ordinal);
+        Assert.Contains("Docs: https://forge-trust.com/docs/pwa-install#push-readiness-evidence", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WritesV3TextEvidenceForEnabledPushReadiness()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidPushResponses(http, "https://app.example.test");
+        var command = new PwaVerifyCommand(new PwaVerifier(http))
+        {
+            Url = "https://app.example.test",
+            Surface = "push"
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console);
+
+        var output = console.ReadOutputString();
+        Assert.Contains("Push expected: enabled; observed: enabled.", output, StringComparison.Ordinal);
+        Assert.Contains("Push configuration: configured; route mapping: mapped.", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WritesV3TextEvidenceForDisabledPushReadiness()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/", "<html><head></head><body></body></html>", "text/html");
+        AddPushStatus(
+            http,
+            "https://app.example.test",
+            pushEnabled: false,
+            registrationHelperPath: null,
+            readiness: new PwaPushReadinessProbe(1, "not-configured", null, null, null));
+        var command = new PwaVerifyCommand(new PwaVerifier(http))
+        {
+            Url = "https://app.example.test",
+            Surface = "push",
+            ExpectedPush = "disabled"
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console);
+
+        var output = console.ReadOutputString();
+        Assert.Contains("Push expected: disabled; observed: disabled.", output, StringComparison.Ordinal);
+        Assert.Contains("Push configuration: not-evaluated; route mapping: not-evaluated.", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WritesV3JsonForPassingPushReadiness()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidPushResponses(http, "https://app.example.test");
+        var command = new PwaVerifyCommand(new PwaVerifier(http))
+        {
+            Url = "https://app.example.test",
+            Surface = "push",
+            Json = true,
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console);
+
+        var output = console.ReadOutputString();
+        Assert.Contains("\"schemaVersion\": 3", output, StringComparison.Ordinal);
+        Assert.Contains("\"install\": null", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_RejectsUnavailableStatusDocuments()
+    {
+        var cases = new[]
+        {
+            new PwaHttpResponse(HttpStatusCode.NotFound, "text/plain", [], null, false),
+            new PwaHttpResponse(HttpStatusCode.OK, "application/json", Encoding.UTF8.GetBytes("null"), null, false),
+            new PwaHttpResponse(HttpStatusCode.OK, "application/json", Encoding.UTF8.GetBytes("{"), null, false),
+        };
+
+        foreach (var statusResponse in cases)
+        {
+            var http = new FakePwaHttpClient();
+            http.Add("https://app.example.test/", "<html><head></head></html>", "text/html");
+            http.AddResponse("https://app.example.test/_appsurface/pwa/status.json", statusResponse);
+            var report = await new PwaVerifier(http).VerifySurfaceAsync(
+                PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push"),
+                CancellationToken.None);
+
+            Assert.False(report.Passed);
+            Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code is "ASPWA270" or "ASPWA271");
+        }
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_ReportsDisabledPushContradictions()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidPushResponses(http, "https://app.example.test");
+        var report = await new PwaVerifier(http).VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push", expectedPush: "disabled"),
+            CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.True(report.Push.Enabled);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA272");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA273");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA274");
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_ReportsNonHtmlDisabledPushEntry()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/", "not html", "text/plain");
+        AddPushStatus(http, "https://app.example.test", pushEnabled: false, registrationHelperPath: null);
+
+        var report = await new PwaVerifier(http).VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push", expectedPush: "disabled"),
+            CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA275");
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_ReportsMissingEnabledPushFoundations()
+    {
+        var http = new FakePwaHttpClient();
+        http.Add("https://app.example.test/", "not html", "text/plain");
+        AddPushStatus(
+            http,
+            "https://app.example.test",
+            workerEnabled: false,
+            workerPath: null,
+            pushEnabled: false,
+            workerScope: null,
+            registrationHelperPath: null,
+            readiness: new PwaPushReadinessProbe(1, "unavailable", null, null, null));
+
+        var report = await new PwaVerifier(http).VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push"),
+            CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA276");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA277");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA278");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA279");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA281");
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_ReportsUnmappedConfiguredPushRail()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidPushResponses(http, "https://app.example.test");
+        AddPushStatus(
+            http,
+            "https://app.example.test",
+            readiness: new PwaPushReadinessProbe(1, "configured", "primary", ValidPushFingerprint, false));
+
+        var report = await new PwaVerifier(http).VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push"),
+            CancellationToken.None);
+
+        Assert.False(report.Passed);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA280");
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_ReportsWorkerBoundaryAndResourceFailures()
+    {
+        var outsideOrigin = new FakePwaHttpClient();
+        AddValidPushResponses(outsideOrigin, "https://app.example.test");
+        AddPushStatus(outsideOrigin, "https://app.example.test", workerPath: "https://other.example.test/worker.js");
+        outsideOrigin.Add(
+            "https://app.example.test/",
+            PushHtml(workerPath: "https://other.example.test/worker.js"),
+            "text/html");
+
+        var boundaryReport = await new PwaVerifier(outsideOrigin).VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push"),
+            CancellationToken.None);
+        Assert.Contains(boundaryReport.Diagnostics, diagnostic => diagnostic.Code == "ASPWA283");
+
+        var failingResource = new FakePwaHttpClient();
+        AddValidPushResponses(failingResource, "https://app.example.test");
+        failingResource.Add("https://app.example.test/service-worker.js", "missing", "text/plain", HttpStatusCode.NotFound);
+        var resourceReport = await new PwaVerifier(failingResource).VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push"),
+            CancellationToken.None);
+        Assert.Contains(resourceReport.Diagnostics, diagnostic => diagnostic.Code == "ASPWA284");
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_ReportsWorkerResponseContractFailures()
+    {
+        var http = new FakePwaHttpClient();
+        AddValidPushResponses(http, "https://app.example.test");
+        http.Add(
+            "https://app.example.test/service-worker.js",
+            "not javascript",
+            "text/plain",
+            headers: new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["X-Content-Type-Options"] = ["nosniff", "nosniff"],
+                ["Cache-Control"] = ["public"],
+                ["Service-Worker-Allowed"] = ["/other/"],
+            });
+
+        var report = await new PwaVerifier(http).VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push"),
+            CancellationToken.None);
+
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA285");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA286");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA287");
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "ASPWA288");
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_ReportsHelperResourceAndResponseContractFailures()
+    {
+        var missing = new FakePwaHttpClient();
+        AddValidPushResponses(missing, "https://app.example.test");
+        missing.Add("https://app.example.test/_appsurface/pwa/register.js?v=build-1", "missing", "text/plain", HttpStatusCode.NotFound);
+        var missingReport = await new PwaVerifier(missing).VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push"),
+            CancellationToken.None);
+        Assert.Contains(missingReport.Diagnostics, diagnostic => diagnostic.Code == "ASPWA289");
+
+        var invalid = new FakePwaHttpClient();
+        AddValidPushResponses(invalid, "https://app.example.test");
+        invalid.Add(
+            "https://app.example.test/_appsurface/pwa/register.js?v=build-1",
+            "not javascript",
+            "text/plain",
+            headers: new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["X-Content-Type-Options"] = ["wrong"],
+                ["Cache-Control"] = ["no-cache"],
+            });
+        var invalidReport = await new PwaVerifier(invalid).VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push"),
+            CancellationToken.None);
+        Assert.Contains(invalidReport.Diagnostics, diagnostic => diagnostic.Code == "ASPWA290");
+        Assert.Contains(invalidReport.Diagnostics, diagnostic => diagnostic.Code == "ASPWA291");
+        Assert.Contains(invalidReport.Diagnostics, diagnostic => diagnostic.Code == "ASPWA292");
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_ReportsTruncatedStrictResourcesAndInvalidHelperMarkup()
+    {
+        var truncated = new FakePwaHttpClient();
+        AddValidPushResponses(truncated, "https://app.example.test");
+        truncated.AddTruncated(
+            "https://app.example.test/service-worker.js",
+            "self.addEventListener('push', () => {});",
+            "text/javascript",
+            headers: StrictHeaders("no-cache", "/"));
+        var truncatedReport = await new PwaVerifier(truncated).VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push"),
+            CancellationToken.None);
+        Assert.Contains(truncatedReport.Diagnostics, diagnostic => diagnostic.Code == "ASPWA293");
+        Assert.Equal("failed", truncatedReport.Push.Worker.Fetch);
+
+        var truncatedHelper = new FakePwaHttpClient();
+        AddValidPushResponses(truncatedHelper, "https://app.example.test");
+        truncatedHelper.AddTruncated(
+            "https://app.example.test/_appsurface/pwa/register.js?v=build-1",
+            "navigator.serviceWorker.register('/service-worker.js');",
+            "application/javascript",
+            headers: StrictHeaders("public, max-age=31536000, immutable"));
+        var truncatedHelperReport = await new PwaVerifier(truncatedHelper).VerifySurfaceAsync(
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push"),
+            CancellationToken.None);
+        Assert.Contains(truncatedHelperReport.Diagnostics, diagnostic => diagnostic.Code == "ASPWA293");
+        Assert.Equal("failed", truncatedHelperReport.Push.RegistrationHelper.Fetch);
+
+        var markupCases = new[]
+        {
+            ("<html><body></body></html>", "ASPWA298"),
+            ("<html><head><script src=\"/_appsurface/push/register.js?v=1\"></script><script src=\"/_appsurface/push/register.js?v=1\"></script></head></html>", "ASPWA299"),
+            (PushHtml(version: "one&v=two"), "ASPWA300"),
+        };
+        foreach (var (html, code) in markupCases)
+        {
+            var http = new FakePwaHttpClient();
+            AddValidPushResponses(http, "https://app.example.test");
+            http.Add("https://app.example.test/", html, "text/html");
+            var report = await new PwaVerifier(http).VerifySurfaceAsync(
+                PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push"),
+                CancellationToken.None);
+            Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == code);
+        }
+    }
+
+    [Fact]
+    public async Task VerifySurfaceAsync_ReportsUnsupportedAndMalformedReadinessSources()
+    {
+        var cases = new[]
+        {
+            new PwaPushReadinessProbe(2, "configured", "primary", ValidPushFingerprint, true),
+            new PwaPushReadinessProbe(1, "configured", "bad id", ValidPushFingerprint, true),
+        };
+        foreach (var readiness in cases)
+        {
+            var http = new FakePwaHttpClient();
+            AddValidPushResponses(http, "https://app.example.test");
+            AddPushStatus(http, "https://app.example.test", readiness: readiness);
+            var report = await new PwaVerifier(http).VerifySurfaceAsync(
+                PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: "push"),
+                CancellationToken.None);
+            Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code is "ASPWA296" or "ASPWA297");
+        }
+    }
+
+    [Fact]
+    public async Task PwaVerificationHttpClient_CapturesRequiredHeadersAndBoundsBodies()
+    {
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("abcdef"),
+        };
+        response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/javascript");
+        response.Headers.TryAddWithoutValidation("X-Content-Type-Options", "nosniff");
+        response.Headers.TryAddWithoutValidation("Service-Worker-Allowed", "/");
+        response.Headers.TryAddWithoutValidation("Cache-Control", "no-cache");
+        using var client = new HttpClient(new StubHttpMessageHandler(response));
+        var verifierClient = new PwaVerificationHttpClient(client);
+
+        var result = await verifierClient.GetAsync(new Uri("https://app.example.test/worker.js"), 3, CancellationToken.None);
+
+        Assert.Equal("abc", result.Body);
+        Assert.True(result.BodyTruncated);
+        Assert.Equal(["nosniff"], result.HeaderValues("X-Content-Type-Options"));
+        Assert.Equal(["no-cache"], result.HeaderValues("Cache-Control"));
+        Assert.Equal(["/"], result.HeaderValues("Service-Worker-Allowed"));
+        Assert.Empty(new PwaHttpResponse(HttpStatusCode.OK, string.Empty, [], null, false).HeaderValues("missing"));
+    }
+
+    [Theory]
+    [InlineData("not-a-surface", "enabled")]
+    [InlineData("push", "not-an-expectation")]
+    public void PwaVerificationOptions_RejectsUnknownSurfaceAndPushExpectation(string surface, string expectedPush)
+    {
+        Assert.Throws<ArgumentException>(() =>
+            PwaVerificationOptions.Create(new Uri("https://app.example.test"), surface: surface, expectedPush: expectedPush));
+    }
+
+    [Fact]
+    public void PwaVerificationOptions_RejectsSurfaceSpecificExpectationsAndEscapedDiagnosticsPaths()
+    {
+        var baseUrl = new Uri("https://app.example.test");
+
+        var installException = Assert.Throws<ArgumentException>(() =>
+            PwaVerificationOptions.Create(baseUrl, surface: "install", expectedPush: "enabled"));
+        var pushException = Assert.Throws<ArgumentException>(() =>
+            PwaVerificationOptions.Create(baseUrl, surface: "push", expectedStartUrl: "/"));
+        var diagnosticsException = Assert.Throws<ArgumentException>(() =>
+            PwaVerificationOptions.Create(baseUrl, diagnosticsPath: "/operations%2Fpwa"));
+
+        Assert.Equal("--expect-push is valid only with --surface push or --surface all.", installException.Message);
+        Assert.Equal("Install expectation options are valid only with --surface install or --surface all.", pushException.Message);
+        Assert.Equal(
+            "--diagnostics-path must be an app-root-relative endpoint path without percent escapes.",
+            diagnosticsException.Message);
+    }
+
     private static void AddValidInstallResponses(FakePwaHttpClient http, string origin)
     {
         http.Add(origin + "/", HtmlWithManifestLink(), "text/html");
         http.Add(origin + "/manifest.webmanifest", ValidManifest(), "application/manifest+json");
         http.Add(origin + "/icons/app-192.png", "png", "image/png");
         http.Add(origin + "/icons/app-512.png", "png", "image/png");
+    }
+
+    private static void AddValidPushResponses(FakePwaHttpClient http, string origin)
+    {
+        http.Add(
+            origin + "/",
+            """<!doctype html><html><head><script src="/_appsurface/pwa/register.js?v=build-1" data-appsurface-pwa-scope="/" data-appsurface-pwa-worker="/service-worker.js"></script></head><body></body></html>""",
+            "text/html");
+        http.Add(
+            origin + "/_appsurface/pwa/status.json",
+            """{"enabled":false,"offlineEnabled":false,"workerEnabled":true,"workerPath":"/service-worker.js","pushEnabled":true,"workerScope":"/","registrationHelperPath":"/_appsurface/pwa/register.js","pushReadiness":{"schemaVersion":1,"configurationStatus":"configured","activeVapidKeyId":"primary","publicKeyFingerprint":"sha256-aYvqY9xEo0RmP_FCmuoQhC3ye2uZHvJYZrLGwCzcxb4","routeMapped":true}}""",
+            "application/json");
+        http.Add(
+            origin + "/service-worker.js",
+            "self.addEventListener('push', () => {});",
+            "text/javascript",
+            headers: StrictHeaders("no-cache", "/"));
+        http.Add(
+            origin + "/_appsurface/pwa/register.js?v=build-1",
+            "navigator.serviceWorker.register('/service-worker.js');",
+            "application/javascript",
+            headers: StrictHeaders("public, max-age=31536000, immutable"));
+    }
+
+    private const string ValidPushFingerprint = "sha256-aYvqY9xEo0RmP_FCmuoQhC3ye2uZHvJYZrLGwCzcxb4";
+
+    private static void AddPushStatus(
+        FakePwaHttpClient http,
+        string origin,
+        bool workerEnabled = true,
+        string? workerPath = "/service-worker.js",
+        bool pushEnabled = true,
+        string? workerScope = "/",
+        string? registrationHelperPath = "/_appsurface/pwa/register.js",
+        PwaPushReadinessProbe? readiness = null,
+        string diagnosticsPath = "/_appsurface/pwa")
+    {
+        readiness ??= new PwaPushReadinessProbe(1, "configured", "primary", ValidPushFingerprint, true);
+        var status = new PwaStatusProbe(
+            Enabled: false,
+            OfflineEnabled: false,
+            ServiceWorkerPath: null,
+            OfflineFallbackPath: null,
+            ConfiguredServiceWorkerPath: null,
+            WorkerEnabled: workerEnabled,
+            WorkerPath: workerPath,
+            PushEnabled: pushEnabled,
+            WorkerScope: workerScope,
+            RegistrationHelperPath: registrationHelperPath,
+            PushReadiness: readiness);
+        http.Add(
+            origin + diagnosticsPath.TrimEnd('/') + "/status.json",
+            JsonSerializer.Serialize(status, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            "application/json");
+    }
+
+    private static string PushHtml(
+        string workerPath = "/service-worker.js",
+        string workerScope = "/",
+        string helperPath = "/_appsurface/pwa/register.js",
+        string version = "build-1") =>
+        $"""<!doctype html><html><head><script src="{helperPath}?v={version}" data-appsurface-pwa-scope="{workerScope}" data-appsurface-pwa-worker="{workerPath}"></script></head><body></body></html>""";
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> StrictHeaders(string cacheControl, string? serviceWorkerAllowed = null)
+    {
+        var headers = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["X-Content-Type-Options"] = ["nosniff"],
+            ["Cache-Control"] = [cacheControl]
+        };
+        if (serviceWorkerAllowed is not null)
+        {
+            headers["Service-Worker-Allowed"] = [serviceWorkerAllowed];
+        }
+
+        return headers;
     }
 
     private static string HtmlWithManifestLink(string href = "/manifest.webmanifest")
@@ -1676,9 +2442,10 @@ public sealed class PwaVerifierTests
             string url,
             string body,
             string contentType,
-            HttpStatusCode statusCode = HttpStatusCode.OK)
+            HttpStatusCode statusCode = HttpStatusCode.OK,
+            IReadOnlyDictionary<string, IReadOnlyList<string>>? headers = null)
         {
-            _responses[url.TrimEnd('/')] = new PwaHttpResponse(statusCode, contentType, Encoding.UTF8.GetBytes(body), null, false);
+            _responses[url.TrimEnd('/')] = new PwaHttpResponse(statusCode, contentType, Encoding.UTF8.GetBytes(body), null, false, headers);
         }
 
         public void AddBytes(
@@ -1694,10 +2461,13 @@ public sealed class PwaVerifierTests
             string url,
             string body,
             string contentType,
-            HttpStatusCode statusCode = HttpStatusCode.OK)
+            HttpStatusCode statusCode = HttpStatusCode.OK,
+            IReadOnlyDictionary<string, IReadOnlyList<string>>? headers = null)
         {
-            _responses[url.TrimEnd('/')] = new PwaHttpResponse(statusCode, contentType, Encoding.UTF8.GetBytes(body), null, true);
+            _responses[url.TrimEnd('/')] = new PwaHttpResponse(statusCode, contentType, Encoding.UTF8.GetBytes(body), null, true, headers);
         }
+
+        public void AddResponse(string url, PwaHttpResponse response) => _responses[url.TrimEnd('/')] = response;
 
         public void AddRedirect(
             string url,

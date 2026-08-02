@@ -113,7 +113,10 @@ public sealed partial class RepositoryReadmePolicyTests
             .Select(entry => entry.StartHerePath!)
             .ToArray();
 
-        Assert.Equal(34, requiredReadmes.Length);
+        Assert.Equal(35, requiredReadmes.Length);
+        Assert.Contains(
+            "ForgeTrust.AppSurface.Theming/README.md",
+            requiredReadmes);
         Assert.Contains(
             "Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md",
             requiredReadmes);

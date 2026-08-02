@@ -33,6 +33,16 @@
     --docs-color-surface-overlay-faint: rgba(5, 11, 23, 0.32);
     --docs-color-surface-code: #0a1322;
     --docs-color-surface-code-plain: #111d31;
+    --docs-color-syntax-keyword: #f9a8d4;
+    --docs-color-syntax-string: #86efac;
+    --docs-color-syntax-comment: #94a3b8;
+    --docs-color-syntax-number: #fca5a5;
+    --docs-color-syntax-type: #a5b4fc;
+    --docs-color-syntax-member: #f8fafc;
+    --docs-color-syntax-parameter: #fcd34d;
+    --docs-color-syntax-operator: #cbd5e1;
+    --docs-color-syntax-inserted: #86efac;
+    --docs-color-syntax-deleted: #fca5a5;
     --docs-color-border-muted: #1b2a43;
     --docs-color-border-muted-heavy: rgba(31, 45, 70, 0.96);
     --docs-color-border-code-plain: #263857;
@@ -2076,45 +2086,45 @@ body {
 }
 
 .docs-content .doc-token--keyword {
-    color: #f9a8d4;
+    color: var(--docs-color-syntax-keyword);
 }
 
 .docs-content .doc-token--string {
-    color: #86efac;
+    color: var(--docs-color-syntax-string);
 }
 
 .docs-content .doc-token--comment {
-    color: #94a3b8;
+    color: var(--docs-color-syntax-comment);
 }
 
 .docs-content .doc-token--number,
 .docs-content .doc-token--literal {
-    color: #fca5a5;
+    color: var(--docs-color-syntax-number);
 }
 
 .docs-content .doc-token--type {
-    color: #a5b4fc;
+    color: var(--docs-color-syntax-type);
 }
 
 .docs-content .doc-token--member {
-    color: #f8fafc;
+    color: var(--docs-color-syntax-member);
 }
 
 .docs-content .doc-token--parameter {
-    color: #fcd34d;
+    color: var(--docs-color-syntax-parameter);
 }
 
 .docs-content .doc-token--operator,
 .docs-content .doc-token--punctuation {
-    color: #cbd5e1;
+    color: var(--docs-color-syntax-operator);
 }
 
 .docs-content .doc-token--inserted {
-    color: #86efac;
+    color: var(--docs-color-syntax-inserted);
 }
 
 .docs-content .doc-token--deleted {
-    color: #fca5a5;
+    color: var(--docs-color-syntax-deleted);
 }
 
 .docs-content--markdown :not(pre) > code {

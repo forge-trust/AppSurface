@@ -37,6 +37,47 @@ The base class for the application bootstrapping logic. While `WebApp` uses a ge
 
 ## Features
 
+### Theme pairs quickstart
+
+AppSurface Web can render a native semantic light/dark pair for package-owned UI without resetting or styling application-authored components. First register a pair and the explicit Web adapter from a module or host service-registration path:
+
+```csharp
+using ForgeTrust.AppSurface.Web;
+using ForgeTrust.AppSurface.Theming;
+
+services.AddAppSurfaceTheming(options =>
+{
+    options.DefaultTheme = new AppSurfaceThemeId("appsurface");
+    options.DefaultMode = AppSurfaceThemeMode.System;
+    options.Pairs.Add(AppSurfaceThemePair.AppSurface());
+});
+services.AddAppSurfaceWebTheming();
+```
+
+Then import the TagHelpers and opt into the document root/head in the layout that owns them:
+
+```cshtml
+@addTagHelper *, ForgeTrust.AppSurface.Web
+<html appsurface-theme-root>
+<head>
+    <meta charset="utf-8" />
+    <appsurface-theme-head />
+    <link rel="stylesheet" href="~/css/site.css" />
+</head>
+```
+
+The root helper emits `data-as-theme`, `data-as-theme-mode`, a stable `data-as-theme-schema="1"` payload marker, and a `color-scheme` declaration. The head helper emits `<meta name="color-scheme">` followed by a deterministic `data-as-theme-critical` stylesheet before external stylesheets. `System` emits light values and a dark `prefers-color-scheme` branch; `Light` and `Dark` emit only their selected branch. Exactly one head payload is emitted per MVC request even if a layout or partial repeats the helper. Neither helper emits scripts, page-hiding CSS, storage access, or a switcher.
+
+The optional `nonce` attribute is copied only to the live inline critical style:
+
+```cshtml
+<appsurface-theme-head nonce="@Model.CspNonce" />
+```
+
+The host owns generating that per-response nonce and its `style-src` policy. Static exports use the same canonical payload without a nonce. If the root already declares `color-scheme`, AppSurface preserves it and marks `data-as-theme-color-scheme-conflict="true"`; correct the host declaration rather than relying on hidden precedence.
+
+Use the neutral package's [theme contract](../../ForgeTrust.AppSurface.Theming/README.md) for roles, validation, typed application extras, diagnostics, and deliberately deferred preference/tenant policy. Use the [Docs migration guide](../ForgeTrust.AppSurface.Docs/README.md#theme-pairs-migration) when the application hosts AppSurface Docs. RazorWire's generated-error boundary is documented in [Failed Form UX](../ForgeTrust.RazorWire/Docs/form-failures.md#appsurface-theme-pairs).
+
 ### PWA application badging
 
 AppSurface Web includes a default-off, privacy-safe browser rail for application-icon badge requests:
@@ -48,6 +89,24 @@ options.Pwa.Badging.Enabled = true;
 With `<appsurface:pwa-head />` in the page head, applications can call `AppSurface.Pwa.badging.set(count)` or `.clear()`. Successful calls resolve to `"accepted"` or `"unsupported"`; invalid counts and native failures reject with sanitized `ASPWAJS040`–`ASPWAJS042` errors. `"accepted"` means only that the native request resolved and never proves a visible icon badge. When offline or push already activates the shared worker, the same API is installed in that worker after normal service-worker activation. Badging alone does not create a worker, own an attention count, request permission, change the push payload, or add CLI verification.
 
 Start with the [PWA badging quick start](Docs/pwa-install.md#badging-only), then use the [executable accessible proof](../../examples/web-pwa-install/README.md). The full guide documents configuration, sanitized `ASPWAJS040`–`042` failures, PathBase, activation lag, privacy boundaries, and unsupported-browser behavior.
+
+### PWA push-readiness posture
+
+The base Web package exposes the optional `IPwaPushReadinessProvider` contribution point for privacy-safe, server-known push posture. A contributor may report only the active VAPID key identifier, a SHA-256 public-key fingerprint, and whether the package-owned route is mapped. Hosts without a provider can still pass worker/helper readiness with optional rail status `not-configured`. The canonical [push-readiness evidence contract](Docs/pwa-install.md#push-readiness-evidence) documents `ASPWA2xx` remediation, `Docs` links, redaction, and the boundary between server posture and browser/delivery state.
+
+Use the CLI explicitly when this evidence is needed:
+
+```bash
+mkdir -p artifacts
+
+appsurface pwa verify --surface push \
+  --base-url https://app.example.com \
+  --entry-path /account/resume \
+  --expect-push enabled \
+  --json > artifacts/pwa-push-readiness.json
+```
+
+This is readiness-posture evidence, not a browser compatibility, permission, subscription, scoring, or delivery proof. A nonzero CLI exit is authoritative even if a JSON artifact was produced.
 
 ### Health and Readiness Probes
 

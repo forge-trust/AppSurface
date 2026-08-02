@@ -98,6 +98,12 @@ internal static class PwaEndpointMapper
         var workerEnabled = options.IsWorkerEnabled;
         var workerPath = workerEnabled ? PwaPathBase.Add(request.PathBase, options.Worker.ServiceWorkerPath) : null;
         var diagnostics = PwaOptionsValidator.Validate(options).ToList();
+        var pushReadiness = EvaluatePushReadiness(httpContext);
+        if (pushReadiness.Diagnostic is not null)
+        {
+            diagnostics.Add(pushReadiness.Diagnostic);
+        }
+
         var isSecureContext = IsSecureInstallContext(request);
         if (!isSecureContext && (options.Enabled || options.IsWorkerEnabled))
         {
@@ -138,10 +144,93 @@ internal static class PwaEndpointMapper
             BadgingHelperPath: options.Badging.Enabled
                 ? PwaPathBase.Add(request.PathBase, options.Badging.HelperPath)
                 : null,
+            PushReadiness: pushReadiness.Document,
             Diagnostics: diagnostics
                 .Select(diagnostic => new PwaDiagnosticDocument(diagnostic.Code, diagnostic.Severity.ToString().ToLowerInvariant(), diagnostic.Message))
                 .ToArray());
     }
+
+    private static PwaPushReadinessEvaluation EvaluatePushReadiness(HttpContext httpContext)
+    {
+        IPwaPushReadinessProvider[] providers;
+        try
+        {
+            providers = httpContext.RequestServices
+                .GetServices<IPwaPushReadinessProvider>()
+                .ToArray();
+        }
+        catch
+        {
+            return PwaPushReadinessEvaluation.Unavailable();
+        }
+
+        if (providers.Length == 0)
+        {
+            return PwaPushReadinessEvaluation.NotConfigured();
+        }
+
+        if (providers.Length != 1)
+        {
+            return PwaPushReadinessEvaluation.Unavailable();
+        }
+
+        try
+        {
+            var readiness = providers[0].GetReadiness();
+            return readiness is not null && IsValidPushReadiness(readiness)
+                ? PwaPushReadinessEvaluation.Configured(readiness)
+                : PwaPushReadinessEvaluation.Unavailable();
+        }
+        catch
+        {
+            return PwaPushReadinessEvaluation.Unavailable();
+        }
+    }
+
+    private static bool IsValidPushReadiness(PwaPushReadiness readiness) =>
+        IsSafeKeyId(readiness.ActiveVapidKeyId)
+        && IsSha256Fingerprint(readiness.PublicKeyFingerprint);
+
+    private static bool IsSafeKeyId(string? value)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length > 64 || !IsAsciiAlphaNumeric(value[0]))
+        {
+            return false;
+        }
+
+        return value.Skip(1).All(character => IsAsciiAlphaNumeric(character) || character is '.' or '-' or '_');
+    }
+
+    private static bool IsSha256Fingerprint(string? value)
+    {
+        const string prefix = "sha256-";
+        if (value is null
+            || value.Length != prefix.Length + 43
+            || !value.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var encoded = value[prefix.Length..];
+        if (!encoded.All(IsBase64UrlCharacter))
+        {
+            return false;
+        }
+
+        var padded = encoded.Replace('-', '+').Replace('_', '/');
+        padded += new string('=', (4 - (padded.Length % 4)) % 4);
+        var decoded = Convert.FromBase64String(padded);
+        return decoded.Length == 32
+            && string.Equals(Convert.ToBase64String(decoded).TrimEnd('=').Replace('+', '-').Replace('/', '_'), encoded, StringComparison.Ordinal);
+    }
+
+    private static bool IsAsciiAlphaNumeric(char character) =>
+        character is >= 'a' and <= 'z'
+            or >= 'A' and <= 'Z'
+            or >= '0' and <= '9';
+
+    private static bool IsBase64UrlCharacter(char character) =>
+        IsAsciiAlphaNumeric(character) || character is '-' or '_';
 
     /// <summary>
     /// Composes the exact generated worker from a JSON configuration and capability-specific embedded sources.
@@ -385,6 +474,7 @@ internal sealed record PwaManifestIcon(
 /// <param name="RegistrationHelperPath">The active registration-helper path.</param>
 /// <param name="BadgingEnabled">Whether the application-icon badging helper is enabled.</param>
 /// <param name="BadgingHelperPath">The active PathBase-adjusted badging-helper path, or an explicit null when disabled.</param>
+/// <param name="PushReadiness">Versioned, privacy-safe server-known Web Push readiness evidence.</param>
 /// <param name="Diagnostics">Stable startup diagnostics.</param>
 internal sealed record PwaDiagnosticsDocument(
     bool Enabled,
@@ -400,9 +490,45 @@ internal sealed record PwaDiagnosticsDocument(
     string? RegistrationHelperPath,
     bool BadgingEnabled,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? BadgingHelperPath,
+    PwaPushReadinessDocument PushReadiness,
     IReadOnlyList<PwaDiagnosticDocument> Diagnostics);
 
 internal sealed record PwaDiagnosticDocument(string Code, string Severity, string Message);
+
+internal sealed record PwaPushReadinessDocument(
+    int SchemaVersion,
+    string ConfigurationStatus,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ActiveVapidKeyId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? PublicKeyFingerprint,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] bool? RouteMapped);
+
+internal sealed record PwaPushReadinessEvaluation(
+    PwaPushReadinessDocument Document,
+    PwaDiagnostic? Diagnostic)
+{
+    public static PwaPushReadinessEvaluation NotConfigured() =>
+        new(
+            new PwaPushReadinessDocument(1, "not-configured", null, null, null),
+            null);
+
+    public static PwaPushReadinessEvaluation Configured(PwaPushReadiness readiness) =>
+        new(
+            new PwaPushReadinessDocument(
+                1,
+                "configured",
+                readiness.ActiveVapidKeyId,
+                readiness.PublicKeyFingerprint,
+                readiness.RouteMapped),
+            null);
+
+    public static PwaPushReadinessEvaluation Unavailable() =>
+        new(
+            new PwaPushReadinessDocument(1, "unavailable", null, null, null),
+            new PwaDiagnostic(
+                "ASPWA028",
+                PwaDiagnosticSeverity.Warning,
+                "PWA push readiness evidence is unavailable."));
+}
 
 /// <summary>Defines the JSON-safe configuration consumed by embedded worker fragments.</summary>
 /// <param name="OfflineEnabled">Whether offline behavior is included.</param>

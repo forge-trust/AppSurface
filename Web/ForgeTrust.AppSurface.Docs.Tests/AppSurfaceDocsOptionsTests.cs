@@ -4,6 +4,7 @@ using ForgeTrust.AppSurface.Config;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Intelligence;
+using ForgeTrust.AppSurface.Theming;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -223,6 +224,22 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("#c4b5fd", options.Theme.Colors.VisitedLinkColor);
         Assert.Equal(AppSurfaceDocsThemeDensity.Compact, options.Theme.Layout.Density);
         Assert.Equal(AppSurfaceDocsThemeChrome.Compact, options.Theme.Layout.Chrome);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldPreserveAPreRegisteredThemeResolver()
+    {
+        var services = new ServiceCollection();
+        var pair = AppSurfaceThemePair.AppSurface();
+        var resolver = new TestThemeResolver(
+            new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.Light, pair.Light, pair.Dark));
+        services.AddSingleton<IAppSurfaceThemeResolver>(resolver);
+
+        services.AddAppSurfaceDocs();
+
+        Assert.Single(services, descriptor => descriptor.ServiceType == typeof(IAppSurfaceThemeResolver));
+        using var provider = services.BuildServiceProvider();
+        Assert.Same(resolver, provider.GetRequiredService<IAppSurfaceThemeResolver>());
     }
 
     [Fact]
@@ -3813,5 +3830,10 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Contains(
             result.Failures,
             failure => failure.Contains("Unsupported AppSurface Docs contributor last-updated mode", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private sealed class TestThemeResolver(AppSurfaceThemeResolution resolution) : IAppSurfaceThemeResolver
+    {
+        public AppSurfaceThemeResolution ResolveDefault() => resolution;
     }
 }

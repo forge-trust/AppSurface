@@ -4,6 +4,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
+- `ForgeTrust.AppSurface.Theming` and the explicit `ForgeTrust.AppSurface.Web` Razor adapter now provide immutable semantic theme pairs with native System/Light/Dark browser output. Docs is part of the MVP: its default `AppSurfaceDark` path can consume the shared pair while preserving its public density, chrome, Graphite compatibility, short-hex overrides, static published-tree output, and internal token ownership. RazorWire styling remains limited to generated form-error nodes and uses the nonce-bearing critical stylesheet under strict CSP. Package discovery, quickstart, diagnostics, Docs migration, test commands, and deliberate non-goals ship with the feature; user preference persistence, tenant selection, shared Graphite, remote packs, and adoption telemetry remain separate policy work.
 - Add merged public changes here as they land.
 
 ## Included in the next coordinated version
@@ -47,11 +48,22 @@ This is the living release note for the next coordinated AppSurface version afte
   remain outside this primitive.
 - [`ForgeTrust.AppSurface.Web` health and readiness probes](../Web/ForgeTrust.AppSurface.Web/README.md#health-and-readiness-probes) are now opt-in. New hosts avoid ASP.NET Core health-check registration and `/health` plus `/ready` endpoint mapping unless `WebOptions.Health.Enabled` is explicitly set to `true`; enabled probes also avoid general route-handler binding during startup. Hosts whose deployment or monitoring infrastructure consumes those probes must enable the shared flag; paths, readiness tags, response semantics, validation, and authorization behavior are unchanged.
 - [`ForgeTrust.RazorWire`](../Web/ForgeTrust.RazorWire/README.md#choose-who-supplies-turbo) upgrades its package-owned Turbo UMD payload from 8.0.12 to 8.0.23 while preserving the existing `Bundled`, same-origin `CustomPath`, and `HostManaged` runtime-source contract. Static CDN and hybrid exports continue to materialize the exact bundled runtime.
+- [`ForgeTrust.AppSurface.Web`](../Web/ForgeTrust.AppSurface.Web/README.md) and
+  [`ForgeTrust.AppSurface.Web.Push`](../Web/ForgeTrust.AppSurface.Web.Push/README.md) now provide privacy-safe,
+  schema-versioned PWA push-readiness posture. Web diagnostics contain either a fixed, redacted VAPID key identifier,
+  SHA-256 public-key fingerprint, and package-route mapping bit, or an explicit unavailable/not-configured state.
+  The optional Push package contributes when validated active VAPID configuration is present and reports route mapping
+  as a separate readiness bit; no private keys, endpoints, subscriptions, payloads, or provider exception text are published.
+- [`appsurface pwa verify`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-pwa-verify) now preserves its
+  schema-v2 install default while `--surface push|all` emits schema-v3 server-known readiness evidence. It verifies
+  worker/helper discovery, direct JavaScript responses, headers, and cache behavior, and clearly marks browser,
+  permission, subscription, notification, and delivery observations as not evaluated.
 - [`ForgeTrust.AppSurface.Web` named canaries](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints)
   now include a bounded protected aggregate snapshot at `GET /_appsurface/canaries`. Operators can select registered
   canaries by exact name or durable tag, receive ordinal partial outcomes under explicit concurrency and deadline caps,
   and parse a privacy-safe envelope with fixed telemetry. The feature does not add triggers, retries, polling, readiness
   effects, or authorization-policy ownership; hosts retain those decisions.
+- Add release-facing changes here.
 
 ## Migration watch
 

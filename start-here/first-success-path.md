@@ -77,6 +77,42 @@ Hello from AppSurface!
 
 That proves the package-consumer path: a fresh ASP.NET Core app can install `ForgeTrust.AppSurface.Web`, start through `WebApp<TModule>`, and map a first endpoint without cloning this repository.
 
+## Theme Pairs: Five-Minute Path
+
+After the package-first path runs, add package-owned light/dark support without restyling the application UI. The Web package carries the neutral theming dependency.
+
+In your module's `ConfigureServices`, register the built-in pair and the explicit Web adapter:
+
+```csharp
+using ForgeTrust.AppSurface.Theming;
+using ForgeTrust.AppSurface.Web;
+
+public void ConfigureServices(StartupContext context, IServiceCollection services)
+{
+    services.AddAppSurfaceTheming(options =>
+    {
+        options.DefaultTheme = new AppSurfaceThemeId("appsurface");
+        options.DefaultMode = AppSurfaceThemeMode.System;
+        options.Pairs.Add(AppSurfaceThemePair.AppSurface());
+    });
+    services.AddAppSurfaceWebTheming();
+}
+```
+
+Then enable the two Razor opt-ins in the layout that owns your document root:
+
+```cshtml
+@addTagHelper *, ForgeTrust.AppSurface.Web
+<html appsurface-theme-root>
+<head>
+    <meta charset="utf-8" />
+    <appsurface-theme-head />
+    <link rel="stylesheet" href="~/css/site.css" />
+</head>
+```
+
+Expected result: browser-native controls and AppSurface package-owned UI follow the operating system before external CSS loads. `System` is browser CSS selection; no cookie, storage, request lookup, or switcher is added. Choose `Light` or `Dark` for a host-fixed branch. Continue with the [Web reference](../Web/ForgeTrust.AppSurface.Web/README.md#theme-pairs-quickstart) for CSP, static output, application extras, and diagnostics.
+
 ## What This Example Shows
 
 Both paths use `WebApp<TModule>.RunAsync(...)` and map the root endpoint from web options. The repo example also contributes its own module endpoint at `/module`.

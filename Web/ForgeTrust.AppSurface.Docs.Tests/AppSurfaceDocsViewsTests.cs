@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using ForgeTrust.AppSurface.Caching;
@@ -9,6 +10,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Docs.ViewComponents;
 using ForgeTrust.AppSurface.Intelligence;
+using ForgeTrust.AppSurface.Web.Theming;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -80,6 +82,39 @@ public class AppSurfaceDocsViewsTests
         var html = await RenderDocsViewAsync(services, "Index", c => c.Index());
 
         Assert.Contains("href=\"/css/site.gen.css", html);
+    }
+
+    [Fact]
+    public async Task Layout_ShouldApplyTheHostCspNonceToBothLiveThemeStyles()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+
+        var html = await RenderDocsViewAsync(
+            services,
+            "Index",
+            controller => controller.Index(),
+            httpContext => httpContext.Items[AppSurfaceThemeCspNonce.HttpContextItemKey] = "docs-nonce");
+
+        Assert.Contains("<style data-as-theme-critical nonce=\"docs-nonce\">", html, StringComparison.Ordinal);
+        Assert.Contains("<style data-docs-theme-critical nonce=\"docs-nonce\">", html, StringComparison.Ordinal);
+        Assert.Equal(2, Regex.Matches(html, "nonce=\"docs-nonce\"").Count);
+    }
+
+    [Fact]
+    public async Task Layout_ShouldRenderOneCanonicalThemePayload()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+
+        var html = await RenderDocsViewAsync(services, "Index", controller => controller.Index());
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+
+        Assert.Single(document.QuerySelectorAll("html[data-as-theme='appsurface']"));
+        Assert.Equal("dark", document.DocumentElement?.GetAttribute("data-as-theme-mode"));
+        Assert.Equal("1", document.DocumentElement?.GetAttribute("data-as-theme-schema"));
+        Assert.Single(document.QuerySelectorAll("meta[name='color-scheme']"));
+        Assert.Single(document.QuerySelectorAll("style[data-as-theme-critical]"));
+        var docsCriticalStyle = Assert.Single(document.QuerySelectorAll("style[data-docs-theme-critical]"));
+        Assert.Contains("--docs-color-surface-canvas:var(--as-canvas);", docsCriticalStyle.TextContent, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -4785,7 +4820,7 @@ public class AppSurfaceDocsViewsTests
         Assembly? rootModuleAssembly = null,
         Action<IServiceCollection>? configureServices = null)
     {
-        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var repoRoot = FindRepoRoot();
         var webRoot = Path.Join(repoRoot, "Web", "ForgeTrust.AppSurface.Docs");
 
         var configValues = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
@@ -4827,7 +4862,7 @@ public class AppSurfaceDocsViewsTests
 
     private static string ReadLayoutMarkup()
     {
-        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var repoRoot = FindRepoRoot();
         var layoutPath = Path.Combine(
             repoRoot,
             "Web",
@@ -4841,7 +4876,7 @@ public class AppSurfaceDocsViewsTests
 
     private static string ReadSearchClientMarkup()
     {
-        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var repoRoot = FindRepoRoot();
         var searchClientPath = Path.Join(
             repoRoot,
             "Web",
@@ -4862,7 +4897,7 @@ public class AppSurfaceDocsViewsTests
 
     private static string ReadOutlineClientMarkup()
     {
-        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var repoRoot = FindRepoRoot();
         var outlineClientPath = Path.Combine(
             repoRoot,
             "Web",
@@ -4898,10 +4933,13 @@ public class AppSurfaceDocsViewsTests
 
     private static string GetDocsProjectRoot()
     {
-        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var repoRoot = FindRepoRoot();
 
         return Path.Join(repoRoot, "Web", "ForgeTrust.AppSurface.Docs");
     }
+
+    private static string FindRepoRoot([CallerFilePath] string testSourcePath = "") =>
+        TestPathUtils.FindRepoRoot(testSourcePath);
 
     private static bool ContainsClass(string line, string className)
     {

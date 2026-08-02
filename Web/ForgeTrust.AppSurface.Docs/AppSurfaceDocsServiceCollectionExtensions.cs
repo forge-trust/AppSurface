@@ -3,6 +3,8 @@ using ForgeTrust.AppSurface.Config;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Intelligence;
+using ForgeTrust.AppSurface.Theming;
+using ForgeTrust.AppSurface.Web;
 using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -86,6 +88,12 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     /// distinguish the package stream from application streams. Built-in RazorWire allow-all/deny-all authorizers are not
     /// considered custom authorization for that docs-owned stream. Call this method once during startup; repeated
     /// registration can nest authorizer wrappers and obscure the intended channel policy.
+    /// </para>
+    /// <para>
+    /// When no <see cref="IAppSurfaceThemeResolver"/> is registered, this method adds the built-in AppSurface pair
+    /// with the legacy <see cref="AppSurfaceThemeMode.Dark"/> default. It always registers the Web theme-document
+    /// services so the package layout can emit the root and head theme integration. Register a host-selected pair and
+    /// resolver before this method to use System, Light, or a different Dark pair.
     /// </para>
     /// <para>
     /// <c>AppSurfaceDocs:Diagnostics:OperatorReadPolicy</c> names an optional host-owned ASP.NET Core authorization
@@ -253,6 +261,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
 
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IValidateOptions<AppSurfaceDocsOptions>, AppSurfaceDocsOptionsValidator>());
+        EnsureThemePairServices(services);
         services.TryAddSingleton(sp => sp.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value);
         services.AddConfigAuditKey<AppSurfaceDocsOptions>(AppSurfaceDocsOptions.SectionName);
         services.AddConfigAuditKey<AppSurfaceDocsIdentityOptions>($"{AppSurfaceDocsOptions.SectionName}.Identity");
@@ -320,6 +329,21 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                 provider => new AppSurfaceDocsHarvestChannelAuthorizer(
                     provider.GetRequiredService<IRazorWireStreamAuthorizer>()),
                 lifetime));
+    }
+
+    private static void EnsureThemePairServices(IServiceCollection services)
+    {
+        if (!services.Any(descriptor => descriptor.ServiceType == typeof(IAppSurfaceThemeResolver)))
+        {
+            services.AddAppSurfaceTheming(
+                options =>
+                {
+                    options.DefaultMode = AppSurfaceThemeMode.Dark;
+                    options.Pairs.Add(AppSurfaceThemePair.AppSurface());
+                });
+        }
+
+        services.AddAppSurfaceWebTheming();
     }
 
     private static ServiceLifetime GetHarvestAuthorizerLifetime(

@@ -2400,11 +2400,11 @@ public sealed class CoverageRunTests
         Assert.True(result.Success);
         var tests = runner.Commands.Where(command => command.Arguments.FirstOrDefault() == "test").ToArray();
         Assert.Equal(3, tests.Length);
-        Assert.Contains(first, tests[..2].Select(command => command.Arguments[1]));
-        Assert.Contains(second, tests[..2].Select(command => command.Arguments[1]));
-        Assert.Equal(browser, tests[2].Arguments[1]);
-        Assert.True(tests[2].StartedAt >= tests[0].FinishedAt);
-        Assert.True(tests[2].StartedAt >= tests[1].FinishedAt);
+        var browserTest = Assert.Single(tests, command => command.Arguments[1] == browser);
+        var parallelTests = tests.Where(command => command.Arguments[1] != browser).ToArray();
+        Assert.Equal([first, second], parallelTests.Select(command => command.Arguments[1]).OrderBy(path => path));
+        Assert.True(parallelTests.Max(command => command.StartedTick) < parallelTests.Min(command => command.FinishedTick));
+        Assert.All(parallelTests, command => Assert.True(browserTest.StartedTick >= command.FinishedTick));
         Assert.Contains("(exclusive)", console.ReadOutputString(), StringComparison.Ordinal);
     }
 
@@ -2431,7 +2431,7 @@ public sealed class CoverageRunTests
         Assert.True(result.Success);
         var tests = runner.Commands.Where(command => command.Arguments.FirstOrDefault() == "test").ToArray();
         Assert.Equal([first, second], tests.Select(command => command.Arguments[1]).ToArray());
-        Assert.True(tests[1].StartedAt >= tests[0].FinishedAt);
+        Assert.True(tests[1].StartedTick >= tests[0].FinishedTick);
     }
 
     [Fact]
@@ -5130,7 +5130,7 @@ public sealed class CoverageRunTests
             var workingDirectory = request.WorkingDirectory;
             var outputFile = request.OutputFile;
             var outputObserver = request.OutputObserver;
-            var command = new RecordedCommand(fileName, arguments.ToArray(), workingDirectory, outputFile, DateTimeOffset.UtcNow);
+            var command = new RecordedCommand(fileName, arguments.ToArray(), workingDirectory, outputFile, Stopwatch.GetTimestamp());
             lock (_commandsLock)
             {
                 _commands.Add(command);
@@ -5323,16 +5323,16 @@ public sealed class CoverageRunTests
         IReadOnlyList<string> Arguments,
         string WorkingDirectory,
         string? OutputFile,
-        DateTimeOffset StartedAt)
+        long StartedTick)
     {
         public string FileName { get; } = FileName;
         public IReadOnlyList<string> Arguments { get; } = Arguments;
         public string WorkingDirectory { get; } = WorkingDirectory;
         public string? OutputFile { get; } = OutputFile;
-        public DateTimeOffset StartedAt { get; } = StartedAt;
-        public DateTimeOffset FinishedAt { get; private set; }
+        public long StartedTick { get; } = StartedTick;
+        public long FinishedTick { get; private set; }
 
-        public void Finish() => FinishedAt = DateTimeOffset.UtcNow;
+        public void Finish() => FinishedTick = Stopwatch.GetTimestamp();
     }
 
     private sealed class TempDirectory : IDisposable
