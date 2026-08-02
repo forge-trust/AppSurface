@@ -5,6 +5,22 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 public sealed class AppSurfaceDocsPublishedTreeContentRewriterTests
 {
     [Fact]
+    public void RewriteHtml_ShouldKeepFrozenCurrentPointerTargetWithinEachMountedDocsTree()
+    {
+        const string currentTreePointer = "<a href=\"/docs/releases/v1.2.4\">Current</a><a href=\"/docs/releases/current\">Pointer</a>";
+        const string historicalTreePointer = "<a href=\"/docs/releases/v1.2.3\">Historical</a><a href=\"/docs/releases/current\">Pointer</a>";
+
+        var current = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(currentTreePointer, "/docs");
+        var historical = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(historicalTreePointer, "/docs/v/1.2.3");
+
+        Assert.Contains("href=\"/docs/releases/v1.2.4\"", current);
+        Assert.Contains("href=\"/docs/releases/current\"", current);
+        Assert.Contains("href=\"/docs/v/1.2.3/releases/v1.2.3\"", historical);
+        Assert.Contains("href=\"/docs/v/1.2.3/releases/current\"", historical);
+        Assert.DoesNotContain("href=\"/docs/releases/current\"", historical, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RewriteHtml_ShouldRebaseStableDocsLinks_AndPreserveArchiveLink()
     {
         const string html =

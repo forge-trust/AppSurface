@@ -12,8 +12,9 @@ internal static class ReleaseReportRenderer
     /// <remarks>
     /// The report shape is stable for workflow comments and maintainer review: <c># Release readiness report</c>, a summary bullet list,
     /// <c>## Generated files</c>, optional <c>## Release evidence bundle</c>, <c>## Errors</c>, then <c>## Warnings</c>.
-    /// Empty diagnostics render as <c>- None</c>. Generated file paths and diagnostic codes are wrapped in inline code; diagnostic
-    /// text is not escaped beyond normal Markdown rendering. Consumers should key off headings and diagnostic codes rather than line numbers.
+    /// Empty diagnostics render as <c>- None</c>. Each diagnostic renders its complete severity/code/problem/cause/fix/docs envelope.
+    /// Generated file paths and diagnostic codes are wrapped in inline code; diagnostic text is not escaped beyond normal Markdown
+    /// rendering. Consumers should key off headings and diagnostic codes rather than line numbers.
     /// </remarks>
     internal static string RenderCheck(ReleaseCheckResult result)
     {
@@ -44,8 +45,8 @@ internal static class ReleaseReportRenderer
     /// <param name="result">Preparation result.</param>
     /// <returns>Markdown report.</returns>
     /// <remarks>
-    /// Preparation reports begin with the check report contract, then append a manual review gate, optional evidence summary, and either
-    /// <c>## Dry-run plan</c> or <c>## Files written</c> based on <see cref="ReleasePreparationResult.DryRun"/>.
+    /// Preparation reports begin with the check report contract, then append a manual review gate, optional evidence summary, either
+    /// <c>## Dry-run plan</c> or <c>## Files written</c> based on <see cref="ReleasePreparationResult.DryRun"/>, and structured recovery guidance.
     /// Paths are repository-relative bullets. This distinction is the only dry-run marker in the report, so callers that publish the report
     /// should preserve that heading.
     /// </remarks>
@@ -64,7 +65,31 @@ internal static class ReleaseReportRenderer
             builder.AppendLine($"- `{path}`");
         }
 
+        AppendPreparationRecovery(builder, result);
         return builder.ToString();
+    }
+
+    private static void AppendPreparationRecovery(StringBuilder builder, ReleasePreparationResult result)
+    {
+        builder.AppendLine();
+        builder.AppendLine("## Preparation recovery");
+        if (result.DryRun)
+        {
+            builder.AppendLine("- State: dry run; no preparation artifacts were written.");
+        }
+        else
+        {
+            builder.AppendLine("- State: preparation writes artifacts sequentially; a failed run may leave a partial generated set.");
+        }
+
+        builder.AppendLine("- Generated artifacts:");
+        foreach (var path in result.PlannedOrWrittenFiles)
+        {
+            builder.AppendLine($"  - `{path}`");
+        }
+
+        builder.AppendLine("- Recovery: stop, inspect `git status --short`, and preserve unrelated work. Remove or restore only the generated artifacts listed above before retrying.");
+        builder.AppendLine("- Safe rollback validation: run `git diff --check`, confirm the listed artifacts are absent or match the pre-run state, then rerun `./eng/release check --version " + result.Check.Version + " --allow-existing-targets` before another prepare attempt.");
     }
 
     private static void AppendEvidenceSummary(StringBuilder builder, ReleaseEvidenceSummary? summary)
@@ -103,7 +128,12 @@ internal static class ReleaseReportRenderer
 
         foreach (var diagnostic in diagnostics)
         {
-            builder.AppendLine($"- `{diagnostic.Code}`: {diagnostic.Problem}");
+            builder.AppendLine($"- Severity: `{diagnostic.Severity}`");
+            builder.AppendLine($"  - Code: `{diagnostic.Code}`");
+            builder.AppendLine($"  - Problem: {diagnostic.Problem}");
+            builder.AppendLine($"  - Cause: {diagnostic.Cause}");
+            builder.AppendLine($"  - Fix: {diagnostic.Fix}");
+            builder.AppendLine($"  - Docs: {diagnostic.Docs}");
         }
     }
 }

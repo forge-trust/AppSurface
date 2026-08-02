@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json.Serialization;
+using ForgeTrust.AppSurface.ReleaseContracts;
 
 namespace ForgeTrust.AppSurface.Release;
 
@@ -78,6 +79,45 @@ internal static class ReleaseEvidence
     }
 
     /// <summary>
+    /// Builds schema-v2 evidence for a release whose package links use the frozen coordinated current pointer.
+    /// </summary>
+    /// <param name="workspace">Repository workspace that supplies the canonical artifact paths.</param>
+    /// <param name="version">Version represented by the generated evidence.</param>
+    /// <param name="releaseClassification">Release channel, either <c>prerelease</c> or <c>stable</c>.</param>
+    /// <param name="date">Release date recorded in the manifest and evidence.</param>
+    /// <param name="contentSourceCommit">Preparation base commit, when it is available.</param>
+    /// <param name="releaseNoteContent">Versioned release-note bytes included in the evidence digest set.</param>
+    /// <param name="releaseSidecarContent">Versioned release-note metadata bytes included in the evidence digest set.</param>
+    /// <param name="releaseManifestContent">Versioned V2 manifest bytes included in the evidence digest set.</param>
+    /// <param name="currentReleaseContent">Frozen tree-local current pointer bytes. Required for schema V2; schema V1 does not use this artifact.</param>
+    /// <param name="currentReleaseSidecarContent">Frozen tree-local current pointer metadata bytes. Required for schema V2; schema V1 does not use this artifact.</param>
+    /// <param name="coordinatedPackageReleaseNoteResolutions">Coordinated package links resolved through the frozen current pointer.</param>
+    internal static ReleaseEvidenceBundleV2 BuildDraftV2(
+        ReleaseWorkspace workspace,
+        SemVer version,
+        string releaseClassification,
+        DateOnly date,
+        string? contentSourceCommit,
+        string releaseNoteContent,
+        string releaseSidecarContent,
+        string releaseManifestContent,
+        string currentReleaseContent,
+        string currentReleaseSidecarContent,
+        IReadOnlyList<CoordinatedPackageReleaseNoteResolution> coordinatedPackageReleaseNoteResolutions) =>
+        ReleaseEvidenceV2.BuildDraft(
+            workspace,
+            version,
+            releaseClassification,
+            date,
+            contentSourceCommit,
+            releaseNoteContent,
+            releaseSidecarContent,
+            releaseManifestContent,
+            currentReleaseContent,
+            currentReleaseSidecarContent,
+            coordinatedPackageReleaseNoteResolutions);
+
+    /// <summary>
     /// Validates a checked-in release evidence bundle in the current worktree.
     /// </summary>
     internal static async Task<ReleaseEvidenceValidationResult> ValidatePreparedAsync(
@@ -100,11 +140,42 @@ internal static class ReleaseEvidence
             return new ReleaseEvidenceValidationResult(null, diagnostics, null);
         }
 
+        var evidenceJson = await File.ReadAllTextAsync(evidencePath, cancellationToken);
+        if (!TryReadSchema(evidenceJson, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle", out var schema))
+        {
+            return new ReleaseEvidenceValidationResult(null, diagnostics, null);
+        }
+
+        if (string.Equals(schema, ReleaseEvidenceV2.Schema, StringComparison.Ordinal))
+        {
+            var v2Result = await ReleaseEvidenceV2.ValidatePreparedAsync(
+                workspace,
+                version,
+                releaseClassification,
+                contentSourceCommit,
+                evidenceJson,
+                cancellationToken);
+            return v2Result with
+            {
+                Diagnostics = diagnostics.Concat(v2Result.Diagnostics).ToArray()
+            };
+        }
+
+        if (!string.Equals(schema, Schema, StringComparison.Ordinal))
+        {
+            diagnostics.Add(ReleaseDiagnostic.Error(
+                "release-evidence-schema-invalid",
+                "Release evidence bundle has an unsupported schema.",
+                $"Expected `{Schema}` or `{ReleaseEvidenceV2.Schema}`, but found `{schema}`.",
+                "Regenerate the release evidence bundle with the current release tool.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle"));
+            return new ReleaseEvidenceValidationResult(null, diagnostics, null);
+        }
+
         ReleaseEvidenceBundle? bundle = null;
         try
         {
-            var json = await File.ReadAllTextAsync(evidencePath, cancellationToken);
-            bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundle>(json, ReleaseJson.Options);
+            bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundle>(evidenceJson, ReleaseJson.Options);
         }
         catch (JsonException ex)
         {
@@ -147,6 +218,16 @@ internal static class ReleaseEvidence
     /// <summary>
     /// Validates release evidence read from an annotated tag.
     /// </summary>
+    /// <param name="version">Version claimed by the annotated tag.</param>
+    /// <param name="releaseClassification">Release channel expected for the tagged evidence.</param>
+    /// <param name="tag">Annotated tag name.</param>
+    /// <param name="tagCommit">Commit resolved from the annotated tag.</param>
+    /// <param name="releaseNoteJson">Tagged release-note content.</param>
+    /// <param name="releaseSidecarJson">Tagged release-note metadata content.</param>
+    /// <param name="releaseManifestJson">Tagged release-manifest content.</param>
+    /// <param name="evidenceJson">Tagged release-evidence content.</param>
+    /// <param name="currentReleaseContent">Optional frozen current-pointer content for schema V1; required with the sidecar for schema V2.</param>
+    /// <param name="currentReleaseSidecarContent">Optional frozen current-pointer metadata for schema V1; required with the pointer for schema V2.</param>
     internal static ReleaseEvidenceValidationResult ValidateTag(
         SemVer version,
         string releaseClassification,
@@ -155,9 +236,53 @@ internal static class ReleaseEvidence
         string releaseNoteJson,
         string releaseSidecarJson,
         string releaseManifestJson,
-        string evidenceJson)
+        string evidenceJson,
+        string? currentReleaseContent = null,
+        string? currentReleaseSidecarContent = null)
     {
         var diagnostics = new List<ReleaseDiagnostic>();
+        if (!TryReadSchema(evidenceJson, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#publish", out var schema))
+        {
+            return new ReleaseEvidenceValidationResult(null, diagnostics, null);
+        }
+
+        if (string.Equals(schema, ReleaseEvidenceV2.Schema, StringComparison.Ordinal))
+        {
+            if (currentReleaseContent is null || currentReleaseSidecarContent is null)
+            {
+                diagnostics.Add(ReleaseDiagnostic.Error(
+                    "release-evidence-current-pointer-missing",
+                    "V2 release evidence requires the frozen current pointer from the annotated tag.",
+                    $"{PackageReleaseLink.CoordinatedReleaseNotesPath} or {PackageReleaseLink.CoordinatedReleaseSidecarPath} was not loaded from the tag.",
+                    "Include both frozen current-pointer artifacts in the tagged release.",
+                    "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
+                return new ReleaseEvidenceValidationResult(null, diagnostics, null);
+            }
+
+            return ReleaseEvidenceV2.ValidateTag(
+                version,
+                releaseClassification,
+                tag,
+                tagCommit,
+                releaseNoteJson,
+                releaseSidecarJson,
+                releaseManifestJson,
+                currentReleaseContent,
+                currentReleaseSidecarContent,
+                evidenceJson);
+        }
+
+        if (!string.Equals(schema, Schema, StringComparison.Ordinal))
+        {
+            diagnostics.Add(ReleaseDiagnostic.Error(
+                "release-evidence-schema-invalid",
+                "Release evidence bundle has an unsupported schema.",
+                $"Expected `{Schema}` or `{ReleaseEvidenceV2.Schema}`, but found `{schema}`.",
+                "Regenerate the release evidence bundle with the current release tool.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
+            return new ReleaseEvidenceValidationResult(null, diagnostics, null);
+        }
+
         ReleaseEvidenceBundle? bundle = null;
         try
         {
@@ -230,10 +355,73 @@ internal static class ReleaseEvidence
         return JsonSerializer.Serialize(bundle, ReleaseJson.Options) + Environment.NewLine;
     }
 
+    /// <summary>
+    /// Serializes a schema-v2 coordinated release evidence bundle.
+    /// </summary>
+    internal static string Serialize(ReleaseEvidenceBundleV2 bundle) => ReleaseEvidenceV2.Serialize(bundle);
+
+    /// <summary>
+    /// Determines whether a raw evidence document declares schema v2 without deserializing it as a v1 object.
+    /// </summary>
+    internal static bool IsV2(string evidenceJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(evidenceJson);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("schema", out var schema)
+                && schema.ValueKind == JsonValueKind.String
+                && string.Equals(schema.GetString(), ReleaseEvidenceV2.Schema, StringComparison.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     internal static string ComputeSha256Hex(string content)
     {
         var bytes = Encoding.UTF8.GetBytes(content);
         return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+    }
+
+    private static bool TryReadSchema(
+        string evidenceJson,
+        List<ReleaseDiagnostic> diagnostics,
+        string docsPath,
+        [NotNullWhen(true)] out string? schema)
+    {
+        schema = null;
+        try
+        {
+            using var document = JsonDocument.Parse(evidenceJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("schema", out var schemaProperty)
+                || schemaProperty.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(schemaProperty.GetString()))
+            {
+                diagnostics.Add(ReleaseDiagnostic.Error(
+                    "release-evidence-schema-invalid",
+                    "Release evidence bundle does not declare a supported schema.",
+                    "The JSON root must be an object with a non-empty schema string.",
+                    "Regenerate release evidence with the current release tool.",
+                    docsPath));
+                return false;
+            }
+
+            schema = schemaProperty.GetString()!;
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            diagnostics.Add(ReleaseDiagnostic.Error(
+                "release-evidence-schema-invalid",
+                "Release evidence bundle could not be parsed.",
+                ex.Message,
+                "Regenerate release evidence with the current release tool.",
+                docsPath));
+            return false;
+        }
     }
 
     private static IEnumerable<ReleaseDiagnostic> ValidateEvidenceFileSet(ReleaseWorkspace workspace, SemVer version)
@@ -418,6 +606,34 @@ internal static class ReleaseEvidence
         List<ReleaseDiagnostic> diagnostics,
         string docsPath)
     {
+        try
+        {
+            using var document = JsonDocument.Parse(releaseManifestJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("schema", out var schema)
+                || schema.ValueKind != JsonValueKind.String
+                || !string.Equals(schema.GetString(), "appsurface-release-manifest-v1", StringComparison.Ordinal))
+            {
+                diagnostics.Add(ReleaseDiagnostic.Error(
+                    "release-evidence-release-manifest-schema-invalid",
+                    "V1 release evidence requires an appsurface-release-manifest-v1 release manifest.",
+                    "The manifest schema is missing, unknown, or belongs to a newer release contract.",
+                    "Pair historical V1 evidence only with its original V1 release manifest.",
+                    docsPath));
+                return;
+            }
+        }
+        catch (JsonException ex)
+        {
+            diagnostics.Add(ReleaseDiagnostic.Error(
+                "release-evidence-release-manifest-schema-invalid",
+                "Release evidence could not parse the release manifest.",
+                ex.Message,
+                "Regenerate the release JSON with the release tool instead of hand-editing it.",
+                docsPath));
+            return;
+        }
+
         ReleaseManifest? manifest;
         try
         {

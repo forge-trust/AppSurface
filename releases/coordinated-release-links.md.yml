@@ -1,0 +1,14 @@
+title: Coordinated release links
+summary: Maintainer guide for frozen tree-local coordinated package release pointers.
+page_type: guide
+nav_group: Releases
+order: 12
+breadcrumbs:
+  - Releases
+  - Coordinated release links
+trust:
+  status: Maintainer guidance
+  summary: Defines coordinated, explicit, held, and proof-host release-link choices for the package index.
+  freshness: Update this guide when package-index or release-preparation link behavior changes.
+  change_scope: Repository release metadata and exported documentation archives.
+  archive: Historical documentation trees preserve their generated current pointers.

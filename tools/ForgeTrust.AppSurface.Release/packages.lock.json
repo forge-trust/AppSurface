@@ -256,6 +256,9 @@
           "Microsoft.Extensions.Logging.Console": "[10.0.8, )"
         }
       },
+      "forgetrust.appsurface.releasecontracts": {
+        "type": "Project"
+      },
       "CliWrap": {
         "type": "CentralTransitive",
         "requested": "[3.10.1, )",

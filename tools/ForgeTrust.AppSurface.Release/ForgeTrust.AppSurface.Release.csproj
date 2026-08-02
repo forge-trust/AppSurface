@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Console\ForgeTrust.AppSurface.Console\ForgeTrust.AppSurface.Console.csproj" />
+    <ProjectReference Include="..\ForgeTrust.AppSurface.ReleaseContracts\ForgeTrust.AppSurface.ReleaseContracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

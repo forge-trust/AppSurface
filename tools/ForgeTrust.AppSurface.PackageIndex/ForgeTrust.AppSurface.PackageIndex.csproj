@@ -13,6 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\ForgeTrust.AppSurface.ReleaseContracts\ForgeTrust.AppSurface.ReleaseContracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="CliWrap" />
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>

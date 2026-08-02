@@ -105,14 +105,14 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
 
         Assert.Equal("Releases", (await page.TextContentAsync("h1"))?.Trim());
         Assert.Contains("Release contract", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("v0.2.0-preview.5", await page.InnerTextAsync(".docs-content"), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Current coordinated release", await page.InnerTextAsync(".docs-content"), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Unreleased", await page.InnerTextAsync(".docs-content"), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("living proof artifact", await page.InnerTextAsync(".docs-content"), StringComparison.OrdinalIgnoreCase);
 
-        await page.Locator(".docs-content a[href='/docs/releases/v0.2.0-preview.5']").First.ClickAsync();
-        await WaitForPathAsync(page, "/docs/releases/v0.2.0-preview.5");
+        await page.Locator(".docs-content a[href='/docs/releases/current']").First.ClickAsync();
+        await WaitForPathAsync(page, "/docs/releases/current");
         await page.WaitForFunctionAsync(
-            "() => document.querySelector('h1')?.textContent?.trim() === 'Release 0.2.0-preview.5'",
+            "() => document.querySelector('h1')?.textContent?.trim() === 'Current coordinated release'",
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
         await page.WaitForSelectorAsync(".docs-trust-bar", new PageWaitForSelectorOptions
@@ -121,6 +121,23 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
             State = WaitForSelectorState.Visible
         });
 
+        Assert.Equal("Current coordinated release", (await page.TextContentAsync("h1"))?.Trim());
+        Assert.Contains("This documentation tree represents", await page.InnerTextAsync(".docs-content"), StringComparison.OrdinalIgnoreCase);
+
+        await page.Locator(".docs-content a[href^='/docs/releases/v']").First.ClickAsync();
+        await page.WaitForFunctionAsync(
+            "() => /^Release \\d/.test(document.querySelector('h1')?.textContent?.trim() ?? '')",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+        await page.WaitForSelectorAsync(".docs-trust-bar", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+        Assert.Contains("Tagged", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/releases/v0.2.0-preview.5");
+        await WaitForPathAsync(page, "/docs/releases/v0.2.0-preview.5");
         Assert.Equal("Release 0.2.0-preview.5", (await page.TextContentAsync("h1"))?.Trim());
         Assert.Contains("Tagged", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
 

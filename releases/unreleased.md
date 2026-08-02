@@ -26,6 +26,7 @@ This is the living release note for the next coordinated AppSurface version afte
   canaries by exact name or durable tag, receive ordinal partial outcomes under explicit concurrency and deadline caps,
   and parse a privacy-safe envelope with fixed telemetry. The feature does not add triggers, retries, polling, readiness
   effects, or authorization-policy ownership; hosts retain those decisions.
+- Coordinated package documentation now follows the release that was current when that documentation tree was published: current docs use the stable [`releases/current.md`](./current.md) pointer, while historical trees retain their original versioned release notes. The [release tool](../tools/ForgeTrust.AppSurface.Release/README.md) records and validates that contract through [versioned manifest and evidence V2 artifacts](./README.md#release-evidence-bundle), preserving V1 evidence compatibility and rejecting incomplete, conflicting, or unknown package release-link declarations.
 - Add release-facing changes here.
 
 ## Migration watch
