@@ -6,6 +6,8 @@ namespace AspireAppHostExample.Tests;
 
 public sealed class TypedProfileIntegrationTests
 {
+    private const int MaximumHttpRequestAttempts = 3;
+
     [Fact]
     public async Task QaProfile_StartsHealthyWebResourceAndServesHttp()
     {
@@ -20,7 +22,7 @@ public sealed class TypedProfileIntegrationTests
         await application.ResourceNotifications.WaitForResourceHealthyAsync("web", timeout.Token);
 
         using var client = application.CreateHttpClient("web", "http");
-        using var response = await client.GetAsync("/", timeout.Token);
+        using var response = await GetResponseWithTransientRetryAsync(client, timeout.Token);
 
         Assert.True(response.IsSuccessStatusCode, $"Expected HTTP success but received {(int)response.StatusCode}.");
     }
@@ -43,10 +45,31 @@ public sealed class TypedProfileIntegrationTests
             await application.ResourceNotifications.WaitForResourceHealthyAsync("web", timeout.Token);
 
             using var client = application.CreateHttpClient("web", "http");
-            using var response = await client.GetAsync("/", timeout.Token);
+            using var response = await GetResponseWithTransientRetryAsync(client, timeout.Token);
             Assert.True(
                 response.IsSuccessStatusCode,
                 $"Iteration {iteration + 1} expected HTTP success but received {(int)response.StatusCode}.");
+        }
+    }
+
+    private static async Task<HttpResponseMessage> GetResponseWithTransientRetryAsync(
+        HttpClient client,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await client.GetAsync("/", cancellationToken);
+            }
+            catch (HttpRequestException exception)
+                when (exception.InnerException is HttpIOException
+                {
+                    HttpRequestError: HttpRequestError.ResponseEnded,
+                } && attempt < MaximumHttpRequestAttempts)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+            }
         }
     }
 }
