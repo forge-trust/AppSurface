@@ -125,11 +125,33 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
             """
             () => {
               const trustBar = document.querySelector('.docs-trust-bar');
-              return Boolean(trustBar)
-                && window
-                  .getComputedStyle(trustBar)
-                  .borderTopColor
-                  .includes('37, 99, 235');
+              const accentStrong = window
+                .getComputedStyle(document.documentElement)
+                .getPropertyValue('--as-accent-strong')
+                .trim();
+              if (!trustBar || !/^#[0-9a-f]{6}$/i.test(accentStrong)) {
+                return false;
+              }
+
+              const expectedChannels = [
+                Number.parseInt(accentStrong.slice(1, 3), 16) / 255,
+                Number.parseInt(accentStrong.slice(3, 5), 16) / 255,
+                Number.parseInt(accentStrong.slice(5, 7), 16) / 255
+              ];
+              const borderColor = window.getComputedStyle(trustBar).borderTopColor;
+              const srgb = borderColor.match(
+                /^color\(srgb\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s*\/\s*([0-9.]+)\)$/);
+              const rgb = borderColor.match(
+                /^rgba?\(\s*([0-9.]+)(?:,|\s)+([0-9.]+)(?:,|\s)+([0-9.]+)(?:\s*(?:,|\/)\s*([0-9.]+))?\s*\)$/);
+              const actualChannels = srgb
+                ? [Number(srgb[1]), Number(srgb[2]), Number(srgb[3]), Number(srgb[4])]
+                : rgb
+                  ? [Number(rgb[1]) / 255, Number(rgb[2]) / 255, Number(rgb[3]) / 255, rgb[4] ? Number(rgb[4]) : 1]
+                  : null;
+              const tolerance = 0.00001;
+              return actualChannels !== null
+                && expectedChannels.every((channel, index) => Math.abs(actualChannels[index] - channel) <= tolerance)
+                && Math.abs(actualChannels[3] - 0.22) <= tolerance;
             }
             """,
             null,
