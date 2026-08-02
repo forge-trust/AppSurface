@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
+using ForgeTrust.AppSurface.ReleaseContracts;
 using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
@@ -25,6 +26,8 @@ internal sealed class PackageIndexGenerator
     private const string UnreleasedPath = "releases/unreleased.md";
     private const string ChangelogPath = "CHANGELOG.md";
     private const string UpgradePolicyPath = "releases/upgrade-policy.md";
+    private const string CoordinatedReleaseLinksGuidePath = "releases/coordinated-release-links.md";
+    private const string UnresolvedReleaseLinkMessage = "release notes unavailable; package publication is blocked until the release link resolves.";
     private const string WebExamplePath = "examples/web-app/README.md";
     private const string WebPackageQuickstartPath = "start-here/first-success-path.md";
     private const string WebPackageQuickstartFragment = "package-first-path";
@@ -413,6 +416,29 @@ internal sealed class PackageIndexGenerator
         }
     }
 
+    /// <summary>
+    /// Resolves the package's release documentation link from its manifest fields.
+    /// </summary>
+    /// <param name="entry">Package manifest entry to validate.</param>
+    /// <returns>A normalized release-link contract.</returns>
+    /// <remarks>
+    /// Keep this thin adapter around the shared resolver so package-index diagnostics retain the project path that a maintainer
+    /// can correct. Callers must still validate that the resulting repository-relative file exists.
+    /// </remarks>
+    internal static PackageReleaseLink ResolveReleaseLink(PackageManifestEntry entry)
+    {
+        if (PackageReleaseLinkResolver.TryResolve(
+                entry.ReleaseTrack,
+                entry.ReleaseNotesPath,
+                out var link,
+                out var error))
+        {
+            return link;
+        }
+
+        throw new PackageIndexException($"Manifest entry '{entry.Project}' {error}.");
+    }
+
     private static void ValidateReadinessAnnotations(PackageManifestEntry entry)
     {
         if (!string.IsNullOrWhiteSpace(entry.ReadinessBlocker)
@@ -657,7 +683,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine("Release and readiness:");
         builder.AppendLine($"- {FormatMarkdownLink("Release hub", GetRelativeDocPath(request, ReleaseHubPath))} keeps the public release story, adoption risk, and policy links in one place.");
-        var currentReleaseNotePath = GetSharedPublicReleaseNotePath(publicEntries);
+        var currentReleaseNotePath = GetSharedPublicReleaseNotePath(request, publicEntries);
         if (!string.IsNullOrWhiteSpace(currentReleaseNotePath)
             && !string.Equals(currentReleaseNotePath, UnreleasedPath, StringComparison.Ordinal)
             && RepositoryFileExists(repositoryRoot, currentReleaseNotePath))
@@ -797,6 +823,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine($"- Edit `packages/package-index.yml` when the public package story changes.");
         builder.AppendLine($"- Review {FormatMarkdownLink("package readiness evidence", GetRelativeOutputPath(request.ChooserOutputPath, request.ReadinessOutputPath))} when deciding whether the package manifest, release metadata, blockers, and dependency evidence are ready for release review.");
         builder.AppendLine("- Package readiness evidence is package-index review evidence. Per-version release consistency lives in `releases/v{version}.evidence.json` and is validated by the release cockpit.");
+        builder.AppendLine($"- Follow the {FormatMarkdownLink("coordinated release-links guide", GetRelativeRepositoryPath(request, CoordinatedReleaseLinksGuidePath))}: use `release_track: coordinated` for the frozen tree-local current pointer, or `release_track: explicit` with `release_notes_path` for a package-specific historical story.");
         builder.AppendLine("- Keep `publish_decision` and `expected_dependency_package_ids` in `packages/package-index.yml` aligned with the package artifact workflow so the chooser and release contract share one package source of truth.");
         builder.AppendLine("- Keep `tool_command_name` aligned with each published .NET tool project's `ToolCommandName` so package validation, pre-publish coverage proof, and post-publish smoke tests run the command users will type. Tool smoke tests install the package, run `--help`, then require `--version` to match the package SemVer exactly, including stable or prerelease labels and excluding any leading `v` or build metadata. The command name value must be one file-name-safe command token, not a path: no whitespace, path separators, reserved `.`/`..` segments, trailing periods, Windows reserved device names or dotted aliases, control characters, or Windows-invalid file-name characters.");
         builder.AppendLine($"- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications, package READMEs, product families, readiness blockers, or readiness notes.");
@@ -961,6 +988,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine("- Edit `packages/package-index.yml` for product family, publish decision, release metadata, dependency expectations, blockers, and notes.");
         builder.AppendLine("- Use `readiness_blocker` only for same-repository ownership. When the underlying blocker is external, create a local tracking issue and put the external context in `readiness_note`.");
+        builder.AppendLine($"- Use the {FormatMarkdownLink("coordinated release-links guide", GetRelativeRepositoryPath(request, CoordinatedReleaseLinksGuidePath, request.ReadinessOutputPath))} to select `release_track: coordinated` or an explicit historical release note.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` to refresh this dashboard and the adopter-facing package chooser.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify` before review to confirm both generated files are current.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` for package artifact proof; this dashboard does not replace that workflow.");
@@ -1009,9 +1037,10 @@ internal sealed class PackageIndexGenerator
         PackageManifestEntry entry,
         string outputPath)
     {
-        return string.IsNullOrWhiteSpace(entry.ReleaseNotesPath)
-            ? "Not declared"
-            : FormatMarkdownLink("notes", GetRelativeDocPath(request, entry.ReleaseNotesPath, outputPath));
+        var releaseNotesPath = TryGetReleaseNotesPath(request, entry, outputPath);
+        return releaseNotesPath is null
+            ? UnresolvedReleaseLinkMessage
+            : FormatMarkdownLink("notes", GetRelativeDocPath(request, releaseNotesPath, outputPath));
     }
 
     private static string FormatReadinessStatus(PackageReadinessStatus status)
@@ -1027,18 +1056,38 @@ internal sealed class PackageIndexGenerator
     /// <summary>
     /// Finds the release note all publishable public package rows currently share.
     /// </summary>
+    /// <param name="request">Generation request that supplies the chooser output context used to validate release-note links.</param>
     /// <param name="publicEntries">Public chooser rows resolved from the package manifest.</param>
     /// <returns>The shared release-note path, or <see langword="null" /> when rows point at mixed or missing release notes.</returns>
-    private static string? GetSharedPublicReleaseNotePath(IReadOnlyList<ResolvedPackageEntry> publicEntries)
+    private static string? GetSharedPublicReleaseNotePath(
+        PackageIndexRequest request,
+        IReadOnlyList<ResolvedPackageEntry> publicEntries)
     {
         var releaseNotePaths = publicEntries
             .Where(entry => entry.Manifest.PublishDecision == PackagePublishDecision.Publish)
-            .Select(entry => entry.Manifest.ReleaseNotesPath)
-            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(entry => TryGetReleaseNotesPath(request, entry.Manifest, request.ChooserOutputPath))
+            .OfType<string>()
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
         return releaseNotePaths.Length == 1 ? releaseNotePaths[0] : null;
+    }
+
+    private static string? TryGetReleaseNotesPath(
+        PackageIndexRequest request,
+        PackageManifestEntry entry,
+        string outputPath)
+    {
+        try
+        {
+            var releaseLink = ResolveReleaseLink(entry);
+            _ = GetRelativeDocPath(request, releaseLink.ReleaseNotesPath, outputPath);
+            return releaseLink.ReleaseNotesPath;
+        }
+        catch (PackageIndexException)
+        {
+            return null;
+        }
     }
 
     private static string GetRelativeDocPath(PackageIndexRequest request, string repositoryRelativePath)
@@ -1056,6 +1105,35 @@ internal sealed class PackageIndexGenerator
             $"Chooser link target '{repositoryRelativePath}'");
         return Path.GetRelativePath(outputDirectory, targetPath)
             .Replace('\\', '/');
+    }
+
+    /// <summary>
+    /// Gets a safe relative repository link for generated maintainer guidance that may not be copied into minimal test fixtures.
+    /// </summary>
+    /// <remarks>
+    /// Unlike the existing <c>GetRelativeDocPath</c> helpers, this helper does not require the target to exist. The checked-in generated output
+    /// still names a repository-owned guide, while isolated callers can generate a package dashboard without recreating every guide.
+    /// Package manifest entries continue to use the <c>GetRelativeDocPath</c> helpers and therefore require existing targets.
+    /// </remarks>
+    internal static string GetRelativeRepositoryPath(PackageIndexRequest request, string repositoryRelativePath, string? outputPath = null)
+    {
+        var normalizedRelativePath = repositoryRelativePath.Replace('/', Path.DirectorySeparatorChar);
+        if (Path.IsPathRooted(normalizedRelativePath))
+        {
+            throw new PackageIndexException($"Repository guidance link '{repositoryRelativePath}' must be relative.");
+        }
+
+        var targetPath = Path.GetFullPath(Path.Join(request.RepositoryRoot, normalizedRelativePath));
+        var relativeToRoot = Path.GetRelativePath(Path.GetFullPath(request.RepositoryRoot), targetPath);
+        if (relativeToRoot.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relativeToRoot))
+        {
+            throw new PackageIndexException($"Repository guidance link '{repositoryRelativePath}' escapes the repository root.");
+        }
+
+        var effectiveOutputPath = outputPath ?? request.ChooserOutputPath;
+        var outputDirectory = Path.GetDirectoryName(effectiveOutputPath)
+            ?? throw new PackageIndexException($"Output path '{effectiveOutputPath}' does not have a parent directory.");
+        return Path.GetRelativePath(outputDirectory, targetPath).Replace('\\', '/');
     }
 
     private static string GetRelativeOutputPath(string fromOutputPath, string toOutputPath)
@@ -1312,10 +1390,10 @@ internal sealed class PackageIndexGenerator
             parts.Add(FormatEnumLabel(entry.CommercialStatus));
         }
 
-        if (!string.IsNullOrWhiteSpace(entry.ReleaseNotesPath))
-        {
-            parts.Add(FormatMarkdownLink("notes", GetRelativeDocPath(request, entry.ReleaseNotesPath)));
-        }
+        var releaseNotesPath = TryGetReleaseNotesPath(request, entry, request.ChooserOutputPath);
+        parts.Add(releaseNotesPath is null
+            ? UnresolvedReleaseLinkMessage
+            : FormatMarkdownLink("notes", GetRelativeDocPath(request, releaseNotesPath)));
 
         return parts.Count == 0 ? "Not declared" : string.Join("<br />", parts);
     }
@@ -1531,25 +1609,19 @@ internal static class PackageReadinessEvaluator
             fixHints.Add($"Set commercial_status: {FormatManifestEnum(expectedCommercialStatus)} for {entry.Manifest.Project}.");
         }
 
-        if (string.IsNullOrWhiteSpace(entry.Manifest.ReleaseNotesPath))
-        {
-            blockingReasons.Add("release_notes_path is missing.");
-            fixHints.Add($"Add release_notes_path to {entry.Manifest.Project} in packages/package-index.yml.");
-            return;
-        }
-
         try
         {
+            var releaseLink = PackageIndexGenerator.ResolveReleaseLink(entry.Manifest);
             PackageIndexGenerator.ResolveRepositoryFilePath(
                 repositoryRoot,
-                entry.Manifest.ReleaseNotesPath,
+                releaseLink.ReleaseNotesPath,
                 $"Manifest entry '{entry.Manifest.Project}' release_notes_path");
-            evidence.Add("release_notes_path resolves inside the repository");
+            evidence.Add($"{(releaseLink.Track == PackageReleaseTrack.Coordinated ? "tree-local coordinated release pointer" : "explicit release_notes_path")} resolves inside the repository");
         }
         catch (PackageIndexException ex)
         {
             blockingReasons.Add(ex.Message);
-            fixHints.Add($"Point release_notes_path for {entry.Manifest.Project} at an existing repository Markdown file.");
+            fixHints.Add($"Point release_notes_path for {entry.Manifest.Project} at an existing repository Markdown file, or use release_track: coordinated.");
         }
     }
 
@@ -1872,15 +1944,11 @@ internal static class PackageGateValidator
             throw new PackageIndexException($"Manifest entry '{entry.Manifest.Project}' must define 'commercial_status'.");
         }
 
-        if (string.IsNullOrWhiteSpace(entry.Manifest.ReleaseNotesPath))
-        {
-            throw new PackageIndexException($"Manifest entry '{entry.Manifest.Project}' must define 'release_notes_path'.");
-        }
-
+        var releaseLink = PackageIndexGenerator.ResolveReleaseLink(entry.Manifest);
         PackageIndexGenerator.ResolveRepositoryFilePath(
             repositoryRoot,
-            entry.Manifest.ReleaseNotesPath,
-            $"Manifest entry '{entry.Manifest.Project}' release_notes_path");
+            releaseLink.ReleaseNotesPath,
+            $"Manifest entry '{entry.Manifest.Project}' release link");
 
         var expectedReleaseStatus = entry.Manifest.Classification switch
         {
@@ -2567,7 +2635,14 @@ internal sealed class PackageManifestEntry
     public PackageCommercialStatus CommercialStatus { get; init; }
 
     /// <summary>
-    /// Gets the repository-relative release notes file that explains current readiness for this package.
+    /// Gets the release-link policy. <c>coordinated</c> resolves to the frozen tree-local <c>releases/current.md</c> pointer;
+    /// <c>explicit</c> uses <see cref="ReleaseNotesPath"/>.
+    /// </summary>
+    public string? ReleaseTrack { get; init; }
+
+    /// <summary>
+    /// Gets the repository-relative release notes file for explicit links. Legacy rows without <see cref="ReleaseTrack"/>
+    /// also retain this explicit-path meaning.
     /// </summary>
     public string? ReleaseNotesPath { get; init; }
 }

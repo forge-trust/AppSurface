@@ -97,7 +97,15 @@ jobs:
           git config user.name "appsurface-release-bot"
           git config user.email "appsurface-release-bot@users.noreply.github.com"
           git checkout -b "${branch}"
-          git add CHANGELOG.md releases packages/package-index.yml
+          git add \
+            "releases/v${VERSION}.md" \
+            "releases/v${VERSION}.md.yml" \
+            "releases/v${VERSION}.release.json" \
+            "releases/v${VERSION}.evidence.json" \
+            releases/current.md \
+            CHANGELOG.md \
+            releases/unreleased.md \
+            releases/unreleased.md.yml
           git commit -m "chore(release): prepare v${VERSION}"
           git push --force-with-lease origin "${branch}"
           existing_pr="$(gh pr list --head "${branch}" --json number --jq '.[0].number // ""')"
@@ -136,89 +144,63 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin "${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}"
-          mapfile -t release_artifact_changes < <(git diff --no-renames --name-status "origin/${GITHUB_BASE_REF}...HEAD" -- \
+          if ! release_prep_changes="$(git diff --no-renames --name-status "origin/${GITHUB_BASE_REF}...HEAD" -- \
+            CHANGELOG.md \
+            releases/current.md \
+            releases/current.md.yml \
+            releases/unreleased.md \
+            releases/unreleased.md.yml \
             ':(glob)releases/v*.md' \
             ':(glob)releases/v*.md.yml' \
             ':(glob)releases/v*.release.json' \
-            ':(glob)releases/v*.evidence.json')
-          if [[ "${#release_artifact_changes[@]}" -eq 0 ]]; then
-            echo "No versioned release artifacts changed; validating release tooling instead."
+            ':(glob)releases/v*.evidence.json')"; then
+            echo "Could not inspect release-preparation paths in the pull request diff." >&2
+            exit 1
+          fi
+          if ! manifest_paths="$(git diff --no-renames --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- ':(glob)releases/v*.release.json')"; then
+            echo "Could not inspect versioned release manifests in the pull request diff." >&2
+            exit 1
+          fi
+          manifests=()
+          while IFS= read -r manifest; do
+            [[ -n "${manifest}" ]] && manifests+=("${manifest}")
+          done <<< "${manifest_paths}"
+          if [[ "${#manifests[@]}" -eq 0 ]]; then
+            current_pointer_markdown_added=false
+            current_pointer_sidecar_added=false
+            requires_release_manifest=false
+            while IFS=$'\t' read -r status path; do
+              [[ -z "${status}" ]] && continue
+              case "${status}:${path}" in
+                M:releases/unreleased.md) ;;
+                A:releases/current.md) current_pointer_markdown_added=true ;;
+                A:releases/current.md.yml) current_pointer_sidecar_added=true ;;
+                *) requires_release_manifest=true ;;
+              esac
+            done <<< "${release_prep_changes}"
+            if [[ "${requires_release_manifest}" == true || "${current_pointer_markdown_added}" != "${current_pointer_sidecar_added}" ]]; then
+              echo "Release-prep-owned paths changed without exactly one added or modified versioned release manifest. Non-release pull requests may update releases/unreleased.md and may bootstrap both releases/current.md and releases/current.md.yml together." >&2
+              exit 1
+            fi
+            echo "No versioned release manifest changed; validating the complete release test suite without applying the release-artifact diff gate."
             dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj
             exit 0
           fi
-          mapfile -t release_artifact_deletions < <(printf '%s\n' "${release_artifact_changes[@]}" | awk '$1 == "D" { print $2 }')
-          mapfile -t release_artifacts < <(git diff --no-renames --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- \
-            ':(glob)releases/v*.md' \
-            ':(glob)releases/v*.md.yml' \
-            ':(glob)releases/v*.release.json' \
-            ':(glob)releases/v*.evidence.json')
-
-          mapfile -t manifests < <(git diff --no-renames --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- ':(glob)releases/v*.release.json')
           if [[ "${#manifests[@]}" -ne 1 ]]; then
-            echo "Expected exactly one added or modified release manifest in this release preparation pull request; found ${#manifests[@]}." >&2
+            echo "Release preparation pull requests must add or modify exactly one versioned release manifest." >&2
             exit 1
           fi
-          mapfile -t evidence_files < <(git diff --no-renames --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- ':(glob)releases/v*.evidence.json')
-          if [[ "${#evidence_files[@]}" -ne 1 ]]; then
-            echo "Expected exactly one added or modified release evidence bundle in this release preparation pull request; found ${#evidence_files[@]}." >&2
+          version=""
+          if [[ -f "${manifests[0]}" ]]; then
+            version="$(jq -r '.version // empty' "${manifests[0]}")"
+          fi
+          if [[ -z "${version}" ]]; then
+            echo "The changed release manifest must declare a version." >&2
             exit 1
           fi
-          manifest="${manifests[0]}"
-          version="$(jq -r '.version' "${manifest}")"
-          expected_evidence="releases/v${version}.evidence.json"
-          if [[ "${evidence_files[0]}" != "${expected_evidence}" ]]; then
-            echo "Release evidence bundle ${evidence_files[0]} does not match release manifest version ${version}; expected ${expected_evidence}." >&2
-            exit 1
-          fi
-          expected_artifacts=(
-            "releases/v${version}.md"
-            "releases/v${version}.md.yml"
-            "releases/v${version}.release.json"
-            "releases/v${version}.evidence.json"
-          )
-          if [[ "${#release_artifact_deletions[@]}" -ne 0 ]]; then
-            allowed_release_artifact_deletions=()
-            if [[ "${version}" == "0.1.0" ]]; then
-              allowed_release_artifact_deletions=(
-                "releases/v0.1.0-rc.1.md"
-                "releases/v0.1.0-rc.1.md.yml"
-                "releases/v0.1.0-rc.1.release.json"
-                "releases/v0.1.0-rc.2.md"
-                "releases/v0.1.0-rc.2.md.yml"
-                "releases/v0.1.0-rc.2.release.json"
-                "releases/v0.1.0-rc.3.evidence.json"
-                "releases/v0.1.0-rc.3.md"
-                "releases/v0.1.0-rc.3.md.yml"
-                "releases/v0.1.0-rc.3.release.json"
-                "releases/v0.1.0-rc.4.evidence.json"
-                "releases/v0.1.0-rc.4.md"
-                "releases/v0.1.0-rc.4.md.yml"
-                "releases/v0.1.0-rc.4.release.json"
-              )
-            fi
-            for deleted_release_artifact in "${release_artifact_deletions[@]}"; do
-              if printf '%s\n' "${allowed_release_artifact_deletions[@]}" | grep -Fxq "${deleted_release_artifact}"; then
-                continue
-              fi
-              echo "Unexpected versioned release artifact deletion ${deleted_release_artifact}; release preparation pull requests may only delete explicitly allowed superseded artifacts." >&2
-              exit 1
-            done
-          fi
-          mapfile -t sorted_release_artifacts < <(printf '%s\n' "${release_artifacts[@]}" | sort)
-          mapfile -t sorted_expected_artifacts < <(printf '%s\n' "${expected_artifacts[@]}" | sort)
-          for expected_artifact in "${sorted_expected_artifacts[@]}"; do
-            if ! printf '%s\n' "${sorted_release_artifacts[@]}" | grep -Fxq "${expected_artifact}"; then
-              echo "Release preparation pull requests must change the generated artifact ${expected_artifact}; found: ${sorted_release_artifacts[*]}." >&2
-              exit 1
-            fi
-          done
-          for artifact in "${sorted_release_artifacts[@]}"; do
-            if printf '%s\n' "${sorted_expected_artifacts[@]}" | grep -Fxq "${artifact}"; then
-              continue
-            fi
-            echo "Release preparation pull requests must change exactly the four generated artifacts for v${version}; found: ${sorted_release_artifacts[*]}." >&2
-            exit 1
-          done
+          RELEASE_PREP_POLICY_BASE_REF="${GITHUB_BASE_REF}" \
+          RELEASE_PREP_POLICY_VERSION="${version}" \
+            dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj
           if [[ "${version}" != *-* ]]; then
             evidence_path="releases/v${version}.evidence.json"
             docs_exact_tree_path="$(jq -r '.docsArchive.exactTreePath // ""' "${evidence_path}")"
@@ -239,7 +221,7 @@ jobs:
             docs_release_root="${RUNNER_TEMP}/appsurface-release-prep-docs-${version}"
             docs_exact_tree="${docs_release_root}/${normalized_exact_tree_path}"
             mkdir -p "$(dirname "${docs_exact_tree}")"
-            docs_source_ref="$(jq -r '.sourceCommit // ""' "releases/v${version}.release.json")"
+            docs_source_ref="$(jq -r '.preparationBaseCommit // ""' "releases/v${version}.release.json")"
             if [[ -z "${docs_source_ref}" ]]; then
               docs_source_ref="$(git rev-parse HEAD)"
             fi

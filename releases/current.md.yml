@@ -1,0 +1,15 @@
+title: Current coordinated release
+summary: The tagged coordinated AppSurface release represented by this documentation tree.
+page_type: release-note
+nav_group: Releases
+order: 5
+breadcrumbs:
+  - Releases
+  - Current
+trust:
+  status: Tree-local coordinated release pointer
+  summary: This pointer is frozen with each published documentation tree.
+  change_scope: Repository-wide. It is a documentation alias, not a global latest-version lookup.
+  archive: Open the linked tagged release note for the immutable narrative.
+  sources:
+    - Preserved by ./eng/release prepare and bound into V2 release evidence.

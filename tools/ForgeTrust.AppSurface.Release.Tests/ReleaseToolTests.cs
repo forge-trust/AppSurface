@@ -13,6 +13,7 @@ public sealed class ReleaseToolTests : IDisposable
 {
     private const string TaggedReleaseNoteContent = "# Release 0.1.0-preview.1\n";
     private const string TaggedReleaseSidecarContent = "title: Release 0.1.0-preview.1\n";
+    private const string CurrentReleaseSidecarContent = "title: Current coordinated release\nsummary: Permanent pointer metadata.\n";
 
     private readonly string _repositoryRoot;
     private readonly string _externalRoot;
@@ -175,7 +176,7 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
-    public async Task PrepareWritesReleaseArtifactsAndUpdatesPublicPublishedPackagePaths()
+    public async Task PrepareWritesReleaseArtifactsAndFreezesCoordinatedCurrentPointer()
     {
         await SeedRepositoryAsync();
         using var stdout = new StringWriter();
@@ -195,6 +196,8 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Contains("## Files written", report, StringComparison.Ordinal);
         Assert.Contains("releases/v0.1.0-preview.1.md", report, StringComparison.Ordinal);
         Assert.Contains("releases/v0.1.0-preview.1.evidence.json", report, StringComparison.Ordinal);
+        Assert.Contains("releases/current.md", report, StringComparison.Ordinal);
+        Assert.DoesNotContain("releases/current.md.yml", report, StringComparison.Ordinal);
         Assert.Contains("CHANGELOG.md", report, StringComparison.Ordinal);
 
         var releaseNote = await ReadFileAsync("releases/v0.1.0-preview.1.md");
@@ -205,28 +208,37 @@ public sealed class ReleaseToolTests : IDisposable
 
         var manifestJson = await ReadFileAsync("releases/v0.1.0-preview.1.release.json");
         using var manifest = JsonDocument.Parse(manifestJson);
-        Assert.Equal("appsurface-release-manifest-v1", manifest.RootElement.GetProperty("schema").GetString());
+        Assert.Equal("appsurface-release-manifest-v2", manifest.RootElement.GetProperty("schema").GetString());
         Assert.Equal("0.1.0-preview.1", manifest.RootElement.GetProperty("version").GetString());
         Assert.Equal("prerelease", manifest.RootElement.GetProperty("releaseClassification").GetString());
-        Assert.Equal("abc123", manifest.RootElement.GetProperty("sourceCommit").GetString());
+        Assert.Equal("abc123", manifest.RootElement.GetProperty("preparationBaseCommit").GetString());
         Assert.Contains(
             manifest.RootElement.GetProperty("generatedFiles").EnumerateArray(),
             path => string.Equals(path.GetString(), "releases/v0.1.0-preview.1.evidence.json", StringComparison.Ordinal));
 
         var evidenceJson = await ReadFileAsync("releases/v0.1.0-preview.1.evidence.json");
         using var evidence = JsonDocument.Parse(evidenceJson);
-        Assert.Equal("appsurface-release-evidence-bundle-v1", evidence.RootElement.GetProperty("schema").GetString());
+        Assert.Equal("appsurface-release-evidence-bundle-v2", evidence.RootElement.GetProperty("schema").GetString());
         Assert.Equal("0.1.0-preview.1", evidence.RootElement.GetProperty("version").GetString());
         Assert.Equal("releases/v0.1.0-preview.1.release.json", evidence.RootElement.GetProperty("releaseManifestPath").GetString());
         var artifactDigests = evidence.RootElement.GetProperty("releaseArtifactDigests").EnumerateArray().ToArray();
         Assert.Contains(artifactDigests, digest => string.Equals(digest.GetProperty("path").GetString(), "releases/v0.1.0-preview.1.md", StringComparison.Ordinal));
         Assert.Contains(artifactDigests, digest => string.Equals(digest.GetProperty("path").GetString(), "releases/v0.1.0-preview.1.md.yml", StringComparison.Ordinal));
         Assert.Contains(artifactDigests, digest => string.Equals(digest.GetProperty("path").GetString(), "releases/v0.1.0-preview.1.release.json", StringComparison.Ordinal));
+        Assert.Contains(artifactDigests, digest => string.Equals(digest.GetProperty("path").GetString(), "releases/current.md", StringComparison.Ordinal));
+        Assert.Contains(artifactDigests, digest => string.Equals(digest.GetProperty("path").GetString(), "releases/current.md.yml", StringComparison.Ordinal));
+        var resolutions = evidence.RootElement.GetProperty("coordinatedPackageReleaseNoteResolutions").EnumerateArray().ToArray();
+        Assert.Empty(resolutions);
         Assert.Equal("notConfigured", evidence.RootElement.GetProperty("docsArchive").GetProperty("status").GetString());
         Assert.NotEmpty(evidence.RootElement.GetProperty("subject").GetProperty("sha256").GetString()!);
 
+        var currentRelease = await ReadFileAsync("releases/current.md");
+        Assert.Contains("./v0.1.0-preview.1.md", currentRelease, StringComparison.Ordinal);
+        var currentReleaseSidecar = await ReadFileAsync("releases/current.md.yml");
+        Assert.Equal(CurrentReleaseSidecarContent, currentReleaseSidecar);
+
         var packageIndex = await ReadFileAsync("packages/package-index.yml");
-        Assert.Contains("release_notes_path: releases/v0.1.0-preview.1.md", packageIndex, StringComparison.Ordinal);
+        Assert.DoesNotContain("release_notes_path: releases/v0.1.0-preview.1.md", packageIndex, StringComparison.Ordinal);
         Assert.Contains("classification: support", packageIndex, StringComparison.Ordinal);
         Assert.Contains("release_notes_path: releases/unreleased.md", packageIndex, StringComparison.Ordinal);
 
@@ -238,6 +250,353 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.DoesNotContain("- Current work.", changelog, StringComparison.Ordinal);
         Assert.DoesNotContain("[v0.1.0-preview.1.release.json]", changelog, StringComparison.Ordinal);
         Assert.DoesNotContain("## No tagged releases yet", changelog, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PrepareRejectsNonCanonicalCurrentPointerAndPreservesPermanentSidecar()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync("releases/current.md", "# Stale pointer\n");
+        await WriteFileAsync("releases/current.md.yml", "title: Permanent pointer metadata\n");
+
+        var prepared = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, prepared.ExitCode);
+        var pointer = await ReadFileAsync("releases/current.md");
+        Assert.Equal("# Stale pointer\n", pointer);
+        Assert.Contains("release-current-page-body-invalid", prepared.Stdout, StringComparison.Ordinal);
+        Assert.Equal("title: Permanent pointer metadata\n", await ReadFileAsync("releases/current.md.yml"));
+    }
+
+    [Fact]
+    public async Task PrepareRejectsConcurrentCurrentPointerChangeBeforeWritingAnyReleaseArtifacts()
+    {
+        await SeedRepositoryAsync();
+        var workspace = new ReleaseWorkspace(_repositoryRoot);
+        var checker = new ReleaseChecker(workspace, FakeCommandRunner.WithSourceCommit("abc123"));
+        var preparation = new ReleasePreparation(
+            workspace,
+            checker,
+            new SystemReleaseClock(),
+            _ => WriteFileAsync("releases/current.md", "# Concurrent pointer\n"));
+        var options = new ReleaseOptions(
+            "prepare",
+            _repositoryRoot,
+            SemVer.Parse("0.1.0-preview.1"),
+            Tag: null,
+            Date: new DateOnly(2026, 5, 25),
+            DryRun: false,
+            ReportPath: null,
+            GitHubOutputPath: null,
+            FailOnWarnings: false,
+            AllowExistingTargets: false);
+
+        var error = await Assert.ThrowsAsync<ReleaseToolException>(
+            () => preparation.PrepareAsync(options, CancellationToken.None));
+
+        Assert.Equal("release-current-pointer-concurrent-update", error.Diagnostic.Code);
+        Assert.False(File.Exists(RepositoryPath("releases/v0.1.0-preview.1.md")));
+    }
+
+    [Fact]
+    public async Task PrepareRejectsConcurrentCurrentPointerSidecarChangeBeforeWritingAnyReleaseArtifacts()
+    {
+        await SeedRepositoryAsync();
+        var workspace = new ReleaseWorkspace(_repositoryRoot);
+        var checker = new ReleaseChecker(workspace, FakeCommandRunner.WithSourceCommit("abc123"));
+        var preparation = new ReleasePreparation(
+            workspace,
+            checker,
+            new SystemReleaseClock(),
+            _ => WriteFileAsync("releases/current.md.yml", "title: Concurrent pointer\n"));
+        var options = new ReleaseOptions(
+            "prepare",
+            _repositoryRoot,
+            SemVer.Parse("0.1.0-preview.1"),
+            Tag: null,
+            Date: new DateOnly(2026, 5, 25),
+            DryRun: false,
+            ReportPath: null,
+            GitHubOutputPath: null,
+            FailOnWarnings: false,
+            AllowExistingTargets: false);
+
+        var error = await Assert.ThrowsAsync<ReleaseToolException>(
+            () => preparation.PrepareAsync(options, CancellationToken.None));
+
+        Assert.Equal("release-current-pointer-concurrent-update", error.Diagnostic.Code);
+        Assert.False(File.Exists(RepositoryPath("releases/v0.1.0-preview.1.md")));
+    }
+
+    [Fact]
+    public void CurrentPointerRequiresAnExactCanonicalTemplate()
+    {
+        Assert.True(ReleaseCurrentPointer.TryParse(ReleaseCurrentPointer.BuildNone(), out var initial));
+        Assert.Null(initial);
+        Assert.True(ReleaseCurrentPointer.TryParse(ReleaseCurrentPointer.Build(SemVer.Parse("1.2.3")), out var version));
+        Assert.Equal(SemVer.Parse("1.2.3"), version);
+        Assert.False(ReleaseCurrentPointer.TryParse("<!-- appsurface-current-coordinated-release: v1.2.3 -->\n# Current coordinated release\n\nDifferent prose.\n", out _));
+        Assert.False(ReleaseCurrentPointer.TryParse("\uFEFF" + ReleaseCurrentPointer.BuildNone(), out _));
+        Assert.False(ReleaseCurrentPointer.TryParse(ReleaseCurrentPointer.BuildNone().TrimEnd('\n'), out _));
+    }
+
+    [Theory]
+    [InlineData("\r\n")]
+    [InlineData("\r")]
+    public void CurrentPointerAcceptsCanonicalCrLfAndCrLineEndings(string lineEnding)
+    {
+        var initialContent = ReleaseCurrentPointer.BuildNone().Replace("\n", lineEnding, StringComparison.Ordinal);
+        Assert.True(ReleaseCurrentPointer.TryParse(initialContent, out var initial));
+        Assert.Null(initial);
+
+        var expectedVersion = SemVer.Parse("1.2.3");
+        var versionedContent = ReleaseCurrentPointer.Build(expectedVersion).Replace("\n", lineEnding, StringComparison.Ordinal);
+        Assert.True(ReleaseCurrentPointer.TryParse(versionedContent, out var parsed));
+        Assert.Equal(expectedVersion, parsed);
+    }
+
+    [Theory]
+    [InlineData("1.0.0-alpha.2", "1.0.0-alpha.10", -1)]
+    [InlineData("1.0.0-alpha.1", "1.0.0-alpha.beta", -1)]
+    [InlineData("1.0.0-99999999999999999999", "1.0.0-100000000000000000000", -1)]
+    [InlineData("1.0.0-rc.1", "1.0.0", -1)]
+    [InlineData("2.0.0", "1.999.999", 1)]
+    public void SemVerComparisonUsesSemVerPrecedence(string left, string right, int expectedSign)
+    {
+        var comparison = SemVer.Parse(left).CompareTo(SemVer.Parse(right));
+        Assert.Equal(expectedSign, Math.Sign(comparison));
+    }
+
+    [Fact]
+    public async Task CurrentPointerGateUsesLatestReachableAnnotatedTag()
+    {
+        var runner = new FakeCommandRunner();
+        runner.Add("git for-each-ref --format=%(refname:short) refs/tags/v*", new CommandResult(0, "v1.0.0-preview.2\nv1.0.0\nv2.0.0\n", ""));
+        runner.Add("git cat-file -t refs/tags/v1.0.0-preview.2", new CommandResult(0, "tag\n", ""));
+        runner.Add("git cat-file -t refs/tags/v1.0.0", new CommandResult(0, "tag\n", ""));
+        runner.Add("git cat-file -t refs/tags/v2.0.0", new CommandResult(0, "tag\n", ""));
+        runner.Add("git rev-parse refs/tags/v1.0.0-preview.2^{commit}", new CommandResult(0, "a\n", ""));
+        runner.Add("git rev-parse refs/tags/v1.0.0^{commit}", new CommandResult(0, "b\n", ""));
+        runner.Add("git rev-parse refs/tags/v2.0.0^{commit}", new CommandResult(0, "c\n", ""));
+        runner.Add("git merge-base --is-ancestor a base", new CommandResult(0, "", ""));
+        runner.Add("git merge-base --is-ancestor b base", new CommandResult(0, "", ""));
+        runner.Add("git merge-base --is-ancestor c base", new CommandResult(1, "", "unreachable"));
+
+        var gate = new ReleaseCurrentPointerGate(new ReleaseWorkspace(_repositoryRoot), runner);
+        var diagnostics = await gate.ValidateAsync(SemVer.Parse("1.0.1"), ReleaseCurrentPointer.Build(SemVer.Parse("1.0.0")), "base", CancellationToken.None);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public async Task CurrentPointerGateRejectsStaleMarkerAndExistingTargetTag()
+    {
+        var runner = new FakeCommandRunner();
+        runner.Add("git for-each-ref --format=%(refname:short) refs/tags/v*", new CommandResult(0, "v1.0.0\nv1.1.0\n", ""));
+        foreach (var tag in new[] { "v1.0.0", "v1.1.0" })
+        {
+            runner.Add($"git cat-file -t refs/tags/{tag}", new CommandResult(0, "tag\n", ""));
+            runner.Add($"git rev-parse refs/tags/{tag}^{{commit}}", new CommandResult(0, tag + "\n", ""));
+            runner.Add($"git merge-base --is-ancestor {tag} base", new CommandResult(0, "", ""));
+        }
+
+        var gate = new ReleaseCurrentPointerGate(new ReleaseWorkspace(_repositoryRoot), runner);
+        var diagnostics = await gate.ValidateAsync(SemVer.Parse("1.0.0"), ReleaseCurrentPointer.Build(SemVer.Parse("1.0.0")), "base", CancellationToken.None);
+
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == "release-current-page-stale");
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == "release-current-page-target-tag-exists");
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == "release-current-page-version-not-newer");
+    }
+
+    [Fact]
+    public async Task CurrentPointerGateReportsTagDiscoveryFailuresInsteadOfAssumingNoHistory()
+    {
+        var runner = new FakeCommandRunner();
+        runner.Add("git for-each-ref --format=%(refname:short) refs/tags/v*", new CommandResult(128, "", "not a git repository"));
+        var gate = new ReleaseCurrentPointerGate(new ReleaseWorkspace(_repositoryRoot), runner);
+
+        var diagnostics = await gate.ValidateAsync(SemVer.Parse("1.0.0"), ReleaseCurrentPointer.BuildNone(), "base", CancellationToken.None);
+
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == "release-current-page-tag-discovery-failed");
+    }
+
+    [Fact]
+    public async Task CurrentPointerGateRejectsAnExistingUnreachableTargetTag()
+    {
+        var runner = new FakeCommandRunner();
+        runner.Add("git for-each-ref --format=%(refname:short) refs/tags/v*", new CommandResult(0, "v1.0.0\n", ""));
+        runner.Add("git cat-file -t refs/tags/v1.0.0", new CommandResult(0, "tag\n", ""));
+        runner.Add("git rev-parse refs/tags/v1.0.0^{commit}", new CommandResult(0, "unreachable\n", ""));
+        runner.Add("git merge-base --is-ancestor unreachable base", new CommandResult(1, "", ""));
+        runner.Add("git rev-parse --verify --quiet refs/tags/v1.0.0", new CommandResult(0, "tag-object\n", ""));
+        var gate = new ReleaseCurrentPointerGate(new ReleaseWorkspace(_repositoryRoot), runner);
+
+        var diagnostics = await gate.ValidateAsync(SemVer.Parse("1.0.0"), ReleaseCurrentPointer.BuildNone(), "base", CancellationToken.None);
+
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == "release-current-page-target-tag-exists");
+    }
+
+    [Fact]
+    public async Task PrepareRejectsHeadChangeBeforeWritingAnyReleaseArtifacts()
+    {
+        await SeedRepositoryAsync();
+        var runner = new FakeCommandRunner();
+        runner.AddSequence("git rev-parse HEAD", new CommandResult(0, "base\n", ""), new CommandResult(0, "changed\n", ""));
+        runner.Add("git for-each-ref --format=%(refname:short) refs/tags/v*", new CommandResult(0, "", ""));
+        var workspace = new ReleaseWorkspace(_repositoryRoot);
+        var preparation = new ReleasePreparation(workspace, new ReleaseChecker(workspace, runner), new SystemReleaseClock());
+        var options = new ReleaseOptions("prepare", _repositoryRoot, SemVer.Parse("0.1.0-preview.1"), null, new DateOnly(2026, 5, 25), false, null, null, false, false);
+
+        var error = await Assert.ThrowsAsync<ReleaseToolException>(() => preparation.PrepareAsync(options, CancellationToken.None));
+
+        Assert.Equal("release-preparation-base-commit-concurrent-update", error.Diagnostic.Code);
+        Assert.False(File.Exists(RepositoryPath("releases/v0.1.0-preview.1.md")));
+    }
+
+    [Fact]
+    public async Task PrepareRejectsWhenPreparationBaseCommitCannotBeResolved()
+    {
+        await SeedRepositoryAsync();
+
+        var result = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
+            new FakeCommandRunner());
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("release-preparation-base-commit-unavailable", result.Stdout, StringComparison.Ordinal);
+        Assert.False(File.Exists(RepositoryPath("releases/v0.1.0-preview.1.md")));
+    }
+
+    [Fact]
+    public async Task PrepareEmitsSortedV2CoordinatedResolutionsAndValidatesTheV2Manifest()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync(
+            "packages/package-index.yml",
+            """
+            packages:
+              - project: Zeta/ForgeTrust.AppSurface.Zeta.csproj
+                classification: public
+                publish_decision: publish
+                release_track: coordinated
+                order: 20
+              - project: Alpha/ForgeTrust.AppSurface.Alpha.csproj
+                classification: public
+                publish_decision: publish
+                release_track: coordinated
+                order: 10
+              - project: Explicit/ForgeTrust.AppSurface.Explicit.csproj
+                classification: public
+                publish_decision: publish
+                release_track: explicit
+                release_notes_path: releases/unreleased.md
+                order: 30
+            """);
+
+        var result = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(0, result.ExitCode);
+        var manifestJson = await ReadFileAsync("releases/v0.1.0-preview.1.release.json");
+        Assert.True(ReleaseManifestV2Validator.TryDeserialize(manifestJson, out var manifest, out var issue), issue);
+        Assert.Equal(
+            ["Alpha/ForgeTrust.AppSurface.Alpha.csproj", "Explicit/ForgeTrust.AppSurface.Explicit.csproj", "Zeta/ForgeTrust.AppSurface.Zeta.csproj"],
+            manifest!.PublishedPackageProjects);
+        Assert.Equal(
+            ["Alpha/ForgeTrust.AppSurface.Alpha.csproj", "Zeta/ForgeTrust.AppSurface.Zeta.csproj"],
+            manifest.CoordinatedPackageReleaseNoteResolutions.Select(resolution => resolution.Project));
+        Assert.All(manifest.CoordinatedPackageReleaseNoteResolutions, resolution =>
+        {
+            Assert.Equal("releases/current.md", resolution.AliasPath);
+            Assert.Equal("releases/v0.1.0-preview.1.md", resolution.ResolvedPath);
+            Assert.Equal("v0.1.0-preview.1", resolution.ReleaseTag);
+            Assert.Equal("abc123", resolution.PreparationBaseCommit);
+        });
+
+        var sourceRoot = FindSourceRoot();
+        using var manifestSchema = JsonDocument.Parse(await File.ReadAllTextAsync(TestPathUtils.PathUnder(sourceRoot, "tools/ForgeTrust.AppSurface.Release/schemas/release-manifest-v2.schema.json")));
+        using var evidenceSchema = JsonDocument.Parse(await File.ReadAllTextAsync(TestPathUtils.PathUnder(sourceRoot, "tools/ForgeTrust.AppSurface.Release/schemas/release-evidence-v2.schema.json")));
+        Assert.False(manifestSchema.RootElement.GetProperty("additionalProperties").GetBoolean());
+        Assert.False(evidenceSchema.RootElement.GetProperty("additionalProperties").GetBoolean());
+        Assert.Contains("coordinatedPackageReleaseNoteResolutions", manifestSchema.RootElement.GetProperty("required").EnumerateArray().Select(item => item.GetString()));
+        Assert.Contains("coordinatedPackageReleaseNoteResolutions", evidenceSchema.RootElement.GetProperty("required").EnumerateArray().Select(item => item.GetString()));
+        Assert.Equal(
+            "^(?:[0-9a-f]{64}|generated)$",
+            evidenceSchema.RootElement
+                .GetProperty("$defs")
+                .GetProperty("docsArchive")
+                .GetProperty("properties")
+                .GetProperty("releaseManifestSha256")
+                .GetProperty("pattern")
+                .GetString());
+    }
+
+    [Fact]
+    public void ReleaseManifestV2Validator_RejectsMalformedUnknownAndIncompleteContracts()
+    {
+        const string validManifest = """
+            {"schema":"appsurface-release-manifest-v2","version":"0.1.0-preview.1","tag":"v0.1.0-preview.1","date":"2026-05-25","preparationBaseCommit":"abc123","releaseClassification":"prerelease","generatedFiles":[],"publishedPackageProjects":[],"coordinatedPackageReleaseNoteResolutions":[],"diagnostics":[],"warningIds":[]}
+            """;
+
+        Assert.False(ReleaseManifestV2Validator.TryDeserialize("{", out var malformedManifest, out var malformedIssue));
+        Assert.Null(malformedManifest);
+        Assert.False(string.IsNullOrWhiteSpace(malformedIssue));
+
+        Assert.False(ReleaseManifestV2Validator.TryDeserialize("{\"schema\":\"appsurface-release-manifest-v2\"}", out var incompleteManifest, out var incompleteIssue));
+        Assert.Null(incompleteManifest);
+        Assert.Equal("Release manifest has missing, unknown, or V1-only properties.", incompleteIssue);
+
+        Assert.False(ReleaseManifestV2Validator.TryDeserialize(validManifest[..^1] + ",\"sourceCommit\":\"abc123\"}", out var unknownPropertyManifest, out var unknownPropertyIssue));
+        Assert.Null(unknownPropertyManifest);
+        Assert.Equal("Release manifest has missing, unknown, or V1-only properties.", unknownPropertyIssue);
+
+        Assert.False(ReleaseManifestV2Validator.TryDeserialize(validManifest.Replace("appsurface-release-manifest-v2", "appsurface-release-manifest-v1", StringComparison.Ordinal), out var wrongSchemaManifest, out var wrongSchemaIssue));
+        Assert.Null(wrongSchemaManifest);
+        Assert.Equal("Release manifest schema must be 'appsurface-release-manifest-v2'.", wrongSchemaIssue);
+
+        Assert.False(ReleaseManifestV2Validator.TryDeserialize(validManifest.Replace("\"preparationBaseCommit\":\"abc123\"", "\"preparationBaseCommit\":null", StringComparison.Ordinal), out var missingValueManifest, out var missingValueIssue));
+        Assert.Null(missingValueManifest);
+        Assert.Equal("Release manifest has missing required V2 values.", missingValueIssue);
+
+        Assert.False(ReleaseManifestV2Validator.TryDeserialize(validManifest.Replace("\"publishedPackageProjects\":[]", "\"publishedPackageProjects\":[\"Core/ForgeTrust.AppSurface.Core.csproj\",\"Core/ForgeTrust.AppSurface.Core.csproj\"]", StringComparison.Ordinal), out var duplicateProjectManifest, out var duplicateProjectIssue));
+        Assert.Null(duplicateProjectManifest);
+        Assert.Equal("Release manifest V2 package resolutions are invalid or not ordinally sorted.", duplicateProjectIssue);
+    }
+
+    [Fact]
+    public void ReleaseManifestV2Validator_RequiresPackageIndexCompleteResolutionSet()
+    {
+        var packages = PackageIndexSummary.Load(
+            """
+            packages:
+              - project: Core/ForgeTrust.AppSurface.Core.csproj
+                classification: public
+                publish_decision: publish
+                release_track: coordinated
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                classification: public
+                publish_decision: publish
+                release_notes_path: releases/unreleased.md
+            """);
+        var manifest = new ReleaseManifestV2(
+            ReleaseManifestV2Validator.Schema,
+            "0.1.0-preview.1",
+            "v0.1.0-preview.1",
+            "2026-05-25",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "prerelease",
+            [],
+            packages.PublicPublishedPackages.Select(package => package.Project).OrderBy(project => project, StringComparer.Ordinal).ToArray(),
+            [],
+            [],
+            []);
+
+        Assert.False(ReleaseManifestV2Validator.TryValidatePackageSet(manifest, packages.PublicPublishedPackages, out var issue));
+        Assert.Contains("Core/ForgeTrust.AppSurface.Core.csproj", issue, StringComparison.Ordinal);
+        Assert.Contains("coordinated rows", issue, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -445,7 +804,7 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
-    public async Task CheckRejectsPreparedReleaseEvidenceWithMismatchedContentSourceCommit()
+    public async Task CheckRejectsPreparedReleaseEvidenceWithV1EvidenceAndV2Manifest()
     {
         await SeedRepositoryAsync();
         var prepare = await RunAsync(
@@ -457,8 +816,8 @@ public sealed class ReleaseToolTests : IDisposable
         var releaseNote = await ReadFileAsync("releases/v0.1.0-preview.1.md");
         var releaseSidecar = await ReadFileAsync("releases/v0.1.0-preview.1.md.yml");
         var releaseManifest = (await ReadFileAsync("releases/v0.1.0-preview.1.release.json")).Replace(
-            "\"sourceCommit\": \"abc123\"",
-            "\"sourceCommit\": \"other-content-source\"",
+            "\"preparationBaseCommit\": \"abc123\"",
+            "\"preparationBaseCommit\": \"other-content-source\"",
             StringComparison.Ordinal);
         await WriteFileAsync("releases/v0.1.0-preview.1.release.json", releaseManifest);
         var evidence = ReleaseEvidence.BuildDraft(
@@ -478,8 +837,38 @@ public sealed class ReleaseToolTests : IDisposable
             FakeCommandRunner.WithSourceCommit("release-prep-commit"));
 
         Assert.Equal(1, result.ExitCode);
-        Assert.Contains("release-evidence-content-source-commit-mismatch", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("release-evidence-release-manifest-schema-invalid", result.Stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("release-evidence-subject-digest-mismatch", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckRejectsPreparedReleaseEvidenceWhenV2PreparationBaseCommitDiffersFromManifest()
+    {
+        await SeedRepositoryAsync();
+        var prepare = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+        Assert.Equal(0, prepare.ExitCode);
+
+        var evidenceJson = await ReadFileAsync("releases/v0.1.0-preview.1.evidence.json");
+        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundleV2>(evidenceJson, ReleaseJson.Options)!;
+        const string mismatchedPreparationBaseCommit = "other-content-source";
+        var mismatched = ReleaseEvidenceV2.RefreshSubject(bundle with
+        {
+            Commits = bundle.Commits with { PreparationBaseCommit = mismatchedPreparationBaseCommit },
+            CoordinatedPackageReleaseNoteResolutions = bundle.CoordinatedPackageReleaseNoteResolutions
+                .Select(resolution => resolution with { PreparationBaseCommit = mismatchedPreparationBaseCommit })
+                .ToArray()
+        });
+        await WriteFileAsync("releases/v0.1.0-preview.1.evidence.json", ReleaseEvidence.Serialize(mismatched));
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1", "--allow-existing-targets"],
+            FakeCommandRunner.WithSourceCommit("release-prep-commit"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("release-evidence-release-manifest-schema-invalid", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("preparation base commit or coordinated resolutions differ", result.Stdout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -596,7 +985,7 @@ public sealed class ReleaseToolTests : IDisposable
             FakeCommandRunner.WithSourceCommit("abc123"));
         Assert.Equal(0, prepare.ExitCode);
         var evidenceJson = await ReadFileAsync("releases/v0.1.0-preview.1.evidence.json");
-        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundle>(evidenceJson, ReleaseJson.Options)!;
+        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundleV2>(evidenceJson, ReleaseJson.Options)!;
         var malformed = bundle with
         {
             ReleaseManifestDigest = new ReleaseEvidenceFileDigest(null!, bundle.ReleaseManifestDigest.Value)
@@ -620,7 +1009,7 @@ public sealed class ReleaseToolTests : IDisposable
             FakeCommandRunner.WithSourceCommit("abc123"));
         Assert.Equal(0, prepare.ExitCode);
         var evidenceJson = await ReadFileAsync("releases/v0.1.0-preview.1.evidence.json");
-        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundle>(evidenceJson, ReleaseJson.Options)!;
+        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundleV2>(evidenceJson, ReleaseJson.Options)!;
         var mismatched = bundle with
         {
             Commits = bundle.Commits with { ReleasePreparationCommit = "old-release-prep-commit" },
@@ -635,6 +1024,106 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("release-evidence-release-preparation-commit-mismatch", result.Stdout, StringComparison.Ordinal);
         Assert.Contains("release-evidence-subject-digest-mismatch", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task V2EvidenceSubjectDigest_ExcludesLaterCommitAndWorkflowIdentities()
+    {
+        await SeedRepositoryAsync();
+        var prepare = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+        Assert.Equal(0, prepare.ExitCode);
+
+        var evidenceJson = await ReadFileAsync("releases/v0.1.0-preview.1.evidence.json");
+        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundleV2>(evidenceJson, ReleaseJson.Options)!;
+        var refreshed = ReleaseEvidenceV2.RefreshSubject(bundle with
+        {
+            Commits = bundle.Commits with
+            {
+                ReleasePreparationCommit = "release-preparation-commit",
+                TagCommit = "tag-commit",
+                WorkflowRunId = "workflow-run"
+            }
+        });
+
+        Assert.Equal(bundle.Subject.Sha256, refreshed.Subject.Sha256);
+    }
+
+    [Fact]
+    public async Task PrepareRejectsSymlinkedGeneratedOutputDirectory()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        await SeedRepositoryAsync();
+        var releasesPath = RepositoryPath("releases");
+        var externalReleasesPath = TestPathUtils.PathUnder(_externalRoot, "releases");
+        Directory.CreateDirectory(_externalRoot);
+        Directory.Move(releasesPath, externalReleasesPath);
+        Directory.CreateSymbolicLink(releasesPath, externalReleasesPath);
+
+        var result = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-preparation-output-path-unsafe", result.Stderr, StringComparison.Ordinal);
+        Assert.False(File.Exists(TestPathUtils.PathUnder(externalReleasesPath, "v0.1.0-preview.1.md")));
+    }
+
+    [Fact]
+    public async Task PrepareRejectsSymlinkedExistingGeneratedOutput()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        await SeedRepositoryAsync();
+        Directory.CreateDirectory(_externalRoot);
+        var currentReleasePath = RepositoryPath("releases/current.md");
+        var externalCurrentReleasePath = TestPathUtils.PathUnder(_externalRoot, "current.md");
+        File.Move(currentReleasePath, externalCurrentReleasePath);
+        File.CreateSymbolicLink(currentReleasePath, externalCurrentReleasePath);
+
+        var result = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-preparation-output-path-unsafe", result.Stderr, StringComparison.Ordinal);
+        Assert.False(File.Exists(RepositoryPath("releases/v0.1.0-preview.1.md")));
+    }
+
+    [Fact]
+    public async Task PrepareRejectsDirectoryAtGeneratedOutputPath()
+    {
+        await SeedRepositoryAsync();
+        Directory.CreateDirectory(RepositoryPath("releases/v0.1.0-preview.1.md"));
+        var workspace = new ReleaseWorkspace(_repositoryRoot);
+        var preparation = new ReleasePreparation(
+            workspace,
+            new ReleaseChecker(workspace, FakeCommandRunner.WithSourceCommit("abc123")),
+            new SystemReleaseClock());
+        var options = new ReleaseOptions(
+            "prepare",
+            _repositoryRoot,
+            SemVer.Parse("0.1.0-preview.1"),
+            Tag: null,
+            Date: new DateOnly(2026, 5, 25),
+            DryRun: false,
+            ReportPath: null,
+            GitHubOutputPath: null,
+            FailOnWarnings: false,
+            AllowExistingTargets: true);
+
+        var error = await Assert.ThrowsAsync<ReleaseToolException>(() => preparation.PrepareAsync(options, CancellationToken.None));
+
+        Assert.Equal("release-preparation-output-path-unsafe", error.Diagnostic.Code);
+        Assert.Contains("directory", error.Diagnostic.Cause, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -821,6 +1310,23 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task PublishRejectsTagEvidenceWithNonStringSchemaThroughDiagnosticEnvelope()
+    {
+        await SeedRepositoryAsync();
+        var runner = CreateSuccessfulPublishRunner();
+        runner.Add(
+            "git show v0.1.0-preview.1:releases/v0.1.0-preview.1.evidence.json",
+            new CommandResult(0, "{\"schema\": 2}\n", ""));
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--dry-run"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-evidence-schema-invalid", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReleaseEvidenceValidationRejectsUnsupportedSchema()
     {
         var version = SemVer.Parse("0.1.0-preview.1");
@@ -843,7 +1349,6 @@ public sealed class ReleaseToolTests : IDisposable
             ReleaseEvidence.Serialize(mismatched));
 
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-schema-invalid");
-        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-subject-digest-mismatch");
     }
 
     [Fact]
@@ -1258,6 +1763,87 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public void ReleaseReportRendererPrintsFullDiagnosticEnvelope()
+    {
+        var result = new ReleaseCheckResult(
+            "0.1.0-preview.1",
+            "prerelease",
+            "abc123",
+            ["releases/v0.1.0-preview.1.md"],
+            null,
+            [
+                ReleaseDiagnostic.Error(
+                    "release-target-exists",
+                    "A generated release artifact already exists.",
+                    "The versioned note is create-only and is present in the worktree.",
+                    "Remove or restore only the generated release artifacts, then rerun the check.",
+                    "releases/coordinated-release-links.md")
+            ],
+            []);
+
+        var report = ReleaseReportRenderer.RenderCheck(result);
+
+        var expected =
+            """
+            # Release readiness report
+
+            - Version: `0.1.0-preview.1`
+            - Classification: `prerelease`
+            - Source commit: `abc123`
+            - Errors: `1`
+            - Warnings: `0`
+
+            ## Generated files
+            - `releases/v0.1.0-preview.1.md`
+
+            ## Errors
+            - Severity: `error`
+              - Code: `release-target-exists`
+              - Problem: A generated release artifact already exists.
+              - Cause: The versioned note is create-only and is present in the worktree.
+              - Fix: Remove or restore only the generated release artifacts, then rerun the check.
+              - Docs: releases/coordinated-release-links.md
+
+            ## Warnings
+            - None
+            """ + Environment.NewLine;
+
+        Assert.Equal(
+            expected.Replace("\r\n", "\n", StringComparison.Ordinal),
+            report.Replace("\r\n", "\n", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ReleasePreparationReportNamesArtifactsAndRollbackValidation()
+    {
+        var check = new ReleaseCheckResult(
+            "0.1.0-preview.1",
+            "prerelease",
+            "abc123",
+            ["releases/v0.1.0-preview.1.md"],
+            null,
+            [],
+            []);
+        var result = new ReleasePreparationResult(
+            check,
+            ["releases/v0.1.0-preview.1.md", "releases/current.md", "CHANGELOG.md"],
+            false,
+            null);
+
+        var report = ReleaseReportRenderer.RenderPreparation(result);
+
+        Assert.Contains("## Preparation recovery", report, StringComparison.Ordinal);
+        Assert.Contains("- State: preparation writes artifacts sequentially; a failed run may leave a partial generated set.", report, StringComparison.Ordinal);
+        Assert.Contains("  - `releases/v0.1.0-preview.1.md`", report, StringComparison.Ordinal);
+        Assert.Contains("  - `releases/current.md`", report, StringComparison.Ordinal);
+        Assert.Contains("  - `CHANGELOG.md`", report, StringComparison.Ordinal);
+        Assert.Contains(
+            "- Safe rollback validation: run `git diff --check`, confirm the listed artifacts are absent or match the pre-run state, then rerun `./eng/release check --version 0.1.0-preview.1 --allow-existing-targets` before another prepare attempt.",
+            report,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReleaseEvidenceValidationRejectsTagBoundPackagePathMismatch()
     {
         var version = SemVer.Parse("0.1.0-preview.1");
@@ -1375,8 +1961,10 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
-    public async Task PackageIndexSummaryNormalizesMissingOptionalPublicationMetadata()
+    public async Task CheckRejectsPublicPublishedPackageWithoutReleaseLink()
     {
+        const string project = "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj";
+        await SeedRepositoryAsync();
         await WriteFileAsync(
             "packages/package-index.yml",
             """
@@ -1387,13 +1975,42 @@ public sealed class ReleaseToolTests : IDisposable
                 order: 10
             """);
 
-        var summary = await PackageIndexSummary.LoadAsync(
-            Path.Join(_repositoryRoot, "packages", "package-index.yml"),
-            CancellationToken.None);
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1"],
+        FakeCommandRunner.WithSourceCommit("abc123"));
 
-        var package = Assert.Single(summary.PublicPublishedPackages);
-        Assert.Equal(string.Empty, package.ReleaseNotesPath);
-        Assert.Null(package.ReadinessBlocker);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("release-package-link-invalid", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains(project, result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("package-release-link-missing", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HistoricalV1ReleaseFixturesRemainReadableWithoutMutation()
+    {
+        var sourceRoot = FindSourceRoot();
+        var evidencePath = TestPathUtils.PathUnder(sourceRoot, "releases", "v0.1.0.evidence.json");
+        var manifestPath = TestPathUtils.PathUnder(sourceRoot, "releases", "v0.1.0.release.json");
+        var notePath = TestPathUtils.PathUnder(sourceRoot, "releases", "v0.1.0.md");
+        var sidecarPath = TestPathUtils.PathUnder(sourceRoot, "releases", "v0.1.0.md.yml");
+        var evidence = await File.ReadAllTextAsync(evidencePath);
+        var manifest = await File.ReadAllTextAsync(manifestPath);
+        var note = await File.ReadAllTextAsync(notePath);
+        var sidecar = await File.ReadAllTextAsync(sidecarPath);
+
+        var result = ReleaseEvidence.ValidateTag(
+            SemVer.Parse("0.1.0"),
+            "stable",
+            "v0.1.0",
+            "e042717616171e6563d29d0368c8ad60a6a5bb60",
+            note,
+            sidecar,
+            manifest,
+            evidence);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.NotNull(result.Summary);
+        Assert.Equal("appsurface-release-evidence-bundle-v1", result.Summary!.Schema);
     }
 
     [Fact]
@@ -3310,7 +3927,7 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Equal(0, prepare.ExitCode);
 
         var evidenceJson = await ReadFileAsync("releases/v0.1.0.evidence.json");
-        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundle>(evidenceJson, ReleaseJson.Options)!;
+        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundleV2>(evidenceJson, ReleaseJson.Options)!;
         await WriteFileAsync("releases/v0.1.0.evidence.json", ReleaseEvidence.Serialize(PinDocsArchive(bundle, docs)));
 
         var result = await RunAsync(
@@ -3334,8 +3951,8 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Equal(0, prepare.ExitCode);
 
         var evidenceJson = await ReadFileAsync("releases/v0.1.0.evidence.json");
-        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundle>(evidenceJson, ReleaseJson.Options)!;
-        var generatedDigestBundle = RefreshSubject(bundle with
+        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundleV2>(evidenceJson, ReleaseJson.Options)!;
+        var generatedDigestBundle = ReleaseEvidenceV2.RefreshSubject(bundle with
         {
             DocsArchive = new ReleaseEvidenceDocsArchive(
                 "configured",
@@ -3385,7 +4002,7 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Equal(0, prepare.ExitCode);
 
         var evidenceJson = await ReadFileAsync("releases/v0.1.0.evidence.json");
-        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundle>(evidenceJson, ReleaseJson.Options)!;
+        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundleV2>(evidenceJson, ReleaseJson.Options)!;
         await WriteFileAsync("releases/v0.1.0.evidence.json", ReleaseEvidence.Serialize(PinDocsArchive(bundle, docs)));
 
         var result = await RunAsync(
@@ -3561,6 +4178,35 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task PublishRejectsV2TagThatDoesNotContainPreparationBaseCommit()
+    {
+        await SeedRepositoryAsync();
+        var runner = await CreateSuccessfulV2PublishRunnerAsync();
+        runner.Add("git merge-base --is-ancestor aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa abc123", new CommandResult(1, "", "not an ancestor"));
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--dry-run"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-preparation-base-commit-not-contained-by-tag", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsV2EvidenceWithNonCanonicalPreparationBaseCommit()
+    {
+        await SeedRepositoryAsync();
+        var runner = await CreateSuccessfulV2PublishRunnerAsync("HEAD");
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--dry-run"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-preparation-base-commit-invalid", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PublishRejectsTagBoundEvidenceDiagnosticsBeforeReleaseCreation()
     {
         await SeedRepositoryAsync();
@@ -3591,6 +4237,70 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("\"releaseClassification\": \"prerelease\"", result.Stdout, StringComparison.Ordinal);
         Assert.Contains("\"evidencePath\": \"releases/v0.1.0-preview.1.evidence.json\"", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishValidatesSchemaV2CurrentPointerArtifacts()
+    {
+        await SeedRepositoryAsync();
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--dry-run"],
+            await CreateSuccessfulV2PublishRunnerAsync());
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("\"evidencePath\": \"releases/v0.1.0-preview.1.evidence.json\"", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("releases/current.md", "release-current-pointer-missing-from-tag")]
+    [InlineData("releases/current.md.yml", "release-current-pointer-sidecar-missing-from-tag")]
+    public async Task PublishRejectsSchemaV2EvidenceWhenFrozenCurrentPointerArtifactIsMissing(string path, string expectedCode)
+    {
+        await SeedRepositoryAsync();
+        var runner = await CreateSuccessfulV2PublishRunnerAsync();
+        runner.Add(
+            $"git show v0.1.0-preview.1:{path}",
+            new CommandResult(1, "", "missing frozen pointer artifact"));
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--dry-run"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains($"Code: {expectedCode}", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishReturnsDiagnosticWhenSchemaV2ResolutionUsesTaggedPathAsAlias()
+    {
+        await SeedRepositoryAsync();
+        var runner = await CreateSuccessfulV2PublishRunnerAsync();
+        var evidenceJson = await ReadFileAsync("releases/v0.1.0-preview.1.evidence.json");
+        var bundle = JsonSerializer.Deserialize<ReleaseEvidenceBundleV2>(evidenceJson, ReleaseJson.Options)!;
+        var malformed = bundle with
+        {
+            CoordinatedPackageReleaseNoteResolutions =
+            [
+                new CoordinatedPackageReleaseNoteResolution(
+                    "Core/ForgeTrust.AppSurface.Core.csproj",
+                    "coordinated",
+                    bundle.ReleaseNotePath,
+                    bundle.ReleaseNotePath,
+                    bundle.Tag,
+                    bundle.Commits.PreparationBaseCommit)
+            ]
+        };
+        runner.Add(
+            "git show v0.1.0-preview.1:releases/v0.1.0-preview.1.evidence.json",
+            new CommandResult(0, ReleaseEvidence.Serialize(malformed), ""));
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--dry-run"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-evidence-package-link-mismatch", result.Stderr, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3678,17 +4388,6 @@ public sealed class ReleaseToolTests : IDisposable
             "# Unreleased\n\nThis is the living release note for the next coordinated AppSurface version. It stays provisional until a tag is cut.\n");
         Assert.Contains($"# Release {version}{Environment.NewLine}{Environment.NewLine}", releaseNote, StringComparison.Ordinal);
 
-        var packageIndex = PackageIndexEditor.UpdatePublicPublishedReleaseNotes(
-            """
-            packages:
-              - project: Core.csproj
-                classification: public
-                publish_decision: publish
-                order: 10
-            """,
-            "releases/v0.1.0-preview.1.md");
-        Assert.Contains("release_notes_path: releases/v0.1.0-preview.1.md", packageIndex, StringComparison.Ordinal);
-
         var appendedChangelog = ChangelogEditor.RollForward(
             "# Changelog\n",
             version,
@@ -3718,16 +4417,6 @@ public sealed class ReleaseToolTests : IDisposable
             "releases/v0.1.0-preview.1.md");
         Assert.Contains("- Narrative release note: [Upcoming release note](./releases/unreleased.md)", multiReleaseChangelog, StringComparison.Ordinal);
         Assert.Matches("## Unreleased[\\s\\S]*## 0\\.1\\.0-preview\\.1 - 2026-05-25[\\s\\S]*## 0\\.0\\.1 - 2026-01-01", multiReleaseChangelog);
-
-        var packageIndexWithoutOrder = PackageIndexEditor.UpdatePublicPublishedReleaseNotes(
-            """
-            packages:
-              - project: Core.csproj
-                classification: public
-                publish_decision: publish
-            """,
-            "releases/v0.1.0-preview.1.md");
-        Assert.EndsWith("    release_notes_path: releases/v0.1.0-preview.1.md\n", packageIndexWithoutOrder, StringComparison.Ordinal);
 
         var placeholderWithFollowingRelease = ChangelogEditor.RollForward(
             """
@@ -5089,6 +5778,8 @@ public sealed class ReleaseToolTests : IDisposable
             nav_group: Releases
             order: 15
             """);
+        await WriteFileAsync("releases/current.md", ReleaseCurrentPointer.BuildNone());
+        await WriteFileAsync("releases/current.md.yml", CurrentReleaseSidecarContent);
         await WriteFileAsync(
             "releases/templates/tagged-release-template.md",
             "# Release x.y.z\n");
@@ -5114,6 +5805,19 @@ public sealed class ReleaseToolTests : IDisposable
         var path = RepositoryPath(relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, content);
+    }
+
+    private static string FindSourceRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            if (File.Exists(TestPathUtils.PathUnder(directory.FullName, "ForgeTrust.AppSurface.slnx")))
+            {
+                return directory.FullName;
+            }
+        }
+
+        throw new DirectoryNotFoundException("Could not locate the AppSurface source root from the test output directory.");
     }
 
     private async Task<string> ReadFileAsync(string relativePath)
@@ -5221,6 +5925,35 @@ public sealed class ReleaseToolTests : IDisposable
                     docs?.ReleaseManifestSha256,
                     docs?.FileCount),
                 ""));
+        return runner;
+    }
+
+    private async Task<FakeCommandRunner> CreateSuccessfulV2PublishRunnerAsync(string preparationBaseCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    {
+        var prepare = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit(preparationBaseCommit));
+        Assert.Equal(0, prepare.ExitCode);
+
+        var runner = CreateSuccessfulPublishRunner();
+        runner.Add($"git merge-base --is-ancestor {preparationBaseCommit} abc123", new CommandResult(0, "", ""));
+        const string tag = "v0.1.0-preview.1";
+        foreach (var path in new[]
+                 {
+                     "releases/v0.1.0-preview.1.md",
+                     "releases/v0.1.0-preview.1.md.yml",
+                     "releases/v0.1.0-preview.1.release.json",
+                     "releases/v0.1.0-preview.1.evidence.json",
+                     "releases/current.md",
+                     "releases/current.md.yml"
+                 })
+        {
+            runner.Add($"git show {tag}:{path}", new CommandResult(0, await ReadFileAsync(path), ""));
+        }
+        runner.Add(
+            $"git show {tag}:packages/package-index.yml",
+            new CommandResult(0, await ReadFileAsync("packages/package-index.yml"), ""));
+
         return runner;
     }
 
@@ -5542,6 +6275,20 @@ public sealed class ReleaseToolTests : IDisposable
         });
     }
 
+    private static ReleaseEvidenceBundleV2 PinDocsArchive(ReleaseEvidenceBundleV2 bundle, DocsArchiveFixture docs)
+    {
+        return ReleaseEvidenceV2.RefreshSubject(bundle with
+        {
+            DocsArchive = new ReleaseEvidenceDocsArchive(
+                "catalogPinned",
+                docs.ExactTreePath,
+                docs.ReleaseManifestSha256,
+                "appsurface-docs-release-manifest-v1",
+                docs.FileCount,
+                new ReleaseEvidenceCatalogEntry(docs.ExactTreePath, docs.ReleaseManifestSha256))
+        });
+    }
+
     private static ReleaseEvidenceBundle RefreshSubject(ReleaseEvidenceBundle bundle)
     {
         var subjectInput = new ReleaseEvidenceSubjectInput(
@@ -5637,28 +6384,4 @@ public sealed class ReleaseToolTests : IDisposable
         int FileCount,
         string VersionText);
 
-    private sealed class FakeCommandRunner : ICommandRunner
-    {
-        private readonly Dictionary<string, CommandResult> _results = new(StringComparer.Ordinal);
-
-        internal static FakeCommandRunner WithSourceCommit(string sourceCommit)
-        {
-            var runner = new FakeCommandRunner();
-            runner.Add("git rev-parse HEAD", new CommandResult(0, sourceCommit + "\n", ""));
-            return runner;
-        }
-
-        internal void Add(string command, CommandResult result)
-        {
-            _results[command] = result;
-        }
-
-        public Task<CommandResult> RunAsync(CommandInvocation invocation, CancellationToken cancellationToken)
-        {
-            var command = invocation.Executable + " " + string.Join(' ', invocation.Arguments);
-            return Task.FromResult(_results.TryGetValue(command, out var result)
-                ? result
-                : new CommandResult(1, "", "command not configured"));
-        }
-    }
 }

@@ -1,7 +1,157 @@
+using System.Diagnostics;
+
 namespace ForgeTrust.AppSurface.Release.Tests;
+
+using ForgeTrust.AppSurface.Release;
 
 public sealed class ReleaseWorkflowPolicyTests
 {
+    [Fact]
+    public void ReleasePreparationChangePolicyAcceptsTheCompletePreparationArtifactSet()
+    {
+        var result = ReleasePreparationChangePolicy.Validate(
+            "1.2.3",
+            [
+                new("A", "releases/v1.2.3.md"),
+                new("A", "releases/v1.2.3.md.yml"),
+                new("A", "releases/v1.2.3.release.json"),
+                new("A", "releases/v1.2.3.evidence.json"),
+                new("M", "releases/current.md"),
+                new("M", "CHANGELOG.md"),
+                new("M", "releases/unreleased.md"),
+                new("M", "releases/unreleased.md.yml")
+            ]);
+
+        Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
+    }
+
+    [Theory]
+    [InlineData("", "A requested release version is required.")]
+    [InlineData("1.2.3", "Required release-preparation path is missing: releases/v1.2.3.md.yml.", "releases/v1.2.3.md")]
+    [InlineData("1.2.3", "Required release-preparation path is missing: releases/v1.2.3.md.", "releases/v1.2.3.md.yml", "releases/v1.2.3.release.json", "releases/v1.2.3.evidence.json", "releases/current.md")]
+    public void ReleasePreparationChangePolicyRejectsEmptyOrPartialDiff(string version, string expectedError, params string[] paths)
+    {
+        var result = ReleasePreparationChangePolicy.Validate(
+            version,
+            paths.Select(path => new ReleasePreparationChange("A", path)));
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => string.Equals(error, expectedError, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ReleasePreparationChangePolicyRejectsAnActuallyEmptyDiff()
+    {
+        var result = ReleasePreparationChangePolicy.Validate("1.2.3", []);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => error.Contains("diff is empty", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ReleasePreparationChangePolicyRejectsUnsupportedGitStatuses()
+    {
+        var result = ReleasePreparationChangePolicy.Validate(
+            "1.2.3",
+            [
+                new("C", "README.md"),
+                new("M", "CHANGELOG.md"),
+                new("M", "CHANGELOG.md")
+            ]);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => error.Contains("Unsupported Git change status 'C'", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, error => error.Contains("path appears more than once: CHANGELOG.md", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ReleasePreparationChangePolicyRejectsSidecarUnexpectedChangesDeletesAndRenames()
+    {
+        var result = ReleasePreparationChangePolicy.Validate(
+            "1.2.3",
+            [
+                new("A", "releases/v1.2.3.md"),
+                new("A", "releases/v1.2.3.md.yml"),
+                new("A", "releases/v1.2.3.release.json"),
+                new("A", "releases/v1.2.3.evidence.json"),
+                new("M", "releases/current.md"),
+                new("M", "CHANGELOG.md"),
+                new("M", "releases/unreleased.md"),
+                new("M", "releases/unreleased.md.yml"),
+                new("M", "releases/current.md.yml"),
+                new("M", "README.md"),
+                new("D", "releases/v1.1.0.md"),
+                new("R100", "releases/v1.0.0.md", "releases/v1.2.3.md")
+            ]);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => error.Contains("current.md.yml", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, error => error.Contains("Unexpected", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, error => error.Contains("Deletes", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, error => error.Contains("Renames", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ReleasePreparationChangePolicyParsesRenameNameStatus()
+    {
+        var changes = ReleasePreparationChangePolicy.ParseNameStatus(
+            "R100\treleases/v1.0.0.md\treleases/v1.2.3.md\nM\treleases/current.md\n");
+
+        Assert.Collection(
+            changes,
+            rename =>
+            {
+                Assert.Equal("R100", rename.Status);
+                Assert.Equal("releases/v1.0.0.md", rename.OriginalPath);
+                Assert.Equal("releases/v1.2.3.md", rename.Path);
+            },
+            current => Assert.Equal("releases/current.md", current.Path));
+    }
+
+    [Fact]
+    public async Task ReleasePreparationChangePolicyValidatesPullRequestDiffWhenRequestedByWorkflow()
+    {
+        var version = Environment.GetEnvironmentVariable("RELEASE_PREP_POLICY_VERSION");
+        if (version is null)
+        {
+            return;
+        }
+
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var baseRef = Environment.GetEnvironmentVariable("RELEASE_PREP_POLICY_BASE_REF");
+        Assert.False(string.IsNullOrWhiteSpace(baseRef), "RELEASE_PREP_POLICY_BASE_REF must be set by the release-prep workflow.");
+
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "git",
+                WorkingDirectory = repositoryRoot,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            }
+        };
+        process.StartInfo.ArgumentList.Add("diff");
+        process.StartInfo.ArgumentList.Add("--find-renames");
+        process.StartInfo.ArgumentList.Add("--no-color");
+        process.StartInfo.ArgumentList.Add("--name-status");
+        process.StartInfo.ArgumentList.Add($"origin/{baseRef}...HEAD");
+        Assert.True(process.Start());
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync());
+        var output = await outputTask;
+        var error = await errorTask;
+        Assert.True(process.ExitCode == 0, error);
+
+        var result = ReleasePreparationChangePolicy.Validate(
+            version,
+            ReleasePreparationChangePolicy.ParseNameStatus(output));
+
+        Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
+    }
+
     [Fact]
     public async Task ReleasePrepReviewUsesReadOnlyPullRequestTriggerWithoutSecrets()
     {
@@ -14,6 +164,8 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("pull-requests: read", workflow, StringComparison.Ordinal);
         Assert.Contains("--fail-on-warnings", workflow, StringComparison.Ordinal);
         Assert.Contains("--allow-existing-targets", workflow, StringComparison.Ordinal);
+        Assert.Contains("RELEASE_PREP_POLICY_VERSION", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("--filter FullyQualifiedName~ReleasePreparationChangePolicyValidatesPullRequestDiff", workflow, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -36,18 +188,22 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("--base \"${BASE_REF}\"", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("expected_main=\"$(git rev-parse origin/main)\"", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("merge-base --is-ancestor HEAD origin/main", prep, StringComparison.Ordinal);
-        Assert.Contains("No versioned release artifacts changed; validating release tooling instead.", prep, StringComparison.Ordinal);
         Assert.Contains("dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj", prep, StringComparison.Ordinal);
+        Assert.Contains("RELEASE_PREP_POLICY_BASE_REF", prep, StringComparison.Ordinal);
+        Assert.Contains("RELEASE_PREP_POLICY_VERSION", prep, StringComparison.Ordinal);
+        Assert.DoesNotContain("--filter FullyQualifiedName~ReleasePreparationChangePolicyValidatesPullRequestDiff", prep, StringComparison.Ordinal);
+        Assert.Contains("No versioned release manifest changed; validating the complete release test suite without applying the release-artifact diff gate.", prep, StringComparison.Ordinal);
+        Assert.DoesNotContain("--filter FullyQualifiedName~ReleaseWorkflowPolicyTests", prep, StringComparison.Ordinal);
+        Assert.Contains("release_prep_changes", prep, StringComparison.Ordinal);
         Assert.Contains("git diff --no-renames --name-status", prep, StringComparison.Ordinal);
-        Assert.Contains("release_artifact_deletions", prep, StringComparison.Ordinal);
-        Assert.Contains("git diff --no-renames --name-only --diff-filter=AM", prep, StringComparison.Ordinal);
-        Assert.Contains("releases/v*.release.json", prep, StringComparison.Ordinal);
-        Assert.Contains("releases/v*.evidence.json", prep, StringComparison.Ordinal);
-        Assert.Contains("Expected exactly one added or modified release manifest", prep, StringComparison.Ordinal);
-        Assert.Contains("Expected exactly one added or modified release evidence bundle", prep, StringComparison.Ordinal);
-        Assert.Contains("Unexpected versioned release artifact deletion", prep, StringComparison.Ordinal);
-        Assert.Contains("releases/v0.1.0-rc.4.release.json", prep, StringComparison.Ordinal);
-        Assert.Contains("Release preparation pull requests must change exactly the four generated artifacts", prep, StringComparison.Ordinal);
+        Assert.Contains("current_pointer_markdown_added", prep, StringComparison.Ordinal);
+        Assert.Contains("current_pointer_sidecar_added", prep, StringComparison.Ordinal);
+        Assert.Contains("M:releases/unreleased.md", prep, StringComparison.Ordinal);
+        Assert.Contains("bootstrap both releases/current.md and releases/current.md.yml together", prep, StringComparison.Ordinal);
+        Assert.Contains("without exactly one added or modified versioned release manifest", prep, StringComparison.Ordinal);
+        Assert.Contains("releases/v${VERSION}.release.json", prep, StringComparison.Ordinal);
+        Assert.Contains("git add", prep, StringComparison.Ordinal);
+        Assert.DoesNotContain("git add CHANGELOG.md releases", prep, StringComparison.Ordinal);
         Assert.Contains("docs export", prep, StringComparison.Ordinal);
         Assert.Contains("docs verify-archive", prep, StringComparison.Ordinal);
         Assert.Contains("--docs-catalog", prep, StringComparison.Ordinal);

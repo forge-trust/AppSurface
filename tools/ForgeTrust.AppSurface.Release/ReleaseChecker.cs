@@ -32,7 +32,9 @@ internal sealed class ReleaseChecker
         var errors = new List<ReleaseDiagnostic>();
         var warnings = new List<ReleaseDiagnostic>();
         var generatedFiles = GeneratedFiles(options.Version);
+        var versionedGeneratedFiles = VersionedGeneratedFiles(options.Version);
         ReleaseEvidenceSummary? evidenceSummary = null;
+        PackageIndexSummary? packageSummary = null;
 
         foreach (var requiredPath in RequiredPaths().Where(requiredPath => !File.Exists(requiredPath)))
         {
@@ -52,12 +54,12 @@ internal sealed class ReleaseChecker
                     "release-generated-target-missing",
                     $"Generated target '{_workspace.DisplayPath(target)}' is missing.",
                     "`--allow-existing-targets` is only valid when reviewing the complete prepared release artifact set.",
-                    "Run `./eng/release prepare` for this version and include the release note, sidecar metadata, and release manifest in the release preparation pull request.",
+                    "Run `./eng/release prepare` for this version and include the versioned release note, sidecar metadata, release manifest, evidence bundle, and frozen releases/current.md pointer in the release preparation pull request.",
                     "tools/ForgeTrust.AppSurface.Release/README.md#check"));
             }
         }
 
-        foreach (var target in generatedFiles.Where(File.Exists))
+        foreach (var target in versionedGeneratedFiles.Where(File.Exists))
         {
             if (options.AllowExistingTargets && string.Equals(options.Command, "check", StringComparison.Ordinal))
             {
@@ -122,7 +124,7 @@ internal sealed class ReleaseChecker
 
         if (File.Exists(_workspace.PackageIndexPath))
         {
-            var packageSummary = await PackageIndexSummary.LoadAsync(_workspace.PackageIndexPath, cancellationToken);
+            packageSummary = await PackageIndexSummary.LoadAsync(_workspace.PackageIndexPath, cancellationToken);
             if (packageSummary.PublicPublishedPackages.Count == 0)
             {
                 errors.Add(ReleaseDiagnostic.Error(
@@ -148,7 +150,25 @@ internal sealed class ReleaseChecker
             }
         }
 
-        var sourceCommit = await TryGetSourceCommitAsync(cancellationToken);
+        var sourceCommit = await GetSourceCommitAsync(cancellationToken);
+        if (string.Equals(options.Command, "prepare", StringComparison.Ordinal)
+            && string.IsNullOrWhiteSpace(sourceCommit))
+        {
+            errors.Add(ReleaseDiagnostic.Error(
+                "release-preparation-base-commit-unavailable",
+                "Release preparation could not resolve the current HEAD commit.",
+                "The current release pointer and V2 evidence must be bound to a concrete preparation base commit.",
+                "Run the release tool from a valid Git worktree with a readable HEAD, then retry.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle"));
+        }
+        else if (string.Equals(options.Command, "prepare", StringComparison.Ordinal)
+            && File.Exists(_workspace.CurrentReleasePath))
+        {
+            var pointer = await File.ReadAllTextAsync(_workspace.CurrentReleasePath, cancellationToken);
+            var pointerGate = new ReleaseCurrentPointerGate(_workspace, _commandRunner);
+            errors.AddRange(await pointerGate.ValidateAsync(options.Version, pointer, sourceCommit!, cancellationToken));
+        }
+
         if (string.Equals(options.Command, "check", StringComparison.Ordinal)
             && (options.AllowExistingTargets || options.Version.IsStable))
         {
@@ -160,6 +180,24 @@ internal sealed class ReleaseChecker
                 cancellationToken);
             evidenceSummary = evidence.Summary;
             errors.AddRange(evidence.Diagnostics);
+            if (packageSummary is not null
+                && File.Exists(_workspace.ReleaseManifestPath(options.Version))
+                && File.Exists(_workspace.ReleaseEvidencePath(options.Version)))
+            {
+                var evidenceJson = await File.ReadAllTextAsync(_workspace.ReleaseEvidencePath(options.Version), cancellationToken);
+                var manifestJson = await File.ReadAllTextAsync(_workspace.ReleaseManifestPath(options.Version), cancellationToken);
+                if (ReleaseEvidence.IsV2(evidenceJson)
+                    && ReleaseManifestV2Validator.TryDeserialize(manifestJson, out var manifest, out _)
+                    && !ReleaseManifestV2Validator.TryValidatePackageSet(manifest, packageSummary.PublicPublishedPackages, out var issue))
+                {
+                    errors.Add(ReleaseDiagnostic.Error(
+                        "release-evidence-package-set-mismatch",
+                        "V2 release evidence does not attest to the package-index release surface.",
+                        issue,
+                        "Regenerate the release manifest and evidence from the unchanged package index before release review.",
+                        "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle"));
+                }
+            }
             if (options.Version.IsStable
                 && evidence.Bundle is not null
                 && evidence.Summary is not null
@@ -202,12 +240,23 @@ internal sealed class ReleaseChecker
             _workspace.ChangelogPath,
             _workspace.UnreleasedPath,
             _workspace.UnreleasedSidecarPath,
+            _workspace.CurrentReleasePath,
+            _workspace.CurrentReleaseSidecarPath,
             _workspace.PackageIndexPath,
             _workspace.TemplatePath
         ];
     }
 
     private IReadOnlyList<string> GeneratedFiles(SemVer version)
+    {
+        return
+        [
+            .. VersionedGeneratedFiles(version),
+            _workspace.CurrentReleasePath
+        ];
+    }
+
+    private IReadOnlyList<string> VersionedGeneratedFiles(SemVer version)
     {
         return
         [
@@ -218,7 +267,7 @@ internal sealed class ReleaseChecker
         ];
     }
 
-    private async Task<string?> TryGetSourceCommitAsync(CancellationToken cancellationToken)
+    internal async Task<string?> GetSourceCommitAsync(CancellationToken cancellationToken)
     {
         var result = await _commandRunner.RunAsync(
             new CommandInvocation("git", ["rev-parse", "HEAD"], _workspace.RepositoryRoot),
