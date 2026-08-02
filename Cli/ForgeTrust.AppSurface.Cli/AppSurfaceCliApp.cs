@@ -78,6 +78,7 @@ internal static class AppSurfaceCliApp
         services.AddSingleton<ICoverageRunReportGenerator, CoverageRunReportGenerator>();
         services.TryAddSingleton<IAppSurfaceGoogleSecretTransferClient, GoogleSecretManagerTransferClientAdapter>();
         services.TryAddSingleton<ISecretPromotionGoogleClientFactory, DefaultSecretPromotionGoogleClientFactory>();
+        services.TryAddSingleton<LocalSecretsTransferCoordinator>();
         services.AddTransient<SecretPromotionWorkflow>();
         AddPwaVerifierServices(services);
         services.AddTransient<PwaVerifier>();

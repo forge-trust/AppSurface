@@ -153,6 +153,20 @@ public sealed class GoogleSecretManagerTransferClientTests
     }
 
     [Fact]
+    public void ProbeSecretVersion_Should_ReturnCanonicalProviderResourceName()
+    {
+        const string requested = "projects/project/secrets/api-key/versions/5";
+        const string canonical = "projects/project/secrets/api-key/versions/7";
+        var client = new GoogleSecretManagerTransferClientAdapter(
+            () => new TransferSecretManagerServiceClient(getVersionName: canonical));
+
+        var result = client.ProbeSecretVersion(requested, TimeSpan.FromSeconds(1));
+
+        Assert.Equal(GoogleSecretManagerTransferStatus.Ready, result.Status);
+        Assert.Equal(canonical, result.ResourceName);
+    }
+
+    [Fact]
     public void ProbeSecretVersion_Should_Fail_WhenVersionIsDisabled()
     {
         var client = new GoogleSecretManagerTransferClientAdapter(
@@ -407,7 +421,8 @@ public sealed class GoogleSecretManagerTransferClientTests
         bool returnNullPayload = false,
         bool hasEnabledVersions = true,
         bool hasAdditionalEnabledVersionPage = false,
-        string? addVersionName = null) : SecretManagerServiceClient
+        string? addVersionName = null,
+        string? getVersionName = null) : SecretManagerServiceClient
     {
         public GetSecretRequest? LastGetRequest { get; private set; }
 
@@ -456,7 +471,7 @@ public sealed class GoogleSecretManagerTransferClientTests
                 throw exception;
             }
 
-            return new SecretVersion { Name = request.Name, State = versionState };
+            return new SecretVersion { Name = getVersionName ?? request.Name, State = versionState };
         }
 
         public override AccessSecretVersionResponse AccessSecretVersion(

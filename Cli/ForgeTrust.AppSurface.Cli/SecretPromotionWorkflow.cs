@@ -9,7 +9,7 @@ using ForgeTrust.AppSurface.Core;
 namespace ForgeTrust.AppSurface.Cli;
 
 /// <summary>
-/// Creates provider clients for declared Google promotion endpoints.
+/// Creates provider clients for declared Google transfer endpoints.
 /// </summary>
 /// <remarks>
 /// The factory is a command-only seam. It keeps transfer credentials distinct from the read-only runtime configuration
@@ -20,7 +20,7 @@ internal interface ISecretPromotionGoogleClientFactory
     IAppSurfaceGoogleSecretTransferClient Create(SecretPromotionEndpoint endpoint);
 }
 
-/// <summary>Persists value-free receipt snapshots for crash-safe promotion recovery.</summary>
+/// <summary>Persists value-free receipt snapshots for crash-safe transfer recovery.</summary>
 internal interface ISecretPromotionReceiptWriter
 {
     /// <summary>Atomically replaces the receipt at <paramref name="path"/>.</summary>
@@ -185,11 +185,12 @@ internal sealed class DefaultSecretPromotionGoogleClientFactory(IAppSurfaceGoogl
 }
 
 /// <summary>
-/// Runs declared, value-safe promotion jobs.
+/// Runs declared, value-safe transfer jobs.
 /// </summary>
 internal sealed class SecretPromotionWorkflow(
     ISecretPromotionGoogleClientFactory googleFactory,
-    ISecretPromotionReceiptWriter? receiptWriter = null)
+    ISecretPromotionReceiptWriter? receiptWriter = null,
+    LocalSecretsTransferCoordinator? localCoordinator = null)
 {
     internal static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -197,27 +198,31 @@ internal sealed class SecretPromotionWorkflow(
         WriteIndented = true
     };
     private readonly ISecretPromotionReceiptWriter _receiptWriter = receiptWriter ?? new AtomicSecretPromotionReceiptWriter();
+    private readonly LocalSecretsTransferCoordinator _localCoordinator = localCoordinator ?? new LocalSecretsTransferCoordinator();
 
     public SecretPromotionPlanResult CreatePlan(SecretPromotionPlanRequest request)
     {
         var loaded = LoadConfiguration(request.ConfigPath);
         var job = FindJob(loaded.Configuration, request.JobName);
         var endpoints = ResolveEndpoints(loaded.Configuration, job);
-        ValidateJob(job, endpoints);
+        ValidateJob(loaded.Configuration.Version, job, endpoints);
 
-        var draftRows = job.Rows.Select((row, index) => CreatePlanRow(row, index + 1, endpoints, request.Context)).ToArray();
+        var draftRows = job.Rows.Select((row, index) => CreatePlanRow(loaded.Configuration.Version, row, index + 1, endpoints, request.Context)).ToArray();
         if (draftRows.GroupBy(row => row.LocalStorageName, StringComparer.Ordinal).Any(group => group.Count() > 1))
         {
             throw SecretPromotionCommandExtensions.Usage("Promotion job contains duplicate normalized LocalSecrets keys.");
         }
 
-        var rows = draftRows.Select(row => CaptureDestinationPrecondition(row, endpoints.Destination)).ToArray();
+        var rows = IsLocal(endpoints.Destination)
+            ? draftRows.Select(row => CaptureLocalDestinationPrecondition(row, request.Context, request.Replace)).ToArray()
+            : draftRows.Select(row => CaptureDestinationPrecondition(row, endpoints.Destination)).ToArray();
         var summaryRows = rows.Select(row => ProbeRow(row, endpoints, request.Context, request.Replace)).ToArray();
         var succeeded = summaryRows.All(IsReadyOrSkipped);
         var createdAtUtc = DateTimeOffset.UtcNow;
         var expiresAtUtc = createdAtUtc.Add(request.Expiry);
         var production = IsProductionJob(endpoints);
         var planIdentity = ComputePlanIdentity(
+            loaded.Configuration.Version,
             job.Name,
             loaded.Digest,
             createdAtUtc,
@@ -227,7 +232,7 @@ internal sealed class SecretPromotionWorkflow(
             succeeded,
             rows);
         var plan = new SecretPromotionPlanArtifact(
-            1,
+            loaded.Configuration.Version,
             job.Name,
             loaded.Digest,
             createdAtUtc,
@@ -252,6 +257,11 @@ internal sealed class SecretPromotionWorkflow(
             throw SecretPromotionCommandExtensions.Usage("The plan does not match the supplied endpoint configuration.");
         }
 
+        if (plan.Version != loaded.Configuration.Version)
+        {
+            throw SecretPromotionCommandExtensions.Usage("The plan version does not match the supplied endpoint configuration.");
+        }
+
         if (plan.ExpiresAtUtc <= DateTimeOffset.UtcNow)
         {
             throw SecretPromotionCommandExtensions.Usage("The plan has expired. Create a new plan before applying.");
@@ -266,20 +276,28 @@ internal sealed class SecretPromotionWorkflow(
 
         var job = FindJob(loaded.Configuration, plan.JobName);
         var endpoints = ResolveEndpoints(loaded.Configuration, job);
-        ValidateJob(job, endpoints);
-        ValidatePlanRows(plan.Rows, job, endpoints, request.Context);
-        if (IsProductionJob(endpoints) && !string.Equals(request.Confirmation, plan.JobName, StringComparison.Ordinal))
+        ValidateJob(loaded.Configuration.Version, job, endpoints);
+        ValidatePlanRows(plan.Version, plan.Rows, job, endpoints, request.Context);
+        var hasLocalReplacement = plan.Rows.Any(static row =>
+            string.Equals(row.DestinationKind, "local", StringComparison.Ordinal) && row.DestinationExists == true);
+        if (hasLocalReplacement && !plan.Replace)
         {
-            throw SecretPromotionCommandExtensions.Usage("A production-labelled promotion job requires --confirm with the exact job name.");
+            throw SecretPromotionCommandExtensions.Usage("A LocalSecrets replacement plan must be created with --replace.");
+        }
+
+        if ((IsProductionJob(endpoints) || hasLocalReplacement) &&
+            !string.Equals(request.Confirmation, plan.JobName, StringComparison.Ordinal))
+        {
+            throw SecretPromotionCommandExtensions.Usage("This transfer requires --confirm with the exact job name before it can access a source value.");
         }
 
         var plannedRows = plan.Rows.ToArray();
         var resumeState = LoadResumeState(request.ResumeReceiptPath, plan);
         var completedRows = resumeState.CompletedRows;
-        VerifyCompletedRows(completedRows, endpoints.Destination);
+        VerifyCompletedRows(completedRows, plan, endpoints.Destination, request.Context);
         var preflight = plannedRows
             .Where(row => !completedRows.ContainsKey(row.RowNumber))
-            .Select(row => RecheckRow(row, endpoints, request.Context, plan.Replace))
+            .Select(row => RecheckRow(row, plan, endpoints, request.Context, plan.Replace, !string.IsNullOrWhiteSpace(request.ResumeReceiptPath)))
             .ToDictionary(row => row.RowNumber);
         var plannedResults = plannedRows
             .Select(row => completedRows.ContainsKey(row.RowNumber)
@@ -320,7 +338,7 @@ internal sealed class SecretPromotionWorkflow(
             }
 
             var preflightResult = preflight[row.RowNumber];
-            if (preflightResult.Status == "DestinationExists")
+            if (!IsLocal(endpoints.Destination) && preflightResult.Status == "DestinationExists")
             {
                 results.Add(SkipExistingDestination(preflightResult));
                 SetJournalResult(journalResults, results[^1]);
@@ -345,7 +363,9 @@ internal sealed class SecretPromotionWorkflow(
             SetJournalResult(journalResults, results[^1]);
             WriteReceipt(request, plan, CreateJournalSummary(plan.JobName, journalResults));
 
-            results[^1] = WriteGoogle(row, endpoints.Destination, value!);
+            results[^1] = IsLocal(endpoints.Destination)
+                ? WriteLocal(row, plan, request.Context, value!, !string.IsNullOrWhiteSpace(request.ResumeReceiptPath))
+                : WriteGoogle(row, endpoints.Destination, value!);
             SetJournalResult(journalResults, results[^1]);
             WriteReceipt(request, plan, CreateJournalSummary(plan.JobName, journalResults));
         }
@@ -393,20 +413,21 @@ internal sealed class SecretPromotionWorkflow(
         try
         {
             var configuration = JsonSerializer.Deserialize<SecretPromotionConfiguration>(bytes, JsonOptions);
-            if (configuration?.Version != 1 ||
+            if (configuration?.Version is not 1 and not 2 ||
                 configuration.Jobs is null ||
                 configuration.Endpoints is null ||
                 configuration.Endpoints.Any(static endpoint => endpoint is null) ||
-                configuration.Jobs.Any(static job => job is null || job.Rows is null || job.Rows.Any(static row => row is null)))
+                configuration.Jobs.Any(static job => job is null || job.Rows is null || job.Rows.Any(static row => row is null)) ||
+                configuration.Version == 2 && (configuration.Endpoints.Count == 0 || configuration.Jobs.Count == 0))
             {
-                throw SecretPromotionCommandExtensions.Usage("--config must be a version 1 secret-promotion configuration with endpoints and jobs.");
+                throw SecretPromotionCommandExtensions.Usage("--config must be a version 1 or version 2 secret-transfer configuration with endpoints and jobs.");
             }
 
             return new LoadedConfiguration(configuration, Convert.ToHexString(SHA256.HashData(bytes)));
         }
         catch (JsonException)
         {
-            throw SecretPromotionCommandExtensions.Usage("--config must be valid secret-promotion JSON.");
+            throw SecretPromotionCommandExtensions.Usage("--config must be valid secret-transfer JSON.");
         }
     }
 
@@ -415,19 +436,19 @@ internal sealed class SecretPromotionWorkflow(
         try
         {
             var plan = JsonSerializer.Deserialize<SecretPromotionPlanArtifact>(File.ReadAllBytes(Path.GetFullPath(path)), JsonOptions);
-            if (plan?.Version != 1 ||
+            if (plan?.Version is not 1 and not 2 ||
                 plan.Rows is null ||
                 plan.Rows.Any(static row => row is null) ||
                 string.IsNullOrWhiteSpace(plan.JobName))
             {
-                throw SecretPromotionCommandExtensions.Usage("--plan must be a version 1 AppSurface secret-promotion plan.");
+                throw SecretPromotionCommandExtensions.Usage("--plan must be a version 1 or version 2 AppSurface secret-transfer plan.");
             }
 
             return plan;
         }
         catch (JsonException)
         {
-            throw SecretPromotionCommandExtensions.Usage("--plan must be valid secret-promotion JSON.");
+            throw SecretPromotionCommandExtensions.Usage("--plan must be valid secret-transfer JSON.");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -479,7 +500,7 @@ internal sealed class SecretPromotionWorkflow(
         return matches[0];
     }
 
-    private static void ValidateJob(SecretPromotionJob job, ResolvedEndpoints endpoints)
+    private static void ValidateJob(int version, SecretPromotionJob job, ResolvedEndpoints endpoints)
     {
         if (string.IsNullOrWhiteSpace(job.Name) || job.Rows.Count == 0)
         {
@@ -488,12 +509,19 @@ internal sealed class SecretPromotionWorkflow(
 
         if (!IsSupported(endpoints.Source) || !IsSupported(endpoints.Destination))
         {
-            throw SecretPromotionCommandExtensions.Usage("V1 supports only the built-in local endpoint and Google endpoints.");
+            throw SecretPromotionCommandExtensions.Usage(version == 1
+                ? "V1 supports only the built-in local endpoint and Google endpoints."
+                : "V2 supports only the built-in local endpoint and Google endpoints.");
         }
 
-        if (IsLocal(endpoints.Destination))
+        if (version == 1 && IsLocal(endpoints.Destination))
         {
             throw SecretPromotionCommandExtensions.Usage("V1 promotion destinations must be declared Google endpoints.");
+        }
+
+        if (version == 2 && (!IsLocal(endpoints.Destination) || IsLocal(endpoints.Source)))
+        {
+            throw SecretPromotionCommandExtensions.Usage("V2 is reserved for Google-to-LocalSecrets transfer jobs. Use version 1 for existing Google destination jobs.");
         }
 
         var duplicateKeys = job.Rows.GroupBy(row => row.Key, StringComparer.Ordinal).FirstOrDefault(group => string.IsNullOrWhiteSpace(group.Key) || group.Count() > 1);
@@ -507,39 +535,49 @@ internal sealed class SecretPromotionWorkflow(
             throw SecretPromotionCommandExtensions.Usage("A LocalSecrets source targeting production requires allowMutableLocalSource: true in the declared job.");
         }
 
-        if (IsProductionJob(endpoints) && !IsLocal(endpoints.Source))
+        if ((version == 2 || IsProductionJob(endpoints)) && !IsLocal(endpoints.Source))
         {
             foreach (var row in job.Rows)
             {
                 if (!IsNumericVersionResource(row.Source))
                 {
-                    throw SecretPromotionCommandExtensions.Usage("Production Google sources must use explicit numeric version resources.");
+                    throw SecretPromotionCommandExtensions.Usage(version == 2
+                        ? "Google-to-LocalSecrets transfer sources must use explicit numeric version resources."
+                        : "Production Google sources must use explicit numeric version resources.");
                 }
             }
         }
 
-        if (!IsLocal(endpoints.Source) && job.Rows.Any(row =>
+        if (!IsLocal(endpoints.Destination) && !IsLocal(endpoints.Source) && job.Rows.Any(row =>
                 string.Equals(SecretParentForVersionResource(row.Source), ResourceForDestination(row, endpoints.Destination), StringComparison.Ordinal)))
         {
             throw SecretPromotionCommandExtensions.Usage("A promotion row cannot copy a Google secret version back into the same Google secret.");
         }
 
-        var duplicates = job.Rows
-            .Select(row => ResourceForDestination(row, endpoints.Destination))
-            .GroupBy(value => value, StringComparer.Ordinal)
-            .FirstOrDefault(group => group.Count() > 1);
-        if (duplicates is not null)
+        if (!IsLocal(endpoints.Destination))
         {
-            throw SecretPromotionCommandExtensions.Usage("Promotion job contains duplicate destination resources.");
+            var duplicates = job.Rows
+                .Select(row => ResourceForDestination(row, endpoints.Destination))
+                .GroupBy(value => value, StringComparer.Ordinal)
+                .FirstOrDefault(group => group.Count() > 1);
+            if (duplicates is not null)
+            {
+                throw SecretPromotionCommandExtensions.Usage("Promotion job contains duplicate destination resources.");
+            }
+        }
+        else if (job.Rows.Any(row => !string.IsNullOrWhiteSpace(row.Destination)))
+        {
+            throw SecretPromotionCommandExtensions.Usage("V2 LocalSecrets destination rows must omit the Google destination resource.");
         }
     }
 
     private SecretPromotionPlanRow CreatePlanRow(
+        int version,
         SecretPromotionJobRow row,
         int rowNumber,
         ResolvedEndpoints endpoints,
         SecretsCommandContext context) =>
-        CreateDeclaredPlanRow(row, rowNumber, endpoints, context) with
+        CreateDeclaredPlanRow(version, row, rowNumber, endpoints, context) with
         {
             DestinationHasEnabledVersions = false,
             DestinationExists = null
@@ -553,7 +591,9 @@ internal sealed class SecretPromotionWorkflow(
             return source;
         }
 
-        return ProbeDestination(row, endpoints.Destination, replace, includePrecondition: true);
+        return IsLocal(endpoints.Destination)
+            ? ProbeLocalDestination(row, replace)
+            : ProbeDestination(row, endpoints.Destination, replace, includePrecondition: true);
     }
 
     private SecretPromotionPlanRow CaptureDestinationPrecondition(
@@ -566,7 +606,49 @@ internal sealed class SecretPromotionWorkflow(
             : row;
     }
 
-    private SecretPromotionRowResult RecheckRow(SecretPromotionPlanRow row, ResolvedEndpoints endpoints, SecretsCommandContext context, bool replace)
+    private SecretPromotionPlanRow CaptureLocalDestinationPrecondition(
+        SecretPromotionPlanRow row,
+        SecretsCommandContext context,
+        bool replace)
+    {
+        var captured = _localCoordinator.CapturePrecondition(IdentityFrom(row, context), context.Store, replace);
+        return row with
+        {
+            DestinationExists = captured.Kind == LocalCoordinatorPreconditionKind.Replace,
+            LocalAttestationOperationId = captured.PreviousOperationId,
+            LocalPreconditionKind = captured.Kind.ToString(),
+            LocalPreconditionDiagnosticCode = captured.Failure?.Code,
+            LocalPreconditionProblem = captured.Failure?.Problem,
+            LocalPreconditionRetryable = captured.Failure?.Retryable
+        };
+    }
+
+    private static SecretPromotionRowResult ProbeLocalDestination(SecretPromotionPlanRow row, bool replace) =>
+        row.LocalPreconditionKind switch
+        {
+            nameof(LocalCoordinatorPreconditionKind.Missing) => row.Result("Ready", "WouldCreateLocalSecret", null, null, null),
+            nameof(LocalCoordinatorPreconditionKind.Replace) when replace => row.Result("Ready", "WouldReplaceLocalSecret", null, null, null),
+            nameof(LocalCoordinatorPreconditionKind.Conflict) => row.Result(
+                "Conflict",
+                "ProbeLocalDestination",
+                row.LocalPreconditionDiagnosticCode ?? "local-secret-transfer-destination-exists",
+                row.LocalPreconditionProblem ?? "The local transfer target conflicts with the declared plan.",
+                row.LocalPreconditionRetryable),
+            nameof(LocalCoordinatorPreconditionKind.Unsupported) or nameof(LocalCoordinatorPreconditionKind.Failed) => row.Result(
+                "Failed",
+                "ProbeLocalDestination",
+                row.LocalPreconditionDiagnosticCode ?? "local-secret-transfer-precondition-failed",
+                row.LocalPreconditionProblem ?? "The local transfer target could not be prepared safely.",
+                row.LocalPreconditionRetryable),
+            _ => row.Result(
+                "Failed",
+                "ProbeLocalDestination",
+                "local-secret-transfer-precondition-invalid",
+                "The local transfer plan does not contain a valid destination precondition.",
+                false)
+        };
+
+    private SecretPromotionRowResult RecheckRow(SecretPromotionPlanRow row, SecretPromotionPlanArtifact plan, ResolvedEndpoints endpoints, SecretsCommandContext context, bool replace, bool allowPreparedRecovery)
     {
         var source = ProbeSource(row, endpoints.Source, context);
         if (source is not null)
@@ -574,13 +656,58 @@ internal sealed class SecretPromotionWorkflow(
             return source;
         }
 
-        var destination = ProbeDestination(row, endpoints.Destination, replace, includePrecondition: true);
-        if (destination.Status != "Ready")
+        var destination = IsLocal(endpoints.Destination)
+            ? RecheckLocalDestination(row, plan, context, allowPreparedRecovery)
+            : ProbeDestination(row, endpoints.Destination, replace, includePrecondition: true);
+        if (destination.Status != "Ready" || string.Equals(destination.Action, "RecoverPreparedLocalSecret", StringComparison.Ordinal))
         {
             return destination;
         }
 
         return row.Result("Ready", "ApplyPreflight", null, null, null);
+    }
+
+    private SecretPromotionRowResult RecheckLocalDestination(
+        SecretPromotionPlanRow row,
+        SecretPromotionPlanArtifact plan,
+        SecretsCommandContext context,
+        bool allowPreparedRecovery)
+    {
+        var result = _localCoordinator.Recheck(
+            plan,
+            row,
+            IdentityFrom(row, context),
+            context.Store,
+            allowPreparedRecovery);
+        return result.Kind switch
+        {
+            LocalCoordinatorCheckKind.Ready => row.Result("Ready", "ApplyPreflight", null, null, null),
+            LocalCoordinatorCheckKind.PreparedRecovery => row.Result("Ready", "RecoverPreparedLocalSecret", null, null, null),
+            LocalCoordinatorCheckKind.Conflict => row.Result(
+                "Conflict",
+                "ProbeLocalDestination",
+                "local-secret-transfer-destination-changed",
+                "The local transfer target or attestation changed after planning.",
+                false),
+            LocalCoordinatorCheckKind.Indeterminate => row.Result(
+                "IndeterminateWrite",
+                "ProbeLocalDestination",
+                "local-secret-transfer-indeterminate-write",
+                "A prepared local transfer must be resumed and reconciled before another write is attempted.",
+                false),
+            LocalCoordinatorCheckKind.Unsupported => row.Result(
+                "Failed",
+                "ProbeLocalDestination",
+                result.Failure!.Code,
+                result.Failure.Problem,
+                result.Failure.Retryable),
+            _ => row.Result(
+                "Failed",
+                "ProbeLocalDestination",
+                result.Failure?.Code ?? "local-secret-transfer-preflight-failed",
+                result.Failure?.Problem ?? "The local transfer preflight failed.",
+                result.Failure?.Retryable)
+        };
     }
 
     private SecretPromotionRowResult? ProbeSource(SecretPromotionPlanRow row, SecretPromotionEndpoint endpoint, SecretsCommandContext context)
@@ -597,9 +724,19 @@ internal sealed class SecretPromotionWorkflow(
         }
 
         var result = googleFactory.Create(endpoint).ProbeSecretVersion(row.SourceResource!, TimeSpan.FromSeconds(5));
-        return result.Status == GoogleSecretManagerTransferStatus.Ready
+        if (result.Status != GoogleSecretManagerTransferStatus.Ready)
+        {
+            return row.GoogleSourceFailure("ProbeGoogleSource", result.Status, result.Diagnostic);
+        }
+
+        return !RequiresExactSourceIdentity(row) || string.Equals(result.ResourceName, row.SourceResource, StringComparison.Ordinal)
             ? null
-            : row.GoogleSourceFailure("ProbeGoogleSource", result.Status, result.Diagnostic);
+            : row.Result(
+                "Failed",
+                "ProbeGoogleSource",
+                "secret-transfer-version-mismatch",
+                "Google Secret Manager returned a version resource different from the version bound into the transfer plan.",
+                false);
     }
 
     private SecretPromotionRowResult ProbeDestination(
@@ -655,6 +792,19 @@ internal sealed class SecretPromotionWorkflow(
             return false;
         }
 
+        if (RequiresExactSourceIdentity(row) &&
+            (!string.Equals(result.ResourceName, row.SourceResource, StringComparison.Ordinal) ||
+             !string.Equals(result.Payload.ResolvedResourceName, row.SourceResource, StringComparison.Ordinal)))
+        {
+            failure = row.Result(
+                "Failed",
+                "AccessGoogleSource",
+                "secret-transfer-version-mismatch",
+                "Google Secret Manager returned a version resource different from the version bound into the transfer plan.",
+                false);
+            return false;
+        }
+
         if (!TryDecodeUtf8(result.Payload.Data, out value))
         {
             failure = row.Result("Failed", "DecodeGoogleSource", "secret-promotion-invalid-payload", "Google source payload is not valid UTF-8 text.", false);
@@ -675,6 +825,52 @@ internal sealed class SecretPromotionWorkflow(
         return result.Status == GoogleSecretManagerTransferStatus.IndeterminateWrite
             ? row.Result("IndeterminateWrite", "AddGoogleVersion", result.Diagnostic?.Code ?? "secret-promotion-indeterminate-write", "Google may have accepted the version before the response failed. Reconcile before resuming.", false)
             : row.GoogleDestinationFailure("AddGoogleVersion", result.Status, result.Diagnostic);
+    }
+
+    private SecretPromotionRowResult WriteLocal(
+        SecretPromotionPlanRow row,
+        SecretPromotionPlanArtifact plan,
+        SecretsCommandContext context,
+        string value,
+        bool allowPreparedRecovery)
+    {
+        var result = _localCoordinator.WriteOrRecover(
+            plan,
+            row,
+            IdentityFrom(row, context),
+            context.Store,
+            value,
+            allowPreparedRecovery);
+        return result.Kind switch
+        {
+            LocalCoordinatorWriteKind.Created => row.Result("Written", "CreatedLocalSecret", null, null, false),
+            LocalCoordinatorWriteKind.Replaced => row.Result("Written", "ReplacedLocalSecret", null, null, false),
+            LocalCoordinatorWriteKind.Recovered => row.Result("Written", "RecoveredLocalSecret", null, null, false),
+            LocalCoordinatorWriteKind.Conflict => row.Result(
+                "Conflict",
+                "WriteLocalSecret",
+                "local-secret-transfer-destination-changed",
+                "The local transfer target changed before its guarded write could begin.",
+                false),
+            LocalCoordinatorWriteKind.Indeterminate => row.Result(
+                "IndeterminateWrite",
+                "WriteLocalSecret",
+                result.Failure?.Code ?? "local-secret-transfer-indeterminate-write",
+                result.Failure?.Problem ?? "The local transfer write must be reconciled before another write is attempted.",
+                false),
+            LocalCoordinatorWriteKind.Unsupported => row.Result(
+                "Failed",
+                "WriteLocalSecret",
+                result.Failure!.Code,
+                result.Failure.Problem,
+                result.Failure.Retryable),
+            _ => row.Result(
+                "Failed",
+                "WriteLocalSecret",
+                result.Failure?.Code ?? "local-secret-transfer-write-failed",
+                result.Failure?.Problem ?? "The local transfer write failed.",
+                result.Failure?.Retryable)
+        };
     }
 
     private static AppSurfaceLocalSecretResult ProbeLocal(SecretsCommandContext context, string key)
@@ -705,13 +901,14 @@ internal sealed class SecretPromotionWorkflow(
     }
 
     private static void ValidatePlanRows(
+        int version,
         IReadOnlyList<SecretPromotionPlanRow> planRows,
         SecretPromotionJob job,
         ResolvedEndpoints endpoints,
         SecretsCommandContext context)
     {
         var declaredRows = job.Rows
-            .Select((row, index) => CreateDeclaredPlanRow(row, index + 1, endpoints, context))
+            .Select((row, index) => CreateDeclaredPlanRow(version, row, index + 1, endpoints, context))
             .ToArray();
         if (planRows.Count != declaredRows.Length)
         {
@@ -728,14 +925,30 @@ internal sealed class SecretPromotionWorkflow(
                 !string.Equals(planned.SourceResource, declared.SourceResource, StringComparison.Ordinal) ||
                 !string.Equals(planned.DestinationEndpoint, declared.DestinationEndpoint, StringComparison.Ordinal) ||
                 !string.Equals(planned.DestinationResource, declared.DestinationResource, StringComparison.Ordinal) ||
-                !string.Equals(planned.LocalStorageName, declared.LocalStorageName, StringComparison.Ordinal))
+                !string.Equals(planned.LocalStorageName, declared.LocalStorageName, StringComparison.Ordinal) ||
+                !string.Equals(planned.DestinationKind, declared.DestinationKind, StringComparison.Ordinal) ||
+                version == 1 &&
+                (planned.LocalAttestationOperationId is not null ||
+                 planned.LocalPreconditionKind is not null ||
+                 planned.LocalPreconditionDiagnosticCode is not null ||
+                 planned.LocalPreconditionProblem is not null ||
+                 planned.LocalPreconditionRetryable is not null))
             {
                 throw SecretPromotionCommandExtensions.Usage("The plan rows do not match the declared promotion job.");
+            }
+
+            if (version == 2 &&
+                (planned.DestinationKind != "local" ||
+                 !IsNumericVersionResource(planned.SourceResource) ||
+                 !IsLocalPreconditionValid(planned)))
+            {
+                throw SecretPromotionCommandExtensions.Usage("The version 2 plan does not contain a valid LocalSecrets transfer precondition.");
             }
         }
     }
 
     private static SecretPromotionPlanRow CreateDeclaredPlanRow(
+        int version,
         SecretPromotionJobRow row,
         int rowNumber,
         ResolvedEndpoints endpoints,
@@ -756,7 +969,10 @@ internal sealed class SecretPromotionWorkflow(
             ResourceForDestination(row, endpoints.Destination),
             identity.Identity!.StorageName,
             null,
-            null);
+            null)
+        {
+            DestinationKind = version == 2 ? "local" : null
+        };
     }
 
     private static string ResourceForSource(SecretPromotionJobRow row, SecretPromotionEndpoint endpoint)
@@ -779,8 +995,18 @@ internal sealed class SecretPromotionWorkflow(
         return row.Source!;
     }
 
-    private static string ResourceForDestination(SecretPromotionJobRow row, SecretPromotionEndpoint endpoint)
+    private static string? ResourceForDestination(SecretPromotionJobRow row, SecretPromotionEndpoint endpoint)
     {
+        if (IsLocal(endpoint))
+        {
+            if (!string.IsNullOrWhiteSpace(row.Destination))
+            {
+                throw SecretPromotionCommandExtensions.Usage("Local destination rows must not declare Google destination resources.");
+            }
+
+            return null;
+        }
+
         if (!IsSecretParentResource(row.Destination))
         {
             throw SecretPromotionCommandExtensions.Usage("Google destination rows require full projects/.../secrets/... resources.");
@@ -796,7 +1022,7 @@ internal sealed class SecretPromotionWorkflow(
         string.Equals(endpoint.Provider, "local", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsProduction(SecretPromotionEndpoint endpoint) =>
-        string.Equals(endpoint.Environment, "production", StringComparison.OrdinalIgnoreCase);
+        string.Equals(endpoint.Environment?.Trim(), "production", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Returns whether either declared endpoint carries the production environment label.</summary>
     private static bool IsProductionJob(ResolvedEndpoints endpoints) =>
@@ -816,6 +1042,24 @@ internal sealed class SecretPromotionWorkflow(
 
     private static bool IsNumericVersionResource(string? value) =>
         IsVersionResource(value) && value!.Split('/')[5].All(static character => character is >= '0' and <= '9');
+
+    private static bool RequiresExactSourceIdentity(SecretPromotionPlanRow row) =>
+        string.Equals(row.DestinationKind, "local", StringComparison.Ordinal) || IsNumericVersionResource(row.SourceResource);
+
+    private static bool IsLocalPreconditionValid(SecretPromotionPlanRow row) =>
+        row.LocalPreconditionKind switch
+        {
+            nameof(LocalCoordinatorPreconditionKind.Missing) =>
+                row.DestinationExists == false &&
+                row.LocalAttestationOperationId is null,
+            nameof(LocalCoordinatorPreconditionKind.Replace) =>
+                row.DestinationExists == true &&
+                IsLowerHex(row.LocalAttestationOperationId, 32),
+            _ => false
+        };
+
+    private static bool IsLowerHex(string? value, int length) =>
+        value?.Length == length && value.All(static character => character is >= '0' and <= '9' || character is >= 'a' and <= 'f');
 
     /// <summary>
     /// Returns the canonical Google secret parent for a syntactically valid version resource.
@@ -857,6 +1101,7 @@ internal sealed class SecretPromotionWorkflow(
     }
 
     private static string ComputePlanIdentity(
+        int version,
         string jobName,
         string configDigest,
         DateTimeOffset createdAtUtc,
@@ -867,7 +1112,7 @@ internal sealed class SecretPromotionWorkflow(
         IReadOnlyList<SecretPromotionPlanRow> rows)
     {
         var material = new SecretPromotionPlanIdentityMaterial(
-            1,
+            version,
             jobName,
             configDigest,
             createdAtUtc,
@@ -882,7 +1127,21 @@ internal sealed class SecretPromotionWorkflow(
 
     private static void ValidatePlanIdentity(SecretPromotionPlanArtifact plan)
     {
-        var expected = ComputePlanIdentity(
+        var expected = ComputePlanIdentity(plan);
+        if (!string.Equals(plan.PlanIdentity, expected, StringComparison.Ordinal))
+        {
+            throw SecretPromotionCommandExtensions.Usage("The plan identity is invalid. Create a new plan before applying.");
+        }
+    }
+
+    /// <summary>Computes the value-free identity that binds every field of a transfer plan.</summary>
+    /// <param name="plan">Plan artifact whose identity fields should be hashed.</param>
+    /// <returns>Lowercase SHA-256 identity for the supplied artifact.</returns>
+    internal static string ComputePlanIdentity(SecretPromotionPlanArtifact plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return ComputePlanIdentity(
+            plan.Version,
             plan.JobName,
             plan.ConfigDigest,
             plan.CreatedAtUtc,
@@ -891,10 +1150,6 @@ internal sealed class SecretPromotionWorkflow(
             plan.Production,
             plan.Ready,
             plan.Rows);
-        if (!string.Equals(plan.PlanIdentity, expected, StringComparison.Ordinal))
-        {
-            throw SecretPromotionCommandExtensions.Usage("The plan identity is invalid. Create a new plan before applying.");
-        }
     }
 
     private static void WriteJson<T>(string path, T value, string option)
@@ -932,8 +1187,10 @@ internal sealed class SecretPromotionWorkflow(
                 throw SecretPromotionCommandExtensions.Usage("--resume contains rows that do not match the supplied plan.");
             }
 
-            ValidateReceiptRows(receipt.Rows, plan.Rows);
-            if (receipt.Rows.Any(static row => row.Status == "IndeterminateWrite"))
+            ValidateReceiptRows(plan.Version, receipt.Rows, plan.Rows);
+            if (receipt.Rows.Any(row =>
+                    row.Status == "IndeterminateWrite" &&
+                    (plan.Version != 2 || !string.Equals(row.DestinationKind, "local", StringComparison.Ordinal))))
             {
                 throw SecretPromotionCommandExtensions.Usage(
                     "--resume contains an indeterminate write. Reconcile the destination before creating a new plan.");
@@ -956,17 +1213,31 @@ internal sealed class SecretPromotionWorkflow(
 
     private void VerifyCompletedRows(
         IReadOnlyDictionary<int, SecretPromotionRowResult> completedRows,
-        SecretPromotionEndpoint destination)
+        SecretPromotionPlanArtifact plan,
+        SecretPromotionEndpoint destination,
+        SecretsCommandContext context)
     {
         if (completedRows.Count == 0)
         {
             return;
         }
 
-        var client = googleFactory.Create(destination);
         foreach (var row in completedRows.Values.OrderBy(static row => row.RowNumber))
         {
-            var result = client.ProbeSecretVersion(row.DestinationResource!, TimeSpan.FromSeconds(5));
+            if (IsLocal(destination))
+            {
+                var planned = plan.Rows[row.RowNumber - 1];
+                var verification = _localCoordinator.VerifyCommitted(plan, planned, IdentityFrom(planned, context), context.Store);
+                if (verification.Kind != LocalCoordinatorCheckKind.Ready)
+                {
+                    throw SecretPromotionCommandExtensions.Usage(
+                        "--resume local transfer evidence could not be verified. Reconcile the local target before retrying.");
+                }
+
+                continue;
+            }
+
+            var result = googleFactory.Create(destination).ProbeSecretVersion(row.DestinationResource!, TimeSpan.FromSeconds(5));
             if (result.Status != GoogleSecretManagerTransferStatus.Ready)
             {
                 throw SecretPromotionCommandExtensions.Usage(
@@ -985,6 +1256,7 @@ internal sealed class SecretPromotionWorkflow(
     }
 
     private static void ValidateReceiptRows(
+        int planVersion,
         IReadOnlyList<SecretPromotionRowResult> receiptRows,
         IReadOnlyList<SecretPromotionPlanRow> planRows)
     {
@@ -997,13 +1269,16 @@ internal sealed class SecretPromotionWorkflow(
         {
             var receiptRow = receiptRows[index];
             var planned = planRows[index];
+            var localReceipt = planVersion == 2 && planned.DestinationKind == "local";
             if (receiptRow.RowNumber != planned.RowNumber ||
                 !string.Equals(receiptRow.Key, planned.Key, StringComparison.Ordinal) ||
                 !string.Equals(receiptRow.SourceEndpoint, planned.SourceEndpoint, StringComparison.Ordinal) ||
                 !string.Equals(receiptRow.SourceResource, planned.SourceResource, StringComparison.Ordinal) ||
                 !string.Equals(receiptRow.DestinationEndpoint, planned.DestinationEndpoint, StringComparison.Ordinal) ||
+                !string.Equals(receiptRow.DestinationKind, planned.DestinationKind, StringComparison.Ordinal) ||
                 !IsReceiptDestinationResource(receiptRow, planned) ||
-                receiptRow.Status == "Written" && receiptRow.Action != "AddedGoogleVersion")
+                (localReceipt && receiptRow.Status == "Written" && !IsLocalWrittenAction(receiptRow.Action)) ||
+                (!localReceipt && receiptRow.Status == "Written" && receiptRow.Action != "AddedGoogleVersion"))
             {
                 throw SecretPromotionCommandExtensions.Usage("--resume contains rows that do not match the supplied plan.");
             }
@@ -1017,6 +1292,9 @@ internal sealed class SecretPromotionWorkflow(
         receiptRow.Status == "Written" &&
         IsNumericVersionResource(receiptRow.DestinationResource) &&
         receiptRow.DestinationResource?.StartsWith($"{planned.DestinationResource}/versions/", StringComparison.Ordinal) == true;
+
+    private static bool IsLocalWrittenAction(string action) =>
+        action is "CreatedLocalSecret" or "ReplacedLocalSecret" or "RecoveredLocalSecret";
 
     private sealed record LoadedConfiguration(SecretPromotionConfiguration Configuration, string Digest);
     private sealed record ResolvedEndpoints(SecretPromotionEndpoint Source, SecretPromotionEndpoint Destination);
@@ -1050,29 +1328,40 @@ internal static class SecretPromotionOutput
         await console.Output.WriteLineAsync($"Operation: {summary.Operation}; Job: {summary.Job}; Mode: {(summary.Apply ? "apply" : "dry-run")}");
         foreach (var row in summary.Rows)
         {
-            await console.Output.WriteLineAsync($"{row.Status}: {row.Key} {row.Action} {row.DestinationResource}");
+            var destination = row.DestinationResource ?? row.DestinationKind ?? "destination";
+            await console.Output.WriteLineAsync($"{row.Status}: {row.Key} {row.Action} {destination}");
             if (!string.IsNullOrWhiteSpace(row.DiagnosticCode))
             {
                 await console.Output.WriteLineAsync($"  Diagnostic: {row.DiagnosticCode}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(row.Problem))
+            {
+                await console.Output.WriteLineAsync($"  Problem: {row.Problem}");
+            }
+
+            if (row.Retryable is { } retryable)
+            {
+                await console.Output.WriteLineAsync($"  Retryable: {retryable.ToString().ToLowerInvariant()}");
             }
         }
     }
 }
 
-/// <summary>Describes a value-free request to create a promotion plan.</summary>
+/// <summary>Describes a value-free request to create a transfer plan.</summary>
 /// <param name="ConfigPath">Path to the reviewed endpoint and job configuration.</param>
 /// <param name="JobName">Exact declared job name to plan.</param>
 /// <param name="OutputPlanPath">Destination for the value-free plan artifact.</param>
-/// <param name="Replace">Whether existing enabled Google versions may receive another version.</param>
+/// <param name="Replace">Whether a Google destination may receive another version or an attested local destination may be replaced.</param>
 /// <param name="Expiry">Positive lifetime after which apply must reject the plan.</param>
 /// <param name="Context">LocalSecrets identity and metadata-only store context.</param>
 internal sealed record SecretPromotionPlanRequest(string ConfigPath, string JobName, string OutputPlanPath, bool Replace, TimeSpan Expiry, SecretsCommandContext Context);
 
-/// <summary>Describes a dry-run or mutation-gated promotion apply request.</summary>
+/// <summary>Describes a dry-run or mutation-gated transfer apply request.</summary>
 /// <param name="ConfigPath">Path to the same reviewed configuration used for planning.</param>
 /// <param name="PlanPath">Path to the unexpired value-free plan.</param>
 /// <param name="Apply">Whether destination mutations are permitted; false performs apply preflight only.</param>
-/// <param name="Confirmation">Exact job name required when either endpoint is production-labelled.</param>
+/// <param name="Confirmation">Exact job name required for production-labelled transfers and every guarded local replacement.</param>
 /// <param name="ReceiptPath">Optional value-free receipt path; defaults beside the plan.</param>
 /// <param name="ResumeReceiptPath">Optional prior receipt whose confirmed writes may be skipped.</param>
 /// <param name="Context">LocalSecrets identity and store context used only after preflight permits payload access.</param>
@@ -1083,14 +1372,14 @@ internal sealed record SecretPromotionApplyRequest(string ConfigPath, string Pla
 internal sealed record SecretPromotionPlanResult(SecretPromotionSummary Summary);
 
 /// <summary>Defines the versioned endpoint and named-job configuration authorization boundary.</summary>
-/// <param name="Version">Configuration schema version; v1 is required.</param>
+/// <param name="Version">Configuration schema version: v1 writes an existing Google destination; v2 materializes pinned Google versions into LocalSecrets.</param>
 /// <param name="Endpoints">Explicit remote endpoint profiles; LocalSecrets is the built-in <c>local</c> endpoint.</param>
-/// <param name="Jobs">Reviewed jobs that bind exact sources, Google destinations, and rows.</param>
+/// <param name="Jobs">Reviewed jobs that bind exact sources, version-specific destinations, and rows.</param>
 internal sealed record SecretPromotionConfiguration(int Version, IReadOnlyList<SecretPromotionEndpoint> Endpoints, IReadOnlyList<SecretPromotionJob> Jobs);
 
 /// <summary>Declares one named provider endpoint without embedding credential values.</summary>
 /// <param name="Name">Case-sensitive endpoint name referenced by jobs.</param>
-/// <param name="Provider">Provider identifier; v1 accepts <c>google</c> plus built-in local sources.</param>
+/// <param name="Provider">Provider identifier: <c>google</c> or the built-in <c>local</c> endpoint where the selected schema direction permits it.</param>
 /// <param name="Environment">Environment label used to enforce production rules.</param>
 /// <param name="Credential">Explicit Google credential mode; null is valid only for the built-in local endpoint.</param>
 internal sealed record SecretPromotionEndpoint(string Name, string Provider, string Environment, SecretPromotionCredential? Credential);
@@ -1100,10 +1389,10 @@ internal sealed record SecretPromotionEndpoint(string Name, string Provider, str
 /// <param name="Path">Absolute restricted credential-file path when that mode is selected; never emitted.</param>
 internal sealed record SecretPromotionCredential(string Mode, string? Path);
 
-/// <summary>Declares one reviewed, direction-specific promotion job.</summary>
+/// <summary>Declares one reviewed, direction-specific transfer job.</summary>
 /// <param name="Name">Case-sensitive job identity used by plan, confirmation, and receipt checks.</param>
 /// <param name="Source">Built-in <c>local</c> or a declared Google endpoint name.</param>
-/// <param name="Destination">Declared Google endpoint name; local destinations are rejected in v1.</param>
+/// <param name="Destination">Declared Google endpoint in v1, or the built-in <c>local</c> endpoint in v2.</param>
 /// <param name="AllowMutableLocalSource">Explicit production exception for a mutable LocalSecrets source.</param>
 /// <param name="Rows">Ordered explicit key and resource mappings.</param>
 internal sealed record SecretPromotionJob(string Name, string Source, string Destination, bool AllowMutableLocalSource, IReadOnlyList<SecretPromotionJobRow> Rows);
@@ -1111,7 +1400,7 @@ internal sealed record SecretPromotionJob(string Name, string Source, string Des
 /// <summary>Maps one logical LocalSecrets key to explicit provider resources.</summary>
 /// <param name="Key">Required logical AppSurface configuration key and row identity.</param>
 /// <param name="Source">Explicit Google version resource, or null for a LocalSecrets source.</param>
-/// <param name="Destination">Explicit existing Google secret parent resource.</param>
+/// <param name="Destination">Explicit existing Google secret parent resource in v1; omitted for a v2 LocalSecrets destination.</param>
 internal sealed record SecretPromotionJobRow(string Key, string? Source, string? Destination);
 
 /// <summary>Persists an expiring, value-free plan bound to all safety-relevant fields.</summary>
@@ -1120,7 +1409,7 @@ internal sealed record SecretPromotionJobRow(string Key, string? Source, string?
 /// <param name="ConfigDigest">Digest of the exact endpoint configuration bytes.</param>
 /// <param name="CreatedAtUtc">UTC creation timestamp included in plan identity.</param>
 /// <param name="ExpiresAtUtc">UTC expiration enforced before payload access.</param>
-/// <param name="Replace">Whether another enabled Google version is authorized.</param>
+/// <param name="Replace">Whether another enabled Google version or an attested LocalSecrets value is authorized to be replaced.</param>
 /// <param name="Production">Value-free production label captured for review.</param>
 /// <param name="Ready">Whether all plan-time probes were ready or intentionally skipped.</param>
 /// <param name="PlanIdentity">Stable SHA-256 identity over every plan safety field and row precondition.</param>
@@ -1132,23 +1421,44 @@ internal sealed record SecretPromotionPlanArtifact(int Version, string JobName, 
 /// <param name="Key">Explicit logical LocalSecrets key.</param>
 /// <param name="SourceEndpoint">Declared source endpoint name.</param>
 /// <param name="SourceResource">Canonical Google version resource, or <c>local</c>.</param>
-/// <param name="DestinationEndpoint">Declared Google destination endpoint name.</param>
-/// <param name="DestinationResource">Canonical existing Google secret parent.</param>
+/// <param name="DestinationEndpoint">Declared Google destination endpoint or built-in local endpoint.</param>
+/// <param name="DestinationResource">Canonical existing Google secret parent; null for a v2 LocalSecrets destination.</param>
 /// <param name="LocalStorageName">Normalized LocalSecrets identity used to detect duplicate logical mappings.</param>
 /// <param name="DestinationHasEnabledVersions">Google enabled-version precondition captured during planning.</param>
-/// <param name="DestinationExists">Reserved provider-neutral existence precondition; null for v1 Google destinations.</param>
+/// <param name="DestinationExists">Local destination existence precondition in v2; null for v1 Google destinations.</param>
 internal sealed record SecretPromotionPlanRow(int RowNumber, string Key, string SourceEndpoint, string? SourceResource, string DestinationEndpoint, string? DestinationResource, string LocalStorageName, bool? DestinationHasEnabledVersions, bool? DestinationExists)
 {
+    /// <summary>Gets the destination contract for a v2 row; null preserves the v1 Google-only artifact shape.</summary>
+    public string? DestinationKind { get; init; }
+
+    /// <summary>Gets the committed local attestation captured as a guarded replacement precondition for a v2 row.</summary>
+    public string? LocalAttestationOperationId { get; init; }
+
+    /// <summary>Gets the value-free local precondition classification captured for a v2 plan row.</summary>
+    public string? LocalPreconditionKind { get; init; }
+
+    /// <summary>Gets the value-safe diagnostic code captured when local preflight could not establish a valid precondition.</summary>
+    public string? LocalPreconditionDiagnosticCode { get; init; }
+
+    /// <summary>Gets the value-safe precondition problem captured for a failed v2 plan row.</summary>
+    public string? LocalPreconditionProblem { get; init; }
+
+    /// <summary>Gets whether the local precondition failure is safe to retry without reconciliation.</summary>
+    public bool? LocalPreconditionRetryable { get; init; }
+
     /// <summary>Creates a value-free row result while preserving canonical row identity.</summary>
     /// <param name="status">Stable workflow status.</param>
     /// <param name="action">Display-safe operation classification.</param>
     /// <param name="diagnosticCode">Optional stable diagnostic code.</param>
     /// <param name="problem">Optional paste-safe problem statement.</param>
     /// <param name="retryable">Whether an operator may retry without reconciliation.</param>
-    /// <param name="writtenResource">Confirmed written Google version resource, when available.</param>
+    /// <param name="writtenResource">Confirmed written Google version resource, when available; null for a local write.</param>
     /// <returns>A result that never includes secret payloads.</returns>
     public SecretPromotionRowResult Result(string status, string action, string? diagnosticCode, string? problem, bool? retryable, string? writtenResource = null) =>
-        new(RowNumber, Key, SourceEndpoint, SourceResource, DestinationEndpoint, writtenResource ?? DestinationResource, status, action, diagnosticCode, problem, retryable);
+        new(RowNumber, Key, SourceEndpoint, SourceResource, DestinationEndpoint, writtenResource ?? DestinationResource, status, action, diagnosticCode, problem, retryable)
+        {
+            DestinationKind = this.DestinationKind
+        };
 
     /// <summary>Maps a Google source failure without misclassifying destination absence.</summary>
     /// <param name="action">Source probe or access action.</param>
@@ -1200,14 +1510,18 @@ internal sealed record SecretPromotionPlanRow(int RowNumber, string Key, string 
 /// <param name="Key">Logical AppSurface key; never its value.</param>
 /// <param name="SourceEndpoint">Declared source endpoint name.</param>
 /// <param name="SourceResource">Canonical source identity.</param>
-/// <param name="DestinationEndpoint">Declared Google destination endpoint name.</param>
-/// <param name="DestinationResource">Planned secret parent or confirmed written version resource.</param>
+/// <param name="DestinationEndpoint">Declared Google destination endpoint or built-in local endpoint.</param>
+/// <param name="DestinationResource">Planned Google secret parent or confirmed written version resource; null for local writes.</param>
 /// <param name="Status">Stable result classification.</param>
 /// <param name="Action">Display-safe action classification.</param>
 /// <param name="DiagnosticCode">Optional stable diagnostic code.</param>
 /// <param name="Problem">Optional paste-safe problem statement.</param>
 /// <param name="Retryable">Whether retry is safe without reconciliation.</param>
-internal sealed record SecretPromotionRowResult(int RowNumber, string Key, string SourceEndpoint, string? SourceResource, string DestinationEndpoint, string? DestinationResource, string Status, string Action, string? DiagnosticCode, string? Problem, bool? Retryable);
+internal sealed record SecretPromotionRowResult(int RowNumber, string Key, string SourceEndpoint, string? SourceResource, string DestinationEndpoint, string? DestinationResource, string Status, string Action, string? DiagnosticCode, string? Problem, bool? Retryable)
+{
+    /// <summary>Gets the v2 destination kind when the result belongs to a local transfer row.</summary>
+    public string? DestinationKind { get; init; }
+}
 
 /// <summary>Aggregates ordered value-free plan or apply results.</summary>
 /// <param name="Operation"><c>plan</c> or <c>apply</c>.</param>

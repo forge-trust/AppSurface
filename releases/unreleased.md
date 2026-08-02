@@ -21,6 +21,12 @@ This is the living release note for the next coordinated AppSurface version afte
   schema-v2 install default while `--surface push|all` emits schema-v3 server-known readiness evidence. It verifies
   worker/helper discovery, direct JavaScript responses, headers, and cache behavior, and clearly marks browser,
   permission, subscription, notification, and delivery observations as not evaluated.
+- [`appsurface secrets transfer`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-secrets-transfer) now supports
+  version-2, one-way Google Secret Manager-to-LocalSecrets materialization for an IAM-authorized developer's local
+  integration testing. Each source is a full numeric version resource, plans and receipts remain value-free, existing
+  local values require guarded `--replace` plus exact confirmation, and prepared local writes can resume only after
+  an in-memory equality check. The [local-testing guide](../Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/materialize-remote-secrets-for-local-testing.md)
+  explains prerequisites, recovery, and the explicit runtime posture required for a `Production`-named local namespace.
 - [`ForgeTrust.AppSurface.Web` named canaries](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints)
   now include a bounded protected aggregate snapshot at `GET /_appsurface/canaries`. Operators can select registered
   canaries by exact name or durable tag, receive ordinal partial outcomes under explicit concurrency and deadline caps,

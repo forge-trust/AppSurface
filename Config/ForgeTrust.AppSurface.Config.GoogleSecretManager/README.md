@@ -33,8 +33,9 @@ services.ConfigureAppSurfaceGoogleSecretManager(options =>
 Grant the runtime identity `secretmanager.versions.access` only for the secrets it should read. Prefer Workload Identity
 or host-owned Application Default Credentials. The runtime provider does not mint credentials, create secrets, assign
 IAM, provision Terraform, shell out to `gcloud`, write secret versions, delete secrets, or rotate values. The package
-also exposes a separate transfer client seam used by the declared `appsurface secrets transfer` promotion workflow; that
-workflow can add a new version to an existing secret only when the user applies a validated plan.
+also exposes a separate transfer client seam used by the declared `appsurface secrets transfer` workflow. Depending on
+the configuration version, a validated plan can add a version to an existing Google secret or materialize one pinned
+Google version into LocalSecrets for a developer-controlled local test environment.
 
 ## Provider Order
 
@@ -174,17 +175,21 @@ work. Definitive missing-resource, access-denied, and invalid-resource failures 
 ## CLI Transfer
 
 Use the [AppSurface CLI transfer workflow](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-secrets-transfer)
-to promote a declared LocalSecrets or Google source into an existing Google secret. Configuration names the source and
-destination endpoints plus exact job rows; Google production sources must use numeric version resources, never `latest`.
+to transfer a declared LocalSecrets or Google source into an existing Google secret, or to materialize one pinned Google
+version into LocalSecrets for local testing. Configuration names the source and destination endpoints plus exact job rows.
+Every Google-to-LocalSecrets source must be a full numeric version resource, never `latest` or another alias.
+For prerequisites, guarded replacement, recovery, and host posture, follow the [remote-to-local local-testing guide](../ForgeTrust.AppSurface.Config.LocalSecrets/docs/materialize-remote-secrets-for-local-testing.md).
 
 ```bash
 appsurface secrets transfer plan --config ./secret-promotion.json --job staging-to-production --out ./promotion.plan.json
 appsurface secrets transfer apply --config ./secret-promotion.json --plan ./promotion.plan.json --apply --confirm staging-to-production
 ```
 
-The plan is value-free and metadata-only. Apply rechecks its digest, expiry, and destination preconditions before
-materializing a UTF-8 payload. `--replace` adds a new enabled Google version; it does not overwrite, disable, or destroy
-an existing version. Treat endpoint configuration and plan artifacts as operator-controlled security-sensitive files.
+The plan is value-free and metadata-only. Apply rechecks its digest, expiry, canonical source resource, and destination
+preconditions before materializing a UTF-8 payload. For Google destinations, `--replace` adds a new enabled version; it
+does not overwrite, disable, or destroy an existing version. For LocalSecrets destinations, `--replace` requires exact
+job confirmation and a matching AppSurface local transfer attestation. Treat endpoint configuration and plan artifacts
+as operator-controlled security-sensitive files.
 
 ## Migration
 
