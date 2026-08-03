@@ -82,3 +82,22 @@ Slice 5 adds five public PostgreSQL schedule types:
 - `PostgreSqlDurableScheduleProcessRequest` specifies the lease owner and maximum schedules per pass.
 - `PostgreSqlDurableScheduleProcessResult` reports claimed schedules, recorded occurrences, materialized Work targets, and suspended schedules.
 - `PostgreSqlDurableScheduleProcessor` drives manual, bounded evaluation passes using separate dispatcher and runtime data sources.
+
+## Slice 6 PostgreSQL runtime operations API
+
+Slice 6 adds the explicit PostgreSQL composition surface rather than widening the portable Provider contracts:
+
+- `AppSurfaceDurablePostgreSqlOptions` configures process-local worker identity, bounded Pass policy, polling,
+  liveness, shutdown reserve, and advisory wake-hint mode.
+- `AppSurfaceDurablePostgreSqlServiceCollectionExtensions.AddAppSurfaceDurablePostgreSql` registers passive storage,
+  clients, schema manager, pump, health, and drain from explicit dispatcher/runtime data sources and existing Work and
+  Schedule options. It opens no connection, applies no migration, and installs no `IHostedService`.
+- `AppSurfaceDurablePostgreSqlBuilder.AddWorkerHost` and `AddAppSurfaceDurableWorkerHost` are the deliberate opt-in
+  for one host adapter. They retain `IDurableRuntimePump` as the external-activator escape hatch rather than creating a
+  second execution API.
+- `AppSurfaceDurablePostgreSqlModule` declares only the passive Durable module dependency. It never guesses
+  credentials or activates a worker.
+
+The runtime pump, health, and drain interfaces remain owned by `ForgeTrust.AppSurface.Durable.Provider`. PostgreSQL
+claim stores, heartbeat generation operations, listener state, execution wrapper, and hosted service stay internal so
+#685 can instrument the execution wrapper without duplicating trace context or broadening the public API.

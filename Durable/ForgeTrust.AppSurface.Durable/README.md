@@ -1,9 +1,8 @@
 # ForgeTrust.AppSurface.Durable
 
 > **Source-only public preview:** the [PostgreSQL source provider](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md)
-> supplies slice-3 Work conformance and restore fencing,
-> but publication remains held until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, and coordinated
-> operations. This package installs no runtime and starts no hosted service.
+> supplies the current source-preview conformance path; publication remains held pending coordinated release evidence.
+> This package installs no runtime and starts no hosted service.
 
 `ForgeTrust.AppSurface.Durable` is the adopter-facing contract package for durable Work, resumable
 [AppSurface Flow](../../Flow/ForgeTrust.AppSurface.Flow/README.md), schedules, serialization, registration, and clients.
@@ -158,7 +157,7 @@ validation before persistence.
 | Provider SPI behavior | Requires provider conformance evidence before adoption |
 
 Diagnostics available now cover contract validation, semantic conflicts, and PostgreSQL Work storage, schema,
-activation, and restore failures. Heartbeat, drain, and later hosted-runtime diagnostics remain reserved. See the
+activation, and restore failures. Heartbeat, drain, and hosted-runtime diagnostics are provider-owned. See the
 [`ASDURxxx` catalog](../../troubleshooting/durable-diagnostics.md).
 
 ## Release Guidance

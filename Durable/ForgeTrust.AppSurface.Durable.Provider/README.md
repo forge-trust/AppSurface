@@ -1,9 +1,9 @@
 # ForgeTrust.AppSurface.Durable.Provider
 
 > **Source-only public preview:** the
-> [`PostgreSQL source provider`](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md) supplies slice-3 Work conformance
-> and restore fencing, but publication remains held until slices 4-6 prove Flow, Schedule, hosted runtime,
-> drain/recovery, and coordinated operations. This package contains SPI contracts, not a runtime.
+> [`PostgreSQL source provider`](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md) supplies the current source-preview
+> conformance path, but publication remains held pending coordinated release evidence. This package contains SPI
+> contracts, not a runtime.
 
 `ForgeTrust.AppSurface.Durable.Provider` is the runtime-provider and operator SPI for
 [`ForgeTrust.AppSurface.Durable`](../ForgeTrust.AppSurface.Durable/README.md). It depends on that adopter package; the
@@ -72,8 +72,8 @@ restore fencing, graceful drain, privacy-bounded diagnostics and telemetry, pack
 against this SPI. Slice 3 supplies source-level PostgreSQL Work conformance; slices 4-6 still own Flow, Schedule, hosted
 activation, drain/recovery, and the coordinated publication gate.
 
-See the [`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md) for currently available contract
-and PostgreSQL Work codes plus explicitly reserved hosted-runtime codes.
+See the [`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md) for currently available contract,
+PostgreSQL Work, and hosted-runtime codes.
 
 From the repository root, `./Durable/verify-packed-consumers.sh` packs both held packages and their local dependencies,
 then compiles and runs isolated adopter and provider consumers against only those packages.

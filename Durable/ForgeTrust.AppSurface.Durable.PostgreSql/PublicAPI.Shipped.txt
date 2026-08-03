@@ -1,3 +1,24 @@
+type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.AppSurfaceDurablePostgreSqlBuilder
+  method public ForgeTrust.AppSurface.Durable.PostgreSql.AppSurfaceDurablePostgreSqlBuilder AddWorkerHost()
+  property public Microsoft.Extensions.DependencyInjection.IServiceCollection Services { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.AppSurfaceDurablePostgreSqlModule : ForgeTrust.AppSurface.Core.IAppSurfaceModule
+  constructor public ForgeTrust.AppSurface.Durable.PostgreSql.AppSurfaceDurablePostgreSqlModule()
+  method public System.Void ConfigureServices(ForgeTrust.AppSurface.Core.StartupContext context, Microsoft.Extensions.DependencyInjection.IServiceCollection services)
+  method public System.Void RegisterDependentModules(ForgeTrust.AppSurface.Core.ModuleDependencyBuilder builder)
+type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.AppSurfaceDurablePostgreSqlOptions
+  constructor public ForgeTrust.AppSurface.Durable.PostgreSql.AppSurfaceDurablePostgreSqlOptions()
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface HostedSurfaces { get: public; set: public; }
+  property public System.Boolean SendWakeNotifications { get: public; set: public; }
+  property public System.Int32 MaximumItemsPerPass { get: public; set: public; }
+  property public System.String WorkerId { get: public; set: public; }
+  property public System.TimeSpan HeartbeatStaleAfter { get: public; set: public; }
+  property public System.TimeSpan IdlePollingInterval { get: public; set: public; }
+  property public System.TimeSpan ShutdownReserve { get: public; set: public; }
+  property public System.TimeSpan TimeBudgetPerPass { get: public; set: public; }
+  property public System.TimeSpan TransientFailureDelay { get: public; set: public; }
+type public static class ForgeTrust.AppSurface.Durable.PostgreSql.AppSurfaceDurablePostgreSqlServiceCollectionExtensions
+  method public static ForgeTrust.AppSurface.Durable.PostgreSql.AppSurfaceDurablePostgreSqlBuilder AddAppSurfaceDurablePostgreSql(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, Npgsql.NpgsqlDataSource dispatcherDataSource, Npgsql.NpgsqlDataSource runtimeDataSource, ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableWorkOptions workOptions, ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableScheduleOptions scheduleOptions, System.Action<ForgeTrust.AppSurface.Durable.PostgreSql.AppSurfaceDurablePostgreSqlOptions>? configure = null)
+  method public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddAppSurfaceDurableWorkerHost(this Microsoft.Extensions.DependencyInjection.IServiceCollection services)
 type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochActivationResult : System.IEquatable<ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochActivationResult>
   constructor public ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochActivationResult(System.Guid ActiveEpoch, System.DateTimeOffset ActivatedAtUtc)
   method public ForgeTrust.AppSurface.Durable.PostgreSql.DurableRuntimeEpochActivationResult <Clone>$()

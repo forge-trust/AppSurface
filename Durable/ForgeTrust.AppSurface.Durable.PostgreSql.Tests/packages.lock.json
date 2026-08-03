@@ -454,6 +454,9 @@
         "dependencies": {
           "ForgeTrust.AppSurface.Durable": "[0.1.0, )",
           "ForgeTrust.AppSurface.Durable.Provider": "[0.1.0, )",
+          "Microsoft.Extensions.DependencyInjection": "[10.0.8, )",
+          "Microsoft.Extensions.Hosting": "[10.0.8, )",
+          "Microsoft.Extensions.Options": "[10.0.8, )",
           "Npgsql": "[10.0.3, )"
         }
       },
