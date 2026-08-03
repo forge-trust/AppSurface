@@ -1,6 +1,6 @@
 # AppSurface CI Critical Path
 
-This note is the CI-000 baseline for build-time work. It records the current PR decision path before coverage artifact changes or test-group experiments are judged by timing data.
+This note is the CI-000 baseline for build-time work. It records the current PR decision path before coverage artifact changes or coverage-matrix experiments are judged by timing data.
 
 ## Current PR validation path
 
@@ -38,8 +38,7 @@ Future CI performance changes should compare:
 - Keep all current PR workflows active.
 - Keep coverage as PR confidence unless a measured follow-up proves Codecov coverage and test-result reporting still work under a different policy.
 - Use `concurrency.cancel-in-progress` on long PR workflows so superseded commits stop consuming runner capacity.
-- Keep PR tests in a single coverage-bearing lane until measured group runs prove they reduce total GitHub Actions minutes, not just wall-clock time.
-- Keep experimental test groups bounded and readable: `core`, `tools`, `web`, `docs`, `razorwire`, and `integration`.
+- Keep PR tests in a single coverage-bearing lane until a measured public-CLI matrix design proves it reduces total GitHub Actions minutes, not just wall-clock time.
 - Preserve a single merged Cobertura output at `TestResults/coverage-merged/coverage.cobertura.xml` for Codecov and local contributors.
 
 ## NuGet cache policy
@@ -52,7 +51,7 @@ Issue #479 treats NuGet package caching as a measured CI hygiene change, not as 
 
 Each cache-enabled job sets `NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages` at the job level before `actions/setup-dotnet`, then uses `setup-dotnet` with `cache: true` and cache dependency paths for both `**/packages.lock.json` and `**/packages.*.lock.json`. The broad lock-file paths are intentional for this first rollout because the selected solution-shaped jobs restore project graphs spread across the repository, including RID-specific AppHost lock files. A dependency or lock-file change anywhere in that graph can invalidate the cache; that is expected and safer than silently omitting a restored project from the cache key. If future timing data shows lock-file churn dominates cache misses, split the cache dependency paths by job/project scope in a follow-up.
 
-Cache-enabled build jobs should restore explicitly before later .NET commands. When `build.yml` runs `scripts/coverage-solution.sh` after that restore, it sets `BUILD_NO_RESTORE=true` so the script's solution build does not hide additional restore work inside the coverage timing. The default script then runs the aggregate coverage gate itself; pull-request jobs set `COVERAGE_GATE_DIFF_BASE=HEAD^1` so the patch gate uses the synthetic merge checkout, while baseline jobs set the variable empty to omit patch thresholds.
+Cache-enabled build jobs should restore explicitly before later .NET commands. When `build.yml` runs `scripts/coverage-solution.sh` after that restore, it sets `BUILD_NO_RESTORE=true` so the public CLI's solution build does not hide additional restore work inside the coverage timing. The default script then runs the aggregate coverage gate itself; pull-request jobs set `COVERAGE_GATE_DIFF_BASE=HEAD^1` so the patch gate uses the synthetic merge checkout, while baseline jobs set the variable empty to omit patch thresholds.
 
 Package-sensitive workflows stay uncached unless a separate issue evaluates their trust boundary. In particular, `package-gate.yml` must keep its isolated `${{ runner.temp }}/nuget-packages` restore and `NuGet.package-gate.config` source policy. Publish, smoke-restore, trusted-publishing, and package validation workflows should not inherit the shared NuGet cache by convention.
 
