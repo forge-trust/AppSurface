@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using ForgeTrust.AppSurface.Docs.Models;
 using Markdig;
 using Markdig.Renderers.Html;
@@ -22,6 +23,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     private readonly MarkdownPipeline _pipeline;
     private readonly ILogger<MarkdownHarvester> _logger;
     private readonly Func<string, CancellationToken, Task<string>> _readAllTextAsync;
+    private readonly Func<string, CancellationToken, Task<byte[]>> _readAllBytesAsync;
     private readonly AppSurfaceDocsHarvestPathPolicy _pathPolicy;
     private readonly AppSurfaceDocsOptions _options;
     private IReadOnlyList<DocHarvestDiagnostic> _lastDiagnostics = [];
@@ -116,7 +118,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     /// file reader and configured AppSurface Docs options.
     /// </summary>
     /// <param name="logger">Logger used for recording harvesting events and errors.</param>
-    /// <param name="readAllTextAsync">Delegate used to asynchronously read Markdown bodies and metadata sidecars.</param>
+    /// <param name="readAllTextAsync">Delegate used to asynchronously read metadata sidecars and Markdown when source capture is disabled.</param>
     /// <param name="options">AppSurface Docs options that provide Markdown resource limits.</param>
     /// <remarks>
     /// This overload supplies the default TextMate-based code highlighter and default harvest path policy. Prefer it when
@@ -135,6 +137,30 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                 NullLogger<TextMateSharpAppSurfaceDocsCodeHighlighter>.Instance),
             options,
             AppSurfaceDocsHarvestPathPolicy.CreateDefault())
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="MarkdownHarvester"/> for tests that need to control both text and
+    /// byte reads while preserving configured AppSurface Docs options.
+    /// </summary>
+    /// <param name="logger">Logger used for recording harvesting events and errors.</param>
+    /// <param name="readAllTextAsync">Delegate used for metadata sidecars and Markdown when source capture is disabled.</param>
+    /// <param name="options">AppSurface Docs options that provide Markdown resource limits.</param>
+    /// <param name="readAllBytesAsync">Delegate used to read original Markdown bytes when source capture is enabled.</param>
+    internal MarkdownHarvester(
+        ILogger<MarkdownHarvester> logger,
+        Func<string, CancellationToken, Task<string>> readAllTextAsync,
+        AppSurfaceDocsOptions options,
+        Func<string, CancellationToken, Task<byte[]>> readAllBytesAsync)
+        : this(
+            logger,
+            readAllTextAsync,
+            AppSurfaceDocsCodeBlockMarkdownExtension.CreateDefaultHighlighter(
+                NullLogger<TextMateSharpAppSurfaceDocsCodeHighlighter>.Instance),
+            options,
+            AppSurfaceDocsHarvestPathPolicy.CreateDefault(),
+            readAllBytesAsync ?? throw new ArgumentNullException(nameof(readAllBytesAsync)))
     {
     }
 
@@ -176,7 +202,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     /// reading, code highlighting, and harvest path policy.
     /// </summary>
     /// <param name="logger">Logger used for recording harvesting events and errors.</param>
-    /// <param name="readAllTextAsync">Delegate used to asynchronously read Markdown bodies and metadata sidecars.</param>
+    /// <param name="readAllTextAsync">Delegate used to asynchronously read metadata sidecars and Markdown when source capture is disabled.</param>
     /// <param name="codeHighlighter">Highlighter used when Markdown fenced code blocks are rendered to HTML.</param>
     /// <param name="pathPolicy">Shared harvest path policy used to decide which Markdown candidates publish.</param>
     /// <remarks>
@@ -202,6 +228,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     /// <param name="codeHighlighter">Highlighter used when Markdown fenced code blocks are rendered to HTML.</param>
     /// <param name="options">AppSurface Docs options that provide Markdown resource limits.</param>
     /// <param name="pathPolicy">Shared harvest path policy used to decide which Markdown candidates publish.</param>
+    /// <param name="readAllBytesAsync">Optional delegate used to read original Markdown bytes when source capture is enabled.</param>
     /// <remarks>
     /// This overload is the internal test seam for combining custom readers, highlighters, options, and path policy.
     /// Simpler overloads should be preferred when their defaults match the scenario because they keep tests focused on
@@ -212,7 +239,8 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         Func<string, CancellationToken, Task<string>> readAllTextAsync,
         IAppSurfaceDocsCodeHighlighter codeHighlighter,
         AppSurfaceDocsOptions options,
-        AppSurfaceDocsHarvestPathPolicy pathPolicy)
+        AppSurfaceDocsHarvestPathPolicy pathPolicy,
+        Func<string, CancellationToken, Task<byte[]>>? readAllBytesAsync = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(readAllTextAsync);
@@ -222,6 +250,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
 
         _logger = logger;
         _readAllTextAsync = readAllTextAsync;
+        _readAllBytesAsync = readAllBytesAsync ?? File.ReadAllBytesAsync;
         _pathPolicy = pathPolicy;
         _options = options;
         _pipeline = new MarkdownPipelineBuilder()
@@ -249,7 +278,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     /// </remarks>
     public async Task<IReadOnlyList<DocNode>> HarvestAsync(string rootPath, CancellationToken cancellationToken = default)
     {
-        return await HarvestAsync(rootPath, _pathPolicy, cancellationToken);
+        return (await HarvestWithSourceAsync(rootPath, _pathPolicy, cancellationToken)).Nodes;
     }
 
     /// <summary>
@@ -272,19 +301,48 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
             return await ((IDocHarvester)this).HarvestAsync(context.RepositoryRoot, cancellationToken);
         }
 
-        return await HarvestAsync(context.RepositoryRoot, context.PathPolicy, cancellationToken);
+        return (await HarvestWithSourceAsync(context.RepositoryRoot, context.PathPolicy, cancellationToken)).Nodes;
     }
 
-    private async Task<IReadOnlyList<DocNode>> HarvestAsync(
+    /// <summary>
+    /// Harvests the built-in Markdown surface and, when enabled, retains eligible valid-UTF-8 source bytes for the
+    /// aggregator's private download sidecar.
+    /// </summary>
+    /// <remarks>
+    /// This internal result is intentionally separate from <see cref="DocNode"/> so raw source never enters rendered
+    /// HTML, search indexes, or the public harvester contract. The byte-reader seam is used only for Markdown source
+    /// capture; metadata sidecars and disabled downloads continue through the configured text reader.
+    /// </remarks>
+    internal async Task<MarkdownHarvestResult> HarvestWithSourceAsync(
+        DocHarvestContext context,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (GetType() != typeof(MarkdownHarvester))
+        {
+            return new MarkdownHarvestResult(
+                await ((IDocHarvester)this).HarvestAsync(context.RepositoryRoot, cancellationToken),
+                new Dictionary<string, byte[]>(StringComparer.Ordinal));
+        }
+
+        return await HarvestWithSourceAsync(context.RepositoryRoot, context.PathPolicy, cancellationToken);
+    }
+
+    private async Task<MarkdownHarvestResult> HarvestWithSourceAsync(
         string rootPath,
         IHarvestPathPolicy pathPolicy,
         CancellationToken cancellationToken)
     {
         var nodes = new List<DocNode>();
+        var sourceByPath = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         var diagnostics = new List<DocHarvestDiagnostic>();
+        long eligibleSourceBytes = 0;
+        var sourceCaptureExceededBudget = false;
         try
         {
             var markdownOptions = _options.Harvest?.Markdown ?? new AppSurfaceDocsMarkdownHarvestOptions();
+            var markdownDownloadOptions = _options.MarkdownDownload ?? new AppSurfaceDocsMarkdownDownloadOptions();
             foreach (var file in EnumerateMarkdownSourceFiles(rootPath, pathPolicy, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -301,7 +359,33 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                         continue;
                     }
 
-                    var content = await _readAllTextAsync(file, cancellationToken);
+                    byte[]? sourceBytes = null;
+                    string content;
+                    if (markdownDownloadOptions.Enabled)
+                    {
+                        var bytes = await _readAllBytesAsync(file, cancellationToken);
+                        if (TryDecodeValidUtf8(bytes, out var decodedContent))
+                        {
+                            sourceBytes = bytes;
+                            content = decodedContent;
+                        }
+                        else
+                        {
+                            content = decodedContent;
+                            diagnostics.Add(new DocHarvestDiagnostic(
+                                DocHarvestDiagnosticCodes.MarkdownDownloadInvalidEncoding,
+                                DocHarvestDiagnosticSeverity.Warning,
+                                HarvesterType,
+                                $"Markdown download was unavailable for '{relativePath}' because the source is not valid UTF-8.",
+                                "The rendered Docs page uses replacement-decoded content and can remain available, but byte-faithful download accepts only valid UTF-8 source.",
+                                "Save the source as UTF-8, then rebuild the Docs snapshot before retrying the protected download."));
+                        }
+                    }
+                    else
+                    {
+                        content = await _readAllTextAsync(file, cancellationToken);
+                    }
+
                     var (markdownBody, frontMatterResult) = MarkdownFrontMatterParser.ExtractWithDiagnostics(content);
                     ReportMetadataDiagnostics(relativePath, frontMatterResult.Diagnostics, diagnostics);
                     var sidecarMetadata = await ReadMetadataSidecarAsync(file, relativePath, cancellationToken, diagnostics);
@@ -328,6 +412,38 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                     var outline = DocOutlinePolicy.Apply(ExtractOutline(document), metadata);
 
                     nodes.Add(new DocNode(resolvedTitle, relativePath, html, Metadata: metadata, Outline: outline));
+
+                    if (sourceBytes is not null)
+                    {
+                        var eligibility = frontMatterResult.DownloadEligibility;
+                        if (eligibility == MarkdownDownloadEligibility.Eligible)
+                        {
+                            eligibleSourceBytes = checked(eligibleSourceBytes + sourceBytes.LongLength);
+                            if (!sourceCaptureExceededBudget
+                                && eligibleSourceBytes <= markdownDownloadOptions.MaxSnapshotBytes)
+                            {
+                                sourceByPath[relativePath] = sourceBytes;
+                            }
+                            else
+                            {
+                                // The download sidecar is deliberately all-or-nothing. Clear retained bytes as soon as
+                                // the cap is crossed, then keep rendering the remaining documents without retaining raw
+                                // source so a large repository cannot build an unbounded transient source map.
+                                sourceByPath.Clear();
+                                sourceCaptureExceededBudget = true;
+                            }
+                        }
+                        else if (eligibility == MarkdownDownloadEligibility.Invalid)
+                        {
+                            diagnostics.Add(new DocHarvestDiagnostic(
+                                DocHarvestDiagnosticCodes.MarkdownDownloadInvalidEligibility,
+                                DocHarvestDiagnosticSeverity.Warning,
+                                HarvesterType,
+                                $"Markdown download was unavailable for '{relativePath}' because download_markdown must be the exact top-level inline declaration 'download_markdown: true'.",
+                                "Raw source download is a security-sensitive opt-in and the declaration was quoted, nested, duplicated, malformed, or otherwise not the strict v1 shape.",
+                                "Use one plain top-level download_markdown: true value in inline front matter; paired sidecar metadata never enables source download."));
+                        }
+                    }
                 }
                 catch (OperationCanceledException)
                 {
@@ -339,12 +455,50 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                 }
             }
 
-            return nodes;
+            return new MarkdownHarvestResult(
+                nodes,
+                sourceByPath,
+                eligibleSourceBytes,
+                sourceCaptureExceededBudget);
         }
         finally
         {
             _lastDiagnostics = diagnostics.ToArray();
         }
+    }
+
+    /// <summary>
+    /// Attempts a strict UTF-8 decode and falls back to replacement decoding.
+    /// </summary>
+    /// <param name="bytes">The raw Markdown source bytes.</param>
+    /// <param name="content">
+    /// The decoded text with a leading byte-order mark removed. This is populated on both outcomes; when the return
+    /// value is <see langword="false"/>, it contains the replacement-decoded content.
+    /// </param>
+    /// <returns><see langword="true"/> when <paramref name="bytes"/> is valid UTF-8; otherwise <see langword="false"/>.</returns>
+    private static bool TryDecodeValidUtf8(byte[] bytes, out string content)
+    {
+        try
+        {
+            content = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(bytes);
+            if (content.Length > 0 && content[0] == '\uFEFF')
+            {
+                content = content[1..];
+            }
+
+            return true;
+        }
+        catch (DecoderFallbackException)
+        {
+            content = DecodeUtf8WithReplacement(bytes);
+            return false;
+        }
+    }
+
+    private static string DecodeUtf8WithReplacement(byte[] bytes)
+    {
+        var content = Encoding.UTF8.GetString(bytes);
+        return content.Length > 0 && content[0] == '\uFEFF' ? content[1..] : content;
     }
 
     private IEnumerable<string> EnumerateMarkdownSourceFiles(
@@ -807,3 +961,16 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         return builder.ToString();
     }
 }
+
+/// <summary>
+/// Private built-in Markdown harvest output used to retain source bytes beside the rendered Docs graph.
+/// </summary>
+/// <remarks>
+/// This type intentionally stays internal. Raw Markdown must not become part of <see cref="DocNode"/>, the search
+/// index, or the public custom-harvester contract.
+/// </remarks>
+internal sealed record MarkdownHarvestResult(
+    IReadOnlyList<DocNode> Nodes,
+    IReadOnlyDictionary<string, byte[]> SourceByPath,
+    long EligibleSourceBytes = 0,
+    bool SourceCaptureExceededBudget = false);
