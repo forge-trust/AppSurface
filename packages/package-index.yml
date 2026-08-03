@@ -331,18 +331,18 @@ packages:
   - project: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj
     classification: public
     publish_decision: do_not_publish
-    publish_reason: PostgreSQL Work and Flow source provider remains held until slices 5-6 prove Schedule, hosted runtime, drain/recovery, and coordinated operational conformance.
-    readiness_note: Slices 3-4 supply manually driven Work and crash-resumable Flow conformance with no hosted worker or production activation.
+    publish_reason: PostgreSQL Work, Flow, and Schedule source provider remains held until Slice 6 proves hosted runtime, drain/recovery, and coordinated operational conformance.
+    readiness_note: Slices 3-5 supply manually driven Work, crash-resumable Flow, and Work-first Schedule conformance with no hosted worker or production activation.
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/unreleased.md
     order: 48
-    use_when: Evaluate PostgreSQL-backed atomic Work acceptance and manually driven crash-resumable Flow persistence from source without installing a hosted runtime.
-    includes: Explicit ordered schema management, StoreId and runtime-epoch fencing, caller-owned Work acceptance, short-transaction Work and Flow clients, payload-free dispatch, Flow waits/timers/activity projection, leases, effect permits, cancellation, terminal facts, and real PostgreSQL conformance proof.
-    does_not_include: Schedule execution, hosted polling, automatic startup DDL, health/drain hosting, endpoints, telemetry implementation, exactly-once external effects, destructive down migrations, or production support.
+    use_when: Evaluate PostgreSQL-backed atomic Work acceptance, manually driven crash-resumable Flow persistence, and Work-first Schedule storage from source without installing a hosted scheduler.
+    includes: Explicit ordered schema management, StoreId and runtime-epoch fencing, caller-owned Work acceptance, short-transaction Work and Flow clients, Work-first Schedule client and manual processor, payload-free dispatch, Flow waits/timers/activity projection, leases, effect permits, cancellation, terminal facts, and real PostgreSQL conformance proof.
+    does_not_include: Hosted background scheduler, hosted polling, automatic startup DDL, health/drain hosting, endpoints, telemetry implementation, exactly-once external effects, destructive down migrations, or production support.
     start_here_path: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
-    recipe_summary: Evaluate the held PostgreSQL source provider when one database must atomically own Work and explicit one-transition Flow state; slices 3-4 start no worker.
+    recipe_summary: Evaluate the held PostgreSQL source provider when one database must atomically own Work, explicit one-transition Flow state, and [Work-first Schedule storage](../Durable/schedule-protocol-v1.md); slices 3-5 start no worker.
     depends_on:
       - ForgeTrust.AppSurface.Durable
       - ForgeTrust.AppSurface.Durable.Provider
@@ -700,12 +700,12 @@ packages:
     release_track: coordinated
     order: 120
     tool_command_name: appsurface
-    use_when: Install this when you want repository-level AppSurface tooling from a global or local .NET tool command.
-    includes: The `appsurface` .NET tool command, `appsurface docs` AppSurface Docs workflows, `appsurface pwa verify` install evidence plus explicitly requested schema-v3 server-known push-readiness posture evidence for AppSurface Web apps, `appsurface coverage run` private test orchestration with managed JUnit diagnostics, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` private threshold enforcement, the `appsurface secrets init`, `set`, `get`, `list --names-only`, `delete`, and `doctor` local-secret workflow, and declared `appsurface secrets transfer plan|apply` jobs, including pinned Google-to-LocalSecrets materialization for local testing.
+    use_when: Install this when you want repository-level AppSurface tooling, including protected named-canary deployment proof, from a global or local .NET tool command.
+    includes: The `appsurface` .NET tool command, `appsurface canary poll` bounded read-only deployment proof for protected AppSurface Web named canaries, `appsurface docs` AppSurface Docs workflows, `appsurface pwa verify` install evidence plus explicitly requested schema-v3 server-known push-readiness posture evidence for AppSurface Web apps, `appsurface coverage run` private test orchestration with managed JUnit diagnostics, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` private threshold enforcement, the `appsurface secrets init`, `set`, `get`, `list --names-only`, `delete`, and `doctor` local-secret workflow, and declared `appsurface secrets transfer plan|apply` jobs, including pinned Google-to-LocalSecrets materialization for local testing.
     does_not_include: App runtime packages, hosted coverage dashboards, coverage uploads, coverage trend storage, grouped coverage runs, TRX/TUnit result parsing, RazorWire-specific export workflows, or a replacement for project package references.
     start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
     start_here_label: AppSurface CLI README
-    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface docs`, `appsurface pwa verify` install or server-known push-readiness posture evidence, private coverage commands, or declared secret-transfer workflows without running from source; verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests. PWA evidence is not scoring or delivery proof.
+    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface canary poll`, `appsurface docs`, `appsurface pwa verify` install or server-known push-readiness posture evidence, private coverage commands, or declared secret-transfer workflows without running from source; verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests. PWA evidence is not scoring or delivery proof.
   - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
     classification: excluded
     publish_decision: do_not_publish

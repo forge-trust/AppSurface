@@ -44,6 +44,69 @@ public sealed class PostgreSqlDurablePublicContractTests
     }
 
     [Fact]
+    public async Task ScheduleTypes_RequireExplicitDependenciesAndValidateBoundedPasses()
+    {
+        using var dataSource = NpgsqlDataSource.Create(
+            "Host=127.0.0.1;Port=5432;Database=durable_contracts;Username=durable");
+        var registry = new DurableWorkRegistry([]);
+        var workOptions = new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid());
+        var scheduleOptions = new PostgreSqlDurableScheduleOptions("durable");
+
+        _ = new PostgreSqlDurableScheduleClient(dataSource, registry, workOptions, scheduleOptions);
+        _ = new PostgreSqlDurableScheduleProcessor(dataSource, dataSource, registry, workOptions, scheduleOptions);
+        Assert.Equal("durable", scheduleOptions.RuntimeRole);
+        Assert.Equal(TimeSpan.FromDays(31), scheduleOptions.MaximumClockAdvance);
+        Assert.Equal(TimeSpan.FromMinutes(2), scheduleOptions.LeaseDuration);
+        Assert.Throws<ArgumentException>(() => new PostgreSqlDurableScheduleOptions(" "));
+        Assert.Throws<ArgumentException>(() => new PostgreSqlDurableScheduleOptions(new string('r', 64)));
+        Assert.Throws<ArgumentException>(() => new PostgreSqlDurableScheduleOptions("durable\u0001"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleOptions("durable", TimeSpan.Zero));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleOptions("durable", TimeSpan.FromTicks(-1)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleOptions("durable", leaseDuration: TimeSpan.Zero));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleOptions("durable", leaseDuration: TimeSpan.FromMinutes(11)));
+        var maximumOptions = new PostgreSqlDurableScheduleOptions(new string('r', 63), leaseDuration: TimeSpan.FromMinutes(10));
+        Assert.Equal(TimeSpan.FromMinutes(10), maximumOptions.LeaseDuration);
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleProcessRequest("pass", 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleProcessRequest("pass", 129));
+        Assert.Throws<ArgumentException>(() => new PostgreSqlDurableScheduleProcessRequest(" "));
+        Assert.Throws<ArgumentException>(() => new PostgreSqlDurableScheduleProcessRequest(new string('p', 201)));
+        Assert.Throws<ArgumentException>(() => new PostgreSqlDurableScheduleProcessRequest("pass\u0001"));
+        var maximumRequest = new PostgreSqlDurableScheduleProcessRequest(new string('p', 200), 128);
+        Assert.Equal(128, maximumRequest.MaximumSchedules);
+
+        var empty = new PostgreSqlDurableScheduleProcessResult(0, 0, 0, 0);
+        Assert.Equal(0, empty.ClaimedSchedules);
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleProcessResult(-1, 0, 0, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleProcessResult(0, -1, 0, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleProcessResult(0, 0, -1, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableScheduleProcessResult(0, 0, 0, -1));
+        var client = new PostgreSqlDurableScheduleClient(dataSource, registry, workOptions, scheduleOptions);
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.CreateAsync(null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.UpdateAsync(null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.ApplyLifecycleCommandAsync(null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.ListAsync(null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await client.ExplainNextOccurrencesAsync(null!));
+        var processor = new PostgreSqlDurableScheduleProcessor(dataSource, dataSource, registry, workOptions, scheduleOptions);
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await processor.ProcessDueAsync(null!));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await client.ListAsync(new DurableScheduleListRequest(
+            new DurableScopeId("schedule-contract-scope"),
+            continuationToken: "not-a-schedule-continuation-token")));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await client.ListAsync(new DurableScheduleListRequest(
+            new DurableScopeId("schedule-contract-scope"),
+            continuationToken: "eyJWZXJzaW9uIjoyLCJTY2hlZHVsZUlkIjoic2NoZWR1bGUtY29udHJhY3QifQ")));
+
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableScheduleClient(null!, registry, workOptions, scheduleOptions));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableScheduleClient(dataSource, null!, workOptions, scheduleOptions));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableScheduleClient(dataSource, registry, null!, scheduleOptions));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableScheduleClient(dataSource, registry, workOptions, null!));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableScheduleProcessor(null!, dataSource, registry, workOptions, scheduleOptions));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableScheduleProcessor(dataSource, null!, registry, workOptions, scheduleOptions));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableScheduleProcessor(dataSource, dataSource, null!, workOptions, scheduleOptions));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableScheduleProcessor(dataSource, dataSource, registry, null!, scheduleOptions));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableScheduleProcessor(dataSource, dataSource, registry, workOptions, null!));
+    }
+
+    [Fact]
     public void FlowClient_RequiresExplicitDependencies()
     {
         using var dataSource = NpgsqlDataSource.Create(

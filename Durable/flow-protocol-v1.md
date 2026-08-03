@@ -52,7 +52,7 @@ Schema management and epoch rotation take the same exclusive session advisory lo
 | Operation | Transaction and locks | Required validation | Result and durable effects |
 | --- | --- | --- | --- |
 | **Get schema status** | Read-only deployment connection | Migration hashes for `0001`, `0002`, `0003` | Reports compatibility (compatible, missing, inconsistent, old/new); includes `StoreId` and active epoch. |
-| **Apply migrations** | Migration owner; session advisory lock | Pre/post migration hashes for `0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol` | Applies pending known migrations in sequence under lock; fails closed on SHA-256 mismatch. |
+| **Apply migrations** | Migration owner; session advisory lock | Pre/post migration hashes for the current forward catalog, including `0001_work_shared`, `0002_forced_rls`, and `0003_flow_protocol` | Applies pending known migrations in sequence under lock; fails closed on SHA-256 mismatch. The Flow protocol does not claim later Schedule behavior. |
 | **Start Flow** | Client-owned short transaction; scope -> flow_instance -> flow_command -> flow_dispatch -> flow_history | Target, StoreId, active epoch, registry, definition fingerprint, `start_idempotency_key` | Atomically creates `flow_instance` (state `ready`), records `flow_command`, appends `flow_history` event, or returns exact duplicate. |
 | **Deliver External Event** | Scoped transaction; scope -> flow_instance -> flow_command -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | Target, StoreId, active epoch, unique `event_id`, matching active `waiting_event` | Records command, resolves active wait (`event_won`), supersedes timer if scheduled, updates `flow_instance` to `ready`, appends history. Exact re-delivery returns the original duplicate-stable outcome. |
 | **Fire Timer** | Payload-free discovery claim, then scoped transition; scope -> flow_instance -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | StoreId, active epoch, `state = 'scheduled'`, `due_at <= clock_timestamp()` | Updates timer to `fired`, resolves event wait (`timer_won`), updates `flow_instance` to `ready`, appends history. |
@@ -97,7 +97,9 @@ Flow persistence guarantees deterministic recovery across 11 explicit process cr
 - **`ExpectedStoreId`**: Must match the deployment-time `StoreId` stored in `appsurface_durable.store_metadata`. Mismatch fails closed with `ASDUR115`.
 - **`RuntimeEpoch`**: Must match the currently active epoch initialized or rotated via `IDurableRuntimeSchemaManager`. Stale epoch fails closed with `ASDUR108` or epoch fence violation.
 - **`WakeNotificationMode`**: Flow and Work engines share PostgreSQL `LISTEN`/`NOTIFY` notification settings (default: `Disabled`).
-- **Schema Compatibility**: Shared schema manager checks migrations `0001_work_shared.sql`, `0002_forced_rls.sql`, and `0003_flow_protocol.sql`.
+- **Schema Compatibility**: Shared schema manager checks the current forward migration catalog. Flow requires its
+  `0001_work_shared.sql`, `0002_forced_rls.sql`, and `0003_flow_protocol.sql` prerequisites and remains compatible with
+  later Schedule migrations that it does not interpret.
 
 ## Migration order and rollback posture
 

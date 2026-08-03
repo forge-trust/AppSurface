@@ -124,6 +124,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Identity.BrandingAssets ??= new AppSurfaceDocsBrandingAssetsOptions();
                     options.Source ??= new AppSurfaceDocsSourceOptions();
                     options.Harvest ??= new AppSurfaceDocsHarvestOptions();
+                    options.MarkdownDownload ??= new AppSurfaceDocsMarkdownDownloadOptions();
                     options.Harvest.Health ??= new AppSurfaceDocsHarvestHealthOptions();
                     options.Diagnostics ??= new AppSurfaceDocsDiagnosticsOptions();
                     options.Metrics ??= new AppSurfaceDocsMetricsOptions();
@@ -172,6 +173,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                         NormalizeDefaultExclusions(options.Harvest.Paths.DefaultExclusions);
                     options.Harvest.Paths.VcsIgnore.AllowGlobs = NormalizeGlobArray(options.Harvest.Paths.VcsIgnore.AllowGlobs);
                     options.Harvest.Health.AuthorizationPolicy = NormalizeOrNull(options.Harvest.Health.AuthorizationPolicy);
+                    options.MarkdownDownload.AuthorizationPolicy = NormalizeOrNull(options.MarkdownDownload.AuthorizationPolicy);
                     options.Diagnostics.OperatorReadPolicy = NormalizeOrNull(options.Diagnostics.OperatorReadPolicy);
                     options.Diagnostics.OperatorWritePolicy = NormalizeOrNull(options.Diagnostics.OperatorWritePolicy);
                     options.Diagnostics.SearchIndexRefreshPolicy = NormalizeOrNull(options.Diagnostics.SearchIndexRefreshPolicy);
@@ -291,6 +293,8 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         services.TryAddSingleton<AppSurfaceDocsHarvestCoordinator>();
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IHostedService, AppSurfaceDocsHarvestFailurePreflightService>());
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, AppSurfaceDocsMarkdownDownloadPolicyValidationService>());
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IHostedService, AppSurfaceDocsOperatorReadPolicyWarningService>());
 

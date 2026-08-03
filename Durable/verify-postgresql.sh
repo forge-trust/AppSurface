@@ -6,6 +6,7 @@ project="$repo_root/Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/Forge
 postgres_image="postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302"
 mode="--quick"
 use_flow=false
+use_schedule=false
 evidence_mode=""
 evidence_output=""
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/appsurface-durable-postgresql.XXXXXX")"
@@ -43,6 +44,10 @@ while [[ $# -gt 0 ]]; do
       use_flow=true
       shift
       ;;
+    --schedule)
+      use_schedule=true
+      shift
+      ;;
     --evidence-mode)
       [[ $# -ge 2 ]] || fail "--evidence-mode requires cold or warm"
       evidence_mode="$2"
@@ -54,11 +59,18 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     *)
-      echo "Usage: $0 --quick|--ci [--flow] [--evidence-mode cold|warm --evidence-output DIR]" >&2
+      echo "Usage: $0 --quick|--ci [--flow|--schedule] [--evidence-mode cold|warm --evidence-output DIR]" >&2
       exit 2
       ;;
   esac
 done
+
+[[ "$use_flow" == "false" || "$use_schedule" == "false" ]] \
+  || fail "--flow and --schedule select different focused workloads; choose one"
+
+if [[ "$use_schedule" == "true" && ( -n "$evidence_mode" || -n "$evidence_output" ) ]]; then
+  fail "Schedule readiness evidence is not implemented yet; use the named real-PostgreSQL Schedule test directly"
+fi
 
 if [[ "${CI:-}" == "true" && "${APPSURFACE_POSTGRES_TEST_ALLOW_SKIP:-}" == "true" ]]; then
   fail "APPSURFACE_POSTGRES_TEST_ALLOW_SKIP is a local-only escape hatch and cannot be enabled in CI"
@@ -142,6 +154,9 @@ started_epoch="$(date +%s)"
 if [[ "$use_flow" == "true" ]]; then
   target_test_class="DurableSlice4ReferenceWorkloadTests"
   target_test_filter="FullyQualifiedName~Flow_StartWaitEventResumeComplete_IsIdempotentAndAuthoritative|FullyQualifiedName~EventBeforeWait_DoesNotConsumeIdentity_AndChangedStartConflicts|FullyQualifiedName~ActivityCompletion_ProjectsWorkResultAndResumesParentAtomically|FullyQualifiedName~TimerAndEventRace_HasOneRevisionWinnerAndDuplicateStableLoser|FullyQualifiedName~ScopeDisable_SuspendsFlowDispatchWaitAndHistoryTogether"
+elif [[ "$use_schedule" == "true" ]]; then
+  target_test_class="PostgreSqlDurableScheduleTests"
+  target_test_filter="FullyQualifiedName~PostgreSqlDurableScheduleTests"
 else
   target_test_class="DurableSlice3ReferenceWorkloadTests"
   target_test_filter="FullyQualifiedName~$target_test_class"
@@ -158,6 +173,10 @@ case "$mode" in
       dotnet test "$project" \
         --filter "$target_test_filter" \
         --logger 'console;verbosity=normal' | tee "$test_log"
+    elif [[ "$use_schedule" == "true" ]]; then
+      dotnet test "$project" \
+        --filter "$target_test_filter" \
+        --logger 'console;verbosity=normal'
     else
       dotnet test "$project" \
         --filter "$target_test_filter" \
@@ -223,7 +242,7 @@ case "$mode" in
     fi
     ;;
   *)
-    echo "Usage: $0 --quick|--ci [--evidence-mode cold|warm --evidence-output DIR]" >&2
+    echo "Usage: $0 --quick|--ci [--flow|--schedule] [--evidence-mode cold|warm --evidence-output DIR]" >&2
     exit 2
     ;;
 esac

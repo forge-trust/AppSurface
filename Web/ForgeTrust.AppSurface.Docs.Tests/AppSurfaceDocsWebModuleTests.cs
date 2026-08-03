@@ -1027,6 +1027,7 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Contains("docs/_health.json", routePatterns);
         Assert.Contains("docs/_routes", routePatterns);
         Assert.Contains("docs/_routes.json", routePatterns);
+        Assert.Contains("docs/_markdown/{*path}", routePatterns);
         Assert.Contains("docs/{*path}", routePatterns);
         Assert.DoesNotContain("docs/_metrics/collect", routePatterns);
         Assert.DoesNotContain("docs/_search-quality", routePatterns);
@@ -1049,6 +1050,7 @@ public class AppSurfaceDocsWebModuleTests
         var healthJsonIndex = prioritizedPatterns.IndexOf("docs/_health.json");
         var routeInspectorIndex = prioritizedPatterns.IndexOf("docs/_routes");
         var routeInspectorJsonIndex = prioritizedPatterns.IndexOf("docs/_routes.json");
+        var markdownDownloadIndex = prioritizedPatterns.IndexOf("docs/_markdown/{*path}");
         var catchAllIndex = prioritizedPatterns.IndexOf("docs/{*path}");
         Assert.True(searchIndex >= 0, "Expected docs/search route declaration.");
         Assert.True(searchIndexRefresh >= 0, "Expected docs/_search-index/refresh route declaration.");
@@ -1058,6 +1060,7 @@ public class AppSurfaceDocsWebModuleTests
         Assert.True(healthJsonIndex >= 0, "Expected docs/_health.json route declaration.");
         Assert.True(routeInspectorIndex >= 0, "Expected docs/_routes route declaration.");
         Assert.True(routeInspectorJsonIndex >= 0, "Expected docs/_routes.json route declaration.");
+        Assert.True(markdownDownloadIndex >= 0, "Expected docs/_markdown/{*path} route declaration.");
         Assert.True(catchAllIndex >= 0, "Expected docs/{*path} route declaration.");
         Assert.True(searchIndex < catchAllIndex, "docs/search must be prioritized before docs/{*path}.");
         Assert.True(searchIndexRefresh < catchAllIndex, "docs/_search-index/refresh must be prioritized before docs/{*path}.");
@@ -1067,6 +1070,111 @@ public class AppSurfaceDocsWebModuleTests
         Assert.True(healthJsonIndex < catchAllIndex, "docs/_health.json must be prioritized before docs/{*path}.");
         Assert.True(routeInspectorIndex < catchAllIndex, "docs/_routes must be prioritized before docs/{*path}.");
         Assert.True(routeInspectorJsonIndex < catchAllIndex, "docs/_routes.json must be prioritized before docs/{*path}.");
+        Assert.True(markdownDownloadIndex < catchAllIndex, "docs/_markdown/{*path} must be prioritized before docs/{*path}.");
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldReserveDisabledMarkdownDownloadForAnonymousGetAndHead404Handling()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+
+        _module.ConfigureEndpoints(context, (IEndpointRouteBuilder)app);
+
+        var endpoints = GetRouteEndpoints((IEndpointRouteBuilder)app, "docs/_markdown/{*path}")
+            .Where(endpoint => endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains(HttpMethods.Get) == true)
+            .ToArray();
+        Assert.NotEmpty(endpoints);
+        Assert.All(
+            endpoints,
+            endpoint =>
+            {
+                var methods = Assert.Single(endpoint.Metadata.OfType<HttpMethodMetadata>());
+                Assert.Equal([HttpMethods.Get, HttpMethods.Head], methods.HttpMethods);
+                Assert.NotNull(endpoint.Metadata.GetMetadata<AllowAnonymousAttribute>());
+                Assert.Empty(endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>());
+            });
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldRequireConfiguredPolicyForEnabledMarkdownDownload()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        builder.Services.AddSingleton(
+            new AppSurfaceDocsOptions
+            {
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader"
+                }
+            });
+        using var app = builder.Build();
+
+        _module.ConfigureEndpoints(context, (IEndpointRouteBuilder)app);
+
+        var endpoints = GetRouteEndpoints((IEndpointRouteBuilder)app, "docs/_markdown/{*path}")
+            .Where(endpoint => endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains(HttpMethods.Get) == true)
+            .ToArray();
+        Assert.NotEmpty(endpoints);
+        Assert.All(
+            endpoints,
+            endpoint =>
+            {
+                Assert.Null(endpoint.Metadata.GetMetadata<AllowAnonymousAttribute>());
+                Assert.Equal("DocsReader", Assert.Single(endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>()).Policy);
+            });
+    }
+
+    [Fact]
+    public async Task MarkdownDownloadUnsupportedMethodEndpoint_ShouldReturnMethodNotAllowedAndDisableStatusPages()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var endpoint = routeBuilder.DataSources
+            .SelectMany(dataSource => dataSource.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Single(
+                routeEndpoint =>
+                {
+                    var methods = routeEndpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
+                    return routeEndpoint.RoutePattern.RawText?.TrimStart('/') == "docs/_markdown/{*path}"
+                    && methods is not null
+                    && methods.Contains(HttpMethods.Post)
+                    && methods.Contains(HttpMethods.Connect)
+                    && methods.Contains(HttpMethods.Trace)
+                    && !methods.Contains(HttpMethods.Get);
+                });
+        var statusCodePages = A.Fake<IStatusCodePagesFeature>();
+        statusCodePages.Enabled = true;
+        var httpContext = new DefaultHttpContext();
+        httpContext.Features.Set(statusCodePages);
+
+        await endpoint.RequestDelegate!(httpContext);
+
+        Assert.Equal(StatusCodes.Status405MethodNotAllowed, httpContext.Response.StatusCode);
+        Assert.False(statusCodePages.Enabled);
+        Assert.Equal("GET, HEAD", httpContext.Response.Headers.Allow);
+
+        var noStatusCodePagesContext = new DefaultHttpContext();
+
+        await endpoint.RequestDelegate!(noStatusCodePagesContext);
+
+        Assert.Equal(StatusCodes.Status405MethodNotAllowed, noStatusCodePagesContext.Response.StatusCode);
+        Assert.Equal("GET, HEAD", noStatusCodePagesContext.Response.Headers.Allow);
     }
 
     [Fact]
@@ -2191,6 +2299,25 @@ public class AppSurfaceDocsWebModuleTests
                 Directory.Delete(tempDirectory, recursive: true);
             }
         }
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldReserveMarkdownDownloadWhenOptionsAreNull()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        builder.Services.AddSingleton(new AppSurfaceDocsOptions { MarkdownDownload = null! });
+        using var app = builder.Build();
+
+        _module.ConfigureEndpoints(context, (IEndpointRouteBuilder)app);
+
+        var endpoints = GetRouteEndpoints((IEndpointRouteBuilder)app, "docs/_markdown/{*path}")
+            .Where(endpoint => endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains(HttpMethods.Get) == true)
+            .ToArray();
+        Assert.NotEmpty(endpoints);
+        Assert.All(endpoints, endpoint => Assert.NotNull(endpoint.Metadata.GetMetadata<AllowAnonymousAttribute>()));
     }
 
     [Fact]

@@ -27,7 +27,7 @@ public sealed class DocsExportWorkflowContractTests
             .Cast<YamlMappingNode>()
             .ToArray();
         var checkout = FindStep(steps, "Checkout code");
-        Assert.Equal("actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0", GetScalar(checkout, "uses"));
+        Assert.Equal("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", GetScalar(checkout, "uses"));
         Assert.Equal("0", GetScalar(GetMapping(checkout, "with"), "fetch-depth"));
 
         var verifyStep = FindStep(steps, "Verify AppSurface Docs harvest health");

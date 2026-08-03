@@ -997,6 +997,21 @@ public static class DocHarvestDiagnosticCodes
     public const string MarkdownMetadataFileTooLarge = "appsurfacedocs.markdown.metadata_file_too_large";
 
     /// <summary>
+    /// Markdown source was not valid UTF-8 and therefore cannot be returned through the source-faithful download surface.
+    /// </summary>
+    public const string MarkdownDownloadInvalidEncoding = "appsurfacedocs.markdown_download.invalid_encoding";
+
+    /// <summary>
+    /// Markdown source attempted a download declaration outside the strict inline opt-in shape.
+    /// </summary>
+    public const string MarkdownDownloadInvalidEligibility = "appsurfacedocs.markdown_download.invalid_eligibility";
+
+    /// <summary>
+    /// Eligible Markdown source exceeded the private snapshot download byte budget.
+    /// </summary>
+    public const string MarkdownDownloadSnapshotBudgetExceeded = "appsurfacedocs.markdown_download.snapshot_budget_exceeded";
+
+    /// <summary>
     /// A JavaScript source file matched the configured include set but exceeded the configured parse size limit.
     /// </summary>
     public const string JavaScriptFileTooLarge = "appsurfacedocs.javascript.file_too_large";
@@ -1911,6 +1926,20 @@ public sealed record DocDetailsViewModel
     /// canonical signals between live docs pages and static exports.
     /// </remarks>
     public string CanonicalUrl { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets whether the current canonical page has a source-faithful Markdown attachment in the active Docs snapshot.
+    /// </summary>
+    /// <remarks>
+    /// This is a presentation capability only. It does not expose source text, alter reader authorization, or imply that
+    /// aliases, generated pages, archives, or static exports have a Markdown representation.
+    /// </remarks>
+    public bool CanDownloadMarkdown { get; init; }
+
+    /// <summary>
+    /// Gets the protected browser attachment URL when <see cref="CanDownloadMarkdown"/> is <see langword="true"/>.
+    /// </summary>
+    public string? MarkdownDownloadUrl { get; init; }
 
     /// <summary>
     /// Gets the authored summary that should be rendered under the title when available.
