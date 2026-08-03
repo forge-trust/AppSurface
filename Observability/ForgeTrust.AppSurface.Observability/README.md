@@ -2,6 +2,14 @@
 
 `ForgeTrust.AppSurface.Observability` registers application-side OpenTelemetry logging, tracing, and metrics for AppSurface apps. Use it when an app should send operational telemetry to Aspire or another OTLP collector without making the app depend on `ForgeTrust.AppSurface.Aspire`.
 
+The canonical AppSurface trace source name is defined in the dependency-free `ForgeTrust.AppSurface.Core` API, and
+`AppSurfaceTelemetrySources` remains a compatibility-forwarding surface for existing callers who need this type in
+observability package contexts.
+
+Durable Flow tracing emits only from this same `ForgeTrust.AppSurface` source. Its fixed value-free tags and W3C trust
+boundary are documented in the [Durable trace-context contract](../../Durable/flow-trace-context-v1.md); do not add
+raw W3C headers, baggage, or durable payload fields to exporter configuration.
+
 It does not create Aspire resources, own dashboards, capture request bodies, define product analytics, add package-specific Flow/Auth/Docs spans, or choose non-OTLP exporters.
 
 ## Release Guidance

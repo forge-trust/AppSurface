@@ -339,8 +339,8 @@ packages:
     release_notes_path: releases/unreleased.md
     order: 48
     use_when: Evaluate PostgreSQL-backed atomic Work acceptance and manually driven crash-resumable Flow persistence from source without installing a hosted runtime.
-    includes: Explicit ordered schema management, StoreId and runtime-epoch fencing, caller-owned Work acceptance, short-transaction Work and Flow clients, payload-free dispatch, Flow waits/timers/activity projection, leases, effect permits, cancellation, terminal facts, and real PostgreSQL conformance proof.
-    does_not_include: Schedule execution, hosted polling, automatic startup DDL, health/drain hosting, endpoints, telemetry implementation, exactly-once external effects, destructive down migrations, or production support.
+    includes: Explicit ordered schema management, StoreId and runtime-epoch fencing, caller-owned Work acceptance, short-transaction Work and Flow clients, payload-free dispatch, Flow waits/timers/activity projection, versioned W3C causal-link persistence and crash proof, leases, effect permits, cancellation, terminal facts, and real PostgreSQL conformance proof.
+    does_not_include: Schedule execution, hosted polling, automatic startup DDL, health/drain hosting, endpoints, hosted-runtime activation, exactly-once external effects, destructive down migrations, or production support.
     start_here_path: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
     recipe_summary: Evaluate the held PostgreSQL source provider when one database must atomically own Work and explicit one-transition Flow state; slices 3-4 start no worker.
     depends_on:

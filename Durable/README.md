@@ -14,6 +14,10 @@ All three packages are machine-held out of every publish plan until slices 5-6 p
 drain/recovery, and operational conformance in a coordinated release review. They can be built and packed directly for
 contract verification, but they are not a supported NuGet release.
 
+For the internal W3C causal-link contract, safe telemetry attributes, deployment order, and reference proof, read
+[Durable Flow trace context v1](flow-trace-context-v1.md). It supplies persistence and crash-proof seams now; it does
+not make Slice 4 a hosted runtime.
+
 ## Why this boundary
 
 Reusable modules should describe durable intent without selecting storage or starting workers. Runtime providers need

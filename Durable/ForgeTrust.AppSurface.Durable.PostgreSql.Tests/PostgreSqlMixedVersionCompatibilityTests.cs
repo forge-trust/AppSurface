@@ -52,7 +52,7 @@ public sealed class PostgreSqlMixedVersionCompatibilityTests
         var oldStatus = await oldCatalogManager.GetStatusAsync();
         Assert.Equal(DurableRuntimeSchemaCompatibility.Compatible, oldStatus.Compatibility);
         Assert.Equal(2, oldStatus.RequiredVersion);
-        Assert.Equal(3, oldStatus.InstalledVersion);
+        Assert.Equal(4, oldStatus.InstalledVersion);
 
         var epoch = Guid.NewGuid();
         await currentManager.InitializeRuntimeEpochAsync(epoch, "tests", "mixed-v2-v3");

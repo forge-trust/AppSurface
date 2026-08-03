@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Durable;
 using ForgeTrust.AppSurface.Durable.PostgreSql;
 using ForgeTrust.AppSurface.Flow;
@@ -115,6 +116,9 @@ static async ValueTask RunFlowTimerCrashBoundaryAsync(
     var work = new DurableWorkRegistry([]);
     var registration = new FlowCrashTimerRegistration(codec);
     var flows = new DurableFlowRegistry([registration], work, payloads);
+    var evidence = new FlowTraceEvidenceCollector();
+    using var listener = evidence.CreateListener();
+    ActivitySource.AddActivityListener(listener);
     var processor = new PostgreSqlDurableFlowProcessor(
         dataSource,
         dataSource,
@@ -122,7 +126,7 @@ static async ValueTask RunFlowTimerCrashBoundaryAsync(
         work,
         payloads,
         new PostgreSqlDurableWorkOptions(runtimeEpoch, storeId),
-        barriers: new FlowCrashBarrier());
+        barriers: new FlowCrashBarrier(evidence));
     var candidate = (await processor.DiscoverAsync(1_000))
         .Single(item =>
             item.Kind == PostgreSqlFlowDispatchKind.Timer
@@ -165,18 +169,31 @@ public sealed record ReferenceCheckpointEvent(
 
 /// <summary>Reports the committed Flow timer boundary reached before forced process termination.</summary>
 public sealed record FlowCrashCheckpoint(
+    string Event,
     string Phase,
     string ScopeId,
     string FlowInstanceId,
-    long Revision);
+    long Revision,
+    FlowTraceEvidence? TraceEvidence);
 
-internal sealed class FlowCrashBarrier : IPostgreSqlDurableFlowBarrierObserver
+/// <summary>Reports test-only identifiers necessary to compare a crash-side Activity with its restarted continuation.</summary>
+public sealed record FlowTraceEvidence(
+    string Operation,
+    string TraceId,
+    string SpanId,
+    IReadOnlyList<FlowTraceLinkEvidence> Links);
+
+/// <summary>Reports one causal link on the test-only telemetry evidence record.</summary>
+public sealed record FlowTraceLinkEvidence(string TraceId, string SpanId);
+
+internal sealed class FlowCrashBarrier(FlowTraceEvidenceCollector evidence) : IPostgreSqlDurableFlowBarrierObserver
 {
     public async ValueTask ObserveAsync(
         string barrier,
         DurableScopeId scopeId,
         DurableFlowInstanceId instanceId,
         long revision,
+        PostgreSqlFlowTelemetryEvidence? traceEvidence,
         CancellationToken cancellationToken)
     {
         if (barrier != "flow.timer-resolution.committed")
@@ -185,13 +202,72 @@ internal sealed class FlowCrashBarrier : IPostgreSqlDurableFlowBarrierObserver
         }
 
         Console.WriteLine(JsonSerializer.Serialize(new FlowCrashCheckpoint(
+            "appsurface.durable.telemetry.evidence",
             barrier,
             scopeId.Value,
             instanceId.Value,
-            revision)));
+            revision,
+            evidence.Last ?? FlowTraceEvidenceCollector.From(traceEvidence) ?? FlowTraceEvidenceCollector.FromActivity(Activity.Current))));
         await Console.Out.FlushAsync(cancellationToken);
         await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
     }
+}
+
+internal sealed class FlowTraceEvidenceCollector
+{
+    private FlowTraceEvidence? _last;
+
+    internal FlowTraceEvidence? Last => Volatile.Read(ref _last);
+
+    internal ActivityListener CreateListener() => new()
+    {
+        ShouldListenTo = source => source.Name == AppSurfaceActivitySources.ActivitySourceName,
+        Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+        ActivityStarted = activity =>
+        {
+            var links = activity.Links
+                .Select(link => new FlowTraceLinkEvidence(
+                    link.Context.TraceId.ToHexString(),
+                    link.Context.SpanId.ToHexString()))
+                .ToArray();
+            Volatile.Write(
+                ref _last,
+                new FlowTraceEvidence(
+                    activity.OperationName,
+                    activity.TraceId.ToHexString(),
+                    activity.SpanId.ToHexString(),
+                    links));
+        },
+    };
+
+    internal static FlowTraceEvidence? FromActivity(Activity? activity)
+    {
+        if (activity is null)
+        {
+            return null;
+        }
+
+        return new FlowTraceEvidence(
+            activity.OperationName,
+            activity.TraceId.ToHexString(),
+            activity.SpanId.ToHexString(),
+            activity.Links
+                .Select(link => new FlowTraceLinkEvidence(
+                    link.Context.TraceId.ToHexString(),
+                    link.Context.SpanId.ToHexString()))
+                .ToArray());
+    }
+
+    internal static FlowTraceEvidence? From(PostgreSqlFlowTelemetryEvidence? evidence) =>
+        evidence is null
+            ? null
+            : new FlowTraceEvidence(
+                evidence.Operation,
+                evidence.TraceId,
+                evidence.SpanId,
+                evidence.Links
+                    .Select(link => new FlowTraceLinkEvidence(link.TraceId, link.SpanId))
+                    .ToArray());
 }
 
 internal sealed class FlowCrashTimerRegistration(IDurablePayloadCodec contextCodec) : DurableFlowRegistration

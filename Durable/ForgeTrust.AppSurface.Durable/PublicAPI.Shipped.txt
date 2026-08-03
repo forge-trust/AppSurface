@@ -522,6 +522,8 @@ type public static class ForgeTrust.AppSurface.Durable.DurableProblemCodes
   field public const System.String ScopeNotFound = "ASDUR113"
   field public const System.String StoreIdentityMismatch = "ASDUR115"
   field public const System.String StoreUnavailable = "ASDUR103"
+  field public const System.String TraceContextInvalid = "ASDUR212"
+  field public const System.String TraceStateRejected = "ASDUR213"
   field public const System.String TransactionRequired = "ASDUR101"
   field public const System.String ValidationFailed = "ASDUR100"
   field public const System.String WorkContractUnavailable = "ASDUR109"

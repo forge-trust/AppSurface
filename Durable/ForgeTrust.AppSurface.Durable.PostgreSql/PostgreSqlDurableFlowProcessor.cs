@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using ForgeTrust.AppSurface.Flow;
@@ -38,6 +39,7 @@ internal interface IPostgreSqlDurableFlowBarrierObserver
     /// <param name="scopeId">The scope that owns the committed Flow transition.</param>
     /// <param name="instanceId">The Flow instance that crossed the boundary.</param>
     /// <param name="revision">The committed aggregate revision.</param>
+    /// <param name="traceEvidence">Value-free in-process activity evidence available at the committed boundary.</param>
     /// <param name="cancellationToken">Cancellation for observer-only work after the commit.</param>
     /// <returns>A task that completes after the observer records the barrier.</returns>
     ValueTask ObserveAsync(
@@ -45,6 +47,7 @@ internal interface IPostgreSqlDurableFlowBarrierObserver
         DurableScopeId scopeId,
         DurableFlowInstanceId instanceId,
         long revision,
+        PostgreSqlFlowTelemetryEvidence? traceEvidence,
         CancellationToken cancellationToken);
 }
 
@@ -62,6 +65,7 @@ internal sealed class NoOpPostgreSqlDurableFlowBarrierObserver : IPostgreSqlDura
         DurableScopeId scopeId,
         DurableFlowInstanceId instanceId,
         long revision,
+        PostgreSqlFlowTelemetryEvidence? traceEvidence,
         CancellationToken cancellationToken) =>
         ValueTask.CompletedTask;
 }
@@ -94,6 +98,16 @@ internal sealed record PostgreSqlFlowDispatchCandidate(
     DateTimeOffset DueAtUtc,
     long ExpectedRevision,
     short Priority);
+
+/// <summary>Value-free in-process Activity evidence passed only to deterministic crash-test barriers.</summary>
+internal sealed record PostgreSqlFlowTelemetryEvidence(
+    string Operation,
+    string TraceId,
+    string SpanId,
+    IReadOnlyList<PostgreSqlFlowTelemetryLink> Links);
+
+/// <summary>Describes one causal link carried by a crash-test Activity evidence record.</summary>
+internal sealed record PostgreSqlFlowTelemetryLink(string TraceId, string SpanId);
 
 /// <summary>Describes the durable outcome of attempting to process one Flow dispatch candidate.</summary>
 internal enum PostgreSqlFlowProcessingOutcome
@@ -221,7 +235,24 @@ internal sealed class PostgreSqlDurableFlowProcessor
         }
         if (candidate.Kind == PostgreSqlFlowDispatchKind.Timer)
         {
-            var timerResult = await _store.TryResolveTimerAsync(candidate, cancellationToken).ConfigureAwait(false);
+            var timerTrace = await _store.ReadTimerTraceContextAsync(candidate, cancellationToken).ConfigureAwait(false);
+            DurableTraceDiagnostics.Report(timerTrace.DiagnosticCode);
+            using var timerActivity = DurableTraceActivity.StartRoot(
+                "appsurface.durable.flow.timer",
+                ActivityKind.Consumer,
+                timerTrace.Context);
+            var timerExecutionTrace = timerActivity is null
+                ? timerTrace
+                : DurableTraceContext.Capture(timerActivity);
+            if (timerActivity is not null)
+            {
+                DurableTraceDiagnostics.Report(timerExecutionTrace.DiagnosticCode);
+            }
+
+            var timerResult = await _store.TryResolveTimerAsync(
+                candidate,
+                timerExecutionTrace.Context,
+                cancellationToken).ConfigureAwait(false);
             if (timerResult.Outcome == PostgreSqlFlowProcessingOutcome.Applied)
             {
                 await _barriers.ObserveAsync(
@@ -229,9 +260,18 @@ internal sealed class PostgreSqlDurableFlowProcessor
                     timerResult.ScopeId,
                     timerResult.InstanceId,
                     timerResult.Revision,
+                    CreateTelemetryEvidence(timerActivity, "appsurface.durable.flow.timer", timerTrace.Context),
                     cancellationToken).ConfigureAwait(false);
             }
 
+            DurableTraceTelemetry.Apply(
+                timerActivity,
+                "timer",
+                "timer",
+                timerResult.State?.ToString().ToLowerInvariant() ?? "unknown",
+                timerResult.Outcome.ToString().ToLowerInvariant(),
+                timerExecutionTrace.Context?.CorrelationToken ?? Guid.Empty,
+                timerExecutionTrace.Status);
             return timerResult;
         }
 
@@ -255,7 +295,21 @@ internal sealed class PostgreSqlDurableFlowProcessor
             claim.ScopeId,
             claim.InstanceId,
             claim.Revision,
+            traceEvidence: null,
             cancellationToken).ConfigureAwait(false);
+
+        DurableTraceDiagnostics.Report(claim.TraceContext.DiagnosticCode);
+        using var activity = DurableTraceActivity.StartRoot(
+            "appsurface.durable.flow.execute",
+            ActivityKind.Consumer,
+            claim.TraceContext.Context);
+        var executionTrace = activity is null
+            ? claim.TraceContext
+            : DurableTraceContext.Capture(activity);
+        if (activity is not null)
+        {
+            DurableTraceDiagnostics.Report(executionTrace.DiagnosticCode);
+        }
 
         DurableFlowEvaluationResult decision;
         try
@@ -265,10 +319,19 @@ internal sealed class PostgreSqlDurableFlowProcessor
                 || !string.Equals(registration.ImplementationVersion, claim.ManifestId, StringComparison.Ordinal)
                 || !string.Equals(registration.DefinitionFingerprint, claim.DefinitionFingerprint, StringComparison.Ordinal))
             {
-                return await _store.SuspendClaimAsync(
+                var suspended = await _store.SuspendClaimAsync(
                     claim,
                     "flow.manifest_incompatible",
                     cancellationToken).ConfigureAwait(false);
+                DurableTraceTelemetry.Apply(
+                    activity,
+                    "flow",
+                    "claim",
+                    "suspended",
+                    "manifest_incompatible",
+                    executionTrace.Context?.CorrelationToken ?? Guid.Empty,
+                    executionTrace.Status);
+                return suspended;
             }
 
             decision = await registration.EvaluateAsync(
@@ -288,10 +351,19 @@ internal sealed class PostgreSqlDurableFlowProcessor
             and not OutOfMemoryException
             and not StackOverflowException)
         {
-            return await _store.SuspendClaimAsync(
+            var suspended = await _store.SuspendClaimAsync(
                 claim,
                 "flow.evaluation_failed",
                 cancellationToken).ConfigureAwait(false);
+            DurableTraceTelemetry.Apply(
+                activity,
+                "flow",
+                "claim",
+                "suspended",
+                "evaluation_failed",
+                executionTrace.Context?.CorrelationToken ?? Guid.Empty,
+                executionTrace.Status);
+            return suspended;
         }
 
         await _barriers.ObserveAsync(
@@ -299,6 +371,7 @@ internal sealed class PostgreSqlDurableFlowProcessor
             claim.ScopeId,
             claim.InstanceId,
             claim.Revision,
+            CreateTelemetryEvidence(activity, "appsurface.durable.flow.execute", claim.TraceContext.Context),
             cancellationToken).ConfigureAwait(false);
         PostgreSqlFlowProcessingResult result;
         try
@@ -307,15 +380,25 @@ internal sealed class PostgreSqlDurableFlowProcessor
                 claim,
                 decision,
                 _workRegistry,
+                executionTrace.Context,
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (
             exception is InvalidOperationException or ArgumentException)
         {
-            return await _store.SuspendClaimAsync(
+            var suspended = await _store.SuspendClaimAsync(
                 claim,
                 "flow.evaluation_invalid",
                 cancellationToken).ConfigureAwait(false);
+            DurableTraceTelemetry.Apply(
+                activity,
+                "flow",
+                "claim",
+                "suspended",
+                "evaluation_invalid",
+                executionTrace.Context?.CorrelationToken ?? Guid.Empty,
+                executionTrace.Status);
+            return suspended;
         }
 
         await _barriers.ObserveAsync(
@@ -323,13 +406,56 @@ internal sealed class PostgreSqlDurableFlowProcessor
             result.ScopeId,
             result.InstanceId,
             result.Revision,
+            CreateTelemetryEvidence(activity, "appsurface.durable.flow.execute", claim.TraceContext.Context),
             cancellationToken).ConfigureAwait(false);
+        DurableTraceTelemetry.Apply(
+            activity,
+            "flow",
+            "claim",
+            result.State?.ToString().ToLowerInvariant() ?? "unknown",
+            result.Outcome.ToString().ToLowerInvariant(),
+            executionTrace.Context?.CorrelationToken ?? Guid.Empty,
+            executionTrace.Status);
         return result;
+    }
+
+    private static PostgreSqlFlowTelemetryEvidence? CreateTelemetryEvidence(
+        Activity? activity,
+        string operation,
+        DurableTraceContext? fallback)
+    {
+        if (activity is not null)
+        {
+            return new PostgreSqlFlowTelemetryEvidence(
+                activity.OperationName,
+                activity.TraceId.ToHexString(),
+                activity.SpanId.ToHexString(),
+                activity.Links
+                    .Select(link => new PostgreSqlFlowTelemetryLink(
+                        link.Context.TraceId.ToHexString(),
+                        link.Context.SpanId.ToHexString()))
+                    .ToArray());
+        }
+
+        return fallback is null
+            ? null
+            : new PostgreSqlFlowTelemetryEvidence(
+                operation,
+                fallback.TraceId,
+                fallback.SpanId,
+                [new PostgreSqlFlowTelemetryLink(fallback.TraceId, fallback.SpanId)]);
     }
 }
 
 internal sealed partial class PostgreSqlDurableFlowStore
 {
+    internal ValueTask<PostgreSqlFlowProcessingResult> CommitDecisionAsync(
+        PostgreSqlFlowClaim claim,
+        DurableFlowEvaluationResult decision,
+        IDurableWorkRegistry workRegistry,
+        CancellationToken cancellationToken) =>
+        CommitDecisionAsync(claim, decision, workRegistry, executionTraceContext: null, cancellationToken);
+
     internal async ValueTask<PostgreSqlFlowClaim?> TryClaimFlowAsync(
         PostgreSqlFlowDispatchCandidate candidate,
         string workerId,
@@ -362,12 +488,15 @@ internal sealed partial class PostgreSqlDurableFlowStore
                        flow.revision, flow.scope_generation, flow.runtime_epoch, flow.lease_generation,
                        (flow.lease_expires_at IS NOT NULL AND flow.lease_expires_at <= clock_timestamp()) AS lease_expired,
                        dispatch.state, dispatch.expected_revision,
-                       flow.context_sha256, flow.resume_event_sha256, flow.activity_result_sha256
+                       flow.context_sha256, flow.resume_event_sha256, flow.activity_result_sha256,
+                       trace.traceparent, trace.tracestate
                 FROM appsurface_durable.flow_instance AS flow
                 JOIN appsurface_durable.flow_dispatch AS dispatch
-                  ON dispatch.scope_id = flow.scope_id
+                 ON dispatch.scope_id = flow.scope_id
                  AND dispatch.flow_instance_id = flow.flow_instance_id
                  AND dispatch.kind = 'flow'
+                LEFT JOIN appsurface_durable.flow_trace_context AS trace
+                  ON trace.scope_id = flow.scope_id AND trace.trace_context_id = flow.trace_context_id
                 WHERE flow.scope_id = @scope_id AND flow.flow_instance_id = @flow_instance_id
                   AND dispatch.dispatch_id = @dispatch_id
                 FOR UPDATE OF flow, dispatch;
@@ -405,6 +534,11 @@ internal sealed partial class PostgreSqlDurableFlowStore
             ValidatePayloadHash(context, reader, 32, "Flow context");
             ValidateNullablePayloadHash(resumePayload, reader, 33, "Flow event");
             ValidateNullablePayloadHash(activityPayload, reader, 34, "Flow activity result");
+            var traceContext = reader.IsDBNull(35)
+                ? DurableTraceContextCapture.Absent
+                : DurableTraceContext.Parse(
+                    reader.GetString(35),
+                    reader.IsDBNull(36) ? null : reader.GetString(36));
             var claim = new PostgreSqlFlowClaim(
                 candidate.DispatchId,
                 candidate.ScopeId,
@@ -421,6 +555,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
                 resumePayload,
                 reader.IsDBNull(19) ? null : reader.GetString(19),
                 activityPayload,
+                traceContext,
                 checked(revision + 1),
                 reader.GetInt64(28) + 1,
                 generation.Value,
@@ -553,6 +688,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
         PostgreSqlFlowClaim claim,
         DurableFlowEvaluationResult decision,
         IDurableWorkRegistry workRegistry,
+        DurableTraceContext? executionTraceContext,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(decision);
@@ -625,6 +761,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
                 decision,
                 childWorkId,
                 activityIdentity,
+                executionTraceContext,
                 cancellationToken).ConfigureAwait(false);
         }
         catch
@@ -641,6 +778,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
         DurableFlowEvaluationResult decision,
         DurableWorkId? childWorkId,
         string? activityIdentity,
+        DurableTraceContext? executionTraceContext,
         CancellationToken cancellationToken)
     {
         var revision = checked(claim.Revision + 1);
@@ -758,6 +896,26 @@ internal sealed partial class PostgreSqlDurableFlowStore
                 claim.LeaseGeneration),
             "decision_" + decision.Kind.ToString().ToLowerInvariant(),
             commandId: null,
+            cancellationToken).ConfigureAwait(false);
+        var trace = await InsertTraceContextAsync(
+            connection,
+            transaction,
+            claim.ScopeId,
+            claim.InstanceId,
+            executionTraceContext,
+            decision.Kind == FlowTransitionKind.Activity ? "activity_scheduled" : "evaluation_committed",
+            cancellationToken).ConfigureAwait(false);
+        await AttachTraceContextAsync(
+            connection,
+            transaction,
+            claim.ScopeId,
+            claim.InstanceId,
+            trace,
+            commandId: null,
+            revision,
+            waitId,
+            timerId,
+            childWorkId,
             cancellationToken).ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return new PostgreSqlFlowProcessingResult(
@@ -899,8 +1057,65 @@ internal sealed partial class PostgreSqlDurableFlowStore
         }
     }
 
+    internal async ValueTask<DurableTraceContextCapture> ReadTimerTraceContextAsync(
+        PostgreSqlFlowDispatchCandidate candidate,
+        CancellationToken cancellationToken)
+    {
+        if (candidate.TimerId is null)
+        {
+            return DurableTraceContextCapture.Absent;
+        }
+
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (await ValidateStoreSetScopeAndLockActiveScopeAsync(
+                    connection,
+                    transaction,
+                    candidate.ScopeId,
+                    createIfMissing: false,
+                    cancellationToken).ConfigureAwait(false) is null)
+            {
+                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                return DurableTraceContextCapture.Absent;
+            }
+
+            const string sql = """
+                SELECT trace.traceparent, trace.tracestate
+                FROM appsurface_durable.flow_timer AS timer
+                LEFT JOIN appsurface_durable.flow_trace_context AS trace
+                  ON trace.scope_id = timer.scope_id AND trace.trace_context_id = timer.trace_context_id
+                WHERE timer.scope_id = @scope_id AND timer.flow_instance_id = @flow_instance_id
+                  AND timer.timer_id = @timer_id;
+                """;
+            await using var command = new NpgsqlCommand(sql, connection, transaction);
+            command.Parameters.AddWithValue("scope_id", candidate.ScopeId.Value);
+            command.Parameters.AddWithValue("flow_instance_id", candidate.InstanceId.Value);
+            command.Parameters.AddWithValue("timer_id", candidate.TimerId.Value);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            var capture = await reader.ReadAsync(cancellationToken).ConfigureAwait(false) && !reader.IsDBNull(0)
+                ? DurableTraceContext.Parse(reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1))
+                : DurableTraceContextCapture.Absent;
+            await reader.DisposeAsync().ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return capture;
+        }
+        catch
+        {
+            await TryRollbackAsync(transaction).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    internal ValueTask<PostgreSqlFlowProcessingResult> TryResolveTimerAsync(
+        PostgreSqlFlowDispatchCandidate candidate,
+        CancellationToken cancellationToken) =>
+        TryResolveTimerAsync(candidate, executionTraceContext: null, cancellationToken);
+
     internal async ValueTask<PostgreSqlFlowProcessingResult> TryResolveTimerAsync(
         PostgreSqlFlowDispatchCandidate candidate,
+        DurableTraceContext? executionTraceContext,
         CancellationToken cancellationToken)
     {
         if (candidate.TimerId is null)
@@ -1065,6 +1280,26 @@ internal sealed partial class PostgreSqlDurableFlowStore
             await AppendHistoryAsync(
                 connection, transaction, current with { Revision = revision, State = "ready" },
                 "timer_won", commandId: null, cancellationToken).ConfigureAwait(false);
+            var trace = await InsertTraceContextAsync(
+                connection,
+                transaction,
+                candidate.ScopeId,
+                candidate.InstanceId,
+                executionTraceContext,
+                "timer_winner",
+                cancellationToken).ConfigureAwait(false);
+            await AttachTraceContextAsync(
+                connection,
+                transaction,
+                candidate.ScopeId,
+                candidate.InstanceId,
+                trace,
+                commandId: null,
+                revision,
+                waitId,
+                candidate.TimerId,
+                workId: null,
+                cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return new PostgreSqlFlowProcessingResult(
                 PostgreSqlFlowProcessingOutcome.Applied,
@@ -1251,6 +1486,7 @@ internal sealed record PostgreSqlFlowClaim(
     DurableEncodedPayload? ResumeEventPayload,
     string? ActivityCallsiteId,
     DurableEncodedPayload? ActivityResult,
+    DurableTraceContextCapture TraceContext,
     long Revision,
     long LeaseGeneration,
     long ScopeGeneration,
