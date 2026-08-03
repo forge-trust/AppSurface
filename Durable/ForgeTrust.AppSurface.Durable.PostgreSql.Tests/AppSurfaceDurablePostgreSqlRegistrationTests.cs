@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Durable.Provider;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -27,6 +28,7 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
         using var provider = services.BuildServiceProvider();
         Assert.Empty(provider.GetServices<IHostedService>());
         Assert.IsAssignableFrom<IDurableWorkClient>(provider.GetRequiredService<IDurableWorkClient>());
+        Assert.IsAssignableFrom<IDurableWorkTransactionWriter>(provider.GetRequiredService<IDurableWorkTransactionWriter>());
         Assert.IsAssignableFrom<IDurableFlowClient>(provider.GetRequiredService<IDurableFlowClient>());
         Assert.IsAssignableFrom<IDurableScheduleClient>(provider.GetRequiredService<IDurableScheduleClient>());
         Assert.IsAssignableFrom<IDurableRuntimeSchemaManager>(provider.GetRequiredService<IDurableRuntimeSchemaManager>());
@@ -60,6 +62,23 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
 
         Assert.Single(services, descriptor => descriptor.ServiceType == typeof(IHostedService));
         Assert.Single(services, descriptor => descriptor.ServiceType == typeof(PostgreSqlDurableHostedServiceMarker));
+    }
+
+    [Fact]
+    public void Module_IsHostNeutralAndDeclaresTheDurableCoreDependency()
+    {
+        var module = new AppSurfaceDurablePostgreSqlModule();
+        var services = new ServiceCollection();
+        var dependencies = new ModuleDependencyBuilder();
+
+        module.ConfigureServices(new StartupContext([], new TestStartupModule()), services);
+        module.RegisterDependentModules(dependencies);
+
+        Assert.Empty(services);
+        Assert.Contains(dependencies.Modules, dependency => dependency is AppSurfaceDurableModule);
+        Assert.Throws<ArgumentNullException>(() => module.ConfigureServices(null!, services));
+        Assert.Throws<ArgumentNullException>(() => module.ConfigureServices(new StartupContext([], new TestStartupModule()), null!));
+        Assert.Throws<ArgumentNullException>(() => module.RegisterDependentModules(null!));
     }
 
     [Fact]
@@ -98,6 +117,8 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
         Assert.True(gate.TryEnter());
         gate.Close();
         Assert.False(gate.TryEnter());
+        gate.Reopen();
+        Assert.True(gate.TryEnter());
     }
 
     [Fact]
@@ -203,6 +224,243 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
         await hosted.StopAsync(CancellationToken.None);
     }
 
+    [Fact]
+    public async Task HostedLifecycle_ValidatesResumesSchedulesAndPersistsDrain()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "hosted-lifecycle", "initial");
+        var options = new AppSurfaceDurablePostgreSqlOptions
+        {
+            WorkerId = "hosted-lifecycle-worker",
+            SendWakeNotifications = false,
+            IdlePollingInterval = TimeSpan.FromMilliseconds(20),
+        }.SnapshotAndValidate();
+        var registration = new PostgreSqlDurableRuntimeRegistration(
+            database.DataSource,
+            database.DataSource,
+            new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options,
+            Guid.NewGuid());
+        var health = new PostgreSqlDurableRuntimeHealth(registration, schema);
+        var invoked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var hosted = new PostgreSqlDurableHostedService(
+            schema,
+            new SignalingPump(invoked),
+            health,
+            registration,
+            new DurableRuntimeAdmissionGate(),
+            new TestHostApplicationLifetime(),
+            Options.Create(new HostOptions()),
+            NullLogger<PostgreSqlDurableHostedService>.Instance);
+
+        await hosted.StartAsync(CancellationToken.None);
+        await invoked.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(DurableRuntimeHealthState.Healthy, (await health.GetAsync()).State);
+
+        await hosted.StopAsync(CancellationToken.None);
+        Assert.Equal(DurableRuntimeHealthState.Draining, (await health.GetAsync()).State);
+    }
+
+    [Fact]
+    public async Task HostedLifecycle_UsesPostgreSqlWakeHintsToAccelerateItsNextAuthoritativePass()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "hosted-wake", "initial");
+        var options = new AppSurfaceDurablePostgreSqlOptions
+        {
+            WorkerId = "hosted-wake-worker",
+            SendWakeNotifications = true,
+            IdlePollingInterval = TimeSpan.FromMinutes(5),
+            HeartbeatStaleAfter = TimeSpan.FromMinutes(6),
+        }.SnapshotAndValidate();
+        var registration = new PostgreSqlDurableRuntimeRegistration(
+            database.DataSource,
+            database.DataSource,
+            new PostgreSqlDurableWorkOptions(
+                epoch,
+                (await schema.GetStatusAsync()).StoreId,
+                PostgreSqlDurableWakeNotificationMode.Enabled),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options,
+            Guid.NewGuid());
+        var lifetime = new TestHostApplicationLifetime();
+        var pump = new CountingPump();
+        using var hosted = new PostgreSqlDurableHostedService(
+            schema,
+            pump,
+            new RecordingDrainControl(),
+            registration,
+            new DurableRuntimeAdmissionGate(),
+            lifetime,
+            Options.Create(new HostOptions()),
+            NullLogger<PostgreSqlDurableHostedService>.Instance);
+
+        await hosted.StartAsync(CancellationToken.None);
+        await pump.FirstPass.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        for (var attempt = 0; !pump.SecondPass.Task.IsCompleted && attempt < 100; attempt++)
+        {
+            await using var notify = database.DataSource.CreateCommand("SELECT pg_notify('appsurface_durable_wake', 'test');");
+            await notify.ExecuteNonQueryAsync();
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+        }
+
+        await pump.SecondPass.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        lifetime.StopApplication();
+        await hosted.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task HostedLifecycle_RetriesTransientPumpFailureBeforeReturningToAuthoritativePolling()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = CreateDataSource();
+        var options = new AppSurfaceDurablePostgreSqlOptions
+        {
+            WorkerId = "hosted-transient-worker",
+            SendWakeNotifications = false,
+            IdlePollingInterval = TimeSpan.FromMinutes(5),
+            HeartbeatStaleAfter = TimeSpan.FromMinutes(6),
+            TransientFailureDelay = TimeSpan.FromMilliseconds(20),
+        }.SnapshotAndValidate();
+        var pump = new TransientThenSignalingPump();
+        var drain = new RecordingDrainControl();
+        using var hosted = new PostgreSqlDurableHostedService(
+            new NoOpSchemaManager(),
+            pump,
+            drain,
+            new PostgreSqlDurableRuntimeRegistration(
+                dispatcher,
+                runtime,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                new PostgreSqlDurableScheduleOptions("durable_runtime"),
+                options,
+                Guid.NewGuid()),
+            new DurableRuntimeAdmissionGate(),
+            new TestHostApplicationLifetime(),
+            Options.Create(new HostOptions()),
+            NullLogger<PostgreSqlDurableHostedService>.Instance);
+
+        await hosted.StartAsync(CancellationToken.None);
+        await pump.RetryCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await hosted.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, drain.ResumeCount);
+        Assert.Equal(1, drain.DrainCount);
+    }
+
+    [Fact]
+    public async Task HostedLifecycle_StopsBeforeResumingWhenApplicationShutdownHasAlreadyBegun()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = CreateDataSource();
+        var lifetime = new TestHostApplicationLifetime();
+        lifetime.StopApplication();
+        var schema = new NoOpSchemaManager();
+        var drain = new RecordingDrainControl();
+        using var hosted = CreateHostedService(
+            dispatcher,
+            runtime,
+            schema,
+            new EmptyPump(),
+            drain,
+            lifetime,
+            "hosted-prestopped-worker");
+
+        await hosted.StartAsync(CancellationToken.None);
+        await schema.Validated.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(TimeSpan.FromMilliseconds(20));
+        await hosted.StopAsync(CancellationToken.None);
+
+        Assert.Equal(0, drain.ResumeCount);
+        Assert.Equal(1, drain.DrainCount);
+    }
+
+    [Fact]
+    public async Task HostedLifecycle_CancelsAnActivePassAndPreservesDrainFailureDiagnosticsDuringShutdown()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = CreateDataSource();
+        var lifetime = new TestHostApplicationLifetime();
+        var pump = new CancellationAwarePump();
+        using var hosted = CreateHostedService(
+            dispatcher,
+            runtime,
+            new NoOpSchemaManager(),
+            pump,
+            new FailingDrainControl(),
+            lifetime,
+            "hosted-cancel-worker");
+
+        await hosted.StartAsync(CancellationToken.None);
+        await pump.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        lifetime.StopApplication();
+        await hosted.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task HostedLifecycle_YieldsImmediatelyWhenThePumpReportsMoreAuthoritativeWork()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = CreateDataSource();
+        var lifetime = new TestHostApplicationLifetime();
+        var pump = new HasMoreThenCancellationPump();
+        using var hosted = CreateHostedService(
+            dispatcher,
+            runtime,
+            new NoOpSchemaManager(),
+            pump,
+            new RecordingDrainControl(),
+            lifetime,
+            "hosted-has-more-worker");
+
+        await hosted.StartAsync(CancellationToken.None);
+        await pump.SecondPassStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        lifetime.StopApplication();
+        await hosted.StopAsync(CancellationToken.None);
+    }
+
+    private static PostgreSqlDurableHostedService CreateHostedService(
+        NpgsqlDataSource dispatcher,
+        NpgsqlDataSource runtime,
+        IDurableRuntimeSchemaManager schema,
+        IDurableRuntimePump pump,
+        IDurableRuntimeDrainControl drain,
+        IHostApplicationLifetime lifetime,
+        string workerId)
+    {
+        var options = new AppSurfaceDurablePostgreSqlOptions
+        {
+            WorkerId = workerId,
+            SendWakeNotifications = false,
+            IdlePollingInterval = TimeSpan.FromMinutes(5),
+            HeartbeatStaleAfter = TimeSpan.FromMinutes(6),
+            TimeBudgetPerPass = TimeSpan.FromMilliseconds(100),
+            ShutdownReserve = TimeSpan.FromMilliseconds(100),
+        }.SnapshotAndValidate();
+        return new PostgreSqlDurableHostedService(
+            schema,
+            pump,
+            drain,
+            new PostgreSqlDurableRuntimeRegistration(
+                dispatcher,
+                runtime,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                new PostgreSqlDurableScheduleOptions("durable_runtime"),
+                options,
+                Guid.NewGuid()),
+            new DurableRuntimeAdmissionGate(),
+            lifetime,
+            Options.Create(new HostOptions { ShutdownTimeout = TimeSpan.FromSeconds(1) }),
+            NullLogger<PostgreSqlDurableHostedService>.Instance);
+    }
+
     private static NpgsqlDataSource CreateDataSource() => NpgsqlDataSource.Create(
         "Host=localhost;Port=5432;Database=durable_registration;Username=durable;Password=not-opened");
 
@@ -214,6 +472,97 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
             ValueTask.FromResult(new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
     }
 
+    private sealed class SignalingPump(TaskCompletionSource invoked) : IDurableRuntimePump
+    {
+        public ValueTask<DurableRuntimePumpResult> RunOnceAsync(
+            DurableRuntimePumpRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            invoked.TrySetResult();
+            return ValueTask.FromResult(new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
+        }
+    }
+
+    private sealed class CountingPump : IDurableRuntimePump
+    {
+        private int _calls;
+
+        internal TaskCompletionSource FirstPass { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal TaskCompletionSource SecondPass { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask<DurableRuntimePumpResult> RunOnceAsync(
+            DurableRuntimePumpRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _calls) == 1)
+            {
+                FirstPass.TrySetResult();
+            }
+            else
+            {
+                SecondPass.TrySetResult();
+            }
+
+            return ValueTask.FromResult(new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
+        }
+    }
+
+    private sealed class TransientThenSignalingPump : IDurableRuntimePump
+    {
+        private int _calls;
+
+        internal TaskCompletionSource RetryCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask<DurableRuntimePumpResult> RunOnceAsync(
+            DurableRuntimePumpRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _calls) == 1)
+            {
+                return ValueTask.FromException<DurableRuntimePumpResult>(new TimeoutException("Simulated transient store timeout."));
+            }
+
+            RetryCompleted.TrySetResult();
+            return ValueTask.FromResult(new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
+        }
+    }
+
+    private sealed class CancellationAwarePump : IDurableRuntimePump
+    {
+        internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async ValueTask<DurableRuntimePumpResult> RunOnceAsync(
+            DurableRuntimePumpRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("The cancellation-aware pump must be canceled before it can return.");
+        }
+    }
+
+    private sealed class HasMoreThenCancellationPump : IDurableRuntimePump
+    {
+        private int _calls;
+
+        internal TaskCompletionSource SecondPassStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async ValueTask<DurableRuntimePumpResult> RunOnceAsync(
+            DurableRuntimePumpRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _calls) == 1)
+            {
+                return new DurableRuntimePumpResult(1, 1, 1, 0, 0, true, null, TimeSpan.Zero);
+            }
+
+            SecondPassStarted.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("The has-more pump must be canceled before it can return.");
+        }
+    }
+
     private sealed class FailingDrainControl : IDurableRuntimeDrainControl
     {
         public ValueTask BeginDrainAsync(CancellationToken cancellationToken = default) =>
@@ -222,15 +571,88 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
         public ValueTask ResumeAsync(CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
     }
 
+    private sealed class RecordingDrainControl : IDurableRuntimeDrainControl
+    {
+        internal int DrainCount { get; private set; }
+
+        internal int ResumeCount { get; private set; }
+
+        public ValueTask BeginDrainAsync(CancellationToken cancellationToken = default)
+        {
+            DrainCount++;
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask ResumeAsync(CancellationToken cancellationToken = default)
+        {
+            ResumeCount++;
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class NoOpSchemaManager : IDurableRuntimeSchemaManager
+    {
+        internal TaskCompletionSource Validated { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask<DurableRuntimeSchemaStatus> GetStatusAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public string GenerateScript(int fromVersion = 0) => throw new NotSupportedException();
+
+        public ValueTask<DurableRuntimeSchemaApplyResult> ApplyAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public ValueTask ValidateAsync(CancellationToken cancellationToken = default)
+        {
+            Validated.TrySetResult();
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<DurableRuntimeEpochActivationResult> InitializeRuntimeEpochAsync(
+            Guid initialEpoch,
+            string actorId,
+            string reasonCode,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public ValueTask<DurableRuntimeEpochRotationResult> RotateRuntimeEpochAsync(
+            Guid expectedActiveEpoch,
+            Guid newActiveEpoch,
+            string actorId,
+            string reasonCode,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
     private sealed class TestHostApplicationLifetime : IHostApplicationLifetime
     {
+        private readonly CancellationTokenSource _stopping = new();
+
         public CancellationToken ApplicationStarted => CancellationToken.None;
 
-        public CancellationToken ApplicationStopping => CancellationToken.None;
+        public CancellationToken ApplicationStopping => _stopping.Token;
 
         public CancellationToken ApplicationStopped => CancellationToken.None;
 
         public void StopApplication()
+        {
+            _stopping.Cancel();
+        }
+    }
+
+    private sealed class TestStartupModule : IAppSurfaceHostModule
+    {
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
         {
         }
     }

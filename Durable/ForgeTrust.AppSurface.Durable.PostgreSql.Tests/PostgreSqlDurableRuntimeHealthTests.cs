@@ -33,6 +33,9 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
         var replacement = new PostgreSqlDurableRuntimeHealth(
             CreateRegistration(database.DataSource, workOptions, options, Guid.NewGuid()),
             schema);
+        var staleIdentity = await replacement.GetAsync();
+        Assert.Equal(DurableRuntimeHealthState.Stale, staleIdentity.State);
+        Assert.Equal(DurableProblemCodes.WorkerIdentityConflict, staleIdentity.ProblemCode);
         var conflict = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await replacement.TryBeginPassAsync(CancellationToken.None));
         Assert.StartsWith(DurableProblemCodes.WorkerIdentityConflict, conflict.Message, StringComparison.Ordinal);
@@ -50,6 +53,126 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
         var staleGeneration = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await first.BeginDrainAsync());
         Assert.StartsWith(DurableProblemCodes.WorkerIdentityConflict, staleGeneration.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetAsync_ReportsSchemaEpochAndHeartbeatCompatibilityWithoutInventingLiveness()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        var missing = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                CreateOptions("runtime-health-missing-worker"),
+                Guid.NewGuid()),
+            schema);
+        var missingSnapshot = await missing.GetAsync();
+        Assert.Equal(DurableRuntimeHealthState.Incompatible, missingSnapshot.State);
+        Assert.Equal(DurableProblemCodes.SchemaMissing, missingSnapshot.ProblemCode);
+
+        await schema.ApplyAsync();
+        var activeEpoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(activeEpoch, "runtime-tests", "compatibility");
+        var status = await schema.GetStatusAsync();
+        var mismatched = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), status.StoreId),
+                CreateOptions("runtime-health-mismatch-worker"),
+                Guid.NewGuid()),
+            schema);
+        var mismatchSnapshot = await mismatched.GetAsync();
+        Assert.Equal(DurableRuntimeHealthState.Incompatible, mismatchSnapshot.State);
+        Assert.Equal(DurableProblemCodes.RecoveryEpochRequired, mismatchSnapshot.ProblemCode);
+
+        var current = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(activeEpoch, status.StoreId),
+                CreateOptions("runtime-health-stale-worker"),
+                Guid.NewGuid()),
+            schema);
+        Assert.True(await current.TryBeginPassAsync(CancellationToken.None));
+        Assert.False(await current.TryBeginPassAsync(CancellationToken.None));
+        await current.RecordHeartbeatAsync(CancellationToken.None);
+        await using (var stale = database.DataSource.CreateCommand(
+            "UPDATE appsurface_durable.runtime_heartbeat SET last_heartbeat_at = clock_timestamp() - interval '1 hour';"))
+        {
+            Assert.Equal(1, await stale.ExecuteNonQueryAsync());
+        }
+
+        var staleSnapshot = await current.GetAsync();
+        Assert.Equal(DurableRuntimeHealthState.Stale, staleSnapshot.State);
+        Assert.Equal(DurableProblemCodes.ActivatorStale, staleSnapshot.ProblemCode);
+        await current.RecordFailedPassAsync(CancellationToken.None);
+        Assert.Equal(DurableRuntimeHealthState.Healthy, (await current.GetAsync()).State);
+    }
+
+    [Fact]
+    public async Task GetAsync_ReportsSchemaCompatibilityAndTransientReadFailuresWithoutOpeningTheRuntimeStore()
+    {
+        using var dataSource = NpgsqlDataSource.Create(
+            "Host=localhost;Port=5432;Database=durable_health;Username=durable;Password=not-opened");
+        var options = CreateOptions("runtime-health-schema-worker");
+        var workOptions = new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid());
+        var expected = new Dictionary<DurableRuntimeSchemaCompatibility, string>
+        {
+            [DurableRuntimeSchemaCompatibility.Missing] = DurableProblemCodes.SchemaMissing,
+            [DurableRuntimeSchemaCompatibility.UpgradeRequired] = DurableProblemCodes.SchemaUpgradeRequired,
+            [DurableRuntimeSchemaCompatibility.StoreTooNew] = DurableProblemCodes.SchemaVersionUnsupported,
+            [DurableRuntimeSchemaCompatibility.Inconsistent] = DurableProblemCodes.SchemaInconsistent,
+        };
+        foreach (var (compatibility, problemCode) in expected)
+        {
+            var health = new PostgreSqlDurableRuntimeHealth(
+                CreateRegistration(dataSource, workOptions, options, Guid.NewGuid()),
+                new StubSchemaManager(_ => ValueTask.FromResult(CreateStatus(compatibility))));
+
+            var snapshot = await health.GetAsync();
+
+            Assert.Equal(DurableRuntimeHealthState.Incompatible, snapshot.State);
+            Assert.Equal(problemCode, snapshot.ProblemCode);
+        }
+
+        var transient = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(dataSource, workOptions, options, Guid.NewGuid()),
+            new StubSchemaManager(_ => ValueTask.FromException<DurableRuntimeSchemaStatus>(new TimeoutException())));
+        var transientSnapshot = await transient.GetAsync();
+        Assert.Equal(DurableRuntimeHealthState.Incompatible, transientSnapshot.State);
+        Assert.Equal(DurableProblemCodes.SchemaInconsistent, transientSnapshot.ProblemCode);
+    }
+
+    [Fact]
+    public async Task RuntimeMutations_FailClosedWhenNoActivePassOrMatchingEpochCanOwnTheHeartbeat()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var activeEpoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(activeEpoch, "runtime-tests", "mutation-failures");
+        var status = await schema.GetStatusAsync();
+        var current = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(activeEpoch, status.StoreId),
+                CreateOptions("runtime-health-no-pass-worker"),
+                Guid.NewGuid()),
+            schema);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await current.RecordHeartbeatAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await current.RecordFailedPassAsync(CancellationToken.None));
+
+        var mismatched = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), status.StoreId),
+                CreateOptions("runtime-health-epoch-worker"),
+                Guid.NewGuid()),
+            schema);
+        var epochFailure = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await mismatched.TryBeginPassAsync(CancellationToken.None));
+        Assert.StartsWith(DurableProblemCodes.RecoveryEpochRequired, epochFailure.Message, StringComparison.Ordinal);
     }
 
     private static AppSurfaceDurablePostgreSqlOptions CreateOptions(string workerId)
@@ -72,4 +195,45 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
         new PostgreSqlDurableScheduleOptions("appsurface"),
         options,
         instanceId);
+
+    private static DurableRuntimeSchemaStatus CreateStatus(DurableRuntimeSchemaCompatibility compatibility) => new(
+        compatibility,
+        Guid.NewGuid(),
+        activeRuntimeEpoch: null,
+        installedVersion: 3,
+        requiredVersion: PostgreSqlDurableRuntimeSchemaManager.RequiredVersion,
+        minimumReaderVersion: 1,
+        maximumReaderVersion: PostgreSqlDurableRuntimeSchemaManager.RequiredVersion,
+        minimumWriterVersion: 1,
+        maximumWriterVersion: PostgreSqlDurableRuntimeSchemaManager.RequiredVersion,
+        appliedVersions: [],
+        pendingVersions: [],
+        problem: null);
+
+    private sealed class StubSchemaManager(
+        Func<CancellationToken, ValueTask<DurableRuntimeSchemaStatus>> getStatus) : IDurableRuntimeSchemaManager
+    {
+        public ValueTask<DurableRuntimeSchemaStatus> GetStatusAsync(CancellationToken cancellationToken = default) =>
+            getStatus(cancellationToken);
+
+        public string GenerateScript(int fromVersion = 0) => throw new NotSupportedException();
+
+        public ValueTask<DurableRuntimeSchemaApplyResult> ApplyAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public ValueTask ValidateAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public ValueTask<DurableRuntimeEpochActivationResult> InitializeRuntimeEpochAsync(
+            Guid initialEpoch,
+            string actorId,
+            string reasonCode,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public ValueTask<DurableRuntimeEpochRotationResult> RotateRuntimeEpochAsync(
+            Guid expectedActiveEpoch,
+            Guid newActiveEpoch,
+            string actorId,
+            string reasonCode,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
 }
