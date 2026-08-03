@@ -94,10 +94,10 @@ internal sealed record ReleaseTagBinding(
         }
 
         var actual = new ReleaseTagBinding(
-            TrailerValue(lines[trailerStart], ReleaseIdKey, tag),
-            TrailerValue(lines[trailerStart + 1], PreparedSidecarSha256Key, tag),
-            TrailerValue(lines[trailerStart + 2], ManifestSha256Key, tag),
-            TrailerValue(lines[trailerStart + 3], EvidenceSubjectSha256Key, tag));
+            lines[trailerStart][(ReleaseIdKey.Length + 2)..],
+            lines[trailerStart + 1][(PreparedSidecarSha256Key.Length + 2)..],
+            lines[trailerStart + 2][(ManifestSha256Key.Length + 2)..],
+            lines[trailerStart + 3][(EvidenceSubjectSha256Key.Length + 2)..]);
         ValidateShape(tag, actual);
         ValidateMatches(tag, expected, actual);
     }
@@ -169,23 +169,8 @@ internal sealed record ReleaseTagBinding(
         return normalizedTagObject[(separator + 2)..];
     }
 
-    private static string TrailerValue(string line, string key, string tag)
-    {
-        if (!line.StartsWith(key + ": ", StringComparison.Ordinal))
-        {
-            throw MissingRequiredTrailer(tag, key);
-        }
-
-        return line[(key.Length + 2)..];
-    }
-
     private static void ValidateShape(string tag, ReleaseTagBinding binding)
     {
-        if (string.IsNullOrWhiteSpace(binding.ReleaseId))
-        {
-            throw InvalidTrailer(tag, ReleaseIdKey, "The release ID must not be empty.");
-        }
-
         ValidateDigest(tag, PreparedSidecarSha256Key, binding.PreparedSidecarSha256);
         ValidateDigest(tag, ManifestSha256Key, binding.ManifestSha256);
         ValidateDigest(tag, EvidenceSubjectSha256Key, binding.EvidenceSubjectSha256);

@@ -67,6 +67,39 @@ public sealed class ReleaseEvidenceCoverageTests
     }
 
     [Fact]
+    public async Task ValidatePreparedReportsMissingPreparedSidecarAfterReadingEvidence()
+    {
+        var root = TestPathUtils.PathUnder(Path.GetTempPath(), "ReleaseEvidenceCoverage", Guid.NewGuid().ToString("N"));
+        var workspace = new ReleaseWorkspace(root);
+        var manifest = CreateV1Manifest("abc123");
+        var bundle = CreateV1Bundle(manifest);
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(workspace.ReleaseEvidencePath(Version))!);
+            await File.WriteAllTextAsync(workspace.ReleaseEvidencePath(Version), ReleaseEvidence.Serialize(bundle));
+            await File.WriteAllTextAsync(workspace.ReleaseNotePath(Version), ReleaseNote);
+            await File.WriteAllTextAsync(workspace.ReleaseManifestPath(Version), manifest);
+
+            var result = await ReleaseEvidence.ValidatePreparedAsync(
+                workspace,
+                Version,
+                ReleaseClassification,
+                "abc123",
+                CancellationToken.None);
+
+            Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-artifact-digest-mismatch");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void ValidateTagRejectsMalformedV1ReleaseManifestJson()
     {
         const string malformedManifest = "{";

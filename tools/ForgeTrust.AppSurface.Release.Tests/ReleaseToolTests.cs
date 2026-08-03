@@ -353,6 +353,59 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task TaggedProjectionResolverDefaultsMissingTagToVersionTag()
+    {
+        await SeedRepositoryAsync();
+        var version = SemVer.Parse("0.1.0-preview.1");
+        var resolver = new ReleaseTaggedProjectionResolver(
+            new ReleaseWorkspace(_repositoryRoot),
+            CreateSuccessfulPublishRunner());
+        var options = new ReleaseOptions(
+            "inspect",
+            _repositoryRoot,
+            version,
+            Tag: null,
+            Date: null,
+            DryRun: true,
+            ReportPath: null,
+            GitHubOutputPath: null,
+            FailOnWarnings: false,
+            AllowExistingTargets: false);
+
+        var projection = await resolver.ResolveAsync(options, CancellationToken.None);
+
+        Assert.Equal(version.TagName, projection.Tag);
+    }
+
+    [Fact]
+    public async Task InspectAcceptsNumericV2PreparationBaseCommit()
+    {
+        await SeedRepositoryAsync();
+        var preparationBaseCommit = new string('0', 40);
+        var runner = await CreateSuccessfulV2PublishRunnerAsync(preparationBaseCommit);
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1"],
+            runner);
+
+        Assert.Equal(0, result.ExitCode);
+    }
+
+    [Fact]
+    public async Task InspectRejectsV2PreparationBaseCommitWithNonHexCharacter()
+    {
+        await SeedRepositoryAsync();
+        var runner = await CreateSuccessfulV2PublishRunnerAsync(new string('g', 40));
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-preparation-base-commit-invalid", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task InspectAcceptsCrLfAnnotatedTagObject()
     {
         await SeedRepositoryAsync();
@@ -378,6 +431,10 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Theory]
+    [InlineData("0000")]
+    [InlineData("+0a00")]
+    [InlineData("+00a0")]
+    [InlineData("+0060")]
     [InlineData("+1401")]
     [InlineData("+1460")]
     [InlineData("+1500")]
@@ -388,6 +445,23 @@ public sealed class ReleaseToolTests : IDisposable
         runner.Add(
             "git cat-file -p refs/tags/v0.1.0-preview.1",
             new CommandResult(0, CreateAnnotatedTagObject(offset), ""));
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-tag-tagger-invalid", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InspectRejectsTaggerWithNonNumericEpoch()
+    {
+        await SeedRepositoryAsync();
+        var runner = CreateSuccessfulPublishRunner();
+        runner.Add(
+            "git cat-file -p refs/tags/v0.1.0-preview.1",
+            new CommandResult(0, CreateAnnotatedTagObject().Replace("1770000000", "not-an-epoch", StringComparison.Ordinal), ""));
 
         var result = await RunAsync(
             ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1"],
@@ -464,11 +538,28 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Contains("Code: release-tag-missing", result.Stderr, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task InspectReportsTagLookupStderr()
+    {
+        await SeedRepositoryAsync();
+        var runner = new FakeCommandRunner();
+        runner.Add("git cat-file -t refs/tags/v0.1.0-preview.1", new CommandResult(1, "", "tag reference is unavailable"));
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("tag reference is unavailable", result.Stderr, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("missing", "release-tag-trailer-missing")]
     [InlineData("duplicate", "release-tag-trailer-invalid")]
     [InlineData("unknown", "release-tag-trailer-invalid")]
     [InlineData("malformed-digest", "release-tag-trailer-invalid")]
+    [InlineData("nonhex-digest", "release-tag-trailer-invalid")]
+    [InlineData("non-digit-range-digest", "release-tag-trailer-invalid")]
     [InlineData("wrong-release-id", "release-tag-trailer-mismatch")]
     [InlineData("stale", "release-tag-trailer-mismatch")]
     public async Task InspectRejectsInvalidOrStaleReleaseTagBinding(string mutation, string expectedCode)
@@ -492,6 +583,14 @@ public sealed class ReleaseToolTests : IDisposable
             "malformed-digest" => tagObject.Replace(
                 binding.ManifestSha256,
                 binding.ManifestSha256.ToUpperInvariant(),
+                StringComparison.Ordinal),
+            "nonhex-digest" => tagObject.Replace(
+                binding.ManifestSha256,
+                new string('g', 64),
+                StringComparison.Ordinal),
+            "non-digit-range-digest" => tagObject.Replace(
+                binding.ManifestSha256,
+                new string(':', 64),
                 StringComparison.Ordinal),
             "wrong-release-id" => tagObject.Replace(
                 binding.ReleaseId,
@@ -713,11 +812,41 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.False(File.Exists(RepositoryPath("tagged-projection.yml")));
     }
 
+    [Fact]
+    public void PreparedSidecarValidationAcceptsEmptyYamlDocument()
+    {
+        var sidecar = ReleaseSidecar.Parse(string.Empty, "fixture.yml");
+
+        var error = Assert.Throws<ReleaseToolException>(() => sidecar.EnsurePrepared(SemVer.Parse("0.1.0-preview.1"), "fixture.yml"));
+
+        Assert.Equal("release-sidecar-schema-invalid", error.Diagnostic.Code);
+    }
+
+    [Fact]
+    public void PreparedSidecarValidationAllowsScalarTrustMetadata()
+    {
+        var content = """
+            release:
+              schema: appsurface-release-sidecar-v1
+              state: prepared
+              id: v0.1.0-preview.1
+            trust:
+              status: Prepared
+              review_attempts: 3
+            """;
+        var sidecar = ReleaseSidecar.Parse(content, "fixture.yml");
+
+        sidecar.EnsurePrepared(SemVer.Parse("0.1.0-preview.1"), "fixture.yml");
+    }
+
     [Theory]
     [InlineData("title: Release\n", "release-sidecar-schema-invalid")]
     [InlineData("release:\n  schema: appsurface-release-sidecar-v1\n", "release-legacy-tag-binding-unsupported")]
+    [InlineData("release:\n  schema: legacy-sidecar\n", "release-sidecar-schema-invalid")]
     [InlineData("release:\n  schema: appsurface-release-sidecar-v1\n  state: tagged\n  id: v0.1.0-preview.1\ntrust:\n  status: Prepared\n", "release-sidecar-state-invalid")]
+    [InlineData("release:\n  schema: appsurface-release-sidecar-v1\n  state: prepared\ntrust:\n  status: Prepared\n", "release-sidecar-id-mismatch")]
     [InlineData("release:\n  schema: appsurface-release-sidecar-v1\n  state: prepared\n  id: v0.1.0-preview.2\ntrust:\n  status: Prepared\n", "release-sidecar-id-mismatch")]
+    [InlineData("release:\n  schema: appsurface-release-sidecar-v1\n  state: prepared\n  id: v0.1.0-preview.1\ntrust: {}\n", "release-sidecar-final-claim-invalid")]
     [InlineData("release:\n  schema: appsurface-release-sidecar-v1\n  state: prepared\n  id: v0.1.0-preview.1\ntrust:\n  status: Tagged\n", "release-sidecar-final-claim-invalid")]
     [InlineData("release:\n  schema: appsurface-release-sidecar-v1\n  state: prepared\n  id: v0.1.0-preview.1\ntrust:\n  status: Prepared\n  summary: This page is the final narrative release note.\n", "release-sidecar-final-claim-invalid")]
     [InlineData("release:\n  schema: appsurface-release-sidecar-v1\n  state: prepared\n  id: v0.1.0-preview.1\ntrust:\n  status: Prepared\n  freshness: Tagged at 2026-08-02T00:00:00Z.\n", "release-sidecar-final-claim-invalid")]
@@ -5102,6 +5231,30 @@ public sealed class ReleaseToolTests : IDisposable
         var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => publishing.PublishAsync(options, CancellationToken.None));
 
         Assert.Equal("release-tag-invalid-temp-path", exception.Diagnostic.Code);
+    }
+
+    [Fact]
+    public async Task PublishingDefaultsMissingTagToVersionTag()
+    {
+        await SeedRepositoryAsync();
+        var publishing = new ReleasePublishing(
+            new ReleaseWorkspace(_repositoryRoot),
+            CreateSuccessfulPublishRunner());
+        var options = new ReleaseOptions(
+            "publish",
+            _repositoryRoot,
+            SemVer.Parse("0.1.0-preview.1"),
+            Tag: null,
+            Date: null,
+            DryRun: true,
+            ReportPath: null,
+            GitHubOutputPath: null,
+            FailOnWarnings: false,
+            AllowExistingTargets: false);
+
+        var outputs = await publishing.PublishAsync(options, CancellationToken.None);
+
+        Assert.Equal("v0.1.0-preview.1", outputs.Tag);
     }
 
     [Fact]
