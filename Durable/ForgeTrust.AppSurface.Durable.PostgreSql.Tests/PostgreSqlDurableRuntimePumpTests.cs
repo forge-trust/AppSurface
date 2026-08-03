@@ -52,6 +52,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             new DurableWorkGetRequest(new DurableScopeId("runtime-pump-scope"), accepted.Value!.WorkId));
         Assert.True(snapshot.IsSuccess);
         Assert.Equal(DurableWorkState.Succeeded, snapshot.Value!.State);
+        Assert.Equal("runtime-pump-key", snapshot.Value.ProviderKey);
         Assert.Equal(DurableRuntimeHealthState.Healthy, (await provider.GetRequiredService<IDurableRuntimeHealth>().GetAsync()).State);
     }
 

@@ -132,7 +132,7 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
             await SetScopeAsync(connection, transaction, request.ScopeId, cancellationToken)
                 .ConfigureAwait(false);
             const string sql = """
-                SELECT activity_id, work_name, work_version, state, provider_safety, activity_id, attempt_number,
+                SELECT activity_id, work_name, work_version, state, provider_safety, idempotency_key, attempt_number,
                        revision, accepted_at, due_at, updated_at, terminal_at, terminal_code, result_contract_id,
                        result_schema_version, result_classification, result_payload, result_sha256,
                        result_retention_policy_id

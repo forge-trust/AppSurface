@@ -16,7 +16,7 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
     /// <param name="services">Application service collection.</param>
     /// <param name="dispatcherDataSource">Payload-free dispatcher-role data source used for global discovery only.</param>
     /// <param name="runtimeDataSource">Scoped runtime-role data source used for durable mutations and heartbeats.</param>
-    /// <param name="workOptions">Validated active epoch, StoreId, and metadata-only wake-hint policy.</param>
+    /// <param name="workOptions">Validated active epoch and StoreId. The <paramref name="configure"/> callback selects the metadata-only wake-hint policy.</param>
     /// <param name="scheduleOptions">Validated exact runtime role and Schedule clock/lease safety settings.</param>
     /// <param name="configure">Optional process-local activation settings.</param>
     /// <returns>A builder that can explicitly add continuous host activation.</returns>

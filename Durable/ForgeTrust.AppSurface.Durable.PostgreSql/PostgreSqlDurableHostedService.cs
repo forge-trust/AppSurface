@@ -186,12 +186,26 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
     {
         var maximumDelay = _registration.Options.IdlePollingInterval;
         var delay = CalculateIdleDelay(nextDueAtUtc, maximumDelay);
-        var wakeReady = _wakeSignals.Reader.WaitToReadAsync(cancellationToken).AsTask();
+        using var wakeWaitCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var wakeReady = _wakeSignals.Reader.WaitToReadAsync(wakeWaitCancellation.Token).AsTask();
         var timer = Task.Delay(delay, cancellationToken);
         if (await Task.WhenAny(wakeReady, timer).ConfigureAwait(false) == wakeReady
             && await wakeReady.ConfigureAwait(false))
         {
             _ = _wakeSignals.Reader.TryRead(out _);
+            return;
+        }
+
+        // A poll timeout must release the channel waiter. Leaving it pending would retain one waiter for every
+        // idle-poll interval until a later wake notification or host shutdown.
+        await wakeWaitCancellation.CancelAsync().ConfigureAwait(false);
+        try
+        {
+            await wakeReady.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (wakeWaitCancellation.IsCancellationRequested)
+        {
+            // The timeout won the race; authoritative polling is about to run another bounded pass.
         }
     }
 
