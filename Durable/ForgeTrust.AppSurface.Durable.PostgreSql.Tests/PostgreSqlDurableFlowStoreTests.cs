@@ -2050,6 +2050,7 @@ public sealed class DurableSlice4ReferenceWorkloadTests
         Assert.Equal("appsurface.durable.telemetry.evidence", crashCheckpoint.Event);
         Assert.NotNull(crashCheckpoint.TraceEvidence);
         Assert.Equal("appsurface.durable.flow.timer", crashCheckpoint.TraceEvidence.Operation);
+        Assert.True(Guid.TryParse(crashCheckpoint.TraceEvidence.CorrelationToken, out _));
         Assert.NotEmpty(crashCheckpoint.TraceEvidence.Links);
 
         await using (var trace = database.DataSource.CreateCommand(

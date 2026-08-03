@@ -104,6 +104,7 @@ internal sealed record PostgreSqlFlowTelemetryEvidence(
     string Operation,
     string TraceId,
     string SpanId,
+    string? CorrelationToken,
     IReadOnlyList<PostgreSqlFlowTelemetryLink> Links);
 
 /// <summary>Describes one causal link carried by a crash-test Activity evidence record.</summary>
@@ -260,7 +261,10 @@ internal sealed class PostgreSqlDurableFlowProcessor
                     timerResult.ScopeId,
                     timerResult.InstanceId,
                     timerResult.Revision,
-                    CreateTelemetryEvidence(timerActivity, "appsurface.durable.flow.timer", timerTrace.Context),
+                    CreateTelemetryEvidence(
+                        timerActivity,
+                        "appsurface.durable.flow.timer",
+                        timerExecutionTrace.Context),
                     cancellationToken).ConfigureAwait(false);
             }
 
@@ -371,7 +375,7 @@ internal sealed class PostgreSqlDurableFlowProcessor
             claim.ScopeId,
             claim.InstanceId,
             claim.Revision,
-            CreateTelemetryEvidence(activity, "appsurface.durable.flow.execute", claim.TraceContext.Context),
+            CreateTelemetryEvidence(activity, "appsurface.durable.flow.execute", executionTrace.Context),
             cancellationToken).ConfigureAwait(false);
         PostgreSqlFlowProcessingResult result;
         try
@@ -406,7 +410,7 @@ internal sealed class PostgreSqlDurableFlowProcessor
             result.ScopeId,
             result.InstanceId,
             result.Revision,
-            CreateTelemetryEvidence(activity, "appsurface.durable.flow.execute", claim.TraceContext.Context),
+            CreateTelemetryEvidence(activity, "appsurface.durable.flow.execute", executionTrace.Context),
             cancellationToken).ConfigureAwait(false);
         DurableTraceTelemetry.Apply(
             activity,
@@ -430,6 +434,7 @@ internal sealed class PostgreSqlDurableFlowProcessor
                 activity.OperationName,
                 activity.TraceId.ToHexString(),
                 activity.SpanId.ToHexString(),
+                fallback?.CorrelationToken.ToString("D"),
                 activity.Links
                     .Select(link => new PostgreSqlFlowTelemetryLink(
                         link.Context.TraceId.ToHexString(),
@@ -443,6 +448,7 @@ internal sealed class PostgreSqlDurableFlowProcessor
                 operation,
                 fallback.TraceId,
                 fallback.SpanId,
+                fallback.CorrelationToken.ToString("D"),
                 [new PostgreSqlFlowTelemetryLink(fallback.TraceId, fallback.SpanId)]);
     }
 }

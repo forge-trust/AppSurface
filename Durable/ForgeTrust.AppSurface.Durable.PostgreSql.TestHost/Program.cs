@@ -181,6 +181,7 @@ public sealed record FlowTraceEvidence(
     string Operation,
     string TraceId,
     string SpanId,
+    string? CorrelationToken,
     IReadOnlyList<FlowTraceLinkEvidence> Links);
 
 /// <summary>Reports one causal link on the test-only telemetry evidence record.</summary>
@@ -207,7 +208,7 @@ internal sealed class FlowCrashBarrier(FlowTraceEvidenceCollector evidence) : IP
             scopeId.Value,
             instanceId.Value,
             revision,
-            evidence.Last ?? FlowTraceEvidenceCollector.From(traceEvidence) ?? FlowTraceEvidenceCollector.FromActivity(Activity.Current))));
+            FlowTraceEvidenceCollector.From(traceEvidence) ?? evidence.Last ?? FlowTraceEvidenceCollector.FromActivity(Activity.Current))));
         await Console.Out.FlushAsync(cancellationToken);
         await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
     }
@@ -236,6 +237,7 @@ internal sealed class FlowTraceEvidenceCollector
                     activity.OperationName,
                     activity.TraceId.ToHexString(),
                     activity.SpanId.ToHexString(),
+                    null,
                     links));
         },
     };
@@ -251,6 +253,7 @@ internal sealed class FlowTraceEvidenceCollector
             activity.OperationName,
             activity.TraceId.ToHexString(),
             activity.SpanId.ToHexString(),
+            null,
             activity.Links
                 .Select(link => new FlowTraceLinkEvidence(
                     link.Context.TraceId.ToHexString(),
@@ -265,6 +268,7 @@ internal sealed class FlowTraceEvidenceCollector
                 evidence.Operation,
                 evidence.TraceId,
                 evidence.SpanId,
+                evidence.CorrelationToken,
                 evidence.Links
                     .Select(link => new FlowTraceLinkEvidence(link.TraceId, link.SpanId))
                     .ToArray());
