@@ -77,4 +77,3 @@ CREATE POLICY flow_trace_context_scope_isolation ON appsurface_durable.flow_trac
 REVOKE ALL ON SCHEMA appsurface_durable FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA appsurface_durable FROM PUBLIC;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA appsurface_durable FROM PUBLIC;
-

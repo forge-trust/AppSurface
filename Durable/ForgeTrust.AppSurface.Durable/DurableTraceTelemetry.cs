@@ -36,4 +36,3 @@ internal static class DurableTraceTelemetry
         activity.SetTag(ContextStatus, contextStatus.ToString().ToLowerInvariant());
     }
 }
-

@@ -83,4 +83,3 @@ Run the reference proof with `./Durable/verify-postgresql.sh --quick --flow`. Fo
 3. Deploy trace-aware binaries. Older supported binaries keep null trace pointers; a later trace-aware rollout interprets those rows as `context.absent` and never backfills.
 
 Trace rows retain the same lifecycle as their linked Flow protocol records until an explicit archival policy is introduced.
-
