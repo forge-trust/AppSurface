@@ -4,11 +4,7 @@ using NpgsqlTypes;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 
-internal sealed record PostgreSqlDurableFlowTrace(
-    Guid TraceContextId,
-    DurableTraceContext Context,
-    string CauseKind,
-    DateTimeOffset CommittedAtUtc);
+internal sealed record PostgreSqlDurableFlowTrace(Guid TraceContextId);
 
 internal sealed partial class PostgreSqlDurableFlowStore
 {
@@ -52,7 +48,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
             throw new InvalidOperationException("The durable trace context insert did not affect exactly one row.");
         }
 
-        return new PostgreSqlDurableFlowTrace(traceContextId, context, causeKind, DateTimeOffset.UtcNow);
+        return new PostgreSqlDurableFlowTrace(traceContextId);
     }
 
     internal static async ValueTask AttachTraceContextAsync(
@@ -125,11 +121,4 @@ internal sealed partial class PostgreSqlDurableFlowStore
         });
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
-
-    private static DurableTraceContextCapture ReadTraceContext(
-        string? traceParent,
-        string? traceState) =>
-        traceParent is null
-            ? DurableTraceContextCapture.Absent
-            : DurableTraceContext.Parse(traceParent, traceState);
 }

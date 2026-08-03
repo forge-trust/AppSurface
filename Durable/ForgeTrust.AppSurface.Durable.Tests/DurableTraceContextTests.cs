@@ -21,9 +21,14 @@ public sealed class DurableTraceContextTests
     }
 
     [Theory]
+    [InlineData(null)]
+    [InlineData(" ")]
     [InlineData("not-a-traceparent")]
     [InlineData("00-0123456789abcdef0123456789abcdeF-0123456789abcdef-01")]
-    public void Parse_InvalidTraceParent_DropsBothFieldsWithValueFreeDiagnostic(string traceParent)
+    [InlineData("00-0123456789abcdef0123456789abcdef-0123456789abcdef-0g")]
+    [InlineData("00-00000000000000000000000000000000-0123456789abcdef-01")]
+    [InlineData("00-0123456789abcdef0123456789abcdef-0000000000000000-01")]
+    public void Parse_InvalidTraceParent_DropsBothFieldsWithValueFreeDiagnostic(string? traceParent)
     {
         var capture = DurableTraceContext.Parse(traceParent, "vendor=value");
 
@@ -41,6 +46,17 @@ public sealed class DurableTraceContextTests
 
         Assert.NotNull(capture.Context);
         Assert.Equal(ActivityTraceFlags.Recorded, capture.Context.ToActivityContext().TraceFlags);
+    }
+
+    [Fact]
+    public void Parse_UnrecordedFlag_PreservesAnUnsampledActivityLink()
+    {
+        var capture = DurableTraceContext.Parse(
+            "00-0123456789abcdef0123456789abcdef-0123456789abcdef-00",
+            traceState: null);
+
+        Assert.NotNull(capture.Context);
+        Assert.Equal(ActivityTraceFlags.None, capture.Context.ToActivityContext().TraceFlags);
     }
 
     [Fact]
@@ -81,6 +97,73 @@ public sealed class DurableTraceContextTests
         Assert.NotNull(capture.Context);
         Assert.Null(capture.Context.TraceState);
         Assert.Equal(DurableProblemCodes.TraceStateRejected, capture.DiagnosticCode);
+    }
+
+    [Theory]
+    [InlineData("Vendor=value")]
+    [InlineData("1simple=value")]
+    [InlineData("vendor@system@other=value")]
+    [InlineData("vendor#name=value")]
+    [InlineData("vendor=opaque\u001fvalue")]
+    [InlineData("vendor=opaque\u007fvalue")]
+    public void Parse_InvalidTraceStateKeyOrOpaqueValue_PreservesValidParentAndDropsOnlyTraceState(string traceState)
+    {
+        var capture = DurableTraceContext.Parse(
+            "00-0123456789abcdef0123456789abcdef-0123456789abcdef-00",
+            traceState);
+
+        Assert.NotNull(capture.Context);
+        Assert.Null(capture.Context.TraceState);
+        Assert.Equal(DurableProblemCodes.TraceStateRejected, capture.DiagnosticCode);
+    }
+
+    [Theory]
+    [InlineData("=value")]
+    [InlineData("@vendor=value")]
+    [InlineData("vendor@=value")]
+    [InlineData("tenant@1system=value")]
+    public void Parse_MalformedTraceStateTenantKey_PreservesValidParentAndDropsOnlyTraceState(string traceState)
+    {
+        var capture = DurableTraceContext.Parse(
+            "00-0123456789abcdef0123456789abcdef-0123456789abcdef-00",
+            traceState);
+
+        Assert.NotNull(capture.Context);
+        Assert.Null(capture.Context.TraceState);
+        Assert.Equal(DurableProblemCodes.TraceStateRejected, capture.DiagnosticCode);
+    }
+
+    [Fact]
+    public void Parse_TraceStateWithEveryAllowedKeyCharacter_PreservesTheOpaqueState()
+    {
+        var capture = DurableTraceContext.Parse(
+            "00-0123456789abcdef0123456789abcdef-0123456789abcdef-00",
+            "v0123456789_-*/=opaque");
+
+        Assert.NotNull(capture.Context);
+        Assert.Equal("v0123456789_-*/=opaque", capture.Context.TraceState);
+        Assert.Null(capture.DiagnosticCode);
+    }
+
+    [Fact]
+    public void Parse_TraceStateExceedingMemberOrFieldLimits_PreservesValidParentAndDropsOnlyTraceState()
+    {
+        var tooManyMembers = string.Join(
+            ',',
+            Enumerable.Range(1, 33).Select(index => $"vendor{index}=value"));
+        var oversizedKey = $"{new string('a', 257)}=value";
+        var oversizedValue = $"vendor={new string('a', 257)}";
+
+        foreach (var traceState in new[] { tooManyMembers, oversizedKey, oversizedValue })
+        {
+            var capture = DurableTraceContext.Parse(
+                "00-0123456789abcdef0123456789abcdef-0123456789abcdef-00",
+                traceState);
+
+            Assert.NotNull(capture.Context);
+            Assert.Null(capture.Context.TraceState);
+            Assert.Equal(DurableProblemCodes.TraceStateRejected, capture.DiagnosticCode);
+        }
     }
 
     [Fact]
