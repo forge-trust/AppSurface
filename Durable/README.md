@@ -10,9 +10,8 @@ AppSurface Durable is a source-only public preview of portable durable contracts
   authoritative-store implementation. Slices 3–6 supply explicit schema management, Work, Flow, Schedule, and an
   explicitly opted-in hosted runtime.
 
-All three packages are machine-held out of every publish plan until slices 5-6 prove Schedule, hosted runtime,
-drain/recovery, and operational conformance in a coordinated release review. They can be built and packed directly for
-contract verification, but they are not a supported NuGet release.
+All three packages are machine-held out of every publish plan pending coordinated release evidence. They can be built
+and packed directly for contract verification, but they are not a supported NuGet release.
 
 ## Why this boundary
 

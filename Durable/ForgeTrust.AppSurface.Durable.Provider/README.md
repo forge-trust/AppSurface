@@ -69,8 +69,8 @@ provider persists the schema id and digest with command outcome truth. A repeate
 
 Before any provider can be published, it must supply storage and migration ownership, polling/schedule execution,
 restore fencing, graceful drain, privacy-bounded diagnostics and telemetry, packed-consumer proof, and conformance tests
-against this SPI. Slice 3 supplies source-level PostgreSQL Work conformance; slices 4-6 still own Flow, Schedule, hosted
-activation, drain/recovery, and the coordinated publication gate.
+against this SPI. The source-preview PostgreSQL provider now supplies Work, Flow, Schedule, hosted activation, and
+drain/recovery conformance; coordinated release evidence remains the publication gate.
 
 See the [`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md) for currently available contract,
 PostgreSQL Work, and hosted-runtime codes.

@@ -34,10 +34,10 @@ seam was removed. No public type was deleted outright.
 
 ## Compatibility rule
 
-All three packages remain source-only public previews and are machine-blocked from publication. The PostgreSQL slice-3 source
-provider supplies Work conformance and restore fencing, but publication remains held until slices 4-6 prove Flow,
-Schedule, hosted runtime, drain/recovery, and coordinated operations. Changes may still be made, but every public member change must update the
-appropriate deterministic API snapshot and this ledger when it changes a type's audience, package, or visibility.
+All three packages remain source-only public previews and are machine-blocked from publication pending coordinated
+release evidence. The PostgreSQL source provider now supplies Work, Flow, Schedule, hosted runtime, drain/recovery, and
+restore fencing conformance. Changes may still be made, but every public member change must update the appropriate
+deterministic API snapshot and this ledger when it changes a type's audience, package, or visibility.
 
 ## Slice 3 PostgreSQL API
 
