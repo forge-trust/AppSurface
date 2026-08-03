@@ -259,6 +259,15 @@ internal sealed class DocsSearchIndexProjectionCache
 }
 
 /// <summary>
+/// Private source bytes and canonical identity returned by the current Docs snapshot for an authorized Markdown download.
+/// </summary>
+/// <remarks>
+/// This is intentionally internal: controllers may turn the bytes into a protected attachment, but callers cannot use it
+/// as a general raw-content API and it never participates in <see cref="DocNode"/> serialization or search.
+/// </remarks>
+internal sealed record MarkdownDownloadSource(byte[] Bytes, string CanonicalPath);
+
+/// <summary>
 /// Service responsible for aggregating documentation from multiple harvesters and caching the results.
 /// </summary>
 public class DocAggregator
@@ -277,6 +286,7 @@ public class DocAggregator
     private readonly ILogger<DocAggregator> _logger;
     private readonly AppSurfaceDocsHarvestProgressReporter? _harvestProgress;
     private readonly AppSurfaceDocsHarvestOptions _harvestOptions;
+    private readonly AppSurfaceDocsMarkdownDownloadOptions _markdownDownloadOptions;
     private readonly AppSurfaceDocsContributorOptions _contributorOptions;
     private readonly AppSurfaceDocsLocalizationOptions _localizationOptions;
     private readonly AppSurfaceDocsHarvestPathPolicySnapshotFactory _pathPolicySnapshotFactory;
@@ -287,7 +297,9 @@ public class DocAggregator
     private readonly CachePolicy _docsCachePolicy;
     private readonly Func<DateTimeOffset> _utcNow;
     private readonly Guid _cacheScope = Guid.NewGuid();
+    private readonly object _markdownDownloadSourcesGate = new();
     private long _cacheGeneration;
+    private MarkdownDownloadSourceSnapshot? _activeMarkdownDownloadSources;
 
     /// <summary>
     /// Gets the configured absolute lifetime for the shared docs snapshot cache.
@@ -314,6 +326,36 @@ public class DocAggregator
         """<a\b[^>]*\bclass\s*=\s*"(?:doc-symbol-source-link(?:\s[^"]*)?|[^"]*\sdoc-symbol-source-link(?:\s[^"]*)?)"[^>]*>[\s\S]*?</a>""",
         RegexOptions.IgnoreCase | RegexOptions.NonBacktracking);
 
+    private sealed class MarkdownDownloadSourceSnapshot
+    {
+        private static readonly IReadOnlyDictionary<string, byte[]> EmptySources =
+            new Dictionary<string, byte[]>(StringComparer.Ordinal);
+
+        private IReadOnlyDictionary<string, byte[]> _sources;
+
+        public MarkdownDownloadSourceSnapshot(IReadOnlyDictionary<string, byte[]> sources)
+        {
+            _sources = sources;
+        }
+
+        public bool TryGetValue(string sourcePath, out byte[] bytes)
+        {
+            if (Volatile.Read(ref _sources).TryGetValue(sourcePath, out var sourceBytes))
+            {
+                bytes = sourceBytes;
+                return true;
+            }
+
+            bytes = [];
+            return false;
+        }
+
+        public void Release()
+        {
+            Interlocked.Exchange(ref _sources, EmptySources);
+        }
+    }
+
     private sealed record CachedDocsSnapshot(
         Dictionary<string, DocNode> DocsByPath,
         DocPathResolver PathResolver,
@@ -323,7 +365,8 @@ public class DocAggregator
         IReadOnlyList<DocSectionSnapshot> PublicSections,
         DocsSearchIndexProjectionCache SearchIndexProjections,
         Dictionary<string, DocContributorProvenanceViewModel> ContributorProvenanceByPath,
-        DocHarvestHealthSnapshot HarvestHealth);
+        DocHarvestHealthSnapshot HarvestHealth,
+        MarkdownDownloadSourceSnapshot MarkdownDownloadSources);
 
     private sealed record HarvesterRunResult(
         string HarvesterType,
@@ -331,7 +374,10 @@ public class DocAggregator
         IReadOnlyList<DocNode> Docs,
         DocHarvestDiagnostic? Diagnostic,
         IReadOnlyList<DocHarvestDiagnostic>? AdditionalDiagnostics = null,
-        bool ParticipatesInStrictHealth = true);
+        bool ParticipatesInStrictHealth = true,
+        IReadOnlyDictionary<string, byte[]>? MarkdownDownloadSourcesByPath = null,
+        long MarkdownDownloadEligibleSourceBytes = 0,
+        bool MarkdownDownloadSourceCaptureExceededBudget = false);
 
     /// <summary>
     /// Initializes a new instance of <see cref="DocAggregator"/> with the provided dependencies and determines the repository root.
@@ -535,6 +581,7 @@ public class DocAggregator
         _logger = logger;
         _harvestProgress = harvestProgress;
         _harvestOptions = options.Harvest ?? new AppSurfaceDocsHarvestOptions();
+        _markdownDownloadOptions = options.MarkdownDownload ?? new AppSurfaceDocsMarkdownDownloadOptions();
         _contributorOptions = options.Contributor ?? throw new ArgumentNullException(nameof(options.Contributor));
         _localizationOptions = options.Localization ?? throw new ArgumentNullException(nameof(options.Localization));
         _pathPolicySnapshotFactory = new AppSurfaceDocsHarvestPathPolicySnapshotFactory(options, logger);
@@ -701,6 +748,37 @@ public class DocAggregator
     }
 
     /// <summary>
+    /// Retrieves source-faithful Markdown bytes for one exact canonical public route in the current Docs snapshot.
+    /// </summary>
+    /// <remarks>
+    /// Raw source stays private to the snapshot and is returned only for built-in Markdown documents that explicitly
+    /// opted in during harvest. Aliases, source-shaped paths, generated documents, the root landing page, and missing
+    /// source entries return <see langword="null"/> rather than exposing repository identity.
+    /// </remarks>
+    internal async Task<MarkdownDownloadSource?> GetMarkdownDownloadSourceAsync(
+        string path,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        var snapshot = await GetCachedDocsSnapshotAsync().WaitAsync(cancellationToken);
+        var resolution = snapshot.RouteIdentityCatalog.ResolvePublicRoute(path);
+        if (resolution.Kind != DocRouteResolutionKind.Canonical
+            || string.IsNullOrWhiteSpace(resolution.SourcePath)
+            || string.IsNullOrWhiteSpace(resolution.PublicRoutePath)
+            || !string.Equals(path, resolution.PublicRoutePath, StringComparison.Ordinal)
+            || !snapshot.MarkdownDownloadSources.TryGetValue(resolution.SourcePath, out var bytes))
+        {
+            return null;
+        }
+
+        return new MarkdownDownloadSource(bytes, resolution.PublicRoutePath);
+    }
+
+    /// <summary>
     /// Gets the route manifest for the current cached docs snapshot.
     /// </summary>
     /// <param name="cancellationToken">Token observed while waiting for the snapshot.</param>
@@ -821,7 +899,12 @@ public class DocAggregator
     public void InvalidateCache()
     {
         // Use a monotonic generation so repeated refreshes cannot resurface a still-live pre-refresh snapshot.
-        Interlocked.Increment(ref _cacheGeneration);
+        lock (_markdownDownloadSourcesGate)
+        {
+            _activeMarkdownDownloadSources?.Release();
+            _activeMarkdownDownloadSources = null;
+            Interlocked.Increment(ref _cacheGeneration);
+        }
     }
 
     /// <summary>
@@ -896,9 +979,20 @@ public class DocAggregator
                            runId,
                            testingDelayPerHarvesterMilliseconds,
                            testingDelayPerDocumentMilliseconds);
-                       var allNodes = harvesterResults
-                           .SelectMany(result => result.Docs)
-                           .ToList();
+                       var allNodes = new List<DocNode>();
+                       var markdownSourceOwnerIndexes = new HashSet<int>();
+                       foreach (var harvesterResult in harvesterResults)
+                       {
+                           foreach (var node in harvesterResult.Docs)
+                           {
+                               if (harvesterResult.MarkdownDownloadSourcesByPath?.ContainsKey(node.Path) == true)
+                               {
+                                   markdownSourceOwnerIndexes.Add(allNodes.Count);
+                               }
+
+                               allNodes.Add(node);
+                           }
+                       }
 
                        var nodesWithSymbolSourceLinks = allNodes
                            .Select(n => n with { Content = ReplaceSymbolSourcePlaceholders(n) })
@@ -930,9 +1024,12 @@ public class DocAggregator
                        var routeIdentityCatalog = DocRouteIdentityCatalog.Create(targetNodes, _docsUrlBuilder);
                        // Rewrite before the real namespace merge so README-relative links keep their source path
                        // context, while the manifest still reflects only final published docs targets.
+                       var markdownSourceOwnerNodes = new HashSet<DocNode>(ReferenceEqualityComparer.Instance);
                        var rewrittenNodes = sanitizedNodes
                            .Select(
-                               n => new DocNode(
+                               (n, index) =>
+                               {
+                                   var rewrittenNode = new DocNode(
                                    n.Title,
                                    n.Path,
                                        DocContentLinkRewriter.RewriteInternalDocLinks(
@@ -947,7 +1044,14 @@ public class DocAggregator
                                        : null,
                                    n.Metadata,
                                    n.Outline,
-                                   n.SymbolSourceProvenance))
+                                   n.SymbolSourceProvenance);
+                                   if (markdownSourceOwnerIndexes.Contains(index))
+                                   {
+                                       markdownSourceOwnerNodes.Add(rewrittenNode);
+                                   }
+
+                                   return rewrittenNode;
+                               })
                            .ToList();
 
                        var namespaceReadmeDiagnostics = MergeNamespaceReadmes(
@@ -971,7 +1075,16 @@ public class DocAggregator
                                return first;
                            })
                            .ToDictionary(n => n.Path, n => n);
+                       var markdownDownloadSourceOwnerPaths = docsByPath.Values
+                           .Where(markdownSourceOwnerNodes.Contains)
+                           .Select(node => node.Path)
+                           .ToHashSet(StringComparer.Ordinal);
                        var finalRouteIdentityCatalog = DocRouteIdentityCatalog.Create(docsByPath.Values, _docsUrlBuilder);
+                       var (markdownDownloadSources, markdownDownloadDiagnostic) = BuildMarkdownDownloadSources(
+                           harvesterResults,
+                           docsByPath,
+                           markdownDownloadSourceOwnerPaths,
+                           _markdownDownloadOptions);
                        var pathResolver = DocPathResolver.Create(docsByPath.Values);
                        var localizedGraph = new LocalizedDocsGraphBuilder(localizationOptions).Build(
                            docsByPath.Values,
@@ -992,6 +1105,7 @@ public class DocAggregator
                            routeManifest.Diagnostics
                                .Concat(localizedGraph.Diagnostics)
                                .Concat(namespaceReadmeDiagnostics)
+                               .Concat(markdownDownloadDiagnostic is null ? [] : [markdownDownloadDiagnostic])
                                .ToArray(),
                            docsByPath.Count,
                            repositoryRoot,
@@ -1011,7 +1125,8 @@ public class DocAggregator
                            searchRecordCount,
                            snapshotCacheDuration.TotalMinutes);
 
-                       return new CachedDocsSnapshot(
+                       var markdownDownloadSourceSnapshot = new MarkdownDownloadSourceSnapshot(markdownDownloadSources);
+                       var snapshot = new CachedDocsSnapshot(
                            docsByPath,
                            pathResolver,
                            finalRouteIdentityCatalog,
@@ -1020,10 +1135,92 @@ public class DocAggregator
                            publicSections,
                            searchIndexProjections,
                            contributorProvenanceByPath,
-                           harvestHealth);
+                           harvestHealth,
+                           markdownDownloadSourceSnapshot);
+                       PublishMarkdownDownloadSources(generation, markdownDownloadSourceSnapshot);
+                       return snapshot;
                    },
                    docsCachePolicy,
                    cancellationToken: CancellationToken.None);
+    }
+
+    private void PublishMarkdownDownloadSources(
+        long generation,
+        MarkdownDownloadSourceSnapshot markdownDownloadSources)
+    {
+        lock (_markdownDownloadSourcesGate)
+        {
+            if (Interlocked.Read(ref _cacheGeneration) != generation)
+            {
+                markdownDownloadSources.Release();
+                return;
+            }
+
+            // Same-generation stale-while-revalidate requests may still hold the previous snapshot. Let that source map
+            // remain reachable through its snapshot until the memo cache replaces it; explicit invalidation releases the
+            // active map before moving to a new generation.
+            _activeMarkdownDownloadSources = markdownDownloadSources;
+        }
+    }
+
+    private static (IReadOnlyDictionary<string, byte[]> Sources, DocHarvestDiagnostic? Diagnostic) BuildMarkdownDownloadSources(
+        IReadOnlyList<HarvesterRunResult> harvesterResults,
+        IReadOnlyDictionary<string, DocNode> docsByPath,
+        IReadOnlySet<string> markdownDownloadSourceOwnerPaths,
+        AppSurfaceDocsMarkdownDownloadOptions options)
+    {
+        if (!options.Enabled)
+        {
+            return (new Dictionary<string, byte[]>(StringComparer.Ordinal), null);
+        }
+
+        var eligibleSourceBytes = harvesterResults.Sum(result => result.MarkdownDownloadEligibleSourceBytes);
+        if (harvesterResults.Any(result => result.MarkdownDownloadSourceCaptureExceededBudget))
+        {
+            return (
+                new Dictionary<string, byte[]>(StringComparer.Ordinal),
+                CreateSnapshotBudgetExceededDiagnostic(eligibleSourceBytes, options));
+        }
+
+        var sources = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        long sourceBytes = 0;
+        foreach (var harvesterResult in harvesterResults)
+        {
+            foreach (var entry in harvesterResult.MarkdownDownloadSourcesByPath
+                                   ?? new Dictionary<string, byte[]>(StringComparer.Ordinal))
+            {
+                if (!markdownDownloadSourceOwnerPaths.Contains(entry.Key)
+                    || !docsByPath.TryGetValue(entry.Key, out var doc)
+                    || string.IsNullOrWhiteSpace(doc.CanonicalPath)
+                    || !sources.TryAdd(entry.Key, entry.Value))
+                {
+                    continue;
+                }
+
+                sourceBytes = checked(sourceBytes + entry.Value.LongLength);
+                if (sourceBytes > options.MaxSnapshotBytes)
+                {
+                    return (
+                        new Dictionary<string, byte[]>(StringComparer.Ordinal),
+                        CreateSnapshotBudgetExceededDiagnostic(eligibleSourceBytes, options));
+                }
+            }
+        }
+
+        return (sources, null);
+    }
+
+    private static DocHarvestDiagnostic CreateSnapshotBudgetExceededDiagnostic(
+        long sourceBytes,
+        AppSurfaceDocsMarkdownDownloadOptions options)
+    {
+        return new DocHarvestDiagnostic(
+            DocHarvestDiagnosticCodes.MarkdownDownloadSnapshotBudgetExceeded,
+            DocHarvestDiagnosticSeverity.Warning,
+            nameof(MarkdownHarvester),
+            $"Markdown download was unavailable because eligible source totaled {sourceBytes} bytes and exceeds AppSurfaceDocs:MarkdownDownload:MaxSnapshotBytes ({options.MaxSnapshotBytes} bytes).",
+            "The source download sidecar is all-or-nothing so page traversal order cannot decide which protected documents are downloadable.",
+            "Reduce the number or size of opted-in Markdown files, or raise AppSurfaceDocs:MarkdownDownload:MaxSnapshotBytes within its supported limit.");
     }
 
     private static async Task<IReadOnlyList<HarvesterRunResult>> RunHarvestersAsync(
@@ -1086,8 +1283,25 @@ public class DocAggregator
                     CancellationToken.None);
             }
 
-            var harvestTask = HarvestWithContextAsync(harvester, context, timeoutCts.Token);
-            var docs = await harvestTask.WaitAsync(harvesterTimeout) ?? [];
+            IReadOnlyList<DocNode> docs;
+            IReadOnlyDictionary<string, byte[]>? markdownDownloadSources = null;
+            long markdownDownloadEligibleSourceBytes = 0;
+            var markdownDownloadSourceCaptureExceededBudget = false;
+            if (harvester is MarkdownHarvester markdownHarvester)
+            {
+                var markdownResult = await markdownHarvester
+                    .HarvestWithSourceAsync(context, timeoutCts.Token)
+                    .WaitAsync(harvesterTimeout);
+                docs = markdownResult.Nodes ?? [];
+                markdownDownloadSources = markdownResult.SourceByPath;
+                markdownDownloadEligibleSourceBytes = markdownResult.EligibleSourceBytes;
+                markdownDownloadSourceCaptureExceededBudget = markdownResult.SourceCaptureExceededBudget;
+            }
+            else
+            {
+                var harvestTask = HarvestWithContextAsync(harvester, context, timeoutCts.Token);
+                docs = await harvestTask.WaitAsync(harvesterTimeout) ?? [];
+            }
             await PublishDocumentDelayAsync(
                 harvestProgress,
                 runId,
@@ -1117,7 +1331,10 @@ public class DocAggregator
                 docs,
                 blockingDiagnostic,
                 supplementalDiagnostics,
-                ParticipatesInStrictHealth: participatesInStrictHealth);
+                ParticipatesInStrictHealth: participatesInStrictHealth,
+                MarkdownDownloadSourcesByPath: markdownDownloadSources,
+                MarkdownDownloadEligibleSourceBytes: markdownDownloadEligibleSourceBytes,
+                MarkdownDownloadSourceCaptureExceededBudget: markdownDownloadSourceCaptureExceededBudget);
         }
         catch (TimeoutException ex)
         {
@@ -1271,11 +1488,6 @@ public class DocAggregator
         DocHarvestContext context,
         CancellationToken cancellationToken)
     {
-        if (harvester is MarkdownHarvester markdownHarvester)
-        {
-            return markdownHarvester.HarvestAsync(context, cancellationToken);
-        }
-
         if (harvester is CSharpDocHarvester csharpDocHarvester)
         {
             return csharpDocHarvester.HarvestAsync(context, cancellationToken);

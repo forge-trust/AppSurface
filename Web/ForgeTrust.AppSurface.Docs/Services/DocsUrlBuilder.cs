@@ -266,6 +266,43 @@ public sealed class DocsUrlBuilder
     }
 
     /// <summary>
+    /// Builds the protected Markdown attachment route for one canonical non-root Docs path.
+    /// </summary>
+    /// <param name="path">The canonical Docs-relative path returned by the route identity catalog.</param>
+    /// <returns>An app-relative, segment-encoded Markdown download URL.</returns>
+    /// <remarks>
+    /// This method intentionally accepts only a clean canonical route path. It rejects aliases, source-shaped paths,
+    /// traversal segments, separators that would change route identity, and the docs home so link rendering cannot create
+    /// an address that the protected download endpoint will later reject.
+    /// </remarks>
+    public string BuildMarkdownDownloadUrl(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        if (!string.Equals(path, path.Trim(), StringComparison.Ordinal)
+            || path.StartsWith("/", StringComparison.Ordinal)
+            || path.EndsWith("/", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Markdown download paths must be a non-root canonical Docs route.", nameof(path));
+        }
+
+        var normalizedPath = path.Trim('/');
+        var segments = normalizedPath.Split('/', StringSplitOptions.None);
+        if (segments.Length == 0
+            || segments.Any(segment => string.IsNullOrWhiteSpace(segment)
+                                       || segment is "." or ".."
+                                       || segment.Contains('\\')
+                                       || segment.Contains('%')))
+        {
+            throw new ArgumentException("Markdown download paths must be a non-root canonical Docs route.", nameof(path));
+        }
+
+        return JoinPath(
+            _currentDocsRootPath,
+            $"_markdown/{string.Join('/', segments.Select(Uri.EscapeDataString))}");
+    }
+
+    /// <summary>
     /// Builds the current-surface search asset URL.
     /// </summary>
     /// <param name="assetName">The asset file name, such as <c>search.css</c>.</param>
