@@ -12,6 +12,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
+- The [release tool](../tools/ForgeTrust.AppSurface.Release/README.md) now treats checked-in versioned sidecars as explicitly `prepared`, then derives a transient `tagged` projection only after an annotated tag binds the prepared sidecar, manifest, and evidence digests. The new `tag-message` and `inspect` commands validate the tag object, tagger, base-branch reachability, V1/V2 evidence, package surface, and preparation commit before publishing. Docs publication uses the validated projection only in a disposable checkout and retains its inspect proof; prepared source files never acquire tag or GitHub Release claims.
 - [`ForgeTrust.AppSurface.Web`](../Web/ForgeTrust.AppSurface.Web/README.md) and
   [`ForgeTrust.AppSurface.Web.Push`](../Web/ForgeTrust.AppSurface.Web.Push/README.md) now provide privacy-safe,
   schema-versioned PWA push-readiness posture. Web diagnostics contain either a fixed, redacted VAPID key identifier,

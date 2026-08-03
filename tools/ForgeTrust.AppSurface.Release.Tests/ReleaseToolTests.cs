@@ -322,6 +322,19 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task TagMessageRejectsBlankHeadOutput()
+    {
+        await SeedRepositoryAsync();
+        var runner = new FakeCommandRunner();
+        runner.Add("git rev-parse HEAD", new CommandResult(0, "   \n", ""));
+
+        var result = await RunAsync(["tag-message", "--version", "0.1.0-preview.1"], runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-tag-message-head-missing", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task InspectRendersV2TaggedProjectionWithoutMutatingPreparedSource()
     {
         await SeedRepositoryAsync();
@@ -402,6 +415,55 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Contains("Code: release-tag-tagger-missing", result.Stderr, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task InspectAcceptsNegativeTaggerOffset()
+    {
+        await SeedRepositoryAsync();
+        var runner = CreateSuccessfulPublishRunner();
+        runner.Add(
+            "git cat-file -p refs/tags/v0.1.0-preview.1",
+            new CommandResult(0, CreateAnnotatedTagObject("-0500"), ""));
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1"],
+            runner);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("state: tagged", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InspectRejectsOutOfRangeTaggerTimestamp()
+    {
+        await SeedRepositoryAsync();
+        var runner = CreateSuccessfulPublishRunner();
+        runner.Add(
+            "git cat-file -p refs/tags/v0.1.0-preview.1",
+            new CommandResult(0, CreateAnnotatedTagObject().Replace("1770000000", "253402300800", StringComparison.Ordinal), ""));
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-tag-tagger-invalid", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InspectRejectsMissingAnnotatedTagBeforeReadingArtifacts()
+    {
+        await SeedRepositoryAsync();
+        var runner = new FakeCommandRunner();
+        runner.Add("git cat-file -t refs/tags/v0.1.0-preview.1", new CommandResult(1, "", ""));
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-tag-missing", result.Stderr, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("missing", "release-tag-trailer-missing")]
     [InlineData("duplicate", "release-tag-trailer-invalid")]
@@ -449,6 +511,73 @@ public sealed class ReleaseToolTests : IDisposable
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains($"Code: {expectedCode}", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("reserved-final-key", "release-tag-trailer-invalid")]
+    [InlineData("ordinary-final-key", "release-tag-trailer-missing")]
+    [InlineData("padded-value", "release-tag-trailer-invalid")]
+    [InlineData("empty-value", "release-tag-trailer-invalid")]
+    [InlineData("empty-message", "release-tag-trailer-missing")]
+    [InlineData("short-digest", "release-tag-trailer-invalid")]
+    [InlineData("missing-message-separator", "release-tag-trailer-missing")]
+    public async Task InspectRejectsMalformedFinalReleaseTrailerBlock(string mutation, string expectedCode)
+    {
+        await SeedRepositoryAsync();
+        var runner = CreateSuccessfulPublishRunner();
+        var tagObject = CreateAnnotatedTagObject();
+        var binding = CreateReleaseTagBinding();
+        var messageStart = tagObject.IndexOf("\n\n", StringComparison.Ordinal) + 2;
+        tagObject = mutation switch
+        {
+            "reserved-final-key" => tagObject.Replace(
+                ReleaseTagBinding.ReleaseIdKey,
+                "AppSurface-Release-Not-Id",
+                StringComparison.Ordinal),
+            "ordinary-final-key" => tagObject.Replace(
+                $"{ReleaseTagBinding.ReleaseIdKey}: {binding.ReleaseId}",
+                "Unrelated: value",
+                StringComparison.Ordinal),
+            "padded-value" => tagObject.Replace(
+                $"{ReleaseTagBinding.ReleaseIdKey}: {binding.ReleaseId}",
+                $"{ReleaseTagBinding.ReleaseIdKey}:  {binding.ReleaseId}",
+                StringComparison.Ordinal),
+            "empty-value" => tagObject.Replace(
+                $"{ReleaseTagBinding.ReleaseIdKey}: {binding.ReleaseId}",
+                $"{ReleaseTagBinding.ReleaseIdKey}: ",
+                StringComparison.Ordinal),
+            "empty-message" => tagObject[..messageStart],
+            "short-digest" => tagObject.Replace(binding.ManifestSha256, "abc", StringComparison.Ordinal),
+            "missing-message-separator" => tagObject.Replace("\n\n", "\n", StringComparison.Ordinal),
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation), mutation, null)
+        };
+        runner.Add("git cat-file -p refs/tags/v0.1.0-preview.1", new CommandResult(0, tagObject, ""));
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains($"Code: {expectedCode}", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InspectRejectsMalformedTaggerHeader()
+    {
+        await SeedRepositoryAsync();
+        var runner = CreateSuccessfulPublishRunner();
+        var tagObject = CreateAnnotatedTagObject().Replace(
+            "tagger Release Tests <release-tests@example.test> 1770000000 +0000",
+            "tagger ",
+            StringComparison.Ordinal);
+        runner.Add("git cat-file -p refs/tags/v0.1.0-preview.1", new CommandResult(0, tagObject, ""));
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-tag-tagger-invalid", result.Stderr, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -600,6 +729,14 @@ public sealed class ReleaseToolTests : IDisposable
         var error = Assert.Throws<ReleaseToolException>(() => sidecar.EnsurePrepared(SemVer.Parse("0.1.0-preview.1"), "fixture.yml"));
 
         Assert.Equal(expectedCode, error.Diagnostic.Code);
+    }
+
+    [Fact]
+    public void PreparedSidecarValidationRejectsMalformedYaml()
+    {
+        var error = Assert.Throws<ReleaseToolException>(() => ReleaseSidecar.Parse("release: [", "fixture.yml"));
+
+        Assert.Equal("release-sidecar-invalid", error.Diagnostic.Code);
     }
 
     [Fact]

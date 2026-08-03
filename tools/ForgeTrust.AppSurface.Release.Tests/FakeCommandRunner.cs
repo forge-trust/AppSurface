@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Release;
 
@@ -62,21 +63,7 @@ internal sealed class FakeCommandRunner : ICommandRunner
         var sidecar = GetStandardOutput($"git show {tag}:releases/v{version}.md.yml");
         var manifest = GetStandardOutput($"git show {tag}:releases/v{version}.release.json");
         var evidence = GetStandardOutput($"git show {tag}:releases/v{version}.evidence.json");
-        var subjectSha256 = new string('0', 64);
-        try
-        {
-            using var document = JsonDocument.Parse(evidence);
-            subjectSha256 = document.RootElement.GetProperty("subject").GetProperty("sha256").GetString() ?? subjectSha256;
-        }
-        catch (JsonException)
-        {
-        }
-        catch (InvalidOperationException)
-        {
-        }
-        catch (KeyNotFoundException)
-        {
-        }
+        var subjectSha256 = TryReadEvidenceSubjectSha256(evidence) ?? new string('0', 64);
 
         var binding = new ReleaseTagBinding(
             tag,
@@ -85,6 +72,33 @@ internal sealed class FakeCommandRunner : ICommandRunner
             subjectSha256);
         var tagObject = $"object abc123\ntype commit\ntag {tag}\ntagger Release Tests <release-tests@example.test> 1770000000 +0000\n\n{binding.Render()}";
         return new CommandResult(0, tagObject, string.Empty);
+    }
+
+    private static string? TryReadEvidenceSubjectSha256(string evidence)
+    {
+        try
+        {
+            var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(evidence));
+            if (!reader.Read()
+                || !JsonDocument.TryParseValue(ref reader, out var document)
+                || document is null)
+            {
+                return null;
+            }
+
+            using (document)
+            {
+                return document.RootElement.ValueKind == JsonValueKind.Object
+                    && document.RootElement.TryGetProperty("subject", out var subject)
+                    && subject.TryGetProperty("sha256", out var sha256)
+                    ? sha256.GetString()
+                    : null;
+            }
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private string GetStandardOutput(string command)
