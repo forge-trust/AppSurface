@@ -646,7 +646,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             await using var reader = await flowDispatchPolicies.ExecuteReaderAsync();
             Assert.True(await reader.ReadAsync());
             Assert.Equal("flow_dispatch_global_discovery", reader.GetString(0));
-            Assert.Equal(["durable_dispatcher"], reader.GetFieldValue<string[]>(1));
+            Assert.Equal(["durable_dispatcher", "durable_owner"], reader.GetFieldValue<string[]>(1));
             Assert.Equal("true", reader.GetString(2));
             Assert.True(await reader.ReadAsync());
             Assert.Equal("flow_dispatch_runtime_scope_select", reader.GetString(0));
@@ -803,8 +803,8 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await using (var dueHealth = runtimeConnection.CreateCommand())
         {
             dueHealth.CommandText =
-                "SELECT due_count >= 0 FROM appsurface_durable.runtime_due_dispatch_health(7);";
-            Assert.True((bool)(await dueHealth.ExecuteScalarAsync())!);
+                "SELECT due_count FROM appsurface_durable.runtime_due_dispatch_health(2);";
+            Assert.Equal(2L, (long)(await dueHealth.ExecuteScalarAsync())!);
         }
 
         await using (var unscopedRead = runtimeConnection.CreateCommand())

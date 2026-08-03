@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using ForgeTrust.AppSurface.Durable.Provider;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -122,6 +123,26 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
         Assert.Equal(TimeSpan.FromMilliseconds(1), PostgreSqlDurableHostedService.CalculateIdleDelay(DateTimeOffset.UtcNow, maximum));
         var nearDue = PostgreSqlDurableHostedService.CalculateIdleDelay(DateTimeOffset.UtcNow.AddMilliseconds(20), maximum);
         Assert.InRange(nearDue, TimeSpan.FromMilliseconds(1), TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
+    public async Task HostedWait_CancelsTheLosingPollDelayWhenAWakeSignalArrives()
+    {
+        var wakeSignals = Channel.CreateBounded<bool>(1);
+        Assert.True(wakeSignals.Writer.TryWrite(true));
+        CancellationToken timerCancellation = default;
+
+        await PostgreSqlDurableHostedService.WaitForWakeOrPollAsync(
+            wakeSignals.Reader,
+            TimeSpan.FromMinutes(5),
+            (_, cancellationToken) =>
+            {
+                timerCancellation = cancellationToken;
+                return Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            },
+            CancellationToken.None);
+
+        Assert.True(timerCancellation.IsCancellationRequested);
     }
 
     [Fact]

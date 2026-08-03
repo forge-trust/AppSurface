@@ -137,8 +137,9 @@ WHERE namespace.nspname = 'appsurface_durable'
   AND routine.prokind = 'f' \gexec
 
 SELECT format(
-    'ALTER POLICY flow_dispatch_global_discovery ON appsurface_durable.flow_dispatch TO %I',
-    :'dispatcher_role') \gexec
+    'ALTER POLICY flow_dispatch_global_discovery ON appsurface_durable.flow_dispatch TO %I, %I',
+    :'dispatcher_role',
+    :'migration_owner_role') \gexec
 SELECT format(
     'ALTER POLICY runtime_heartbeat_runtime_role ON appsurface_durable.runtime_heartbeat TO %I',
     :'runtime_role') \gexec
@@ -380,9 +381,11 @@ SELECT NOT EXISTS
     (
         CASE
             WHEN actual.policy_name = 'flow_dispatch_global_discovery' THEN actual.polroles @> ARRAY[
-                (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'dispatcher_role')]
+                (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'dispatcher_role'),
+                (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'migration_owner_role')]
                 AND actual.polroles <@ ARRAY[
-                    (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'dispatcher_role')]
+                    (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'dispatcher_role'),
+                    (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'migration_owner_role')]
             WHEN actual.policy_name IN ('schedule_dispatch_global_discovery', 'schedule_dispatch_global_lease') THEN actual.polroles @> ARRAY[
                 (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'dispatcher_role'),
                 (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'migration_owner_role')]

@@ -368,7 +368,7 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("pg_catalog.pg_policy", recipe, StringComparison.Ordinal);
         Assert.Contains("pg_catalog.pg_get_expr", recipe, StringComparison.Ordinal);
         Assert.Contains(
-            "ALTER POLICY flow_dispatch_global_discovery ON appsurface_durable.flow_dispatch TO %I",
+            "ALTER POLICY flow_dispatch_global_discovery ON appsurface_durable.flow_dispatch TO %I, %I",
             recipe,
             StringComparison.Ordinal);
         Assert.Contains("flow_dispatch_runtime_scope_select", recipe, StringComparison.Ordinal);

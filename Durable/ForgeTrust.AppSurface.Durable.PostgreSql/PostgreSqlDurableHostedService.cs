@@ -186,13 +186,37 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
     {
         var maximumDelay = _registration.Options.IdlePollingInterval;
         var delay = CalculateIdleDelay(nextDueAtUtc, maximumDelay);
+        await WaitForWakeOrPollAsync(_wakeSignals.Reader, delay, Task.Delay, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static async Task WaitForWakeOrPollAsync(
+        ChannelReader<bool> wakeSignals,
+        TimeSpan delay,
+        Func<TimeSpan, CancellationToken, Task> delayAsync,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(wakeSignals);
+        ArgumentNullException.ThrowIfNull(delayAsync);
         using var wakeWaitCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var wakeReady = _wakeSignals.Reader.WaitToReadAsync(wakeWaitCancellation.Token).AsTask();
-        var timer = Task.Delay(delay, cancellationToken);
+        using var timerCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var wakeReady = wakeSignals.WaitToReadAsync(wakeWaitCancellation.Token).AsTask();
+        var timer = delayAsync(delay, timerCancellation.Token);
         if (await Task.WhenAny(wakeReady, timer).ConfigureAwait(false) == wakeReady
             && await wakeReady.ConfigureAwait(false))
         {
-            _ = _wakeSignals.Reader.TryRead(out _);
+            // A wake signal wins frequently under load. Cancel its losing delay so a five-minute idle timer does not
+            // remain rooted after every notification.
+            await timerCancellation.CancelAsync().ConfigureAwait(false);
+            try
+            {
+                await timer.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (timerCancellation.IsCancellationRequested)
+            {
+                // The wake signal won; the canceled delay has completed and released its timer registration.
+            }
+
+            _ = wakeSignals.TryRead(out _);
             return;
         }
 
