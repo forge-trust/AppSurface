@@ -1577,6 +1577,55 @@ public sealed class SecretPromotionWorkflowTests
     }
 
     [Fact]
+    public void GoogleToLocalV2_StaleAttestationAfterOutOfBandDeleteIsConflictBeforeSourceAccess()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var initialPlanPath = Path.Join(temp.Path, "initial.plan.json");
+        var stalePlanPath = Path.Join(temp.Path, "stale.plan.json");
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var workflow = CreateV2Workflow(google, temp.Path);
+
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", initialPlanPath, false, TimeSpan.FromMinutes(10), context));
+        workflow.Apply(new SecretPromotionApplyRequest(configPath, initialPlanPath, true, null, null, null, context));
+        Assert.Equal(LocalSecretResultStatus.Found, store.Delete(Normalize(context, "Stripe:ApiKey")).Status);
+
+        var planned = workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", stalePlanPath, false, TimeSpan.FromMinutes(10), context));
+
+        Assert.False(planned.Summary.Succeeded);
+        Assert.Equal("Conflict", Assert.Single(planned.Summary.Rows).Status);
+        Assert.Equal("local-secret-transfer-attestation-stale", Assert.Single(planned.Summary.Rows).DiagnosticCode);
+        Assert.Equal(1, google.AccessCalls);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_OutOfBandDestinationMutationAfterPlanFailsBeforeSourceAccess()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var workflow = CreateV2Workflow(google, temp.Path);
+
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        Assert.Equal(LocalSecretResultStatus.Found, store.Set(Normalize(context, "Stripe:ApiKey"), "sentinel-manual-secret").Status);
+
+        var applied = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+
+        Assert.False(applied.Succeeded);
+        Assert.Equal("Conflict", Assert.Single(applied.Rows).Status);
+        Assert.Equal("local-secret-transfer-destination-changed", Assert.Single(applied.Rows).DiagnosticCode);
+        Assert.Equal(0, google.AccessCalls);
+        Assert.Equal("sentinel-manual-secret", store.Get(Normalize(context, "Stripe:ApiKey")).Value);
+    }
+
+    [Fact]
     public void GoogleToLocalV2_ReplaceRequiresExactConfirmationAndMatchingAttestation()
     {
         using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
