@@ -84,6 +84,30 @@ public sealed class CoverageSolutionScriptTests
     }
 
     [Fact]
+    public void RazorWireCoverageProofSources_ShouldSelectConfiguredCoveredSourceInPreferenceOrder()
+    {
+        var secondSource = RazorWireCoverageProofSources.All[1];
+
+        Assert.Equal(
+            secondSource,
+            RazorWireCoverageProofSources.SelectCoveredSource([secondSource.Replace('/', '\\')]));
+        Assert.Equal(
+            RazorWireCoverageProofSources.All[0],
+            RazorWireCoverageProofSources.SelectCoveredSource([secondSource, RazorWireCoverageProofSources.All[0]]));
+    }
+
+    [Fact]
+    public void RazorWireCoverageProofSources_ShouldRejectWhenNoConfiguredSourceIsCovered()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => RazorWireCoverageProofSources.SelectCoveredSource(["Web/Unrelated/NotCovered.cs"]));
+
+        Assert.Equal(
+            $"Merged Cobertura did not contain a maintained RazorWire proof source. Expected one of: {string.Join(", ", RazorWireCoverageProofSources.All)}.",
+            exception.Message);
+    }
+
+    [Fact]
     public void LegacyCoverageRunnerSources_ShouldNotExist()
     {
         var repositoryRoot = Path.GetDirectoryName(FindRepositoryFile("ForgeTrust.AppSurface.slnx"))!;
