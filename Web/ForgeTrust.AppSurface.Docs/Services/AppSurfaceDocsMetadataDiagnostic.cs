@@ -24,4 +24,16 @@ internal sealed record AppSurfaceDocsMetadataDiagnostic(
 /// <param name="Diagnostics">Warnings produced while parsing or normalizing metadata fields.</param>
 internal sealed record MarkdownMetadataParseResult(
     DocMetadata? Metadata,
-    IReadOnlyList<AppSurfaceDocsMetadataDiagnostic> Diagnostics);
+    IReadOnlyList<AppSurfaceDocsMetadataDiagnostic> Diagnostics)
+{
+    /// <summary>
+    /// Gets the strict inline opt-in result for protected Markdown download.
+    /// </summary>
+    /// <remarks>
+    /// This remains internal parsing state. It lets the Markdown harvester reuse the same front-matter split and YAML
+    /// validation already required for rendered metadata instead of reparsing the document solely for raw-source eligibility.
+    /// Sidecar parsing leaves the default <see cref="MarkdownDownloadEligibility.NotDeclared"/> value because sidecars
+    /// cannot grant download access.
+    /// </remarks>
+    public MarkdownDownloadEligibility DownloadEligibility { get; init; } = MarkdownDownloadEligibility.NotDeclared;
+}

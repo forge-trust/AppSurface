@@ -68,6 +68,50 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task EntryPoint_Should_Print_NamedCanaryPoll_Help_Without_Lifecycle_Noise()
+    {
+        var result = await InvokeEntryPointAsync(["canary", "poll", "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Poll a protected named canary", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--marker-env", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--bearer-token-env", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--no-github-summary", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EntryPoint_Should_RenderOneSafeSemanticCanaryFailure_AndExitThree()
+    {
+        const string token = "canary-entrypoint-token-sentinel";
+        using var tokenScope = new EnvironmentVariableScope("APPSURFACE_CANARY_TOKEN", token);
+        var client = new StaticCanaryPollHttpClient(
+            new CanaryPollHttpResponse(
+                HttpStatusCode.ServiceUnavailable,
+                "application/json",
+                Encoding.UTF8.GetBytes("""
+                    {"name":"forwarding.alpha-evidence","ready":false,"status":"stale","reasonCode":"proof-stale"}
+                    """),
+                false,
+                null));
+
+        var result = await InvokeEntryPointAsync(
+            [
+                "canary", "poll",
+                "--url", "https://app.example.test",
+                "--name", "forwarding.alpha-evidence",
+                "--bearer-token-env", "APPSURFACE_CANARY_TOKEN",
+            ],
+            options => RegisterCanaryPollHttpClient(options, client));
+
+        Assert.Equal(3, result.ExitCode);
+        Assert.Contains("ASCAN403", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("stale", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("CliFx", result.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(token, result.AllText);
+    }
+
+    [Fact]
     public async Task SecretsCommand_Should_PrintPlanApplyGuidance()
     {
         var result = await InvokeProgramEntryPointAsync(["secrets"]);
@@ -2971,22 +3015,13 @@ public sealed class ProgramEntryPointTests
     public void AppSurfaceDocsPreviewUrlResolver_Should_Not_Default_When_Endpoint_Environment_Is_Configured()
     {
         using var repository = TempDirectory.Create("appsurface-docs-preview-repo-");
-        var previousValue = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
+        using var urlsScope = new EnvironmentVariableScope("ASPNETCORE_URLS", "http://127.0.0.1:61243");
 
-        try
-        {
-            Environment.SetEnvironmentVariable("ASPNETCORE_URLS", "http://127.0.0.1:61243");
+        var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(
+            ["--environment", "Development"],
+            repository.Path);
 
-            var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(
-                ["--environment", "Development"],
-                repository.Path);
-
-            Assert.Null(defaultUrl);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ASPNETCORE_URLS", previousValue);
-        }
+        Assert.Null(defaultUrl);
     }
 
     [Fact]
@@ -3012,20 +3047,11 @@ public sealed class ProgramEntryPointTests
     public void AppSurfaceDocsPreviewUrlResolver_Should_Ignore_Incomplete_Environment_Probe_Arguments(params string[] args)
     {
         using var repository = TempDirectory.Create("appsurface-docs-preview-repo-");
-        var previousValue = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        using var environmentScope = new EnvironmentVariableScope("ASPNETCORE_ENVIRONMENT", "Development");
 
-        try
-        {
-            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
+        var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(args, repository.Path);
 
-            var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(args, repository.Path);
-
-            Assert.StartsWith("http://localhost:", defaultUrl, StringComparison.Ordinal);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", previousValue);
-        }
+        Assert.StartsWith("http://localhost:", defaultUrl, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3277,6 +3303,11 @@ public sealed class ProgramEntryPointTests
     private static void RegisterGoogleTransferClient(ConsoleOptions options, FakeGoogleSecretTransferClient client)
     {
         options.CustomRegistrations.Add(services => services.AddSingleton<IAppSurfaceGoogleSecretTransferClient>(client));
+    }
+
+    private static void RegisterCanaryPollHttpClient(ConsoleOptions options, ICanaryPollHttpClient client)
+    {
+        options.CustomRegistrations.Add(services => services.AddSingleton(client));
     }
 
     private static void RegisterRunner(ConsoleOptions options, CapturingAppSurfaceDocsExportRunner runner)
@@ -4326,6 +4357,12 @@ public sealed class ProgramEntryPointTests
         public SecretsCommandContext BuildContextForTests() => BuildContext();
 
         public override ValueTask ExecuteAsync(IConsole console) => ValueTask.CompletedTask;
+    }
+
+    private sealed class StaticCanaryPollHttpClient(CanaryPollHttpResponse response) : ICanaryPollHttpClient
+    {
+        public Task<CanaryPollHttpResponse> SendAsync(CanaryPollRequest request, CancellationToken cancellationToken) =>
+            Task.FromResult(response);
     }
 
     private static bool TryCreateFileSymlink(string linkPath, string targetPath)

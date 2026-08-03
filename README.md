@@ -86,7 +86,7 @@ This approach aims to:
 
 - [**ForgeTrust.AppSurface.Durable**](./Durable/ForgeTrust.AppSurface.Durable/README.md) – Source-preview contracts for portable Work, resumable Flow, schedules, payloads, registration, and clients without installing a runtime.
 - [**ForgeTrust.AppSurface.Durable.Provider**](./Durable/ForgeTrust.AppSurface.Durable.Provider/README.md) – Public runtime-provider and operator SPI for claims, bounded activation, health, drain, recovery, and controlled repair.
-- [**ForgeTrust.AppSurface.Durable.PostgreSql**](./Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) – Held PostgreSQL source provider for explicit schema management, atomic Work acceptance, and manually driven recovery; it starts no hosted worker.
+- [**ForgeTrust.AppSurface.Durable.PostgreSql**](./Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) – Held PostgreSQL source provider for explicit schema management, atomic Work acceptance, manually driven Flow persistence, and [Work-first Schedule storage](./Durable/schedule-protocol-v1.md); it starts no hosted worker.
 
 ### [Console](./Console/README.md)
 
@@ -105,7 +105,7 @@ This approach aims to:
 
 ### [CLI](./Cli/ForgeTrust.AppSurface.Cli/README.md)
 
-- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including `appsurface docs` preview/export workflows, `appsurface secrets` local-secret diagnostics, `appsurface coverage run` private test orchestration, `appsurface coverage merge` Cobertura fan-in, and `appsurface coverage gate` local threshold enforcement.
+- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including [`appsurface canary poll`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-canary-poll) bounded read-only deployment proof for protected AppSurface Web named canaries, `appsurface docs` preview/export workflows, `appsurface secrets` local-secret diagnostics, `appsurface coverage run` private test orchestration, `appsurface coverage merge` Cobertura fan-in, and `appsurface coverage gate` local threshold enforcement.
 
 ### [Dependency](./Dependency/README.md)
 

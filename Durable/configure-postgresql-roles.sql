@@ -126,12 +126,42 @@ WHERE namespace.nspname = 'appsurface_durable'
 ORDER BY CASE WHEN object.relkind = 'S' THEN 2 ELSE 1 END, object.relname \gexec
 
 SELECT format(
+    'ALTER FUNCTION %I.%I(%s) OWNER TO %I',
+    namespace.nspname,
+    routine.proname,
+    pg_catalog.pg_get_function_identity_arguments(routine.oid),
+    :'migration_owner_role')
+FROM pg_catalog.pg_proc AS routine
+JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = routine.pronamespace
+WHERE namespace.nspname = 'appsurface_durable'
+  AND routine.prokind = 'f' \gexec
+
+SELECT format(
     'ALTER POLICY flow_dispatch_global_discovery ON appsurface_durable.flow_dispatch TO %I',
     :'dispatcher_role') \gexec
 DROP POLICY IF EXISTS flow_dispatch_runtime_scope_select ON appsurface_durable.flow_dispatch;
 SELECT format(
     'CREATE POLICY flow_dispatch_runtime_scope_select ON appsurface_durable.flow_dispatch FOR SELECT TO %I USING (scope_id = nullif(current_setting(''appsurface_durable.scope_id'', true), ''''))',
     :'runtime_role') \gexec
+SELECT format(
+    'ALTER POLICY schedule_dispatch_global_discovery ON appsurface_durable.schedule_dispatch TO %I, %I',
+    :'dispatcher_role',
+    :'migration_owner_role') \gexec
+SELECT format(
+    'ALTER POLICY schedule_dispatch_global_lease ON appsurface_durable.schedule_dispatch TO %I, %I',
+    :'dispatcher_role',
+    :'migration_owner_role') \gexec
+DROP POLICY IF EXISTS schedule_dispatch_runtime_scope_select ON appsurface_durable.schedule_dispatch;
+SELECT format(
+    'CREATE POLICY schedule_dispatch_runtime_scope_select ON appsurface_durable.schedule_dispatch FOR SELECT TO %I USING (scope_id = nullif(current_setting(''appsurface_durable.scope_id'', true), ''''))',
+    :'runtime_role') \gexec
+DROP POLICY IF EXISTS schedule_dispatch_scope_update ON appsurface_durable.schedule_dispatch;
+SELECT format(
+    'CREATE POLICY schedule_dispatch_scope_update ON appsurface_durable.schedule_dispatch FOR UPDATE TO %I USING (scope_id = nullif(current_setting(''appsurface_durable.scope_id'', true), '''')) WITH CHECK (scope_id = nullif(current_setting(''appsurface_durable.scope_id'', true), ''''))',
+    :'runtime_role') \gexec
+SELECT format('REVOKE ALL ON TABLE appsurface_durable.schedule_dispatch FROM %I', :'dispatcher_role') \gexec
+SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.claim_schedule_dispatch(text, interval) FROM %I', :'dispatcher_role') \gexec
+SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.claim_schedule_dispatch(text, interval) FROM %I', :'runtime_role') \gexec
 
 SELECT NOT EXISTS
 (
@@ -149,17 +179,37 @@ SELECT NOT EXISTS
   SELECT 1 / 0;
 \endif
 
+SELECT NOT EXISTS
+(
+  SELECT 1
+  FROM pg_catalog.pg_proc AS routine
+  JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = routine.pronamespace
+  JOIN pg_catalog.pg_roles AS owner_role ON owner_role.oid = routine.proowner
+  WHERE namespace.nspname = 'appsurface_durable'
+    AND routine.prokind = 'f'
+    AND owner_role.rolname <> :'migration_owner_role'
+) AS durable_functions_owned_by_migration_role \gset
+\if :durable_functions_owned_by_migration_role
+\else
+  \echo 'Every durable function must be owned by the migration owner.'
+  SELECT 1 / 0;
+\endif
+
 SELECT bool_and(
     object.relrowsecurity =
       (object.relname IN
         ('scope', 'scope_history', 'work', 'work_history', 'dispatch', 'work_operator_command', 'effect_permit',
          'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch',
-         'flow_trace_context'))
+         'schedule_definition', 'schedule_generation', 'schedule_command', 'schedule_occurrence', 'schedule_dispatch',
+         'schedule_history', 'flow_trace_context')
+        OR object.relname LIKE 'schedule_history_%')
     AND object.relforcerowsecurity =
       (object.relname IN
         ('scope', 'scope_history', 'work', 'work_history', 'dispatch', 'work_operator_command', 'effect_permit',
          'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch',
-         'flow_trace_context')))
+         'schedule_definition', 'schedule_generation', 'schedule_command', 'schedule_occurrence', 'schedule_dispatch',
+         'schedule_history', 'flow_trace_context')
+        OR object.relname LIKE 'schedule_history_%'))
   AS durable_rls_flags_are_exact
 FROM pg_catalog.pg_class AS object
 JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
@@ -168,6 +218,52 @@ WHERE namespace.nspname = 'appsurface_durable'
 \if :durable_rls_flags_are_exact
 \else
   \echo 'Durable row-level security flags must exactly match the package migration.'
+  SELECT 1 / 0;
+\endif
+
+WITH schedule_history_child AS
+(
+  SELECT child.oid, child.relrowsecurity, child.relforcerowsecurity
+  FROM pg_catalog.pg_inherits AS inheritance
+  JOIN pg_catalog.pg_class AS parent ON parent.oid = inheritance.inhparent
+  JOIN pg_catalog.pg_namespace AS parent_namespace ON parent_namespace.oid = parent.relnamespace
+  JOIN pg_catalog.pg_class AS child ON child.oid = inheritance.inhrelid
+  JOIN pg_catalog.pg_namespace AS child_namespace ON child_namespace.oid = child.relnamespace
+  WHERE parent_namespace.nspname = 'appsurface_durable'
+    AND parent.relname = 'schedule_history'
+    AND child_namespace.nspname = 'appsurface_durable'
+),
+actual_child_policy AS
+(
+  SELECT child.relrowsecurity,
+         child.relforcerowsecurity,
+         policy.polname AS policy_name,
+         policy.polcmd::text AS command_name,
+         policy.polpermissive,
+         policy.polroles,
+         pg_catalog.pg_get_expr(policy.polqual, policy.polrelid) AS using_expression,
+         pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid) AS check_expression
+  FROM schedule_history_child AS child
+  LEFT JOIN pg_catalog.pg_policy AS policy ON policy.polrelid = child.oid
+)
+SELECT NOT EXISTS
+(
+  SELECT 1
+  FROM actual_child_policy
+  WHERE NOT relrowsecurity
+    OR NOT relforcerowsecurity
+    OR policy_name IS DISTINCT FROM 'schedule_history_scope_isolation'
+    OR command_name IS DISTINCT FROM '*'
+    OR NOT polpermissive
+    OR polroles IS DISTINCT FROM ARRAY[0]::oid[]
+    OR using_expression IS DISTINCT FROM
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'
+    OR check_expression IS DISTINCT FROM
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'
+) AS schedule_history_child_policies_are_exact \gset
+\if :schedule_history_child_policies_are_exact
+\else
+  \echo 'Every schedule_history partition must have forced RLS and the exact scope-isolation policy.'
   SELECT 1 / 0;
 \endif
 
@@ -204,6 +300,30 @@ WITH expected_policy(relation_name, policy_name, command_name, using_expression,
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
     ('flow_wait', 'flow_wait_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('schedule_command', 'schedule_command_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('schedule_definition', 'schedule_definition_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('schedule_dispatch', 'schedule_dispatch_global_discovery', 'r', 'true', NULL::text),
+    ('schedule_dispatch', 'schedule_dispatch_global_lease', 'w', 'true', 'true'),
+    ('schedule_dispatch', 'schedule_dispatch_runtime_scope_select', 'r',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))', NULL::text),
+    ('schedule_dispatch', 'schedule_dispatch_scope_insert', 'a', NULL::text,
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('schedule_dispatch', 'schedule_dispatch_scope_update', 'w',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('schedule_generation', 'schedule_generation_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('schedule_history', 'schedule_history_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('schedule_occurrence', 'schedule_occurrence_scope_isolation', '*',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
     ('effect_permit', 'effect_permit_scope_isolation', '*',
@@ -243,6 +363,7 @@ actual_policy AS
   JOIN pg_catalog.pg_class AS object ON object.oid = policy.polrelid
   JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
   WHERE namespace.nspname = 'appsurface_durable'
+    AND object.relname NOT LIKE 'schedule_history_%'
 )
 SELECT NOT EXISTS
 (
@@ -254,13 +375,26 @@ SELECT NOT EXISTS
   WHERE expected.policy_name IS NULL
     OR actual.policy_name IS NULL
     OR NOT actual.polpermissive
-    OR actual.polroles <> CASE
-        WHEN actual.policy_name = 'flow_dispatch_global_discovery' THEN ARRAY[
-            (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'dispatcher_role')]
-        WHEN actual.policy_name = 'flow_dispatch_runtime_scope_select' THEN ARRAY[
-            (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'runtime_role')]
-        ELSE ARRAY[0]::oid[]
-    END
+    OR NOT
+    (
+        CASE
+            WHEN actual.policy_name = 'flow_dispatch_global_discovery' THEN actual.polroles @> ARRAY[
+                (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'dispatcher_role')]
+                AND actual.polroles <@ ARRAY[
+                    (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'dispatcher_role')]
+            WHEN actual.policy_name IN ('schedule_dispatch_global_discovery', 'schedule_dispatch_global_lease') THEN actual.polroles @> ARRAY[
+                (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'dispatcher_role'),
+                (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'migration_owner_role')]
+                AND actual.polroles <@ ARRAY[
+                    (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'dispatcher_role'),
+                    (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'migration_owner_role')]
+            WHEN actual.policy_name IN ('flow_dispatch_runtime_scope_select', 'schedule_dispatch_runtime_scope_select', 'schedule_dispatch_scope_update') THEN actual.polroles @> ARRAY[
+                (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'runtime_role')]
+                AND actual.polroles <@ ARRAY[
+                    (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'runtime_role')]
+            ELSE actual.polroles = ARRAY[0]::oid[]
+        END
+    )
     OR actual.command_name <> expected.command_name
     OR actual.using_expression IS DISTINCT FROM expected.using_expression
     OR actual.check_expression IS DISTINCT FROM expected.check_expression
@@ -328,7 +462,8 @@ SELECT NOT EXISTS
          'store_metadata', 'schema_migration', 'scope', 'work', 'dispatch',
          'work_operator_command', 'effect_permit', 'scope_history', 'work_history',
          'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch',
-         'flow_trace_context'
+         'schedule_definition', 'schedule_generation', 'schedule_command', 'schedule_occurrence', 'schedule_dispatch',
+         'schedule_history', 'flow_trace_context'
        )
        OR privilege.privilege_name = 'INSERT'
        AND relation.relname IN
@@ -336,7 +471,8 @@ SELECT NOT EXISTS
          'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
          'scope_history', 'work_history',
          'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch',
-         'flow_trace_context'
+         'schedule_definition', 'schedule_generation', 'schedule_command', 'schedule_occurrence', 'schedule_dispatch',
+         'schedule_history', 'flow_trace_context'
        )
      )
    )
@@ -394,7 +530,8 @@ SELECT NOT EXISTS
          'store_metadata', 'schema_migration', 'scope', 'work', 'dispatch',
          'work_operator_command', 'effect_permit', 'scope_history', 'work_history',
          'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch',
-         'flow_trace_context'
+         'schedule_definition', 'schedule_generation', 'schedule_command', 'schedule_occurrence', 'schedule_dispatch',
+         'schedule_history', 'flow_trace_context'
        )
        OR privilege.privilege_name = 'INSERT'
        AND column_value.relname IN
@@ -402,7 +539,8 @@ SELECT NOT EXISTS
          'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
          'scope_history', 'work_history',
          'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch',
-         'flow_trace_context'
+         'schedule_definition', 'schedule_generation', 'schedule_command', 'schedule_occurrence', 'schedule_dispatch',
+         'schedule_history', 'flow_trace_context'
        )
        OR privilege.privilege_name = 'UPDATE'
        AND
@@ -444,6 +582,23 @@ SELECT NOT EXISTS
          AND column_value.attname IN ('state', 'resolved_at', 'updated_at', 'trace_context_id')
          OR column_value.relname = 'flow_dispatch'
          AND column_value.attname IN ('due_at', 'state', 'expected_revision', 'updated_at')
+         OR column_value.relname = 'schedule_definition'
+         AND column_value.attname IN
+         (
+           'display_name', 'state', 'active_generation', 'revision', 'accepted_at_utc', 'cursor_utc', 'next_due_utc',
+           'scope_generation', 'runtime_epoch', 'suspension_code', 'updated_at'
+         )
+         OR column_value.relname = 'schedule_occurrence'
+         AND column_value.attname IN
+         (
+           'last_nominal_utc', 'state', 'target_kind', 'target_id', 'target_command_id', 'target_idempotency_key',
+           'claimed_by', 'lease_expires_at', 'updated_at'
+         )
+         OR column_value.relname = 'schedule_dispatch'
+         AND column_value.attname IN
+         (
+           'dispatch_revision', 'due_at', 'state', 'lease_owner', 'lease_generation', 'lease_expires_at', 'updated_at'
+         )
        )
      )
    )
@@ -494,18 +649,58 @@ SELECT NOT EXISTS
   SELECT 1 / 0;
 \endif
 
+WITH service_role(role_name) AS
+(
+  VALUES (:'dispatcher_role'), (:'runtime_role')
+),
+durable_function AS
+(
+  SELECT routine.oid, routine.proname
+  FROM pg_catalog.pg_proc AS routine
+  JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = routine.pronamespace
+  WHERE namespace.nspname = 'appsurface_durable'
+    AND routine.prokind = 'f'
+),
+function_privilege(privilege_name) AS
+(
+  VALUES ('EXECUTE'), ('EXECUTE WITH GRANT OPTION')
+)
+SELECT NOT EXISTS
+(
+  SELECT 1
+  FROM service_role AS service
+  CROSS JOIN durable_function AS routine
+  CROSS JOIN function_privilege AS privilege
+  WHERE pg_catalog.has_function_privilege(
+      service.role_name::pg_catalog.name,
+      routine.oid,
+      privilege.privilege_name)
+    AND NOT
+    (
+      service.role_name = :'dispatcher_role'
+      AND routine.proname = 'claim_schedule_dispatch'
+      AND privilege.privilege_name = 'EXECUTE'
+    )
+) AS service_roles_have_safe_function_privileges \gset
+\if :service_roles_have_safe_function_privileges
+\else
+  \echo 'Dispatcher or scoped runtime role has an effective durable-function privilege outside the package allowlist.'
+  SELECT 1 / 0;
+\endif
+
 SELECT format('GRANT USAGE ON SCHEMA appsurface_durable TO %I', :'dispatcher_role') \gexec
 SELECT format('GRANT SELECT ON appsurface_durable.dispatch TO %I', :'dispatcher_role') \gexec
 SELECT format('GRANT SELECT ON appsurface_durable.flow_dispatch TO %I', :'dispatcher_role') \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION appsurface_durable.claim_schedule_dispatch(text, interval) TO %I', :'dispatcher_role') \gexec
 SELECT format('GRANT USAGE ON SCHEMA appsurface_durable TO %I', :'runtime_role') \gexec
 SELECT format(
     'GRANT SELECT ON appsurface_durable.store_metadata, appsurface_durable.schema_migration TO %I',
     :'runtime_role') \gexec
 SELECT format(
-    'GRANT SELECT, INSERT ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch, appsurface_durable.flow_instance, appsurface_durable.flow_command, appsurface_durable.flow_history, appsurface_durable.flow_wait, appsurface_durable.flow_timer, appsurface_durable.flow_dispatch, appsurface_durable.flow_trace_context TO %I',
+    'GRANT SELECT, INSERT ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch, appsurface_durable.flow_instance, appsurface_durable.flow_command, appsurface_durable.flow_history, appsurface_durable.flow_wait, appsurface_durable.flow_timer, appsurface_durable.flow_dispatch, appsurface_durable.flow_trace_context, appsurface_durable.schedule_definition, appsurface_durable.schedule_generation, appsurface_durable.schedule_command, appsurface_durable.schedule_occurrence, appsurface_durable.schedule_dispatch TO %I',
     :'runtime_role') \gexec
 SELECT format(
-    'REVOKE UPDATE ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch, appsurface_durable.flow_instance, appsurface_durable.flow_command, appsurface_durable.flow_history, appsurface_durable.flow_wait, appsurface_durable.flow_timer, appsurface_durable.flow_dispatch FROM %I',
+    'REVOKE UPDATE ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch, appsurface_durable.flow_instance, appsurface_durable.flow_command, appsurface_durable.flow_history, appsurface_durable.flow_wait, appsurface_durable.flow_timer, appsurface_durable.flow_dispatch, appsurface_durable.schedule_definition, appsurface_durable.schedule_generation, appsurface_durable.schedule_command, appsurface_durable.schedule_occurrence, appsurface_durable.schedule_dispatch FROM %I',
     :'runtime_role') \gexec
 SELECT format(
     'GRANT UPDATE (generation, state, updated_at) ON appsurface_durable.scope TO %I',
@@ -529,6 +724,15 @@ SELECT format(
     'GRANT UPDATE (due_at, state, expected_revision, updated_at) ON appsurface_durable.flow_dispatch TO %I',
     :'runtime_role') \gexec
 SELECT format(
+    'GRANT UPDATE (display_name, state, active_generation, revision, accepted_at_utc, cursor_utc, next_due_utc, scope_generation, runtime_epoch, suspension_code, updated_at) ON appsurface_durable.schedule_definition TO %I',
+    :'runtime_role') \gexec
+SELECT format(
+    'GRANT UPDATE (last_nominal_utc, state, target_kind, target_id, target_command_id, target_idempotency_key, claimed_by, lease_expires_at, updated_at) ON appsurface_durable.schedule_occurrence TO %I',
+    :'runtime_role') \gexec
+SELECT format(
+    'GRANT UPDATE (dispatch_revision, due_at, state, lease_owner, lease_generation, lease_expires_at, updated_at) ON appsurface_durable.schedule_dispatch TO %I',
+    :'runtime_role') \gexec
+SELECT format(
     'GRANT SELECT, INSERT ON appsurface_durable.work_operator_command, appsurface_durable.effect_permit TO %I',
     :'runtime_role') \gexec
 SELECT format(
@@ -539,6 +743,9 @@ SELECT format(
     :'runtime_role') \gexec
 SELECT format(
     'GRANT SELECT, INSERT ON appsurface_durable.scope_history, appsurface_durable.work_history TO %I',
+    :'runtime_role') \gexec
+SELECT format(
+    'GRANT SELECT, INSERT ON appsurface_durable.schedule_history TO %I',
     :'runtime_role') \gexec
 SELECT format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA appsurface_durable TO %I', :'runtime_role') \gexec
 

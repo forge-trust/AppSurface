@@ -82,6 +82,8 @@ internal static class AppSurfaceCliApp
         AddPwaVerifierServices(services);
         services.AddTransient<PwaVerifier>();
         services.AddSingleton(TimeProvider.System);
+        AddCanaryPollingServices(services);
+        services.AddTransient<CanaryPollWorkflow>();
         services.AddTransient<CoverageRunWorkflow>();
         services.AddTransient<CoverageMergeWorkflow>();
         AddExportEngineServices(services);
@@ -161,6 +163,23 @@ internal static class AppSurfaceCliApp
         services
             .AddHttpClient<IPwaVerificationHttpClient, PwaVerificationHttpClient>(
                 client => { client.Timeout = TimeSpan.FromSeconds(30); })
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+    }
+
+    /// <summary>
+    /// Registers the named-canary polling HTTP and delay services.
+    /// </summary>
+    /// <param name="services">The service collection to populate.</param>
+    /// <remarks>
+    /// The polling workflow owns all visible attempt and deadline behavior, so this client disables redirects and has no
+    /// client-level timeout. Each workflow dispatch receives its own linked per-attempt token instead.
+    /// </remarks>
+    internal static void AddCanaryPollingServices(IServiceCollection services)
+    {
+        services.AddSingleton<ICanaryPollDelay, TimeProviderCanaryPollDelay>();
+        services
+            .AddHttpClient<ICanaryPollHttpClient, CanaryPollHttpClient>(
+                client => { client.Timeout = Timeout.InfiniteTimeSpan; })
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
     }
 

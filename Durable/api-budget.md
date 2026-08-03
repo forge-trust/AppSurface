@@ -73,3 +73,12 @@ The existing Flow list continuation-token shape is unchanged. Its validated prev
 characters so the versioned base64url keyset token can carry an exact UTC update key and instance identity without
 truncation. Tokens remain opaque, payload-free, scope-local query inputs and reject unknown versions or malformed
 encodings.
+
+## Slice 5 PostgreSQL Schedule API
+
+Slice 5 adds five public PostgreSQL schedule types:
+- `PostgreSqlDurableScheduleClient : IDurableScheduleClient` handles definition management, lifecycle commands, list pagination, and next-occurrence explanations.
+- `PostgreSqlDurableScheduleOptions` configures the required runtime role, maximum clock advance, and dispatch lease duration.
+- `PostgreSqlDurableScheduleProcessRequest` specifies the lease owner and maximum schedules per pass.
+- `PostgreSqlDurableScheduleProcessResult` reports claimed schedules, recorded occurrences, materialized Work targets, and suspended schedules.
+- `PostgreSqlDurableScheduleProcessor` drives manual, bounded evaluation passes using separate dispatcher and runtime data sources.

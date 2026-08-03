@@ -41,6 +41,47 @@ public sealed class AppSurfaceCliAppTests
     }
 
     [Fact]
+    public async Task AddCanaryPollingServices_Should_Disable_Automatic_Redirects_For_Canary_Client()
+    {
+        var services = new ServiceCollection();
+
+        AppSurfaceCliApp.AddCanaryPollingServices(services);
+
+        using var provider = services.BuildServiceProvider();
+        using var redirectListener = new TcpListener(IPAddress.Loopback, port: 0);
+        using var targetListener = new TcpListener(IPAddress.Loopback, port: 0);
+        redirectListener.Start();
+        targetListener.Start();
+        var redirectPort = ((IPEndPoint)redirectListener.LocalEndpoint).Port;
+        var targetPort = ((IPEndPoint)targetListener.LocalEndpoint).Port;
+        var targetUrl = $"http://127.0.0.1:{targetPort}/target";
+        var redirectTask = ServeRedirectAsync(redirectListener, targetUrl);
+        var targetRequestTask = AcceptRequestWithinAsync(targetListener, TimeSpan.FromMilliseconds(250));
+        using var configuredClient = provider.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(ICanaryPollHttpClient));
+        var request = new CanaryPollRequest(
+            new Uri($"http://127.0.0.1:{redirectPort}/_appsurface/canaries/forwarding.alpha-evidence"),
+            "forwarding.alpha-evidence",
+            null,
+            null,
+            null,
+            [],
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromSeconds(5),
+            3);
+
+        var client = provider.GetRequiredService<ICanaryPollHttpClient>();
+        var response = await client.SendAsync(request, CancellationToken.None);
+
+        Assert.Equal(Timeout.InfiniteTimeSpan, configuredClient.Timeout);
+        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        Assert.False(await targetRequestTask);
+
+        redirectListener.Stop();
+        targetListener.Stop();
+        await redirectTask;
+    }
+
+    [Fact]
     public async Task AddExportEngineServices_Should_Disable_Automatic_Redirects_For_ExportEngine_Client()
     {
         var services = new ServiceCollection();

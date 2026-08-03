@@ -376,7 +376,7 @@ public sealed class PostgreSqlDurableWorkStoreTests
             (
                 Mutation: """
                     UPDATE appsurface_durable.store_metadata
-                    SET schema_version = 4,
+                    SET schema_version = 5,
                         minimum_reader_version = 1,
                         maximum_reader_version = 1,
                         minimum_writer_version = 1,

@@ -16,6 +16,7 @@ using Ganss.Xss;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.Controllers;
@@ -5852,6 +5853,181 @@ public class DocsControllerTests : IDisposable
 
         Assert.False(result.IsAllowed);
         Assert.Equal(SearchIndexRefreshAuthorizationFailure.MissingPolicyProvider, result.Reason);
+    }
+
+    [Fact]
+    public async Task DownloadMarkdown_ShouldReturnTheSnapshotBytesForAnExactCanonicalRawTarget()
+    {
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_MarkdownDownload",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repositoryRoot);
+        try
+        {
+            var sourceBytes = Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# Guide\n");
+            await File.WriteAllBytesAsync(TestPathUtils.PathUnder(repositoryRoot, "Guide.md"), sourceBytes);
+            var options = new AppSurfaceDocsOptions
+            {
+                Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = repositoryRoot },
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader"
+                }
+            };
+            var (controller, cache, memo) = CreateController(
+                options,
+                [new MarkdownHarvester(NullLogger<MarkdownHarvester>.Instance, File.ReadAllTextAsync, options)]);
+            using (cache)
+            using (memo)
+            {
+                var httpContext = new DefaultHttpContext();
+                httpContext.Request.PathBase = "/tenant";
+                httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget = "/tenant/docs/_markdown/guide?ingest=second-brain";
+                controller.ControllerContext = CreateControllerContext(httpContext);
+
+                var result = await controller.DownloadMarkdown("guide");
+
+                var file = Assert.IsType<FileContentResult>(result);
+                Assert.Equal(sourceBytes, file.FileContents);
+                Assert.Equal("text/markdown; charset=utf-8", file.ContentType);
+                Assert.Equal("guide.md", file.FileDownloadName);
+                Assert.Equal("private, no-store", controller.Response.Headers.CacheControl.ToString());
+
+                httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget =
+                    "https://docs.example/tenant/docs/_markdown/guide?ingest=second-brain";
+
+                var absoluteFormResult = await controller.DownloadMarkdown("guide");
+
+                Assert.Equal(sourceBytes, Assert.IsType<FileContentResult>(absoluteFormResult).FileContents);
+
+                httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget = "/tenant/docs/_markdown/GUIDE";
+
+                var tamperedResult = await controller.DownloadMarkdown("guide");
+
+                Assert.IsType<NotFoundResult>(tamperedResult);
+
+                httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget =
+                    "https://docs.example/tenant/docs/_markdown/gu%69de";
+
+                var encodedAlternateResult = await controller.DownloadMarkdown("guide");
+
+                Assert.IsType<NotFoundResult>(encodedAlternateResult);
+            }
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Details_ShouldExposeMarkdownDownload_WhenCanonicalPageHasEligibleSource()
+    {
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_MarkdownDownload",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repositoryRoot);
+        try
+        {
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(repositoryRoot, "Guide.md"),
+                "---\ndownload_markdown: true\n---\n# Guide\n");
+            var options = new AppSurfaceDocsOptions
+            {
+                Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = repositoryRoot },
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader"
+                }
+            };
+            var (controller, cache, memo) = CreateController(
+                options,
+                [new MarkdownHarvester(NullLogger<MarkdownHarvester>.Instance, File.ReadAllTextAsync, options)]);
+            using (cache)
+            using (memo)
+            {
+                var result = await controller.Details("guide");
+
+                var view = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<DocDetailsViewModel>(view.Model);
+                Assert.True(model.CanDownloadMarkdown);
+                Assert.Equal("/docs/_markdown/guide", model.MarkdownDownloadUrl);
+            }
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadMarkdown_ShouldFailClosedForMissingSourcesAndInvalidRequests()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+            {
+                Enabled = true,
+                AuthorizationPolicy = "DocsReader"
+            }
+        };
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Guide", "Guide.md", "<p>Guide</p>")]);
+        var (controller, cache, memo) = CreateController(options, harvester);
+        using (cache)
+        using (memo)
+        {
+            var httpContext = new DefaultHttpContext();
+            httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget = "/docs/_markdown/guide";
+            controller.ControllerContext = CreateControllerContext(httpContext);
+
+            Assert.IsType<NotFoundResult>(await controller.DownloadMarkdown("guide"));
+            Assert.IsType<NotFoundResult>(await controller.DownloadMarkdown(" "));
+            Assert.IsType<NotFoundResult>(await controller.DownloadMarkdown("Guide.md"));
+            Assert.IsType<NotFoundResult>(await controller.DownloadMarkdown("guides/../guide"));
+
+            httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget = string.Empty;
+
+            Assert.IsType<NotFoundResult>(await controller.DownloadMarkdown("guide"));
+
+            options.MarkdownDownload.Enabled = false;
+            httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget = "/docs/_markdown/guide";
+
+            Assert.IsType<NotFoundResult>(await controller.DownloadMarkdown("guide"));
+        }
+    }
+
+    [Theory]
+    [InlineData("aA1._-!", "aA1._.md")]
+    [InlineData("safe!name", "safe-name.md")]
+    [InlineData("", "document.md")]
+    [InlineData("CON", "document.md")]
+    [InlineData("PRN", "document.md")]
+    [InlineData("AUX", "document.md")]
+    [InlineData("NUL", "document.md")]
+    [InlineData("COM1", "document.md")]
+    [InlineData("COM9", "document.md")]
+    [InlineData("LPT1", "document.md")]
+    [InlineData("LPT9", "document.md")]
+    [InlineData("COM0", "COM0.md")]
+    public void BuildMarkdownDownloadFileName_ShouldSanitizeUnsafeAndDeviceNames(string canonicalPath, string expectedFileName)
+    {
+        var fileName = DocsController.BuildMarkdownDownloadFileName(canonicalPath);
+
+        Assert.Equal(expectedFileName, fileName);
+    }
+
+    [Fact]
+    public void BuildMarkdownDownloadFileName_ShouldTruncateLongNames()
+    {
+        var fileName = DocsController.BuildMarkdownDownloadFileName(new string('a', 117));
+
+        Assert.Equal(new string('a', 116) + ".md", fileName);
     }
 
     public void Dispose()
