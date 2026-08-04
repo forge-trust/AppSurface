@@ -57,6 +57,27 @@ public sealed class MacOsV2CompatibilityLocalSecretStoreTests
     }
 
     [Fact]
+    public void Get_Should_ReturnLegacyLockedStatus_WhenV2IsMissing()
+    {
+        var legacy = new FixedGetStore(
+            AppSurfaceLocalSecretResult.NotFound(
+                LocalSecretResultStatus.Locked,
+                new AppSurfaceLocalSecretDiagnostic(
+                    "local-secret-store-locked",
+                    "Legacy Keychain is locked.",
+                    "The retained v1 value cannot be read.",
+                    "Unlock Keychain and retry.",
+                    "local-secrets-macos-migration"),
+                "legacy"));
+        var store = CreateStore(legacy, new FakeSecItemInterop());
+
+        var result = store.Get(Identity("Stripe:ApiKey"));
+
+        Assert.Equal(LocalSecretResultStatus.Locked, result.Status);
+        Assert.Equal("local-secret-store-locked", result.Diagnostic?.Code);
+    }
+
+    [Fact]
     public void Set_Should_UpdateAnExistingV2ValueAndKeepItIndexed()
     {
         var interop = new FakeSecItemInterop();
@@ -71,6 +92,32 @@ public sealed class MacOsV2CompatibilityLocalSecretStoreTests
         Assert.Single(interop.Updates);
         Assert.Equal("sentinel-second", get.Value);
         Assert.Equal(["Stripe:ApiKey"], store.List("MyApp", "Development", null).Keys);
+    }
+
+    [Fact]
+    public void Set_Should_NotWriteTheIndex_WhenV2WriteFails()
+    {
+        var interop = new FakeSecItemInterop { NextAddStatus = -1 };
+        var store = CreateStore(new InMemoryAppSurfaceLocalSecretStore(), interop);
+
+        var result = store.Set(Identity("Stripe:ApiKey"), "sentinel-v2-value");
+
+        Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
+        Assert.DoesNotContain(interop.Adds, query => query.Account == "__appsurface_index__");
+        ValueSafeAssert.DoesNotExpose("sentinel-v2-value", result.ToString());
+    }
+
+    [Fact]
+    public void Set_Should_NotWriteTheIndex_WhenFreshV2ReadFails()
+    {
+        var interop = new FakeSecItemInterop { ReadStatus = -1 };
+        var store = CreateStore(new InMemoryAppSurfaceLocalSecretStore(), interop);
+
+        var result = store.Set(Identity("Stripe:ApiKey"), "sentinel-v2-value");
+
+        Assert.Equal(LocalSecretResultStatus.Unavailable, result.Status);
+        Assert.DoesNotContain(interop.Adds, query => query.Account == "__appsurface_index__");
+        ValueSafeAssert.DoesNotExpose("sentinel-v2-value", result.ToString());
     }
 
     [Fact]
@@ -91,6 +138,24 @@ public sealed class MacOsV2CompatibilityLocalSecretStoreTests
         Assert.Equal(["Legacy:Only", "V2:Only"], listed.Keys);
         Assert.Equal(LocalSecretResultStatus.Found, deleted.Status);
         Assert.Equal(LocalSecretResultStatus.Missing, store.Get(v2Only).Status);
+    }
+
+    [Fact]
+    public void List_Should_PruneAStaleV2IndexEntry()
+    {
+        var interop = new FakeSecItemInterop();
+        interop.Seed(
+            new PlatformAppSurfaceLocalSecretStore.MacOsSecItemQuery(
+                "AppSurface.LocalSecrets.v2.MyApp.Development",
+                "__appsurface_index__"),
+            "[\"Stale:Key\"]");
+        var store = CreateStore(new InMemoryAppSurfaceLocalSecretStore(), interop);
+
+        var result = store.List("MyApp", "Development", null);
+
+        Assert.Equal(LocalSecretResultStatus.Found, result.Status);
+        Assert.Empty(result.Keys);
+        Assert.Contains(interop.Updates, query => query.Account == "__appsurface_index__");
     }
 
     [Theory]
@@ -167,6 +232,25 @@ public sealed class MacOsV2CompatibilityLocalSecretStoreTests
         Assert.Equal("sentinel-v2-current", result.Value);
     }
 
+    [Fact]
+    public void Migrate_Should_ReportAValueSafeFailedRow_WhenV2CannotBeRead()
+    {
+        var legacy = new InMemoryAppSurfaceLocalSecretStore();
+        var interop = new FakeSecItemInterop { ReadStatus = -1 };
+        var store = CreateStore(legacy, interop);
+        var identity = Identity("Stripe:ApiKey");
+        legacy.Set(identity, "sentinel-legacy-value");
+
+        var result = store.Migrate("MyApp", "Development", null);
+
+        var row = Assert.Single(result.Rows);
+        Assert.Equal(LocalSecretResultStatus.Found, result.Status);
+        Assert.Equal("Failed", row.Action);
+        Assert.Equal(LocalSecretResultStatus.Unavailable, row.Status);
+        Assert.Equal(1, result.Failed);
+        ValueSafeAssert.DoesNotExpose("sentinel-legacy-value", System.Text.Json.JsonSerializer.Serialize(result));
+    }
+
     private PlatformAppSurfaceLocalSecretStore.MacOsV2CompatibilityLocalSecretStore CreateStore(
         IAppSurfaceLocalSecretStore legacy,
         FakeSecItemInterop interop) =>
@@ -188,6 +272,9 @@ public sealed class MacOsV2CompatibilityLocalSecretStoreTests
         public int? ReadStatus { get; set; }
 
         public int? NextAddStatus { get; set; }
+
+        public void Seed(PlatformAppSurfaceLocalSecretStore.MacOsSecItemQuery query, string value) =>
+            _values[Key(query)] = Encoding.UTF8.GetBytes(value);
 
         public PlatformAppSurfaceLocalSecretStore.MacOsSecItemReadResult Read(PlatformAppSurfaceLocalSecretStore.MacOsSecItemQuery query)
         {
@@ -233,5 +320,23 @@ public sealed class MacOsV2CompatibilityLocalSecretStoreTests
 
         private static string Key(PlatformAppSurfaceLocalSecretStore.MacOsSecItemQuery query) =>
             string.Concat(query.Service, "\0", query.Account);
+    }
+
+    private sealed class FixedGetStore(AppSurfaceLocalSecretResult result) : IAppSurfaceLocalSecretStore
+    {
+        public string Name => "fixed-legacy-store";
+
+        public AppSurfaceLocalSecretResult Get(AppSurfaceLocalSecretIdentity identity) => result;
+
+        public AppSurfaceLocalSecretResult Set(AppSurfaceLocalSecretIdentity identity, string value) =>
+            AppSurfaceLocalSecretResult.Missing(Name);
+
+        public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity) =>
+            AppSurfaceLocalSecretResult.Missing(Name);
+
+        public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix) =>
+            AppSurfaceLocalSecretListResult.Failed(result.Status, result.Diagnostic!, Name);
+
+        public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) => result;
     }
 }
