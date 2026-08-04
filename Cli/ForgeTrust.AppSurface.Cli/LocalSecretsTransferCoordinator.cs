@@ -17,6 +17,7 @@ internal sealed class LocalSecretsTransferCoordinator
     private const int JournalVersion = 1;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly string _stateRoot;
+    private readonly LocalSecretsTransferCoordinatorTestHooks? _testHooks;
 
     /// <summary>Initializes a coordinator using the default per-user AppSurface state root.</summary>
     public LocalSecretsTransferCoordinator()
@@ -26,9 +27,16 @@ internal sealed class LocalSecretsTransferCoordinator
 
     /// <summary>Initializes a coordinator with an explicit state root for deterministic tests.</summary>
     internal LocalSecretsTransferCoordinator(string stateRoot)
+        : this(stateRoot, null)
+    {
+    }
+
+    /// <summary>Initializes a coordinator with deterministic failure hooks for tests.</summary>
+    internal LocalSecretsTransferCoordinator(string stateRoot, LocalSecretsTransferCoordinatorTestHooks? testHooks)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(stateRoot);
         _stateRoot = Path.GetFullPath(stateRoot);
+        _testHooks = testHooks;
     }
 
     /// <summary>Gets whether the CLI can coordinate the supplied built-in store in v2.</summary>
@@ -334,6 +342,7 @@ internal sealed class LocalSecretsTransferCoordinator
             {
                 try
                 {
+                    _testHooks?.BeforeDeleteJournal?.Invoke(lease!.JournalPath);
                     File.Delete(lease!.JournalPath);
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -351,7 +360,7 @@ internal sealed class LocalSecretsTransferCoordinator
         }
     }
 
-    private static bool MatchesCurrentPrecondition(
+    private bool MatchesCurrentPrecondition(
         SecretPromotionPlanRow row,
         AppSurfaceLocalSecretIdentity identity,
         IAppSurfaceLocalSecretStore store,
@@ -385,8 +394,9 @@ internal sealed class LocalSecretsTransferCoordinator
         string.Equals(journal.OperationId, row.LocalAttestationOperationId, StringComparison.Ordinal) &&
         string.Equals(journal.LocalStorageName, row.LocalStorageName, StringComparison.Ordinal);
 
-    private static AppSurfaceLocalSecretResult Probe(IAppSurfaceLocalSecretStore store, AppSurfaceLocalSecretIdentity identity) =>
-        store is IAppSurfaceLocalSecretMetadataStore metadataStore
+    private AppSurfaceLocalSecretResult Probe(IAppSurfaceLocalSecretStore store, AppSurfaceLocalSecretIdentity identity) =>
+        _testHooks?.StoreProbe?.Invoke(store, identity) ??
+        (store is IAppSurfaceLocalSecretMetadataStore metadataStore
             ? metadataStore.Probe(identity)
             : AppSurfaceLocalSecretResult.NotFound(
                 LocalSecretResultStatus.ProviderFailed,
@@ -396,13 +406,13 @@ internal sealed class LocalSecretsTransferCoordinator
                     "The selected local secret store cannot prove target presence without reading a value.",
                     "Use a built-in LocalSecrets store for remote-to-local transfer.",
                     "local-secrets-without-a-remote-vault"),
-                store.Name);
+                store.Name));
 
-    private static AppSurfaceLocalSecretResult Get(IAppSurfaceLocalSecretStore store, AppSurfaceLocalSecretIdentity identity)
+    private AppSurfaceLocalSecretResult Get(IAppSurfaceLocalSecretStore store, AppSurfaceLocalSecretIdentity identity)
     {
         try
         {
-            return store.Get(identity);
+            return _testHooks?.StoreGet?.Invoke(store, identity) ?? store.Get(identity);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
         {
@@ -419,11 +429,11 @@ internal sealed class LocalSecretsTransferCoordinator
         }
     }
 
-    private static AppSurfaceLocalSecretResult Set(IAppSurfaceLocalSecretStore store, AppSurfaceLocalSecretIdentity identity, string value)
+    private AppSurfaceLocalSecretResult Set(IAppSurfaceLocalSecretStore store, AppSurfaceLocalSecretIdentity identity, string value)
     {
         try
         {
-            return store.Set(identity, value);
+            return _testHooks?.StoreSet?.Invoke(store, identity, value) ?? store.Set(identity, value);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
         {
@@ -460,7 +470,8 @@ internal sealed class LocalSecretsTransferCoordinator
 
     private bool TryEnsureStoreReady(IAppSurfaceLocalSecretStore store, AppSurfaceLocalSecretIdentity identity, out LocalCoordinatorFailure? failure)
     {
-        var doctor = store.Doctor(identity.ApplicationName, identity.Environment, identity.KeyPrefix);
+        var doctor = _testHooks?.StoreDoctor?.Invoke(store, identity) ??
+            store.Doctor(identity.ApplicationName, identity.Environment, identity.KeyPrefix);
         if (doctor.Status is LocalSecretResultStatus.Found or LocalSecretResultStatus.Missing)
         {
             failure = null;
@@ -484,6 +495,7 @@ internal sealed class LocalSecretsTransferCoordinator
         var journalPath = Path.Join(_stateRoot, $"{hash}.json");
         try
         {
+            _testHooks?.BeforeAcquireLock?.Invoke(lockPath);
             var stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             TrySetPrivateFileMode(lockPath);
             lease = new LocalCoordinatorLease(stream, journalPath, _stateRoot);
@@ -512,6 +524,7 @@ internal sealed class LocalSecretsTransferCoordinator
     {
         try
         {
+            _testHooks?.BeforeEnsureStateRoot?.Invoke(_stateRoot);
             var existed = Directory.Exists(_stateRoot);
             Directory.CreateDirectory(_stateRoot);
             var attributes = File.GetAttributes(_stateRoot);
@@ -579,6 +592,7 @@ internal sealed class LocalSecretsTransferCoordinator
 
         try
         {
+            _testHooks?.BeforeReadJournal?.Invoke(lease.JournalPath);
             if ((File.GetAttributes(lease.JournalPath) & FileAttributes.ReparsePoint) != 0)
             {
                 failure = new LocalCoordinatorFailure(
@@ -617,6 +631,7 @@ internal sealed class LocalSecretsTransferCoordinator
         try
         {
             File.WriteAllText(temporaryPath, JsonSerializer.Serialize(journal, JsonOptions));
+            _testHooks?.AfterWriteTemporaryJournal?.Invoke(temporaryPath);
             TrySetPrivateFileMode(temporaryPath);
             File.Move(temporaryPath, lease.JournalPath, overwrite: true);
             failure = null;
@@ -626,6 +641,7 @@ internal sealed class LocalSecretsTransferCoordinator
         {
             try
             {
+                _testHooks?.BeforeDeleteTemporaryJournal?.Invoke(temporaryPath);
                 File.Delete(temporaryPath);
             }
             catch (Exception cleanupException) when (cleanupException is IOException or UnauthorizedAccessException)
@@ -683,6 +699,40 @@ internal sealed class LocalSecretsTransferCoordinator
 
         public void Dispose() => stream.Dispose();
     }
+}
+
+/// <summary>Provides deterministic coordinator failure injection for internal tests.</summary>
+internal sealed class LocalSecretsTransferCoordinatorTestHooks
+{
+    /// <summary>Runs immediately before the coordinator verifies or creates its state directory.</summary>
+    public Action<string>? BeforeEnsureStateRoot { get; init; }
+
+    /// <summary>Runs immediately before the coordinator opens a per-secret transfer lock.</summary>
+    public Action<string>? BeforeAcquireLock { get; init; }
+
+    /// <summary>Runs immediately before the coordinator reads an existing transfer journal.</summary>
+    public Action<string>? BeforeReadJournal { get; init; }
+
+    /// <summary>Runs after a temporary journal has been written and before it is secured and committed.</summary>
+    public Action<string>? AfterWriteTemporaryJournal { get; init; }
+
+    /// <summary>Runs immediately before cleanup deletes an uncommitted temporary journal.</summary>
+    public Action<string>? BeforeDeleteTemporaryJournal { get; init; }
+
+    /// <summary>Runs immediately before an attestation journal is removed for an ordinary mutation.</summary>
+    public Action<string>? BeforeDeleteJournal { get; init; }
+
+    /// <summary>Supplies the LocalSecrets doctor result instead of calling the store.</summary>
+    public Func<IAppSurfaceLocalSecretStore, AppSurfaceLocalSecretIdentity, AppSurfaceLocalSecretResult>? StoreDoctor { get; init; }
+
+    /// <summary>Supplies the LocalSecrets metadata probe result instead of calling the store.</summary>
+    public Func<IAppSurfaceLocalSecretStore, AppSurfaceLocalSecretIdentity, AppSurfaceLocalSecretResult>? StoreProbe { get; init; }
+
+    /// <summary>Supplies the LocalSecrets recovery read result instead of calling the store.</summary>
+    public Func<IAppSurfaceLocalSecretStore, AppSurfaceLocalSecretIdentity, AppSurfaceLocalSecretResult>? StoreGet { get; init; }
+
+    /// <summary>Supplies the LocalSecrets write result instead of calling the store.</summary>
+    public Func<IAppSurfaceLocalSecretStore, AppSurfaceLocalSecretIdentity, string, AppSurfaceLocalSecretResult>? StoreSet { get; init; }
 }
 
 /// <summary>Describes the captured local precondition without exposing local values.</summary>
