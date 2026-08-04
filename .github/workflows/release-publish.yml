@@ -40,6 +40,7 @@ jobs:
     outputs:
       version: ${{ steps.release.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
+      base_ref: ${{ steps.base.outputs.base_ref }}
       tag_commit: ${{ steps.release.outputs.tag_commit }}
       notes_file: ${{ steps.release.outputs.notes_file }}
       prerelease: ${{ steps.release.outputs.prerelease }}
@@ -57,21 +58,37 @@ jobs:
           dotnet-version: |
             10.0.x
 
-      - name: Fetch release tag and base
+      - name: Normalize release base ref
+        id: base
         env:
-          TAG: ${{ inputs.tag }}
           BASE_REF: ${{ inputs.base-ref }}
         run: |
           set -euo pipefail
+          base_ref="${BASE_REF#"${BASE_REF%%[![:space:]]*}"}"
+          base_ref="${base_ref%"${base_ref##*[![:space:]]}"}"
+          case "${base_ref}" in
+            "") base_ref="main" ;;
+            origin/*) base_ref="${base_ref#origin/}" ;;
+            refs/heads/*) base_ref="${base_ref#refs/heads/}" ;;
+            refs/remotes/origin/*) base_ref="${base_ref#refs/remotes/origin/}" ;;
+          esac
+          echo "base_ref=${base_ref}" >> "${GITHUB_OUTPUT}"
+
+      - name: Fetch release tag and base
+        env:
+          TAG: ${{ inputs.tag }}
+          BASE_REF: ${{ steps.base.outputs.base_ref }}
+        run: |
+          set -euo pipefail
           git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
-          git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          git fetch origin -- "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
 
       - name: Validate tag-bound release evidence
         id: release
         env:
           VERSION: ${{ inputs.version }}
           TAG: ${{ inputs.tag }}
-          BASE_REF: ${{ inputs.base-ref }}
+          BASE_REF: ${{ steps.base.outputs.base_ref }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -120,11 +137,11 @@ jobs:
         env:
           VERSION: ${{ needs.validate-release.outputs.version }}
           TAG: ${{ needs.validate-release.outputs.tag }}
-          BASE_REF: ${{ inputs.base-ref }}
+          BASE_REF: ${{ needs.validate-release.outputs.base_ref }}
         run: |
           set -euo pipefail
           git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
-          git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          git fetch origin -- "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           projection="${RUNNER_TEMP}/appsurface-tagged-release-sidecar.yml"
           inspect_proof="${RUNNER_TEMP}/appsurface-tagged-release-inspect.txt"
           ./eng/release inspect \
@@ -139,7 +156,7 @@ jobs:
         env:
           VERSION: ${{ needs.validate-release.outputs.version }}
           EXISTING_PAGES_ROOT: ${{ runner.temp }}/appsurface-existing-pages
-          AppSurfaceDocs__Contributor__DefaultBranch: ${{ inputs.base-ref }}
+          AppSurfaceDocs__Contributor__DefaultBranch: ${{ needs.validate-release.outputs.base_ref }}
           AppSurfaceDocs__Contributor__SourceRef: ${{ needs.validate-release.outputs.tag_commit }}
           AppSurfaceDocs__Contributor__SourceUrlTemplate: https://github.com/${{ github.repository }}/blob/{branch}/{path}
           AppSurfaceDocs__Contributor__SymbolSourceUrlTemplate: https://github.com/${{ github.repository }}/blob/{ref}/{path}#L{line}

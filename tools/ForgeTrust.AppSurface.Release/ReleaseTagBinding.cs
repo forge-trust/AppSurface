@@ -30,6 +30,11 @@ internal sealed record ReleaseTagBinding(
     ];
 
     /// <summary>
+    /// Gets the number of canonical trailers required to bind a tagged release.
+    /// </summary>
+    internal static int RequiredKeyCount => RequiredKeys.Length;
+
+    /// <summary>
     /// Renders the exact trailing message block accepted by the resolver.
     /// </summary>
     /// <returns>Canonical four-line trailer block with a trailing newline.</returns>

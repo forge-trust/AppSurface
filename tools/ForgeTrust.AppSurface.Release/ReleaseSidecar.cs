@@ -138,6 +138,11 @@ internal sealed class ReleaseSidecar
     internal void EnsurePrepared(SemVer version, string source)
     {
         var release = GetMapping(_metadata, "release");
+        if (release is null)
+        {
+            throw LegacyTagBindingUnsupported(source);
+        }
+
         var schema = GetString(release, "schema");
         if (!string.Equals(schema, "appsurface-release-sidecar-v1", StringComparison.Ordinal))
         {
@@ -152,12 +157,7 @@ internal sealed class ReleaseSidecar
         var state = GetString(release, "state");
         if (state is null)
         {
-            throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                "release-legacy-tag-binding-unsupported",
-                "The release sidecar predates the prepared-to-tagged binding contract.",
-                $"The sidecar from {source} does not declare release.state.",
-                "Use the existing historical archive path for this tag. New inspect and publish operations require a release prepared after the binding contract was introduced.",
-                "tools/ForgeTrust.AppSurface.Release/README.md#prepared-to-tagged-state"));
+            throw LegacyTagBindingUnsupported(source);
         }
 
         if (!string.Equals(state, "prepared", StringComparison.Ordinal))
@@ -211,11 +211,16 @@ internal sealed class ReleaseSidecar
     /// <param name="taggerTimestamp">Timestamp recorded in the annotated tag object.</param>
     /// <param name="source">Human-readable source identifier used for prepared-state validation.</param>
     /// <returns>Rendered tagged sidecar YAML. The caller owns any temporary output path.</returns>
+    /// <remarks>
+    /// This method mutates and consumes the loaded metadata. After projection, the instance declares <c>release.state: tagged</c>
+    /// and final trust wording, so it no longer passes <see cref="EnsurePrepared"/>. Parse a fresh <see cref="ReleaseSidecar"/>
+    /// for each projection.
+    /// </remarks>
     internal string ToTaggedProjection(SemVer version, DateTimeOffset taggerTimestamp, string source)
     {
         EnsurePrepared(version, source);
         var taggedAtUtc = taggerTimestamp.ToUniversalTime();
-        _metadata["release"] = new Dictionary<string, object?>
+        _metadata["release"] = new Dictionary<object, object?>
         {
             ["schema"] = "appsurface-release-sidecar-v1",
             ["state"] = "tagged",
@@ -225,7 +230,7 @@ internal sealed class ReleaseSidecar
         _metadata["summary"] = $"Coordinated AppSurface release {version}, verified against annotated tag {version.TagName}.";
         _metadata["order"] = 10;
         _metadata["breadcrumbs"] = new[] { "Releases", $"v{version}" };
-        _metadata["trust"] = new Dictionary<string, object?>
+        _metadata["trust"] = new Dictionary<object, object?>
         {
             ["status"] = "Tagged",
             ["summary"] = $"This page is the final narrative release note for AppSurface {version}.",
@@ -291,6 +296,16 @@ internal sealed class ReleaseSidecar
     private static Dictionary<object, object?>? GetMapping(object? mapping, string key)
     {
         return GetValue(mapping, key) as Dictionary<object, object?>;
+    }
+
+    private static ReleaseToolException LegacyTagBindingUnsupported(string source)
+    {
+        return new ReleaseToolException(ReleaseDiagnostic.Error(
+            "release-legacy-tag-binding-unsupported",
+            "The release sidecar predates the prepared-to-tagged binding contract.",
+            $"The sidecar from {source} does not declare release.state.",
+            "Use the existing historical archive path for this tag. New inspect and publish operations require a release prepared after the binding contract was introduced.",
+            "tools/ForgeTrust.AppSurface.Release/README.md#prepared-to-tagged-state"));
     }
 
     private static string? GetString(Dictionary<object, object?>? mapping, string key)

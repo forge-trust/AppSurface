@@ -711,7 +711,7 @@ public sealed class ReleaseToolTests : IDisposable
             CreateSuccessfulPublishRunner());
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("release.binding: 4/4 verified", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains($"release.binding: {ReleaseTagBinding.RequiredKeyCount}/{ReleaseTagBinding.RequiredKeyCount} verified", result.Stdout, StringComparison.Ordinal);
         var projection = await File.ReadAllTextAsync(output);
         Assert.Contains("state: tagged", projection, StringComparison.Ordinal);
         Assert.Contains("status: Tagged", projection, StringComparison.Ordinal);
@@ -813,13 +813,46 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public void InspectOutputOnlyExemptsTheMacOsTemporaryDirectoryAlias()
+    {
+        Assert.Equal(
+            OperatingSystem.IsMacOS(),
+            ReleaseInspectCommand.IsMacOsTemporaryDirectory(new DirectoryInfo("/tmp")));
+        Assert.Equal(
+            OperatingSystem.IsMacOS(),
+            ReleaseInspectCommand.IsMacOsTemporaryDirectory(new DirectoryInfo("/var")));
+        Assert.False(ReleaseInspectCommand.IsMacOsTemporaryDirectory(new DirectoryInfo("/tagged-release-link")));
+    }
+
+    [Fact]
+    public void InspectOutputAcceptsMissingPathsAndRejectsUninspectablePaths()
+    {
+        Assert.False(ReleaseInspectCommand.IsReparsePoint("missing-file", _ => throw new FileNotFoundException()));
+        Assert.False(ReleaseInspectCommand.IsReparsePoint("missing-directory", _ => throw new DirectoryNotFoundException()));
+        Assert.True(ReleaseInspectCommand.IsReparsePoint("reparse-point", _ => FileAttributes.ReparsePoint));
+
+        foreach (var createException in new Func<Exception>[]
+        {
+            () => new IOException("I/O failure"),
+            () => new UnauthorizedAccessException("Access denied"),
+            () => new NotSupportedException("Unsupported")
+        })
+        {
+            var error = Assert.Throws<ReleaseToolException>(() =>
+                ReleaseInspectCommand.IsReparsePoint("uninspectable", _ => throw createException()));
+
+            Assert.Equal("release-inspect-output-path-invalid", error.Diagnostic.Code);
+        }
+    }
+
+    [Fact]
     public void PreparedSidecarValidationAcceptsEmptyYamlDocument()
     {
         var sidecar = ReleaseSidecar.Parse(string.Empty, "fixture.yml");
 
         var error = Assert.Throws<ReleaseToolException>(() => sidecar.EnsurePrepared(SemVer.Parse("0.1.0-preview.1"), "fixture.yml"));
 
-        Assert.Equal("release-sidecar-schema-invalid", error.Diagnostic.Code);
+        Assert.Equal("release-legacy-tag-binding-unsupported", error.Diagnostic.Code);
     }
 
     [Fact]
@@ -839,8 +872,21 @@ public sealed class ReleaseToolTests : IDisposable
         sidecar.EnsurePrepared(SemVer.Parse("0.1.0-preview.1"), "fixture.yml");
     }
 
+    [Fact]
+    public void TaggedProjectionConsumesItsPreparedSidecar()
+    {
+        var version = SemVer.Parse("0.1.0-preview.1");
+        var sidecar = ReleaseSidecar.Parse(TaggedReleaseSidecarContent, "fixture.yml");
+
+        var projection = sidecar.ToTaggedProjection(version, DateTimeOffset.UnixEpoch, "fixture.yml");
+        var error = Assert.Throws<ReleaseToolException>(() => sidecar.EnsurePrepared(version, "fixture.yml"));
+
+        Assert.Contains("state: tagged", projection, StringComparison.Ordinal);
+        Assert.Equal("release-sidecar-state-invalid", error.Diagnostic.Code);
+    }
+
     [Theory]
-    [InlineData("title: Release\n", "release-sidecar-schema-invalid")]
+    [InlineData("title: Release\n", "release-legacy-tag-binding-unsupported")]
     [InlineData("release:\n  schema: appsurface-release-sidecar-v1\n", "release-legacy-tag-binding-unsupported")]
     [InlineData("release:\n  schema: legacy-sidecar\n", "release-sidecar-schema-invalid")]
     [InlineData("release:\n  schema: appsurface-release-sidecar-v1\n  state: tagged\n  id: v0.1.0-preview.1\ntrust:\n  status: Prepared\n", "release-sidecar-state-invalid")]

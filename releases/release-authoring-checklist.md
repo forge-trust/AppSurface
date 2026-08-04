@@ -29,7 +29,7 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 - link the tagged note from [`CHANGELOG.md`](../CHANGELOG.md)
 - open the release preparation pull request and stop for manual maintainer review; automation and coding agents must not merge release PRs or create release tags without an explicit post-review instruction
 
-## After the tag ships
+## When creating and pushing the tag
 
 - from the maintainer-reviewed merge commit, generate the canonical tag trailers with `./eng/release tag-message --version x.y.z > /tmp/appsurface-vx.y.z-tag-message.txt`, create `git tag -a vx.y.z -F /tmp/appsurface-vx.y.z-tag-message.txt`, and run `./eng/release inspect --version x.y.z --tag vx.y.z --base-ref <release-base>` before pushing the tag; see the [prepared-to-tagged state contract](../tools/ForgeTrust.AppSurface.Release/README.md#prepared-to-tagged-state)
 - the committed versioned sidecar remains `release.state: prepared`; `inspect` creates a temporary verified `tagged` projection for the detached docs-export checkout, so never commit a tagged sidecar back to the release branch
