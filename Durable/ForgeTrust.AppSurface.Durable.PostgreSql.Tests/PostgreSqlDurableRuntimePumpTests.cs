@@ -216,6 +216,125 @@ public sealed class PostgreSqlDurableRuntimePumpTests
     }
 
     [Fact]
+    public async Task RunOnceAsync_CountsAClaimSuspendedByAnAmbiguousEffectAsFailed()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "suspended-before-permit");
+        var registration = new PreparationGatedWorkRegistration();
+        var services = new ServiceCollection();
+        services.AddSingleton<DurableWorkRegistration>(registration);
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.DataSource,
+            new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-suspended-before-permit-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+        var scope = new DurableScopeId("runtime-pump-suspended-before-permit-scope");
+        var accepted = await provider.GetRequiredService<IDurableWorkClient>().EnqueueAsync(new DurableWorkRequest(
+            scope,
+            new DurableCommandId("runtime-pump-suspended-before-permit-command"),
+            "runtime-pump-suspended-before-permit-key",
+            PreparationGatedWorkRegistration.Name,
+            "v1",
+            registration.InputCodec.EncodeObject(Encoding.UTF8.GetBytes("input")),
+            DurableProviderSafety.Idempotent));
+        Assert.True(accepted.IsSuccess);
+
+        var running = provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work)).AsTask();
+        await registration.PreparationStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var claimed = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
+            new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
+        Assert.True(claimed.IsSuccess);
+        Assert.Equal(DurableWorkState.Claimed, claimed.Value!.State);
+        await SetCancellationIntentAsync(database.DataSource, scope, accepted.Value.WorkId);
+        await InsertAmbiguousPermitFromAnotherAttemptAsync(database.DataSource, claimed.Value, epoch);
+
+        registration.AllowPreparation.Set();
+        var result = await running;
+
+        Assert.Equal(1, result.Discovered);
+        Assert.Equal(1, result.Claimed);
+        Assert.Equal(0, result.Processed);
+        Assert.Equal(0, result.Deferred);
+        Assert.Equal(1, result.Failed);
+        var snapshot = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
+            new DurableWorkGetRequest(scope, accepted.Value.WorkId));
+        Assert.True(snapshot.IsSuccess);
+        Assert.Equal(DurableWorkState.Suspended, snapshot.Value!.State);
+        Assert.Equal("cancellation_with_ambiguous_effect", snapshot.Value.TerminalCode);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_DefersWhenAClaimedScheduleProducesNoDurableFacts()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "empty-schedule-result");
+        var registration = new SuccessfulWorkRegistration();
+        var scheduleCodec = new RuntimeSchedulePayloadCodec(
+            registration.InputCodec.ContractName,
+            registration.InputCodec.ContractVersion,
+            registration.InputCodec.Classification);
+        var services = new ServiceCollection();
+        services.AddSingleton<DurableWorkRegistration>(registration);
+        services.AddSingleton<IDurablePayloadCodec>(scheduleCodec);
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.DataSource,
+            new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-empty-schedule-result-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+        var scope = new DurableScopeId("runtime-pump-empty-schedule-result-scope");
+        var scheduleId = new DurableScheduleId("runtime-pump-empty-schedule-result");
+        var created = await provider.GetRequiredService<IDurableScheduleClient>().CreateAsync(new DurableScheduleCreateRequest(
+            scope,
+            new DurableCommandId("runtime-pump-empty-schedule-result-command"),
+            "runtime-pump-empty-schedule-result-key",
+            scheduleId,
+            DurableSchedule.At(DateTimeOffset.UtcNow + TimeSpan.FromDays(1)),
+            DurableScheduleTarget.Work(
+                SuccessfulWorkRegistration.Name,
+                "v1",
+                Encoding.UTF8.GetBytes("input"),
+                scheduleCodec)));
+        Assert.True(created.IsSuccess);
+        await MakeScheduleDispatchAvailableAsync(database.DataSource, scope, scheduleId);
+
+        var result = await provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Schedule));
+
+        Assert.Equal(1, result.Discovered);
+        Assert.Equal(1, result.Claimed);
+        Assert.Equal(0, result.Processed);
+        Assert.Equal(0, result.Deferred);
+        Assert.Equal(0, result.Failed);
+        Assert.False(result.HasMore);
+        var snapshot = await provider.GetRequiredService<IDurableScheduleClient>().GetAsync(scope, scheduleId);
+        Assert.True(snapshot.IsSuccess);
+        Assert.Equal(DurableScheduleState.Active, snapshot.Value!.State);
+        await using var count = database.DataSource.CreateCommand(
+            "SELECT count(*) FROM appsurface_durable.work WHERE scope_id = @scope_id;");
+        count.Parameters.AddWithValue("scope_id", scope.Value);
+        Assert.Equal(0L, (long)(await count.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
     public async Task RunOnceAsync_TreatsASuspendedScheduleAsACommittedTurn()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -947,6 +1066,53 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             provider.GetRequiredService<IServiceScopeFactory>(),
             provider.GetRequiredService<IDurableRuntimeExecutionBoundary>(),
             provider.GetRequiredService<DurableRuntimeAdmissionGate>());
+
+    private static async ValueTask SetCancellationIntentAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scopeId,
+        DurableWorkId workId)
+    {
+        await using var command = dataSource.CreateCommand(
+            "UPDATE appsurface_durable.work SET cancellation_requested_at = clock_timestamp(), revision = revision + 1 WHERE scope_id = @scope_id AND work_id = @work_id;");
+        command.Parameters.AddWithValue("scope_id", scopeId.Value);
+        command.Parameters.AddWithValue("work_id", workId.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+    }
+
+    private static async ValueTask InsertAmbiguousPermitFromAnotherAttemptAsync(
+        NpgsqlDataSource dataSource,
+        DurableWorkSnapshot snapshot,
+        Guid runtimeEpoch)
+    {
+        await using var command = dataSource.CreateCommand(
+            """
+            INSERT INTO appsurface_durable.effect_permit
+                (permit_id, scope_id, work_id, activity_id, attempt_number, lease_generation, scope_generation, runtime_epoch, status)
+            VALUES
+                (@permit_id, @scope_id, @work_id, @activity_id, @attempt_number, @lease_generation, @scope_generation, @runtime_epoch, 'ambiguous');
+            """);
+        command.Parameters.AddWithValue("permit_id", Guid.NewGuid());
+        command.Parameters.AddWithValue("scope_id", snapshot.ScopeId.Value);
+        command.Parameters.AddWithValue("work_id", snapshot.WorkId.Value);
+        command.Parameters.AddWithValue("activity_id", snapshot.ProviderKey ?? "runtime-pump-ambiguous-activity");
+        command.Parameters.AddWithValue("attempt_number", snapshot.AttemptNumber + 1);
+        command.Parameters.AddWithValue("lease_generation", 1L);
+        command.Parameters.AddWithValue("scope_generation", 1L);
+        command.Parameters.AddWithValue("runtime_epoch", runtimeEpoch);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+    }
+
+    private static async ValueTask MakeScheduleDispatchAvailableAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scopeId,
+        DurableScheduleId scheduleId)
+    {
+        await using var command = dataSource.CreateCommand(
+            "UPDATE appsurface_durable.schedule_dispatch SET due_at = clock_timestamp(), state = 'available', lease_owner = NULL, lease_expires_at = NULL, updated_at = clock_timestamp() WHERE scope_id = @scope_id AND schedule_id = @schedule_id;");
+        command.Parameters.AddWithValue("scope_id", scopeId.Value);
+        command.Parameters.AddWithValue("schedule_id", scheduleId.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+    }
 
     public enum RenewalBehavior
     {

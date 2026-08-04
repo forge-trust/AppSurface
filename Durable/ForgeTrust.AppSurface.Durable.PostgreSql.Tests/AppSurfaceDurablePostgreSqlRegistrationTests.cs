@@ -198,15 +198,19 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
         Assert.Throws<ArgumentOutOfRangeException>(() => new AppSurfaceDurablePostgreSqlOptions { ShutdownReserve = TimeSpan.FromMinutes(5).Add(TimeSpan.FromTicks(1)) }.SnapshotAndValidate());
     }
 
-    [Fact]
-    public async Task HostedStart_RejectsAPassBudgetThatCannotLeaveTheShutdownReserve()
+    [Theory]
+    [InlineData(10, 5)]
+    [InlineData(10, 10)]
+    public async Task HostedStart_RejectsAPassBudgetThatCannotLeaveTheShutdownReserve(
+        int shutdownTimeoutSeconds,
+        int shutdownReserveSeconds)
     {
         using var dispatcher = CreateDataSource();
         using var runtime = CreateDataSource();
         using var host = new HostBuilder()
             .ConfigureServices(services =>
             {
-                services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(10));
+                services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(shutdownTimeoutSeconds));
                 services.AddAppSurfaceDurablePostgreSql(
                         dispatcher,
                         runtime,
@@ -215,7 +219,7 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
                         options =>
                         {
                             options.TimeBudgetPerPass = TimeSpan.FromSeconds(10);
-                            options.ShutdownReserve = TimeSpan.FromSeconds(5);
+                            options.ShutdownReserve = TimeSpan.FromSeconds(shutdownReserveSeconds);
                             options.SendWakeNotifications = false;
                         })
                     .AddWorkerHost();

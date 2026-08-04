@@ -238,6 +238,80 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
     }
 
     [Fact]
+    public async Task GetAsync_ReportsNotStartedForNullHeartbeatAndHealthyAfterStaleHeartbeatIsRefreshed()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-health-tests", "null-heartbeat");
+        var status = await schema.GetStatusAsync();
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+                CreateOptions("runtime-health-null-heartbeat-worker"),
+                Guid.NewGuid()),
+            schema);
+
+        Assert.True(await health.TryBeginPassAsync(CancellationToken.None));
+        await health.RecordSuccessfulSweepAsync(
+            new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero),
+            CancellationToken.None);
+
+        await using (var allowNull = database.DataSource.CreateCommand(
+            "ALTER TABLE appsurface_durable.runtime_heartbeat ALTER COLUMN last_heartbeat_at DROP NOT NULL;"))
+        {
+            await allowNull.ExecuteNonQueryAsync();
+        }
+
+        await using (var nullHeartbeat = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.runtime_heartbeat
+            SET last_heartbeat_at = NULL
+            WHERE worker_id = @worker_id;
+            """))
+        {
+            nullHeartbeat.Parameters.AddWithValue("worker_id", "runtime-health-null-heartbeat-worker");
+            Assert.Equal(1, await nullHeartbeat.ExecuteNonQueryAsync());
+        }
+
+        var notStarted = await health.GetAsync();
+        Assert.Equal(DurableRuntimeHealthState.NotStarted, notStarted.State);
+        Assert.Equal(DurableProblemCodes.ActivatorStale, notStarted.ProblemCode);
+
+        await using (var staleHeartbeat = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.runtime_heartbeat
+            SET last_heartbeat_at = clock_timestamp() - interval '1 hour'
+            WHERE worker_id = @worker_id;
+            """))
+        {
+            staleHeartbeat.Parameters.AddWithValue("worker_id", "runtime-health-null-heartbeat-worker");
+            Assert.Equal(1, await staleHeartbeat.ExecuteNonQueryAsync());
+        }
+
+        var stale = await health.GetAsync();
+        Assert.Equal(DurableRuntimeHealthState.Stale, stale.State);
+        Assert.Equal(DurableProblemCodes.ActivatorStale, stale.ProblemCode);
+
+        await using (var freshHeartbeat = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.runtime_heartbeat
+            SET last_heartbeat_at = clock_timestamp(), draining = false
+            WHERE worker_id = @worker_id;
+            """))
+        {
+            freshHeartbeat.Parameters.AddWithValue("worker_id", "runtime-health-null-heartbeat-worker");
+            Assert.Equal(1, await freshHeartbeat.ExecuteNonQueryAsync());
+        }
+
+        var healthy = await health.GetAsync();
+        Assert.Equal(DurableRuntimeHealthState.Healthy, healthy.State);
+        Assert.Null(healthy.ProblemCode);
+    }
+
+    [Fact]
     public async Task TryBeginPassAsync_TakesOverOnlyWhenEpochDrainOrStalenessAllowsIt()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
