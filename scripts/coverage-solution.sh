@@ -111,6 +111,7 @@ if [[ -n "$COVERAGE_GATE_DIFF_BASE" ]]; then
     --diff-base "$COVERAGE_GATE_DIFF_BASE"
     --min-patch-line 95
     --min-patch-branch 85
+    --patch-line-mode codecov
   )
 fi
 

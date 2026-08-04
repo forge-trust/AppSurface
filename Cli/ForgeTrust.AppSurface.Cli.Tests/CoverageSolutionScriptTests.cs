@@ -26,6 +26,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("--diff-base \"$COVERAGE_GATE_DIFF_BASE\"", script, StringComparison.Ordinal);
         Assert.Contains("--min-patch-line 95", script, StringComparison.Ordinal);
         Assert.Contains("--min-patch-branch 85", script, StringComparison.Ordinal);
+        Assert.Contains("--patch-line-mode codecov", script, StringComparison.Ordinal);
         Assert.Equal(3, CountOccurrences(script, "--no-restore"));
         Assert.Contains("if [[ -n \"$COVERAGE_GATE_DIFF_BASE\" ]]; then", script, StringComparison.Ordinal);
     }
@@ -138,7 +139,7 @@ public sealed class CoverageSolutionScriptTests
 
         if (expectsPatchGate)
         {
-            Assert.Contains("--diff-base\norigin/main\n--min-patch-line\n95\n--min-patch-branch\n85", invocations, StringComparison.Ordinal);
+            Assert.Contains("--diff-base\norigin/main\n--min-patch-line\n95\n--min-patch-branch\n85\n--patch-line-mode\ncodecov", invocations, StringComparison.Ordinal);
         }
         else
         {
