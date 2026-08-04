@@ -24,7 +24,7 @@ reported only as ignored diagnostic context.
 appsurface secrets init --app MyApp --environment Development
 printf '%s' "<secret>" | appsurface secrets set Stripe:ApiKey --app MyApp --environment Development --stdin
 appsurface secrets doctor --app MyApp --environment Development
-dotnet run
+DOTNET_ENVIRONMENT=Development dotnet run
 appsurface config diagnostics
 ```
 
@@ -41,7 +41,7 @@ Recover with the explicit, resumable command:
 
 ```bash
 appsurface secrets migrate --app MyApp --environment Development
-dotnet run
+DOTNET_ENVIRONMENT=Development dotnet run
 ```
 
 The command reports only key names and safe counts. It retains v1 for recovery and never overwrites a v2 record. Once a

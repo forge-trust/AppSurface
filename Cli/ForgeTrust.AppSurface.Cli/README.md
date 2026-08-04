@@ -216,7 +216,7 @@ Run the matching namespace migration before retrying the AppHost:
 
 ```bash
 appsurface secrets migrate --app MyApp --environment Development
-dotnet run
+DOTNET_ENVIRONMENT=Development dotnet run
 ```
 
 `migrate` never prints values, retains v1 records for recovery, and never overwrites an existing v2 value. V2 becomes

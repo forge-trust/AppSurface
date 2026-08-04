@@ -24,7 +24,7 @@ Run the explicit migration command from the same user session as the AppHost:
 
 ```bash
 appsurface secrets migrate --app MyApp --environment Development
-dotnet run
+DOTNET_ENVIRONMENT=Development dotnet run
 appsurface config diagnostics
 ```
 
@@ -46,9 +46,9 @@ appsurface secrets init --app MyApp --environment Development
 printf '%s' "smoke-one" | appsurface secrets set Smoke:One --app MyApp --environment Development --stdin
 printf '%s' "smoke-two" | appsurface secrets set Smoke:Two --app MyApp --environment Development --stdin
 printf '%s' "smoke-three" | appsurface secrets set Smoke:Three --app MyApp --environment Development --stdin
-dotnet run
+DOTNET_ENVIRONMENT=Development dotnet run
 printf '%s' "smoke-one-updated" | appsurface secrets set Smoke:One --app MyApp --environment Development --stdin
-dotnet run
+DOTNET_ENVIRONMENT=Development dotnet run
 ```
 
 The entitlement-free v2 store uses macOS file-based `SecItem` Keychain records. It deliberately does not configure an
