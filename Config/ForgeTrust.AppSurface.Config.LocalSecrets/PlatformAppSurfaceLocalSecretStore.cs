@@ -13,12 +13,13 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 /// LocalSecrets store that delegates to the current operating system's user secret facility when available.
 /// </summary>
 /// <remarks>
-/// macOS uses Security.framework Keychain generic passwords, Windows uses current-user Credential Manager generic credentials,
-/// Linux uses Secret Service through <c>secret-tool</c>, and unsupported sessions return display-safe diagnostics.
+/// macOS uses an entitlement-free Security.framework <c>SecItem</c> v2 Keychain namespace with retained legacy-record
+/// migration diagnostics, Windows uses current-user Credential Manager generic credentials, Linux uses Secret Service through
+/// <c>secret-tool</c>, and unsupported sessions return display-safe diagnostics.
 /// </remarks>
 [ExcludeFromCodeCoverage(
     Justification = "Real OS credential stores depend on desktop session state, prompts, and native services; deterministic tests cover fake stores and status mapping.")]
-public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore
+public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore, IAppSurfaceLocalSecretMigrationStore
 {
     private static readonly string[] LinuxSecretToolTrustedCandidates = ["/usr/bin/secret-tool", "/bin/secret-tool"];
 
@@ -84,6 +85,20 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
     public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) =>
         _inner.Doctor(applicationName, environment, keyPrefix);
 
+    /// <inheritdoc />
+    public AppSurfaceLocalSecretMigrationResult Migrate(string applicationName, string environment, string? keyPrefix) =>
+        _inner is IAppSurfaceLocalSecretMigrationStore migrationStore
+            ? migrationStore.Migrate(applicationName, environment, keyPrefix)
+            : AppSurfaceLocalSecretMigrationResult.FailedToStart(
+                LocalSecretResultStatus.UnsupportedPlatform,
+                new AppSurfaceLocalSecretDiagnostic(
+                    "local-secret-migration-unsupported",
+                    "Local secret migration is unavailable for this platform store.",
+                    "This LocalSecrets store does not retain macOS legacy Keychain records that can be migrated into the v2 namespace.",
+                    "Use the macOS OS-backed store for this namespace, or set the intended value explicitly with `appsurface secrets set`.",
+                    "local-secrets-macos-migration"),
+                Name);
+
     private static IAppSurfaceLocalSecretStore CreateInnerStore(
         AppSurfaceLocalSecretsOptions options,
         LinuxSecretToolResolver linuxSecretToolResolver,
@@ -109,7 +124,9 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
-            return new MacOsKeychainLocalSecretStore();
+            return new MacOsV2CompatibilityLocalSecretStore(
+                new MacOsKeychainLocalSecretStore(),
+                NativeMacOsSecItemInterop.Instance);
         }
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))

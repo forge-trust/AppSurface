@@ -18,6 +18,7 @@ public sealed class AppSurfaceLocalSecretResultContractTests
         Assert.Equal(6, (int)LocalSecretResultStatus.InvalidIdentity);
         Assert.Equal(7, (int)LocalSecretResultStatus.ConversionFailed);
         Assert.Equal(8, (int)LocalSecretResultStatus.ProviderFailed);
+        Assert.Equal(9, (int)LocalSecretResultStatus.MigrationRequired);
     }
 
     [Fact]

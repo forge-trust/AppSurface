@@ -30,6 +30,24 @@ appsurface config diagnostics
 
 The diagnostics path reports where a value came from without printing the raw secret value.
 
+## macOS v2 Keychain migration
+
+On macOS, LocalSecrets now writes v2 `SecItem` records in an entitlement-free file-based Keychain namespace. The CLI and
+runtime must use the same pinned application, environment, and optional prefix. A retained readable v1 record with no
+v2 counterpart returns terminal `MigrationRequired` / `local-secret-migration-required`; it does not silently fall
+through, write from the AppHost, or print the value.
+
+Recover with the explicit, resumable command:
+
+```bash
+appsurface secrets migrate --app MyApp --environment Development
+dotnet run
+```
+
+The command reports only key names and safe counts. It retains v1 for recovery and never overwrites a v2 record. Once a
+v2 record exists it is canonical, so use `appsurface secrets set` to update it. See the [macOS v2 migration guide](docs/macos-keychain-v2-migration.md)
+for matching runtime identity, failure handling, and the three-key CLI/AppHost smoke.
+
 ### When You See `local-secret-store-unavailable`
 
 `local-secret-store-unavailable` means the OS-backed LocalSecrets store could not complete the requested operation.
@@ -158,14 +176,15 @@ Use the [package chooser](../../packages/README.md) and [release hub](../../rele
 `AppSurfaceLocalSecretProvider.GetValue<T>` adapts LocalSecrets into the normal AppSurface config provider contract.
 When callers need the LocalSecrets status directly, use `ResolveValue<T>(environment, key)`. It returns
 `Found`, `Missing`, `Unavailable`, `Locked`, `UnsupportedPlatform`, `DisabledByPosture`, `InvalidIdentity`,
-`ConversionFailed`, or `ProviderFailed` with a paste-safe diagnostic and source name. Only `Missing` means the
+`ConversionFailed`, `ProviderFailed`, or terminal `MigrationRequired` with a paste-safe diagnostic and source name.
+Only `Missing` means the
 provider should fall through to lower-priority configuration.
 
 ## Platform Matrix
 
 | Platform | Adapter | Notes |
 | --- | --- | --- |
-| macOS | Keychain generic passwords through Security.framework | Requires an interactive user session when Keychain prompts. |
+| macOS | Entitlement-free file-based `SecItem` v2 Keychain records, with retained v1 recovery reads | Requires an interactive user session when Keychain prompts. See the [v2 migration guide](docs/macos-keychain-v2-migration.md) for explicit migration and cross-process smoke. |
 | Linux | Secret Service through trusted `secret-tool` paths | Uses `/usr/bin/secret-tool`, then `/bin/secret-tool`, or an explicit absolute `LinuxSecretToolPath`/`--secret-tool-path`. Requires DBus/session secret service availability. |
 | Windows | Credential Manager generic credentials for the current user | Requires an interactive user profile; use environment variables/key-per-file for services, CI, and containers. |
 | Explicit file fallback | JSON file at `--store-file <path>` | Unix mode-bit hardening only; Windows and unknown filesystem ACL posture is reported as degraded. |
@@ -212,3 +231,4 @@ Guides:
 - [Migrate from .env](docs/migrate-from-dotenv.md)
 - [Use env or key-per-file in CI and containers](docs/use-env-or-key-per-file-in-ci-and-containers.md)
 - [Move to Google Secret Manager](docs/move-to-future-remote-vault.md)
+- [Migrate retained macOS Keychain records to v2](docs/macos-keychain-v2-migration.md)

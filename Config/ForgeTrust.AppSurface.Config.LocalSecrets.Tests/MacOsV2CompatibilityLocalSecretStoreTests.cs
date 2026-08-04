@@ -1,0 +1,237 @@
+using System.Text;
+
+namespace ForgeTrust.AppSurface.Config.LocalSecrets.Tests;
+
+public sealed class MacOsV2CompatibilityLocalSecretStoreTests
+{
+    private readonly AppSurfaceLocalSecretIdentityNormalizer _normalizer = new();
+
+    [Fact]
+    public void Set_Should_WriteVerifyAndIndexTheExactV2Identity()
+    {
+        var interop = new FakeSecItemInterop();
+        var store = CreateStore(new InMemoryAppSurfaceLocalSecretStore(), interop);
+        var identity = Identity("Stripe:ApiKey", "Payments");
+
+        var result = store.Set(identity, "sentinel-v2-value");
+
+        Assert.Equal(LocalSecretResultStatus.Found, result.Status);
+        Assert.Equal("AppSurface.LocalSecrets.v2.MyApp.Development", interop.Adds[0].Service);
+        Assert.Equal("Payments:Stripe:ApiKey", interop.Adds[0].Account);
+        Assert.Contains(interop.Reads, query => query.Account == "Payments:Stripe:ApiKey");
+        Assert.Contains(interop.Adds, query => query.Account == "Payments:__appsurface_index__");
+        ValueSafeAssert.DoesNotExpose("sentinel-v2-value", result.ToString());
+    }
+
+    [Fact]
+    public void Get_Should_ReturnMigrationRequired_WhenOnlyLegacyValueIsReadable()
+    {
+        var legacy = new InMemoryAppSurfaceLocalSecretStore();
+        var interop = new FakeSecItemInterop();
+        var store = CreateStore(legacy, interop);
+        var identity = Identity("Stripe:ApiKey");
+        legacy.Set(identity, "sentinel-legacy-value");
+
+        var result = store.Get(identity);
+
+        Assert.Equal(LocalSecretResultStatus.MigrationRequired, result.Status);
+        Assert.Equal("local-secret-migration-required", result.Diagnostic?.Code);
+        Assert.Contains("appsurface secrets migrate --app MyApp --environment Development", result.Diagnostic?.Fix, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-legacy-value", result.ToString());
+    }
+
+    [Fact]
+    public void Get_Should_KeepV2FoundPrecedenceOverLegacyValue()
+    {
+        var legacy = new InMemoryAppSurfaceLocalSecretStore();
+        var interop = new FakeSecItemInterop();
+        var store = CreateStore(legacy, interop);
+        var identity = Identity("Stripe:ApiKey");
+        legacy.Set(identity, "sentinel-legacy-value");
+        store.Set(identity, "sentinel-v2-value");
+
+        var result = store.Get(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Found, result.Status);
+        Assert.Equal("sentinel-v2-value", result.Value);
+    }
+
+    [Fact]
+    public void Set_Should_UpdateAnExistingV2ValueAndKeepItIndexed()
+    {
+        var interop = new FakeSecItemInterop();
+        var store = CreateStore(new InMemoryAppSurfaceLocalSecretStore(), interop);
+        var identity = Identity("Stripe:ApiKey");
+        store.Set(identity, "sentinel-first");
+
+        var set = store.Set(identity, "sentinel-second");
+        var get = store.Get(identity);
+
+        Assert.Equal(LocalSecretResultStatus.Found, set.Status);
+        Assert.Single(interop.Updates);
+        Assert.Equal("sentinel-second", get.Value);
+        Assert.Equal(["Stripe:ApiKey"], store.List("MyApp", "Development", null).Keys);
+    }
+
+    [Fact]
+    public void ListAndDelete_Should_MergeLegacyNamesThenRemoveBothStorageVersions()
+    {
+        var legacy = new InMemoryAppSurfaceLocalSecretStore();
+        var interop = new FakeSecItemInterop();
+        var store = CreateStore(legacy, interop);
+        var v1Only = Identity("Legacy:Only");
+        var v2Only = Identity("V2:Only");
+        legacy.Set(v1Only, "sentinel-legacy");
+        store.Set(v2Only, "sentinel-v2");
+
+        var listed = store.List("MyApp", "Development", null);
+        var deleted = store.Delete(v2Only);
+
+        Assert.Equal(LocalSecretResultStatus.Found, listed.Status);
+        Assert.Equal(["Legacy:Only", "V2:Only"], listed.Keys);
+        Assert.Equal(LocalSecretResultStatus.Found, deleted.Status);
+        Assert.Equal(LocalSecretResultStatus.Missing, store.Get(v2Only).Status);
+    }
+
+    [Theory]
+    [InlineData(-25308, LocalSecretResultStatus.Locked, "local-secret-store-locked")]
+    [InlineData(-25293, LocalSecretResultStatus.Locked, "local-secret-store-locked")]
+    [InlineData(-128, LocalSecretResultStatus.Locked, "local-secret-store-locked")]
+    [InlineData(-34018, LocalSecretResultStatus.Unavailable, "local-secret-store-entitlement-unsupported")]
+    [InlineData(-1, LocalSecretResultStatus.Unavailable, "local-secret-store-unavailable")]
+    public void Get_Should_MapSecItemTerminalStatusesSafely(int nativeStatus, LocalSecretResultStatus expected, string diagnosticCode)
+    {
+        var interop = new FakeSecItemInterop { ReadStatus = nativeStatus };
+        var store = CreateStore(new InMemoryAppSurfaceLocalSecretStore(), interop);
+
+        var result = store.Get(Identity("Stripe:ApiKey"));
+
+        Assert.Equal(expected, result.Status);
+        Assert.Equal(diagnosticCode, result.Diagnostic?.Code);
+        Assert.Contains(nativeStatus.ToString(System.Globalization.CultureInfo.InvariantCulture), result.Diagnostic?.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Get_Should_FailClosed_WhenSecItemReportsSuccessWithoutData()
+    {
+        var legacy = new InMemoryAppSurfaceLocalSecretStore();
+        var interop = new FakeSecItemInterop { ReadStatus = 0 };
+        var store = CreateStore(legacy, interop);
+        var identity = Identity("Stripe:ApiKey");
+        legacy.Set(identity, "sentinel-legacy-value");
+
+        var result = store.Get(identity);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, result.Status);
+        Assert.Equal("local-secret-v2-read-invalid", result.Diagnostic?.Code);
+        ValueSafeAssert.DoesNotExpose("sentinel-legacy-value", result.ToString());
+    }
+
+    [Fact]
+    public void Migrate_Should_CopyLegacyValueWithoutDeletingIt_AndRemainIdempotent()
+    {
+        var legacy = new InMemoryAppSurfaceLocalSecretStore();
+        var interop = new FakeSecItemInterop();
+        var store = CreateStore(legacy, interop);
+        var identity = Identity("Stripe:ApiKey");
+        legacy.Set(identity, "sentinel-legacy-value");
+
+        var first = store.Migrate("MyApp", "Development", null);
+        var second = store.Migrate("MyApp", "Development", null);
+
+        Assert.Equal(LocalSecretResultStatus.Found, first.Status);
+        Assert.Equal(1, first.Migrated);
+        Assert.Equal(0, first.Failed);
+        Assert.Equal(LocalSecretResultStatus.Found, legacy.Get(identity).Status);
+        Assert.Equal(LocalSecretResultStatus.Found, store.Get(identity).Status);
+        Assert.Equal(1, second.AlreadyV2);
+        Assert.Equal(0, second.Failed);
+        ValueSafeAssert.DoesNotExpose("sentinel-legacy-value", System.Text.Json.JsonSerializer.Serialize(first));
+    }
+
+    [Fact]
+    public void Migrate_Should_PreserveExistingV2ValueWhenLegacyChangesLater()
+    {
+        var legacy = new InMemoryAppSurfaceLocalSecretStore();
+        var interop = new FakeSecItemInterop();
+        var store = CreateStore(legacy, interop);
+        var identity = Identity("Stripe:ApiKey");
+        legacy.Set(identity, "sentinel-legacy-first");
+        store.Set(identity, "sentinel-v2-current");
+        legacy.Set(identity, "sentinel-legacy-later");
+
+        var migration = store.Migrate("MyApp", "Development", null);
+        var result = store.Get(identity);
+
+        Assert.Equal(1, migration.AlreadyV2);
+        Assert.Equal("sentinel-v2-current", result.Value);
+    }
+
+    private PlatformAppSurfaceLocalSecretStore.MacOsV2CompatibilityLocalSecretStore CreateStore(
+        IAppSurfaceLocalSecretStore legacy,
+        FakeSecItemInterop interop) =>
+        new(legacy, interop, _normalizer);
+
+    private AppSurfaceLocalSecretIdentity Identity(string key, string? prefix = null) =>
+        _normalizer.Normalize("MyApp", "Development", prefix, key).Identity!;
+
+    private sealed class FakeSecItemInterop : PlatformAppSurfaceLocalSecretStore.IMacOsSecItemInterop
+    {
+        private readonly Dictionary<string, byte[]> _values = new(StringComparer.Ordinal);
+
+        public List<PlatformAppSurfaceLocalSecretStore.MacOsSecItemQuery> Reads { get; } = [];
+
+        public List<PlatformAppSurfaceLocalSecretStore.MacOsSecItemQuery> Adds { get; } = [];
+
+        public List<PlatformAppSurfaceLocalSecretStore.MacOsSecItemQuery> Updates { get; } = [];
+
+        public int? ReadStatus { get; set; }
+
+        public int? NextAddStatus { get; set; }
+
+        public PlatformAppSurfaceLocalSecretStore.MacOsSecItemReadResult Read(PlatformAppSurfaceLocalSecretStore.MacOsSecItemQuery query)
+        {
+            Reads.Add(query);
+            if (ReadStatus is { } status)
+            {
+                return new PlatformAppSurfaceLocalSecretStore.MacOsSecItemReadResult(status, null);
+            }
+
+            return _values.TryGetValue(Key(query), out var value)
+                ? new PlatformAppSurfaceLocalSecretStore.MacOsSecItemReadResult(0, value.ToArray())
+                : new PlatformAppSurfaceLocalSecretStore.MacOsSecItemReadResult(-25300, null);
+        }
+
+        public int Add(PlatformAppSurfaceLocalSecretStore.MacOsSecItemQuery query, byte[] value)
+        {
+            Adds.Add(query);
+            if (NextAddStatus is { } status)
+            {
+                NextAddStatus = null;
+                return status;
+            }
+
+            var key = Key(query);
+            if (_values.ContainsKey(key))
+            {
+                return -25299;
+            }
+
+            _values[key] = value.ToArray();
+            return 0;
+        }
+
+        public int Update(PlatformAppSurfaceLocalSecretStore.MacOsSecItemQuery query, byte[] value)
+        {
+            Updates.Add(query);
+            _values[Key(query)] = value.ToArray();
+            return 0;
+        }
+
+        public int Delete(PlatformAppSurfaceLocalSecretStore.MacOsSecItemQuery query) =>
+            _values.Remove(Key(query)) ? 0 : -25300;
+
+        private static string Key(PlatformAppSurfaceLocalSecretStore.MacOsSecItemQuery query) =>
+            string.Concat(query.Service, "\0", query.Account);
+    }
+}

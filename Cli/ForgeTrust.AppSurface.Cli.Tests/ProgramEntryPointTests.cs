@@ -118,7 +118,21 @@ public sealed class ProgramEntryPointTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("appsurface secrets transfer plan|apply", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("migrate", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("transfer google", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsMigrate_Should_ExplainWhenTheSelectedStoreDoesNotRetainMacOsLegacyRecords()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["secrets", "migrate", "--app", "MyApp", "--environment", "Development", "--store-file", storePath]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("local-secret-migration-unsupported", result.AllText, StringComparison.Ordinal);
     }
 
     [Fact]
