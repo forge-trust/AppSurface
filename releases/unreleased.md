@@ -12,6 +12,43 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
+- AppSurface Docs adds an opt-in protected Markdown browser download. Hosts set `AppSurfaceDocs:MarkdownDownload:Enabled=true`, provide a host-owned named ASP.NET Core reader policy, and may bound the aggregate exact-source snapshot with `MaxSnapshotBytes` (default `8,388,608`, range `1..33,554,432`). Pages require exact inline `download_markdown: true`; sidecars, aliases, generated pages, noncanonical routes, and archives do not grant access. Successful canonical `GET` responses are private, no-store `text/markdown` attachments containing the original valid UTF-8 bytes; `HEAD` returns the matching attachment metadata without a body. The feature is disabled by default and is browser-only v1; it adds no API, batch, vendor, or automatic synchronization integration. See the [five-minute setup](../Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md#five-minute-protected-markdown-download) and [package reference](../Web/ForgeTrust.AppSurface.Docs/README.md#protected-markdown-download).
+- [`appsurface coverage gate`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate) now applies a configurable `--tolerance` grace margin to overall and patch thresholds. The default `0.5` percentage point tolerance reduces rounding-related flakiness, `0` preserves strict enforcement, effective thresholds never fall below `0`, invalid values fail before evaluation, and console plus Markdown and JSON reports show the effective thresholds they enforce while retaining configured thresholds for automation.
+- `ForgeTrust.AppSurface.Web.OpenApi` now uses `Microsoft.AspNetCore.OpenApi` 10.0.9 and directly requires `Microsoft.OpenApi` in the range `[2.7.5, 3.0.0)`, keeping .NET 10 consumers on the supported 2.x line above the range affected by [GHSA-v5pm-xwqc-g5wc](https://github.com/advisories/GHSA-v5pm-xwqc-g5wc) while preserving existing OpenAPI and Scalar APIs and endpoint behavior.
+- [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) can now start long-running non-exclusive test projects earlier with `--schedule longest-first`. It reuses prior `timings.json` data when available, preserves integration and Playwright projects as exclusive barriers, supports explicit priority projects, fails invalid explicit timing or priority input before tests run, warns and preserves input order for unmeasured projects when inferred prior timings are missing or unusable, and keeps artifact names stable.
+- [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#exclude-discovered-test-projects) now supports repeatable `--exclude-test-project` segment globs for solution-discovered tests. Exclusions are normalized and case-insensitive, reject stale or malformed patterns before side effects, remain visible in list and dry-run output, preserve solution compilation, and are proven through the packaged CLI consumer with an excluded failing sentinel project.
+- The [ASP.NET Core DevAuth example](../examples/auth-aspnetcore-dev-auth/README.md#what-the-verifier-proves) now has deterministic, staged startup proof: synchronous build failures stop immediately, child exits and Kestrel readiness are observed separately, a child-owned listening record gates the real-loopback HTTP workflow, and cleanup targets only the recorded child. A child-scoped standard .NET host setting avoids configuration-reload stalls in restricted file-watcher environments without changing normal example or consumer behavior. Focused in-process host coverage complements rather than replaces the real-socket verifier, and failures preserve only bounded, sanitized, allowlisted evidence. This is a contributor-experience correction; it adds no package API, package or production-host runtime behavior, package version, or release implication.
+- The coordinated package graph now addresses
+  [GHSA-pgww-w46g-26qg](https://github.com/advisories/GHSA-pgww-w46g-26qg) by pinning AppSurface Docs to exact
+  `AngleSharp` `[1.5.2]`, `HtmlSanitizer` `[9.1.949-beta]`, and `AngleSharp.Css` `[1.0.0-beta.216]`
+  dependencies. This is a dependency-only upgrade: AppSurface Docs public APIs, registration, configuration, and consumer
+  usage are unchanged. The beta sanitizer/CSS pair is intentional only for preview releases; stable package verification
+  rejects either prerelease dependency until
+  [issue #682](https://github.com/forge-trust/AppSurface/issues/682) selects compatible stable versions. The
+  [Docs security boundary](../Web/ForgeTrust.AppSurface.Docs/README.md#dependency-security-boundary) remains narrow:
+  sanitization covers rendered package-documentation fragments, not general UGC or host CSP. The RazorWire CLI also
+  carries the coordinated parser upgrade in its proof-only bundled tool graph, but remains excluded with
+  `publish_decision: do_not_publish`; see its
+  [installation and publication boundary](../Web/ForgeTrust.RazorWire.Cli/README.md#installation). The sanitizer regression
+  proof passed all four Chromium variants: `text/html` and `application/xhtml+xml`, each exercised through `title` and
+  `style` RCDATA handling.
+- [`ForgeTrust.AppSurface.Web` named canary evaluation](../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints) is now available in preview: applications register typed, application-owned proof
+  evaluators and explicitly map one fixed protected route family. Completed evaluations add required `name`, `ready`, and
+  `status` fields plus optional typed evidence, a marker fingerprint, and up to 16 registration-declared bounded details.
+  Existing `AppSurfaceCanaryResult(status)` construction remains source-compatible. Consumers must tolerate optional
+  omissions, unknown fields, and property reordering; the contract remains preview until the
+  [#625 caller](https://github.com/forge-trust/AppSurface/issues/625) proves polling and operator actions.
+  The canonical guide includes a complete forwarding evaluator, a contrasting migration fixture, copyable
+  `System.Text.Json` and `jq` consumers, the #623-to-#624 upgrade contract, and separate under-5-minute authenticated-host
+  and under-15-minute cold-path onboarding targets.
+  The package emits fixed completion event `62401` with typed evaluation and host facts only; marker, reason, summary,
+  correlation, and custom detail values remain response-only. Bounds and declarations constrain shape but do not classify
+  or redact application-authored text. The default adapter still returns `200` only for `pass` and `503` for completed
+  non-pass states; authenticated diagnostic consumers can opt into status-preserving `AlwaysOk`. Authorization remains
+  host-owned and fail-closed, and triggering, retries, polling, aggregation, health-check adaptation, and `/ready` behavior
+  remain outside this primitive.
+- [`ForgeTrust.AppSurface.Web` health and readiness probes](../Web/ForgeTrust.AppSurface.Web/README.md#health-and-readiness-probes) are now opt-in. New hosts avoid ASP.NET Core health-check registration and `/health` plus `/ready` endpoint mapping unless `WebOptions.Health.Enabled` is explicitly set to `true`; enabled probes also avoid general route-handler binding during startup. Hosts whose deployment or monitoring infrastructure consumes those probes must enable the shared flag; paths, readiness tags, response semantics, validation, and authorization behavior are unchanged.
+- [`ForgeTrust.RazorWire`](../Web/ForgeTrust.RazorWire/README.md#choose-who-supplies-turbo) upgrades its package-owned Turbo UMD payload from 8.0.12 to 8.0.23 while preserving the existing `Bundled`, same-origin `CustomPath`, and `HostManaged` runtime-source contract. Static CDN and hybrid exports continue to materialize the exact bundled runtime.
 - [`ForgeTrust.AppSurface.Web`](../Web/ForgeTrust.AppSurface.Web/README.md) and
   [`ForgeTrust.AppSurface.Web.Push`](../Web/ForgeTrust.AppSurface.Web.Push/README.md) now provide privacy-safe,
   schema-versioned PWA push-readiness posture. Web diagnostics contain either a fixed, redacted VAPID key identifier,
@@ -41,4 +78,5 @@ This is the living release note for the next coordinated AppSurface version afte
 
 - Apply `0004_schedule_protocol.sql` with the migration-owner workflow before constructing Schedule clients or processors. Runtime credentials must remain distinct non-owner, non-`BYPASSRLS` dispatcher and scoped-runtime roles; use [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) rather than granting table access directly.
 - Schedule history partitions cover the current and following UTC months. Before the boundary is crossed, an operator must run `appsurface_durable.ensure_schedule_history_partitions()` as the migration owner; a missing partition fails writes visibly rather than routing data elsewhere.
+- The repository-only `scripts/coverage-solution.sh` wrapper now has one no-argument run-and-gate path over the public [`appsurface coverage` commands](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run). Its former group, filter, build, output, and merge compatibility inputs now fail before work starts with an exit-2 command-specific migration message; select projects, own assembly filters, or merge shards through the package-consumer CLI instead. The legacy `ForgeTrust.AppSurface.CoverageRunner` implementation and test project have been removed.
 - Record-breaking or behavior-changing guidance here before it moves into the tagged release note.

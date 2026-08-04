@@ -227,6 +227,8 @@ public sealed class DocRouteIdentityCatalogTests
     [Theory]
     [InlineData("_harvest")]
     [InlineData("_harvest/rebuild")]
+    [InlineData("_markdown")]
+    [InlineData("_markdown/guide")]
     [InlineData("_routes")]
     [InlineData("_routes.json")]
     public void Create_ShouldReserveOperatorRoutesAndRejectAliases(string requestedRoute)
@@ -251,6 +253,21 @@ public sealed class DocRouteIdentityCatalogTests
             catalog.Diagnostics,
             diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.DocInvalidRedirectAlias
                           && diagnostic.Problem.Contains(requestedRoute, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Create_ShouldKeepMarkdownDownloadNamespaceNonPublic()
+    {
+        var catalog = CreateCatalog(
+            new DocNode(
+                "Download",
+                "_markdown/guide.md",
+                "<p>Download</p>",
+                Metadata: new DocMetadata { CanonicalSlug = "_markdown/guide" }));
+
+        var route = catalog.ResolvePublicRoute("_markdown/guide");
+
+        Assert.Equal(DocRouteResolutionKind.ReservedRoute, route.Kind);
     }
 
     [Fact]

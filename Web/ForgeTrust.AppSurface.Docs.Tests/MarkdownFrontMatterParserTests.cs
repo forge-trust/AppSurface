@@ -6,6 +6,41 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public sealed class MarkdownFrontMatterParserTests
 {
+    [Theory]
+    [InlineData("# Guide", 0)]
+    [InlineData("---\ndownload_markdown: true\n---\n# Guide", 1)]
+    [InlineData("---\ndownload_markdown: false\n---\n# Guide", 2)]
+    [InlineData("---\n  download_markdown: true\n---\n# Guide", 2)]
+    public void GetMarkdownDownloadEligibility_ShouldClassifyMissingStrictAndInvalidDeclarations(
+        string markdown,
+        int expectedValue)
+    {
+        var actual = MarkdownFrontMatterParser.GetMarkdownDownloadEligibility(markdown);
+
+        Assert.Equal((MarkdownDownloadEligibility)expectedValue, actual);
+    }
+
+    [Fact]
+    public void GetMarkdownDownloadEligibility_ShouldRejectMalformedYamlAfterAValidDeclaration()
+    {
+        var markdown = "---\ndownload_markdown: true\nbroken: [unterminated\n---\n# Guide";
+
+        var actual = MarkdownFrontMatterParser.GetMarkdownDownloadEligibility(markdown);
+
+        Assert.Equal(MarkdownDownloadEligibility.Invalid, actual);
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldRejectDownloadEligibilityWhenTypedMetadataIsInvalid()
+    {
+        var markdown = "---\ndownload_markdown: true\norder: not-a-number\n---\n# Guide";
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Equal(MarkdownDownloadEligibility.Invalid, result.DownloadEligibility);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-yaml");
+    }
+
     [Fact]
     public void Extract_ShouldReturnNullMetadata_WhenMarkdownIsEmpty()
     {

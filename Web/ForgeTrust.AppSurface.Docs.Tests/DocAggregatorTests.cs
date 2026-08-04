@@ -91,6 +91,316 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetMarkdownDownloadSourceAsync_ShouldReturnOnlyExactCanonicalOptedInMarkdown()
+    {
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_MarkdownDownload",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repositoryRoot);
+        try
+        {
+            var sourceBytes = System.Text.Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# Guide\n");
+            await File.WriteAllBytesAsync(TestPathUtils.PathUnder(repositoryRoot, "Guide.md"), sourceBytes);
+            var options = new AppSurfaceDocsOptions
+            {
+                Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = repositoryRoot },
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader"
+                }
+            };
+            var aggregator = new DocAggregator(
+                [new MarkdownHarvester(NullLogger<MarkdownHarvester>.Instance, File.ReadAllTextAsync, options)],
+                options,
+                _envFake,
+                _memo,
+                _sanitizerFake,
+                _loggerFake);
+
+            var source = await aggregator.GetMarkdownDownloadSourceAsync("guide");
+            var sourceShapedAlias = await aggregator.GetMarkdownDownloadSourceAsync("Guide.md");
+            var blankPath = await aggregator.GetMarkdownDownloadSourceAsync(" ");
+
+            Assert.NotNull(source);
+            Assert.Equal(sourceBytes, source.Bytes);
+            Assert.Equal("guide", source.CanonicalPath);
+            Assert.Null(sourceShapedAlias);
+            Assert.Null(blankPath);
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task InvalidateCache_ShouldReplaceMarkdownSourcesWithoutChangingAnAcquiredResponse()
+    {
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_MarkdownDownload",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repositoryRoot);
+        try
+        {
+            var sourcePath = TestPathUtils.PathUnder(repositoryRoot, "Guide.md");
+            var firstBytes = System.Text.Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# First\n");
+            var secondBytes = System.Text.Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# Second\n");
+            await File.WriteAllBytesAsync(sourcePath, firstBytes);
+            var options = new AppSurfaceDocsOptions
+            {
+                Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = repositoryRoot },
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader"
+                }
+            };
+            var aggregator = new DocAggregator(
+                [new MarkdownHarvester(NullLogger<MarkdownHarvester>.Instance, File.ReadAllTextAsync, options)],
+                options,
+                _envFake,
+                _memo,
+                _sanitizerFake,
+                _loggerFake);
+
+            var firstSource = await aggregator.GetMarkdownDownloadSourceAsync("guide");
+            await File.WriteAllBytesAsync(sourcePath, secondBytes);
+            aggregator.InvalidateCache();
+            var secondSource = await aggregator.GetMarkdownDownloadSourceAsync("guide");
+
+            Assert.NotNull(firstSource);
+            Assert.NotNull(secondSource);
+            Assert.Equal(firstBytes, firstSource.Bytes);
+            Assert.Equal(secondBytes, secondSource.Bytes);
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task InvalidateCache_ShouldDiscardMarkdownSourcesFromAnObsoleteSnapshotGeneration()
+    {
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_MarkdownDownload",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repositoryRoot);
+        try
+        {
+            var firstReadStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var firstReadRelease = new TaskCompletionSource<byte[]>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var readCount = 0;
+            var sourcePath = TestPathUtils.PathUnder(repositoryRoot, "Guide.md");
+            await File.WriteAllTextAsync(sourcePath, "---\ndownload_markdown: true\n---\n# Guide\n");
+            var options = new AppSurfaceDocsOptions
+            {
+                Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = repositoryRoot },
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader"
+                }
+            };
+
+            async Task<byte[]> ReadAllBytesAsync(string _, CancellationToken cancellationToken)
+            {
+                if (Interlocked.Increment(ref readCount) == 1)
+                {
+                    firstReadStarted.TrySetResult();
+                    return await firstReadRelease.Task.WaitAsync(cancellationToken);
+                }
+
+                return [0xC3, 0x28];
+            }
+
+            using var cache = new MemoryCache(new MemoryCacheOptions());
+            using var memo = new Memo(cache);
+            var aggregator = new DocAggregator(
+                [new MarkdownHarvester(
+                    NullLogger<MarkdownHarvester>.Instance,
+                    File.ReadAllTextAsync,
+                    options,
+                    ReadAllBytesAsync)],
+                options,
+                _envFake,
+                memo,
+                _sanitizerFake,
+                _loggerFake);
+
+            var obsoleteSnapshot = aggregator.GetDocsAsync();
+            await firstReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            aggregator.InvalidateCache();
+            firstReadRelease.TrySetResult(System.Text.Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# Obsolete\n"));
+
+            var obsoleteDocs = await obsoleteSnapshot;
+            var freshDocs = await aggregator.GetDocsAsync();
+            var source = await aggregator.GetMarkdownDownloadSourceAsync("guide");
+
+            Assert.Equal("Obsolete", Assert.Single(obsoleteDocs).Title);
+            Assert.Equal("Guide", Assert.Single(freshDocs).Title);
+            Assert.Equal(2, Volatile.Read(ref readCount));
+            Assert.Null(source);
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GetMarkdownDownloadSourceAsync_ShouldFailClosedWhenEligibleSourcesExceedBudget()
+    {
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_MarkdownDownload",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repositoryRoot);
+        try
+        {
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(repositoryRoot, "Guide.md"),
+                "---\ndownload_markdown: true\n---\n# Guide\n");
+            var options = new AppSurfaceDocsOptions
+            {
+                Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = repositoryRoot },
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader",
+                    MaxSnapshotBytes = 1
+                }
+            };
+            var aggregator = new DocAggregator(
+                [new MarkdownHarvester(NullLogger<MarkdownHarvester>.Instance, File.ReadAllTextAsync, options)],
+                options,
+                _envFake,
+                _memo,
+                _sanitizerFake,
+                _loggerFake);
+
+            var source = await aggregator.GetMarkdownDownloadSourceAsync("guide");
+            var health = await aggregator.GetHarvestHealthAsync();
+
+            Assert.Null(source);
+            Assert.Contains(
+                health.Diagnostics,
+                diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.MarkdownDownloadSnapshotBudgetExceeded);
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GetMarkdownDownloadSourceAsync_ShouldFailClosedWhenEligibleSourcesCollectivelyExceedBudget()
+    {
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_MarkdownDownload",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repositoryRoot);
+        try
+        {
+            var firstBytes = System.Text.Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# First\n");
+            var secondBytes = System.Text.Encoding.UTF8.GetBytes("---\ndownload_markdown: true\n---\n# Second\n");
+            await File.WriteAllBytesAsync(TestPathUtils.PathUnder(repositoryRoot, "First.md"), firstBytes);
+            await File.WriteAllBytesAsync(TestPathUtils.PathUnder(repositoryRoot, "Second.md"), secondBytes);
+            var options = new AppSurfaceDocsOptions
+            {
+                Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = repositoryRoot },
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader",
+                    MaxSnapshotBytes = 1
+                }
+            };
+            var harvesterOptions = new AppSurfaceDocsOptions
+            {
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader",
+                    MaxSnapshotBytes = firstBytes.Length + secondBytes.Length
+                }
+            };
+            var aggregator = new DocAggregator(
+                [new MarkdownHarvester(NullLogger<MarkdownHarvester>.Instance, File.ReadAllTextAsync, harvesterOptions)],
+                options,
+                _envFake,
+                _memo,
+                _sanitizerFake,
+                _loggerFake);
+
+            var source = await aggregator.GetMarkdownDownloadSourceAsync("first");
+            var health = await aggregator.GetHarvestHealthAsync();
+
+            Assert.Null(source);
+            var diagnostic = Assert.Single(
+                health.Diagnostics,
+                diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.MarkdownDownloadSnapshotBudgetExceeded);
+            Assert.Contains(
+                $"eligible source totaled {firstBytes.Length + secondBytes.Length} bytes",
+                diagnostic.Problem,
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GetMarkdownDownloadSourceAsync_ShouldNotUseMarkdownBytesWhenAnotherHarvesterWinsTheSourcePath()
+    {
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_MarkdownDownload",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repositoryRoot);
+        try
+        {
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(repositoryRoot, "Guide.md"),
+                "---\ndownload_markdown: true\n---\n# Markdown guide\n");
+            var options = new AppSurfaceDocsOptions
+            {
+                Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = repositoryRoot },
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader"
+                }
+            };
+            var generatedHarvester = A.Fake<IDocHarvester>();
+            A.CallTo(() => generatedHarvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+                .Returns([new DocNode("Generated guide", "Guide.md", "<p>Generated</p>")]);
+            var aggregator = new DocAggregator(
+                [generatedHarvester, new MarkdownHarvester(NullLogger<MarkdownHarvester>.Instance, File.ReadAllTextAsync, options)],
+                options,
+                _envFake,
+                _memo,
+                _sanitizerFake,
+                _loggerFake);
+
+            var source = await aggregator.GetMarkdownDownloadSourceAsync("guide");
+
+            Assert.Null(source);
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task GetDocsAsync_ShouldServeStaleSnapshotWhileRevalidatingExpiredCache()
     {
         var cacheExpiration = TimeSpan.FromSeconds(3);

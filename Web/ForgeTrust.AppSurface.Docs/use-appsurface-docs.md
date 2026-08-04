@@ -61,6 +61,69 @@ Point the host at the repository you want to harvest:
 
 If `AppSurfaceDocs:Source:RepositoryRoot` is omitted, AppSurface Docs falls back to repository discovery from the app content root. That is convenient for local dogfooding, but production hosts should make the repository root explicit so the docs source is not guessed from deployment layout.
 
+### Five-minute protected Markdown download
+
+Protected Markdown download is disabled by default. To enable the v1 browser attachment, the host must own and register a named ASP.NET Core reader policy; AppSurface Docs does not create identities, authentication handlers, or authorization policies.
+
+1. Register a reader policy in the host and choose its name, for example `DocsMarkdownReader`:
+
+   ```csharp
+   services.AddAuthorization(options =>
+   {
+       options.AddPolicy("DocsMarkdownReader", policy =>
+       {
+           policy.RequireAuthenticatedUser();
+           // Add host-specific reader requirements, such as roles or claims, here.
+       });
+   });
+   ```
+
+2. Put authentication before authorization in endpoint-aware middleware:
+
+   ```csharp
+   app.UseRouting();
+   app.UseAuthentication();
+   app.UseAuthorization();
+   ```
+
+3. Enable the feature and point it at that policy. The default snapshot limit is 8,388,608 bytes; the valid range is 1 through 33,554,432:
+
+   ```json
+   {
+     "AppSurfaceDocs": {
+       "MarkdownDownload": {
+         "Enabled": true,
+         "AuthorizationPolicy": "DocsMarkdownReader",
+         "MaxSnapshotBytes": 8388608
+       }
+     }
+   }
+   ```
+
+4. Add an exact inline opt-in to a Markdown page. A paired `.md.yml` or `.md.yaml` sidecar never grants download access:
+
+   ```markdown
+   ---
+   download_markdown: true
+   ---
+   ```
+
+5. Verify an authenticated browser `GET` and `HEAD` at `{DocsRootPath}/_markdown/{canonical path}`. `GET` returns a `text/markdown` attachment with `Cache-Control: private, no-store` and the exact original valid UTF-8 bytes, including any BOM, front matter, comments, line endings, and relative links. `HEAD` returns matching attachment metadata without a body. `{DocsRootPath}/_markdown` is package-reserved, so do not use it as a page or alias path.
+
+Only the exact inline boolean `download_markdown: true` opts a page in. Quoted truthy strings, `True`, `1`, nested or duplicate keys, malformed front matter, aliases, generated pages, and archive paths do not. Disabled, unavailable, noncanonical, alias, generated, archive, missing-snapshot, and invalid-UTF-8-source requests return `404`; unsupported methods return `405` with `Allow: GET, HEAD`; anonymous and forbidden enabled requests retain the host's normal challenge/forbid behavior.
+
+Source safety matters: this endpoint returns source bytes, not rendered or sanitized HTML. Keep secrets, private notes, credentials, generated build output, and other non-public material outside the configured [public source boundary](#define-the-public-source-boundary), and follow the [Markdown authoring guidance](#author-the-first-useful-page-set) when choosing inline front matter versus a sidecar. Browser attachment is v1 only; there is no API, batch, vendor, or automatic “second-brain” synchronization integration.
+
+| Symptom | Check | Fix |
+| --- | --- | --- |
+| `404` for an intended page | The page has exact inline `download_markdown: true`, and the requested path is canonical. | Remove quotes and nesting, fix malformed front matter, or use the canonical Markdown route. |
+| `404` after adding the flag to a sidecar | The flag is in `.md.yml` or `.md.yaml`. | Move the opt-in into the Markdown file's top-level inline front matter. |
+| Policy startup failure | The named policy is missing or has no reader requirements. | Register a non-empty host-owned reader policy. |
+| Unexpected `401`/`403` | Authentication or authorization middleware is missing or out of order. | Configure the host identity, then run authentication before authorization. |
+| Download is unexpectedly refused | The aggregate opted-in source snapshot exceeds `MaxSnapshotBytes`, which must be between 1 and 33,554,432. | Reduce opted-in source bytes, raise the limit only for intentional published source, or keep the page out of the download surface. |
+
+This is a compatibility-preserving opt-in. Existing hosts remain unchanged while `Enabled=false`; consumers that enable it must provide the named policy and accept that the endpoint exposes original source bytes. For the complete package contract, see the [protected Markdown download reference](./README.md#protected-markdown-download).
+
 For production or preview hosts that expose diagnostics, configure a host-owned read policy before opting in:
 
 ```json

@@ -339,10 +339,12 @@ dotnet new tool-manifest
 dotnet tool install ForgeTrust.AppSurface.Cli --prerelease
 dotnet tool run appsurface coverage run --solution ./MyApp.slnx --dry-run
 dotnet tool run appsurface coverage run --solution ./MyApp.slnx
-dotnet tool run appsurface coverage gate --min-line 85 --min-branch 75
+dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75
 ```
 
-Use `--dry-run` before the first real CI run to confirm project discovery, exclusive scheduling, and artifact paths without running tests.
+Use `--dry-run` before the first real CI run to confirm project discovery, collector
+capability, exclusive scheduling, and artifact paths without running tests or cleaning
+the output directory.
 
 #### Add Coverlet First
 
@@ -471,7 +473,16 @@ Use this GitHub Actions shape for a private pull request workflow that already h
 - run: dotnet tool restore
 - run: dotnet restore ./MyApp.slnx
 - run: dotnet tool run appsurface coverage run --solution ./MyApp.slnx --configuration Release --no-restore --test-results junit --slow-test-diagnostics
-- run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75 --diff-base HEAD^1 --min-patch-line 85 --min-patch-branch 75
+- name: Gate coverage
+  shell: bash
+  env:
+    COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
+  run: |
+    gate_args=(coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75)
+    if [[ -n "$COVERAGE_GATE_DIFF_BASE" ]]; then
+      gate_args+=(--diff-base "$COVERAGE_GATE_DIFF_BASE" --min-patch-line 85 --min-patch-branch 75)
+    fi
+    dotnet tool run appsurface "${gate_args[@]}"
 - uses: actions/upload-artifact@v4
   if: always()
   with:
@@ -502,7 +513,7 @@ appsurface coverage merge \
   --output ./TestResults/coverage-merged
 ```
 
-Use `coverage merge` when a CI matrix, custom test harness, or non-AppSurface test producer already writes Cobertura files and you only need AppSurface's package-owned fan-in plus `coverage gate` artifacts. Use `coverage run -> coverage gate` for normal package-consuming .NET repositories where AppSurface should discover projects, invoke `dotnet test`, and merge the Coverlet output. In this repository, the default `./scripts/coverage-solution.sh` lane runs that pair with repository thresholds; its legacy grouped and `--merge-only` modes remain coverage-only until the separate coverage-runner cleanup retires them.
+Use `coverage merge` when a CI matrix, custom test harness, or non-AppSurface test producer already writes Cobertura files and you only need AppSurface's package-owned fan-in plus `coverage gate` artifacts. Use `coverage run -> coverage gate` for normal package-consuming .NET repositories where AppSurface should discover projects, invoke `dotnet test`, and merge the Coverlet output. In this repository, the default no-argument `./scripts/coverage-solution.sh` lane runs that pair with repository thresholds; focused selection and shard fan-in always use the public CLI commands above.
 
 The v1 source contract is intentionally narrow. `--source` must point to an existing directory. The command recursively selects files named exactly `coverage.cobertura.xml`, sorts them by ordinal path, validates that each selected file has a Cobertura `<coverage>` root, and prints the discovered count plus the first few relative paths. A single shard is valid. Files named `Cobertura.xml`, arbitrary `*.xml`, or non-Cobertura XML are not accepted by v1; rename or copy producer artifacts to `coverage.cobertura.xml` before merging.
 
@@ -722,7 +733,16 @@ Use `coverage gate` after `coverage run`, or after any other private coverage wo
 - run: dotnet tool restore
 - run: dotnet restore ./MyApp.slnx
 - run: dotnet tool run appsurface coverage run --solution ./MyApp.slnx --configuration Release --no-restore
-- run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base HEAD^1 --min-patch-line 95 --min-patch-branch 85
+- name: Gate coverage
+  shell: bash
+  env:
+    COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
+  run: |
+    gate_args=(coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85)
+    if [[ -n "$COVERAGE_GATE_DIFF_BASE" ]]; then
+      gate_args+=(--diff-base "$COVERAGE_GATE_DIFF_BASE" --min-patch-line 95 --min-patch-branch 85)
+    fi
+    dotnet tool run appsurface "${gate_args[@]}"
 - uses: actions/upload-artifact@v4
   if: always()
   with:
