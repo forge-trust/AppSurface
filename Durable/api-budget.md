@@ -100,4 +100,4 @@ Slice 6 adds the explicit PostgreSQL composition surface rather than widening th
 
 The runtime pump, health, and drain interfaces remain owned by `ForgeTrust.AppSurface.Durable.Provider`. PostgreSQL
 claim stores, heartbeat generation operations, listener state, execution wrapper, and hosted service stay internal so
-#685 can instrument the execution wrapper without duplicating trace context or broadening the public API.
+Issue #685 can instrument the execution wrapper without duplicating trace context or broadening the public API.

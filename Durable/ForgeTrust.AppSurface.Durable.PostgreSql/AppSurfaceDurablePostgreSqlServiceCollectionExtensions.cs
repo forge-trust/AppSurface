@@ -152,7 +152,7 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
             return new PostgreSqlDurableWorkOperatorClient(
                 runtime.RuntimeDataSource,
                 provider.GetRequiredService<IDurableWorkRegistry>(),
-                provider,
+                provider.GetRequiredService<IServiceScopeFactory>(),
                 runtime.WorkOptions.RuntimeEpoch);
         });
         services.TryAddSingleton<IDurableRuntimePump>(static provider => new PostgreSqlDurableRuntimePump(
@@ -203,6 +203,13 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
     }
 }
 
+/// <summary>Captures the one immutable PostgreSQL durable runtime configuration for a service provider.</summary>
+/// <param name="DispatcherDataSource">Payload-free dispatcher connection used only for global discovery.</param>
+/// <param name="RuntimeDataSource">Scoped runtime connection used for durable mutations and heartbeats.</param>
+/// <param name="WorkOptions">Validated active Work-store epoch and wake-hint policy.</param>
+/// <param name="ScheduleOptions">Validated Schedule clock and lease safety configuration.</param>
+/// <param name="Options">Validated process-local activation settings.</param>
+/// <param name="InstanceId">Unique process-instance fence persisted with runtime heartbeats.</param>
 internal sealed record PostgreSqlDurableRuntimeRegistration(
     NpgsqlDataSource DispatcherDataSource,
     NpgsqlDataSource RuntimeDataSource,
@@ -211,4 +218,5 @@ internal sealed record PostgreSqlDurableRuntimeRegistration(
     AppSurfaceDurablePostgreSqlOptions Options,
     Guid InstanceId);
 
+/// <summary>Marks that worker-host registration has occurred so repeated composition stays idempotent.</summary>
 internal sealed class PostgreSqlDurableHostedServiceMarker;

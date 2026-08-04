@@ -49,7 +49,10 @@ authorization. The recipe fails before granting privileges when role names alias
 inherit the migration owner, `SUPERUSER`, or `BYPASSRLS`. It also transfers every package table, sequence, and view to
 the migration owner so pre-existing object ownership cannot preserve runtime DDL authority. Existing direct,
 inherited, or `PUBLIC` schema, relation, column, and sequence privileges outside the documented allowlist cause the
-transactional recipe to fail and roll back; remove those host-managed grants before retrying.
+transactional recipe to fail and roll back; remove those host-managed grants before retrying. The runtime role is
+deliberately fully trusted for the unscoped `runtime_heartbeat` table: the health component owns the
+worker-generation fence through its row lock and compare-and-swap predicates, so applications must not expose that
+credential to untrusted callers.
 
 Apply schema migrations before rerunning the role recipe. A migration can add package relations, but the recipe owns
 the reviewed grants for existing service roles; running it second is required before Flow runtime or dispatcher
@@ -110,7 +113,7 @@ For a cold path, apply `0005_runtime_heartbeat.sql` with the migration owner, re
 [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql),
 verify the active epoch and StoreId, deploy with `AddWorkerHost()` disabled, then enable it. Roll back application code
 by disabling the worker host and deploying a previous compatible binary; never destructively roll back a migration. If
-#685 supplies an intervening migration first, renumber this migration to the next contiguous number while preserving
+Issue #685 supplies an intervening migration first, renumber this migration to the next contiguous number while preserving
 its content and rerun the role recipe.
 
 ### Role recipe contract

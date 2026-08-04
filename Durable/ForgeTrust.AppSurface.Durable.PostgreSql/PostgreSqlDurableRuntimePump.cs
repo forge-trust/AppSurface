@@ -351,7 +351,7 @@ internal sealed class PostgreSqlDurableRuntimePump : IDurableRuntimePump
                     }
 
                     current = renewed;
-                    nextRenewal = now + current.LeaseRenewalCadence;
+                    nextRenewal = DateTimeOffset.UtcNow + current.LeaseRenewalCadence;
                     if (current.CancellationRequested)
                     {
                         await executorStop.CancelAsync().ConfigureAwait(false);

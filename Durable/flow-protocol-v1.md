@@ -128,7 +128,8 @@ The dispatcher credential normally receives global `flow_dispatch` discovery. Ru
 immediately after applying `0003` and before granting `SELECT` on `flow_dispatch`: the migration's
 `flow_dispatch_global_discovery` policy is initially `PUBLIC`, because it has
 no scope-restricted discovery fallback. The role recipe narrows that policy to the dispatcher credential and migration
-owner; the latter is required only for the migration-owner `SECURITY DEFINER` aggregate-health function. The recipe also
+owner; the latter is required only for the migration-owner `SECURITY DEFINER` aggregate-health function introduced by
+[`0005_runtime_heartbeat.sql`](./ForgeTrust.AppSurface.Durable.PostgreSql/Migrations/0005_runtime_heartbeat.sql). The recipe also
 adds the runtime-role scope predicate. The scoped runtime credential then retains `SELECT` and column-scoped `UPDATE`
 privileges but sees Flow dispatch rows directly only after its transaction sets the matching
 `appsurface_durable.scope_id`.

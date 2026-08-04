@@ -2,6 +2,7 @@ using System.Text;
 using ForgeTrust.AppSurface.Durable.Provider;
 using ForgeTrust.AppSurface.Flow;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 
@@ -432,6 +433,75 @@ public sealed class PostgreSqlDurableRuntimePumpTests
     }
 
     [Fact]
+    public async Task RunOnceAsync_WaitsForTheRenewalCadenceAfterASlowLeaseRenewal()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "slow-lease-renewal");
+        var registration = new BlockingWorkRegistration();
+        var services = new ServiceCollection();
+        services.AddSingleton<DurableWorkRegistration>(registration);
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.DataSource,
+            new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-slow-renewal-worker";
+                options.SendWakeNotifications = false;
+                options.HeartbeatStaleAfter = TimeSpan.FromSeconds(2);
+            });
+        await using var provider = services.BuildServiceProvider();
+        var scope = new DurableScopeId("runtime-pump-slow-renewal-scope");
+        var accepted = await provider.GetRequiredService<IDurableWorkClient>().EnqueueAsync(new DurableWorkRequest(
+            scope,
+            new DurableCommandId("runtime-pump-slow-renewal-command"),
+            "runtime-pump-slow-renewal-key",
+            BlockingWorkRegistration.Name,
+            "v1",
+            registration.InputCodec.EncodeObject(Encoding.UTF8.GetBytes("input")),
+            DurableProviderSafety.Idempotent,
+            new DurableWorkRetryPolicy(
+                maximumAttempts: 2,
+                maximumElapsedTime: TimeSpan.FromMinutes(1),
+                initialRetryDelay: TimeSpan.FromSeconds(1),
+                maximumRetryDelay: TimeSpan.FromSeconds(1),
+                leaseDuration: TimeSpan.FromSeconds(2),
+                renewalCadence: TimeSpan.FromMilliseconds(250),
+                maximumLeaseLifetime: TimeSpan.FromMinutes(1),
+                backoffAlgorithm: "exponential-v1")));
+        Assert.True(accepted.IsSuccess);
+
+        var delayedStore = new DelayedLeaseRenewalWorkStore(database.DataSource, epoch);
+        var pump = new PostgreSqlDurableRuntimePump(
+            provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>(),
+            provider.GetRequiredService<IDurableRuntimeSchemaManager>(),
+            provider.GetRequiredService<PostgreSqlDurableRuntimeHealth>(),
+            delayedStore,
+            provider.GetRequiredService<PostgreSqlDurableFlowProcessor>(),
+            provider.GetRequiredService<PostgreSqlDurableScheduleProcessor>(),
+            provider.GetRequiredService<IDurableWorkRegistry>(),
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            provider.GetRequiredService<IDurableRuntimeExecutionBoundary>(),
+            provider.GetRequiredService<DurableRuntimeAdmissionGate>());
+        var running = pump.RunOnceAsync(new DurableRuntimePumpRequest(
+            maximumItems: 1,
+            surfaces: DurableRuntimeSurface.Work)).AsTask();
+
+        await registration.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await delayedStore.FirstRenewalCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(TimeSpan.FromMilliseconds(50));
+        Assert.Equal(1, delayedStore.RenewalCount);
+        registration.Complete.TrySetResult(registration.CompletionResult);
+
+        var result = await running.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, result.Processed);
+    }
+
+    [Fact]
     public async Task RunOnceAsync_ObservesCancellationThatCommitsAfterClaimBeforeAnEffectPermit()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -622,6 +692,8 @@ public sealed class PostgreSqlDurableRuntimePumpTests
 
         internal IDurablePayloadCodec InputCodec => WorkCodec;
 
+        internal DurableEncodedPayload CompletionResult => ResultCodec.EncodeObject(Encoding.UTF8.GetBytes("result"));
+
         public override bool CanReconcile => false;
 
         public override DurablePreparedWork Prepare(IServiceProvider services, DurableWorkExecutionContext work) =>
@@ -706,6 +778,30 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             DurableWorkExecutionContext work,
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("Idempotent test Work does not reconcile.");
+    }
+
+    private sealed class DelayedLeaseRenewalWorkStore : PostgreSqlDurableWorkStore
+    {
+        private int _renewalCount;
+
+        internal DelayedLeaseRenewalWorkStore(NpgsqlDataSource dataSource, Guid runtimeEpoch)
+            : base(dataSource, runtimeEpoch)
+        {
+        }
+
+        internal TaskCompletionSource FirstRenewalCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal int RenewalCount => Volatile.Read(ref _renewalCount);
+
+        internal override async ValueTask<PostgreSqlDurableWorkClaim?> RenewLeaseAsync(
+            PostgreSqlDurableWorkClaim claim,
+            CancellationToken cancellationToken = default)
+        {
+            _ = Interlocked.Increment(ref _renewalCount);
+            await Task.Delay(TimeSpan.FromMilliseconds(300), cancellationToken);
+            FirstRenewalCompleted.TrySetResult();
+            return claim with { LeaseExpiresAtUtc = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(1) };
+        }
     }
 
     private sealed class PreparationGatedWorkRegistration : DurableWorkRegistration

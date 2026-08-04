@@ -426,6 +426,25 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
         await hosted.StopAsync(CancellationToken.None);
     }
 
+    [Fact]
+    public async Task HostedStop_CancelsTheWakeListenerWithoutRequiringApplicationStopping()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = CreateDataSource();
+        using var hosted = CreateHostedService(
+            dispatcher,
+            runtime,
+            new NoOpSchemaManager(),
+            new EmptyPump(),
+            new RecordingDrainControl(),
+            new TestHostApplicationLifetime(),
+            "hosted-direct-stop-worker",
+            sendWakeNotifications: true);
+
+        await hosted.StartAsync(CancellationToken.None);
+        await hosted.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
     private static PostgreSqlDurableHostedService CreateHostedService(
         NpgsqlDataSource dispatcher,
         NpgsqlDataSource runtime,
@@ -433,12 +452,13 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
         IDurableRuntimePump pump,
         IDurableRuntimeDrainControl drain,
         IHostApplicationLifetime lifetime,
-        string workerId)
+        string workerId,
+        bool sendWakeNotifications = false)
     {
         var options = new AppSurfaceDurablePostgreSqlOptions
         {
             WorkerId = workerId,
-            SendWakeNotifications = false,
+            SendWakeNotifications = sendWakeNotifications,
             IdlePollingInterval = TimeSpan.FromMinutes(5),
             HeartbeatStaleAfter = TimeSpan.FromMinutes(6),
             TimeBudgetPerPass = TimeSpan.FromMilliseconds(100),
@@ -451,7 +471,12 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
             new PostgreSqlDurableRuntimeRegistration(
                 dispatcher,
                 runtime,
-                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                new PostgreSqlDurableWorkOptions(
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    sendWakeNotifications
+                        ? PostgreSqlDurableWakeNotificationMode.Enabled
+                        : PostgreSqlDurableWakeNotificationMode.Disabled),
                 new PostgreSqlDurableScheduleOptions("durable_runtime"),
                 options,
                 Guid.NewGuid()),

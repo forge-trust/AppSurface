@@ -1,5 +1,6 @@
 using System.Text;
 using ForgeTrust.AppSurface.Durable.Provider;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
@@ -1845,7 +1846,7 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
     [Theory]
     [InlineData("dataSource", "dataSource", typeof(ArgumentNullException))]
     [InlineData("registry", "registry", typeof(ArgumentNullException))]
-    [InlineData("services", "services", typeof(ArgumentNullException))]
+    [InlineData("scopeFactory", "scopeFactory", typeof(ArgumentNullException))]
     [InlineData("runtimeEpoch", "runtimeEpoch", typeof(ArgumentException))]
     public void Constructor_RejectsInvalidDependenciesAndEpoch(
         string invalidArgument,
@@ -1863,7 +1864,7 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
                 null!, registry, NullServices.Instance, epoch),
             "registry" => new PostgreSqlDurableWorkOperatorClient(
                 dataSource, null!, NullServices.Instance, epoch),
-            "services" => new PostgreSqlDurableWorkOperatorClient(
+            "scopeFactory" => new PostgreSqlDurableWorkOperatorClient(
                 dataSource, registry, null!, epoch),
             "runtimeEpoch" => new PostgreSqlDurableWorkOperatorClient(
                 dataSource, registry, NullServices.Instance, Guid.Empty),
@@ -2479,9 +2480,18 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         }
     }
 
-    private sealed class NullServices : IServiceProvider
+    private sealed class NullServices : IServiceProvider, IServiceScopeFactory, IServiceScope
     {
         internal static NullServices Instance { get; } = new();
+
+        public IServiceProvider ServiceProvider => this;
+
         public object? GetService(Type serviceType) => null;
+
+        public IServiceScope CreateScope() => this;
+
+        public void Dispose()
+        {
+        }
     }
 }

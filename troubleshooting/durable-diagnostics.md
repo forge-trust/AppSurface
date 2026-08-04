@@ -135,9 +135,10 @@ five-character SQLSTATE. Never log or serialize inner message text, detail, hint
 
 | Code | Problem | Typical cause | Safe action |
 |---|---|---|---|
-| `ASDUR103` | Transient runtime or listener failure | PostgreSQL transport, timeout, or temporary listener disconnect | Polling remains authoritative; retry after the configured bounded delay and inspect only safe infrastructure telemetry. |
+| `ASDUR103` | Transient runtime failure | PostgreSQL transport or timeout blocks a bounded runtime pass | Retry after the configured bounded delay and inspect only safe infrastructure telemetry. |
+| `ASDUR406` | Wake listener retry | The advisory wake-listener connection disconnected or timed out | Polling remains authoritative; retry the listener after the configured bounded delay and alert separately from pass failures. |
 | `ASDUR404` | Activator stale | No current heartbeat or successful sweep inside `HeartbeatStaleAfter` | Check that exactly one compatible host or external activator is running, then inspect typed health and role/schema prerequisites. |
-| `ASDUR405` | Worker identity conflict | Another live process owns the configured `WorkerId`, or an old generation updated after takeover | Assign a unique worker ID per replica, wait for stale/drain takeover rules, and never edit the heartbeat row manually. |
+| `ASDUR405` | Worker identity conflict | Another live process owns the configured `WorkerId`, an old generation updated after takeover, or the same runtime instance already has an active pass | Assign a unique worker ID per replica, wait for stale/drain takeover rules, avoid overlapping local activation, and never edit the heartbeat row manually. |
 | `ASDUR400`–`ASDUR403` | Incompatible runtime store | Missing, pending, unsupported, or inconsistent migration state | Apply reviewed migrations with the migration owner, rerun the role recipe, and deploy compatible code; startup intentionally performs no DDL. |
 | `ASDUR108` | Recovery epoch required | The configured runtime epoch differs from the active store epoch | Perform authorized epoch initialization/rotation before enabling the worker host. |
 

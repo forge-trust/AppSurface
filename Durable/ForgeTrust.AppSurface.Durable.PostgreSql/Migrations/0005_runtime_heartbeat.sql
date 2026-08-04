@@ -27,6 +27,10 @@ CREATE INDEX ix_runtime_heartbeat_epoch_liveness
 
 ALTER TABLE appsurface_durable.runtime_heartbeat ENABLE ROW LEVEL SECURITY;
 ALTER TABLE appsurface_durable.runtime_heartbeat FORCE ROW LEVEL SECURITY;
+-- runtime_heartbeat is unscoped process-liveness state. The runtime credential is deliberately trusted for this
+-- entire table because PostgreSQL has no independently authenticated worker-generation identity to express in an
+-- RLS predicate. PostgreSqlDurableRuntimeHealth supplies that identity and performs takeover under FOR UPDATE with
+-- a compare-and-swap predicate; applications must keep this credential isolated from untrusted callers.
 CREATE POLICY runtime_heartbeat_runtime_role ON appsurface_durable.runtime_heartbeat
     USING (true)
     WITH CHECK (true);
@@ -39,10 +43,17 @@ RETURNS TABLE
     due_count bigint,
     oldest_due_at timestamp with time zone
 )
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, appsurface_durable
 AS $$
+BEGIN
+    IF p_surfaces IS NULL OR p_surfaces NOT BETWEEN 1 AND 7 THEN
+        RAISE EXCEPTION 'p_surfaces must select one or more known runtime surfaces.'
+            USING ERRCODE = '22023';
+    END IF;
+
+    RETURN QUERY
     SELECT count(*), min(due_at)
     FROM
     (
@@ -65,6 +76,7 @@ AS $$
           AND state IN ('available', 'leased')
           AND due_at <= clock_timestamp()
     ) AS due;
+END;
 $$;
 
 REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM PUBLIC;

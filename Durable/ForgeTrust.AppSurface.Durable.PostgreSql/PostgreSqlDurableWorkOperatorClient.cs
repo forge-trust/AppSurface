@@ -1,4 +1,5 @@
 using ForgeTrust.AppSurface.Durable.Provider;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using NpgsqlTypes;
 using static ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableProtocolCodec;
@@ -12,23 +13,23 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
     private static readonly Uri Documentation = new("https://appsurface.dev/docs/durable/work");
     private readonly NpgsqlDataSource _dataSource;
     private readonly IDurableWorkRegistry _registry;
-    private readonly IServiceProvider _services;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly Guid _runtimeEpoch;
 
     /// <summary>Initializes the internal operator path for one active PostgreSQL runtime epoch.</summary>
     /// <param name="dataSource">Scoped-runtime PostgreSQL data source.</param>
     /// <param name="registry">Immutable Work registrations used for reconciliation and result validation.</param>
-    /// <param name="services">Application services used only outside database transactions.</param>
+    /// <param name="scopeFactory">Creates a short-lived application scope for each reconciliation provider call.</param>
     /// <param name="runtimeEpoch">Non-empty active runtime epoch.</param>
     internal PostgreSqlDurableWorkOperatorClient(
         NpgsqlDataSource dataSource,
         IDurableWorkRegistry registry,
-        IServiceProvider services,
+        IServiceScopeFactory scopeFactory,
         Guid runtimeEpoch)
     {
         _dataSource = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
-        _services = services ?? throw new ArgumentNullException(nameof(services));
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         if (runtimeEpoch == Guid.Empty)
         {
             throw new ArgumentException("The durable runtime epoch must not be empty.", nameof(runtimeEpoch));
@@ -62,9 +63,10 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
                 "The requested Work cannot be reconciled by its immutable registration.");
         }
 
+        using var scope = _scopeFactory.CreateScope();
         var proof = await DurableProviderWorkAdapter.ReconcileAsync(
             registration,
-            _services,
+            scope.ServiceProvider,
             snapshot.ToProviderClaim(started.Payload!),
             cancellationToken).ConfigureAwait(false);
         if (proof.Result is { } result)

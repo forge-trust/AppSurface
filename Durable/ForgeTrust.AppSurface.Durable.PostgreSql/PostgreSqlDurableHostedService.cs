@@ -29,6 +29,7 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
         SingleWriter = false,
     });
     private readonly object _shutdownSync = new();
+    private readonly CancellationTokenSource _listenerCancellation = new();
     private CancellationTokenRegistration _stoppingRegistration;
     private CancellationTokenSource? _activePassCancellation;
     private DateTimeOffset? _shutdownDeadlineUtc;
@@ -61,7 +62,7 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
         _stoppingRegistration = _lifetime.ApplicationStopping.Register(CloseAdmissionAndStartDrain);
         if (_registration.WorkOptions.WakeNotificationMode == PostgreSqlDurableWakeNotificationMode.Enabled)
         {
-            _listenerTask = ListenForWakeHintsAsync(_lifetime.ApplicationStopping);
+            _listenerTask = ListenForWakeHintsAsync(_listenerCancellation.Token);
         }
 
         return base.StartAsync(cancellationToken);
@@ -69,6 +70,7 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
+        await _listenerCancellation.CancelAsync().ConfigureAwait(false);
         CloseAdmissionAndStartDrain();
         var drain = GetDrainTask();
         if (drain is not null)
@@ -99,6 +101,7 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
     public override void Dispose()
     {
         _stoppingRegistration.Dispose();
+        _listenerCancellation.Cancel();
         _wakeSignals.Writer.TryComplete();
         base.Dispose();
     }
@@ -297,6 +300,7 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
     private void CloseAdmissionAndStartDrain()
     {
         _admission.Close();
+        _listenerCancellation.Cancel();
         lock (_shutdownSync)
         {
             _shutdownDeadlineUtc ??= DateTimeOffset.UtcNow + (_hostOptions.ShutdownTimeout - _registration.Options.ShutdownReserve);
@@ -345,7 +349,9 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
             || _registration.Options.TimeBudgetPerPass > availablePassTime)
         {
             throw new InvalidOperationException(
-                "The durable hosted pass budget plus ShutdownReserve must fit inside HostOptions.ShutdownTimeout.");
+                $"The durable hosted pass budget plus ShutdownReserve must fit inside HostOptions.ShutdownTimeout. " +
+                $"ShutdownTimeout={_hostOptions.ShutdownTimeout}; TimeBudgetPerPass={_registration.Options.TimeBudgetPerPass}; " +
+                $"ShutdownReserve={_registration.Options.ShutdownReserve}; AvailablePassTime={availablePassTime}.");
         }
     }
 
@@ -401,6 +407,6 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
     [LoggerMessage(
         EventId = 4106,
         Level = LogLevel.Debug,
-        Message = "ASDUR103 durable PostgreSQL wake listener disconnected transiently; polling remains authoritative and listener retry begins after {Delay}.")]
+        Message = "ASDUR406 durable PostgreSQL wake listener disconnected transiently; polling remains authoritative and listener retry begins after {Delay}.")]
     private partial void LogListenerRetry(TimeSpan delay);
 }

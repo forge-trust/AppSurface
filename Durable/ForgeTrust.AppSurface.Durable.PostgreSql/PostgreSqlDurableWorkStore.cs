@@ -7,7 +7,7 @@ using static ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableProtocolC
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 
-internal sealed class PostgreSqlDurableWorkStore
+internal class PostgreSqlDurableWorkStore
 {
     private static readonly Uri WorkDocumentation = new("https://appsurface.dev/docs/durable/work");
     private static readonly Uri ScopeDocumentation = new("https://appsurface.dev/docs/durable/scopes");
@@ -676,7 +676,7 @@ internal sealed class PostgreSqlDurableWorkStore
         return new PostgreSqlWorkClaimTransition(ParseWorkState(reader.GetString(0)), reader.GetString(1));
     }
 
-    internal async ValueTask<PostgreSqlDurableWorkClaim?> RenewLeaseAsync(
+    internal virtual async ValueTask<PostgreSqlDurableWorkClaim?> RenewLeaseAsync(
         PostgreSqlDurableWorkClaim claim,
         CancellationToken cancellationToken = default)
     {

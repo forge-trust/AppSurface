@@ -8,6 +8,6 @@
 
 ## Durable runtime operations follow-ups (#641)
 
-- Consider broker-backed activation only when a deployment requires scale-to-zero or a provider can preserve the existing bounded `IDurableRuntimePump.RunOnceAsync` contract. PostgreSQL polling and metadata-only wake hints remain the current authority.
+- Consider broker-backed activation only when a deployment requires scale-to-zero or a provider can preserve the existing bounded `IDurableRuntimePump.RunOnceAsync` contract. PostgreSQL remains authoritative; polling is the recovery path and metadata-only wake hints remain optional and advisory.
 - Consider an application-owned authorized operator dashboard or HTTP control surface only after an adopter identifies a real workflow that the typed health and drain APIs cannot serve. Do not add a Durable-owned endpoint or second operational timeline by default.
 - Consider independently configured per-surface worker hosts when production latency evidence shows that one sequential Work/Flow/Schedule pass cannot meet a service objective. Keep the common runtime kernel and PostgreSQL claims/fences rather than adding local parallel fan-out.

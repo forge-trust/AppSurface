@@ -398,6 +398,10 @@ public sealed class DurableSchemaContractTests
             recipe,
             StringComparison.Ordinal);
         Assert.Contains("runtime_heartbeat_runtime_role", recipe, StringComparison.Ordinal);
+        Assert.Contains(
+            "runtime_due_dispatch_health(integer)'::pg_catalog.regprocedure",
+            recipe,
+            StringComparison.Ordinal);
         Assert.Contains("appsurface_durable.scope_history", recipe, StringComparison.Ordinal);
         Assert.Contains("appsurface_durable.work_operator_command", recipe, StringComparison.Ordinal);
         Assert.Contains(

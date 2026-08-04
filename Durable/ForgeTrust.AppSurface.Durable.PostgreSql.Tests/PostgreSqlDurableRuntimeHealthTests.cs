@@ -26,6 +26,7 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
 
         await first.BeginDrainAsync();
         Assert.Equal(DurableRuntimeHealthState.Draining, (await first.GetAsync()).State);
+        Assert.False(await first.TryBeginPassAsync(CancellationToken.None));
         await first.ResumeAsync();
         Assert.True(await first.TryBeginPassAsync(CancellationToken.None));
         await first.RecordSuccessfulSweepAsync(new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero), CancellationToken.None);

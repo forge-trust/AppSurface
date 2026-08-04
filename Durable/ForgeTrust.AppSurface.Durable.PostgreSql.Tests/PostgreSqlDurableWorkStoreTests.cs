@@ -2064,6 +2064,34 @@ public sealed class PostgreSqlDurableWorkStoreTests
         Assert.False(missingCancellation.IsSuccess);
         Assert.Equal(DurableProblemCodes.WorkNotFound, missingCancellation.Problem!.Code);
 
+        var staleEpoch = Guid.NewGuid();
+        await SetRecoveryListingEpochAsync(
+            database.DataSource,
+            scope,
+            providerKeyed.Value!.WorkId,
+            staleEpoch,
+            terminal: false);
+        await SetRecoveryListingEpochAsync(
+            database.DataSource,
+            scope,
+            reconcile.Value!.WorkId,
+            staleEpoch,
+            terminal: true);
+        var recoveryOnly = await control.ListAsync(new DurableWorkListRequest(
+            scope,
+            requiresRecoveryReleaseOnly: true,
+            pageSize: 10));
+        Assert.True(recoveryOnly.IsSuccess);
+        var recoveryItem = Assert.Single(recoveryOnly.Value!.Items);
+        Assert.Equal(providerKeyed.Value.WorkId, recoveryItem.WorkId);
+        Assert.True(recoveryItem.RequiresRecoveryRelease);
+        var emptyRecoveryOnly = await control.ListAsync(new DurableWorkListRequest(
+            new DurableScopeId("control-empty-recovery-scope"),
+            requiresRecoveryReleaseOnly: true,
+            pageSize: 10));
+        Assert.True(emptyRecoveryOnly.IsSuccess);
+        Assert.Empty(emptyRecoveryOnly.Value!.Items);
+
         var generationConflict = await control.DisableAsync(new DurableScopeDisableRequest(
             scope,
             "control-operator",
@@ -2991,6 +3019,35 @@ public sealed class PostgreSqlDurableWorkStoreTests
         var result = await command.ExecuteNonQueryAsync();
         await transaction.CommitAsync();
         return result;
+    }
+
+    private static async ValueTask SetRecoveryListingEpochAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scopeId,
+        DurableWorkId workId,
+        Guid runtimeEpoch,
+        bool terminal)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await SetTestScopeAsync(connection, transaction, scopeId);
+        await using var command = new NpgsqlCommand(
+            """
+            UPDATE appsurface_durable.work
+            SET runtime_epoch = @runtime_epoch,
+                state = CASE WHEN @terminal THEN 'failed' ELSE state END,
+                terminal_at = CASE WHEN @terminal THEN clock_timestamp() ELSE terminal_at END,
+                updated_at = clock_timestamp()
+            WHERE scope_id = @scope_id AND work_id = @work_id;
+            """,
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("runtime_epoch", runtimeEpoch);
+        command.Parameters.AddWithValue("terminal", terminal);
+        command.Parameters.AddWithValue("scope_id", scopeId.Value);
+        command.Parameters.AddWithValue("work_id", workId.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        await transaction.CommitAsync();
     }
 
     private static async ValueTask AssertScopedMutationDeniedAsync(

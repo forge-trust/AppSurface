@@ -117,11 +117,6 @@ internal sealed class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHealth, ID
                 return false;
             }
 
-            if (affected != 1)
-            {
-                throw LostWorkerIdentity();
-            }
-
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return true;
         }

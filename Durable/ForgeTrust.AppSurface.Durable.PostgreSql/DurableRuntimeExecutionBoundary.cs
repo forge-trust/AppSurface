@@ -10,6 +10,8 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 /// </remarks>
 internal interface IDurableRuntimeExecutionBoundary
 {
+    /// <summary>Invokes one prepared provider operation and returns its registered encoded terminal payload.</summary>
+    /// <remarks>Forwards cancellation to provider execution and owns no claim, permit, completion, or tracing state.</remarks>
     ValueTask<DurableEncodedPayload> InvokeAsync(
         DurablePreparedWorkInvocation invocation,
         CancellationToken cancellationToken);

@@ -696,7 +696,7 @@ SELECT NOT EXISTS
       AND routine.proname = 'claim_schedule_dispatch'
       AND privilege.privilege_name = 'EXECUTE'
       OR service.role_name = :'runtime_role'
-      AND routine.proname = 'runtime_due_dispatch_health'
+      AND routine.oid = 'appsurface_durable.runtime_due_dispatch_health(integer)'::pg_catalog.regprocedure
       AND privilege.privilege_name = 'EXECUTE'
     )
 ) AS service_roles_have_safe_function_privileges \gset

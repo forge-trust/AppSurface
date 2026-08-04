@@ -32,6 +32,12 @@ public sealed class CoverageSolutionScriptTests
         var legacyRunner = script.IndexOf("dotnet_run_args=(\n  run\n  --project \"$COVERAGE_RUNNER_PROJECT\"", StringComparison.Ordinal);
         Assert.True(sourceCliNoRestore >= 0, "The source CLI lane should pass --no-restore to dotnet run when requested.");
         Assert.True(coverageRunDelimiter > sourceCliNoRestore, "The source CLI lane must append --no-restore before the coverage run delimiter.");
+        var postgresExclusiveProject = script.IndexOf(
+            "    --exclusive-test-project ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj",
+            StringComparison.Ordinal);
+        Assert.True(
+            postgresExclusiveProject > coverageRunDelimiter && postgresExclusiveProject < coverageGateExit,
+            "The PostgreSQL test project must be exclusive in the default source-CLI lane.");
         Assert.True(coverageGateExit >= 0, "The source CLI lane must exit after its coverage gate succeeds.");
         Assert.True(legacyRunner > coverageGateExit, "The legacy runner must remain unreachable from the source CLI lane.");
     }
