@@ -654,6 +654,50 @@ body {
     height: 0.85rem;
 }
 
+.docs-theme-preference {
+    display: grid;
+    gap: 0.45rem;
+    margin: 0 1rem;
+    border: 1px solid var(--docs-color-border-default);
+    border-radius: 0.5rem;
+    padding: 0.7rem 0.8rem;
+    color: var(--docs-color-text-muted);
+    font-size: 0.75rem;
+}
+
+.docs-theme-preference legend {
+    padding: 0 0.2rem;
+    color: var(--docs-color-text-subtle);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.docs-theme-preference label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    cursor: pointer;
+}
+
+.docs-theme-preference input {
+    accent-color: var(--docs-color-accent);
+}
+
+.docs-theme-preference label:has(input:focus-visible) {
+    border-radius: 0.2rem;
+    outline: var(--docs-focus-outline);
+    outline-offset: 0.15rem;
+}
+
+.docs-theme-preference-noscript {
+    margin: 0 1rem 0.75rem;
+    color: var(--docs-color-text-subtle);
+    font-size: 0.75rem;
+    line-height: 1.4;
+}
+
 @media (pointer: coarse) {
     .docs-page-meta-download::before {
         position: absolute;

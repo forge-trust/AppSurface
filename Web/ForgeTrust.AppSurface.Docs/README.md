@@ -1436,6 +1436,20 @@ services.AddAppSurfaceWebTheming();
 services.AddAppSurfaceDocs();
 ```
 
+To offer the browser-local appearance picker demonstrated by the Docs consumer fixture, replace the explicit Web call with the opt-in preference adapter before `AddAppSurfaceDocs()`:
+
+```csharp
+services.AddAppSurfaceTheming(options =>
+{
+    options.DefaultTheme = new AppSurfaceThemeId("appsurface");
+    options.Pairs.Add(AppSurfaceThemePair.AppSurface());
+});
+services.AddAppSurfaceWebThemePreferences(options => options.StorageKey = "docs-theme");
+services.AddAppSurfaceDocs();
+```
+
+This keeps one canonical page and one static tree per Docs version. It is origin-scoped browser storage only: Light and Dark never change Docs routes, archive routes, canonical metadata, raw Markdown downloads, cookies, account state, cache keys, or server rendering. The layout includes a hidden native `System`/`Light`/`Dark` radio group that the opt-in bootstrap reveals after binding; hosts that do not opt in retain the legacy dark behavior and the control stays hidden. See the [Web preference guide](../ForgeTrust.AppSurface.Web/README.md#browser-local-theme-preferences) for the precedence, localizable status event, no-script behavior, privacy boundary, forced-colors guidance, and rollback.
+
 | Before | After |
 | --- | --- |
 | `AppSurfaceDark` produced only the established dark Docs variable graph. | It maps Docs-owned surfaces, code tokens, search states, tables, archive/status pages, and focus treatment to the shared System/Light/Dark semantic branch while keeping Docs variables internal. |
@@ -1446,7 +1460,7 @@ Docs preserves density, chrome, layout override behavior, and the default dark e
 
 `AddAppSurfaceDocs()` always registers the Web theme-document adapter. When no `IAppSurfaceThemeResolver` is already registered, it also adds the built-in pair with the legacy `Dark` default. Register them explicitly before `AddAppSurfaceDocs()` only when the host needs a different pair or System/Light behavior.
 
-For a nonce-based `style-src` policy, the host stores its per-response nonce before Razor executes. The package layout applies it only to the two live critical styles; static exports remain nonce-free and deterministic.
+For a nonce-based CSP policy, the host stores its per-response nonce before Razor executes. The package layout applies it to the two live critical styles and, when the preference adapter is enabled, to the deterministic preference bootstrap; static exports remain nonce-free and deterministic.
 
 ```csharp
 using ForgeTrust.AppSurface.Web.Theming;
@@ -1455,6 +1469,8 @@ context.Items[AppSurfaceThemeCspNonce.HttpContextItemKey] = hostGeneratedNonce;
 ```
 
 Do not put the nonce in `AppSurfaceDocsOptions`, configuration files, logs, or static exports. The host owns nonce generation and CSP headers.
+
+For static/versioned Docs, allow the [published preference script hash](../ForgeTrust.AppSurface.Web/README.md#csp-static-export-privacy-and-rollback) only when the exported bootstrap is present, and calculate hashes for every exported inline style, including `data-as-theme-critical`, `data-docs-theme-critical`, and host-authored additions. The published-tree handler recognizes the known bootstrap hash while continuing to block all other inline scripts; it removes request nonces from the three generated payloads. Markdown download routes remain `text/markdown` attachments and do not enter this HTML/CSP path.
 
 Do not treat `--docs-*` variables as a consumer API. They are Docs implementation details derived from stable shared `--as-*` semantic inputs. The supported consumer contract is the neutral [theme-pair reference](../../ForgeTrust.AppSurface.Theming/README.md), this Docs options section, and the documented Razor layout override boundary.
 

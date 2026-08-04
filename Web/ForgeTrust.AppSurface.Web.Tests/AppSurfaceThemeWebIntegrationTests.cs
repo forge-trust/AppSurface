@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using ForgeTrust.AppSurface.Theming;
 using ForgeTrust.AppSurface.Web.TagHelpers;
 using ForgeTrust.AppSurface.Web.Theming;
@@ -316,6 +318,150 @@ public sealed class AppSurfaceThemeWebIntegrationTests
 
         var html = firstOutput.Content.GetContent() + secondOutput.Content.GetContent();
         Assert.Equal(1, CountOccurrences(html, "<meta name=\"color-scheme\""));
+        Assert.Equal(1, CountOccurrences(html, "<style data-as-theme-critical"));
+    }
+
+    [Fact]
+    public void PreferenceSerializer_ShouldEmitMutuallyExclusiveSystemAndExplicitModeSelectors()
+    {
+        var document = AppSurfaceThemeDocumentSerializer.SerializePreference(CreateResolution(AppSurfaceThemeMode.Dark));
+
+        Assert.Contains("[data-as-theme=\"appsurface\"][data-as-theme-mode=\"system\"]", document.HeadContent, StringComparison.Ordinal);
+        Assert.Contains("[data-as-theme=\"appsurface\"][data-as-theme-mode=\"light\"]", document.HeadContent, StringComparison.Ordinal);
+        Assert.Contains("[data-as-theme=\"appsurface\"][data-as-theme-mode=\"dark\"]", document.HeadContent, StringComparison.Ordinal);
+        Assert.Contains("color-scheme: light !important;", document.HeadContent, StringComparison.Ordinal);
+        Assert.Contains("color-scheme: dark !important;", document.HeadContent, StringComparison.Ordinal);
+        Assert.Contains("@media (prefers-color-scheme: dark)", document.HeadContent, StringComparison.Ordinal);
+        Assert.Equal("system", document.RootThemeMode);
+    }
+
+    [Fact]
+    public void PreferenceRegistration_ShouldUseSystemDocumentForTheConfiguredPair()
+    {
+        var services = new ServiceCollection();
+        services.AddAppSurfaceTheming(options =>
+        {
+            options.Pairs.Add(AppSurfaceThemePair.AppSurface());
+            options.DefaultMode = AppSurfaceThemeMode.Dark;
+        });
+        services.AddAppSurfaceWebThemePreferences();
+        using var provider = services.BuildServiceProvider();
+
+        var document = provider.GetRequiredService<IAppSurfaceThemeDocumentProvider>().GetDocument();
+        Assert.Equal("system", document.RootThemeMode);
+        Assert.Contains("[data-as-theme=\"appsurface\"][data-as-theme-mode=\"dark\"]", document.HeadContent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PreferenceRegistration_ShouldReplaceEarlierPreferenceConfiguration()
+    {
+        var services = new ServiceCollection();
+        services.AddAppSurfaceTheming(options => options.Pairs.Add(AppSurfaceThemePair.AppSurface()));
+        services.AddAppSurfaceWebThemePreferences(options => options.StorageKey = "first-theme-key");
+        services.AddAppSurfaceWebThemePreferences(options => options.StorageKey = "latest-theme-key");
+
+        Assert.Equal(1, services.Count(descriptor => descriptor.ServiceType == typeof(AppSurfaceThemePreferenceOptions)));
+        Assert.Equal(1, services.Count(descriptor => descriptor.ServiceType == typeof(AppSurfaceThemePreferenceBootstrap)));
+
+        using var provider = services.BuildServiceProvider();
+        Assert.Equal("latest-theme-key", provider.GetRequiredService<AppSurfaceThemePreferenceOptions>().StorageKey);
+        Assert.Equal("latest-theme-key", provider.GetRequiredService<AppSurfaceThemePreferenceBootstrap>().StorageKey);
+    }
+
+    [Fact]
+    public void PreferenceRegistration_ShouldRequireNeutralTheming()
+    {
+        var services = new ServiceCollection();
+
+        var exception = Assert.Throws<InvalidOperationException>(() => services.AddAppSurfaceWebThemePreferences());
+
+        Assert.Contains("ASWEBTHEME002", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PreferenceOptions_ShouldRejectUnsafeStorageKeys()
+    {
+        var services = new ServiceCollection();
+        services.AddAppSurfaceTheming(options => options.Pairs.Add(AppSurfaceThemePair.AppSurface()));
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => services.AddAppSurfaceWebThemePreferences(options => options.StorageKey = "bad key"));
+
+        Assert.Contains("ASWEBTHEME001", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("with\tspace")]
+    [InlineData("contains'quote")]
+    [InlineData("contains\"quote")]
+    [InlineData("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmn")]
+    public void PreferenceOptions_ShouldRejectMissingAndUnsafeStorageKeys(string? storageKey)
+    {
+        var services = new ServiceCollection();
+        services.AddAppSurfaceTheming(options => options.Pairs.Add(AppSurfaceThemePair.AppSurface()));
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => services.AddAppSurfaceWebThemePreferences(options => options.StorageKey = storageKey!));
+
+        Assert.Contains("ASWEBTHEME001", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HeadTagHelper_ShouldEmitNonceProtectedPreferenceBootstrapBeforeCriticalStyle()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(new AppSurfaceThemePreferenceBootstrap(new AppSurfaceThemePreferenceOptions()));
+        using var provider = services.BuildServiceProvider();
+        var helper = new AppSurfaceThemeHeadTagHelper(
+            new AppSurfaceThemeDocumentProvider(new StubResolver(CreateResolution(AppSurfaceThemeMode.System))),
+            provider)
+        {
+            Nonce = "nonce-value"
+        };
+        var output = CreateOutput("appsurface-theme-head");
+
+        helper.Process(CreateContext(), output);
+
+        var html = output.Content.GetContent();
+        Assert.Contains("<script data-as-theme-preference-bootstrap data-as-theme-storage-key=\"as_theme\" nonce=\"nonce-value\">", html, StringComparison.Ordinal);
+        Assert.Contains("<style data-as-theme-critical nonce=\"nonce-value\">", html, StringComparison.Ordinal);
+        Assert.True(html.IndexOf("<script", StringComparison.Ordinal) < html.IndexOf("<style", StringComparison.Ordinal));
+        Assert.StartsWith("sha256-", AppSurfaceThemePreferenceBootstrap.CspHash, StringComparison.Ordinal);
+        Assert.Equal(AppSurfaceThemePreferenceBootstrap.CspHash, AppSurfaceThemePreferenceCsp.ScriptHash);
+        Assert.Equal(
+            "sha256-" + Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(AppSurfaceThemePreferenceBootstrap.Script))),
+            AppSurfaceThemePreferenceCsp.ScriptHash);
+    }
+
+    [Fact]
+    public void HeadTagHelper_ShouldEmitOnePreferenceBootstrapPerMvcRequest()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(new AppSurfaceThemePreferenceBootstrap(new AppSurfaceThemePreferenceOptions()));
+        using var provider = services.BuildServiceProvider();
+        var viewContext = CreateViewContext();
+        var first = new AppSurfaceThemeHeadTagHelper(
+            new AppSurfaceThemeDocumentProvider(new StubResolver(CreateResolution(AppSurfaceThemeMode.System))),
+            provider)
+        {
+            ViewContext = viewContext
+        };
+        var second = new AppSurfaceThemeHeadTagHelper(
+            new AppSurfaceThemeDocumentProvider(new StubResolver(CreateResolution(AppSurfaceThemeMode.System))),
+            provider)
+        {
+            ViewContext = viewContext
+        };
+        var firstOutput = CreateOutput("appsurface-theme-head");
+        var secondOutput = CreateOutput("appsurface-theme-head");
+
+        first.Process(CreateContext(), firstOutput);
+        second.Process(CreateContext(), secondOutput);
+
+        var html = firstOutput.Content.GetContent() + secondOutput.Content.GetContent();
+        Assert.Equal(1, CountOccurrences(html, "<script data-as-theme-preference-bootstrap"));
         Assert.Equal(1, CountOccurrences(html, "<style data-as-theme-critical"));
     }
 

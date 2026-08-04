@@ -214,7 +214,23 @@ Add theme settings when the consuming repository should make the built-in docs s
 
 The default theme is `AppSurfaceDark` with comfortable density and standard chrome. `GraphiteDark` is the second dark-family preset for lower-saturation surfaces. Blank color values use the selected preset default. Color overrides must be CSS hex colors and must meet startup contrast checks for their role; validation messages name the exact config key, bad value, required contrast ratio, tested preset background, and fix. The same keys work through environment variables, for example `AppSurfaceDocs__Theme__Preset=GraphiteDark` and `AppSurfaceDocs__Theme__Colors__AccentColor=#38bdf8`.
 
-The supported theme contract is intentionally narrow. Use `Preset`, `Colors`, `Density`, and `Chrome` for package-owned docs chrome. Do not rely on `--docs-*` custom property names as a public API, do not use theme settings for arbitrary surface/text/syntax-token overrides, and do not expect light mode, system mode, view replacement, layout slots, or external theme packages in v1. Static exports and published release archives freeze the resolved theme into their exported HTML; changing host config later does not rewrite already-exported archives.
+The supported Docs configuration contract is intentionally narrow. Use `Preset`, `Colors`, `Density`, and `Chrome` for package-owned docs chrome. Do not rely on `--docs-*` custom property names as a public API, do not use theme settings for arbitrary surface/text/syntax-token overrides, and do not expect view replacement, layout slots, or external theme packages in v1. Static exports and published release archives freeze the resolved Docs configuration into their exported HTML; changing host config later does not rewrite already-exported archives.
+
+### Optional browser-local appearance choice
+
+Docs can inherit a user-selected System/Light/Dark appearance without multiplying live or versioned pages. Register the shared pair and the [Web browser-local preference adapter](../ForgeTrust.AppSurface.Web/README.md#browser-local-theme-preferences) before `AddAppSurfaceDocs()`:
+
+```csharp
+services.AddAppSurfaceTheming(options =>
+{
+    options.DefaultTheme = new AppSurfaceThemeId("appsurface");
+    options.Pairs.Add(AppSurfaceThemePair.AppSurface());
+});
+services.AddAppSurfaceWebThemePreferences(options => options.StorageKey = "docs-theme");
+services.AddAppSurfaceDocs();
+```
+
+The browser applies a valid saved Light/Dark value to the root before styles paint; otherwise System follows the operating system. The URL, canonical metadata, static tree, server cache behavior, and versioned Docs routes stay unchanged. The built-in layout supplies a hidden native `Appearance` radio group for this opt-in and preserves forced-colors and keyboard focus; hosts own localized status feedback through the documented browser event. Storage denial leaves System usable or keeps the current page selection only for that visit. Raw protected Markdown download is deliberately unrelated: it stays a private, no-store `text/markdown` attachment and never receives a theme head, script, or HTML rewrite.
 
 ## Define the public source boundary
 

@@ -27,6 +27,30 @@ public static partial class AppSurfaceThemeDocumentSerializer
         return document;
     }
 
+    internal static AppSurfaceThemeDocument SerializePreference(AppSurfaceThemeResolution resolution)
+    {
+        ArgumentNullException.ThrowIfNull(resolution);
+
+        var systemResolution = new AppSurfaceThemeResolution(
+            resolution.Id,
+            AppSurfaceThemeMode.System,
+            resolution.Light,
+            resolution.Dark);
+        if (!AppSurfaceThemeRegistry.IsSafeResolution(systemResolution))
+        {
+            return AppSurfaceThemeDocument.Empty;
+        }
+
+        var rootAttributes =
+            $"data-as-theme=\"{HtmlEncoder.Default.Encode(systemResolution.Id.Value)}\" data-as-theme-mode=\"system\" data-as-theme-schema=\"{AppSurfaceThemeDocument.SchemaVersion}\"";
+        return new AppSurfaceThemeDocument(
+            systemResolution.Id.Value,
+            "system",
+            rootAttributes,
+            "color-scheme: light dark;",
+            BuildHeadContent(systemResolution, "light dark", preferenceModes: true));
+    }
+
     /// <summary>
     /// Attempts to create a deterministic document from a neutral theme resolution.
     /// </summary>
@@ -93,7 +117,8 @@ public static partial class AppSurfaceThemeDocumentSerializer
 
     private static string BuildHeadContent(
         AppSurfaceThemeResolution resolution,
-        string colorScheme)
+        string colorScheme,
+        bool preferenceModes = false)
     {
         var builder = new StringBuilder();
         builder.Append("<meta name=\"color-scheme\" content=\"");
@@ -101,17 +126,28 @@ public static partial class AppSurfaceThemeDocumentSerializer
         builder.Append("\" />\n");
         builder.Append(StyleOpenTag);
         builder.Append("\n");
-        AppendCriticalCss(builder, resolution);
+        AppendCriticalCss(builder, resolution, preferenceModes);
         builder.Append(StyleCloseTag);
         return builder.ToString();
     }
 
     private static void AppendCriticalCss(
         StringBuilder builder,
-        AppSurfaceThemeResolution resolution)
+        AppSurfaceThemeResolution resolution,
+        bool preferenceModes)
     {
         var selector = $"[data-as-theme=\"{resolution.Id.Value}\"]";
-        if (resolution.Mode == AppSurfaceThemeMode.Dark)
+        if (preferenceModes)
+        {
+            var systemSelector = selector + "[data-as-theme-mode=\"system\"]";
+            AppendBranch(builder, systemSelector, resolution.Light);
+            builder.Append("@media (prefers-color-scheme: dark) {\n");
+            AppendBranch(builder, systemSelector, resolution.Dark, indent: "  ");
+            builder.Append("}\n");
+            AppendBranch(builder, selector + "[data-as-theme-mode=\"light\"]", resolution.Light, colorScheme: "light");
+            AppendBranch(builder, selector + "[data-as-theme-mode=\"dark\"]", resolution.Dark, colorScheme: "dark");
+        }
+        else if (resolution.Mode == AppSurfaceThemeMode.Dark)
         {
             AppendBranch(builder, selector, resolution.Dark);
         }
@@ -171,7 +207,8 @@ public static partial class AppSurfaceThemeDocumentSerializer
         StringBuilder builder,
         string selector,
         AppSurfaceThemeRoles roles,
-        string indent = "")
+        string indent = "",
+        string? colorScheme = null)
     {
         builder.Append(indent);
         builder.Append(selector);
@@ -192,6 +229,14 @@ public static partial class AppSurfaceThemeDocumentSerializer
         builder.Append("  color: var(--as-text);\n");
         builder.Append(indent);
         builder.Append("  background-color: var(--as-canvas);\n");
+        if (colorScheme is not null)
+        {
+            builder.Append(indent);
+            builder.Append("  color-scheme: ");
+            builder.Append(colorScheme);
+            builder.Append(" !important;\n");
+        }
+
         builder.Append(indent);
         builder.Append("}\n");
     }

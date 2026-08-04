@@ -10,6 +10,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Docs.ViewComponents;
 using ForgeTrust.AppSurface.Intelligence;
+using ForgeTrust.AppSurface.Web;
 using ForgeTrust.AppSurface.Web.Theming;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -113,8 +114,34 @@ public class AppSurfaceDocsViewsTests
         Assert.Equal("1", document.DocumentElement?.GetAttribute("data-as-theme-schema"));
         Assert.Single(document.QuerySelectorAll("meta[name='color-scheme']"));
         Assert.Single(document.QuerySelectorAll("style[data-as-theme-critical]"));
+        Assert.Empty(document.QuerySelectorAll("fieldset[data-as-theme-preference-control]"));
+        Assert.DoesNotContain("Appearance follows your operating-system preference", html, StringComparison.Ordinal);
         var docsCriticalStyle = Assert.Single(document.QuerySelectorAll("style[data-docs-theme-critical]"));
         Assert.Contains("--docs-color-surface-canvas:var(--as-canvas);", docsCriticalStyle.TextContent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Layout_ShouldRenderTheHeadlessPreferenceControlForAnOptedInHost()
+    {
+        using var services = CreateServiceProvider(
+            CreateDocs(),
+            configureServices: collection => collection.AddAppSurfaceWebThemePreferences(options => options.StorageKey = "docs-theme"));
+
+        var html = await RenderDocsViewAsync(
+            services,
+            "Index",
+            controller => controller.Index(),
+            httpContext => httpContext.Items[AppSurfaceThemeCspNonce.HttpContextItemKey] = "docs-nonce");
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var control = Assert.Single(document.QuerySelectorAll("fieldset[data-as-theme-preference-control]"));
+
+        Assert.Equal("system", document.DocumentElement?.GetAttribute("data-as-theme-mode"));
+        Assert.Single(document.QuerySelectorAll("script[data-as-theme-preference-bootstrap]"));
+        Assert.Equal("docs-nonce", document.QuerySelector("script[data-as-theme-preference-bootstrap]")?.GetAttribute("nonce"));
+        Assert.True(control.HasAttribute("hidden"));
+        Assert.Equal(3, control.QuerySelectorAll("input[type='radio'][name='appsurface-theme-preference']").Length);
+        Assert.Contains("Appearance follows your operating-system preference", html, StringComparison.Ordinal);
+        Assert.Equal(3, Regex.Matches(html, "nonce=\"docs-nonce\"").Count);
     }
 
     [Fact]

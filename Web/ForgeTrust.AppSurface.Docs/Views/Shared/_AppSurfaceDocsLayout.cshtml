@@ -6,11 +6,13 @@
 @inject ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsThemeResolver ThemeResolver
 @inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrlBuilder
 @inject ForgeTrust.AppSurface.Docs.AppSurfaceDocsOptions DocsOptions
+@inject ForgeTrust.AppSurface.Web.Theming.IAppSurfaceThemeDocumentProvider ThemeDocumentProvider
 @inject Microsoft.Extensions.Options.IOptions<AppSurfaceProductIntelligenceOptions> ProductIntelligenceOptions
 @{
     var stylesheetPath = AssetVersioner.AppendVersion(AssetPathResolver.StylesheetPath, "css/site.gen.css");
     var docsIdentity = IdentityResolver.Identity;
     var docsTheme = ThemeResolver.Theme;
+    var hasSystemThemeDocument = string.Equals(ThemeDocumentProvider.GetDocument().RootThemeMode, "system", StringComparison.Ordinal);
     var docsRoutes = DocsUrlBuilder.Routes;
     var docsRootUrl = Url.PathBaseAware(docsRoutes.Home);
     var docsHomeUrl = Url.PathBaseAware(docsIdentity.HomeHref);
@@ -204,6 +206,27 @@
                 </p>
             }
         </nav>
+        @if (hasSystemThemeDocument)
+        {
+            <fieldset class="docs-theme-preference" data-as-theme-preference-control hidden>
+                <legend>Appearance</legend>
+                <label>
+                    <input type="radio" name="appsurface-theme-preference" value="system" />
+                    System
+                </label>
+                <label>
+                    <input type="radio" name="appsurface-theme-preference" value="light" />
+                    Light
+                </label>
+                <label>
+                    <input type="radio" name="appsurface-theme-preference" value="dark" />
+                    Dark
+                </label>
+            </fieldset>
+            <noscript>
+                <p class="docs-theme-preference-noscript">Appearance follows your operating-system preference because JavaScript is unavailable.</p>
+            </noscript>
+        }
         <div id="docs-sidebar-footer" class="docs-sidebar-footer p-4 border-t text-xs text-center">
             @docsIdentity.DisplayName
         </div>

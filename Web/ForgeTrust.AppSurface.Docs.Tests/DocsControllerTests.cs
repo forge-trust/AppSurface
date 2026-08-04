@@ -5894,6 +5894,10 @@ public class DocsControllerTests : IDisposable
                 Assert.Equal("text/markdown; charset=utf-8", file.ContentType);
                 Assert.Equal("guide.md", file.FileDownloadName);
                 Assert.Equal("private, no-store", controller.Response.Headers.CacheControl.ToString());
+                var downloadedMarkdown = Encoding.UTF8.GetString(file.FileContents);
+                Assert.DoesNotContain("data-as-theme", downloadedMarkdown, StringComparison.Ordinal);
+                Assert.DoesNotContain("data-as-theme-preference-bootstrap", downloadedMarkdown, StringComparison.Ordinal);
+                Assert.DoesNotContain("<script", downloadedMarkdown, StringComparison.OrdinalIgnoreCase);
 
                 httpContext.Features.Get<IHttpRequestFeature>()!.RawTarget =
                     "https://docs.example/tenant/docs/_markdown/guide?ingest=second-brain";

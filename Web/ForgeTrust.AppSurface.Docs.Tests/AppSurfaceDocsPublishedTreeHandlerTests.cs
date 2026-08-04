@@ -2,7 +2,13 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Docs.Services;
+using ForgeTrust.AppSurface.Theming;
+using ForgeTrust.AppSurface.Web;
+using ForgeTrust.AppSurface.Web.TagHelpers;
+using ForgeTrust.AppSurface.Web.Theming;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Razor.TagHelpers;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.FileProviders.Physical;
 using Microsoft.Extensions.Logging;
@@ -144,6 +150,52 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         Assert.Contains("sandbox allow-same-origin", csp);
         Assert.Contains("script-src 'none'", csp);
         Assert.Contains("guide page", ReadBody(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldAllowOnlyTheVerifiedPreferenceBootstrapAndThemeStyles()
+    {
+        var services = new ServiceCollection();
+        services.AddAppSurfaceTheming(options => options.Pairs.Add(AppSurfaceThemePair.AppSurface()));
+        services.AddAppSurfaceWebThemePreferences(options => options.StorageKey = "docs-theme");
+        using var provider = services.BuildServiceProvider();
+        var document = provider.GetRequiredService<IAppSurfaceThemeDocumentProvider>().GetDocument();
+        var head = RenderPreferenceHead(provider, "request-nonce");
+        var pair = AppSurfaceThemePair.AppSurface();
+        var resolution = new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.System, pair.Light, pair.Dark);
+        var docsCriticalCss = new AppSurfaceDocsThemeResolver(
+            new AppSurfaceDocsOptions(),
+            new StubThemeResolver(resolution)).Theme.CriticalCss!;
+        var tree = CreatePublishedTree("theme-preference-csp");
+        File.WriteAllText(
+            Path.Join(tree, "index.html"),
+            $"""
+            <!DOCTYPE html><html {document.RootAttributes} style="{document.RootStyle}"><head>{head}<style data-docs-theme-critical nonce="request-nonce">{docsCriticalCss}</style><style data-host-theme-extension>/* host theme extension */</style></head><body><p>canonical</p></body></html>
+            """);
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3");
+
+        Assert.True(await handler.TryHandleAsync(request));
+
+        var body = ReadBody(request);
+        var csp = request.Response.Headers["Content-Security-Policy"].ToString();
+        var bootstrap = ExtractElementContent(body, "<script data-as-theme-preference-bootstrap", "</script>");
+        var themeCriticalCss = ExtractElementContent(body, "<style data-as-theme-critical", "</style>");
+        var docsThemeCriticalCss = ExtractElementContent(body, "<style data-docs-theme-critical", "</style>");
+        var hostThemeExtensionCss = ExtractElementContent(body, "<style data-host-theme-extension", "</style>");
+        var rootStyle = ExtractAttributeValue(body, "<html", "style");
+
+        Assert.Contains("sandbox allow-same-origin allow-scripts", csp, StringComparison.Ordinal);
+        Assert.Contains($"script-src '{AppSurfaceThemePreferenceCsp.ScriptHash}'", csp, StringComparison.Ordinal);
+        Assert.Contains(ToCspSha256(bootstrap), csp, StringComparison.Ordinal);
+        Assert.Contains(ToCspSha256(themeCriticalCss), csp, StringComparison.Ordinal);
+        Assert.Contains(ToCspSha256(docsThemeCriticalCss), csp, StringComparison.Ordinal);
+        Assert.Contains(ToCspSha256(hostThemeExtensionCss), csp, StringComparison.Ordinal);
+        Assert.Contains("style-src 'self' 'unsafe-hashes'", csp, StringComparison.Ordinal);
+        Assert.Contains(ToCspSha256(rootStyle), csp, StringComparison.Ordinal);
+        Assert.DoesNotContain("unsafe-inline", csp, StringComparison.Ordinal);
+        Assert.DoesNotContain("nonce=\"request-nonce\"", body, StringComparison.Ordinal);
+        Assert.Contains("<p>canonical</p>", body, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1811,6 +1863,61 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         httpContext.Response.Body.Position = 0;
         using var reader = new StreamReader(httpContext.Response.Body, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
         return reader.ReadToEnd();
+    }
+
+    private static string RenderPreferenceHead(IServiceProvider provider, string nonce)
+    {
+        var helper = new AppSurfaceThemeHeadTagHelper(
+            provider.GetRequiredService<IAppSurfaceThemeDocumentProvider>(),
+            provider)
+        {
+            Nonce = nonce
+        };
+        var output = new TagHelperOutput(
+            "appsurface-theme-head",
+            new TagHelperAttributeList(),
+            (_, _) => Task.FromResult<TagHelperContent>(new DefaultTagHelperContent()));
+
+        helper.Process(
+            new TagHelperContext(new TagHelperAttributeList(), new Dictionary<object, object>(), "published-preference-head"),
+            output);
+
+        return output.Content.GetContent();
+    }
+
+    private static string ExtractElementContent(string html, string openingMarker, string closingMarker)
+    {
+        var openingIndex = html.IndexOf(openingMarker, StringComparison.Ordinal);
+        Assert.True(openingIndex >= 0, $"Expected '{openingMarker}' in static HTML.");
+        var contentIndex = html.IndexOf('>', openingIndex);
+        Assert.True(contentIndex >= 0, $"Expected the opening '{openingMarker}' tag to close.");
+        var closingIndex = html.IndexOf(closingMarker, contentIndex, StringComparison.Ordinal);
+        Assert.True(closingIndex >= 0, $"Expected closing '{closingMarker}' in static HTML.");
+        return html[(contentIndex + 1)..closingIndex];
+    }
+
+    private static string ToCspSha256(string value) =>
+        "sha256-" + Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static string ExtractAttributeValue(string html, string openingMarker, string attributeName)
+    {
+        var openingIndex = html.IndexOf(openingMarker, StringComparison.Ordinal);
+        Assert.True(openingIndex >= 0, $"Expected '{openingMarker}' in static HTML.");
+        var tagEnd = html.IndexOf('>', openingIndex);
+        Assert.True(tagEnd >= 0, $"Expected the opening '{openingMarker}' tag to close.");
+        var tag = html[openingIndex..tagEnd];
+        var prefix = attributeName + "=\"";
+        var attributeIndex = tag.IndexOf(prefix, StringComparison.Ordinal);
+        Assert.True(attributeIndex >= 0, $"Expected '{attributeName}' on '{openingMarker}'.");
+        var valueStart = attributeIndex + prefix.Length;
+        var valueEnd = tag.IndexOf('"', valueStart);
+        Assert.True(valueEnd >= 0, $"Expected '{attributeName}' to have a closing quote.");
+        return tag[valueStart..valueEnd];
+    }
+
+    private sealed class StubThemeResolver(AppSurfaceThemeResolution resolution) : IAppSurfaceThemeResolver
+    {
+        public AppSurfaceThemeResolution ResolveDefault() => resolution;
     }
 
     private sealed class TestFileProvider(params (string Path, TestFileInfo FileInfo)[] files) : IFileProvider
