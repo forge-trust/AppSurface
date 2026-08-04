@@ -264,18 +264,18 @@ meant to verify the Linux platform store.
 
 #### `appsurface secrets transfer`
 
-Create a value-free plan for a reviewed source-to-sink job, then revalidate and apply that artifact:
+Create a value-free plan for a reviewed source-to-destination job, then revalidate and apply that artifact:
 
 ```bash
-appsurface secrets transfer plan --config ./secret-promotion.json --job staging-to-production --out ./staging-to-production.plan.json
-appsurface secrets transfer apply --config ./secret-promotion.json --plan ./staging-to-production.plan.json --apply --confirm staging-to-production
+appsurface secrets transfer plan --config ./secret-transfer.json --job staging-to-production --out ./staging-to-production.plan.json
+appsurface secrets transfer apply --config ./secret-transfer.json --plan ./staging-to-production.plan.json --apply --confirm staging-to-production
 ```
 
 The JSON configuration declares named endpoints and exact jobs. `local` is the built-in LocalSecrets endpoint; Google
 endpoints select either `applicationDefault` or a validated `credentialFile`. A job always supplies the logical key and
-the exact remote source version or destination secret parent. This v1 contract supports LocalSecrets sources promoted to
-Google destinations and Google source versions promoted to Google destinations without exposing arbitrary `--from`/`--to`
-flags.
+the exact remote source version or destination secret parent. Version 1 supports LocalSecrets-to-Google and
+Google-to-Google transfer without exposing arbitrary `--from`/`--to` flags. Version 2 adds the deliberate,
+plan-bound Google-to-LocalSecrets direction described below.
 
 `credentialFile` requires an absolute regular-file path with owner-only file permissions. Its parent directories must
 not use symbolic links and must not be writable by group or other users unless the directory uses the sticky bit.
@@ -300,6 +300,74 @@ starts background synchronization. Writes are ordered but cross-secret atomicity
 workflow persists a value-free journal before the first mutation and updates it atomically after each row; the final
 receipt is the durable summary used by `--resume` to skip rows already confirmed as written. A crash can therefore leave
 a partial receipt, and an uncertain Google write is recorded as `IndeterminateWrite` and is never retried automatically.
+
+##### Materialize one pinned Google version locally (v2)
+
+For the complete local-test setup, including IAM prerequisites, guarded replacement, recovery, and runtime posture,
+start with [Materialize a pinned remote secret for local testing](../../Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/materialize-remote-secrets-for-local-testing.md).
+
+Use this direction when you already have Google Secret Manager IAM access and need a reproducible local integration-test
+clone. It does not create Google secrets, change IAM, or display a value. Choose the version number through Google
+Secret Manager metadata—for example, `gcloud secrets versions list db-password`—then use the full numeric resource.
+Version aliases, including `latest`, are rejected for every remote-to-local transfer because the plan must bind one
+immutable source. See Google's [version metadata guide](https://cloud.google.com/secret-manager/docs/view-secret-version)
+for the metadata-only listing workflow.
+
+```json
+{
+  "version": 2,
+  "endpoints": [
+    {
+      "name": "production-gsm",
+      "provider": "google",
+      "environment": "production",
+      "credential": { "mode": "applicationDefault" }
+    }
+  ],
+  "jobs": [
+    {
+      "name": "clone-production-db-password",
+      "source": "production-gsm",
+      "destination": "local",
+      "rows": [
+        {
+          "key": "Database:Password",
+          "source": "projects/my-project/secrets/db-password/versions/42"
+        }
+      ]
+    }
+  ]
+}
+```
+
+The Google source must have `secretmanager.versions.get` for planning and `secretmanager.versions.access` for apply.
+Run `doctor` and use the same local namespace flags for both plan and apply:
+
+```bash
+appsurface secrets doctor --app MyApp --environment Production
+appsurface secrets transfer plan --config ./remote-to-local.json --job clone-production-db-password --app MyApp --environment Production --out ./clone-production-db-password.plan.json
+appsurface secrets transfer apply --config ./remote-to-local.json --plan ./clone-production-db-password.plan.json --app MyApp --environment Production --apply --confirm clone-production-db-password
+```
+
+`plan` performs metadata-only probes. `apply --apply` accesses the pinned value only after every row passes preflight,
+then emits a value-free `CreatedLocalSecret`, `ReplacedLocalSecret`, or `RecoveredLocalSecret` result and receipt. A
+local target is missing by default. An existing target is a `Conflict`; a replacement requires `--replace` at **plan**
+time and exact `--confirm <job>` at apply time, even when the remote source is not production-labelled. Legacy or
+unattested local values must be deleted explicitly and planned again.
+
+The v2 coordinator supports the built-in platform store and file fallback after `doctor` and transfer-state posture
+checks; `InMemoryAppSurfaceLocalSecretStore` is test-only. Custom `IAppSurfaceLocalSecretStore` implementations receive
+the value-safe `local-secret-transfer-unsupported-store` diagnostic in v2.
+
+If the process stops after the local write begins, do not retry it blindly. Run apply with `--resume <receipt>` so
+AppSurface can compare the pinned remote and local values in memory while holding the same per-key lock. Equal values
+commit the prepared transfer; missing, different, unreadable, corrupt, or unsafe state remains `Conflict` or
+`IndeterminateWrite`. Reconcile with `appsurface secrets delete <key>` and a fresh plan when needed. Local deletion
+clears local transfer evidence and never changes the Google Secret Manager version.
+
+`Production` is a valid local namespace label. It does not turn the laptop into a production host. A host application
+that resolves a local namespace other than `Development`, `Local`, or `Dev` must explicitly set
+`LocalSecretsPostureMode.SingleMachineSelfHosted`; the transfer CLI does not make that host configuration.
 
 ### `appsurface coverage run`
 

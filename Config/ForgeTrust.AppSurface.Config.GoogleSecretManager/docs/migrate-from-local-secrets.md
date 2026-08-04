@@ -3,6 +3,9 @@
 LocalSecrets is the single-machine pre-vault posture. Google Secret Manager is the remote provider for Google Cloud
 hosts that need team-safe storage, IAM-mediated access, and production-like source evidence.
 
+This guide covers the LocalSecrets-to-Google direction. For an IAM-authorized developer who instead needs one pinned
+Google version in a local integration-test namespace, use [Materialize a pinned remote secret for local testing](../../ForgeTrust.AppSurface.Config.LocalSecrets/docs/materialize-remote-secrets-for-local-testing.md).
+
 The migration ladder is:
 
 ```text
@@ -19,10 +22,10 @@ Manager.
 2. Grant the app runtime identity `secretmanager.versions.access` for the version it will read. Grant the operator
    running transfer `secretmanager.secrets.get`, `secretmanager.versions.list`, and `secretmanager.versions.add` on the
    existing destination secret so plan can verify its metadata and apply can add the version.
-3. Declare the source, destination, and exact key mapping in a reviewed promotion job, then create its value-free plan:
+3. Declare the source, destination, and exact key mapping in a reviewed transfer job, then create its value-free plan:
 
    ```bash
-   appsurface secrets transfer plan --config ./secret-promotion.json \
+   appsurface secrets transfer plan --config ./secret-transfer.json \
      --job local-to-production \
      --out ./local-to-production.plan.json
    ```
@@ -30,7 +33,7 @@ Manager.
 4. Apply only after the plan reports the intended row:
 
    ```bash
-   appsurface secrets transfer apply --config ./secret-promotion.json \
+   appsurface secrets transfer apply --config ./secret-transfer.json \
      --plan ./local-to-production.plan.json \
      --apply --confirm local-to-production
    ```
@@ -57,7 +60,7 @@ Manager.
 8. Confirm the source is `GoogleSecretManagerConfigProvider` and the value is redacted.
 9. Delete the old LocalSecrets value from the local machine when it is no longer needed.
 
-The promotion configuration carries batch mappings and keeps source/sink authority reviewed in one place:
+The transfer configuration carries batch mappings and keeps source/destination authority reviewed in one place:
 
 ```json
 {
@@ -92,7 +95,7 @@ exceptions.
 - Do not leave a production fallback secret in `appsettings.*.json`. Claimed remote failures fail closed by default so
   a missing IAM grant or outage does not silently read a stale file value.
 - Keep environment variables for emergency overrides, CI injection, and short-lived operational recovery.
-- Do not use promotion as a rotation system. `--replace` adds a new enabled version to an existing secret and leaves
+- Do not use transfer as a rotation system. `--replace` adds a new enabled version to an existing secret and leaves
   older versions under operator control.
-- Do not use promotion jobs for implicit convention mapping. Every row names the local logical key and Google secret
+- Do not use transfer jobs for implicit convention mapping. Every row names the local logical key and Google secret
   explicitly.

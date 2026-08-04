@@ -20,3 +20,8 @@ Stripe:ApiKey resolved from configuration. Value: [redacted]
 
 Use the default OS-backed store by omitting `--store-file` and `APPSURFACE_LOCAL_SECRETS_FILE`. Use environment
 variables, key-per-file, or a remote vault for CI, containers, team environments, and production.
+
+If an IAM-authorized developer needs a local integration-test clone of a specific Google Secret Manager version, use the
+[remote-to-local materialization guide](../../Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/materialize-remote-secrets-for-local-testing.md).
+It uses a reviewed numeric remote version, never prints the value, and does not turn this sample into a remote-vault
+integration example.

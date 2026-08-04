@@ -5,9 +5,9 @@ using CliFx.Infrastructure;
 namespace ForgeTrust.AppSurface.Cli;
 
 /// <summary>
-/// Provides the discoverable root for declared secret-promotion commands.
+/// Provides the discoverable root for declared, value-safe secret-transfer commands.
 /// </summary>
-[Command("secrets transfer", Description = "Create and apply declared, value-safe secret promotion plans.")]
+[Command("secrets transfer", Description = "Create and apply declared, value-safe secret transfer plans.")]
 internal sealed partial class SecretsTransferCommand : ICommand
 {
     /// <inheritdoc />
@@ -18,15 +18,15 @@ internal sealed partial class SecretsTransferCommand : ICommand
 }
 
 /// <summary>
-/// Creates a value-free promotion plan for one declared endpoint job.
+/// Creates a value-free transfer plan for one declared endpoint job.
 /// </summary>
-[Command("secrets transfer plan", Description = "Probe and record a declared secret promotion job without reading values.")]
+[Command("secrets transfer plan", Description = "Probe and record a declared secret transfer job without reading values.")]
 internal sealed partial class SecretsTransferPlanCommand(SecretPromotionWorkflow workflow) : SecretsCommandBase
 {
-    [CommandOption("config", Description = "Path to the declared secret-promotion JSON configuration.")]
+    [CommandOption("config", Description = "Path to the declared secret-transfer JSON configuration.")]
     public string? ConfigPath { get; set; }
 
-    [CommandOption("job", Description = "Name of the reviewed promotion job to plan.")]
+    [CommandOption("job", Description = "Name of the reviewed transfer job to plan.")]
     public string? JobName { get; set; }
 
     [CommandOption("out", Description = "Path for the value-free plan artifact.")]
@@ -71,12 +71,12 @@ internal sealed partial class SecretsTransferPlanCommand(SecretPromotionWorkflow
 }
 
 /// <summary>
-/// Applies one previously-created and still-valid secret-promotion plan.
+/// Applies one previously-created and still-valid secret-transfer plan.
 /// </summary>
-[Command("secrets transfer apply", Description = "Revalidate and apply a declared secret promotion plan.")]
+[Command("secrets transfer apply", Description = "Revalidate and apply a declared secret transfer plan.")]
 internal sealed partial class SecretsTransferApplyCommand(SecretPromotionWorkflow workflow) : SecretsCommandBase
 {
-    [CommandOption("config", Description = "Path to the declared secret-promotion JSON configuration used to create the plan.")]
+    [CommandOption("config", Description = "Path to the declared secret-transfer JSON configuration used to create the plan.")]
     public string? ConfigPath { get; set; }
 
     [CommandOption("plan", Description = "Path to the value-free plan artifact created by secrets transfer plan.")]
@@ -85,7 +85,7 @@ internal sealed partial class SecretsTransferApplyCommand(SecretPromotionWorkflo
     [CommandOption("apply", Description = "Execute the plan. Omit to inspect the apply preflight only.")]
     public bool Apply { get; set; }
 
-    [CommandOption("confirm", Description = "Required exact job name when either endpoint is production-labelled; also acknowledges any declared mutable LocalSecrets source exception.")]
+    [CommandOption("confirm", Description = "Required exact job name for production-labelled transfers, every remote-to-local replacement, and mutable LocalSecrets source exceptions.")]
     public string? Confirmation { get; set; }
 
     [CommandOption("receipt", Description = "Path for the value-free apply receipt. Defaults beside the plan.")]
@@ -110,11 +110,25 @@ internal sealed partial class SecretsTransferApplyCommand(SecretPromotionWorkflo
             BuildContext());
         var result = workflow.Apply(request);
         await SecretPromotionOutput.WriteAsync(console, result, Json);
+        if (!Json &&
+            result.Rows.Any(static row =>
+                string.Equals(row.DestinationKind, "local", StringComparison.Ordinal) &&
+                string.Equals(row.Status, "Written", StringComparison.Ordinal)) &&
+            !IsDevelopmentLike(request.Context.Environment))
+        {
+            await console.Output.WriteLineAsync("Note: resolving this local namespace in a host requires LocalSecretsPostureMode.SingleMachineSelfHosted.");
+        }
+
         if (!result.Succeeded)
         {
             Environment.ExitCode = 1;
         }
     }
+
+    private static bool IsDevelopmentLike(string environment) =>
+        environment.Equals("Development", StringComparison.OrdinalIgnoreCase) ||
+        environment.Equals("Local", StringComparison.OrdinalIgnoreCase) ||
+        environment.Equals("Dev", StringComparison.OrdinalIgnoreCase);
 }
 
 internal static class SecretPromotionCommandExtensions
