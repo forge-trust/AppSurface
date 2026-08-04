@@ -25,6 +25,10 @@ public sealed class DurableTraceContextDocumentationRegressionTests
             .Select(value => value.GetString())
             .ToArray();
 
-        Assert.Contains("Durable/flow-trace-context-v1.md", includeGlobs);
+        const string guidePath = "Durable/flow-trace-context-v1.md";
+        Assert.Contains(guidePath, includeGlobs);
+        Assert.True(
+            File.Exists(TestPathUtils.PathUnder(repoRoot, guidePath)),
+            "The harvested durable trace-context guide must exist at the configured path.");
     }
 }

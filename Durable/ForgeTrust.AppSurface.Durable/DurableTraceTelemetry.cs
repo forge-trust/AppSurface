@@ -13,6 +13,17 @@ internal static class DurableTraceTelemetry
     internal const string CorrelationToken = "appsurface.durable.correlation_token";
     internal const string ContextStatus = "appsurface.durable.context.status";
 
+    /// <summary>
+    /// Applies the fixed, value-free Durable trace tag vocabulary to an active execution activity.
+    /// </summary>
+    /// <remarks>
+    /// A <see langword="null"/> <paramref name="activity"/> is a no-op because no listener requested an activity.
+    /// The emitted keys are <see cref="ContractVersion"/>, <see cref="ExecutionKind"/>, <see cref="TriggerKind"/>,
+    /// <see cref="FlowState"/>, <see cref="Outcome"/>, <see cref="ContextStatus"/>, and, only when available,
+    /// <see cref="CorrelationToken"/>. <paramref name="contextStatus"/> is a
+    /// <see cref="DurableTraceContextStatus"/> value from validated durable trace capture; header values, baggage,
+    /// and tenant data are never emitted.
+    /// </remarks>
     internal static void Apply(
         Activity? activity,
         string executionKind,
@@ -32,7 +43,11 @@ internal static class DurableTraceTelemetry
         activity.SetTag(TriggerKind, triggerKind);
         activity.SetTag(FlowState, flowState);
         activity.SetTag(Outcome, outcome);
-        activity.SetTag(CorrelationToken, correlationToken.ToString("D"));
+        if (correlationToken != Guid.Empty)
+        {
+            activity.SetTag(CorrelationToken, correlationToken.ToString("D"));
+        }
+
         activity.SetTag(ContextStatus, contextStatus.ToString().ToLowerInvariant());
     }
 }

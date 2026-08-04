@@ -2205,6 +2205,73 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     }
 
     [Fact]
+    public async Task TraceAttachment_MissingRequestedPointerRollsBackEveryTraceMutation()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-trace-attachment-cardinality");
+        var status = await schema.GetStatusAsync();
+        var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
+        var payloads = new DurablePayloadCodecRegistry([codec]);
+        var work = new DurableWorkRegistry([]);
+        var registration = new WaitingTestFlowRegistration(codec);
+        var flows = new DurableFlowRegistry([registration], work, payloads);
+        var options = new PostgreSqlDurableWorkOptions(epoch, status.StoreId);
+        var client = new PostgreSqlDurableFlowClient(database.DataSource, flows, payloads, options);
+        var scope = new DurableScopeId("slice4-trace-attachment-cardinality");
+        var instance = new DurableFlowInstanceId("trace-attachment-cardinality-flow");
+        Assert.True((await client.StartAsync(new DurableFlowStartRequest(
+            scope,
+            new DurableCommandId("trace-attachment-cardinality-start"),
+            "trace-attachment-cardinality-start-key",
+            instance,
+            registration.FlowId,
+            registration.FlowVersion,
+            codec.EncodeObject(new byte[] { 1 })))).IsSuccess);
+
+        await using var connection = await database.DataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using (var setScope = new NpgsqlCommand(
+                         "SELECT set_config('appsurface_durable.scope_id', @scope_id, true);",
+                         connection,
+                         transaction))
+        {
+            setScope.Parameters.AddWithValue("scope_id", scope.Value);
+            await setScope.ExecuteNonQueryAsync();
+        }
+
+        var trace = await PostgreSqlDurableFlowStore.InsertTraceContextAsync(
+            connection,
+            transaction,
+            scope,
+            instance,
+            DurableTraceContext.Parse(
+                "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01",
+                traceState: null).Context,
+            "command_accepted",
+            CancellationToken.None);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await PostgreSqlDurableFlowStore.AttachTraceContextAsync(
+                connection,
+                transaction,
+                scope,
+                instance,
+                trace,
+                commandId: "trace-attachment-cardinality-start",
+                revision: 1,
+                waitId: null,
+                timerId: null,
+                workId: new DurableWorkId("missing-trace-attachment-work"),
+                CancellationToken.None));
+
+        Assert.Equal("The durable trace context attachment expected 4 pointer updates.", exception.Message);
+        await transaction.RollbackAsync();
+        Assert.Equal(0, await CountFlowTraceContextsAsync(database.DataSource, scope, instance));
+    }
+
+    [Fact]
     public async Task TimerResolution_SupersedesACandidateThatIsNoLongerDue()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();

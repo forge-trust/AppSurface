@@ -4,10 +4,17 @@ using NpgsqlTypes;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 
+/// <summary>Identifies transaction-local trace evidence before it is attached to its committed Flow lineage.</summary>
 internal sealed record PostgreSqlDurableFlowTrace(Guid TraceContextId);
 
 internal sealed partial class PostgreSqlDurableFlowStore
 {
+    /// <summary>Inserts immutable trace evidence into the caller-owned Flow mutation transaction.</summary>
+    /// <remarks>
+    /// The caller must set the scoped runtime context and commit or roll back the supplied transaction. A missing
+    /// <paramref name="context"/> produces no row and returns <see langword="null"/>. A non-null context must insert
+    /// exactly one row or the method throws so the enclosing durable mutation cannot commit partial evidence.
+    /// </remarks>
     internal static async ValueTask<PostgreSqlDurableFlowTrace?> InsertTraceContextAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
@@ -51,6 +58,13 @@ internal sealed partial class PostgreSqlDurableFlowStore
         return new PostgreSqlDurableFlowTrace(traceContextId);
     }
 
+    /// <summary>Attaches inserted trace evidence to every Flow record created by the same committed transition.</summary>
+    /// <remarks>
+    /// The caller must use the transaction that inserted <paramref name="trace"/>. A missing trace is a no-op for an
+    /// absent context. Otherwise the Flow instance and history pointer, plus every non-null command, wait, timer, or
+    /// Work pointer, must each update exactly one row; any mismatch throws so the transaction rolls back rather than
+    /// committing detached causal evidence.
+    /// </remarks>
     internal static async ValueTask AttachTraceContextAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
@@ -119,6 +133,15 @@ internal sealed partial class PostgreSqlDurableFlowStore
         {
             Value = workId?.Value ?? (object)DBNull.Value,
         });
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        var expectedPointers = 2
+            + (commandId is null ? 0 : 1)
+            + (waitId is null ? 0 : 1)
+            + (timerId is null ? 0 : 1)
+            + (workId is null ? 0 : 1);
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != expectedPointers)
+        {
+            throw new InvalidOperationException(
+                $"The durable trace context attachment expected {expectedPointers} pointer updates.");
+        }
     }
 }

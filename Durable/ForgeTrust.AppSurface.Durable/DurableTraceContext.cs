@@ -53,7 +53,7 @@ internal sealed record DurableTraceContext(
             return DurableTraceContextCapture.Absent;
         }
 
-        var flags = ((byte)activity.ActivityTraceFlags).ToString("x2");
+        var flags = ((byte)activity.ActivityTraceFlags).ToString("x2", CultureInfo.InvariantCulture);
         return Parse(
             $"00-{activity.TraceId.ToHexString()}-{activity.SpanId.ToHexString()}-{flags}",
             activity.TraceStateString,

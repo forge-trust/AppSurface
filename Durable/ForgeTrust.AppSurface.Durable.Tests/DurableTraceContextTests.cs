@@ -228,18 +228,54 @@ public sealed class DurableTraceContextTests
             "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01",
             traceState: null).Context;
 
-        using var activity = DurableTraceActivity.StartRoot(
-            "durable-test",
-            ActivityKind.Consumer,
-            cause);
+        using (var activityScope = DurableTraceActivity.StartRoot("durable-test", ActivityKind.Consumer, cause))
+        {
+            var activity = activityScope.Activity;
+            Assert.NotNull(activity);
+            Assert.Equal(default, activity.ParentSpanId);
+            Assert.NotEqual(ambient.TraceId, activity.TraceId);
+            Assert.Same(ambient, Activity.Current);
+            var link = Assert.Single(activity.Links);
+            Assert.Equal(cause!.TraceId, link.Context.TraceId.ToHexString());
+            Assert.Equal(cause.SpanId, link.Context.SpanId.ToHexString());
+        }
+
+        Assert.Same(ambient, Activity.Current);
+    }
+
+    [Fact]
+    public void StartRoot_WithoutAmbientActivity_UsesTheActivitySourceLifetime()
+    {
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = static source => source.Name == AppSurfaceActivitySources.ActivitySourceName,
+            Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.PropagationData,
+        };
+        ActivitySource.AddActivityListener(listener);
+
+        var activityScope = DurableTraceActivity.StartRoot("durable-test", ActivityKind.Consumer, committedCause: null);
+        var activity = activityScope.Activity;
 
         Assert.NotNull(activity);
         Assert.Equal(default, activity.ParentSpanId);
-        Assert.NotEqual(ambient.TraceId, activity.TraceId);
-        Assert.Same(ambient, Activity.Current);
-        var link = Assert.Single(activity.Links);
-        Assert.Equal(cause!.TraceId, link.Context.TraceId.ToHexString());
-        Assert.Equal(cause.SpanId, link.Context.SpanId.ToHexString());
+        Assert.Same(activity, Activity.Current);
+
+        activityScope.Dispose();
+        activityScope.Dispose();
+
+        Assert.Null(Activity.Current);
+    }
+
+    [Fact]
+    public void StartRoot_WithoutAListener_ReturnsAnEmptyScope()
+    {
+        using var activityScope = DurableTraceActivity.StartRoot(
+            "durable-test",
+            ActivityKind.Consumer,
+            committedCause: null);
+
+        Assert.Null(activityScope.Activity);
+        Assert.Null(Activity.Current);
     }
 
     [Fact]
@@ -292,6 +328,23 @@ public sealed class DurableTraceContextTests
             tags.Keys.OrderBy(key => key, StringComparer.Ordinal));
         Assert.DoesNotContain(tags.Keys, key => key.Contains("traceparent", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(tags.Keys, key => key.Contains("tracestate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Apply_WithoutAValidatedContext_OmitsTheCorrelationToken()
+    {
+        using var activity = new Activity("durable-test").Start();
+
+        DurableTraceTelemetry.Apply(
+            activity,
+            "flow",
+            "claim",
+            "ready",
+            "applied",
+            Guid.Empty,
+            DurableTraceContextStatus.Absent);
+
+        Assert.DoesNotContain(activity.TagObjects, pair => pair.Key == DurableTraceTelemetry.CorrelationToken);
     }
 
     [Fact]

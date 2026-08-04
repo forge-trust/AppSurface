@@ -46,7 +46,7 @@ Keep these values separate. ASP.NET static web assets use the host application n
 
 ## Tracing source boundaries
 
-Packages that emit [`System.Diagnostics.Activity`] instances can use the canonical source name from this package through
+Packages that emit [`System.Diagnostics.Activity`](https://learn.microsoft.com/dotnet/api/system.diagnostics.activity) instances can use the canonical source name from this package through
 `AppSurfaceActivitySources.ActivitySourceName` (or `AppSurfaceActivitySources.Instance`). This API is dependency-neutral
 to `ForgeTrust.AppSurface.Core` and avoids requiring `ForgeTrust.AppSurface.Observability` in framework code.
 

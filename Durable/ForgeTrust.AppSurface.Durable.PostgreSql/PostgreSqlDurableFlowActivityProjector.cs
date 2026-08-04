@@ -115,10 +115,11 @@ internal static class PostgreSqlDurableFlowActivityProjector
         if (succeeded && !canceledParent && hasResultPayload)
         {
             DurableTraceDiagnostics.Report(workTrace.DiagnosticCode);
-            using var activity = DurableTraceActivity.StartRoot(
+            using var activityScope = DurableTraceActivity.StartRoot(
                 "appsurface.durable.flow.activity",
                 ActivityKind.Consumer,
                 workTrace.Context);
+            var activity = activityScope.Activity;
             var completionTrace = activity is null
                 ? workTrace
                 : DurableTraceContext.Capture(activity);

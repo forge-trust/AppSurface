@@ -238,10 +238,11 @@ internal sealed class PostgreSqlDurableFlowProcessor
         {
             var timerTrace = await _store.ReadTimerTraceContextAsync(candidate, cancellationToken).ConfigureAwait(false);
             DurableTraceDiagnostics.Report(timerTrace.DiagnosticCode);
-            using var timerActivity = DurableTraceActivity.StartRoot(
+            using var timerActivityScope = DurableTraceActivity.StartRoot(
                 "appsurface.durable.flow.timer",
                 ActivityKind.Consumer,
                 timerTrace.Context);
+            var timerActivity = timerActivityScope.Activity;
             var timerExecutionTrace = timerActivity is null
                 ? timerTrace
                 : DurableTraceContext.Capture(timerActivity);
@@ -303,10 +304,11 @@ internal sealed class PostgreSqlDurableFlowProcessor
             cancellationToken).ConfigureAwait(false);
 
         DurableTraceDiagnostics.Report(claim.TraceContext.DiagnosticCode);
-        using var activity = DurableTraceActivity.StartRoot(
+        using var activityScope = DurableTraceActivity.StartRoot(
             "appsurface.durable.flow.execute",
             ActivityKind.Consumer,
             claim.TraceContext.Context);
+        var activity = activityScope.Activity;
         var executionTrace = activity is null
             ? claim.TraceContext
             : DurableTraceContext.Capture(activity);

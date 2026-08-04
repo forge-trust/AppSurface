@@ -10,10 +10,10 @@ The internal `flow_trace_context` relation stores only validated W3C version-`00
 
 | Field | Rule |
 | --- | --- |
-| `trace_context_id` | Storage-generated UUID, referenced through `(scope_id, trace_context_id)`. |
+| `trace_context_id` | Runtime-generated UUID, referenced through `(scope_id, trace_context_id)`. |
 | `traceparent` | Exactly W3C version `00`, 55 characters, lower-case hexadecimal IDs, never all-zero. |
 | `tracestate` | Optional opaque ASCII value, at most 512 characters. It is not parsed for routing. |
-| `correlation_token` | Storage-generated UUID exported as the only identifier-valued durable tag. |
+| `correlation_token` | Runtime-generated UUID exported as the only identifier-valued durable tag when validated context exists. |
 | `cause_kind` | One of `command_accepted`, `activity_scheduled`, `activity_completed`, `event_winner`, `timer_winner`, or `evaluation_committed`. |
 | `contract_version` | `1`; a future W3C wire version requires a new durable contract version. |
 
@@ -44,7 +44,7 @@ Only these tags are emitted by Durable instrumentation:
 - `appsurface.durable.trigger.kind`
 - `appsurface.durable.flow.state`
 - `appsurface.durable.outcome`
-- `appsurface.durable.correlation_token`
+- `appsurface.durable.correlation_token` (only when a validated context exists)
 - `appsurface.durable.context.status`
 
 Configure the canonical `ForgeTrust.AppSurface` source through the [Observability package](../Observability/ForgeTrust.AppSurface.Observability/README.md) or a host-owned OpenTelemetry registration.

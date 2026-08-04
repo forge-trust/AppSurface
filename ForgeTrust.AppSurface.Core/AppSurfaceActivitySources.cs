@@ -23,13 +23,14 @@ public static class AppSurfaceActivitySources
     /// </summary>
     /// <remarks>
     /// This instance is intended for dependency-agnostic package code that needs an <see cref="ActivitySource"/> value.
-    /// OpenTelemetry registration should still occur through the host package.
+    /// It is process-shared and callers must not dispose it. OpenTelemetry registration should still occur through the
+    /// host package.
     /// </remarks>
     public static ActivitySource Instance { get; } = new(ActivitySourceName);
 
     /// <summary>
-    /// Gets canonical AppSurface activity-source names. Keep this list dependency-neutral and minimal so packages can merge
-    /// additional framework source names where needed.
+    /// Gets a read-only list containing only <see cref="ActivitySourceName"/>. Keep this list dependency-neutral and
+    /// minimal so packages can merge additional framework source names where needed.
     /// </summary>
     public static IReadOnlyList<string> StandardActivitySourceNames { get; } = Array.AsReadOnly(
         [
