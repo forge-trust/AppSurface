@@ -2279,6 +2279,12 @@ public sealed class DurableSlice4ReferenceWorkloadTests
         var registration = new TimerTestFlowRegistration(codec);
         var flows = new DurableFlowRegistry([registration], work, payloads);
         var barriers = new RecordingFlowBarrierObserver();
+        using var traceListener = new ActivityListener
+        {
+            ShouldListenTo = static source => source.Name == AppSurfaceActivitySources.ActivitySourceName,
+            Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+        };
+        ActivitySource.AddActivityListener(traceListener);
         var options = new PostgreSqlDurableWorkOptions(epoch, status.StoreId);
         var client = new PostgreSqlDurableFlowClient(database.DataSource, flows, payloads, options);
         var processor = new PostgreSqlDurableFlowProcessor(
@@ -2291,6 +2297,7 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             barriers: barriers);
         var scope = new DurableScopeId("slice4-timer-barrier");
         var instance = new DurableFlowInstanceId("timer-barrier-flow");
+        using var incoming = new Activity("timer-barrier-incoming").SetIdFormat(ActivityIdFormat.W3C).Start();
         Assert.True((await client.StartAsync(new DurableFlowStartRequest(
             scope,
             new DurableCommandId("timer-barrier-start"),
@@ -2311,6 +2318,14 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             "timer-barrier-resolve-worker");
         Assert.Equal(PostgreSqlFlowProcessingOutcome.Applied, result.Outcome);
         Assert.Contains("flow.timer-resolution.committed", barriers.Barriers);
+        var traceEvidence = Assert.Single(
+            barriers.TraceEvidence,
+            evidence => evidence?.Operation == "appsurface.durable.flow.timer");
+        Assert.NotNull(traceEvidence);
+        Assert.NotEmpty(traceEvidence.TraceId);
+        Assert.NotEmpty(traceEvidence.SpanId);
+        Assert.True(Guid.TryParse(traceEvidence.CorrelationToken, out _));
+        Assert.Single(traceEvidence.Links);
     }
 
     [Fact]
@@ -3644,6 +3659,8 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     {
         internal List<string> Barriers { get; } = [];
 
+        internal List<PostgreSqlFlowTelemetryEvidence?> TraceEvidence { get; } = [];
+
         public ValueTask ObserveAsync(
             string barrier,
             DurableScopeId scopeId,
@@ -3653,6 +3670,7 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             CancellationToken cancellationToken)
         {
             Barriers.Add(barrier);
+            TraceEvidence.Add(traceEvidence);
             return ValueTask.CompletedTask;
         }
     }

@@ -243,6 +243,25 @@ public sealed class DurableTraceContextTests
     }
 
     [Fact]
+    public void StartRoot_WithAmbientActivity_RelaysAListenerFailure()
+    {
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = static source => source.Name == AppSurfaceActivitySources.ActivitySourceName,
+            Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+            ActivityStarted = static _ => throw new InvalidOperationException("The test listener failed."),
+        };
+        ActivitySource.AddActivityListener(listener);
+        using var ambient = new Activity("ambient").SetIdFormat(ActivityIdFormat.W3C).Start();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            DurableTraceActivity.StartRoot("durable-test", ActivityKind.Consumer, committedCause: null));
+
+        Assert.Equal("The test listener failed.", exception.Message);
+        Assert.Same(ambient, Activity.Current);
+    }
+
+    [Fact]
     public void Apply_UsesOnlyTheFixedValueFreeTelemetryVocabulary()
     {
         using var activity = new Activity("durable-test").Start();
