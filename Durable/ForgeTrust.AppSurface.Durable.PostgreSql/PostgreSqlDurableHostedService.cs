@@ -401,7 +401,7 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
     [LoggerMessage(
         EventId = 4105,
         Level = LogLevel.Warning,
-        Message = "ASDUR404 durable worker shutdown could not persist its drain marker; PostgreSQL liveness will become stale after the configured bound.")]
+        Message = DurableProblemCodes.StoreUnavailable + " durable worker shutdown could not persist its drain marker; PostgreSQL liveness will become stale after the configured bound.")]
     private partial void LogDrainMarkerFailure();
 
     [LoggerMessage(

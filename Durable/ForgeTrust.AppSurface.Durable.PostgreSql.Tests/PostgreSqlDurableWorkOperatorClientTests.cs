@@ -1592,8 +1592,9 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         var registry = new DurableWorkRegistry([reconcile, manual]);
         var client = new PostgreSqlDurableWorkClient(
             database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var scopeFactory = new TrackingScopeFactory();
         var operators = new PostgreSqlDurableWorkOperatorClient(
-            database.DataSource, registry, NullServices.Instance, epoch);
+            database.DataSource, registry, scopeFactory, epoch);
 
         var reconcileScope = new DurableScopeId("operator-typed-registration");
         var reconcileAccepted = await AcceptAndPermitAsync(
@@ -1620,6 +1621,8 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         var resumed = await operators.ReconcileAsync(reconcileRequest);
         Assert.True(resumed.IsSuccess);
         Assert.Equal(1, reconcile.ReconciliationCount);
+        Assert.Same(scopeFactory.Scope!.ServiceProvider, reconcile.ReconciliationServices);
+        Assert.True(scopeFactory.Scope.IsDisposed);
 
         var mismatchScope = new DurableScopeId("operator-typed-safety-mismatch");
         var mismatchAccepted = await AcceptAndPermitAsync(
@@ -2428,6 +2431,8 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
     {
         public int ReconciliationCount { get; private set; }
 
+        public IServiceProvider? ReconciliationServices { get; private set; }
+
         public override bool CanReconcile => ProviderSafety == DurableProviderSafety.ReconcileBeforeRetry;
 
         public override DurablePreparedWork Prepare(IServiceProvider services, DurableWorkExecutionContext work) =>
@@ -2445,6 +2450,7 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
             CancellationToken cancellationToken = default)
         {
             ReconciliationCount++;
+            ReconciliationServices = services;
             providerEntered?.TrySetResult(true);
             if (releaseProvider is not null)
             {
@@ -2492,6 +2498,27 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
 
         public void Dispose()
         {
+        }
+    }
+
+    private sealed class TrackingScopeFactory : IServiceScopeFactory
+    {
+        public TrackingScope? Scope { get; private set; }
+
+        public IServiceScope CreateScope() => Scope = new TrackingScope();
+    }
+
+    private sealed class TrackingScope : IServiceScope
+    {
+        public IServiceProvider ServiceProvider { get; } = new ScopedServices();
+
+        public bool IsDisposed { get; private set; }
+
+        public void Dispose() => IsDisposed = true;
+
+        private sealed class ScopedServices : IServiceProvider
+        {
+            public object? GetService(Type serviceType) => null;
         }
     }
 }

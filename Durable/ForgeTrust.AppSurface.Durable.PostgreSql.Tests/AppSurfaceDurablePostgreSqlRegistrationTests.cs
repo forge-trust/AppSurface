@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Durable;
 using ForgeTrust.AppSurface.Durable.Provider;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -395,6 +396,7 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
     {
         using var dispatcher = CreateDataSource();
         using var runtime = CreateDataSource();
+        var logger = new DrainFailureLogger();
         var options = new AppSurfaceDurablePostgreSqlOptions
         {
             WorkerId = "host-stop-test",
@@ -414,9 +416,14 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
             new DurableRuntimeAdmissionGate(),
             new TestHostApplicationLifetime(),
             Options.Create(new HostOptions()),
-            NullLogger<PostgreSqlDurableHostedService>.Instance);
+            logger);
 
         await hosted.StopAsync(CancellationToken.None);
+
+        Assert.StartsWith(
+            DurableProblemCodes.StoreUnavailable,
+            await logger.FailureLogged.Task.WaitAsync(TimeSpan.FromSeconds(5)),
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1029,6 +1036,29 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
             if (eventId.Id == 4106)
             {
                 RetryLogged.TrySetResult();
+            }
+        }
+    }
+
+    private sealed class DrainFailureLogger : ILogger<PostgreSqlDurableHostedService>
+    {
+        internal TaskCompletionSource<string> FailureLogged { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull =>
+            NullLogger.Instance.BeginScope(state);
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (eventId.Id == 4105)
+            {
+                FailureLogged.TrySetResult(formatter(state, exception));
             }
         }
     }
