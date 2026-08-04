@@ -106,6 +106,7 @@ public sealed class CoverageGateTests
                 DiffBase = "HEAD~1",
                 MinPatchLine = 100,
                 MinPatchBranch = 100,
+                PatchLineModeOption = "CoDeCoV",
                 NoGithubSummary = true
             };
             using var console = new FakeInMemoryConsole();
@@ -115,6 +116,7 @@ public sealed class CoverageGateTests
             var output = console.ReadOutputString();
             Assert.Contains("patch lines 100.00% >= 99.5%", output, StringComparison.Ordinal);
             Assert.Contains("patch branches 100.00% >= 99.5%", output, StringComparison.Ordinal);
+            Assert.Contains("Patch line mode: codecov", File.ReadAllText(Path.Join(temp.Path, "coverage-gate.md")), StringComparison.Ordinal);
         }
         finally
         {
@@ -525,6 +527,214 @@ public sealed class CoverageGateTests
         Assert.Contains("| Patch lines | 66.67% (2/3 measurable, 5 changed) | 49.5% | pass |", markdown, StringComparison.Ordinal);
         Assert.Contains("\"patchLine\": 50", json, StringComparison.Ordinal);
         Assert.Contains("\"measurable\": 3", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_DefaultPatchLineMode_PreservesHitsOnlyCoverage()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1">
+              <packages>
+                <package name="Example">
+                  <classes>
+                    <class name="Example.Foo" filename="src/Foo.cs">
+                      <lines>
+                        <line number="1" hits="1" branch="true" condition-coverage="50% (1/2)" />
+                      </lines>
+                    </class>
+                  </classes>
+                </package>
+              </packages>
+            </coverage>
+            """);
+        var request = new CoverageGateRequest(
+            coverage,
+            temp.Path,
+            0,
+            0,
+            false,
+            null,
+            new CoveragePatchRequest(temp.Path, "origin/main", 100, _ => Task.FromResult("""
+                diff --git a/src/Foo.cs b/src/Foo.cs
+                index 0000000..1111111 100644
+                --- a/src/Foo.cs
+                +++ b/src/Foo.cs
+                @@ -0,0 +1,1 @@
+                +changed
+                """)));
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+
+        Assert.Equal(PatchLineMode.Measurable, request.PatchCoverage?.LineMode);
+        Assert.Equal(1, result.PatchLineCoverage?.CoveredLines);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_CodecovMode_CountsPartialConditionLinesAsUncovered()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1">
+              <packages>
+                <package name="Example">
+                  <classes>
+                    <class name="Example.Foo" filename="src/Foo.cs">
+                      <lines>
+                        <line number="1" hits="1" branch="true" condition-coverage="50% (1/2)" />
+                        <line number="2" hits="1" branch="true" condition-coverage="100% (2/2)" />
+                        <line number="3" hits="1" />
+                        <line number="4" hits="0" branch="true" condition-coverage="100% (2/2)" />
+                      </lines>
+                    </class>
+                  </classes>
+                </package>
+              </packages>
+            </coverage>
+            """);
+        var request = new CoverageGateRequest(
+            coverage,
+            temp.Path,
+            0,
+            0,
+            false,
+            null,
+            new CoveragePatchRequest(
+                temp.Path,
+                "origin/main",
+                50,
+                _ => Task.FromResult("""
+                    diff --git a/src/Foo.cs b/src/Foo.cs
+                    index 0000000..1111111 100644
+                    --- a/src/Foo.cs
+                    +++ b/src/Foo.cs
+                    @@ -0,0 +1,4 @@
+                    +partial
+                    +full
+                    +no branch data
+                    +zero hits
+                    """),
+                LineMode: PatchLineMode.Codecov));
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+        await CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None);
+
+        Assert.Equal(2, result.PatchLineCoverage?.CoveredLines);
+        Assert.Equal(50, result.PatchLineCoverage?.Percent);
+        Assert.Contains("\"patchLineMode\": \"codecov\"", File.ReadAllText(result.JsonReportPath), StringComparison.Ordinal);
+        Assert.Contains("Patch line mode: codecov", File.ReadAllText(result.MarkdownReportPath), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("measurable")]
+    [InlineData("codecov")]
+    public async Task EvaluateAsync_ExcludesChangedLinesMissingFromCobertura_InEveryMode(string modeName)
+    {
+        var mode = Enum.Parse<PatchLineMode>(modeName, ignoreCase: true);
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1">
+              <packages>
+                <package name="Example">
+                  <classes>
+                    <class name="Example.Foo" filename="src/Foo.cs">
+                      <lines>
+                        <line number="1" hits="1" />
+                      </lines>
+                    </class>
+                  </classes>
+                </package>
+              </packages>
+            </coverage>
+            """);
+        var request = new CoverageGateRequest(
+            coverage,
+            temp.Path,
+            0,
+            0,
+            false,
+            null,
+            new CoveragePatchRequest(
+                temp.Path,
+                "origin/main",
+                100,
+                _ => Task.FromResult("""
+                    diff --git a/src/Foo.cs b/src/Foo.cs
+                    index 0000000..1111111 100644
+                    --- a/src/Foo.cs
+                    +++ b/src/Foo.cs
+                    @@ -0,0 +1,2 @@
+                    +covered
+                    +missing from Cobertura
+                    """),
+                LineMode: mode));
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+
+        Assert.Equal(2, result.PatchLineCoverage?.ChangedLines);
+        Assert.Equal(1, result.PatchLineCoverage?.MeasurableLines);
+        Assert.Equal(1, result.PatchLineCoverage?.CoveredLines);
+    }
+
+    [Theory]
+    [InlineData("measurable")]
+    [InlineData("codecov")]
+    public async Task EvaluateAsync_PassesWithNoMeasurableChangedLines_InEveryMode(string modeName)
+    {
+        var mode = Enum.Parse<PatchLineMode>(modeName, ignoreCase: true);
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var request = new CoverageGateRequest(
+            coverage,
+            temp.Path,
+            0,
+            0,
+            false,
+            null,
+            new CoveragePatchRequest(
+                temp.Path,
+                "origin/main",
+                100,
+                _ => Task.FromResult("""
+                    diff --git a/Tests/FooTests.cs b/Tests/FooTests.cs
+                    index 0000000..1111111 100644
+                    --- a/Tests/FooTests.cs
+                    +++ b/Tests/FooTests.cs
+                    @@ -0,0 +1,1 @@
+                    +test-only
+                    """),
+                LineMode: mode));
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+
+        Assert.True(result.Passed);
+        Assert.Equal(0, result.PatchLineCoverage?.MeasurableLines);
+        Assert.Equal(100, result.PatchLineCoverage?.Percent);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RejectsUnknownPatchLineMode_WithDiagnostic()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var command = new CoverageGateCommand
+        {
+            CoveragePath = coverage,
+            OutputDirectory = temp.Path,
+            PatchLineModeOption = "unknown",
+            NoGithubSummary = true,
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV017", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--patch-line-mode", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

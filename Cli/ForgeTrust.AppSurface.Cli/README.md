@@ -58,6 +58,7 @@ dotnet tool run appsurface docs --repo .
 dotnet tool run appsurface coverage run --solution ./MyApp.slnx --dry-run
 dotnet tool run appsurface coverage run --solution ./MyApp.slnx
 dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --min-patch-branch 85
+dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --patch-line-mode codecov
 ```
 
 Update the repo-scoped tool version with:
@@ -640,6 +641,7 @@ Options:
 - `--diff-label`: Optional display label for the selected patch source in JSON, Markdown, and GitHub summaries.
 - `--repository-root`: Repository root used to normalize Cobertura paths and diff paths. Defaults to the Git worktree root when available, otherwise the current directory.
 - `--min-patch-line`: Minimum changed-line coverage percentage from `0` through `100`. Requires exactly one patch source: `--diff-base`, `--diff-file`, or `--diff-stdin`. Omit it to report changed-line coverage without gating on it.
+- `--patch-line-mode`: Changed-line calculation mode, either `measurable` (the backwards-compatible default) or `codecov`, case-insensitive.
 - `--min-patch-branch`: Minimum changed-branch coverage percentage from `0` through `100`. Requires exactly one patch source. Omit it to report changed-branch coverage without gating on it.
 - `--output`: Directory for `coverage-gate.json` and `coverage-gate.md`. Defaults to the coverage file directory.
 - `--github-summary`: Append Markdown to `$GITHUB_STEP_SUMMARY` when it is set. Enabled by default.
@@ -649,7 +651,7 @@ Use the default tolerance to absorb insignificant coverage-report rounding diffe
 
 The command accepts Cobertura root attributes such as `line-rate`, `branch-rate`, `lines-covered`, `lines-valid`, `branches-covered`, and `branches-valid`. XML parsing disables DTD processing and external resolution. Coverage counts must be non-negative, covered counts cannot exceed valid counts, rates must be from `0` through `1`, and zero valid line or branch counts fail with `ASCOV006` because a quality gate with no measurable denominator is misleading.
 
-Patch coverage counts added or modified diff lines, intersects those lines with Cobertura `<class filename>` and `<line number hits>` entries, and reports covered/measurable lines. Changed lines that do not appear in the Cobertura line map are ignored for the denominator, which keeps docs, project files, generated artifacts, and other non-coverable edits from failing the patch gate. Changed-branch coverage uses Cobertura line-level `condition-coverage` counts on those same changed measurable lines, so ordinary changed statements without branch conditions do not inflate the branch denominator. When a diff has no measurable changed lines or no measurable changed branches, the corresponding patch metric reports `100%` and says so explicitly in Markdown. Empty external diff files or stdin are valid empty patches. Non-empty malformed external artifacts, such as HTML login pages or JSON API errors, fail before coverage is evaluated.
+Patch coverage counts added or modified diff lines, intersects those lines with Cobertura `<class filename>` and `<line number hits>` entries, and reports covered/measurable lines. The default `measurable` mode counts a Cobertura line as covered when `hits > 0`, preserving the original local gate behavior. `codecov` mode retains only changed lines present in Cobertura and counts a line as covered when `hits > 0` and it has no branch data or full condition coverage (`covered == valid`); partial condition coverage therefore counts as an uncovered line, matching Codecov's patch-line calculation. Lines absent from Cobertura remain excluded in both modes, including test-only or otherwise non-instrumented modules that Codecov excludes. The patch-line mode affects only the patch line metric; `--min-patch-branch` remains a separate branch-condition metric and still counts changed Cobertura conditions. When a diff has no measurable changed lines or no measurable changed branches, the corresponding patch metric reports `100%` and says so explicitly in Markdown. Empty external diff files or stdin are valid empty patches. Non-empty malformed external artifacts, such as HTML login pages or JSON API errors, fail before coverage is evaluated.
 
 Reports are private local artifacts:
 
