@@ -230,7 +230,7 @@ services.AddAppSurfaceWebThemePreferences(options => options.StorageKey = "docs-
 services.AddAppSurfaceDocs();
 ```
 
-The browser applies a valid saved Light/Dark value to the root before styles paint; otherwise System follows the operating system. The URL, canonical metadata, static tree, server cache behavior, and versioned Docs routes stay unchanged. The built-in layout supplies a hidden native `Appearance` radio group for this opt-in and preserves forced-colors and keyboard focus; hosts own localized status feedback through the documented browser event. Storage denial leaves System usable or keeps the current page selection only for that visit. Raw protected Markdown download is deliberately unrelated: it stays a private, no-store `text/markdown` attachment and never receives a theme head, script, or HTML rewrite.
+The browser applies a valid saved Light/Dark value to the root before styles paint; otherwise System follows the operating system. The URL, canonical metadata, static tree, server cache behavior, and versioned Docs routes stay unchanged. The built-in layout supplies a hidden native `Appearance` radio group only when Docs uses the shared `AppSurfaceDark` bridge; the fixed `GraphiteDark` compatibility preset remains dark and deliberately omits it. The shared path preserves forced-colors and keyboard focus, while hosts own localized status feedback through the documented browser event. Storage denial leaves System usable or keeps the current page selection only for that visit. Raw protected Markdown download is deliberately unrelated: it stays a private, no-store `text/markdown` attachment and never receives a theme head, script, or HTML rewrite.
 
 ## Define the public source boundary
 

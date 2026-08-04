@@ -1448,7 +1448,7 @@ services.AddAppSurfaceWebThemePreferences(options => options.StorageKey = "docs-
 services.AddAppSurfaceDocs();
 ```
 
-This keeps one canonical page and one static tree per Docs version. It is origin-scoped browser storage only: Light and Dark never change Docs routes, archive routes, canonical metadata, raw Markdown downloads, cookies, account state, cache keys, or server rendering. The layout includes a hidden native `System`/`Light`/`Dark` radio group that the opt-in bootstrap reveals after binding; hosts that do not opt in retain the legacy dark behavior and the control stays hidden. See the [Web preference guide](../ForgeTrust.AppSurface.Web/README.md#browser-local-theme-preferences) for the precedence, localizable status event, no-script behavior, privacy boundary, forced-colors guidance, and rollback.
+This keeps one canonical page and one static tree per Docs version. It is origin-scoped browser storage only: Light and Dark never change Docs routes, archive routes, canonical metadata, raw Markdown downloads, cookies, account state, cache keys, or server rendering. When Docs uses the shared `AppSurfaceDark` bridge, the layout includes a hidden native `System`/`Light`/`Dark` radio group that the opt-in bootstrap reveals after binding. The fixed `GraphiteDark` compatibility preset stays dark and deliberately omits that control; hosts that do not opt in also retain the legacy dark behavior. See the [Web preference guide](../ForgeTrust.AppSurface.Web/README.md#browser-local-theme-preferences) for the precedence, localizable status event, no-script behavior, privacy boundary, forced-colors guidance, and rollback.
 
 | Before | After |
 | --- | --- |

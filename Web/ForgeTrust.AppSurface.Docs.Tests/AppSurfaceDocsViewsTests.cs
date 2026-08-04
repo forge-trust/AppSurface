@@ -145,6 +145,22 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
+    public async Task Layout_ShouldNotRenderThePreferenceControlForTheFixedGraphiteTheme()
+    {
+        using var services = CreateServiceProvider(
+            CreateDocs(),
+            new Dictionary<string, string?> { ["AppSurfaceDocs:Theme:Preset"] = "GraphiteDark" },
+            configureServices: collection => collection.AddAppSurfaceWebThemePreferences());
+
+        var html = await RenderDocsViewAsync(services, "Index", controller => controller.Index());
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+
+        Assert.Equal("system", document.DocumentElement?.GetAttribute("data-as-theme-mode"));
+        Assert.Empty(document.QuerySelectorAll("fieldset[data-as-theme-preference-control]"));
+        Assert.DoesNotContain("Appearance follows your operating-system preference", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Layout_ShouldRenderPackagedStylesheet_WhenAppSurfaceDocsIsEmbeddedInAnotherHost()
     {
         using var services = CreateServiceProvider(
@@ -701,6 +717,10 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("html[data-as-theme-mode=\"system\"] {", tailwindEntryStylesheet);
         Assert.Contains("--color-slate-50: var(--docs-color-text-strong);", tailwindEntryStylesheet);
         Assert.Contains("--color-slate-950: var(--docs-color-surface-canvas);", tailwindEntryStylesheet);
+        Assert.Contains("--color-amber-100: var(--docs-color-visited-link);", tailwindEntryStylesheet);
+        Assert.Contains("--color-emerald-100: var(--docs-color-link);", tailwindEntryStylesheet);
+        Assert.Contains("--color-rose-100: var(--as-danger);", tailwindEntryStylesheet);
+        Assert.Contains("--color-sky-100: var(--docs-color-link);", tailwindEntryStylesheet);
         Assert.Contains(".docs-token-bg-accent-strong.text-white", tailwindEntryStylesheet);
         Assert.Contains(".docs-content--markdown a:visited", tailwindEntryStylesheet);
         Assert.Contains("color: var(--docs-color-link-visited);", tailwindEntryStylesheet);

@@ -357,6 +357,20 @@ public sealed class AppSurfaceThemeWebIntegrationTests
     }
 
     [Fact]
+    public void PreferenceRegistration_ShouldSupportACustomResolverWithoutARegistry()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IAppSurfaceThemeResolver>(new StubResolver(CreateResolution(AppSurfaceThemeMode.Dark)));
+        services.AddAppSurfaceWebThemePreferences();
+        using var provider = services.BuildServiceProvider();
+
+        var document = provider.GetRequiredService<IAppSurfaceThemeDocumentProvider>().GetDocument();
+
+        Assert.Equal("system", document.RootThemeMode);
+        Assert.True(document.IsRenderable);
+    }
+
+    [Fact]
     public void PreferenceRegistration_ShouldReplaceEarlierPreferenceConfiguration()
     {
         var services = new ServiceCollection();

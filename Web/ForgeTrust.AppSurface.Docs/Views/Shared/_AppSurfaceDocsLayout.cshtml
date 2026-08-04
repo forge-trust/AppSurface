@@ -206,7 +206,7 @@
                 </p>
             }
         </nav>
-        @if (hasSystemThemeDocument)
+        @if (docsTheme.UsesSharedTheme && hasSystemThemeDocument)
         {
             <fieldset class="docs-theme-preference" data-as-theme-preference-control hidden>
                 <legend>Appearance</legend>

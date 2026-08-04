@@ -137,6 +137,15 @@ html[data-as-theme-mode="light"] {
     --color-slate-800: var(--docs-color-border-muted);
     --color-slate-900: var(--docs-color-surface-raised);
     --color-slate-950: var(--docs-color-surface-canvas);
+    --color-amber-100: var(--docs-color-visited-link);
+    --color-amber-200: var(--docs-color-visited-link);
+    --color-emerald-100: var(--docs-color-link);
+    --color-emerald-200: var(--docs-color-link);
+    --color-emerald-300: var(--docs-color-link);
+    --color-rose-100: var(--as-danger);
+    --color-rose-200: var(--as-danger);
+    --color-rose-300: var(--as-danger);
+    --color-sky-100: var(--docs-color-link);
 }
 
 html[data-as-theme-mode="light"] .text-white {
@@ -165,6 +174,15 @@ html[data-as-theme-mode="light"] .docs-token-bg-accent-strong.text-white {
         --color-slate-800: var(--docs-color-border-muted);
         --color-slate-900: var(--docs-color-surface-raised);
         --color-slate-950: var(--docs-color-surface-canvas);
+        --color-amber-100: var(--docs-color-visited-link);
+        --color-amber-200: var(--docs-color-visited-link);
+        --color-emerald-100: var(--docs-color-link);
+        --color-emerald-200: var(--docs-color-link);
+        --color-emerald-300: var(--docs-color-link);
+        --color-rose-100: var(--as-danger);
+        --color-rose-200: var(--as-danger);
+        --color-rose-300: var(--as-danger);
+        --color-sky-100: var(--docs-color-link);
     }
 
     html[data-as-theme-mode="system"] .text-white {

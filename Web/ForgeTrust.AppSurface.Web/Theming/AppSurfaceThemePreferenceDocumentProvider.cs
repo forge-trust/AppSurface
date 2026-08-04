@@ -6,17 +6,11 @@ internal sealed class AppSurfaceThemePreferenceDocumentProvider : IAppSurfaceThe
 {
     private readonly AppSurfaceThemeDocument _document;
 
-    public AppSurfaceThemePreferenceDocumentProvider(
-        IAppSurfaceThemeRegistry registry,
-        IAppSurfaceThemeResolver resolver)
+    public AppSurfaceThemePreferenceDocumentProvider(IAppSurfaceThemeResolver resolver)
     {
-        ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(resolver);
 
-        var defaultResolution = resolver.ResolveDefault();
-        var pair = registry.GetRequired(defaultResolution.Id);
-        _document = AppSurfaceThemeDocumentSerializer.SerializePreference(
-            new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.System, pair.Light, pair.Dark));
+        _document = AppSurfaceThemeDocumentSerializer.SerializePreference(resolver.ResolveDefault());
     }
 
     public AppSurfaceThemeDocument GetDocument() => _document;
