@@ -698,9 +698,9 @@ internal sealed class SecretPromotionWorkflow(
             LocalCoordinatorCheckKind.Unsupported => row.Result(
                 "Failed",
                 "ProbeLocalDestination",
-                result.Failure!.Code,
-                result.Failure.Problem,
-                result.Failure.Retryable),
+                result.Failure?.Code ?? "local-secret-transfer-preflight-failed",
+                result.Failure?.Problem ?? "The local transfer preflight failed.",
+                result.Failure?.Retryable),
             _ => row.Result(
                 "Failed",
                 "ProbeLocalDestination",
@@ -861,9 +861,9 @@ internal sealed class SecretPromotionWorkflow(
             LocalCoordinatorWriteKind.Unsupported => row.Result(
                 "Failed",
                 "WriteLocalSecret",
-                result.Failure!.Code,
-                result.Failure.Problem,
-                result.Failure.Retryable),
+                result.Failure?.Code ?? "local-secret-transfer-write-unsupported",
+                result.Failure?.Problem ?? "The local transfer destination does not support guarded writes.",
+                result.Failure?.Retryable),
             _ => row.Result(
                 "Failed",
                 "WriteLocalSecret",
