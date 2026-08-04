@@ -74,6 +74,11 @@ dotnet_run_args+=(
   --output "$ROOT_DIR/TestResults/coverage-merged"
   --configuration "$BUILD_CONFIGURATION"
   --parallelism "${COVERAGE_PARALLELISM:-1}"
+  # These suites start containers or nested dotnet builds, so keep them behind scheduler barriers.
+  --exclusive-test-project ForgeTrust.AppSurface.Config.Tests.csproj
+  --exclusive-test-project AuthWebRazorWireProofExample.Tests.csproj
+  --exclusive-test-project ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj
+  --exclusive-test-project ForgeTrust.RazorWire.Cli.Tests.csproj
   --exclusive-test-project ForgeTrust.AppSurface.Web.Tailwind.Tests.csproj
   --test-results junit
   --slow-test-diagnostics
