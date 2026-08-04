@@ -108,19 +108,19 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await _schemaManager.ValidateAsync(stoppingToken).ConfigureAwait(false);
-        if (_lifetime.ApplicationStopping.IsCancellationRequested)
-        {
-            return;
-        }
-
-        await _drainControl.ResumeAsync(stoppingToken).ConfigureAwait(false);
-        var request = new DurableRuntimePumpRequest(
-            _registration.Options.MaximumItemsPerPass,
-            _registration.Options.TimeBudgetPerPass,
-            _registration.Options.HostedSurfaces);
         try
         {
+            await _schemaManager.ValidateAsync(stoppingToken).ConfigureAwait(false);
+            if (_lifetime.ApplicationStopping.IsCancellationRequested)
+            {
+                return;
+            }
+
+            await _drainControl.ResumeAsync(stoppingToken).ConfigureAwait(false);
+            var request = new DurableRuntimePumpRequest(
+                _registration.Options.MaximumItemsPerPass,
+                _registration.Options.TimeBudgetPerPass,
+                _registration.Options.HostedSurfaces);
             while (!stoppingToken.IsCancellationRequested)
             {
                 DurableRuntimePumpResult result;

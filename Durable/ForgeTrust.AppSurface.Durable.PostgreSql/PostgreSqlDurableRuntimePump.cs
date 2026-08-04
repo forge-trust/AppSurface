@@ -450,7 +450,9 @@ internal sealed class PostgreSqlDurableRuntimePump : IDurableRuntimePump
         counts.Claimed += result.ClaimedSchedules;
         counts.Processed += result.RecordedOccurrences + result.MaterializedWorkTargets;
         counts.Failed += result.SuspendedSchedules;
-        return result.RecordedOccurrences == 0 && result.MaterializedWorkTargets == 0
+        return result.RecordedOccurrences == 0
+            && result.MaterializedWorkTargets == 0
+            && result.SuspendedSchedules == 0
             ? TurnOutcome.Deferred
             : TurnOutcome.Committed;
     }

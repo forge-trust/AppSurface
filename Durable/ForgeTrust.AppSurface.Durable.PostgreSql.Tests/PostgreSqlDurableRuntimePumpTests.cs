@@ -161,6 +161,62 @@ public sealed class PostgreSqlDurableRuntimePumpTests
     }
 
     [Fact]
+    public async Task RunOnceAsync_TreatsASuspendedScheduleAsACommittedTurn()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "suspended-schedule");
+        var registration = new SuccessfulWorkRegistration();
+        var scheduleCodec = new RuntimeSchedulePayloadCodec(
+            registration.InputCodec.ContractName,
+            registration.InputCodec.ContractVersion,
+            registration.InputCodec.Classification);
+        var services = new ServiceCollection();
+        services.AddSingleton<DurableWorkRegistration>(registration);
+        services.AddSingleton<IDurablePayloadCodec>(scheduleCodec);
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.DataSource,
+            new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface", maximumClockAdvance: TimeSpan.FromTicks(1)),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-suspended-schedule-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+        var scope = new DurableScopeId("runtime-pump-suspended-schedule-scope");
+        var scheduleId = new DurableScheduleId("runtime-pump-suspended-schedule");
+        var scheduleClient = provider.GetRequiredService<IDurableScheduleClient>();
+        var created = await scheduleClient.CreateAsync(new DurableScheduleCreateRequest(
+            scope,
+            new DurableCommandId("runtime-pump-suspended-schedule-command"),
+            "runtime-pump-suspended-schedule-key",
+            scheduleId,
+            DurableSchedule.At(DateTimeOffset.UtcNow - TimeSpan.FromSeconds(1)),
+            DurableScheduleTarget.Work(
+                SuccessfulWorkRegistration.Name,
+                "v1",
+                Encoding.UTF8.GetBytes("input"),
+                scheduleCodec)));
+        Assert.True(created.IsSuccess);
+
+        var result = await provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Schedule));
+
+        Assert.Equal(1, result.Discovered);
+        Assert.Equal(1, result.Claimed);
+        Assert.Equal(0, result.Processed);
+        Assert.Equal(1, result.Failed);
+        Assert.True(result.HasMore);
+        var snapshot = await scheduleClient.GetAsync(scope, scheduleId);
+        Assert.True(snapshot.IsSuccess);
+        Assert.Equal(DurableScheduleState.Suspended, snapshot.Value!.State);
+    }
+
+    [Fact]
     public async Task RunOnceAsync_ReturnsAnEmptyHealthyPassWhenEverySelectedSurfaceIsQuiescent()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();

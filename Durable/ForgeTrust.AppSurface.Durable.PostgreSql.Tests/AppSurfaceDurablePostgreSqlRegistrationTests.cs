@@ -196,6 +196,43 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
     }
 
     [Fact]
+    public async Task HostedStart_ClosesAdmissionAndPersistsDrainWhenSchemaValidationFails()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = CreateDataSource();
+        var admission = new DurableRuntimeAdmissionGate();
+        var drain = new RecordingDrainControl();
+        var schema = new FailingSchemaManager();
+        using var hosted = new PostgreSqlDurableHostedService(
+            schema,
+            new EmptyPump(),
+            drain,
+            new PostgreSqlDurableRuntimeRegistration(
+                dispatcher,
+                runtime,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                new PostgreSqlDurableScheduleOptions("durable_runtime"),
+                new AppSurfaceDurablePostgreSqlOptions
+                {
+                    WorkerId = "hosted-schema-failure-worker",
+                    SendWakeNotifications = false,
+                }.SnapshotAndValidate(),
+                Guid.NewGuid()),
+            admission,
+            new TestHostApplicationLifetime(),
+            Options.Create(new HostOptions()),
+            NullLogger<PostgreSqlDurableHostedService>.Instance);
+
+        await hosted.StartAsync(CancellationToken.None);
+        await schema.Validated.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await drain.Drained.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(admission.TryEnter());
+        Assert.Equal(1, drain.DrainCount);
+        await hosted.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
     public async Task HostedStop_DrainFailureDoesNotPreventBackgroundServiceShutdown()
     {
         using var dispatcher = CreateDataSource();
@@ -600,11 +637,14 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
     {
         internal int DrainCount { get; private set; }
 
+        internal TaskCompletionSource Drained { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         internal int ResumeCount { get; private set; }
 
         public ValueTask BeginDrainAsync(CancellationToken cancellationToken = default)
         {
             DrainCount++;
+            Drained.TrySetResult();
             return ValueTask.CompletedTask;
         }
 
@@ -631,6 +671,38 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
         {
             Validated.TrySetResult();
             return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<DurableRuntimeEpochActivationResult> InitializeRuntimeEpochAsync(
+            Guid initialEpoch,
+            string actorId,
+            string reasonCode,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public ValueTask<DurableRuntimeEpochRotationResult> RotateRuntimeEpochAsync(
+            Guid expectedActiveEpoch,
+            Guid newActiveEpoch,
+            string actorId,
+            string reasonCode,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class FailingSchemaManager : IDurableRuntimeSchemaManager
+    {
+        internal TaskCompletionSource Validated { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask<DurableRuntimeSchemaStatus> GetStatusAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public string GenerateScript(int fromVersion = 0) => throw new NotSupportedException();
+
+        public ValueTask<DurableRuntimeSchemaApplyResult> ApplyAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public ValueTask ValidateAsync(CancellationToken cancellationToken = default)
+        {
+            Validated.TrySetResult();
+            return ValueTask.FromException(new InvalidOperationException("Simulated schema validation failure."));
         }
 
         public ValueTask<DurableRuntimeEpochActivationResult> InitializeRuntimeEpochAsync(
