@@ -528,6 +528,61 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_ShouldEvaluateSelectedRazorWireProofSourceFromDiffFile()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var selectedSource = RazorWireCoverageProofSources.SelectCoveredSource(
+            [RazorWireCoverageProofSources.All[0].Replace('/', '\\')]);
+        var sourcePath = Path.Join(temp.Path, selectedSource);
+        Directory.CreateDirectory(Path.GetDirectoryName(sourcePath)!);
+        await File.WriteAllTextAsync(sourcePath, "public static class ExportSourceResolver { }\n");
+
+        var coverage = temp.WriteCoverage($$"""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1">
+              <packages>
+                <package name="ForgeTrust.RazorWire.Cli">
+                  <classes>
+                    <class name="ForgeTrust.RazorWire.Cli.ExportSourceResolver" filename="{{selectedSource.Replace('/', '\\')}}">
+                      <lines>
+                        <line number="10" hits="1" />
+                      </lines>
+                    </class>
+                  </classes>
+                </package>
+              </packages>
+            </coverage>
+            """);
+        var diffFile = Path.Join(temp.Path, "razorwire-proof.diff");
+        await File.WriteAllTextAsync(diffFile, $$"""
+            diff --git a/{{selectedSource}} b/{{selectedSource}}
+            index 0000000..1111111 100644
+            --- a/{{selectedSource}}
+            +++ b/{{selectedSource}}
+            @@ -9,0 +10,1 @@
+            +covered RazorWire source
+            """);
+        var command = new CoverageGateCommand
+        {
+            CoveragePath = coverage,
+            OutputDirectory = temp.Path,
+            RepositoryRoot = temp.Path,
+            MinLine = 100,
+            MinBranch = 100,
+            DiffFile = diffFile,
+            MinPatchLine = 100,
+            NoGithubSummary = true,
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console, CancellationToken.None);
+
+        Assert.Contains("patch lines 100.00% >= 99.5%", console.ReadOutputString(), StringComparison.Ordinal);
+        var markdown = await File.ReadAllTextAsync(Path.Join(temp.Path, "coverage-gate.md"));
+        Assert.Contains("Patch source: file", markdown, StringComparison.Ordinal);
+        Assert.Contains("1/1 measurable, 1 changed", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task EvaluateAsync_ComputesPatchLineAndBranchCoverage_ConsistentWithFullCoverage()
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-");

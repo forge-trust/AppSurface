@@ -89,3 +89,6 @@ dotnet test --no-build
 
 The default script runs both merged coverage and the repository thresholds. It compares local patch
 coverage with `origin/main`; set `COVERAGE_GATE_DIFF_BASE=` when only aggregate coverage is wanted.
+It deliberately accepts no project-selection, filter, output, or merge arguments. Use the public
+[`appsurface coverage` commands](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run)
+when a contributor needs a focused run or a shard merge.
