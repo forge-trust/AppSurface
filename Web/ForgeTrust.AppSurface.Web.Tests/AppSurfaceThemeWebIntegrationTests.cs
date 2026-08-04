@@ -329,6 +329,10 @@ public sealed class AppSurfaceThemeWebIntegrationTests
         Assert.Contains("[data-as-theme=\"appsurface\"][data-as-theme-mode=\"system\"]", document.HeadContent, StringComparison.Ordinal);
         Assert.Contains("[data-as-theme=\"appsurface\"][data-as-theme-mode=\"light\"]", document.HeadContent, StringComparison.Ordinal);
         Assert.Contains("[data-as-theme=\"appsurface\"][data-as-theme-mode=\"dark\"]", document.HeadContent, StringComparison.Ordinal);
+        Assert.Contains(
+            "[data-as-theme=\"appsurface\"][data-as-theme-mode=\"system\"],\n[data-as-theme=\"appsurface\"][data-as-theme-mode=\"light\"] {",
+            document.HeadContent,
+            StringComparison.Ordinal);
         Assert.Contains("color-scheme: light !important;", document.HeadContent, StringComparison.Ordinal);
         Assert.Contains("color-scheme: dark !important;", document.HeadContent, StringComparison.Ordinal);
         Assert.Contains("@media (prefers-color-scheme: dark)", document.HeadContent, StringComparison.Ordinal);

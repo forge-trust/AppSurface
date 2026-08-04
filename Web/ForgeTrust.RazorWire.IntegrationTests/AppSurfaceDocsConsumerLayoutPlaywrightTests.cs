@@ -99,6 +99,10 @@ public sealed class AppSurfaceDocsConsumerLayoutPlaywrightTests
               window.addEventListener("appsurface-theme-preference-change", event => {
                 window.__appsurfaceThemePreferenceEvents.push(event.detail);
               });
+              document.addEventListener("DOMContentLoaded", () => {
+                const control = document.querySelector("[data-as-theme-preference-control]");
+                control?.after(control.cloneNode(true));
+              }, { once: true });
             })();
             """);
         var page = await context.NewPageAsync();
@@ -115,10 +119,16 @@ public sealed class AppSurfaceDocsConsumerLayoutPlaywrightTests
             await page.EvaluateAsync<string>("() => getComputedStyle(document.documentElement).getPropertyValue('--as-canvas').trim()"));
         Assert.Equal("light dark", await page.EvaluateAsync<string>("() => document.documentElement.style.colorScheme"));
         Assert.Equal("light", await page.EvaluateAsync<string>("() => getComputedStyle(document.documentElement).colorScheme"));
-        Assert.True(await page.Locator("[data-as-theme-preference-control] input[value='light']").IsCheckedAsync());
-        Assert.Equal(3, await page.Locator("[data-as-theme-preference-control] input[type='radio'][name='appsurface-theme-preference']").CountAsync());
+        Assert.Equal(2, await page.Locator("[data-as-theme-preference-control]").CountAsync());
+        Assert.Equal(2, await page.Locator("[data-as-theme-preference-control] input[value='light']:checked").CountAsync());
+        Assert.Equal(
+            2,
+            (await page.Locator("[data-as-theme-preference-control]").EvaluateAllAsync<string[]>(
+                "controls => controls.map(control => control.querySelector('input[type=radio]').name)"))
+            .Distinct(StringComparer.Ordinal)
+            .Count());
 
-        var darkChoice = page.Locator("[data-as-theme-preference-control] input[value='dark']");
+        var darkChoice = page.Locator("[data-as-theme-preference-control] input[value='dark']").First;
         await darkChoice.FocusAsync();
         await page.Keyboard.PressAsync("Space");
         await page.WaitForFunctionAsync(
@@ -126,7 +136,7 @@ public sealed class AppSurfaceDocsConsumerLayoutPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
 
-        Assert.True(await darkChoice.IsCheckedAsync());
+        Assert.Equal(2, await page.Locator("[data-as-theme-preference-control] input[value='dark']:checked").CountAsync());
         Assert.Equal("dark", await page.EvaluateAsync<string>("() => localStorage.getItem('appsurface_docs_theme')"));
         Assert.Equal("light dark", await page.EvaluateAsync<string>("() => document.documentElement.style.colorScheme"));
         Assert.Equal("dark", await page.EvaluateAsync<string>("() => getComputedStyle(document.documentElement).colorScheme"));
@@ -149,10 +159,43 @@ public sealed class AppSurfaceDocsConsumerLayoutPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
 
-        Assert.True(await page.Locator("[data-as-theme-preference-control] input[value='system']").IsCheckedAsync());
+        Assert.Equal(2, await page.Locator("[data-as-theme-preference-control] input[value='system']:checked").CountAsync());
+        Assert.Equal(
+            "#0f172a",
+            await page.EvaluateAsync<string>("() => getComputedStyle(document.documentElement).getPropertyValue('--as-canvas').trim()"));
         change = await page.EvaluateAsync<string[]>(
             "() => window.__appsurfaceThemePreferenceEvents.at(-1) && [window.__appsurfaceThemePreferenceEvents.at(-1).mode, window.__appsurfaceThemePreferenceEvents.at(-1).persistence, window.__appsurfaceThemePreferenceEvents.at(-1).source]");
         Assert.Equal(["system", "system", "storage"], change);
+    }
+
+    [Theory]
+    [InlineData("system")]
+    [InlineData("not-a-theme")]
+    public async Task ConsumerFixture_ShouldFallbackToSystemForNonExplicitBrowserLocalThemeValues(string storedTheme)
+    {
+        await using var appHost = await AppSurfaceDocsInProcessHost.StartConsumerAsync("http://127.0.0.1:0");
+
+        Assert.Equal(0, Microsoft.Playwright.Program.Main(["install", "chromium"]));
+        using var playwright = await Playwright.CreateAsync();
+        await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
+        await using var context = await browser.NewContextAsync(new BrowserNewContextOptions { ColorScheme = ColorScheme.Light });
+        await context.AddInitScriptAsync(
+            $"""
+            (() => localStorage.setItem("appsurface_docs_theme", "{storedTheme}"))();
+            """);
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{appHost.BaseUrl}/docs/search");
+        await page.WaitForFunctionAsync(
+            "() => document.documentElement.dataset.asThemeMode === 'system' && document.querySelector('[data-as-theme-preference-control] input[value=system]')?.checked === true",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+        Assert.Equal("system", await page.GetAttributeAsync("html", "data-as-theme-mode"));
+        Assert.Equal(storedTheme, await page.EvaluateAsync<string>("() => localStorage.getItem('appsurface_docs_theme')"));
+        Assert.Equal(
+            "#f8fafc",
+            await page.EvaluateAsync<string>("() => getComputedStyle(document.documentElement).getPropertyValue('--as-canvas').trim()"));
     }
 
     [Fact]

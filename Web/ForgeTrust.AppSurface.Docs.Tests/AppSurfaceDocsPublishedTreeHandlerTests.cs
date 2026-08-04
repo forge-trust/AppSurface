@@ -199,6 +199,24 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task TryHandleAsync_ShouldKeepLegacyScriptPolicyForAnUnverifiedPreferenceBootstrap()
+    {
+        var tree = CreatePublishedTree("unverified-theme-preference-csp");
+        File.WriteAllText(
+            Path.Join(tree, "index.html"),
+            "<!DOCTYPE html><html><head><script data-as-theme-preference-bootstrap>window.unverifiedThemeBootstrap = true;</script></head><body><p>canonical</p></body></html>");
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3");
+
+        Assert.True(await handler.TryHandleAsync(request));
+
+        var csp = request.Response.Headers["Content-Security-Policy"].ToString();
+        Assert.Contains("script-src 'none'", csp, StringComparison.Ordinal);
+        Assert.DoesNotContain("allow-scripts", csp, StringComparison.Ordinal);
+        Assert.DoesNotContain(AppSurfaceThemePreferenceCsp.ScriptHash, csp, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TryHandleAsync_ShouldDenySvg_ForLegacyUnverifiedArchives()
     {
         var tree = CreatePublishedTree("legacy-svg");

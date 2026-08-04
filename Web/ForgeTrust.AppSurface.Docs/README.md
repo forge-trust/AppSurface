@@ -1454,7 +1454,7 @@ This keeps one canonical page and one static tree per Docs version. It is origin
 | --- | --- |
 | `AppSurfaceDark` produced only the established dark Docs variable graph. | It maps Docs-owned surfaces, code tokens, search states, tables, archive/status pages, and focus treatment to the shared System/Light/Dark semantic branch while keeping Docs variables internal. |
 | `GraphiteDark` was a dark preset. | It remains a Docs-local dark compatibility preset; it is not a shared pair. |
-| `#rgb` color overrides were accepted. | They remain accepted and apply only to the supported Docs accent/link roles. Shared role values remain strict `#RRGGBB`. When a shared Light or System branch cannot render an override at the documented contrast threshold, Docs keeps the safe semantic pair role for that branch instead of emitting the override. |
+| `#rgb` color overrides were accepted. | They remain accepted and apply only to the supported Docs accent/link roles. Shared role values remain strict `#RRGGBB`. When a rendered branch cannot meet the documented contrast threshold, Docs keeps the safe semantic pair role instead of emitting the override; browser-local preferences therefore validate every Light and Dark branch, even if the host default is fixed. |
 
 Docs preserves density, chrome, layout override behavior, and the default dark experience when no shared resolver is registered. The package layout emits the Web root/head opt-ins plus a Docs-critical variable mapping before the package stylesheet. Published-tree rewriting preserves that root metadata and both critical styles, so static archives match live output apart from a host-request CSP nonce.
 

@@ -140,12 +140,15 @@ public static partial class AppSurfaceThemeDocumentSerializer
         if (preferenceModes)
         {
             var systemSelector = selector + "[data-as-theme-mode=\"system\"]";
-            AppendBranch(builder, systemSelector, resolution.Light);
+            var lightSelector = selector + "[data-as-theme-mode=\"light\"]";
+            var darkSelector = selector + "[data-as-theme-mode=\"dark\"]";
+            AppendBranch(builder, systemSelector + ",\n" + lightSelector, resolution.Light);
+            AppendColorScheme(builder, lightSelector, "light");
             builder.Append("@media (prefers-color-scheme: dark) {\n");
             AppendBranch(builder, systemSelector, resolution.Dark, indent: "  ");
             builder.Append("}\n");
-            AppendBranch(builder, selector + "[data-as-theme-mode=\"light\"]", resolution.Light, colorScheme: "light");
-            AppendBranch(builder, selector + "[data-as-theme-mode=\"dark\"]", resolution.Dark, colorScheme: "dark");
+            AppendBranch(builder, darkSelector, resolution.Dark);
+            AppendColorScheme(builder, darkSelector, "dark");
         }
         else if (resolution.Mode == AppSurfaceThemeMode.Dark)
         {
@@ -207,8 +210,7 @@ public static partial class AppSurfaceThemeDocumentSerializer
         StringBuilder builder,
         string selector,
         AppSurfaceThemeRoles roles,
-        string indent = "",
-        string? colorScheme = null)
+        string indent = "")
     {
         builder.Append(indent);
         builder.Append(selector);
@@ -229,15 +231,17 @@ public static partial class AppSurfaceThemeDocumentSerializer
         builder.Append("  color: var(--as-text);\n");
         builder.Append(indent);
         builder.Append("  background-color: var(--as-canvas);\n");
-        if (colorScheme is not null)
-        {
-            builder.Append(indent);
-            builder.Append("  color-scheme: ");
-            builder.Append(colorScheme);
-            builder.Append(" !important;\n");
-        }
-
         builder.Append(indent);
+        builder.Append("}\n");
+    }
+
+    private static void AppendColorScheme(StringBuilder builder, string selector, string colorScheme)
+    {
+        builder.Append(selector);
+        builder.Append(" {\n");
+        builder.Append("  color-scheme: ");
+        builder.Append(colorScheme);
+        builder.Append(" !important;\n");
         builder.Append("}\n");
     }
 

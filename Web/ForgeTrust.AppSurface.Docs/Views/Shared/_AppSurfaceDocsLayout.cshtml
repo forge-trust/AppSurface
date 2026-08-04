@@ -335,6 +335,7 @@
             }
 
             if (isModalOpen) {
+                sidebar.removeAttribute("inert");
                 sidebar.setAttribute("role", "dialog");
                 sidebar.setAttribute("aria-modal", "true");
                 sidebar.setAttribute("aria-label", "Documentation navigation");
@@ -346,6 +347,11 @@
             sidebar.removeAttribute("aria-modal");
             sidebar.removeAttribute("aria-label");
             sidebar.setAttribute("aria-hidden", shouldAutoCloseSidebar() ? "true" : "false");
+            if (shouldAutoCloseSidebar()) {
+                sidebar.setAttribute("inert", "");
+            } else {
+                sidebar.removeAttribute("inert");
+            }
         }
 
         function getMainScrollTopForTarget(target) {
@@ -459,6 +465,14 @@
         function closeSidebar({ restoreFocus = true } = {}) {
             if (!sidebar || !sidebarOverlay) {
                 return;
+            }
+
+            const shouldMoveFocusToOpenButton = !restoreFocus
+                && shouldAutoCloseSidebar()
+                && document.activeElement instanceof HTMLElement
+                && sidebar.contains(document.activeElement);
+            if (shouldMoveFocusToOpenButton && openSidebarButton) {
+                openSidebarButton.focus();
             }
 
             sidebar.classList.add("-translate-x-full");

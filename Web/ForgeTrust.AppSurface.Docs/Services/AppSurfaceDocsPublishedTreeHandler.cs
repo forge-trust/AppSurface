@@ -28,6 +28,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
     private const string MaxRewrittenFileSizeKey = "AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes";
     private const string RewriteLimitDocsAnchor = "AppSurface Docs README section 'Published tree rewrite limit'";
     private const string SvgContentSecurityPolicy = "sandbox; default-src 'none'; script-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
+    private const string LegacyHtmlContentSecurityPolicy = "sandbox allow-same-origin; default-src 'self'; script-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'self' 'unsafe-inline'";
 
     private static readonly FileExtensionContentTypeProvider ContentTypeProvider = new();
     private readonly IReadOnlyList<AppSurfaceDocsPublishedTreeMount> _mounts;
@@ -686,7 +687,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
     {
         if (string.IsNullOrWhiteSpace(html))
         {
-            return "sandbox allow-same-origin; default-src 'self'; script-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'self' 'unsafe-inline'";
+            return LegacyHtmlContentSecurityPolicy;
         }
 
         var document = new HtmlParser().ParseDocument(html);
@@ -700,7 +701,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         {
             // Existing published trees may carry host-authored inline styles outside the Docs/theme markers. Preserve
             // their established CSP until a preference bootstrap opts the document into the strict, hash-complete path.
-            return "sandbox allow-same-origin; default-src 'self'; script-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'self' 'unsafe-inline'";
+            return LegacyHtmlContentSecurityPolicy;
         }
 
         var styleHashes = document

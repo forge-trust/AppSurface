@@ -68,7 +68,7 @@ Then import the TagHelpers and opt into the document root/head in the layout tha
 
 The root helper emits `data-as-theme`, `data-as-theme-mode`, a stable `data-as-theme-schema="1"` payload marker, and a `color-scheme` declaration. The base head helper emits `<meta name="color-scheme">` followed by a deterministic `data-as-theme-critical` stylesheet before external stylesheets. `System` emits light values and a dark `prefers-color-scheme` branch; `Light` and `Dark` emit only their selected branch. Exactly one head payload is emitted per MVC request even if a layout or partial repeats the helper. The base adapter emits no scripts, page-hiding CSS, storage access, or switcher.
 
-The optional `nonce` attribute is copied to the live inline critical style:
+For the base adapter, the optional `nonce` attribute is copied to the live inline critical style:
 
 ```cshtml
 <appsurface-theme-head nonce="@Model.CspNonce" />
@@ -120,7 +120,7 @@ The package remains headless. Place a native group outside an application data f
 <noscript><p>This site follows your operating-system appearance setting.</p></noscript>
 ```
 
-The shared radio `name` preserves native keyboard behavior; because the group is not inside a submitted form, it does not become application request data. The script dispatches `appsurface-theme-preference-change` only after user or cross-tab changes. Its validated `detail` is `{ mode, persistence, source }`, where persistence is `stored`, `session`, or `system`, and source is `control` or `storage`. The host owns localized feedback, for example:
+The shared radio `name` preserves native keyboard behavior within one control; because the group is not inside a submitted form, it does not become application request data. If responsive markup renders more than one preference control with the same name, the bootstrap scopes each group so their checked states cannot cancel one another. The script dispatches `appsurface-theme-preference-change` only after user or cross-tab changes. Its validated `detail` is `{ mode, persistence, source }`, where persistence is `stored`, `session`, or `system`, and source is `control` or `storage`. The host owns localized feedback, for example:
 
 ```js
 window.addEventListener("appsurface-theme-preference-change", event => {
