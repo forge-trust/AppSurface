@@ -7,6 +7,22 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 public sealed class PostgreSqlDurableRuntimeHealthTests
 {
     [Fact]
+    public void Constructor_RejectsNullRegistrationAndSchemaManager()
+    {
+        using var dataSource = NpgsqlDataSource.Create(
+            "Host=localhost;Port=5432;Database=durable_health;Username=durable;Password=not-opened");
+        var registration = CreateRegistration(
+            dataSource,
+            new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+            CreateOptions("runtime-health-constructor-worker"),
+            Guid.NewGuid());
+        var schema = new StubSchemaManager(_ => ValueTask.FromResult(CreateStatus(DurableRuntimeSchemaCompatibility.Compatible)));
+
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableRuntimeHealth(null!, schema));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableRuntimeHealth(registration, null!));
+    }
+
+    [Fact]
     public async Task HeartbeatDrainAndGenerationTakeover_AreFencedByWorkerInstanceAndEpoch()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -503,6 +519,342 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
         var epochFailure = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await mismatched.TryBeginPassAsync(CancellationToken.None));
         Assert.StartsWith(DurableProblemCodes.RecoveryEpochRequired, epochFailure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetAsync_ReportsRecoveryEpochRequiredWhenMetadataEpochDisappears()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-health-tests", "missing-active-epoch");
+        var status = await schema.GetStatusAsync();
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+                CreateOptions("runtime-health-missing-active-epoch-worker"),
+                Guid.NewGuid()),
+            new StubSchemaManager(_ => ValueTask.FromResult(CreateStatus(DurableRuntimeSchemaCompatibility.Compatible))));
+
+        await using (var clearEpoch = database.DataSource.CreateCommand(
+            "UPDATE appsurface_durable.store_metadata SET active_runtime_epoch = NULL WHERE singleton;"))
+        {
+            Assert.Equal(1, await clearEpoch.ExecuteNonQueryAsync());
+        }
+
+        var snapshot = await health.GetAsync();
+
+        Assert.Equal(DurableRuntimeHealthState.Incompatible, snapshot.State);
+        Assert.Equal(DurableProblemCodes.RecoveryEpochRequired, snapshot.ProblemCode);
+        Assert.False(snapshot.EpochCompatible);
+    }
+
+    [Fact]
+    public async Task GetAsync_ReportsIdentityConflictWhenOnlyHeartbeatEpochChanges()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-health-tests", "heartbeat-epoch-conflict");
+        var status = await schema.GetStatusAsync();
+        var instanceId = Guid.NewGuid();
+        var workerId = "runtime-health-heartbeat-epoch-conflict-worker";
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+                CreateOptions(workerId),
+                instanceId),
+            schema);
+
+        Assert.True(await health.TryBeginPassAsync(CancellationToken.None));
+        await using (var changeEpoch = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.runtime_heartbeat
+            SET runtime_epoch = @runtime_epoch
+            WHERE worker_id = @worker_id;
+            """))
+        {
+            changeEpoch.Parameters.AddWithValue("runtime_epoch", Guid.NewGuid());
+            changeEpoch.Parameters.AddWithValue("worker_id", workerId);
+            Assert.Equal(1, await changeEpoch.ExecuteNonQueryAsync());
+        }
+
+        var snapshot = await health.GetAsync();
+
+        Assert.Equal(DurableRuntimeHealthState.Stale, snapshot.State);
+        Assert.Equal(DurableProblemCodes.WorkerIdentityConflict, snapshot.ProblemCode);
+    }
+
+    [Fact]
+    public async Task TryBeginPassAsync_ReturnsFalseWhenPassActivationLosesItsUpdateRace()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-health-tests", "pass-activation-race");
+        var status = await schema.GetStatusAsync();
+        var workerId = "runtime-health-pass-activation-race-worker";
+
+        await using (var trigger = database.DataSource.CreateCommand(
+            """
+            CREATE OR REPLACE FUNCTION appsurface_durable.test_runtime_health_skip_pass_activation()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                IF NEW.pass_active AND NOT OLD.pass_active THEN
+                    RETURN NULL;
+                END IF;
+                RETURN NEW;
+            END;
+            $$;
+            CREATE TRIGGER test_runtime_health_skip_pass_activation
+            BEFORE UPDATE ON appsurface_durable.runtime_heartbeat
+            FOR EACH ROW
+            EXECUTE FUNCTION appsurface_durable.test_runtime_health_skip_pass_activation();
+            """))
+        {
+            await trigger.ExecuteNonQueryAsync();
+        }
+
+        try
+        {
+            var health = new PostgreSqlDurableRuntimeHealth(
+                CreateRegistration(
+                    database.DataSource,
+                    new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+                    CreateOptions(workerId),
+                    Guid.NewGuid()),
+                schema);
+
+            Assert.False(await health.TryBeginPassAsync(CancellationToken.None));
+        }
+        finally
+        {
+            await using var cleanup = database.DataSource.CreateCommand(
+                """
+                DROP TRIGGER IF EXISTS test_runtime_health_skip_pass_activation
+                    ON appsurface_durable.runtime_heartbeat;
+                DROP FUNCTION IF EXISTS appsurface_durable.test_runtime_health_skip_pass_activation();
+                """);
+            await cleanup.ExecuteNonQueryAsync();
+        }
+    }
+
+    [Fact]
+    public async Task RecordHeartbeatAsync_PreservesProcessingFailureWhenRollbackLosesTransport()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-health-tests", "rollback-transport");
+        var status = await schema.GetStatusAsync();
+        var workerId = "runtime-health-rollback-transport-worker";
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+                CreateOptions(workerId),
+                Guid.NewGuid()),
+            schema);
+        Assert.True(await health.TryBeginPassAsync(CancellationToken.None));
+
+        await using (var trigger = database.DataSource.CreateCommand(
+            """
+            CREATE OR REPLACE FUNCTION appsurface_durable.test_runtime_health_terminate_backend()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                PERFORM pg_terminate_backend(pg_backend_pid());
+                RETURN NEW;
+            END;
+            $$;
+            CREATE TRIGGER test_runtime_health_terminate_backend
+            BEFORE UPDATE ON appsurface_durable.runtime_heartbeat
+            FOR EACH ROW
+            EXECUTE FUNCTION appsurface_durable.test_runtime_health_terminate_backend();
+            """))
+        {
+            await trigger.ExecuteNonQueryAsync();
+        }
+
+        try
+        {
+            await Assert.ThrowsAnyAsync<NpgsqlException>(
+                async () => await health.RecordHeartbeatAsync(CancellationToken.None));
+        }
+        finally
+        {
+            await using var cleanup = database.DataSource.CreateCommand(
+                """
+                DROP TRIGGER IF EXISTS test_runtime_health_terminate_backend
+                    ON appsurface_durable.runtime_heartbeat;
+                DROP FUNCTION IF EXISTS appsurface_durable.test_runtime_health_terminate_backend();
+                """);
+            await cleanup.ExecuteNonQueryAsync();
+        }
+    }
+
+    [Fact]
+    public async Task GetAsync_ReportsDrainingAndIdentityConflictBeforeLiveness()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-health-tests", "state-order");
+        var status = await schema.GetStatusAsync();
+        var instanceId = Guid.NewGuid();
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+                CreateOptions("runtime-health-state-order-worker"),
+                instanceId),
+            schema);
+
+        Assert.True(await health.TryBeginPassAsync(CancellationToken.None));
+        var active = await health.GetAsync();
+        Assert.Equal(DurableRuntimeHealthState.Healthy, active.State);
+        Assert.True(active.IsPassActive);
+
+        await health.BeginDrainAsync();
+        var draining = await health.GetAsync();
+        Assert.Equal(DurableRuntimeHealthState.Draining, draining.State);
+        Assert.Null(draining.ProblemCode);
+        Assert.True(draining.IsDraining);
+
+        await using (var identity = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.runtime_heartbeat
+            SET worker_instance_id = @worker_instance_id
+            WHERE worker_id = @worker_id;
+            """))
+        {
+            identity.Parameters.AddWithValue("worker_instance_id", Guid.NewGuid());
+            identity.Parameters.AddWithValue("worker_id", "runtime-health-state-order-worker");
+            Assert.Equal(1, await identity.ExecuteNonQueryAsync());
+        }
+
+        var conflict = await health.GetAsync();
+        Assert.Equal(DurableRuntimeHealthState.Stale, conflict.State);
+        Assert.Equal(DurableProblemCodes.WorkerIdentityConflict, conflict.ProblemCode);
+    }
+
+    [Fact]
+    public async Task RuntimeMutations_RejectLostPassOwnershipAndPreserveFailedPassSemantics()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-health-tests", "mutation-ownership");
+        var status = await schema.GetStatusAsync();
+        var workerId = "runtime-health-mutation-ownership-worker";
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+                CreateOptions(workerId),
+                Guid.NewGuid()),
+            schema);
+
+        Assert.True(await health.TryBeginPassAsync(CancellationToken.None));
+        await health.RecordHeartbeatAsync(CancellationToken.None);
+        await using (var losePass = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.runtime_heartbeat
+            SET pass_active = false, pass_started_at = NULL
+            WHERE worker_id = @worker_id;
+            """))
+        {
+            losePass.Parameters.AddWithValue("worker_id", workerId);
+            Assert.Equal(1, await losePass.ExecuteNonQueryAsync());
+        }
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await health.RecordFailedPassAsync(CancellationToken.None));
+
+        Assert.True(await health.TryBeginPassAsync(CancellationToken.None));
+        await using (var changeIdentity = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.runtime_heartbeat
+            SET worker_instance_id = @worker_instance_id
+            WHERE worker_id = @worker_id;
+            """))
+        {
+            changeIdentity.Parameters.AddWithValue("worker_instance_id", Guid.NewGuid());
+            changeIdentity.Parameters.AddWithValue("worker_id", workerId);
+            Assert.Equal(1, await changeIdentity.ExecuteNonQueryAsync());
+        }
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await health.RecordSuccessfulSweepAsync(
+                new DurableRuntimePumpResult(3, 2, 1, 0, 0, false, null, TimeSpan.FromMilliseconds(4)),
+                CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task TryBeginPassAsync_ReportsMissingHeartbeatAfterRegistrationIsDiscarded()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-health-tests", "missing-heartbeat-row");
+        var status = await schema.GetStatusAsync();
+        var workerId = "runtime-health-missing-heartbeat-row-worker";
+
+        await using (var trigger = database.DataSource.CreateCommand(
+            """
+            CREATE OR REPLACE FUNCTION appsurface_durable.test_runtime_health_skip_heartbeat_insert()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                RETURN NULL;
+            END;
+            $$;
+            CREATE TRIGGER test_runtime_health_skip_heartbeat_insert
+            BEFORE INSERT ON appsurface_durable.runtime_heartbeat
+            FOR EACH ROW
+            EXECUTE FUNCTION appsurface_durable.test_runtime_health_skip_heartbeat_insert();
+            """))
+        {
+            await trigger.ExecuteNonQueryAsync();
+        }
+
+        try
+        {
+            var health = new PostgreSqlDurableRuntimeHealth(
+                CreateRegistration(
+                    database.DataSource,
+                    new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+                    CreateOptions(workerId),
+                    Guid.NewGuid()),
+                schema);
+
+            var exception = await Assert.ThrowsAsync<InvalidDataException>(
+                async () => await health.TryBeginPassAsync(CancellationToken.None));
+            Assert.Contains("heartbeat could not be registered", exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await using var cleanup = database.DataSource.CreateCommand(
+                """
+                DROP TRIGGER IF EXISTS test_runtime_health_skip_heartbeat_insert
+                    ON appsurface_durable.runtime_heartbeat;
+                DROP FUNCTION IF EXISTS appsurface_durable.test_runtime_health_skip_heartbeat_insert();
+                """);
+            await cleanup.ExecuteNonQueryAsync();
+        }
     }
 
     private static AppSurfaceDurablePostgreSqlOptions CreateOptions(string workerId)
