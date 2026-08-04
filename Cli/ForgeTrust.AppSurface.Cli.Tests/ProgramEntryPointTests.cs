@@ -117,8 +117,10 @@ public sealed class ProgramEntryPointTests
         var result = await InvokeProgramEntryPointAsync(["secrets"]);
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("appsurface secrets transfer plan|apply", result.AllText, StringComparison.Ordinal);
         Assert.Contains("migrate", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("appsurface secrets transfer plan", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("appsurface secrets transfer apply", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("plan|apply", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("transfer google", result.AllText, StringComparison.Ordinal);
     }
 
@@ -289,6 +291,92 @@ public sealed class ProgramEntryPointTests
         var planArtifact = await File.ReadAllTextAsync(planPath);
         var receiptArtifact = await File.ReadAllTextAsync($"{planPath}.receipt.json");
         ValueSafeAssert.DoesNotExpose("sentinel-local-secret", plan.AllText + dryRun.AllText + apply.AllText + planArtifact + receiptArtifact);
+    }
+
+    [Fact]
+    public async Task SecretsTransferCommands_Should_MaterializePinnedV2SourceIntoProductionNamedLocalNamespace()
+    {
+        using var temp = TempDirectory.Create("appsurface-transfer-");
+        var storePath = Path.Join(temp.Path, "secrets.json");
+        var configPath = Path.Join(temp.Path, "transfer.json");
+        var planPath = Path.Join(temp.Path, "transfer.plan.json");
+        const string source = "projects/production/secrets/stripe-api-key/versions/7";
+        await File.WriteAllTextAsync(configPath, """
+            {"version":2,"endpoints":[{"name":"production","provider":"google","environment":"production","credential":{"mode":"applicationDefault"}}],"jobs":[{"name":"clone-production","source":"production","destination":"local","rows":[{"key":"Stripe:ApiKey","source":"projects/production/secrets/stripe-api-key/versions/7"}]}]}
+            """);
+        var client = new FakeGoogleSecretTransferClient();
+        client.Versions[source] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var coordinator = new LocalSecretsTransferCoordinator(Path.Join(temp.Path, "transfer-state"));
+        var workflow = new SecretPromotionWorkflow(
+            new DefaultSecretPromotionGoogleClientFactory(client),
+            null,
+            coordinator);
+        var shared = new[] { "--app", $"V2Transfer{Guid.NewGuid():N}", "--environment", "Production", "--store-file", storePath };
+
+        var plan = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "plan", "--config", configPath, "--job", "clone-production", "--out", planPath, .. shared],
+            options => RegisterSecretPromotionWorkflow(options, workflow, coordinator));
+        var withoutConfirmation = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "apply", "--config", configPath, "--plan", planPath, "--apply", .. shared],
+            options => RegisterSecretPromotionWorkflow(options, workflow, coordinator));
+        var applied = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "apply", "--config", configPath, "--plan", planPath, "--apply", "--confirm", "clone-production", .. shared],
+            options => RegisterSecretPromotionWorkflow(options, workflow, coordinator));
+        var repeated = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "apply", "--config", configPath, "--plan", planPath, "--apply", "--confirm", "clone-production", .. shared],
+            options => RegisterSecretPromotionWorkflow(options, workflow, coordinator));
+
+        Assert.Equal(0, plan.ExitCode);
+        Assert.Equal(2, withoutConfirmation.ExitCode);
+        Assert.Equal(0, applied.ExitCode);
+        Assert.Equal(1, repeated.ExitCode);
+        Assert.Contains("CreatedLocalSecret", applied.AllText, StringComparison.Ordinal);
+        Assert.Contains("LocalSecretsPostureMode.SingleMachineSelfHosted", applied.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Retryable:", applied.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("LocalSecretsPostureMode.SingleMachineSelfHosted", repeated.AllText, StringComparison.Ordinal);
+        Assert.Equal(1, client.AccessCalls);
+        ValueSafeAssert.DoesNotExpose("sentinel-remote-secret", plan.AllText + withoutConfirmation.AllText + applied.AllText + File.ReadAllText(planPath) + File.ReadAllText($"{planPath}.receipt.json"));
+    }
+
+    [Fact]
+    public async Task SecretsSetCommand_ShouldInvalidateLocalTransferAttestationBeforeMutation()
+    {
+        using var temp = TempDirectory.Create("appsurface-transfer-");
+        var storePath = Path.Join(temp.Path, "secrets.json");
+        var configPath = Path.Join(temp.Path, "transfer.json");
+        var initialPlanPath = Path.Join(temp.Path, "initial.plan.json");
+        var replacementPlanPath = Path.Join(temp.Path, "replacement.plan.json");
+        const string source = "projects/staging/secrets/stripe-api-key/versions/7";
+        await File.WriteAllTextAsync(configPath, """
+            {"version":2,"endpoints":[{"name":"staging","provider":"google","environment":"staging","credential":{"mode":"applicationDefault"}}],"jobs":[{"name":"clone-staging","source":"staging","destination":"local","rows":[{"key":"Stripe:ApiKey","source":"projects/staging/secrets/stripe-api-key/versions/7"}]}]}
+            """);
+        var client = new FakeGoogleSecretTransferClient();
+        client.Versions[source] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var coordinator = new LocalSecretsTransferCoordinator(Path.Join(temp.Path, "transfer-state"));
+        var workflow = new SecretPromotionWorkflow(new DefaultSecretPromotionGoogleClientFactory(client), null, coordinator);
+        var shared = new[] { "--app", $"V2Mutation{Guid.NewGuid():N}", "--environment", "Development", "--store-file", storePath };
+
+        var plan = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "plan", "--config", configPath, "--job", "clone-staging", "--out", initialPlanPath, .. shared],
+            options => RegisterSecretPromotionWorkflow(options, workflow, coordinator));
+        var applied = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "apply", "--config", configPath, "--plan", initialPlanPath, "--apply", .. shared],
+            options => RegisterSecretPromotionWorkflow(options, workflow, coordinator));
+        var set = await InvokeProgramEntryPointAsync(
+            ["secrets", "set", "Stripe:ApiKey", "--stdin", .. shared],
+            options => RegisterLocalTransferCoordinator(options, coordinator),
+            "sentinel-manual-secret\n");
+        var replacementPlan = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "plan", "--config", configPath, "--job", "clone-staging", "--out", replacementPlanPath, "--replace", .. shared],
+            options => RegisterSecretPromotionWorkflow(options, workflow, coordinator));
+
+        Assert.Equal(0, plan.ExitCode);
+        Assert.Equal(0, applied.ExitCode);
+        Assert.Equal(0, set.ExitCode);
+        Assert.Equal(1, replacementPlan.ExitCode);
+        Assert.Contains("local-secret-transfer-unattested-destination", replacementPlan.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-remote-secret", plan.AllText + applied.AllText + set.AllText + replacementPlan.AllText);
+        ValueSafeAssert.DoesNotExpose("sentinel-manual-secret", set.AllText + replacementPlan.AllText);
     }
 
     [Fact]
@@ -3393,6 +3481,24 @@ public sealed class ProgramEntryPointTests
     private static void RegisterGoogleTransferClient(ConsoleOptions options, FakeGoogleSecretTransferClient client)
     {
         options.CustomRegistrations.Add(services => services.AddSingleton<IAppSurfaceGoogleSecretTransferClient>(client));
+    }
+
+    private static void RegisterSecretPromotionWorkflow(
+        ConsoleOptions options,
+        SecretPromotionWorkflow workflow,
+        LocalSecretsTransferCoordinator? coordinator = null)
+    {
+        if (coordinator is not null)
+        {
+            RegisterLocalTransferCoordinator(options, coordinator);
+        }
+
+        options.CustomRegistrations.Add(services => services.AddSingleton(workflow));
+    }
+
+    private static void RegisterLocalTransferCoordinator(ConsoleOptions options, LocalSecretsTransferCoordinator coordinator)
+    {
+        options.CustomRegistrations.Add(services => services.AddSingleton(coordinator));
     }
 
     private static void RegisterCanaryPollHttpClient(ConsoleOptions options, ICanaryPollHttpClient client)

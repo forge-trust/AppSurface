@@ -205,7 +205,8 @@ public sealed record AppSurfaceGoogleSecretAccessResult(
 /// <remarks>
 /// This seam is intentionally separate from <see cref="IAppSurfaceGoogleSecretManagerClient"/>, which remains the
 /// read-only runtime configuration provider client. Implementations must keep diagnostics value-safe and must not create,
-/// disable, destroy, rotate, or provision secrets for the v1 transfer workflow.
+/// disable, destroy, rotate, or provision secrets. Version 1 transfer workflows can write an existing Google secret;
+/// version 2 workflows use this client only to probe and read a pinned Google version before guarded local materialization.
 /// </remarks>
 public interface IAppSurfaceGoogleSecretTransferClient
 {
@@ -222,7 +223,7 @@ public interface IAppSurfaceGoogleSecretTransferClient
     /// </summary>
     /// <param name="versionResourceName">The full <c>projects/.../secrets/.../versions/...</c> resource name.</param>
     /// <param name="timeout">The bounded probe timeout.</param>
-    /// <returns>The probe result.</returns>
+    /// <returns>The probe result, whose resource name is the canonical provider response identity.</returns>
     AppSurfaceGoogleSecretProbeResult ProbeSecretVersion(string versionResourceName, TimeSpan timeout);
 
     /// <summary>
@@ -358,7 +359,15 @@ public sealed class GoogleSecretManagerTransferClientAdapter : IAppSurfaceGoogle
                     CreateVersionNotEnabledDiagnostic(version.State));
             }
 
-            return AppSurfaceGoogleSecretProbeResult.Ready(versionResourceName);
+            if (string.IsNullOrWhiteSpace(version.Name))
+            {
+                return AppSurfaceGoogleSecretProbeResult.Failed(
+                    GoogleSecretManagerTransferStatus.ProviderFailed,
+                    versionResourceName,
+                    CreateProviderDiagnostic("probe"));
+            }
+
+            return AppSurfaceGoogleSecretProbeResult.Ready(version.Name);
         }
         catch (RpcException ex)
         {
