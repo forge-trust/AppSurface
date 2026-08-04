@@ -42,7 +42,7 @@ Create a version-2 configuration. Each row has a Google source and the built-in 
 }
 ```
 
-Do not place a secret value in the configuration. The plan contains only resource identities, diagnostic codes, and digest values.
+Do not place a secret value in the configuration. The plan is value-free and contains resource identities, canonical resources, actions, expiry, destination preconditions, diagnostic codes, and configuration and plan identity digests.
 
 ## Plan and apply
 

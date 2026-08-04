@@ -1826,8 +1826,7 @@ public sealed class SecretPromotionWorkflowTests
         store.Set(identity, "sentinel-remote-secret");
         var stateRoot = Path.Join(temp.Path, "transfer-state");
         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(identity.StorageName))).ToLowerInvariant();
-        var prepared = new LocalTransferJournal(1, LocalTransferJournalState.Prepared, "0123456789abcdef0123456789abcdef", plan.PlanIdentity, sourceResource, identity.StorageName, null);
-        File.WriteAllText(Path.Join(stateRoot, $"{hash}.json"), JsonSerializer.Serialize(prepared, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
+        WritePreparedCoordinatorJournal(stateRoot, plan, row, identity);
         File.WriteAllText(
             receiptPath,
             JsonSerializer.Serialize(
@@ -1876,9 +1875,7 @@ public sealed class SecretPromotionWorkflowTests
         var identity = Normalize(context, "Stripe:ApiKey");
         store.Set(identity, "sentinel-different-local-secret");
         var stateRoot = Path.Join(temp.Path, "transfer-state");
-        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(identity.StorageName))).ToLowerInvariant();
-        var prepared = new LocalTransferJournal(1, LocalTransferJournalState.Prepared, "0123456789abcdef0123456789abcdef", plan.PlanIdentity, sourceResource, identity.StorageName, null);
-        File.WriteAllText(Path.Join(stateRoot, $"{hash}.json"), JsonSerializer.Serialize(prepared, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
+        WritePreparedCoordinatorJournal(stateRoot, plan, row, identity);
         File.WriteAllText(
             receiptPath,
             JsonSerializer.Serialize(
@@ -1899,7 +1896,7 @@ public sealed class SecretPromotionWorkflowTests
         Assert.False(resumed.Succeeded);
         Assert.Equal("Conflict", Assert.Single(resumed.Rows).Status);
         Assert.Equal("sentinel-different-local-secret", store.Get(identity).Value);
-        var stillPrepared = JsonSerializer.Deserialize<LocalTransferJournal>(File.ReadAllText(Path.Join(stateRoot, $"{hash}.json")), new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        var stillPrepared = JsonSerializer.Deserialize<LocalTransferJournal>(File.ReadAllText(CoordinatorJournalPath(stateRoot, identity)), new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
         Assert.Equal(LocalTransferJournalState.Prepared, stillPrepared.State);
     }
 
@@ -1921,9 +1918,7 @@ public sealed class SecretPromotionWorkflowTests
         var row = Assert.Single(plan.Rows);
         var identity = Normalize(context, "Stripe:ApiKey");
         var stateRoot = Path.Join(temp.Path, "transfer-state");
-        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(identity.StorageName))).ToLowerInvariant();
-        var prepared = new LocalTransferJournal(1, LocalTransferJournalState.Prepared, "0123456789abcdef0123456789abcdef", plan.PlanIdentity, sourceResource, identity.StorageName, null);
-        File.WriteAllText(Path.Join(stateRoot, $"{hash}.json"), JsonSerializer.Serialize(prepared, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
+        WritePreparedCoordinatorJournal(stateRoot, plan, row, identity);
         File.WriteAllText(
             receiptPath,
             JsonSerializer.Serialize(
@@ -1961,12 +1956,12 @@ public sealed class SecretPromotionWorkflowTests
         var workflow = CreateV2Workflow(google, temp.Path);
         workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
         var plan = JsonSerializer.Deserialize<SecretPromotionPlanArtifact>(File.ReadAllText(planPath), SecretPromotionWorkflow.JsonOptions)!;
+        var row = Assert.Single(plan.Rows);
         var identity = Normalize(context, "Stripe:ApiKey");
         store.Set(identity, "sentinel-remote-secret");
         var stateRoot = Path.Join(temp.Path, "transfer-state");
         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(identity.StorageName))).ToLowerInvariant();
-        var prepared = new LocalTransferJournal(1, LocalTransferJournalState.Prepared, "0123456789abcdef0123456789abcdef", plan.PlanIdentity, sourceResource, identity.StorageName, null);
-        File.WriteAllText(Path.Join(stateRoot, $"{hash}.json"), JsonSerializer.Serialize(prepared, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
+        WritePreparedCoordinatorJournal(stateRoot, plan, row, identity);
 
         var blocked = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
 
@@ -2140,6 +2135,68 @@ public sealed class SecretPromotionWorkflowTests
     }
 
     [Fact]
+    public void GoogleToLocalV2_CoordinatorLockHardeningFailureFailsClosedBeforePayloadAccess()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var google = CreateGoogleWithPinnedSource();
+        var workflow = CreateV2Workflow(
+            google,
+            temp.Path,
+            new LocalSecretsTransferCoordinatorTestHooks
+            {
+                BeforeSecureLockFile = static _ => throw new PlatformNotSupportedException()
+            });
+
+        var planned = workflow.CreatePlan(new SecretPromotionPlanRequest(
+            configPath,
+            "staging-to-local",
+            Path.Join(temp.Path, "plan.json"),
+            false,
+            TimeSpan.FromMinutes(10),
+            context));
+
+        Assert.False(planned.Summary.Succeeded);
+        Assert.Equal("local-secret-transfer-state-root-unavailable", Assert.Single(planned.Summary.Rows).DiagnosticCode);
+        Assert.Equal(0, google.AccessCalls);
+    }
+
+    [Fact]
+    public void Coordinator_DefaultStateRootUsesTheProfileFallbackWhenLocalApplicationDataIsUnavailable()
+    {
+        var profile = Path.Join("test", "profile");
+
+        var stateRoot = LocalSecretsTransferCoordinator.GetDefaultStateRoot(string.Empty, profile);
+
+        Assert.Equal(Path.Join(profile, ".appsurface", "AppSurface", "secret-transfer"), stateRoot);
+    }
+
+    [Fact]
+    public void Coordinator_TightensAStateRootThatLacksUserExecutePermission()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip("Unix file-mode enforcement is not available on Windows.");
+        }
+
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var stateRoot = Directory.CreateDirectory(Path.Join(temp.Path, "transfer-state")).FullName;
+        File.SetUnixFileMode(stateRoot, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var coordinator = new LocalSecretsTransferCoordinator(stateRoot);
+
+        var result = coordinator.CapturePrecondition(Normalize(context, "Stripe:ApiKey"), store, replace: false);
+
+        Assert.Equal(LocalCoordinatorPreconditionKind.Missing, result.Kind);
+        Assert.Equal(
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+            File.GetUnixFileMode(stateRoot));
+    }
+
+    [Fact]
     public void GoogleToLocalV2_CoordinatorJournalReadFailureFailsPlanBeforePayloadAccess()
     {
         using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
@@ -2224,6 +2281,31 @@ public sealed class SecretPromotionWorkflowTests
 
         Assert.False(applied.Succeeded);
         Assert.Equal("Failed", Assert.Single(applied.Rows).Status);
+        Assert.Equal("local-secret-transfer-journal-write-failed", Assert.Single(applied.Rows).DiagnosticCode);
+        Assert.Equal(LocalSecretResultStatus.Missing, store.Get(Normalize(context, "Stripe:ApiKey")).Status);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_TemporaryJournalHardeningFailureDoesNotMutateTheTarget()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var google = CreateGoogleWithPinnedSource();
+        var workflow = CreateV2Workflow(
+            google,
+            temp.Path,
+            new LocalSecretsTransferCoordinatorTestHooks
+            {
+                BeforeSecureTemporaryJournal = static _ => throw new PlatformNotSupportedException()
+            });
+        var planPath = Path.Join(temp.Path, "plan.json");
+
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        var applied = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+
+        Assert.False(applied.Succeeded);
         Assert.Equal("local-secret-transfer-journal-write-failed", Assert.Single(applied.Rows).DiagnosticCode);
         Assert.Equal(LocalSecretResultStatus.Missing, store.Get(Normalize(context, "Stripe:ApiKey")).Status);
     }
@@ -2575,7 +2657,7 @@ public sealed class SecretPromotionWorkflowTests
         var journalTarget = temp.WriteFile("journal-target.json", "{}");
         if (!TryCreateFileSymlink(journalPath, journalTarget))
         {
-            return;
+            throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
         }
 
         var result = coordinator.CapturePrecondition(identity, store, replace: false);
@@ -2758,6 +2840,38 @@ public sealed class SecretPromotionWorkflowTests
             new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context)));
 
         Assert.Contains("valid LocalSecrets transfer precondition", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_InvalidCapturedPreconditionMapsToAValueSafePlanFailure()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var coordinator = new LocalSecretsTransferCoordinator(Path.Join(temp.Path, "transfer-state"));
+        var (_, row) = CreateCoordinatorPlan(temp, context, coordinator);
+
+        var result = SecretPromotionWorkflow.ProbeLocalDestination(row with { LocalPreconditionKind = "unexpected" }, replace: false);
+
+        Assert.Equal("Failed", result.Status);
+        Assert.Equal("local-secret-transfer-precondition-invalid", result.DiagnosticCode);
+        Assert.False(result.Retryable);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_UnsupportedWriteMapsToAValueSafeFailure()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var coordinator = new LocalSecretsTransferCoordinator(Path.Join(temp.Path, "transfer-state"));
+        var (_, row) = CreateCoordinatorPlan(temp, context, coordinator);
+
+        var result = SecretPromotionWorkflow.MapLocalWriteResult(row, LocalCoordinatorWriteResult.Unsupported());
+
+        Assert.Equal("Failed", result.Status);
+        Assert.Equal("local-secret-transfer-unsupported-store", result.DiagnosticCode);
+        Assert.False(result.Retryable);
     }
 
     [Fact]

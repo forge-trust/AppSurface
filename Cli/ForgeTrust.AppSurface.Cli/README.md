@@ -267,8 +267,8 @@ meant to verify the Linux platform store.
 Create a value-free plan for a reviewed source-to-destination job, then revalidate and apply that artifact:
 
 ```bash
-appsurface secrets transfer plan --config ./secret-promotion.json --job staging-to-production --out ./staging-to-production.plan.json
-appsurface secrets transfer apply --config ./secret-promotion.json --plan ./staging-to-production.plan.json --apply --confirm staging-to-production
+appsurface secrets transfer plan --config ./secret-transfer.json --job staging-to-production --out ./staging-to-production.plan.json
+appsurface secrets transfer apply --config ./secret-transfer.json --plan ./staging-to-production.plan.json --apply --confirm staging-to-production
 ```
 
 The JSON configuration declares named endpoints and exact jobs. `local` is the built-in LocalSecrets endpoint; Google

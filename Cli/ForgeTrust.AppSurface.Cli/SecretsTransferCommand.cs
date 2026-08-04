@@ -111,7 +111,9 @@ internal sealed partial class SecretsTransferApplyCommand(SecretPromotionWorkflo
         var result = workflow.Apply(request);
         await SecretPromotionOutput.WriteAsync(console, result, Json);
         if (!Json &&
-            result.Rows.Any(static row => string.Equals(row.DestinationKind, "local", StringComparison.Ordinal)) &&
+            result.Rows.Any(static row =>
+                string.Equals(row.DestinationKind, "local", StringComparison.Ordinal) &&
+                string.Equals(row.Status, "Written", StringComparison.Ordinal)) &&
             !IsDevelopmentLike(request.Context.Environment))
         {
             await console.Output.WriteLineAsync("Note: resolving this local namespace in a host requires LocalSecretsPostureMode.SingleMachineSelfHosted.");

@@ -25,7 +25,7 @@ Manager.
 3. Declare the source, destination, and exact key mapping in a reviewed transfer job, then create its value-free plan:
 
    ```bash
-   appsurface secrets transfer plan --config ./secret-promotion.json \
+   appsurface secrets transfer plan --config ./secret-transfer.json \
      --job local-to-production \
      --out ./local-to-production.plan.json
    ```
@@ -33,7 +33,7 @@ Manager.
 4. Apply only after the plan reports the intended row:
 
    ```bash
-   appsurface secrets transfer apply --config ./secret-promotion.json \
+   appsurface secrets transfer apply --config ./secret-transfer.json \
      --plan ./local-to-production.plan.json \
      --apply --confirm local-to-production
    ```
@@ -60,7 +60,7 @@ Manager.
 8. Confirm the source is `GoogleSecretManagerConfigProvider` and the value is redacted.
 9. Delete the old LocalSecrets value from the local machine when it is no longer needed.
 
-The transfer configuration carries batch mappings and keeps source/sink authority reviewed in one place:
+The transfer configuration carries batch mappings and keeps source/destination authority reviewed in one place:
 
 ```json
 {

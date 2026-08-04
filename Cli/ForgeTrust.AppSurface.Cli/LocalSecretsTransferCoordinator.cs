@@ -462,7 +462,7 @@ internal sealed class LocalSecretsTransferCoordinator
             new AppSurfaceLocalSecretDiagnostic(
                 failure.Code,
                 failure.Problem,
-                failure.Problem,
+                "The AppSurface local transfer coordinator could not safely complete the requested operation.",
                 "Resolve the local transfer coordinator state before changing this local secret.",
                 "local-secrets-without-a-remote-vault",
                 failure.Retryable),
@@ -493,14 +493,11 @@ internal sealed class LocalSecretsTransferCoordinator
         var hash = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(identity.StorageName))).ToLowerInvariant();
         var lockPath = Path.Join(_stateRoot, $"{hash}.lock");
         var journalPath = Path.Join(_stateRoot, $"{hash}.json");
+        FileStream stream;
         try
         {
             _testHooks?.BeforeAcquireLock?.Invoke(lockPath);
-            var stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-            TrySetPrivateFileMode(lockPath);
-            lease = new LocalCoordinatorLease(stream, journalPath, _stateRoot);
-            failure = null;
-            return true;
+            stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         }
         catch (IOException)
         {
@@ -515,6 +512,24 @@ internal sealed class LocalSecretsTransferCoordinator
             failure = new LocalCoordinatorFailure(
                 "local-secret-transfer-state-root-unavailable",
                 "The AppSurface transfer state root cannot be opened for the current user.",
+                false);
+            return false;
+        }
+
+        try
+        {
+            _testHooks?.BeforeSecureLockFile?.Invoke(lockPath);
+            TrySetPrivateFileMode(lockPath);
+            lease = new LocalCoordinatorLease(stream, journalPath, _stateRoot);
+            failure = null;
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            stream.Dispose();
+            failure = new LocalCoordinatorFailure(
+                "local-secret-transfer-state-root-unavailable",
+                "The AppSurface transfer lock file could not be secured for the current user.",
                 false);
             return false;
         }
@@ -632,12 +647,13 @@ internal sealed class LocalSecretsTransferCoordinator
         {
             File.WriteAllText(temporaryPath, JsonSerializer.Serialize(journal, JsonOptions));
             _testHooks?.AfterWriteTemporaryJournal?.Invoke(temporaryPath);
+            _testHooks?.BeforeSecureTemporaryJournal?.Invoke(temporaryPath);
             TrySetPrivateFileMode(temporaryPath);
             File.Move(temporaryPath, lease.JournalPath, overwrite: true);
             failure = null;
             return true;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
         {
             try
             {
@@ -661,23 +677,29 @@ internal sealed class LocalSecretsTransferCoordinator
         journal is not null &&
         journal.Version == JournalVersion &&
         journal.State is LocalTransferJournalState.Prepared or LocalTransferJournalState.Committed &&
-        IsLowerHex(journal.OperationId, 32) &&
-        IsLowerHex(journal.PlanIdentity, 64) &&
+        LocalTransferFormat.IsLowerHex(journal.OperationId, 32) &&
+        LocalTransferFormat.IsLowerHex(journal.PlanIdentity, 64) &&
         !string.IsNullOrWhiteSpace(journal.SourceVersionResource) &&
         !string.IsNullOrWhiteSpace(journal.LocalStorageName) &&
-        (journal.PreviousOperationId is null || IsLowerHex(journal.PreviousOperationId, 32));
-
-    private static bool IsLowerHex(string? value, int length) =>
-        value?.Length == length && value.All(static character => character is >= '0' and <= '9' || character is >= 'a' and <= 'f');
+        (journal.PreviousOperationId is null || LocalTransferFormat.IsLowerHex(journal.PreviousOperationId, 32));
 
     private static string CreateOperationId() => Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
 
-    private static string GetDefaultStateRoot()
+    private static string GetDefaultStateRoot() =>
+        GetDefaultStateRoot(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+
+    /// <summary>Builds the default per-user transfer state directory from platform folder values.</summary>
+    /// <param name="localApplicationData">Platform local-application-data root, if available.</param>
+    /// <param name="userProfile">Platform user-profile root used when local application data is unavailable.</param>
+    /// <returns>The absolute AppSurface secret-transfer state directory.</returns>
+    internal static string GetDefaultStateRoot(string? localApplicationData, string userProfile)
     {
-        var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var root = localApplicationData;
         if (string.IsNullOrWhiteSpace(root))
         {
-            root = Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".appsurface");
+            root = Path.Join(userProfile, ".appsurface");
         }
 
         return Path.Join(root, "AppSurface", "secret-transfer");
@@ -701,6 +723,17 @@ internal sealed class LocalSecretsTransferCoordinator
     }
 }
 
+/// <summary>Validates fixed-length lowercase hexadecimal transfer identities.</summary>
+internal static class LocalTransferFormat
+{
+    /// <summary>Gets whether a value is lowercase hexadecimal with the required length.</summary>
+    /// <param name="value">Candidate value to validate.</param>
+    /// <param name="length">Required character length.</param>
+    /// <returns><see langword="true"/> when the value has the required lowercase hexadecimal shape.</returns>
+    internal static bool IsLowerHex(string? value, int length) =>
+        value?.Length == length && value.All(static character => character is >= '0' and <= '9' || character is >= 'a' and <= 'f');
+}
+
 /// <summary>Provides deterministic coordinator failure injection for internal tests.</summary>
 internal sealed class LocalSecretsTransferCoordinatorTestHooks
 {
@@ -710,11 +743,17 @@ internal sealed class LocalSecretsTransferCoordinatorTestHooks
     /// <summary>Runs immediately before the coordinator opens a per-secret transfer lock.</summary>
     public Action<string>? BeforeAcquireLock { get; init; }
 
+    /// <summary>Runs after the coordinator opens a lock file and before it restricts the file to the current user.</summary>
+    public Action<string>? BeforeSecureLockFile { get; init; }
+
     /// <summary>Runs immediately before the coordinator reads an existing transfer journal.</summary>
     public Action<string>? BeforeReadJournal { get; init; }
 
     /// <summary>Runs after a temporary journal has been written and before it is secured and committed.</summary>
     public Action<string>? AfterWriteTemporaryJournal { get; init; }
+
+    /// <summary>Runs immediately before the coordinator restricts a temporary journal to the current user.</summary>
+    public Action<string>? BeforeSecureTemporaryJournal { get; init; }
 
     /// <summary>Runs immediately before cleanup deletes an uncommitted temporary journal.</summary>
     public Action<string>? BeforeDeleteTemporaryJournal { get; init; }
@@ -741,85 +780,148 @@ internal sealed record LocalCoordinatorPrecondition(
     string? PreviousOperationId,
     LocalCoordinatorFailure? Failure)
 {
+    /// <summary>Creates a precondition for a local target that is absent.</summary>
+    /// <returns>A missing-target precondition with no attestation or failure.</returns>
     public static LocalCoordinatorPrecondition Missing() => new(LocalCoordinatorPreconditionKind.Missing, null, null);
 
+    /// <summary>Creates a precondition that permits a guarded replacement.</summary>
+    /// <param name="previousOperationId">Committed attestation operation identifier that authorizes replacement.</param>
+    /// <returns>A replacement precondition bound to the supplied prior operation.</returns>
     public static LocalCoordinatorPrecondition Replace(string previousOperationId) => new(LocalCoordinatorPreconditionKind.Replace, previousOperationId, null);
 
+    /// <summary>Creates a precondition that blocks transfer because the local target conflicts with the plan.</summary>
+    /// <param name="failure">Value-safe explanation of the conflict.</param>
+    /// <returns>A conflict precondition carrying the supplied failure.</returns>
     public static LocalCoordinatorPrecondition Conflict(LocalCoordinatorFailure failure) => new(LocalCoordinatorPreconditionKind.Conflict, null, failure);
 
+    /// <summary>Creates a precondition for a local store that cannot participate in coordinated transfer.</summary>
+    /// <returns>An unsupported-store precondition with its stable failure diagnostic.</returns>
     public static LocalCoordinatorPrecondition Unsupported() => new(
         LocalCoordinatorPreconditionKind.Unsupported,
         null,
         new LocalCoordinatorFailure("local-secret-transfer-unsupported-store", "The selected LocalSecrets store is not supported for coordinated remote-to-local transfer.", false));
 
+    /// <summary>Creates a precondition that failed before a safe local state could be established.</summary>
+    /// <param name="failure">Value-safe failure that prevented precondition capture.</param>
+    /// <returns>A failed precondition carrying the supplied failure.</returns>
     public static LocalCoordinatorPrecondition Failed(LocalCoordinatorFailure failure) => new(LocalCoordinatorPreconditionKind.Failed, null, failure);
 }
 
+/// <summary>Classifies the value-free precondition captured for a local transfer target.</summary>
 internal enum LocalCoordinatorPreconditionKind
 {
+    /// <summary>The target is absent and may be created.</summary>
     Missing,
+    /// <summary>The target has a matching committed attestation and may be replaced with explicit authorization.</summary>
     Replace,
+    /// <summary>The target or attestation conflicts with the planned transfer.</summary>
     Conflict,
+    /// <summary>The selected local store cannot participate in coordinated transfer.</summary>
     Unsupported,
+    /// <summary>The coordinator could not safely capture a local precondition.</summary>
     Failed
 }
 
 /// <summary>Describes a local destination check without exposing local values.</summary>
 internal sealed record LocalCoordinatorCheck(LocalCoordinatorCheckKind Kind, LocalCoordinatorFailure? Failure)
 {
+    /// <summary>Creates a check result that permits the planned operation.</summary>
+    /// <returns>A ready result without a failure.</returns>
     public static LocalCoordinatorCheck Ready() => new(LocalCoordinatorCheckKind.Ready, null);
 
+    /// <summary>Creates a check result that requires safe reconciliation of a prepared transfer.</summary>
+    /// <returns>A prepared-recovery result without a failure.</returns>
     public static LocalCoordinatorCheck PreparedRecovery() => new(LocalCoordinatorCheckKind.PreparedRecovery, null);
 
+    /// <summary>Creates a check result that blocks the operation because current state conflicts with the plan.</summary>
+    /// <returns>A conflict result without a failure because the plan mismatch is the diagnostic.</returns>
     public static LocalCoordinatorCheck Conflict() => new(LocalCoordinatorCheckKind.Conflict, null);
 
+    /// <summary>Creates a check result whose prior write state cannot be safely determined.</summary>
+    /// <returns>An indeterminate result without a failure because reconciliation is required.</returns>
     public static LocalCoordinatorCheck Indeterminate() => new(LocalCoordinatorCheckKind.Indeterminate, null);
 
+    /// <summary>Creates a check result for a local store that cannot participate in coordinated transfer.</summary>
+    /// <returns>An unsupported-store result with its stable failure diagnostic.</returns>
     public static LocalCoordinatorCheck Unsupported() => new(
         LocalCoordinatorCheckKind.Unsupported,
         new LocalCoordinatorFailure("local-secret-transfer-unsupported-store", "The selected LocalSecrets store is not supported for coordinated remote-to-local transfer.", false));
 
+    /// <summary>Creates a check result that failed before the local state could be safely rechecked.</summary>
+    /// <param name="failure">Value-safe failure that prevented the recheck.</param>
+    /// <returns>A failed result carrying the supplied failure.</returns>
     public static LocalCoordinatorCheck Failed(LocalCoordinatorFailure failure) => new(LocalCoordinatorCheckKind.Failed, failure);
 }
 
+/// <summary>Classifies a value-free recheck of a plan-bound local destination.</summary>
 internal enum LocalCoordinatorCheckKind
 {
+    /// <summary>The local destination still satisfies the plan precondition.</summary>
     Ready,
+    /// <summary>A matching prepared transfer may be reconciled only through the resume workflow.</summary>
     PreparedRecovery,
+    /// <summary>The local destination no longer satisfies the plan precondition.</summary>
     Conflict,
+    /// <summary>The coordinator cannot establish whether a prior write completed safely.</summary>
     Indeterminate,
+    /// <summary>The selected local store cannot participate in coordinated transfer.</summary>
     Unsupported,
+    /// <summary>The coordinator could not safely recheck local state.</summary>
     Failed
 }
 
 /// <summary>Describes a guarded local write or recovery outcome.</summary>
 internal sealed record LocalCoordinatorWriteResult(LocalCoordinatorWriteKind Kind, LocalCoordinatorFailure? Failure)
 {
+    /// <summary>Creates a successful create outcome.</summary>
+    /// <returns>A created result without a failure.</returns>
     public static LocalCoordinatorWriteResult Created() => new(LocalCoordinatorWriteKind.Created, null);
 
+    /// <summary>Creates a successful guarded replacement outcome.</summary>
+    /// <returns>A replaced result without a failure.</returns>
     public static LocalCoordinatorWriteResult Replaced() => new(LocalCoordinatorWriteKind.Replaced, null);
 
+    /// <summary>Creates a successful recovery outcome for a matching prepared write.</summary>
+    /// <returns>A recovered result without a failure.</returns>
     public static LocalCoordinatorWriteResult Recovered() => new(LocalCoordinatorWriteKind.Recovered, null);
 
+    /// <summary>Creates a write outcome blocked by a changed local target or attestation.</summary>
+    /// <returns>A conflict result without a failure because the plan mismatch is the diagnostic.</returns>
     public static LocalCoordinatorWriteResult Conflict() => new(LocalCoordinatorWriteKind.Conflict, null);
 
+    /// <summary>Creates an outcome whose write state requires reconciliation before another write.</summary>
+    /// <param name="failure">Optional value-safe detail; omitted when the coordinator cannot determine a more specific cause.</param>
+    /// <returns>An indeterminate result; a null <paramref name="failure"/> means callers must use the generic reconciliation diagnostic.</returns>
     public static LocalCoordinatorWriteResult Indeterminate(LocalCoordinatorFailure? failure = null) => new(LocalCoordinatorWriteKind.Indeterminate, failure);
 
+    /// <summary>Creates a write outcome for a local store that cannot participate in coordinated transfer.</summary>
+    /// <returns>An unsupported-store result with its stable failure diagnostic.</returns>
     public static LocalCoordinatorWriteResult Unsupported() => new(
         LocalCoordinatorWriteKind.Unsupported,
         new LocalCoordinatorFailure("local-secret-transfer-unsupported-store", "The selected LocalSecrets store is not supported for coordinated remote-to-local transfer.", false));
 
+    /// <summary>Creates a write outcome that failed before a safe completion could be established.</summary>
+    /// <param name="failure">Value-safe failure that prevented a confirmed write result.</param>
+    /// <returns>A failed result carrying the supplied failure.</returns>
     public static LocalCoordinatorWriteResult Failed(LocalCoordinatorFailure failure) => new(LocalCoordinatorWriteKind.Failed, failure);
 }
 
+/// <summary>Classifies a guarded local write or recovery outcome.</summary>
 internal enum LocalCoordinatorWriteKind
 {
+    /// <summary>A previously absent local secret was created and attested.</summary>
     Created,
+    /// <summary>An attested local secret was replaced with explicit authorization.</summary>
     Replaced,
+    /// <summary>A prepared local write was reconciled and committed.</summary>
     Recovered,
+    /// <summary>The local target or attestation conflicts with the plan.</summary>
     Conflict,
+    /// <summary>The write may have changed local state and requires reconciliation.</summary>
     Indeterminate,
+    /// <summary>The selected local store cannot participate in coordinated transfer.</summary>
     Unsupported,
+    /// <summary>The coordinator could not safely complete the write operation.</summary>
     Failed
 }
 
@@ -836,8 +938,11 @@ internal sealed record LocalTransferJournal(
     string LocalStorageName,
     string? PreviousOperationId);
 
+/// <summary>Tracks the value-free lifecycle of a local transfer journal.</summary>
 internal enum LocalTransferJournalState
 {
+    /// <summary>A local write is prepared and must be reconciled before another write.</summary>
     Prepared,
+    /// <summary>A local write is confirmed and may authorize a later guarded replacement.</summary>
     Committed
 }

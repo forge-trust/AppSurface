@@ -166,6 +166,20 @@ public sealed class GoogleSecretManagerTransferClientTests
         Assert.Equal(canonical, result.ResourceName);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void ProbeSecretVersion_Should_FailWhenTheProviderReturnsABlankCanonicalName(string providerName)
+    {
+        var client = new GoogleSecretManagerTransferClientAdapter(
+            () => new TransferSecretManagerServiceClient(getVersionName: providerName));
+
+        var result = client.ProbeSecretVersion("projects/project/secrets/api-key/versions/5", TimeSpan.FromSeconds(1));
+
+        Assert.Equal(GoogleSecretManagerTransferStatus.ProviderFailed, result.Status);
+        Assert.Equal("google-secret-transfer-failed", result.Diagnostic?.Code);
+    }
+
     [Fact]
     public void ProbeSecretVersion_Should_Fail_WhenVersionIsDisabled()
     {

@@ -117,7 +117,9 @@ public sealed class ProgramEntryPointTests
         var result = await InvokeProgramEntryPointAsync(["secrets"]);
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("appsurface secrets transfer plan|apply", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("appsurface secrets transfer plan", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("appsurface secrets transfer apply", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("plan|apply", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("transfer google", result.AllText, StringComparison.Ordinal);
     }
 
@@ -230,12 +232,18 @@ public sealed class ProgramEntryPointTests
         var applied = await InvokeProgramEntryPointAsync(
             ["secrets", "transfer", "apply", "--config", configPath, "--plan", planPath, "--apply", "--confirm", "clone-production", .. shared],
             options => RegisterSecretPromotionWorkflow(options, workflow, coordinator));
+        var repeated = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "apply", "--config", configPath, "--plan", planPath, "--apply", "--confirm", "clone-production", .. shared],
+            options => RegisterSecretPromotionWorkflow(options, workflow, coordinator));
 
         Assert.Equal(0, plan.ExitCode);
         Assert.Equal(2, withoutConfirmation.ExitCode);
         Assert.Equal(0, applied.ExitCode);
+        Assert.Equal(1, repeated.ExitCode);
         Assert.Contains("CreatedLocalSecret", applied.AllText, StringComparison.Ordinal);
         Assert.Contains("LocalSecretsPostureMode.SingleMachineSelfHosted", applied.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Retryable:", applied.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("LocalSecretsPostureMode.SingleMachineSelfHosted", repeated.AllText, StringComparison.Ordinal);
         Assert.Equal(1, client.AccessCalls);
         ValueSafeAssert.DoesNotExpose("sentinel-remote-secret", plan.AllText + withoutConfirmation.AllText + applied.AllText + File.ReadAllText(planPath) + File.ReadAllText($"{planPath}.receipt.json"));
     }

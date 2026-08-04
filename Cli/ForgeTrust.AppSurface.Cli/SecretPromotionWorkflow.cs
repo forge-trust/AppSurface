@@ -509,9 +509,8 @@ internal sealed class SecretPromotionWorkflow(
 
         if (!IsSupported(endpoints.Source) || !IsSupported(endpoints.Destination))
         {
-            throw SecretPromotionCommandExtensions.Usage(version == 1
-                ? "V1 supports only the built-in local endpoint and Google endpoints."
-                : "V2 supports only the built-in local endpoint and Google endpoints.");
+            throw SecretPromotionCommandExtensions.Usage(
+                $"V{version} supports only the built-in local endpoint and Google endpoints.");
         }
 
         if (version == 1 && IsLocal(endpoints.Destination))
@@ -564,10 +563,6 @@ internal sealed class SecretPromotionWorkflow(
             {
                 throw SecretPromotionCommandExtensions.Usage("Promotion job contains duplicate destination resources.");
             }
-        }
-        else if (job.Rows.Any(row => !string.IsNullOrWhiteSpace(row.Destination)))
-        {
-            throw SecretPromotionCommandExtensions.Usage("V2 LocalSecrets destination rows must omit the Google destination resource.");
         }
     }
 
@@ -623,7 +618,11 @@ internal sealed class SecretPromotionWorkflow(
         };
     }
 
-    private static SecretPromotionRowResult ProbeLocalDestination(SecretPromotionPlanRow row, bool replace) =>
+    /// <summary>Maps a captured local precondition to a value-safe planning result.</summary>
+    /// <param name="row">Plan row carrying the captured local precondition.</param>
+    /// <param name="replace">Whether the plan explicitly authorizes a guarded replacement.</param>
+    /// <returns>The value-safe planning result for the captured local state.</returns>
+    internal static SecretPromotionRowResult ProbeLocalDestination(SecretPromotionPlanRow row, bool replace) =>
         row.LocalPreconditionKind switch
         {
             nameof(LocalCoordinatorPreconditionKind.Missing) => row.Result("Ready", "WouldCreateLocalSecret", null, null, null),
@@ -695,12 +694,6 @@ internal sealed class SecretPromotionWorkflow(
                 "local-secret-transfer-indeterminate-write",
                 "A prepared local transfer must be resumed and reconciled before another write is attempted.",
                 false),
-            LocalCoordinatorCheckKind.Unsupported => row.Result(
-                "Failed",
-                "ProbeLocalDestination",
-                result.Failure?.Code ?? "local-secret-transfer-preflight-failed",
-                result.Failure?.Problem ?? "The local transfer preflight failed.",
-                result.Failure?.Retryable),
             _ => row.Result(
                 "Failed",
                 "ProbeLocalDestination",
@@ -841,11 +834,19 @@ internal sealed class SecretPromotionWorkflow(
             context.Store,
             value,
             allowPreparedRecovery);
-        return result.Kind switch
+        return MapLocalWriteResult(row, result);
+    }
+
+    /// <summary>Maps a guarded local coordinator write outcome to a value-safe transfer row.</summary>
+    /// <param name="row">Planned local destination row.</param>
+    /// <param name="result">Coordinator write or recovery result to render.</param>
+    /// <returns>The value-safe transfer row corresponding to the coordinator result.</returns>
+    internal static SecretPromotionRowResult MapLocalWriteResult(SecretPromotionPlanRow row, LocalCoordinatorWriteResult result) =>
+        result.Kind switch
         {
-            LocalCoordinatorWriteKind.Created => row.Result("Written", "CreatedLocalSecret", null, null, false),
-            LocalCoordinatorWriteKind.Replaced => row.Result("Written", "ReplacedLocalSecret", null, null, false),
-            LocalCoordinatorWriteKind.Recovered => row.Result("Written", "RecoveredLocalSecret", null, null, false),
+            LocalCoordinatorWriteKind.Created => row.Result("Written", "CreatedLocalSecret", null, null, null),
+            LocalCoordinatorWriteKind.Replaced => row.Result("Written", "ReplacedLocalSecret", null, null, null),
+            LocalCoordinatorWriteKind.Recovered => row.Result("Written", "RecoveredLocalSecret", null, null, null),
             LocalCoordinatorWriteKind.Conflict => row.Result(
                 "Conflict",
                 "WriteLocalSecret",
@@ -871,7 +872,6 @@ internal sealed class SecretPromotionWorkflow(
                 result.Failure?.Problem ?? "The local transfer write failed.",
                 result.Failure?.Retryable)
         };
-    }
 
     private static AppSurfaceLocalSecretResult ProbeLocal(SecretsCommandContext context, string key)
     {
@@ -1001,7 +1001,7 @@ internal sealed class SecretPromotionWorkflow(
         {
             if (!string.IsNullOrWhiteSpace(row.Destination))
             {
-                throw SecretPromotionCommandExtensions.Usage("Local destination rows must not declare Google destination resources.");
+                throw SecretPromotionCommandExtensions.Usage("V2 LocalSecrets destination rows must omit the Google destination resource.");
             }
 
             return null;
@@ -1054,12 +1054,9 @@ internal sealed class SecretPromotionWorkflow(
                 row.LocalAttestationOperationId is null,
             nameof(LocalCoordinatorPreconditionKind.Replace) =>
                 row.DestinationExists == true &&
-                IsLowerHex(row.LocalAttestationOperationId, 32),
+                LocalTransferFormat.IsLowerHex(row.LocalAttestationOperationId, 32),
             _ => false
         };
-
-    private static bool IsLowerHex(string? value, int length) =>
-        value?.Length == length && value.All(static character => character is >= '0' and <= '9' || character is >= 'a' and <= 'f');
 
     /// <summary>
     /// Returns the canonical Google secret parent for a syntactically valid version resource.

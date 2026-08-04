@@ -178,11 +178,11 @@ Use the [AppSurface CLI transfer workflow](../../Cli/ForgeTrust.AppSurface.Cli/R
 to transfer a declared LocalSecrets or Google source into an existing Google secret, or to materialize one pinned Google
 version into LocalSecrets for local testing. Configuration names the source and destination endpoints plus exact job rows.
 Every Google-to-LocalSecrets source must be a full numeric version resource, never `latest` or another alias.
-For prerequisites, guarded replacement, recovery, and host posture, follow the [remote-to-local local-testing guide](../ForgeTrust.AppSurface.Config.LocalSecrets/docs/materialize-remote-secrets-for-local-testing.md).
+For prerequisites, guarded replacement, recovery, and host posture, follow the [remote-to-local testing guide](../ForgeTrust.AppSurface.Config.LocalSecrets/docs/materialize-remote-secrets-for-local-testing.md).
 
 ```bash
-appsurface secrets transfer plan --config ./secret-promotion.json --job staging-to-production --out ./promotion.plan.json
-appsurface secrets transfer apply --config ./secret-promotion.json --plan ./promotion.plan.json --apply --confirm staging-to-production
+appsurface secrets transfer plan --config ./secret-transfer.json --job staging-to-production --out ./promotion.plan.json
+appsurface secrets transfer apply --config ./secret-transfer.json --plan ./promotion.plan.json --apply --confirm staging-to-production
 ```
 
 The plan is value-free and metadata-only. Apply rechecks its digest, expiry, canonical source resource, and destination
