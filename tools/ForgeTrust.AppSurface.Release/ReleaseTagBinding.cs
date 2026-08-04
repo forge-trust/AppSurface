@@ -115,8 +115,10 @@ internal sealed record ReleaseTagBinding(
     /// <returns>Timestamp and offset recorded by the annotated tagger.</returns>
     internal static DateTimeOffset ParseTaggerTimestamp(string tag, string tagObject)
     {
-        var taggerLine = tagObject
-            .Replace("\r\n", "\n", StringComparison.Ordinal)
+        var normalizedTagObject = tagObject.Replace("\r\n", "\n", StringComparison.Ordinal);
+        var headerEnd = normalizedTagObject.IndexOf("\n\n", StringComparison.Ordinal);
+        var tagHeader = headerEnd < 0 ? normalizedTagObject : normalizedTagObject[..headerEnd];
+        var taggerLine = tagHeader
             .Split('\n')
             .FirstOrDefault(line => line.StartsWith("tagger ", StringComparison.Ordinal));
         if (taggerLine is null)

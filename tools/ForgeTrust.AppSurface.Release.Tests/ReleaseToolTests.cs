@@ -490,6 +490,23 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task InspectRejectsTaggerLineInAnnotatedTagMessageWithoutTaggerHeader()
+    {
+        await SeedRepositoryAsync();
+        var runner = CreateSuccessfulPublishRunner();
+        var binding = CreateReleaseTagBinding();
+        var tagObject = $"object abc123\ntype commit\ntag v0.1.0-preview.1\n\ntagger Release Tests <release-tests@example.test> 1770000000 +0000\n{binding.Render()}";
+        runner.Add("git cat-file -p refs/tags/v0.1.0-preview.1", new CommandResult(0, tagObject, ""));
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-tag-tagger-missing", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task InspectAcceptsNegativeTaggerOffset()
     {
         await SeedRepositoryAsync();
@@ -710,11 +727,71 @@ public sealed class ReleaseToolTests : IDisposable
             ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--out", output],
             CreateSuccessfulPublishRunner());
 
-        Assert.Equal(0, result.ExitCode);
+        Assert.True(result.ExitCode == 0, result.Stderr);
         Assert.Contains($"release.binding: {ReleaseTagBinding.RequiredKeyCount}/{ReleaseTagBinding.RequiredKeyCount} verified", result.Stdout, StringComparison.Ordinal);
         var projection = await File.ReadAllTextAsync(output);
         Assert.Contains("state: tagged", projection, StringComparison.Ordinal);
         Assert.Contains("status: Tagged", projection, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InspectWritesThroughOpenedDirectoryAfterParentDirectoryIsReplaced()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        await SeedRepositoryAsync();
+        var parent = ExternalPath("projection-race/parent");
+        var parkedParent = ExternalPath("projection-race/parked-parent");
+        var attackerDirectory = ExternalPath("projection-race/attacker");
+        var output = Path.Join(parent, "tagged-projection.yml");
+        Directory.CreateDirectory(parent);
+        Directory.CreateDirectory(attackerDirectory);
+        var probe = ExternalPath("projection-race/symbolic-link-probe");
+        if (!TryCreateSymbolicLink(probe, attackerDirectory, isDirectory: true))
+        {
+            return;
+        }
+
+        Directory.Delete(probe);
+        var replaced = false;
+        using var hook = ReleaseProjectionOutputWriter.UseDirectoryOpenedHookForTesting(directory =>
+        {
+            if (!string.Equals(directory, parent, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            Directory.Move(parent, parkedParent);
+            Directory.CreateSymbolicLink(parent, attackerDirectory);
+            replaced = true;
+        });
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--out", output],
+            CreateSuccessfulPublishRunner());
+
+        Assert.True(replaced);
+        Assert.True(result.ExitCode == 0, result.Stderr);
+        Assert.Contains("state: tagged", await File.ReadAllTextAsync(Path.Join(parkedParent, "tagged-projection.yml")), StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Join(attackerDirectory, "tagged-projection.yml")));
+    }
+
+    [Fact]
+    public async Task InspectOutputWriterDoesNotReplaceOutputWhenCancelled()
+    {
+        var output = ExternalPath("cancelled-projection.yml");
+        Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+        await File.WriteAllTextAsync(output, "keep this sentinel\n");
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            ReleaseProjectionOutputWriter.WriteAsync(output, "replacement\n", cancellation.Token));
+
+        Assert.Equal("keep this sentinel\n", await File.ReadAllTextAsync(output));
     }
 
     [Fact]
@@ -813,40 +890,14 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
-    public void InspectOutputOnlyExemptsTheMacOsTemporaryDirectoryAlias()
+    public void InspectOutputCanonicalizesOnlyFixedMacOsTemporaryDirectoryAliases()
     {
-        Assert.Equal(
-            OperatingSystem.IsMacOS(),
-            ReleaseInspectCommand.IsMacOsTemporaryDirectory(new DirectoryInfo("/tmp")));
-        Assert.Equal(
-            OperatingSystem.IsMacOS(),
-            ReleaseInspectCommand.IsMacOsTemporaryDirectory(new DirectoryInfo("/var")));
-        Assert.True(ReleaseInspectCommand.IsMacOsTemporaryDirectory(new DirectoryInfo("/tmp"), isMacOs: true));
-        Assert.True(ReleaseInspectCommand.IsMacOsTemporaryDirectory(new DirectoryInfo("/var"), isMacOs: true));
-        Assert.False(ReleaseInspectCommand.IsMacOsTemporaryDirectory(new DirectoryInfo("/tagged-release-link"), isMacOs: true));
-        Assert.False(ReleaseInspectCommand.IsMacOsTemporaryDirectory(new DirectoryInfo("/tmp"), isMacOs: false));
-        Assert.False(ReleaseInspectCommand.IsMacOsTemporaryDirectory(new DirectoryInfo("/tagged-release-link")));
-    }
-
-    [Fact]
-    public void InspectOutputAcceptsMissingPathsAndRejectsUninspectablePaths()
-    {
-        Assert.False(ReleaseInspectCommand.IsReparsePoint("missing-file", _ => throw new FileNotFoundException()));
-        Assert.False(ReleaseInspectCommand.IsReparsePoint("missing-directory", _ => throw new DirectoryNotFoundException()));
-        Assert.True(ReleaseInspectCommand.IsReparsePoint("reparse-point", _ => FileAttributes.ReparsePoint));
-
-        foreach (var createException in new Func<Exception>[]
-        {
-            () => new IOException("I/O failure"),
-            () => new UnauthorizedAccessException("Access denied"),
-            () => new NotSupportedException("Unsupported")
-        })
-        {
-            var error = Assert.Throws<ReleaseToolException>(() =>
-                ReleaseInspectCommand.IsReparsePoint("uninspectable", _ => throw createException()));
-
-            Assert.Equal("release-inspect-output-path-invalid", error.Diagnostic.Code);
-        }
+        Assert.Equal("/private/tmp", ReleaseProjectionOutputWriter.NormalizePlatformPath("/tmp", isMacOs: true));
+        Assert.Equal("/private/tmp/tagged-projection.yml", ReleaseProjectionOutputWriter.NormalizePlatformPath("/tmp/tagged-projection.yml", isMacOs: true));
+        Assert.Equal("/private/var", ReleaseProjectionOutputWriter.NormalizePlatformPath("/var", isMacOs: true));
+        Assert.Equal("/private/var/folders/tagged-projection.yml", ReleaseProjectionOutputWriter.NormalizePlatformPath("/var/folders/tagged-projection.yml", isMacOs: true));
+        Assert.Equal("/tagged-release-link", ReleaseProjectionOutputWriter.NormalizePlatformPath("/tagged-release-link", isMacOs: true));
+        Assert.Equal("/tmp/tagged-projection.yml", ReleaseProjectionOutputWriter.NormalizePlatformPath("/tmp/tagged-projection.yml", isMacOs: false));
     }
 
     [Fact]

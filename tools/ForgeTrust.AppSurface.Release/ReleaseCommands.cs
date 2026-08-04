@@ -190,9 +190,10 @@ internal sealed partial class ReleaseInspectCommand : ReleaseCommandBase, IComma
     /// Gets an optional explicit output path for the tagged sidecar projection.
     /// </summary>
     /// <remarks>
-    /// The command validates all tag-bound inputs before writing this path. The release-publish docs job uses a runner-temporary
-    /// file and explicitly overlays it only in its disposable detached checkout. The path must resolve outside the repository source
-    /// tree so inspection cannot overwrite a prepared release artifact.
+    /// The command validates all tag-bound inputs before writing this path, then opens each parent directory without following links and
+    /// atomically replaces the output through that retained directory object. The release-publish docs job uses a runner-temporary file and
+    /// explicitly overlays it only in its disposable detached checkout. The path must resolve outside the repository source tree so inspection
+    /// cannot overwrite a prepared release artifact.
     /// </remarks>
     [CommandOption("out", Description = "Optional temporary YAML output path outside the repository for the validated tagged sidecar projection.")]
     public string? OutputPath { get; set; }
@@ -275,16 +276,6 @@ internal sealed partial class ReleaseInspectCommand : ReleaseCommandBase, IComma
                 "tools/ForgeTrust.AppSurface.Release/README.md#prepared-to-tagged-state"));
         }
 
-        if (IsReparsePoint(resolvedPath))
-        {
-            throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                "release-inspect-output-path-invalid",
-                "Inspect output must not replace a symbolic link or reparse point.",
-                $"The output path {resolvedPath} is a reparse point.",
-                "Pass an ordinary temporary file path outside the repository source tree.",
-                "tools/ForgeTrust.AppSurface.Release/README.md#prepared-to-tagged-state"));
-        }
-
         var directory = Path.GetDirectoryName(resolvedPath);
         if (string.IsNullOrWhiteSpace(directory))
         {
@@ -296,84 +287,7 @@ internal sealed partial class ReleaseInspectCommand : ReleaseCommandBase, IComma
                 "tools/ForgeTrust.AppSurface.Release/README.md#prepared-to-tagged-state"));
         }
 
-        EnsureNoReparsePointParent(directory);
-
-        Directory.CreateDirectory(directory);
-        var temporaryPath = Path.Join(directory, "." + Path.GetFileName(resolvedPath) + "." + Guid.NewGuid().ToString("N") + ".tmp");
-        try
-        {
-            await File.WriteAllTextAsync(temporaryPath, yaml, cancellationToken);
-            File.Move(temporaryPath, resolvedPath, true);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath))
-            {
-                File.Delete(temporaryPath);
-            }
-        }
-    }
-
-    private static void EnsureNoReparsePointParent(string directory)
-    {
-        for (var current = new DirectoryInfo(directory); current is not null; current = current.Parent)
-        {
-            if (!IsMacOsTemporaryDirectory(current) && IsReparsePoint(current.FullName))
-            {
-                throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                    "release-inspect-output-path-invalid",
-                    "Inspect output must not traverse a symbolic link or reparse-point directory.",
-                    $"The output directory component {current.FullName} is a reparse point.",
-                    "Pass an ordinary temporary file path outside the repository source tree.",
-                    "tools/ForgeTrust.AppSurface.Release/README.md#prepared-to-tagged-state"));
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gets whether a parent directory is a macOS system temporary-directory alias that is permitted to be a reparse point.
-    /// </summary>
-    /// <param name="directory">Directory currently being checked while resolving an inspect output path.</param>
-    /// <param name="isMacOs">Optional platform value used by focused tests. When omitted, detects the current operating system.</param>
-    /// <returns><c>true</c> only for the macOS <c>/tmp</c> and <c>/var</c> aliases that anchor the system temporary directory.</returns>
-    internal static bool IsMacOsTemporaryDirectory(DirectoryInfo directory, bool? isMacOs = null)
-    {
-        return (isMacOs ?? OperatingSystem.IsMacOS())
-            && (string.Equals(directory.FullName, "/tmp", StringComparison.Ordinal)
-                || string.Equals(directory.FullName, "/var", StringComparison.Ordinal));
-    }
-
-    /// <summary>
-    /// Gets whether a path is a symbolic link, junction, or other reparse point.
-    /// </summary>
-    /// <param name="path">Path to inspect.</param>
-    /// <param name="attributesReader">Optional attribute reader used by focused tests.</param>
-    /// <returns><c>true</c> when the path is a reparse point; <c>false</c> when it does not yet exist.</returns>
-    /// <exception cref="ReleaseToolException">Thrown when an existing path cannot be inspected safely.</exception>
-    internal static bool IsReparsePoint(string path, Func<string, FileAttributes>? attributesReader = null)
-    {
-        try
-        {
-            var attributes = attributesReader is null ? File.GetAttributes(path) : attributesReader(path);
-            return attributes.HasFlag(FileAttributes.ReparsePoint);
-        }
-        catch (FileNotFoundException)
-        {
-            return false;
-        }
-        catch (DirectoryNotFoundException)
-        {
-            return false;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
-        {
-            throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                "release-inspect-output-path-invalid",
-                "Inspect output path could not be inspected.",
-                $"The path {path} could not be read: {ex.Message}",
-                "Pass an ordinary temporary file path outside the repository source tree.",
-                "tools/ForgeTrust.AppSurface.Release/README.md#prepared-to-tagged-state"));
-        }
+        await ReleaseProjectionOutputWriter.WriteAsync(resolvedPath, yaml, cancellationToken);
     }
 }
 
