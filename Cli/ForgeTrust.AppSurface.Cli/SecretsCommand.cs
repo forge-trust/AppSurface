@@ -145,7 +145,7 @@ internal sealed partial class SecretsListCommand : SecretsCommandBase
 /// canonical v2 value after migration.
 /// </remarks>
 [Command("secrets migrate", Description = "Migrate readable legacy macOS LocalSecrets records into the v2 namespace without printing values.")]
-internal sealed partial class SecretsMigrateCommand : SecretsCommandBase
+internal partial class SecretsMigrateCommand : SecretsCommandBase
 {
     /// <inheritdoc />
     public override async ValueTask ExecuteAsync(IConsole console)
