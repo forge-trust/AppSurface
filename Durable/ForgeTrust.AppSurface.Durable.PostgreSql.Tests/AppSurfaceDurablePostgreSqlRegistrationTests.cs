@@ -3,6 +3,7 @@ using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Durable.Provider;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -137,6 +138,23 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
     }
 
     [Fact]
+    public void TurnScheduler_ContinuesRotationAfterChangingTheSelectedSurfaceSet()
+    {
+        var scheduler = new DurableRuntimeTurnScheduler();
+
+        Assert.Equal(DurableRuntimeSurface.Work, scheduler.Next(DurableRuntimeSurface.All));
+        Assert.Equal(DurableRuntimeSurface.Schedule, scheduler.Next(DurableRuntimeSurface.Schedule | DurableRuntimeSurface.Work));
+        Assert.Equal(DurableRuntimeSurface.Work, scheduler.Next(DurableRuntimeSurface.Work));
+        Assert.Equal(DurableRuntimeSurface.Flow, scheduler.Next(DurableRuntimeSurface.Flow | DurableRuntimeSurface.Schedule));
+    }
+
+    [Fact]
+    public void Builder_RejectsNullServiceCollection()
+    {
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceDurablePostgreSqlBuilder(null!));
+    }
+
+    [Fact]
     public void HostedWait_UsesEarliestDueTimeAndNeverReturnsZeroDelay()
     {
         var maximum = TimeSpan.FromSeconds(5);
@@ -145,6 +163,7 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
         Assert.Equal(TimeSpan.FromMilliseconds(1), PostgreSqlDurableHostedService.CalculateIdleDelay(DateTimeOffset.UtcNow, maximum));
         var nearDue = PostgreSqlDurableHostedService.CalculateIdleDelay(DateTimeOffset.UtcNow.AddMilliseconds(20), maximum);
         Assert.InRange(nearDue, TimeSpan.FromMilliseconds(1), TimeSpan.FromSeconds(1));
+        Assert.Equal(maximum, PostgreSqlDurableHostedService.CalculateIdleDelay(DateTimeOffset.UtcNow.AddHours(1), maximum));
     }
 
     [Fact]
@@ -182,9 +201,29 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
     }
 
     [Fact]
+    public async Task HostedWait_RejectsNullDependencies()
+    {
+        var wakeSignals = Channel.CreateBounded<bool>(1);
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            PostgreSqlDurableHostedService.WaitForWakeOrPollAsync(
+                null!,
+                TimeSpan.Zero,
+                static (_, _) => Task.CompletedTask,
+                CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            PostgreSqlDurableHostedService.WaitForWakeOrPollAsync(
+                wakeSignals.Reader,
+                TimeSpan.Zero,
+                null!,
+                CancellationToken.None));
+    }
+
+    [Fact]
     public void OptionsValidation_RejectsBoundsAndIdentityEdges()
     {
         Assert.Throws<ArgumentException>(() => new AppSurfaceDurablePostgreSqlOptions { WorkerId = " " }.SnapshotAndValidate());
+        Assert.Throws<ArgumentException>(() => new AppSurfaceDurablePostgreSqlOptions { WorkerId = new string('w', 201) }.SnapshotAndValidate());
         Assert.Throws<ArgumentOutOfRangeException>(() => new AppSurfaceDurablePostgreSqlOptions { MaximumItemsPerPass = 0 }.SnapshotAndValidate());
         Assert.Throws<ArgumentOutOfRangeException>(() => new AppSurfaceDurablePostgreSqlOptions { TimeBudgetPerPass = TimeSpan.Zero }.SnapshotAndValidate());
         Assert.Throws<ArgumentOutOfRangeException>(() => new AppSurfaceDurablePostgreSqlOptions { HostedSurfaces = (DurableRuntimeSurface)8 }.SnapshotAndValidate());
@@ -196,6 +235,48 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
             HeartbeatStaleAfter = TimeSpan.FromMilliseconds(500),
         }.SnapshotAndValidate());
         Assert.Throws<ArgumentOutOfRangeException>(() => new AppSurfaceDurablePostgreSqlOptions { ShutdownReserve = TimeSpan.FromMinutes(5).Add(TimeSpan.FromTicks(1)) }.SnapshotAndValidate());
+    }
+
+    [Fact]
+    public void OptionsValidation_PreservesDefaultsAndAcceptsDocumentedUpperBounds()
+    {
+        var defaults = new AppSurfaceDurablePostgreSqlOptions().SnapshotAndValidate();
+
+        Assert.NotEmpty(defaults.WorkerId);
+        Assert.InRange(defaults.WorkerId.Length, 1, 200);
+        Assert.All(
+            defaults.WorkerId,
+            character => Assert.True(
+                char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.' or ':'));
+        Assert.True(defaults.SendWakeNotifications);
+        Assert.Equal(32, defaults.MaximumItemsPerPass);
+        Assert.Equal(TimeSpan.FromSeconds(10), defaults.TimeBudgetPerPass);
+        Assert.Equal(DurableRuntimeSurface.All, defaults.HostedSurfaces);
+
+        var bounded = new AppSurfaceDurablePostgreSqlOptions
+        {
+            WorkerId = new string('a', 200),
+            MaximumItemsPerPass = 10_000,
+            TimeBudgetPerPass = TimeSpan.FromMinutes(5),
+            IdlePollingInterval = TimeSpan.FromMinutes(5),
+            TransientFailureDelay = TimeSpan.FromMinutes(5),
+            HeartbeatStaleAfter = TimeSpan.FromHours(1),
+            ShutdownReserve = TimeSpan.FromMinutes(5),
+        }.SnapshotAndValidate();
+
+        Assert.Equal(200, bounded.WorkerId.Length);
+        Assert.Equal(10_000, bounded.MaximumItemsPerPass);
+        Assert.Equal(TimeSpan.FromMinutes(5), bounded.TimeBudgetPerPass);
+    }
+
+    [Theory]
+    [InlineData("worker id")]
+    [InlineData("worker/id")]
+    [InlineData("worker\nid")]
+    public void OptionsValidation_RejectsUnsafeWorkerIdCharacters(string workerId)
+    {
+        Assert.Throws<ArgumentException>(() =>
+            new AppSurfaceDurablePostgreSqlOptions { WorkerId = workerId }.SnapshotAndValidate());
     }
 
     [Theory]
@@ -266,6 +347,47 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
         Assert.False(admission.TryEnter());
         Assert.Equal(1, drain.DrainCount);
         await hosted.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public void HostedConstructor_RejectsNullDependencies()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = CreateDataSource();
+        var registration = new PostgreSqlDurableRuntimeRegistration(
+            dispatcher,
+            runtime,
+            new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+            new PostgreSqlDurableScheduleOptions("durable_runtime"),
+            new AppSurfaceDurablePostgreSqlOptions
+            {
+                WorkerId = "hosted-constructor-test",
+            }.SnapshotAndValidate(),
+            Guid.NewGuid());
+        var schema = new NoOpSchemaManager();
+        var pump = new EmptyPump();
+        var drain = new RecordingDrainControl();
+        var admission = new DurableRuntimeAdmissionGate();
+        var lifetime = new TestHostApplicationLifetime();
+        var hostOptions = Options.Create(new HostOptions());
+        var logger = NullLogger<PostgreSqlDurableHostedService>.Instance;
+
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableHostedService(
+            null!, pump, drain, registration, admission, lifetime, hostOptions, logger));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableHostedService(
+            schema, null!, drain, registration, admission, lifetime, hostOptions, logger));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableHostedService(
+            schema, pump, null!, registration, admission, lifetime, hostOptions, logger));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableHostedService(
+            schema, pump, drain, null!, admission, lifetime, hostOptions, logger));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableHostedService(
+            schema, pump, drain, registration, null!, lifetime, hostOptions, logger));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableHostedService(
+            schema, pump, drain, registration, admission, null!, hostOptions, logger));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableHostedService(
+            schema, pump, drain, registration, admission, lifetime, null!, logger));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableHostedService(
+            schema, pump, drain, registration, admission, lifetime, hostOptions, null!));
     }
 
     [Fact]
@@ -553,6 +675,127 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
         await hosted.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
     }
 
+    [Fact]
+    public async Task HostedLifecycle_RetriesAListenerConnectionFailureBeforeShutdownCancellation()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = NpgsqlDataSource.Create(
+            "Host=127.0.0.1;Port=1;Database=durable_registration;Username=durable;Password=not-opened;Timeout=1");
+        var logger = new ListenerRetryLogger();
+        using var hosted = CreateHostedService(
+            dispatcher,
+            runtime,
+            new NoOpSchemaManager(),
+            new EmptyPump(),
+            new RecordingDrainControl(),
+            new TestHostApplicationLifetime(),
+            "hosted-listener-retry-worker",
+            sendWakeNotifications: true,
+            logger);
+
+        await hosted.StartAsync(CancellationToken.None);
+        await logger.RetryLogged.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Assert.ThrowsAsync<TaskCanceledException>(() => hosted.StopAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task HostedLifecycle_RetriesAListenerTimeoutBeforeShutdownCancellation()
+    {
+        using var dispatcher = CreateDataSource();
+        var dataSourceBuilder = new NpgsqlDataSourceBuilder(
+            "Host=127.0.0.1;Port=5432;Database=durable_registration;Username=durable");
+        dataSourceBuilder.UsePasswordProvider(
+            static _ => "unused",
+            static (_, _) => ValueTask.FromException<string>(new TimeoutException("Simulated listener timeout.")));
+        using var runtime = dataSourceBuilder.Build();
+        var logger = new ListenerRetryLogger();
+        using var hosted = CreateHostedService(
+            dispatcher,
+            runtime,
+            new NoOpSchemaManager(),
+            new EmptyPump(),
+            new RecordingDrainControl(),
+            new TestHostApplicationLifetime(),
+            "hosted-listener-timeout-worker",
+            sendWakeNotifications: true,
+            logger);
+
+        await hosted.StartAsync(CancellationToken.None);
+        await logger.RetryLogged.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Assert.ThrowsAsync<TaskCanceledException>(() => hosted.StopAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task HostedStop_RespectsHostCancellationWhenDrainHasNotCompleted()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = CreateDataSource();
+        var drain = new BlockingDrainControl();
+        using var hosted = CreateHostedService(
+            dispatcher,
+            runtime,
+            new NoOpSchemaManager(),
+            new EmptyPump(),
+            drain,
+            new TestHostApplicationLifetime(),
+            "hosted-canceled-stop-worker");
+
+        await hosted.StartAsync(CancellationToken.None);
+        using var cancellation = new CancellationTokenSource();
+        var stop = hosted.StopAsync(cancellation.Token);
+        try
+        {
+            await drain.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            cancellation.Cancel();
+
+            await stop.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(drain.Started.Task.IsCompletedSuccessfully);
+        }
+        finally
+        {
+            drain.Release.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task HostedLifecycle_ExpiresShutdownDeadlineBeforeStartingAnotherPass()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = CreateDataSource();
+        var lifetime = new TestHostApplicationLifetime();
+        var pump = new CountingPump();
+        var options = new AppSurfaceDurablePostgreSqlOptions
+        {
+            WorkerId = "hosted-expired-deadline-worker",
+            SendWakeNotifications = false,
+            IdlePollingInterval = TimeSpan.FromMilliseconds(200),
+            HeartbeatStaleAfter = TimeSpan.FromSeconds(1),
+            TimeBudgetPerPass = TimeSpan.FromMilliseconds(1),
+            ShutdownReserve = TimeSpan.FromMilliseconds(999),
+        }.SnapshotAndValidate();
+        using var hosted = new PostgreSqlDurableHostedService(
+            new NoOpSchemaManager(),
+            pump,
+            new RecordingDrainControl(),
+            new PostgreSqlDurableRuntimeRegistration(
+                dispatcher,
+                runtime,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                new PostgreSqlDurableScheduleOptions("durable_runtime"),
+                options,
+                Guid.NewGuid()),
+            new DurableRuntimeAdmissionGate(),
+            lifetime,
+            Options.Create(new HostOptions { ShutdownTimeout = TimeSpan.FromSeconds(1) }),
+            NullLogger<PostgreSqlDurableHostedService>.Instance);
+
+        await hosted.StartAsync(CancellationToken.None);
+        await pump.FirstPass.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        lifetime.StopApplication();
+        await pump.SecondPass.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await hosted.StopAsync(CancellationToken.None);
+    }
+
     private static PostgreSqlDurableHostedService CreateHostedService(
         NpgsqlDataSource dispatcher,
         NpgsqlDataSource runtime,
@@ -561,7 +804,8 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
         IDurableRuntimeDrainControl drain,
         IHostApplicationLifetime lifetime,
         string workerId,
-        bool sendWakeNotifications = false)
+        bool sendWakeNotifications = false,
+        ILogger<PostgreSqlDurableHostedService>? logger = null)
     {
         var options = new AppSurfaceDurablePostgreSqlOptions
         {
@@ -591,7 +835,7 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
             new DurableRuntimeAdmissionGate(),
             lifetime,
             Options.Create(new HostOptions { ShutdownTimeout = TimeSpan.FromSeconds(1) }),
-            NullLogger<PostgreSqlDurableHostedService>.Instance);
+            logger ?? NullLogger<PostgreSqlDurableHostedService>.Instance);
     }
 
     private static NpgsqlDataSource CreateDataSource() => NpgsqlDataSource.Create(
@@ -749,6 +993,44 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
             ValueTask.FromException(new InvalidOperationException("Simulated drain persistence failure."));
 
         public ValueTask ResumeAsync(CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+    }
+
+    private sealed class BlockingDrainControl : IDurableRuntimeDrainControl
+    {
+        internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async ValueTask BeginDrainAsync(CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            await Release.Task.ConfigureAwait(false);
+        }
+
+        public ValueTask ResumeAsync(CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+    }
+
+    private sealed class ListenerRetryLogger : ILogger<PostgreSqlDurableHostedService>
+    {
+        internal TaskCompletionSource RetryLogged { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull =>
+            NullLogger.Instance.BeginScope(state);
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (eventId.Id == 4106)
+            {
+                RetryLogged.TrySetResult();
+            }
+        }
     }
 
     private sealed class RecordingDrainControl : IDurableRuntimeDrainControl
