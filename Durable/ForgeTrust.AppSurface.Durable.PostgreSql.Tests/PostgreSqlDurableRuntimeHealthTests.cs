@@ -1,3 +1,4 @@
+using System.Text;
 using ForgeTrust.AppSurface.Durable.Provider;
 using Npgsql;
 
@@ -142,6 +143,260 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
         var transientSnapshot = await transient.GetAsync();
         Assert.Equal(DurableRuntimeHealthState.Incompatible, transientSnapshot.State);
         Assert.Equal(DurableProblemCodes.SchemaInconsistent, transientSnapshot.ProblemCode);
+    }
+
+    [Fact]
+    public async Task GetAsync_MapsTransientWorkerReadToSchemaInconsistent()
+    {
+        using var dataSource = NpgsqlDataSource.Create(
+            "Host=localhost;Port=5432;Database=durable_health;Username=durable;Password=not-opened");
+        var schemaStatus = CreateStatus(DurableRuntimeSchemaCompatibility.Compatible);
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                dataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                CreateOptions("runtime-health-transient-worker"),
+                Guid.NewGuid()),
+            new StubSchemaManager(_ => ValueTask.FromResult(schemaStatus)));
+
+        var snapshot = await health.GetAsync();
+
+        Assert.Equal(DurableRuntimeHealthState.Incompatible, snapshot.State);
+        Assert.Equal(DurableProblemCodes.SchemaInconsistent, snapshot.ProblemCode);
+        Assert.False(snapshot.SchemaCompatible);
+        Assert.Equal(schemaStatus.InstalledVersion, snapshot.InstalledSchemaVersion);
+    }
+
+    [Fact]
+    public async Task GetAsync_MapsTransientDueReadToSchemaInconsistent()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-health-tests", "transient-due-read");
+        var schemaStatus = await schema.GetStatusAsync();
+        await using (var dropFunction = database.DataSource.CreateCommand(
+            "DROP FUNCTION appsurface_durable.runtime_due_dispatch_health(integer);"))
+        {
+            await dropFunction.ExecuteNonQueryAsync();
+        }
+
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(epoch, schemaStatus.StoreId),
+                CreateOptions("runtime-health-transient-due-worker"),
+                Guid.NewGuid()),
+            new StubSchemaManager(_ => ValueTask.FromResult(schemaStatus)));
+
+        var snapshot = await health.GetAsync();
+
+        Assert.Equal(DurableRuntimeHealthState.Incompatible, snapshot.State);
+        Assert.Equal(DurableProblemCodes.SchemaInconsistent, snapshot.ProblemCode);
+        Assert.False(snapshot.SchemaCompatible);
+        Assert.Equal(schemaStatus.InstalledVersion, snapshot.InstalledSchemaVersion);
+    }
+
+    [Fact]
+    public async Task GetAsync_ReportsMissingHeartbeatAndMissingMetadataWithoutInventingLiveness()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-health-tests", "missing-state");
+        var status = await schema.GetStatusAsync();
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+                CreateOptions("runtime-health-missing-state-worker"),
+                Guid.NewGuid()),
+            schema);
+
+        var missingHeartbeat = await health.GetAsync();
+        Assert.Equal(DurableRuntimeHealthState.NotStarted, missingHeartbeat.State);
+        Assert.Equal(DurableProblemCodes.ActivatorStale, missingHeartbeat.ProblemCode);
+        Assert.Null(missingHeartbeat.WorkerInstanceId);
+        Assert.Null(missingHeartbeat.LastHeartbeatAtUtc);
+
+        await using (var delete = database.DataSource.CreateCommand(
+            "DELETE FROM appsurface_durable.store_metadata WHERE singleton;"))
+        {
+            Assert.Equal(1, await delete.ExecuteNonQueryAsync());
+        }
+
+        var metadataMissingHealth = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+                CreateOptions("runtime-health-missing-state-worker"),
+                Guid.NewGuid()),
+            new StubSchemaManager(_ => ValueTask.FromResult(CreateStatus(DurableRuntimeSchemaCompatibility.Compatible))));
+        await Assert.ThrowsAsync<InvalidDataException>(async () => await metadataMissingHealth.GetAsync());
+    }
+
+    [Fact]
+    public async Task TryBeginPassAsync_TakesOverOnlyWhenEpochDrainOrStalenessAllowsIt()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-health-tests", "takeover");
+        var status = await schema.GetStatusAsync();
+        var workOptions = new PostgreSqlDurableWorkOptions(epoch, status.StoreId);
+        var incumbent = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(database.DataSource, workOptions, CreateOptions("runtime-health-takeover-worker"), Guid.NewGuid()),
+            schema);
+        Assert.True(await incumbent.TryBeginPassAsync(CancellationToken.None));
+        await incumbent.RecordSuccessfulSweepAsync(
+            new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero),
+            CancellationToken.None);
+
+        await using (var update = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.runtime_heartbeat
+            SET worker_instance_id = @instance_id, runtime_epoch = @runtime_epoch,
+                draining = false, pass_active = false,
+                last_heartbeat_at = clock_timestamp()
+            WHERE worker_id = @worker_id;
+            """))
+        {
+            update.Parameters.AddWithValue("instance_id", Guid.NewGuid());
+            update.Parameters.AddWithValue("runtime_epoch", Guid.NewGuid());
+            update.Parameters.AddWithValue("worker_id", "runtime-health-takeover-worker");
+            Assert.Equal(1, await update.ExecuteNonQueryAsync());
+        }
+
+        var epochTakeover = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(database.DataSource, workOptions, CreateOptions("runtime-health-takeover-worker"), Guid.NewGuid()),
+            schema);
+        Assert.True(await epochTakeover.TryBeginPassAsync(CancellationToken.None));
+        await epochTakeover.RecordSuccessfulSweepAsync(
+            new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero),
+            CancellationToken.None);
+
+        await using (var update = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.runtime_heartbeat
+            SET worker_instance_id = @instance_id, draining = true, pass_active = false,
+                last_heartbeat_at = clock_timestamp()
+            WHERE worker_id = @worker_id;
+            """))
+        {
+            update.Parameters.AddWithValue("instance_id", Guid.NewGuid());
+            update.Parameters.AddWithValue("worker_id", "runtime-health-takeover-worker");
+            Assert.Equal(1, await update.ExecuteNonQueryAsync());
+        }
+
+        var drainingTakeover = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(database.DataSource, workOptions, CreateOptions("runtime-health-takeover-worker"), Guid.NewGuid()),
+            schema);
+        Assert.True(await drainingTakeover.TryBeginPassAsync(CancellationToken.None));
+        await drainingTakeover.RecordSuccessfulSweepAsync(
+            new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero),
+            CancellationToken.None);
+
+        await using (var update = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.runtime_heartbeat
+            SET worker_instance_id = @instance_id, draining = false, pass_active = false,
+                last_heartbeat_at = clock_timestamp() - interval '1 hour'
+            WHERE worker_id = @worker_id;
+            """))
+        {
+            update.Parameters.AddWithValue("instance_id", Guid.NewGuid());
+            update.Parameters.AddWithValue("worker_id", "runtime-health-takeover-worker");
+            Assert.Equal(1, await update.ExecuteNonQueryAsync());
+        }
+
+        var staleTakeover = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(database.DataSource, workOptions, CreateOptions("runtime-health-takeover-worker"), Guid.NewGuid()),
+            schema);
+        Assert.True(await staleTakeover.TryBeginPassAsync(CancellationToken.None));
+        await staleTakeover.RecordSuccessfulSweepAsync(
+            new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero),
+            CancellationToken.None);
+
+        await using (var update = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.runtime_heartbeat
+            SET worker_instance_id = @instance_id, draining = false, pass_active = false,
+                last_heartbeat_at = clock_timestamp()
+            WHERE worker_id = @worker_id;
+            """))
+        {
+            update.Parameters.AddWithValue("instance_id", Guid.NewGuid());
+            update.Parameters.AddWithValue("worker_id", "runtime-health-takeover-worker");
+            Assert.Equal(1, await update.ExecuteNonQueryAsync());
+        }
+
+        var rejected = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(database.DataSource, workOptions, CreateOptions("runtime-health-takeover-worker"), Guid.NewGuid()),
+            schema);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await rejected.TryBeginPassAsync(CancellationToken.None));
+        Assert.StartsWith(DurableProblemCodes.WorkerIdentityConflict, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetAsync_ReportsDueAgeOnlyForPastDispatchesAndLeavesFutureDispatchesQuiescent()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-health-tests", "due-age");
+        var status = await schema.GetStatusAsync();
+        var workOptions = new PostgreSqlDurableWorkOptions(epoch, status.StoreId);
+        var workerId = "runtime-health-due-age-worker";
+        var options = CreateOptions(workerId);
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(database.DataSource, workOptions, options, Guid.NewGuid()),
+            schema);
+        Assert.True(await health.TryBeginPassAsync(CancellationToken.None));
+        await health.RecordSuccessfulSweepAsync(
+            new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero),
+            CancellationToken.None);
+
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource,
+            PostgreSqlTestWorkContracts.CreateDeleteProviderAccessRegistry(),
+            new PostgreSqlDurableWorkOptions(epoch, status.StoreId));
+        var accepted = await client.EnqueueAsync(new DurableWorkRequest(
+            new DurableScopeId("runtime-health-due-age-scope"),
+            new DurableCommandId("runtime-health-due-age-command"),
+            "runtime-health-due-age-key",
+            PostgreSqlTestWorkContracts.DeleteProviderAccessName(DurableProviderSafety.Idempotent),
+            "v1",
+            new DurableEncodedPayload(
+                "tests.delete-provider-access",
+                "v1",
+                DurableDataClassification.ApprovedApplication,
+                Encoding.UTF8.GetBytes("payload")),
+            DurableProviderSafety.Idempotent,
+            dueAtUtc: DateTimeOffset.UtcNow.AddHours(1)));
+        Assert.True(accepted.IsSuccess);
+
+        var future = await health.GetAsync();
+        Assert.Equal(0, future.DueDispatchCount);
+        Assert.Null(future.OldestDueAtUtc);
+        Assert.Null(future.OldestDueAge);
+
+        await using (var due = database.DataSource.CreateCommand(
+            "UPDATE appsurface_durable.dispatch SET due_at = clock_timestamp() - interval '1 hour' WHERE aggregate_id = @work_id;"))
+        {
+            due.Parameters.AddWithValue("work_id", accepted.Value!.WorkId.Value);
+            Assert.Equal(1, await due.ExecuteNonQueryAsync());
+        }
+
+        var past = await health.GetAsync();
+        Assert.Equal(1, past.DueDispatchCount);
+        Assert.NotNull(past.OldestDueAtUtc);
+        Assert.NotNull(past.OldestDueAge);
+        Assert.True(past.OldestDueAge >= TimeSpan.FromMinutes(59));
     }
 
     [Fact]
