@@ -2206,10 +2206,115 @@ public sealed class PostgreSqlDurableWorkStoreTests
             listed.Value.Items.Select(item => item.State).Distinct().Order());
     }
 
+    [Fact]
+    public async Task ControlClient_FailsClosedForUnknownPersistedWorkStateProviderSafetyAndResultClassification()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        var workOptions = CreateOptions(database.DataSource, epoch);
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
+        var control = CreateControlClient(database.DataSource, workOptions, schema, store, "control-invalid-persisted-worker");
+        var client = CreateClient(database.DataSource, epoch);
+        var scope = new DurableScopeId("control-invalid-persisted-scope");
+        var stateWork = (await client.EnqueueAsync(CreateRequest(scope.Value, "control-invalid-state"))).Value!;
+        var providerWork = (await client.EnqueueAsync(CreateRequest(scope.Value, "control-invalid-provider"))).Value!;
+        var resultWork = (await client.EnqueueAsync(CreateRequest(scope.Value, "control-invalid-classification"))).Value!;
+
+        await DropWorkConstraintAsync(database.DataSource, "work_state_check");
+        await UpdatePersistedWorkColumnAsync(
+            database.DataSource,
+            scope,
+            stateWork.WorkId,
+            "state",
+            "unexpected_state");
+        var unknownState = await Assert.ThrowsAsync<InvalidDataException>(
+            async () => await control.ListAsync(new DurableWorkListRequest(scope, pageSize: 10)));
+        Assert.Contains("Unknown persisted durable Work state 'unexpected_state'", unknownState.Message, StringComparison.Ordinal);
+
+        await UpdatePersistedWorkColumnAsync(database.DataSource, scope, stateWork.WorkId, "state", "pending");
+        await DropWorkConstraintAsync(database.DataSource, "work_provider_safety_check");
+        await UpdatePersistedWorkColumnAsync(
+            database.DataSource,
+            scope,
+            providerWork.WorkId,
+            "provider_safety",
+            "unexpected_provider_safety");
+        var unknownProviderSafety = await Assert.ThrowsAsync<InvalidDataException>(
+            async () => await control.ListAsync(new DurableWorkListRequest(scope, pageSize: 10)));
+        Assert.Contains(
+            "Unknown persisted provider safety 'unexpected_provider_safety'",
+            unknownProviderSafety.Message,
+            StringComparison.Ordinal);
+
+        var claim = await store.TryClaimAsync(
+            (await store.DiscoverAsync(10)).Single(item => item.WorkId == resultWork.WorkId),
+            "control-invalid-persisted-worker");
+        Assert.NotNull(claim);
+        var permit = await store.TryAcquireEffectPermitAsync(claim!);
+        Assert.NotNull(permit);
+        await store.RecordCompletionAsync(
+            permit!.Claim,
+            new PostgreSqlWorkCompletion(
+                PostgreSqlWorkCompletionKind.Succeeded,
+                "completed",
+                "{}",
+                new DurableEncodedPayload(
+                    "tests.control-invalid-result",
+                    "v1",
+                    DurableDataClassification.ApprovedApplication,
+                    Encoding.UTF8.GetBytes("result"))));
+        await UpdatePersistedWorkColumnAsync(
+            database.DataSource,
+            scope,
+            resultWork.WorkId,
+            "result_classification",
+            "unexpected_classification");
+
+        var unknownClassification = await Assert.ThrowsAsync<InvalidDataException>(
+            async () => await control.GetAsync(new DurableWorkGetRequest(scope, resultWork.WorkId)));
+        Assert.Contains(
+            "Unknown persisted data classification 'unexpected_classification'",
+            unknownClassification.Message,
+            StringComparison.Ordinal);
+    }
+
     private static async ValueTask ApplySchemaAsync(PostgreSqlIntegrationTestDatabase database)
     {
         var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         await manager.ApplyAsync();
+    }
+
+    private static async ValueTask DropWorkConstraintAsync(NpgsqlDataSource dataSource, string constraintName)
+    {
+        await using var command = dataSource.CreateCommand(
+            $"ALTER TABLE appsurface_durable.work DROP CONSTRAINT {constraintName};");
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async ValueTask UpdatePersistedWorkColumnAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableWorkId work,
+        string column,
+        string value)
+    {
+        Assert.True(
+            column is "state" or "provider_safety" or "result_classification",
+            $"Unexpected persisted Work column '{column}'.");
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await SetTestScopeAsync(connection, transaction, scope);
+        await using var command = new NpgsqlCommand(
+            $"UPDATE appsurface_durable.work SET {column} = @value WHERE scope_id = @scope_id AND work_id = @work_id;",
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("value", value);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("work_id", work.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        await transaction.CommitAsync();
     }
 
     private static async ValueTask UpdatePersistedStateAsync(

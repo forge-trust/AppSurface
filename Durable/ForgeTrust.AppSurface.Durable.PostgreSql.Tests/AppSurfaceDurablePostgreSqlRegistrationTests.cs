@@ -133,6 +133,7 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
         Assert.Equal(DurableRuntimeSurface.Flow, scheduler.Next(DurableRuntimeSurface.Flow | DurableRuntimeSurface.Schedule));
         Assert.Equal(DurableRuntimeSurface.Schedule, scheduler.Next(DurableRuntimeSurface.Flow | DurableRuntimeSurface.Schedule));
         Assert.Throws<ArgumentOutOfRangeException>(() => scheduler.Next(DurableRuntimeSurface.None));
+        Assert.Throws<ArgumentOutOfRangeException>(() => scheduler.Next((DurableRuntimeSurface)8));
     }
 
     [Fact]
@@ -167,14 +168,49 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
     }
 
     [Fact]
-    public async Task HostedStart_RejectsAPassBudgetThatCannotLeaveTheShutdownReserve()
+    public async Task HostedWait_CancelsTheLosingWakeWaitWhenThePollDelayWins()
+    {
+        var wakeSignals = new CancellationObservingChannelReader();
+
+        await PostgreSqlDurableHostedService.WaitForWakeOrPollAsync(
+            wakeSignals,
+            TimeSpan.Zero,
+            static (_, _) => Task.CompletedTask,
+            CancellationToken.None);
+
+        await wakeSignals.Canceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public void OptionsValidation_RejectsBoundsAndIdentityEdges()
+    {
+        Assert.Throws<ArgumentException>(() => new AppSurfaceDurablePostgreSqlOptions { WorkerId = " " }.SnapshotAndValidate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AppSurfaceDurablePostgreSqlOptions { MaximumItemsPerPass = 0 }.SnapshotAndValidate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AppSurfaceDurablePostgreSqlOptions { TimeBudgetPerPass = TimeSpan.Zero }.SnapshotAndValidate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AppSurfaceDurablePostgreSqlOptions { HostedSurfaces = (DurableRuntimeSurface)8 }.SnapshotAndValidate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AppSurfaceDurablePostgreSqlOptions { IdlePollingInterval = TimeSpan.Zero }.SnapshotAndValidate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AppSurfaceDurablePostgreSqlOptions { TransientFailureDelay = TimeSpan.FromMinutes(5).Add(TimeSpan.FromTicks(1)) }.SnapshotAndValidate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AppSurfaceDurablePostgreSqlOptions
+        {
+            IdlePollingInterval = TimeSpan.FromMilliseconds(100),
+            HeartbeatStaleAfter = TimeSpan.FromMilliseconds(500),
+        }.SnapshotAndValidate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AppSurfaceDurablePostgreSqlOptions { ShutdownReserve = TimeSpan.FromMinutes(5).Add(TimeSpan.FromTicks(1)) }.SnapshotAndValidate());
+    }
+
+    [Theory]
+    [InlineData(10, 5)]
+    [InlineData(10, 10)]
+    public async Task HostedStart_RejectsAPassBudgetThatCannotLeaveTheShutdownReserve(
+        int shutdownTimeoutSeconds,
+        int shutdownReserveSeconds)
     {
         using var dispatcher = CreateDataSource();
         using var runtime = CreateDataSource();
         using var host = new HostBuilder()
             .ConfigureServices(services =>
             {
-                services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(10));
+                services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(shutdownTimeoutSeconds));
                 services.AddAppSurfaceDurablePostgreSql(
                         dispatcher,
                         runtime,
@@ -183,7 +219,7 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
                         options =>
                         {
                             options.TimeBudgetPerPass = TimeSpan.FromSeconds(10);
-                            options.ShutdownReserve = TimeSpan.FromSeconds(5);
+                            options.ShutdownReserve = TimeSpan.FromSeconds(shutdownReserveSeconds);
                             options.SendWakeNotifications = false;
                         })
                     .AddWorkerHost();
@@ -393,6 +429,41 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
     }
 
     [Fact]
+    public async Task HostedLifecycle_RetriesTransientNpgsqlPumpFailureBeforeReturningToAuthoritativePolling()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = CreateDataSource();
+        var options = new AppSurfaceDurablePostgreSqlOptions
+        {
+            WorkerId = "hosted-npgsql-transient-worker",
+            SendWakeNotifications = false,
+            IdlePollingInterval = TimeSpan.FromMinutes(5),
+            HeartbeatStaleAfter = TimeSpan.FromMinutes(6),
+            TransientFailureDelay = TimeSpan.FromMilliseconds(1),
+        }.SnapshotAndValidate();
+        var pump = new TransientNpgsqlThenSignalingPump();
+        using var hosted = new PostgreSqlDurableHostedService(
+            new NoOpSchemaManager(),
+            pump,
+            new RecordingDrainControl(),
+            new PostgreSqlDurableRuntimeRegistration(
+                dispatcher,
+                runtime,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                new PostgreSqlDurableScheduleOptions("durable_runtime"),
+                options,
+                Guid.NewGuid()),
+            new DurableRuntimeAdmissionGate(),
+            new TestHostApplicationLifetime(),
+            Options.Create(new HostOptions()),
+            NullLogger<PostgreSqlDurableHostedService>.Instance);
+
+        await hosted.StartAsync(CancellationToken.None);
+        await pump.RetryCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await hosted.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
     public async Task HostedLifecycle_StopsBeforeResumingWhenApplicationShutdownHasAlreadyBegun()
     {
         using var dispatcher = CreateDataSource();
@@ -534,6 +605,32 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
             ValueTask.FromResult(new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
     }
 
+    private sealed class CancellationObservingChannelReader : ChannelReader<bool>
+    {
+        private readonly TaskCompletionSource<bool> _wait = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal TaskCompletionSource Canceled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override bool TryRead(out bool item)
+        {
+            item = false;
+            return false;
+        }
+
+        public override ValueTask<bool> WaitToReadAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.Register(
+                static state =>
+                {
+                    var reader = (CancellationObservingChannelReader)state!;
+                    reader.Canceled.TrySetResult();
+                    reader._wait.TrySetCanceled();
+                },
+                this);
+            return new ValueTask<bool>(_wait.Task);
+        }
+    }
+
     private sealed class SignalingPump(TaskCompletionSource invoked) : IDurableRuntimePump
     {
         public ValueTask<DurableRuntimePumpResult> RunOnceAsync(
@@ -583,6 +680,27 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
             if (Interlocked.Increment(ref _calls) == 1)
             {
                 return ValueTask.FromException<DurableRuntimePumpResult>(new TimeoutException("Simulated transient store timeout."));
+            }
+
+            RetryCompleted.TrySetResult();
+            return ValueTask.FromResult(new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
+        }
+    }
+
+    private sealed class TransientNpgsqlThenSignalingPump : IDurableRuntimePump
+    {
+        private int _calls;
+
+        internal TaskCompletionSource RetryCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask<DurableRuntimePumpResult> RunOnceAsync(
+            DurableRuntimePumpRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _calls) == 1)
+            {
+                return ValueTask.FromException<DurableRuntimePumpResult>(
+                    new NpgsqlException("Simulated transient store failure.", new TimeoutException()));
             }
 
             RetryCompleted.TrySetResult();
