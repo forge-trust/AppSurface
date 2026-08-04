@@ -821,6 +821,10 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Equal(
             OperatingSystem.IsMacOS(),
             ReleaseInspectCommand.IsMacOsTemporaryDirectory(new DirectoryInfo("/var")));
+        Assert.True(ReleaseInspectCommand.IsMacOsTemporaryDirectory(new DirectoryInfo("/tmp"), isMacOs: true));
+        Assert.True(ReleaseInspectCommand.IsMacOsTemporaryDirectory(new DirectoryInfo("/var"), isMacOs: true));
+        Assert.False(ReleaseInspectCommand.IsMacOsTemporaryDirectory(new DirectoryInfo("/tagged-release-link"), isMacOs: true));
+        Assert.False(ReleaseInspectCommand.IsMacOsTemporaryDirectory(new DirectoryInfo("/tmp"), isMacOs: false));
         Assert.False(ReleaseInspectCommand.IsMacOsTemporaryDirectory(new DirectoryInfo("/tagged-release-link")));
     }
 

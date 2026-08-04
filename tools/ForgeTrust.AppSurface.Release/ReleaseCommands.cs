@@ -334,10 +334,11 @@ internal sealed partial class ReleaseInspectCommand : ReleaseCommandBase, IComma
     /// Gets whether a parent directory is a macOS system temporary-directory alias that is permitted to be a reparse point.
     /// </summary>
     /// <param name="directory">Directory currently being checked while resolving an inspect output path.</param>
+    /// <param name="isMacOs">Optional platform value used by focused tests. When omitted, detects the current operating system.</param>
     /// <returns><c>true</c> only for the macOS <c>/tmp</c> and <c>/var</c> aliases that anchor the system temporary directory.</returns>
-    internal static bool IsMacOsTemporaryDirectory(DirectoryInfo directory)
+    internal static bool IsMacOsTemporaryDirectory(DirectoryInfo directory, bool? isMacOs = null)
     {
-        return OperatingSystem.IsMacOS()
+        return (isMacOs ?? OperatingSystem.IsMacOS())
             && (string.Equals(directory.FullName, "/tmp", StringComparison.Ordinal)
                 || string.Equals(directory.FullName, "/var", StringComparison.Ordinal));
     }
