@@ -625,6 +625,53 @@ public sealed class CoverageGateTests
         Assert.Contains("Patch line mode: codecov", File.ReadAllText(result.MarkdownReportPath), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task EvaluateAsync_CodecovMode_FailsThePatchThresholdForPartialConditionCoverage()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="2">
+              <packages>
+                <package name="Example">
+                  <classes>
+                    <class name="Example.Foo" filename="src/Foo.cs">
+                      <lines>
+                        <line number="1" hits="1" branch="true" condition-coverage="50% (1/2)" />
+                      </lines>
+                    </class>
+                  </classes>
+                </package>
+              </packages>
+            </coverage>
+            """);
+        var request = new CoverageGateRequest(
+            coverage,
+            temp.Path,
+            0,
+            0,
+            false,
+            null,
+            new CoveragePatchRequest(
+                temp.Path,
+                "origin/main",
+                1,
+                _ => Task.FromResult("""
+                    diff --git a/src/Foo.cs b/src/Foo.cs
+                    index 0000000..1111111 100644
+                    --- a/src/Foo.cs
+                    +++ b/src/Foo.cs
+                    @@ -0,0 +1,1 @@
+                    +partial
+                    """),
+                LineMode: PatchLineMode.Codecov));
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+
+        Assert.False(result.Passed);
+        Assert.Equal(0, result.PatchLineCoverage?.CoveredLines);
+        Assert.Equal(0, result.PatchLineCoverage?.Percent);
+    }
+
     [Theory]
     [InlineData("measurable")]
     [InlineData("codecov")]
