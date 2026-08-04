@@ -120,6 +120,67 @@
     color-scheme: dark;
 }
 
+/*
+ * Docs predates the shared theme pair and still has a small number of Tailwind slate utilities in its Razor views.
+ * Preserve those views while a host opts into browser-local light/system preferences by mapping Tailwind's neutral
+ * palette back to the Docs semantic tokens. Dark and legacy fixed-dark hosts keep Tailwind's original palette.
+ */
+html[data-as-theme-mode="light"] {
+    --color-slate-50: var(--docs-color-text-strong);
+    --color-slate-100: var(--docs-color-text-strong);
+    --color-slate-200: var(--docs-color-text-default);
+    --color-slate-300: var(--docs-color-text-muted);
+    --color-slate-400: var(--docs-color-text-subtle);
+    --color-slate-500: var(--docs-color-text-faint);
+    --color-slate-600: var(--docs-color-border-strong);
+    --color-slate-700: var(--docs-color-border-default);
+    --color-slate-800: var(--docs-color-border-muted);
+    --color-slate-900: var(--docs-color-surface-raised);
+    --color-slate-950: var(--docs-color-surface-canvas);
+}
+
+html[data-as-theme-mode="light"] .text-white {
+    color: var(--docs-color-text-strong);
+}
+
+html[data-as-theme-mode="light"] [class~="border-white/10"] {
+    border-color: var(--docs-color-border-muted);
+}
+
+html[data-as-theme-mode="light"] .docs-token-bg-accent.text-slate-950,
+html[data-as-theme-mode="light"] .docs-token-bg-accent-strong.text-white {
+    color: var(--color-white);
+}
+
+@media (prefers-color-scheme: light) {
+    html[data-as-theme-mode="system"] {
+        --color-slate-50: var(--docs-color-text-strong);
+        --color-slate-100: var(--docs-color-text-strong);
+        --color-slate-200: var(--docs-color-text-default);
+        --color-slate-300: var(--docs-color-text-muted);
+        --color-slate-400: var(--docs-color-text-subtle);
+        --color-slate-500: var(--docs-color-text-faint);
+        --color-slate-600: var(--docs-color-border-strong);
+        --color-slate-700: var(--docs-color-border-default);
+        --color-slate-800: var(--docs-color-border-muted);
+        --color-slate-900: var(--docs-color-surface-raised);
+        --color-slate-950: var(--docs-color-surface-canvas);
+    }
+
+    html[data-as-theme-mode="system"] .text-white {
+        color: var(--docs-color-text-strong);
+    }
+
+    html[data-as-theme-mode="system"] [class~="border-white/10"] {
+        border-color: var(--docs-color-border-muted);
+    }
+
+    html[data-as-theme-mode="system"] .docs-token-bg-accent.text-slate-950,
+    html[data-as-theme-mode="system"] .docs-token-bg-accent-strong.text-white {
+        color: var(--color-white);
+    }
+}
+
 .docs-shell-root {
     background: var(--docs-color-surface-canvas);
     border-color: var(--docs-color-border-muted);

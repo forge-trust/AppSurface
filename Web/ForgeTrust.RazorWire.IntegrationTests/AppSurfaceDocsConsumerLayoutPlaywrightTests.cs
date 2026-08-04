@@ -188,6 +188,17 @@ public sealed class AppSurfaceDocsConsumerLayoutPlaywrightTests
             "#f8fafc",
             await page.EvaluateAsync<string>("() => getComputedStyle(document.documentElement).getPropertyValue('--as-canvas').trim()"));
 
+        await page.GotoAsync($"{appHost.BaseUrl}/docs/start-here/appsurface-evaluator");
+        await page.WaitForSelectorAsync(".docs-detail-title", new PageWaitForSelectorOptions { Timeout = 30_000 });
+        Assert.Equal(
+            "rgb(15, 23, 42)",
+            await page.EvaluateAsync<string>("() => getComputedStyle(document.querySelector('.docs-detail-title')).color"));
+
+        await page.GotoAsync($"{appHost.BaseUrl}/docs/search");
+        await page.WaitForFunctionAsync(
+            "() => document.documentElement.dataset.asThemeMode === 'system' && document.querySelector('[data-as-theme-preference-control]')?.hidden === false",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
         await page.Locator("[data-as-theme-preference-control] input[value='dark']").ClickAsync();
         await page.WaitForFunctionAsync(
             "() => document.documentElement.dataset.asThemeMode === 'dark'",

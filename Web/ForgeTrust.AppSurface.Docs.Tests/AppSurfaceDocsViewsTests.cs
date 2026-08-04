@@ -696,6 +696,12 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains(".docs-token-hover-border-accent:hover", tailwindEntryStylesheet);
         Assert.Contains(".docs-token-hover-bg-panel:hover", tailwindEntryStylesheet);
         Assert.Contains(".docs-token-group-hover-text-accent-soft", tailwindEntryStylesheet);
+        Assert.Contains("html[data-as-theme-mode=\"light\"] {", tailwindEntryStylesheet);
+        Assert.Contains("@media (prefers-color-scheme: light)", tailwindEntryStylesheet);
+        Assert.Contains("html[data-as-theme-mode=\"system\"] {", tailwindEntryStylesheet);
+        Assert.Contains("--color-slate-50: var(--docs-color-text-strong);", tailwindEntryStylesheet);
+        Assert.Contains("--color-slate-950: var(--docs-color-surface-canvas);", tailwindEntryStylesheet);
+        Assert.Contains(".docs-token-bg-accent-strong.text-white", tailwindEntryStylesheet);
         Assert.Contains(".docs-content--markdown a:visited", tailwindEntryStylesheet);
         Assert.Contains("color: var(--docs-color-link-visited);", tailwindEntryStylesheet);
         Assert.True(
