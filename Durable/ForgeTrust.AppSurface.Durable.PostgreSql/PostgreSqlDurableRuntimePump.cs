@@ -391,10 +391,8 @@ internal sealed class PostgreSqlDurableRuntimePump : IDurableRuntimePump
                 DurableWorkState.Succeeded or DurableWorkState.SucceededAfterCancelRequested:
                 counts.Processed++;
                 return TurnOutcome.Committed;
-            case PostgreSqlWorkObservationOutcome.Applied when result.State == DurableWorkState.Suspended:
-                counts.Failed++;
-                return TurnOutcome.Committed;
             case PostgreSqlWorkObservationOutcome.Applied:
+                // Any applied non-success state, including canceled-before-effect and suspension, is committed but not processed.
                 counts.Failed++;
                 return TurnOutcome.Committed;
             case PostgreSqlWorkObservationOutcome.AlreadyTerminal:
