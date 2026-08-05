@@ -131,7 +131,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
         });
         command.Parameters.Add(new NpgsqlParameter("work_id", NpgsqlDbType.Text)
         {
-            Value = workId?.Value ?? (object)DBNull.Value,
+            Value = workId is { } durableWorkId ? durableWorkId.Value : DBNull.Value,
         });
         var expectedPointers = 2
             + (commandId is null ? 0 : 1)
