@@ -7,7 +7,12 @@ using static ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableProtocolC
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 
-internal sealed class PostgreSqlDurableWorkStore
+/// <summary>Provides PostgreSQL persistence operations for the durable Work protocol.</summary>
+/// <remarks>
+/// This internal class supports controlled derived test seams. Overrides must preserve claim identity, runtime epoch
+/// and scope-generation fences, lease ownership, dispatch projection, Work history, and transaction guarantees.
+/// </remarks>
+internal class PostgreSqlDurableWorkStore
 {
     private static readonly Uri WorkDocumentation = new("https://appsurface.dev/docs/durable/work");
     private static readonly Uri ScopeDocumentation = new("https://appsurface.dev/docs/durable/scopes");
@@ -676,7 +681,18 @@ internal sealed class PostgreSqlDurableWorkStore
         return new PostgreSqlWorkClaimTransition(ParseWorkState(reader.GetString(0)), reader.GetString(1));
     }
 
-    internal async ValueTask<PostgreSqlDurableWorkClaim?> RenewLeaseAsync(
+    /// <summary>Renews the active lease held by a fenced Work claim.</summary>
+    /// <param name="claim">Claim that identifies the active runtime epoch, scope, Work attempt, and lease owner.</param>
+    /// <param name="cancellationToken">Token that cancels database operations.</param>
+    /// <returns>
+    /// The renewed claim with its current revision, expiry, and cancellation state, or <see langword="null"/> when
+    /// an epoch, scope, attempt, owner, or lease fence is stale.
+    /// </returns>
+    /// <remarks>
+    /// Overrides must preserve the current-epoch and active-scope checks, lease and dispatch consistency, durable
+    /// history semantics, and transactional atomicity of the renewal attempt.
+    /// </remarks>
+    internal virtual async ValueTask<PostgreSqlDurableWorkClaim?> RenewLeaseAsync(
         PostgreSqlDurableWorkClaim claim,
         CancellationToken cancellationToken = default)
     {

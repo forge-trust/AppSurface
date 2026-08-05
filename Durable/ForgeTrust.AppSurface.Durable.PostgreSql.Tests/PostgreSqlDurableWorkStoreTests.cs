@@ -1,4 +1,5 @@
 using System.Text;
+using ForgeTrust.AppSurface.Durable.Provider;
 using Npgsql;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
@@ -376,7 +377,7 @@ public sealed class PostgreSqlDurableWorkStoreTests
             (
                 Mutation: """
                     UPDATE appsurface_durable.store_metadata
-                    SET schema_version = 5,
+                    SET schema_version = 6,
                         minimum_reader_version = 1,
                         maximum_reader_version = 1,
                         minimum_writer_version = 1,
@@ -396,11 +397,11 @@ public sealed class PostgreSqlDurableWorkStoreTests
                 await using var restore = database.DataSource.CreateCommand(
                     """
                     UPDATE appsurface_durable.store_metadata
-                    SET schema_version = 3,
+                    SET schema_version = 6,
                         minimum_reader_version = 1,
-                        maximum_reader_version = 3,
+                        maximum_reader_version = 6,
                         minimum_writer_version = 1,
-                        maximum_writer_version = 3
+                        maximum_writer_version = 6
                     WHERE singleton;
                     """);
                 await restore.ExecuteNonQueryAsync();
@@ -1957,10 +1958,542 @@ public sealed class PostgreSqlDurableWorkStoreTests
         Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, denied.SqlState);
     }
 
+    [Fact]
+    public async Task ControlClient_ConstructorRejectsMissingDependencies()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        var workOptions = CreateOptions(database.DataSource, epoch);
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
+        var registration = new PostgreSqlDurableRuntimeRegistration(
+            database.DataSource,
+            database.DataSource,
+            workOptions,
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            new AppSurfaceDurablePostgreSqlOptions { WorkerId = "control-constructor-worker" }.SnapshotAndValidate(),
+            Guid.NewGuid());
+
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableControlClient(null!, schema, store));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableControlClient(registration, null!, store));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableControlClient(registration, schema, null!));
+    }
+
+    [Fact]
+    public async Task ControlClient_ListsReadsCancelsAndDisablesThroughAuthoritativeOutcomes()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        var workOptions = CreateOptions(database.DataSource, epoch);
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
+        var control = CreateControlClient(database.DataSource, workOptions, schema, store, "control-outcomes-worker");
+        var client = CreateClient(database.DataSource, epoch);
+        var scope = new DurableScopeId("control-outcomes-scope");
+        var first = await client.EnqueueAsync(CreateRequest(scope.Value, "control-outcomes-first"));
+        var second = await client.EnqueueAsync(CreateRequest(scope.Value, "control-outcomes-second"));
+        var providerKeyed = await client.EnqueueAsync(CreateRequest(
+            scope.Value,
+            "control-outcomes-provider-keyed",
+            DurableProviderSafety.ProviderKeyed));
+        var reconcile = await client.EnqueueAsync(CreateRequest(
+            scope.Value,
+            "control-outcomes-reconcile",
+            DurableProviderSafety.ReconcileBeforeRetry));
+        var manual = await client.EnqueueAsync(CreateRequest(
+            scope.Value,
+            "control-outcomes-manual",
+            DurableProviderSafety.ManualResolution));
+        Assert.True(first.IsSuccess);
+        Assert.True(second.IsSuccess);
+        Assert.True(providerKeyed.IsSuccess);
+        Assert.True(reconcile.IsSuccess);
+        Assert.True(manual.IsSuccess);
+
+        var firstPage = await control.ListAsync(new DurableWorkListRequest(scope, pageSize: 1));
+        Assert.True(firstPage.IsSuccess);
+        Assert.Single(firstPage.Value!.Items);
+        Assert.NotNull(firstPage.Value.ContinuationToken);
+        var secondPage = await control.ListAsync(new DurableWorkListRequest(
+            scope,
+            pageSize: 1,
+            continuationToken: firstPage.Value.ContinuationToken));
+        Assert.True(secondPage.IsSuccess);
+        Assert.Single(secondPage.Value!.Items);
+
+        var all = await control.ListAsync(new DurableWorkListRequest(scope, pageSize: 10));
+        Assert.True(all.IsSuccess);
+        Assert.Equal(
+            [
+                DurableProviderSafety.Idempotent,
+                DurableProviderSafety.ProviderKeyed,
+                DurableProviderSafety.ReconcileBeforeRetry,
+                DurableProviderSafety.ManualResolution,
+            ],
+            all.Value!.Items.Select(item => item.ProviderSafety).Distinct().Order());
+        foreach (var state in Enum.GetValues<DurableWorkState>().Except(
+                     [DurableWorkState.Accepted, DurableWorkState.CancelRequested]))
+        {
+            var filtered = await control.ListAsync(new DurableWorkListRequest(scope, state, pageSize: 10));
+            Assert.True(filtered.IsSuccess);
+        }
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await control.ListAsync(new DurableWorkListRequest(scope, DurableWorkState.Accepted, pageSize: 10)));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await control.ListAsync(new DurableWorkListRequest(scope, DurableWorkState.CancelRequested, pageSize: 10)));
+
+        var snapshot = await control.GetAsync(new DurableWorkGetRequest(scope, first.Value!.WorkId));
+        Assert.True(snapshot.IsSuccess);
+        Assert.Equal("request-control-outcomes-first", snapshot.Value!.ProviderKey);
+        Assert.Null(snapshot.Value.Result);
+        var missingSnapshot = await control.GetAsync(new DurableWorkGetRequest(scope, new DurableWorkId("control-missing-work")));
+        Assert.False(missingSnapshot.IsSuccess);
+        Assert.Equal(DurableProblemCodes.WorkNotFound, missingSnapshot.Problem!.Code);
+
+        var revisionConflict = await control.CancelAsync(new DurableWorkCancelRequest(
+            scope,
+            first.Value.WorkId,
+            "control-operator",
+            "stale",
+            snapshot.Value.Revision + 1));
+        Assert.False(revisionConflict.IsSuccess);
+        Assert.Equal(DurableProblemCodes.WorkRevisionConflict, revisionConflict.Problem!.Code);
+
+        var canceled = await control.CancelAsync(new DurableWorkCancelRequest(
+            scope,
+            first.Value.WorkId,
+            "control-operator",
+            "requested",
+            snapshot.Value.Revision));
+        Assert.True(canceled.IsSuccess);
+        Assert.Equal(DurableWorkCancelOutcome.Applied, canceled.Value!.Outcome);
+        var alreadyTerminal = await control.CancelAsync(new DurableWorkCancelRequest(
+            scope,
+            first.Value.WorkId,
+            "control-operator",
+            "duplicate",
+            canceled.Value.Revision));
+        Assert.True(alreadyTerminal.IsSuccess);
+        Assert.Equal(DurableWorkCancelOutcome.AlreadyTerminal, alreadyTerminal.Value!.Outcome);
+        var missingCancellation = await control.CancelAsync(new DurableWorkCancelRequest(
+            scope,
+            new DurableWorkId("control-missing-work"),
+            "control-operator",
+            "requested",
+            expectedRevision: 1));
+        Assert.False(missingCancellation.IsSuccess);
+        Assert.Equal(DurableProblemCodes.WorkNotFound, missingCancellation.Problem!.Code);
+
+        var staleEpoch = Guid.NewGuid();
+        await SetRecoveryListingEpochAsync(
+            database.DataSource,
+            scope,
+            providerKeyed.Value!.WorkId,
+            staleEpoch,
+            terminal: false);
+        await SetRecoveryListingEpochAsync(
+            database.DataSource,
+            scope,
+            reconcile.Value!.WorkId,
+            staleEpoch,
+            terminal: true);
+        var recoveryOnly = await control.ListAsync(new DurableWorkListRequest(
+            scope,
+            requiresRecoveryReleaseOnly: true,
+            pageSize: 10));
+        Assert.True(recoveryOnly.IsSuccess);
+        var recoveryItem = Assert.Single(recoveryOnly.Value!.Items);
+        Assert.Equal(providerKeyed.Value.WorkId, recoveryItem.WorkId);
+        Assert.True(recoveryItem.RequiresRecoveryRelease);
+        var emptyRecoveryOnly = await control.ListAsync(new DurableWorkListRequest(
+            new DurableScopeId("control-empty-recovery-scope"),
+            requiresRecoveryReleaseOnly: true,
+            pageSize: 10));
+        Assert.True(emptyRecoveryOnly.IsSuccess);
+        Assert.Empty(emptyRecoveryOnly.Value!.Items);
+
+        var generationConflict = await control.DisableAsync(new DurableScopeDisableRequest(
+            scope,
+            "control-operator",
+            "stale",
+            expectedGeneration: 2));
+        Assert.False(generationConflict.IsSuccess);
+        Assert.Equal(DurableProblemCodes.ScopeGenerationConflict, generationConflict.Problem!.Code);
+
+        var disabled = await control.DisableAsync(new DurableScopeDisableRequest(
+            scope,
+            "control-operator",
+            "closed",
+            expectedGeneration: 1));
+        Assert.True(disabled.IsSuccess);
+        Assert.Equal(DurableScopeDisableOutcome.Applied, disabled.Value!.Outcome);
+        var alreadyDisabled = await control.DisableAsync(new DurableScopeDisableRequest(
+            scope,
+            "control-operator",
+            "duplicate",
+            disabled.Value.Generation));
+        Assert.True(alreadyDisabled.IsSuccess);
+        Assert.Equal(DurableScopeDisableOutcome.AlreadyDisabled, alreadyDisabled.Value!.Outcome);
+        var missingScope = await control.DisableAsync(new DurableScopeDisableRequest(
+            new DurableScopeId("control-missing-scope"),
+            "control-operator",
+            "closed",
+            expectedGeneration: 1));
+        Assert.False(missingScope.IsSuccess);
+        Assert.Equal(DurableProblemCodes.ScopeNotFound, missingScope.Problem!.Code);
+    }
+
+    [Fact]
+    public async Task ControlClient_ReturnsVerifiedResultsAndFailsClosedForHashCorruption()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        var workOptions = CreateOptions(database.DataSource, epoch);
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
+        var control = CreateControlClient(database.DataSource, workOptions, schema, store, "control-result-worker");
+        var client = CreateClient(database.DataSource, epoch);
+        var request = CreateRequest("control-result-scope", "control-result-command");
+        var accepted = await client.EnqueueAsync(request);
+        Assert.True(accepted.IsSuccess);
+
+        var claim = await store.TryClaimAsync(Assert.Single(await store.DiscoverAsync(1)), "control-result-worker");
+        Assert.NotNull(claim);
+        var permit = await store.TryAcquireEffectPermitAsync(claim!);
+        Assert.NotNull(permit);
+        var result = new DurableEncodedPayload(
+            "tests.control-result",
+            "v1",
+            DurableDataClassification.ApprovedApplication,
+            Encoding.UTF8.GetBytes("result"));
+        await store.RecordCompletionAsync(
+            permit!.Claim,
+            new PostgreSqlWorkCompletion(PostgreSqlWorkCompletionKind.Succeeded, "completed", "{}", result));
+
+        var verified = await control.GetAsync(new DurableWorkGetRequest(request.ScopeId, accepted.Value!.WorkId));
+        Assert.True(verified.IsSuccess);
+        Assert.Equal(result.Sha256, verified.Value!.Result!.Sha256);
+
+        await ExecuteScopedNonQueryAsync(
+            database.DataSource,
+            request.ScopeId,
+            "UPDATE appsurface_durable.work SET result_sha256 = decode(repeat('00', 32), 'hex');");
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await control.GetAsync(new DurableWorkGetRequest(request.ScopeId, accepted.Value.WorkId)));
+    }
+
+    [Fact]
+    public async Task ControlClient_ReturnsOperationalResultClassificationThroughPublicSnapshot()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        var workOptions = CreateOptions(database.DataSource, epoch);
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
+        var control = CreateControlClient(database.DataSource, workOptions, schema, store, "control-operational-result-worker");
+        var client = CreateClient(database.DataSource, epoch);
+        var request = CreateRequest("control-operational-result-scope", "control-operational-result-command");
+        var accepted = await client.EnqueueAsync(request);
+        Assert.True(accepted.IsSuccess);
+
+        var claim = await store.TryClaimAsync(Assert.Single(await store.DiscoverAsync(1)), "control-operational-result-worker");
+        Assert.NotNull(claim);
+        var permit = await store.TryAcquireEffectPermitAsync(claim!);
+        Assert.NotNull(permit);
+        var result = new DurableEncodedPayload(
+            "tests.control-operational-result",
+            "v1",
+            DurableDataClassification.Operational,
+            Encoding.UTF8.GetBytes("operational-result"));
+        await store.RecordCompletionAsync(
+            permit!.Claim,
+            new PostgreSqlWorkCompletion(PostgreSqlWorkCompletionKind.Succeeded, "completed", "{}", result));
+
+        var snapshot = await control.GetAsync(new DurableWorkGetRequest(request.ScopeId, accepted.Value!.WorkId));
+
+        Assert.True(snapshot.IsSuccess);
+        Assert.Equal(DurableDataClassification.Operational, snapshot.Value!.Result!.Classification);
+        Assert.Equal(result.Sha256, snapshot.Value.Result.Sha256);
+    }
+
+    [Fact]
+    public async Task ControlClient_ListSurfacesTheServerShutdownThatAlsoBreaksRollback()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        var workOptions = CreateOptions(database.DataSource, epoch);
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        var applicationName = $"control-list-loss-{Guid.NewGuid():N}";
+        var controlDataSourceBuilder = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            ApplicationName = applicationName,
+        };
+        await using var controlDataSource = NpgsqlDataSource.Create(controlDataSourceBuilder.ConnectionString);
+        var store = new PostgreSqlDurableWorkStore(controlDataSource, epoch);
+        var control = CreateControlClient(
+            controlDataSource,
+            workOptions,
+            schema,
+            store,
+            "control-list-loss-worker");
+
+        await using var blockerConnection = await database.DataSource.OpenConnectionAsync();
+        await using var blockerTransaction = await blockerConnection.BeginTransactionAsync();
+        await using (var lockCommand = new NpgsqlCommand(
+            "LOCK TABLE appsurface_durable.work IN ACCESS EXCLUSIVE MODE;",
+            blockerConnection,
+            blockerTransaction))
+        {
+            await lockCommand.ExecuteNonQueryAsync();
+        }
+
+        var listing = control.ListAsync(
+                new DurableWorkListRequest(new DurableScopeId("control-list-loss-scope"), pageSize: 1))
+            .AsTask();
+        var backendPid = await WaitForBackendAsync(database.DataSource, applicationName, "relation");
+        await using (var terminate = database.DataSource.CreateCommand("SELECT pg_terminate_backend(@pid);"))
+        {
+            terminate.Parameters.AddWithValue("pid", backendPid);
+            Assert.True((bool)(await terminate.ExecuteScalarAsync())!);
+        }
+
+        var failure = await Assert.ThrowsAsync<PostgresException>(async () => await listing);
+        Assert.Equal("57P01", failure.SqlState);
+        await blockerTransaction.RollbackAsync();
+    }
+
+    [Fact]
+    public async Task ControlClient_ListProjectsAuthoritativeInventoryFields()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        var workOptions = CreateOptions(database.DataSource, epoch);
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
+        var control = CreateControlClient(database.DataSource, workOptions, schema, store, "control-list-projection-worker");
+        var client = CreateClient(database.DataSource, epoch);
+        var scope = new DurableScopeId("control-list-projection-scope");
+        var request = CreateRequest(scope.Value, "control-list-projection-command", DurableProviderSafety.ProviderKeyed);
+        var accepted = await client.EnqueueAsync(request);
+        Assert.True(accepted.IsSuccess);
+
+        await ExecuteScopedNonQueryAsync(
+            database.DataSource,
+            scope,
+            """
+            UPDATE appsurface_durable.work
+            SET state = 'cancel_pending',
+                attempt_number = 3,
+                revision = 7,
+                terminal_code = 'cancel-requested',
+                cancellation_requested_at = now(),
+                runtime_epoch = '00000000-0000-0000-0000-000000000001'
+            WHERE work_id = @work_id;
+            """,
+            ("work_id", accepted.Value!.WorkId.Value));
+
+        var listed = await control.ListAsync(new DurableWorkListRequest(scope, pageSize: 10));
+
+        var item = Assert.Single(listed.Value!.Items);
+        Assert.Equal(accepted.Value.WorkId, item.WorkId);
+        Assert.Equal(accepted.Value.WorkId.Value, item.ActivityId);
+        Assert.Equal(request.WorkName, item.WorkName);
+        Assert.Equal(request.WorkVersion, item.WorkVersion);
+        Assert.Equal(DurableWorkState.CancelPending, item.State);
+        Assert.Equal(DurableProviderSafety.ProviderKeyed, item.ProviderSafety);
+        Assert.Equal(3, item.AttemptNumber);
+        Assert.Equal(7, item.Revision);
+        Assert.NotEqual(default, item.DueAtUtc);
+        Assert.Equal("cancel-requested", item.TerminalCode);
+        Assert.True(item.CancellationRequested);
+        Assert.True(item.RequiresRecoveryRelease);
+    }
+
+    [Fact]
+    public async Task ControlClient_MapsEveryPersistedWorkStateToItsPublicInventoryProjection()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        var workOptions = CreateOptions(database.DataSource, epoch);
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
+        var control = CreateControlClient(database.DataSource, workOptions, schema, store, "control-state-worker");
+        var client = CreateClient(database.DataSource, epoch);
+        var scope = new DurableScopeId("control-state-scope");
+        var persisted = new[]
+        {
+            "pending", "retry_wait", "leased", "effect_permitted", "reconciling", "cancel_pending", "succeeded",
+            "succeeded_after_cancel_requested", "failed", "canceled_before_effect", "suspended_ambiguous_external_outcome",
+            "suspended_reconciliation_required", "suspended_manual_resolution", "suspended_contract_unavailable",
+        };
+        foreach (var state in persisted)
+        {
+            var accepted = await client.EnqueueAsync(CreateRequest(scope.Value, $"control-state-{state}"));
+            Assert.True(accepted.IsSuccess);
+            await UpdatePersistedStateAsync(database.DataSource, scope, accepted.Value!.WorkId, state);
+        }
+
+        var listed = await control.ListAsync(new DurableWorkListRequest(scope, pageSize: persisted.Length));
+
+        Assert.True(listed.IsSuccess);
+        Assert.Equal(persisted.Length, listed.Value!.Items.Count);
+        Assert.Equal(
+            [
+                DurableWorkState.Ready,
+                DurableWorkState.Claimed,
+                DurableWorkState.CancelPending,
+                DurableWorkState.Succeeded,
+                DurableWorkState.SucceededAfterCancelRequested,
+                DurableWorkState.FailedTerminal,
+                DurableWorkState.CanceledBeforeEffect,
+                DurableWorkState.Suspended,
+            ],
+            listed.Value.Items.Select(item => item.State).Distinct().Order());
+    }
+
+    [Fact]
+    public async Task ControlClient_FailsClosedForUnknownPersistedWorkStateProviderSafetyAndResultClassification()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await ApplySchemaAsync(database);
+        var epoch = Guid.NewGuid();
+        var workOptions = CreateOptions(database.DataSource, epoch);
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
+        var control = CreateControlClient(database.DataSource, workOptions, schema, store, "control-invalid-persisted-worker");
+        var client = CreateClient(database.DataSource, epoch);
+        var scope = new DurableScopeId("control-invalid-persisted-scope");
+        var stateWork = (await client.EnqueueAsync(CreateRequest(scope.Value, "control-invalid-state"))).Value!;
+        var providerWork = (await client.EnqueueAsync(CreateRequest(scope.Value, "control-invalid-provider"))).Value!;
+        var resultWork = (await client.EnqueueAsync(CreateRequest(scope.Value, "control-invalid-classification"))).Value!;
+
+        await DropWorkConstraintAsync(database.DataSource, "work_state_check");
+        await UpdatePersistedWorkColumnAsync(
+            database.DataSource,
+            scope,
+            stateWork.WorkId,
+            "state",
+            "unexpected_state");
+        var unknownState = await Assert.ThrowsAsync<InvalidDataException>(
+            async () => await control.ListAsync(new DurableWorkListRequest(scope, pageSize: 10)));
+        Assert.Contains("Unknown persisted durable Work state 'unexpected_state'", unknownState.Message, StringComparison.Ordinal);
+
+        await UpdatePersistedWorkColumnAsync(database.DataSource, scope, stateWork.WorkId, "state", "pending");
+        await DropWorkConstraintAsync(database.DataSource, "work_provider_safety_check");
+        await UpdatePersistedWorkColumnAsync(
+            database.DataSource,
+            scope,
+            providerWork.WorkId,
+            "provider_safety",
+            "unexpected_provider_safety");
+        var unknownProviderSafety = await Assert.ThrowsAsync<InvalidDataException>(
+            async () => await control.ListAsync(new DurableWorkListRequest(scope, pageSize: 10)));
+        Assert.Contains(
+            "Unknown persisted provider safety 'unexpected_provider_safety'",
+            unknownProviderSafety.Message,
+            StringComparison.Ordinal);
+
+        var claim = await store.TryClaimAsync(
+            (await store.DiscoverAsync(10)).Single(item => item.WorkId == resultWork.WorkId),
+            "control-invalid-persisted-worker");
+        Assert.NotNull(claim);
+        var permit = await store.TryAcquireEffectPermitAsync(claim!);
+        Assert.NotNull(permit);
+        await store.RecordCompletionAsync(
+            permit!.Claim,
+            new PostgreSqlWorkCompletion(
+                PostgreSqlWorkCompletionKind.Succeeded,
+                "completed",
+                "{}",
+                new DurableEncodedPayload(
+                    "tests.control-invalid-result",
+                    "v1",
+                    DurableDataClassification.ApprovedApplication,
+                    Encoding.UTF8.GetBytes("result"))));
+        await UpdatePersistedWorkColumnAsync(
+            database.DataSource,
+            scope,
+            resultWork.WorkId,
+            "result_classification",
+            "unexpected_classification");
+
+        var unknownClassification = await Assert.ThrowsAsync<InvalidDataException>(
+            async () => await control.GetAsync(new DurableWorkGetRequest(scope, resultWork.WorkId)));
+        Assert.Contains(
+            "Unknown persisted data classification 'unexpected_classification'",
+            unknownClassification.Message,
+            StringComparison.Ordinal);
+    }
+
     private static async ValueTask ApplySchemaAsync(PostgreSqlIntegrationTestDatabase database)
     {
         var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         await manager.ApplyAsync();
+    }
+
+    private static async ValueTask DropWorkConstraintAsync(NpgsqlDataSource dataSource, string constraintName)
+    {
+        await using var command = dataSource.CreateCommand(
+            $"ALTER TABLE appsurface_durable.work DROP CONSTRAINT {constraintName};");
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async ValueTask UpdatePersistedWorkColumnAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableWorkId work,
+        string column,
+        string value)
+    {
+        Assert.True(
+            column is "state" or "provider_safety" or "result_classification",
+            $"Unexpected persisted Work column '{column}'.");
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await SetTestScopeAsync(connection, transaction, scope);
+        await using var command = new NpgsqlCommand(
+            $"UPDATE appsurface_durable.work SET {column} = @value WHERE scope_id = @scope_id AND work_id = @work_id;",
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("value", value);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("work_id", work.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        await transaction.CommitAsync();
+    }
+
+    private static async ValueTask UpdatePersistedStateAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableWorkId work,
+        string state)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using (var scopeCommand = new NpgsqlCommand(
+            "SELECT set_config('appsurface_durable.scope_id', @scope_id, true);",
+            connection,
+            transaction))
+        {
+            scopeCommand.Parameters.AddWithValue("scope_id", scope.Value);
+            await scopeCommand.ExecuteNonQueryAsync();
+        }
+        await using var command = new NpgsqlCommand(
+            "UPDATE appsurface_durable.work SET state = @state WHERE scope_id = @scope_id AND work_id = @work_id;",
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("state", state);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("work_id", work.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        await transaction.CommitAsync();
     }
 
     private static PostgreSqlDurableWorkTransactionWriter CreateWriter(
@@ -1980,6 +2513,23 @@ public sealed class PostgreSqlDurableWorkStoreTests
             dataSource,
             PostgreSqlTestWorkContracts.CreateDeleteProviderAccessRegistry(),
             CreateOptions(dataSource, runtimeEpoch, sendWakeNotification));
+
+    private static PostgreSqlDurableControlClient CreateControlClient(
+        NpgsqlDataSource dataSource,
+        PostgreSqlDurableWorkOptions workOptions,
+        IDurableRuntimeSchemaManager schema,
+        PostgreSqlDurableWorkStore store,
+        string workerId) =>
+        new(
+            new PostgreSqlDurableRuntimeRegistration(
+                dataSource,
+                dataSource,
+                workOptions,
+                new PostgreSqlDurableScheduleOptions("appsurface"),
+                new AppSurfaceDurablePostgreSqlOptions { WorkerId = workerId }.SnapshotAndValidate(),
+                Guid.NewGuid()),
+            schema,
+            store);
 
     private static PostgreSqlDurableWorkOptions CreateOptions(
         NpgsqlDataSource dataSource,
@@ -2631,6 +3181,34 @@ public sealed class PostgreSqlDurableWorkStoreTests
         throw new TimeoutException("Runtime epoch rotation did not wait for the in-flight acceptance transaction.");
     }
 
+    private static async ValueTask<int> WaitForBackendAsync(
+        NpgsqlDataSource dataSource,
+        string applicationName,
+        string waitEvent)
+    {
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            await using var command = dataSource.CreateCommand(
+                """
+                SELECT pid
+                FROM pg_catalog.pg_stat_activity
+                WHERE application_name = @application_name
+                  AND wait_event = @wait_event
+                LIMIT 1;
+                """);
+            command.Parameters.AddWithValue("application_name", applicationName);
+            command.Parameters.AddWithValue("wait_event", waitEvent);
+            if (await command.ExecuteScalarAsync() is int backendPid)
+            {
+                return backendPid;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
+        }
+
+        throw new TimeoutException($"The control session did not begin waiting for the {waitEvent} lock.");
+    }
+
     private static async ValueTask<T> ExecuteScalarAsync<T>(NpgsqlDataSource dataSource, string sql)
     {
         await using var command = dataSource.CreateCommand(sql);
@@ -2717,15 +3295,49 @@ public sealed class PostgreSqlDurableWorkStoreTests
     private static async ValueTask<int> ExecuteScopedNonQueryAsync(
         NpgsqlDataSource dataSource,
         DurableScopeId scopeId,
-        string sql)
+        string sql,
+        params (string Name, object Value)[] parameters)
     {
         await using var connection = await dataSource.OpenConnectionAsync();
         await using var transaction = await connection.BeginTransactionAsync();
         await SetTestScopeAsync(connection, transaction, scopeId);
         await using var command = new NpgsqlCommand(sql, connection, transaction);
+        foreach (var (name, value) in parameters)
+        {
+            command.Parameters.AddWithValue(name, value);
+        }
         var result = await command.ExecuteNonQueryAsync();
         await transaction.CommitAsync();
         return result;
+    }
+
+    private static async ValueTask SetRecoveryListingEpochAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scopeId,
+        DurableWorkId workId,
+        Guid runtimeEpoch,
+        bool terminal)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await SetTestScopeAsync(connection, transaction, scopeId);
+        await using var command = new NpgsqlCommand(
+            """
+            UPDATE appsurface_durable.work
+            SET runtime_epoch = @runtime_epoch,
+                state = CASE WHEN @terminal THEN 'failed' ELSE state END,
+                terminal_at = CASE WHEN @terminal THEN clock_timestamp() ELSE terminal_at END,
+                updated_at = clock_timestamp()
+            WHERE scope_id = @scope_id AND work_id = @work_id;
+            """,
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("runtime_epoch", runtimeEpoch);
+        command.Parameters.AddWithValue("terminal", terminal);
+        command.Parameters.AddWithValue("scope_id", scopeId.Value);
+        command.Parameters.AddWithValue("work_id", workId.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        await transaction.CommitAsync();
     }
 
     private static async ValueTask AssertScopedMutationDeniedAsync(

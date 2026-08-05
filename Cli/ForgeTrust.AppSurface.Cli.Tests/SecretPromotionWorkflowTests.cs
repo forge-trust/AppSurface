@@ -1494,7 +1494,7 @@ public sealed class SecretPromotionWorkflowTests
 
     public static IEnumerable<object[]> InvalidPlanConfigurations()
     {
-        yield return ["{", "valid secret-promotion JSON"];
+        yield return ["{", "valid secret-transfer JSON"];
         yield return ["null", "--config must be"];
         yield return ["{\"version\":2,\"endpoints\":[],\"jobs\":[]}", "--config must be"];
         yield return ["{\"version\":1,\"endpoints\":null,\"jobs\":[]}", "--config must be"];
@@ -1524,7 +1524,1464 @@ public sealed class SecretPromotionWorkflowTests
         yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"remote\",\"provider\":\"local\",\"environment\":\"staging\"}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"remote\",\"rows\":[{\"key\":\"Key\"}]}]}", "supported remote provider"];
         yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\"}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"staging\",\"rows\":[{\"key\":\"A\",\"destination\":\"projects/p/secrets/s\"},{\"key\":\"B\",\"destination\":\"projects/p/secrets/s\"}]}]}", "duplicate destination"];
         yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\"}],\"jobs\":[{\"name\":\"job\",\"source\":\"staging\",\"destination\":\"local\",\"rows\":[{\"key\":\"Key\",\"source\":\"projects/p/secrets/s/versions/1\",\"destination\":\"unexpected\"}]}]}", "destinations must be declared Google endpoints"];
+        yield return ["{\"version\":2,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\"}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"staging\",\"rows\":[{\"key\":\"Key\",\"destination\":\"projects/p/secrets/s\"}]}]}", "V2 is reserved"];
+        yield return ["{\"version\":2,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\"}],\"jobs\":[{\"name\":\"job\",\"source\":\"staging\",\"destination\":\"local\",\"rows\":[{\"key\":\"Key\",\"source\":\"projects/p/secrets/s/versions/1\",\"destination\":\"unexpected\"}]}]}", "V2 LocalSecrets destination rows must omit"];
         yield return ["{\"version\":1,\"endpoints\":[{\"name\":\"staging\",\"provider\":\"google\",\"environment\":\"staging\"}],\"jobs\":[{\"name\":\"job\",\"source\":\"local\",\"destination\":\"staging\",\"rows\":[{\"key\":\"Bad\\nKey\",\"destination\":\"projects/p/secrets/s\"}]}]}", "unsupported characters"];
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_PlanThenApply_MaterializesPinnedValueWithoutValueLeak()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = new SecretsCommandContext(new AppSurfaceLocalSecretIdentityNormalizer(), store, "AppSurfaceApp", "Production", null);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var planPath = Path.Join(temp.Path, "transfer.plan.json");
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var workflow = CreateV2Workflow(google, temp.Path);
+
+        var planned = workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        var applied = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+
+        Assert.True(planned.Summary.Succeeded, JsonSerializer.Serialize(planned.Summary));
+        Assert.True(applied.Succeeded, JsonSerializer.Serialize(applied));
+        Assert.Equal("CreatedLocalSecret", Assert.Single(applied.Rows).Action);
+        Assert.Equal("sentinel-remote-secret", store.Get(Normalize(context, "Stripe:ApiKey")).Value);
+        Assert.Empty(google.Writes);
+        var planJson = File.ReadAllText(planPath);
+        Assert.Contains("\"version\": 2", planJson, StringComparison.Ordinal);
+        Assert.Contains("\"destinationKind\": \"local\"", planJson, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-remote-secret", planJson);
+        ValueSafeAssert.DoesNotExpose("sentinel-remote-secret", JsonSerializer.Serialize(applied));
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_ExistingUnattestedTarget_IsConflictBeforeSourceAccess()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        store.Set(Normalize(context, "Stripe:ApiKey"), "sentinel-existing-secret");
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var workflow = CreateV2Workflow(google, temp.Path);
+
+        var planned = workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", Path.Join(temp.Path, "plan.json"), false, TimeSpan.FromMinutes(10), context));
+
+        Assert.False(planned.Summary.Succeeded);
+        var row = Assert.Single(planned.Summary.Rows);
+        Assert.Equal("Conflict", row.Status);
+        Assert.Equal("local-secret-transfer-destination-exists", row.DiagnosticCode);
+        Assert.Equal(0, google.AccessCalls);
+        Assert.Equal("sentinel-existing-secret", store.Get(Normalize(context, "Stripe:ApiKey")).Value);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_StaleAttestationAfterOutOfBandDeleteIsConflictBeforeSourceAccess()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var initialPlanPath = Path.Join(temp.Path, "initial.plan.json");
+        var stalePlanPath = Path.Join(temp.Path, "stale.plan.json");
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var workflow = CreateV2Workflow(google, temp.Path);
+
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", initialPlanPath, false, TimeSpan.FromMinutes(10), context));
+        workflow.Apply(new SecretPromotionApplyRequest(configPath, initialPlanPath, true, null, null, null, context));
+        Assert.Equal(LocalSecretResultStatus.Found, store.Delete(Normalize(context, "Stripe:ApiKey")).Status);
+
+        var planned = workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", stalePlanPath, false, TimeSpan.FromMinutes(10), context));
+
+        Assert.False(planned.Summary.Succeeded);
+        Assert.Equal("Conflict", Assert.Single(planned.Summary.Rows).Status);
+        Assert.Equal("local-secret-transfer-attestation-stale", Assert.Single(planned.Summary.Rows).DiagnosticCode);
+        Assert.Equal(1, google.AccessCalls);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_OutOfBandDestinationMutationAfterPlanFailsBeforeSourceAccess()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var workflow = CreateV2Workflow(google, temp.Path);
+
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        Assert.Equal(LocalSecretResultStatus.Found, store.Set(Normalize(context, "Stripe:ApiKey"), "sentinel-manual-secret").Status);
+
+        var applied = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+
+        Assert.False(applied.Succeeded);
+        Assert.Equal("Conflict", Assert.Single(applied.Rows).Status);
+        Assert.Equal("local-secret-transfer-destination-changed", Assert.Single(applied.Rows).DiagnosticCode);
+        Assert.Equal(0, google.AccessCalls);
+        Assert.Equal("sentinel-manual-secret", store.Get(Normalize(context, "Stripe:ApiKey")).Value);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_ReplaceRequiresExactConfirmationAndMatchingAttestation()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var firstPlanPath = Path.Join(temp.Path, "first.plan.json");
+        var replacementPlanPath = Path.Join(temp.Path, "replacement.plan.json");
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-first-secret");
+        var workflow = CreateV2Workflow(google, temp.Path);
+
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", firstPlanPath, false, TimeSpan.FromMinutes(10), context));
+        workflow.Apply(new SecretPromotionApplyRequest(configPath, firstPlanPath, true, null, null, null, context));
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-replacement-secret");
+        var replacement = workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", replacementPlanPath, true, TimeSpan.FromMinutes(10), context));
+
+        var missingConfirmation = Assert.Throws<CommandException>(() => workflow.Apply(
+            new SecretPromotionApplyRequest(configPath, replacementPlanPath, true, null, null, null, context)));
+        var applied = workflow.Apply(new SecretPromotionApplyRequest(
+            configPath,
+            replacementPlanPath,
+            true,
+            "staging-to-local",
+            null,
+            null,
+            context));
+
+        Assert.True(replacement.Summary.Succeeded);
+        Assert.Contains("--confirm", missingConfirmation.Message, StringComparison.Ordinal);
+        Assert.True(applied.Succeeded);
+        Assert.Equal("ReplacedLocalSecret", Assert.Single(applied.Rows).Action);
+        Assert.Equal("sentinel-replacement-secret", store.Get(Normalize(context, "Stripe:ApiKey")).Value);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_TrimmedProductionSourceLabelStillRequiresExactConfirmation()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile(
+            "transfer.json",
+            GoogleToLocalV2Configuration().Replace("\"environment\": \"staging\"", "\"environment\": \" production \"", StringComparison.Ordinal));
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var workflow = CreateV2Workflow(google, temp.Path);
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+
+        var exception = Assert.Throws<CommandException>(() => workflow.Apply(
+            new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context)));
+
+        Assert.Contains("--confirm", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, google.AccessCalls);
+        Assert.Equal(LocalSecretResultStatus.Missing, store.Get(Normalize(context, "Stripe:ApiKey")).Status);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_ResumeUsesCommittedAttestationWithoutGoogleDestinationProbe()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var workflow = CreateV2Workflow(google, temp.Path);
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+        google.Versions.Clear();
+
+        var resumed = workflow.Apply(new SecretPromotionApplyRequest(
+            configPath,
+            planPath,
+            true,
+            null,
+            null,
+            $"{planPath}.receipt.json",
+            context));
+
+        Assert.True(resumed.Succeeded);
+        Assert.Equal("ResumeSkippedConfirmedWrite", Assert.Single(resumed.Rows).Action);
+        Assert.Equal(1, google.AccessCalls);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_ResumeRejectsAReceiptWhoseCommittedAttestationWasInvalidated()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var coordinator = new LocalSecretsTransferCoordinator(stateRoot);
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google), null, coordinator);
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+        var identity = Normalize(context, "Stripe:ApiKey");
+        coordinator.InvalidateBeforeMutation(store, identity, () => store.Set(identity, "sentinel-manual-secret"));
+
+        var exception = Assert.Throws<CommandException>(() => workflow.Apply(new SecretPromotionApplyRequest(
+            configPath,
+            planPath,
+            true,
+            null,
+            null,
+            $"{planPath}.receipt.json",
+            context)));
+
+        Assert.Contains("local transfer evidence could not be verified", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("sentinel-manual-secret", store.Get(identity).Value);
+        Assert.Equal(1, google.AccessCalls);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_CanonicalProbeAndAccessMismatchesFailBeforeLocalWrite()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        google.ProbeVersionOverride = AppSurfaceGoogleSecretProbeResult.Ready("projects/staging/secrets/stripe-api-key/versions/8");
+        var workflow = CreateV2Workflow(google, temp.Path);
+
+        var probeMismatch = workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", Path.Join(temp.Path, "mismatch.plan.json"), false, TimeSpan.FromMinutes(10), context));
+
+        Assert.False(probeMismatch.Summary.Succeeded);
+        Assert.Equal("secret-transfer-version-mismatch", Assert.Single(probeMismatch.Summary.Rows).DiagnosticCode);
+        google.ProbeVersionOverride = null;
+        var planPath = Path.Join(temp.Path, "plan.json");
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        google.AccessOverride = AppSurfaceGoogleSecretAccessResult.Accessed(
+            "projects/staging/secrets/stripe-api-key/versions/7",
+            new AppSurfaceGoogleSecretPayload(Encoding.UTF8.GetBytes("sentinel-remote-secret"), "projects/staging/secrets/stripe-api-key/versions/8"));
+
+        var accessMismatch = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+
+        Assert.False(accessMismatch.Succeeded);
+        Assert.Equal("secret-transfer-version-mismatch", Assert.Single(accessMismatch.Rows).DiagnosticCode);
+        Assert.Equal(LocalSecretResultStatus.Missing, store.Get(Normalize(context, "Stripe:ApiKey")).Status);
+        ValueSafeAssert.DoesNotExpose("sentinel-remote-secret", JsonSerializer.Serialize(accessMismatch));
+    }
+
+    [Fact]
+    public void GoogleToGoogleV1_NonProductionAliasSourceAcceptsCanonicalProviderResponses()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToGoogleNonProductionAliasConfiguration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        const string canonical = "projects/staging/secrets/stripe-api-key/versions/7";
+        var google = new FakeGoogleClient
+        {
+            ProbeVersionOverride = AppSurfaceGoogleSecretProbeResult.Ready(canonical),
+            AccessOverride = AppSurfaceGoogleSecretAccessResult.Accessed(
+                canonical,
+                new AppSurfaceGoogleSecretPayload(Encoding.UTF8.GetBytes("sentinel-remote-secret"), canonical))
+        };
+        google.Secrets["projects/testing/secrets/stripe-api-key"] = false;
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(google));
+
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-testing", planPath, false, TimeSpan.FromMinutes(10), context));
+        var applied = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+
+        Assert.True(applied.Succeeded);
+        Assert.Equal("AddedGoogleVersion", Assert.Single(applied.Rows).Action);
+        Assert.Equal("projects/testing/secrets/stripe-api-key", Assert.Single(google.Writes));
+        ValueSafeAssert.DoesNotExpose("sentinel-remote-secret", JsonSerializer.Serialize(applied));
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_PreparedRecordResumesOnlyAfterInMemoryValueEquality()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var receiptPath = Path.Join(temp.Path, "receipt.json");
+        var google = new FakeGoogleClient();
+        const string sourceResource = "projects/staging/secrets/stripe-api-key/versions/7";
+        google.Versions[sourceResource] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var workflow = CreateV2Workflow(google, temp.Path);
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        var plan = JsonSerializer.Deserialize<SecretPromotionPlanArtifact>(File.ReadAllText(planPath), SecretPromotionWorkflow.JsonOptions)!;
+        var row = Assert.Single(plan.Rows);
+        var identity = Normalize(context, "Stripe:ApiKey");
+        store.Set(identity, "sentinel-remote-secret");
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(identity.StorageName))).ToLowerInvariant();
+        WritePreparedCoordinatorJournal(stateRoot, plan, row, identity);
+        File.WriteAllText(
+            receiptPath,
+            JsonSerializer.Serialize(
+                new SecretPromotionReceipt(
+                    plan.JobName,
+                    plan.ConfigDigest,
+                    plan.PlanIdentity,
+                    [row.Result(
+                        "IndeterminateWrite",
+                        "WritePending",
+                        "secret-promotion-write-pending",
+                        "The destination write must be reconciled if this operation is interrupted.",
+                        false)]),
+                SecretPromotionWorkflow.JsonOptions));
+
+        var preflight = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, false, null, null, receiptPath, context));
+
+        Assert.True(preflight.Succeeded);
+        Assert.Equal("RecoverPreparedLocalSecret", Assert.Single(preflight.Rows).Action);
+        Assert.Equal(0, google.AccessCalls);
+
+        var resumed = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, receiptPath, context));
+
+        Assert.True(resumed.Succeeded);
+        Assert.Equal("RecoveredLocalSecret", Assert.Single(resumed.Rows).Action);
+        var committed = JsonSerializer.Deserialize<LocalTransferJournal>(File.ReadAllText(Path.Join(stateRoot, $"{hash}.json")), new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        Assert.Equal(LocalTransferJournalState.Committed, committed.State);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_PreparedRecordWithDifferentLocalValueRemainsAConflict()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var receiptPath = Path.Join(temp.Path, "receipt.json");
+        var google = new FakeGoogleClient();
+        const string sourceResource = "projects/staging/secrets/stripe-api-key/versions/7";
+        google.Versions[sourceResource] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var workflow = CreateV2Workflow(google, temp.Path);
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        var plan = JsonSerializer.Deserialize<SecretPromotionPlanArtifact>(File.ReadAllText(planPath), SecretPromotionWorkflow.JsonOptions)!;
+        var row = Assert.Single(plan.Rows);
+        var identity = Normalize(context, "Stripe:ApiKey");
+        store.Set(identity, "sentinel-different-local-secret");
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        WritePreparedCoordinatorJournal(stateRoot, plan, row, identity);
+        File.WriteAllText(
+            receiptPath,
+            JsonSerializer.Serialize(
+                new SecretPromotionReceipt(
+                    plan.JobName,
+                    plan.ConfigDigest,
+                    plan.PlanIdentity,
+                    [row.Result(
+                        "IndeterminateWrite",
+                        "WritePending",
+                        "secret-promotion-write-pending",
+                        "The destination write must be reconciled if this operation is interrupted.",
+                        false)]),
+                SecretPromotionWorkflow.JsonOptions));
+
+        var resumed = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, receiptPath, context));
+
+        Assert.False(resumed.Succeeded);
+        Assert.Equal("Conflict", Assert.Single(resumed.Rows).Status);
+        Assert.Equal("sentinel-different-local-secret", store.Get(identity).Value);
+        var stillPrepared = JsonSerializer.Deserialize<LocalTransferJournal>(File.ReadAllText(CoordinatorJournalPath(stateRoot, identity)), new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        Assert.Equal(LocalTransferJournalState.Prepared, stillPrepared.State);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_PreparedRecordWithoutLocalTargetFailsPreflightBeforePayloadAccess()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var receiptPath = Path.Join(temp.Path, "receipt.json");
+        var google = new FakeGoogleClient();
+        const string sourceResource = "projects/staging/secrets/stripe-api-key/versions/7";
+        google.Versions[sourceResource] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var workflow = CreateV2Workflow(google, temp.Path);
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        var plan = JsonSerializer.Deserialize<SecretPromotionPlanArtifact>(File.ReadAllText(planPath), SecretPromotionWorkflow.JsonOptions)!;
+        var row = Assert.Single(plan.Rows);
+        var identity = Normalize(context, "Stripe:ApiKey");
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        WritePreparedCoordinatorJournal(stateRoot, plan, row, identity);
+        File.WriteAllText(
+            receiptPath,
+            JsonSerializer.Serialize(
+                new SecretPromotionReceipt(
+                    plan.JobName,
+                    plan.ConfigDigest,
+                    plan.PlanIdentity,
+                    [row.Result(
+                        "IndeterminateWrite",
+                        "WritePending",
+                        "secret-promotion-write-pending",
+                        "The destination write must be reconciled if this operation is interrupted.",
+                        false)]),
+                SecretPromotionWorkflow.JsonOptions));
+
+        var resumed = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, receiptPath, context));
+
+        Assert.False(resumed.Succeeded);
+        Assert.Equal("Conflict", Assert.Single(resumed.Rows).Status);
+        Assert.Equal(0, google.AccessCalls);
+        Assert.Equal(LocalSecretResultStatus.Missing, store.Get(identity).Status);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_PreparedRecordCannotProceedWithoutExplicitResume()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var google = new FakeGoogleClient();
+        const string sourceResource = "projects/staging/secrets/stripe-api-key/versions/7";
+        google.Versions[sourceResource] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var workflow = CreateV2Workflow(google, temp.Path);
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        var plan = JsonSerializer.Deserialize<SecretPromotionPlanArtifact>(File.ReadAllText(planPath), SecretPromotionWorkflow.JsonOptions)!;
+        var row = Assert.Single(plan.Rows);
+        var identity = Normalize(context, "Stripe:ApiKey");
+        store.Set(identity, "sentinel-remote-secret");
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(identity.StorageName))).ToLowerInvariant();
+        WritePreparedCoordinatorJournal(stateRoot, plan, row, identity);
+
+        var blocked = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+
+        Assert.False(blocked.Succeeded);
+        Assert.Equal("IndeterminateWrite", Assert.Single(blocked.Rows).Status);
+        Assert.Equal("local-secret-transfer-indeterminate-write", Assert.Single(blocked.Rows).DiagnosticCode);
+        Assert.Equal(0, google.AccessCalls);
+        Assert.Equal("sentinel-remote-secret", store.Get(identity).Value);
+        var stillPrepared = JsonSerializer.Deserialize<LocalTransferJournal>(File.ReadAllText(Path.Join(stateRoot, $"{hash}.json")), new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        Assert.Equal(LocalTransferJournalState.Prepared, stillPrepared.State);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_ReplacementRowsCannotBypassReplaceAuthorization()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var initialPlanPath = Path.Join(temp.Path, "initial.plan.json");
+        var replacementPlanPath = Path.Join(temp.Path, "replacement.plan.json");
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-first-secret");
+        var workflow = CreateV2Workflow(google, temp.Path);
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", initialPlanPath, false, TimeSpan.FromMinutes(10), context));
+        workflow.Apply(new SecretPromotionApplyRequest(configPath, initialPlanPath, true, null, null, null, context));
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-replacement-secret");
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", replacementPlanPath, true, TimeSpan.FromMinutes(10), context));
+        var replacement = JsonSerializer.Deserialize<SecretPromotionPlanArtifact>(File.ReadAllText(replacementPlanPath), SecretPromotionWorkflow.JsonOptions)!;
+        var forged = replacement with { Replace = false };
+        forged = forged with { PlanIdentity = SecretPromotionWorkflow.ComputePlanIdentity(forged) };
+        File.WriteAllText(replacementPlanPath, JsonSerializer.Serialize(forged, SecretPromotionWorkflow.JsonOptions));
+        var accessCallsBeforeApply = google.AccessCalls;
+
+        var exception = Assert.Throws<CommandException>(() => workflow.Apply(
+            new SecretPromotionApplyRequest(configPath, replacementPlanPath, true, null, null, null, context)));
+
+        Assert.Contains("created with --replace", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(accessCallsBeforeApply, google.AccessCalls);
+        Assert.Equal("sentinel-first-secret", store.Get(Normalize(context, "Stripe:ApiKey")).Value);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_HeldCoordinatorLockFailsPlanBeforePayloadAccess()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var workflow = new SecretPromotionWorkflow(
+            new FakeGoogleFactory(google),
+            null,
+            new LocalSecretsTransferCoordinator(stateRoot));
+        var identity = Normalize(context, "Stripe:ApiKey");
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(identity.StorageName))).ToLowerInvariant();
+        workflow.CreatePlan(new SecretPromotionPlanRequest(
+            configPath,
+            "staging-to-local",
+            Path.Join(temp.Path, "initial.plan.json"),
+            false,
+            TimeSpan.FromMinutes(10),
+            context));
+
+        using var heldLock = new FileStream(Path.Join(stateRoot, $"{hash}.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        var planned = workflow.CreatePlan(new SecretPromotionPlanRequest(
+            configPath,
+            "staging-to-local",
+            Path.Join(temp.Path, "plan.json"),
+            false,
+            TimeSpan.FromMinutes(10),
+            context));
+
+        Assert.False(planned.Summary.Succeeded);
+        Assert.Equal("local-secret-transfer-locked", Assert.Single(planned.Summary.Rows).DiagnosticCode);
+        Assert.Equal(0, google.AccessCalls);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_CorruptCoordinatorJournalFailsPlanBeforePayloadAccess()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var workflow = new SecretPromotionWorkflow(
+            new FakeGoogleFactory(google),
+            null,
+            new LocalSecretsTransferCoordinator(stateRoot));
+        var identity = Normalize(context, "Stripe:ApiKey");
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(identity.StorageName))).ToLowerInvariant();
+        workflow.CreatePlan(new SecretPromotionPlanRequest(
+            configPath,
+            "staging-to-local",
+            Path.Join(temp.Path, "initial.plan.json"),
+            false,
+            TimeSpan.FromMinutes(10),
+            context));
+        File.WriteAllText(Path.Join(stateRoot, $"{hash}.json"), "{");
+
+        var planned = workflow.CreatePlan(new SecretPromotionPlanRequest(
+            configPath,
+            "staging-to-local",
+            Path.Join(temp.Path, "plan.json"),
+            false,
+            TimeSpan.FromMinutes(10),
+            context));
+
+        Assert.False(planned.Summary.Succeeded);
+        Assert.Equal("local-secret-transfer-journal-corrupt", Assert.Single(planned.Summary.Rows).DiagnosticCode);
+        Assert.Equal(0, google.AccessCalls);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_CoordinatorStateRootCreationFailureFailsClosedBeforePayloadAccess()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var google = CreateGoogleWithPinnedSource();
+        var hooks = new LocalSecretsTransferCoordinatorTestHooks
+        {
+            BeforeEnsureStateRoot = _ => throw new UnauthorizedAccessException()
+        };
+        var workflow = CreateV2Workflow(google, temp.Path, hooks);
+
+        var planned = workflow.CreatePlan(new SecretPromotionPlanRequest(
+            configPath,
+            "staging-to-local",
+            Path.Join(temp.Path, "plan.json"),
+            false,
+            TimeSpan.FromMinutes(10),
+            context));
+
+        Assert.False(planned.Summary.Succeeded);
+        Assert.Equal("local-secret-transfer-state-root-unavailable", Assert.Single(planned.Summary.Rows).DiagnosticCode);
+        Assert.Equal(0, google.AccessCalls);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_CoordinatorLockOpenFailureFailsClosedBeforePayloadAccess()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var google = CreateGoogleWithPinnedSource();
+        var hooks = new LocalSecretsTransferCoordinatorTestHooks
+        {
+            BeforeAcquireLock = _ => throw new UnauthorizedAccessException()
+        };
+        var workflow = CreateV2Workflow(google, temp.Path, hooks);
+
+        var planned = workflow.CreatePlan(new SecretPromotionPlanRequest(
+            configPath,
+            "staging-to-local",
+            Path.Join(temp.Path, "plan.json"),
+            false,
+            TimeSpan.FromMinutes(10),
+            context));
+
+        Assert.False(planned.Summary.Succeeded);
+        Assert.Equal("local-secret-transfer-state-root-unavailable", Assert.Single(planned.Summary.Rows).DiagnosticCode);
+        Assert.Equal(0, google.AccessCalls);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_CoordinatorLockHardeningFailureFailsClosedBeforePayloadAccess()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var google = CreateGoogleWithPinnedSource();
+        var workflow = CreateV2Workflow(
+            google,
+            temp.Path,
+            new LocalSecretsTransferCoordinatorTestHooks
+            {
+                BeforeSecureLockFile = static _ => throw new PlatformNotSupportedException()
+            });
+
+        var planned = workflow.CreatePlan(new SecretPromotionPlanRequest(
+            configPath,
+            "staging-to-local",
+            Path.Join(temp.Path, "plan.json"),
+            false,
+            TimeSpan.FromMinutes(10),
+            context));
+
+        Assert.False(planned.Summary.Succeeded);
+        Assert.Equal("local-secret-transfer-state-root-unavailable", Assert.Single(planned.Summary.Rows).DiagnosticCode);
+        Assert.Equal(0, google.AccessCalls);
+    }
+
+    [Fact]
+    public void Coordinator_DefaultStateRootUsesTheProfileFallbackWhenLocalApplicationDataIsUnavailable()
+    {
+        var profile = Path.Join("test", "profile");
+
+        var stateRoot = LocalSecretsTransferCoordinator.GetDefaultStateRoot(string.Empty, profile);
+
+        Assert.Equal(Path.Join(profile, ".appsurface", "AppSurface", "secret-transfer"), stateRoot);
+    }
+
+    [Fact]
+    public void Coordinator_TightensAStateRootThatLacksUserExecutePermission()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip("Unix file-mode enforcement is not available on Windows.");
+        }
+
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var stateRoot = Directory.CreateDirectory(Path.Join(temp.Path, "transfer-state")).FullName;
+        File.SetUnixFileMode(stateRoot, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var coordinator = new LocalSecretsTransferCoordinator(stateRoot);
+
+        var result = coordinator.CapturePrecondition(Normalize(context, "Stripe:ApiKey"), store, replace: false);
+
+        Assert.Equal(LocalCoordinatorPreconditionKind.Missing, result.Kind);
+        Assert.Equal(
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+            File.GetUnixFileMode(stateRoot));
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_CoordinatorJournalReadFailureFailsPlanBeforePayloadAccess()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var google = CreateGoogleWithPinnedSource();
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var identity = Normalize(context, "Stripe:ApiKey");
+        PrepareCoordinatorStateRoot(stateRoot, store, identity);
+        File.WriteAllText(CoordinatorJournalPath(stateRoot, identity), "{}");
+        var hooks = new LocalSecretsTransferCoordinatorTestHooks
+        {
+            BeforeReadJournal = _ => throw new IOException()
+        };
+        var workflow = new SecretPromotionWorkflow(
+            new FakeGoogleFactory(google),
+            null,
+            new LocalSecretsTransferCoordinator(stateRoot, hooks));
+
+        var planned = workflow.CreatePlan(new SecretPromotionPlanRequest(
+            configPath,
+            "staging-to-local",
+            Path.Join(temp.Path, "plan.json"),
+            false,
+            TimeSpan.FromMinutes(10),
+            context));
+
+        Assert.False(planned.Summary.Succeeded);
+        Assert.Equal("local-secret-transfer-journal-corrupt", Assert.Single(planned.Summary.Rows).DiagnosticCode);
+        Assert.Equal(0, google.AccessCalls);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_UnreadableCoordinatorJournalFailsPlanBeforePayloadAccess()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var google = CreateGoogleWithPinnedSource();
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var identity = Normalize(context, "Stripe:ApiKey");
+        PrepareCoordinatorStateRoot(stateRoot, store, identity);
+        File.WriteAllText(CoordinatorJournalPath(stateRoot, identity), "{");
+        var workflow = new SecretPromotionWorkflow(
+            new FakeGoogleFactory(google),
+            null,
+            new LocalSecretsTransferCoordinator(stateRoot));
+
+        var planned = workflow.CreatePlan(new SecretPromotionPlanRequest(
+            configPath,
+            "staging-to-local",
+            Path.Join(temp.Path, "plan.json"),
+            false,
+            TimeSpan.FromMinutes(10),
+            context));
+
+        Assert.False(planned.Summary.Succeeded);
+        Assert.Equal("local-secret-transfer-journal-corrupt", Assert.Single(planned.Summary.Rows).DiagnosticCode);
+        Assert.Equal(0, google.AccessCalls);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_CoordinatorJournalWriteFailureDoesNotMutateTheTarget()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var google = CreateGoogleWithPinnedSource();
+        var hooks = new LocalSecretsTransferCoordinatorTestHooks
+        {
+            AfterWriteTemporaryJournal = _ => throw new IOException(),
+            BeforeDeleteTemporaryJournal = _ => throw new IOException()
+        };
+        var workflow = CreateV2Workflow(google, temp.Path, hooks);
+        var planPath = Path.Join(temp.Path, "plan.json");
+
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        var applied = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+
+        Assert.False(applied.Succeeded);
+        Assert.Equal("Failed", Assert.Single(applied.Rows).Status);
+        Assert.Equal("local-secret-transfer-journal-write-failed", Assert.Single(applied.Rows).DiagnosticCode);
+        Assert.Equal(LocalSecretResultStatus.Missing, store.Get(Normalize(context, "Stripe:ApiKey")).Status);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_TemporaryJournalHardeningFailureDoesNotMutateTheTarget()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var google = CreateGoogleWithPinnedSource();
+        var workflow = CreateV2Workflow(
+            google,
+            temp.Path,
+            new LocalSecretsTransferCoordinatorTestHooks
+            {
+                BeforeSecureTemporaryJournal = static _ => throw new PlatformNotSupportedException()
+            });
+        var planPath = Path.Join(temp.Path, "plan.json");
+
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        var applied = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+
+        Assert.False(applied.Succeeded);
+        Assert.Equal("local-secret-transfer-journal-write-failed", Assert.Single(applied.Rows).DiagnosticCode);
+        Assert.Equal(LocalSecretResultStatus.Missing, store.Get(Normalize(context, "Stripe:ApiKey")).Status);
+    }
+
+    [Fact]
+    public void Coordinator_AttestationClearFailurePreventsTheOrdinaryMutation()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var google = CreateGoogleWithPinnedSource();
+        var workflow = new SecretPromotionWorkflow(
+            new FakeGoogleFactory(google),
+            null,
+            new LocalSecretsTransferCoordinator(stateRoot));
+        var planPath = Path.Join(temp.Path, "plan.json");
+
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+        var identity = Normalize(context, "Stripe:ApiKey");
+        var coordinator = new LocalSecretsTransferCoordinator(
+            stateRoot,
+            new LocalSecretsTransferCoordinatorTestHooks { BeforeDeleteJournal = _ => throw new UnauthorizedAccessException() });
+        var result = coordinator.InvalidateBeforeMutation(
+            store,
+            identity,
+            () => store.Set(identity, "sentinel-ordinary-mutation"));
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, result.Status);
+        Assert.Equal("local-secret-transfer-attestation-clear-failed", result.Diagnostic?.Code);
+        Assert.Equal("sentinel-remote-secret", store.Get(identity).Value);
+    }
+
+    [Fact]
+    public void CoordinatorOutcomeFactories_PreserveKindsAndFailureDetails()
+    {
+        var failure = new LocalCoordinatorFailure("test-failure", "Test failure.", Retryable: true);
+
+        Assert.Equal(LocalCoordinatorCheckKind.Unsupported, LocalCoordinatorCheck.Unsupported().Kind);
+        Assert.Equal("local-secret-transfer-unsupported-store", LocalCoordinatorCheck.Unsupported().Failure?.Code);
+        Assert.Same(failure, LocalCoordinatorCheck.Failed(failure).Failure);
+
+        Assert.Equal(LocalCoordinatorWriteKind.Indeterminate, LocalCoordinatorWriteResult.Indeterminate().Kind);
+        Assert.Same(failure, LocalCoordinatorWriteResult.Indeterminate(failure).Failure);
+        Assert.Equal(LocalCoordinatorWriteKind.Unsupported, LocalCoordinatorWriteResult.Unsupported().Kind);
+        Assert.Equal("local-secret-transfer-unsupported-store", LocalCoordinatorWriteResult.Unsupported().Failure?.Code);
+        Assert.Same(failure, LocalCoordinatorWriteResult.Failed(failure).Failure);
+    }
+
+    [Fact]
+    public void Coordinator_UnsupportedStoreFailsClosedExceptForOrdinaryMutations()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var supportedStore = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(supportedStore);
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var coordinator = new LocalSecretsTransferCoordinator(stateRoot);
+        var (plan, row) = CreateCoordinatorPlan(temp, context, coordinator);
+        var unsupportedStore = new MetadataIncapableStore();
+        var identity = Normalize(context, "Stripe:ApiKey");
+        var mutated = false;
+
+        Assert.Equal(LocalCoordinatorPreconditionKind.Unsupported, coordinator.CapturePrecondition(identity, unsupportedStore, replace: false).Kind);
+        Assert.Equal(LocalCoordinatorCheckKind.Unsupported, coordinator.Recheck(plan, row, identity, unsupportedStore, allowPreparedRecovery: false).Kind);
+        Assert.Equal(LocalCoordinatorWriteKind.Unsupported, coordinator.WriteOrRecover(plan, row, identity, unsupportedStore, "sentinel-value", allowPreparedRecovery: false).Kind);
+
+        Assert.Equal(LocalCoordinatorCheckKind.Unsupported, coordinator.VerifyCommitted(plan, row, identity, unsupportedStore).Kind);
+        var result = coordinator.InvalidateBeforeMutation(
+            unsupportedStore,
+            identity,
+            () =>
+            {
+                mutated = true;
+                return AppSurfaceLocalSecretResult.Found(string.Empty, unsupportedStore.Name);
+            });
+
+        Assert.True(mutated);
+        Assert.Equal(LocalSecretResultStatus.Found, result.Status);
+    }
+
+    [Fact]
+    public void Coordinator_AcquisitionFailuresAreReportedAcrossGuardedOperations()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var (plan, row) = CreateCoordinatorPlan(temp, context, new LocalSecretsTransferCoordinator(stateRoot));
+        var coordinator = new LocalSecretsTransferCoordinator(
+            stateRoot,
+            new LocalSecretsTransferCoordinatorTestHooks { BeforeAcquireLock = _ => throw new UnauthorizedAccessException() });
+        var identity = Normalize(context, "Stripe:ApiKey");
+        var mutated = false;
+
+        Assert.Equal("local-secret-transfer-state-root-unavailable", coordinator.Recheck(plan, row, identity, store, allowPreparedRecovery: false).Failure?.Code);
+        Assert.Equal("local-secret-transfer-state-root-unavailable", coordinator.WriteOrRecover(plan, row, identity, store, "sentinel-value", allowPreparedRecovery: false).Failure?.Code);
+        Assert.Equal("local-secret-transfer-state-root-unavailable", coordinator.VerifyCommitted(plan, row, identity, store).Failure?.Code);
+
+        var result = coordinator.InvalidateBeforeMutation(
+            store,
+            identity,
+            () =>
+            {
+                mutated = true;
+                return store.Set(identity, "sentinel-value");
+            });
+
+        Assert.False(mutated);
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, result.Status);
+        Assert.Equal("local-secret-transfer-state-root-unavailable", result.Diagnostic?.Code);
+    }
+
+    [Fact]
+    public void Coordinator_JournalReadFailuresAreReportedAcrossGuardedOperations()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var (plan, row) = CreateCoordinatorPlan(temp, context, new LocalSecretsTransferCoordinator(stateRoot));
+        var identity = Normalize(context, "Stripe:ApiKey");
+        File.WriteAllText(CoordinatorJournalPath(stateRoot, identity), "{}");
+        var coordinator = new LocalSecretsTransferCoordinator(
+            stateRoot,
+            new LocalSecretsTransferCoordinatorTestHooks { BeforeReadJournal = _ => throw new IOException() });
+        var mutated = false;
+
+        Assert.Equal("local-secret-transfer-journal-corrupt", coordinator.Recheck(plan, row, identity, store, allowPreparedRecovery: false).Failure?.Code);
+        Assert.Equal("local-secret-transfer-journal-corrupt", coordinator.WriteOrRecover(plan, row, identity, store, "sentinel-value", allowPreparedRecovery: false).Failure?.Code);
+        Assert.Equal("local-secret-transfer-journal-corrupt", coordinator.VerifyCommitted(plan, row, identity, store).Failure?.Code);
+
+        var result = coordinator.InvalidateBeforeMutation(
+            store,
+            identity,
+            () =>
+            {
+                mutated = true;
+                return store.Set(identity, "sentinel-value");
+            });
+
+        Assert.False(mutated);
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, result.Status);
+        Assert.Equal("local-secret-transfer-journal-corrupt", result.Diagnostic?.Code);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_CommittedJournalWriteFailureReturnsIndeterminateAfterTheLocalWrite()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var google = CreateGoogleWithPinnedSource();
+        var journalWrites = 0;
+        var workflow = CreateV2Workflow(
+            google,
+            temp.Path,
+            new LocalSecretsTransferCoordinatorTestHooks
+            {
+                AfterWriteTemporaryJournal = _ =>
+                {
+                    journalWrites++;
+                    if (journalWrites == 2)
+                    {
+                        throw new IOException();
+                    }
+                }
+            });
+        var planPath = Path.Join(temp.Path, "plan.json");
+
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        var applied = workflow.Apply(new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context));
+
+        Assert.False(applied.Succeeded);
+        Assert.Equal("IndeterminateWrite", Assert.Single(applied.Rows).Status);
+        Assert.Equal("local-secret-transfer-journal-write-failed", Assert.Single(applied.Rows).DiagnosticCode);
+        Assert.Equal(2, journalWrites);
+        Assert.Equal("sentinel-remote-secret", store.Get(Normalize(context, "Stripe:ApiKey")).Value);
+    }
+
+    [Fact]
+    public void Coordinator_PreparedJournalWithoutResumeAuthorizationIsIndeterminate()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var coordinator = new LocalSecretsTransferCoordinator(stateRoot);
+        var (plan, row) = CreateCoordinatorPlan(temp, context, coordinator);
+        var identity = Normalize(context, "Stripe:ApiKey");
+        store.Set(identity, "sentinel-value");
+        var prepared = new LocalTransferJournal(
+            1,
+            LocalTransferJournalState.Prepared,
+            "0123456789abcdef0123456789abcdef",
+            plan.PlanIdentity,
+            row.SourceResource!,
+            identity.StorageName,
+            null);
+        File.WriteAllText(
+            CoordinatorJournalPath(stateRoot, identity),
+            JsonSerializer.Serialize(prepared, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+
+        var result = coordinator.WriteOrRecover(plan, row, identity, store, "sentinel-value", allowPreparedRecovery: false);
+
+        Assert.Equal(LocalCoordinatorWriteKind.Indeterminate, result.Kind);
+        Assert.Equal(LocalTransferJournalState.Prepared, JsonSerializer.Deserialize<LocalTransferJournal>(File.ReadAllText(CoordinatorJournalPath(stateRoot, identity)), new JsonSerializerOptions(JsonSerializerDefaults.Web))!.State);
+    }
+
+    [Fact]
+    public void Coordinator_CommittedJournalWithMissingTargetCannotVerifyReceipt()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var coordinator = new LocalSecretsTransferCoordinator(stateRoot);
+        var (plan, row) = CreateCoordinatorPlan(temp, context, coordinator);
+        var identity = Normalize(context, "Stripe:ApiKey");
+        var prepared = new LocalTransferJournal(
+            1,
+            LocalTransferJournalState.Committed,
+            "0123456789abcdef0123456789abcdef",
+            plan.PlanIdentity,
+            row.SourceResource!,
+            identity.StorageName,
+            null);
+        File.WriteAllText(
+            CoordinatorJournalPath(stateRoot, identity),
+            JsonSerializer.Serialize(prepared, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+
+        var result = coordinator.VerifyCommitted(plan, row, identity, store);
+
+        Assert.Equal(LocalCoordinatorCheckKind.Conflict, result.Kind);
+    }
+
+    [Fact]
+    public void Coordinator_StoreDoctorFailuresFailEveryOperationThatRequiresAReadyStore()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var (plan, row) = CreateCoordinatorPlan(temp, context, new LocalSecretsTransferCoordinator(stateRoot));
+        var identity = Normalize(context, "Stripe:ApiKey");
+        var coordinator = new LocalSecretsTransferCoordinator(
+            stateRoot,
+            new LocalSecretsTransferCoordinatorTestHooks { StoreDoctor = static (_, _) => StoreFailure("doctor-failure") });
+
+        Assert.Equal("doctor-failure", coordinator.CapturePrecondition(identity, store, replace: false).Failure?.Code);
+        Assert.Equal("doctor-failure", coordinator.Recheck(plan, row, identity, store, allowPreparedRecovery: false).Failure?.Code);
+        Assert.Equal("doctor-failure", coordinator.WriteOrRecover(plan, row, identity, store, "sentinel-value", allowPreparedRecovery: false).Failure?.Code);
+    }
+
+    [Fact]
+    public void Coordinator_StoreProbeFailuresFailEveryOperationThatRequiresCurrentState()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var (plan, row) = CreateCoordinatorPlan(temp, context, new LocalSecretsTransferCoordinator(stateRoot));
+        var identity = Normalize(context, "Stripe:ApiKey");
+        var coordinator = new LocalSecretsTransferCoordinator(
+            stateRoot,
+            new LocalSecretsTransferCoordinatorTestHooks { StoreProbe = static (_, _) => StoreFailure("probe-failure") });
+
+        Assert.Equal("probe-failure", coordinator.CapturePrecondition(identity, store, replace: false).Failure?.Code);
+        Assert.Equal("probe-failure", coordinator.Recheck(plan, row, identity, store, allowPreparedRecovery: false).Failure?.Code);
+        Assert.Equal("probe-failure", coordinator.WriteOrRecover(plan, row, identity, store, "sentinel-value", allowPreparedRecovery: false).Failure?.Code);
+        Assert.Equal("probe-failure", coordinator.VerifyCommitted(plan, row, identity, store).Failure?.Code);
+    }
+
+    [Fact]
+    public void Coordinator_RecoveryReadAndWriteFaultsNeverReportAConfirmedMutation()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var coordinator = new LocalSecretsTransferCoordinator(stateRoot);
+        var (plan, row) = CreateCoordinatorPlan(temp, context, coordinator);
+        var identity = Normalize(context, "Stripe:ApiKey");
+        WritePreparedCoordinatorJournal(stateRoot, plan, row, identity);
+
+        var missing = new LocalSecretsTransferCoordinator(
+            stateRoot,
+            new LocalSecretsTransferCoordinatorTestHooks { StoreGet = static (_, _) => AppSurfaceLocalSecretResult.Missing("test-store") });
+        var missingResult = missing.WriteOrRecover(plan, row, identity, store, "sentinel-value", allowPreparedRecovery: true);
+
+        Assert.Equal(LocalCoordinatorWriteKind.Conflict, missingResult.Kind);
+
+        var readFailure = new LocalSecretsTransferCoordinator(
+            stateRoot,
+            new LocalSecretsTransferCoordinatorTestHooks { StoreGet = static (_, _) => throw new IOException() });
+        var readFailureResult = readFailure.WriteOrRecover(plan, row, identity, store, "sentinel-value", allowPreparedRecovery: true);
+
+        Assert.Equal(LocalCoordinatorWriteKind.Failed, readFailureResult.Kind);
+        Assert.Equal("local-secret-transfer-recovery-read-failed", readFailureResult.Failure?.Code);
+
+        File.Delete(CoordinatorJournalPath(stateRoot, identity));
+        var writeFailure = new LocalSecretsTransferCoordinator(
+            stateRoot,
+            new LocalSecretsTransferCoordinatorTestHooks { StoreSet = static (_, _, _) => throw new IOException() });
+        var writeFailureResult = writeFailure.WriteOrRecover(plan, row, identity, store, "sentinel-value", allowPreparedRecovery: false);
+
+        Assert.Equal(LocalCoordinatorWriteKind.Indeterminate, writeFailureResult.Kind);
+        Assert.Equal("local-secret-transfer-write-indeterminate", writeFailureResult.Failure?.Code);
+        Assert.Equal(LocalSecretResultStatus.Missing, store.Get(identity).Status);
+    }
+
+    [Fact]
+    public void Coordinator_ExistingGroupReadableStateRootFailsClosed()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var stateRoot = Directory.CreateDirectory(Path.Join(temp.Path, "transfer-state")).FullName;
+        File.SetUnixFileMode(
+            stateRoot,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead);
+        var coordinator = new LocalSecretsTransferCoordinator(stateRoot);
+        var identity = Normalize(context, "Stripe:ApiKey");
+
+        var result = coordinator.CapturePrecondition(identity, store, replace: false);
+
+        Assert.Equal(LocalCoordinatorPreconditionKind.Failed, result.Kind);
+        Assert.Equal("local-secret-transfer-state-root-unsafe", result.Failure?.Code);
+    }
+
+    [Fact]
+    public void Coordinator_SymbolicLinkJournalFailsClosed()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var coordinator = new LocalSecretsTransferCoordinator(stateRoot);
+        CreateCoordinatorPlan(temp, context, coordinator);
+        var identity = Normalize(context, "Stripe:ApiKey");
+        var journalPath = CoordinatorJournalPath(stateRoot, identity);
+        var journalTarget = temp.WriteFile("journal-target.json", "{}");
+        if (!TryCreateFileSymlink(journalPath, journalTarget))
+        {
+            throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
+        }
+
+        var result = coordinator.CapturePrecondition(identity, store, replace: false);
+
+        Assert.Equal(LocalCoordinatorPreconditionKind.Failed, result.Kind);
+        Assert.Equal("local-secret-transfer-journal-unsafe", result.Failure?.Code);
+    }
+
+    [Fact]
+    public void Coordinator_UnsupportedJournalShapeFailsClosed()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var coordinator = new LocalSecretsTransferCoordinator(stateRoot);
+        CreateCoordinatorPlan(temp, context, coordinator);
+        var identity = Normalize(context, "Stripe:ApiKey");
+        File.WriteAllText(CoordinatorJournalPath(stateRoot, identity), "{}");
+
+        var result = coordinator.CapturePrecondition(identity, store, replace: false);
+
+        Assert.Equal(LocalCoordinatorPreconditionKind.Failed, result.Kind);
+        Assert.Equal("local-secret-transfer-journal-corrupt", result.Failure?.Code);
+    }
+
+    [Fact]
+    public void Coordinator_ReplacementPreconditionMismatchIsAConflict()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var coordinator = new LocalSecretsTransferCoordinator(stateRoot);
+        var (plan, row) = CreateCoordinatorPlan(temp, context, coordinator);
+        var identity = Normalize(context, "Stripe:ApiKey");
+        store.Set(identity, "sentinel-value");
+        var replacementRow = row with
+        {
+            DestinationExists = true,
+            LocalAttestationOperationId = "0123456789abcdef0123456789abcdef"
+        };
+        var committed = new LocalTransferJournal(
+            1,
+            LocalTransferJournalState.Committed,
+            "fedcba9876543210fedcba9876543210",
+            plan.PlanIdentity,
+            row.SourceResource!,
+            identity.StorageName,
+            null);
+        File.WriteAllText(
+            CoordinatorJournalPath(stateRoot, identity),
+            JsonSerializer.Serialize(committed, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+
+        var result = coordinator.Recheck(plan, replacementRow, identity, store, allowPreparedRecovery: false);
+
+        Assert.Equal(LocalCoordinatorCheckKind.Conflict, result.Kind);
+    }
+
+    [Fact]
+    public void Coordinator_PreparedRecoveryCommitFailureIsIndeterminate()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var (plan, row) = CreateCoordinatorPlan(temp, context, new LocalSecretsTransferCoordinator(stateRoot));
+        var identity = Normalize(context, "Stripe:ApiKey");
+        store.Set(identity, "sentinel-value");
+        WritePreparedCoordinatorJournal(stateRoot, plan, row, identity);
+        var coordinator = new LocalSecretsTransferCoordinator(
+            stateRoot,
+            new LocalSecretsTransferCoordinatorTestHooks { AfterWriteTemporaryJournal = _ => throw new IOException() });
+
+        var result = coordinator.WriteOrRecover(plan, row, identity, store, "sentinel-value", allowPreparedRecovery: true);
+
+        Assert.Equal(LocalCoordinatorWriteKind.Indeterminate, result.Kind);
+        Assert.Equal("sentinel-value", store.Get(identity).Value);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_ApplyRejectsAPlanWithADifferentVersion()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var workflow = CreateV2Workflow(CreateGoogleWithPinnedSource(), temp.Path);
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        var plan = JsonSerializer.Deserialize<SecretPromotionPlanArtifact>(File.ReadAllText(planPath), SecretPromotionWorkflow.JsonOptions)!;
+        File.WriteAllText(planPath, JsonSerializer.Serialize(plan with { Version = 1 }, SecretPromotionWorkflow.JsonOptions));
+
+        var exception = Assert.Throws<CommandException>(() => workflow.Apply(
+            new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context)));
+
+        Assert.Contains("plan version does not match", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_ApplyMapsAnUnsupportedLocalStoreToAValueSafeFailure()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var google = CreateGoogleWithPinnedSource();
+        var workflow = CreateV2Workflow(google, temp.Path);
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        var unsupportedContext = new SecretsCommandContext(
+            context.Normalizer,
+            new MetadataIncapableStore(),
+            context.ApplicationName,
+            context.Environment,
+            context.KeyPrefix);
+
+        var applied = workflow.Apply(new SecretPromotionApplyRequest(
+            configPath,
+            planPath,
+            true,
+            null,
+            null,
+            null,
+            unsupportedContext));
+
+        Assert.False(applied.Succeeded);
+        Assert.Equal("Failed", Assert.Single(applied.Rows).Status);
+        Assert.Equal("local-secret-transfer-unsupported-store", Assert.Single(applied.Rows).DiagnosticCode);
+        Assert.Equal(0, google.AccessCalls);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_ApplyMapsCoordinatorPreflightFailureToAValueSafeFailure()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var google = CreateGoogleWithPinnedSource();
+        CreateV2Workflow(google, temp.Path).CreatePlan(
+            new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        var failingWorkflow = CreateV2Workflow(
+            google,
+            temp.Path,
+            new LocalSecretsTransferCoordinatorTestHooks { StoreDoctor = static (_, _) => StoreFailure("doctor-failure") });
+
+        var applied = failingWorkflow.Apply(new SecretPromotionApplyRequest(
+            configPath,
+            planPath,
+            true,
+            null,
+            null,
+            null,
+            context));
+
+        Assert.False(applied.Succeeded);
+        Assert.Equal("Failed", Assert.Single(applied.Rows).Status);
+        Assert.Equal("doctor-failure", Assert.Single(applied.Rows).DiagnosticCode);
+        Assert.Equal(0, google.AccessCalls);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_ApplyRejectsAnInvalidLocalPrecondition()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var workflow = CreateV2Workflow(CreateGoogleWithPinnedSource(), temp.Path);
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", planPath, false, TimeSpan.FromMinutes(10), context));
+        var plan = JsonSerializer.Deserialize<SecretPromotionPlanArtifact>(File.ReadAllText(planPath), SecretPromotionWorkflow.JsonOptions)!;
+        var forged = plan with { Rows = [Assert.Single(plan.Rows) with { LocalPreconditionKind = "unexpected" }] };
+        forged = forged with { PlanIdentity = SecretPromotionWorkflow.ComputePlanIdentity(forged) };
+        File.WriteAllText(planPath, JsonSerializer.Serialize(forged, SecretPromotionWorkflow.JsonOptions));
+
+        var exception = Assert.Throws<CommandException>(() => workflow.Apply(
+            new SecretPromotionApplyRequest(configPath, planPath, true, null, null, null, context)));
+
+        Assert.Contains("valid LocalSecrets transfer precondition", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_InvalidCapturedPreconditionMapsToAValueSafePlanFailure()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var coordinator = new LocalSecretsTransferCoordinator(Path.Join(temp.Path, "transfer-state"));
+        var (_, row) = CreateCoordinatorPlan(temp, context, coordinator);
+
+        var result = SecretPromotionWorkflow.ProbeLocalDestination(row with { LocalPreconditionKind = "unexpected" }, replace: false);
+
+        Assert.Equal("Failed", result.Status);
+        Assert.Equal("local-secret-transfer-precondition-invalid", result.DiagnosticCode);
+        Assert.False(result.Retryable);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_UnsupportedWriteMapsToAValueSafeFailure()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var coordinator = new LocalSecretsTransferCoordinator(Path.Join(temp.Path, "transfer-state"));
+        var (_, row) = CreateCoordinatorPlan(temp, context, coordinator);
+
+        var result = SecretPromotionWorkflow.MapLocalWriteResult(row, LocalCoordinatorWriteResult.Unsupported());
+
+        Assert.Equal("Failed", result.Status);
+        Assert.Equal("local-secret-transfer-unsupported-store", result.DiagnosticCode);
+        Assert.False(result.Retryable);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_SymbolicLinkStateRootFailsPlanBeforePayloadAccess()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var stateTarget = Directory.CreateDirectory(Path.Join(temp.Path, "transfer-state-target")).FullName;
+        if (!TryCreateDirectorySymlink(stateRoot, stateTarget))
+        {
+            throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
+        }
+
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var workflow = new SecretPromotionWorkflow(
+            new FakeGoogleFactory(google),
+            null,
+            new LocalSecretsTransferCoordinator(stateRoot));
+
+        var planned = workflow.CreatePlan(new SecretPromotionPlanRequest(
+            configPath,
+            "staging-to-local",
+            Path.Join(temp.Path, "plan.json"),
+            false,
+            TimeSpan.FromMinutes(10),
+            context));
+
+        Assert.False(planned.Summary.Succeeded);
+        Assert.Equal("local-secret-transfer-state-root-unsafe", Assert.Single(planned.Summary.Rows).DiagnosticCode);
+        Assert.Equal(0, google.AccessCalls);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_CustomStoreIsRejectedWithoutPayloadAccess()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var context = CreateContext(new MetadataIncapableStore());
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var workflow = CreateV2Workflow(google, temp.Path);
+
+        var planned = workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", Path.Join(temp.Path, "plan.json"), false, TimeSpan.FromMinutes(10), context));
+
+        Assert.False(planned.Summary.Succeeded);
+        Assert.Equal("local-secret-transfer-unsupported-store", Assert.Single(planned.Summary.Rows).DiagnosticCode);
+        Assert.Equal(0, google.AccessCalls);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_RejectsVersionAliasesBeforeAPlanCanBeCreated()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var context = CreateContext(new InMemoryAppSurfaceLocalSecretStore());
+        var configPath = temp.WriteFile(
+            "transfer.json",
+            GoogleToLocalV2Configuration().Replace("/versions/7", "/versions/latest", StringComparison.Ordinal));
+        var workflow = CreateV2Workflow(new FakeGoogleClient(), temp.Path);
+
+        var exception = Assert.Throws<CommandException>(() => workflow.CreatePlan(new SecretPromotionPlanRequest(
+            configPath,
+            "staging-to-local",
+            Path.Join(temp.Path, "plan.json"),
+            false,
+            TimeSpan.FromMinutes(10),
+            context)));
+
+        Assert.Contains("explicit numeric version", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GoogleToLocalV2_OrdinaryMutationClearsCommittedAttestationBeforeReplacementPlanning()
+    {
+        using var temp = TestTempDirectory.Create("appsurface-secret-transfer-");
+        var stateRoot = Path.Join(temp.Path, "transfer-state");
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var context = CreateContext(store);
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var initialPlanPath = Path.Join(temp.Path, "initial.plan.json");
+        var replacementPlanPath = Path.Join(temp.Path, "replacement.plan.json");
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-transfer-secret");
+        var workflow = new SecretPromotionWorkflow(
+            new FakeGoogleFactory(google),
+            null,
+            new LocalSecretsTransferCoordinator(stateRoot));
+        workflow.CreatePlan(new SecretPromotionPlanRequest(configPath, "staging-to-local", initialPlanPath, false, TimeSpan.FromMinutes(10), context));
+        workflow.Apply(new SecretPromotionApplyRequest(configPath, initialPlanPath, true, null, null, null, context));
+        var identity = Normalize(context, "Stripe:ApiKey");
+        var mutation = new LocalSecretsTransferCoordinator(stateRoot).InvalidateBeforeMutation(
+            store,
+            identity,
+            () => store.Set(identity, "sentinel-manual-secret"));
+
+        var replacement = workflow.CreatePlan(new SecretPromotionPlanRequest(
+            configPath,
+            "staging-to-local",
+            replacementPlanPath,
+            true,
+            TimeSpan.FromMinutes(10),
+            context));
+
+        Assert.Equal(LocalSecretResultStatus.Found, mutation.Status);
+        Assert.False(replacement.Summary.Succeeded);
+        Assert.Equal("local-secret-transfer-unattested-destination", Assert.Single(replacement.Summary.Rows).DiagnosticCode);
+        Assert.Equal("sentinel-manual-secret", store.Get(identity).Value);
     }
 
     [Theory]
@@ -1547,8 +3004,115 @@ public sealed class SecretPromotionWorkflowTests
     private static SecretsCommandContext CreateContext(IAppSurfaceLocalSecretStore store) =>
         new(new AppSurfaceLocalSecretIdentityNormalizer(), store, "AppSurfaceApp", "Development", null);
 
+    private static SecretPromotionWorkflow CreateV2Workflow(FakeGoogleClient google, string temporaryRoot) =>
+        new(new FakeGoogleFactory(google), null, new LocalSecretsTransferCoordinator(Path.Join(temporaryRoot, "transfer-state")));
+
+    private static SecretPromotionWorkflow CreateV2Workflow(
+        FakeGoogleClient google,
+        string temporaryRoot,
+        LocalSecretsTransferCoordinatorTestHooks hooks) =>
+        new(
+            new FakeGoogleFactory(google),
+            null,
+            new LocalSecretsTransferCoordinator(Path.Join(temporaryRoot, "transfer-state"), hooks));
+
+    private static FakeGoogleClient CreateGoogleWithPinnedSource()
+    {
+        var google = new FakeGoogleClient();
+        google.Versions["projects/staging/secrets/stripe-api-key/versions/7"] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        return google;
+    }
+
+    private static string CoordinatorJournalPath(string stateRoot, AppSurfaceLocalSecretIdentity identity)
+    {
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(identity.StorageName))).ToLowerInvariant();
+        return Path.Join(stateRoot, $"{hash}.json");
+    }
+
+    private static void PrepareCoordinatorStateRoot(
+        string stateRoot,
+        IAppSurfaceLocalSecretStore store,
+        AppSurfaceLocalSecretIdentity identity) =>
+        Assert.Equal(
+            LocalCoordinatorPreconditionKind.Missing,
+            new LocalSecretsTransferCoordinator(stateRoot).CapturePrecondition(identity, store, replace: false).Kind);
+
+    private static (SecretPromotionPlanArtifact Plan, SecretPromotionPlanRow Row) CreateCoordinatorPlan(
+        TestTempDirectory temp,
+        SecretsCommandContext context,
+        LocalSecretsTransferCoordinator coordinator)
+    {
+        var configPath = temp.WriteFile("transfer.json", GoogleToLocalV2Configuration());
+        var planPath = Path.Join(temp.Path, "plan.json");
+        var workflow = new SecretPromotionWorkflow(new FakeGoogleFactory(CreateGoogleWithPinnedSource()), null, coordinator);
+
+        var planned = workflow.CreatePlan(new SecretPromotionPlanRequest(
+            configPath,
+            "staging-to-local",
+            planPath,
+            false,
+            TimeSpan.FromMinutes(10),
+            context));
+        Assert.True(planned.Summary.Succeeded, JsonSerializer.Serialize(planned.Summary));
+        var plan = JsonSerializer.Deserialize<SecretPromotionPlanArtifact>(File.ReadAllText(planPath), SecretPromotionWorkflow.JsonOptions)!;
+
+        return (plan, Assert.Single(plan.Rows));
+    }
+
+    private static void WritePreparedCoordinatorJournal(
+        string stateRoot,
+        SecretPromotionPlanArtifact plan,
+        SecretPromotionPlanRow row,
+        AppSurfaceLocalSecretIdentity identity)
+    {
+        var prepared = new LocalTransferJournal(
+            1,
+            LocalTransferJournalState.Prepared,
+            "0123456789abcdef0123456789abcdef",
+            plan.PlanIdentity,
+            row.SourceResource!,
+            identity.StorageName,
+            null);
+        File.WriteAllText(
+            CoordinatorJournalPath(stateRoot, identity),
+            JsonSerializer.Serialize(prepared, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+    }
+
+    private static AppSurfaceLocalSecretResult StoreFailure(string code) =>
+        new(
+            LocalSecretResultStatus.ProviderFailed,
+            null,
+            new AppSurfaceLocalSecretDiagnostic(code, "Test failure.", "Test cause.", "Test fix.", "test", retryable: true),
+            "test-store");
+
     private static AppSurfaceLocalSecretIdentity Normalize(SecretsCommandContext context, string key) =>
         context.Normalizer.Normalize(context.ApplicationName, context.Environment, context.KeyPrefix, key).Identity!;
+
+    private static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryCreateFileSymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            File.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
 
     private static string LocalToGoogleConfiguration() =>
         """
@@ -1636,6 +3200,51 @@ public sealed class SecretPromotionWorkflowTests
         }
         """;
 
+    private static string GoogleToLocalV2Configuration() =>
+        """
+        {
+          "version": 2,
+          "endpoints": [
+            { "name": "staging", "provider": "google", "environment": "staging", "credential": { "mode": "applicationDefault" } }
+          ],
+          "jobs": [
+            {
+              "name": "staging-to-local",
+              "source": "staging",
+              "destination": "local",
+              "rows": [
+                { "key": "Stripe:ApiKey", "source": "projects/staging/secrets/stripe-api-key/versions/7" }
+              ]
+            }
+          ]
+        }
+        """;
+
+    private static string GoogleToGoogleNonProductionAliasConfiguration() =>
+        """
+        {
+          "version": 1,
+          "endpoints": [
+            { "name": "staging", "provider": "google", "environment": "staging", "credential": { "mode": "applicationDefault" } },
+            { "name": "testing", "provider": "google", "environment": "testing", "credential": { "mode": "applicationDefault" } }
+          ],
+          "jobs": [
+            {
+              "name": "staging-to-testing",
+              "source": "staging",
+              "destination": "testing",
+              "rows": [
+                {
+                  "key": "Stripe:ApiKey",
+                  "source": "projects/staging/secrets/stripe-api-key/versions/latest",
+                  "destination": "projects/testing/secrets/stripe-api-key"
+                }
+              ]
+            }
+          ]
+        }
+        """;
+
     private static string ProductionToStagingConfiguration() =>
         """
         {
@@ -1704,6 +3313,7 @@ public sealed class SecretPromotionWorkflowTests
         public int SecretProbeCalls { get; private set; }
         public AppSurfaceGoogleSecretWriteResult? WriteOverride { get; set; }
         public AppSurfaceGoogleSecretAccessResult? AccessOverride { get; set; }
+        public AppSurfaceGoogleSecretProbeResult? ProbeVersionOverride { get; set; }
 
         public AppSurfaceGoogleSecretProbeResult ProbeSecret(string secretResourceName, TimeSpan timeout)
         {
@@ -1714,9 +3324,10 @@ public sealed class SecretPromotionWorkflowTests
         }
 
         public AppSurfaceGoogleSecretProbeResult ProbeSecretVersion(string versionResourceName, TimeSpan timeout) =>
-            Versions.ContainsKey(versionResourceName) || WrittenVersions.Contains(versionResourceName)
+            ProbeVersionOverride ??
+            (Versions.ContainsKey(versionResourceName) || WrittenVersions.Contains(versionResourceName)
                 ? AppSurfaceGoogleSecretProbeResult.Ready(versionResourceName)
-                : AppSurfaceGoogleSecretProbeResult.Failed(GoogleSecretManagerTransferStatus.Missing, versionResourceName, Diagnostic());
+                : AppSurfaceGoogleSecretProbeResult.Failed(GoogleSecretManagerTransferStatus.Missing, versionResourceName, Diagnostic()));
 
         public AppSurfaceGoogleSecretAccessResult AccessSecretVersion(string versionResourceName, TimeSpan timeout)
         {

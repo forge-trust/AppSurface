@@ -9,7 +9,7 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 public sealed class DurableSchemaContractTests
 {
     [Fact]
-    public void MigrationCatalog_IsExactlyFiveOrderedChecksummedResources()
+    public void MigrationCatalog_IsExactlySixOrderedChecksummedResources()
     {
         var migrations = DurablePostgreSqlMigrationCatalog.Load();
 
@@ -91,13 +91,26 @@ public sealed class DurableSchemaContractTests
             fifth =>
             {
                 Assert.Equal(5, fifth.Version);
-                Assert.Equal("flow_trace_context", fifth.Name);
+                Assert.Equal("runtime_heartbeat", fifth.Name);
                 Assert.Equal(64, fifth.Sha256.Length);
-                Assert.Contains("flow_trace_context", fifth.Sql, StringComparison.Ordinal);
-                Assert.Contains("trace_context_id uuid PRIMARY KEY", fifth.Sql, StringComparison.Ordinal);
-                Assert.Contains("UNIQUE (scope_id, trace_context_id)", fifth.Sql, StringComparison.Ordinal);
-                Assert.Contains("flow_trace_context_scope_isolation", fifth.Sql, StringComparison.Ordinal);
-                Assert.Contains("evaluation_committed", fifth.Sql, StringComparison.Ordinal);
+                Assert.Contains("runtime_heartbeat", fifth.Sql, StringComparison.Ordinal);
+                Assert.Contains("worker_instance_id uuid NOT NULL", fifth.Sql, StringComparison.Ordinal);
+                Assert.Contains("runtime_epoch uuid NOT NULL", fifth.Sql, StringComparison.Ordinal);
+                Assert.Contains("FORCE ROW LEVEL SECURITY", fifth.Sql, StringComparison.Ordinal);
+                Assert.Contains("runtime_due_dispatch_health", fifth.Sql, StringComparison.Ordinal);
+                Assert.Contains("SECURITY DEFINER", fifth.Sql, StringComparison.Ordinal);
+                Assert.DoesNotContain("scope_id", fifth.Sql, StringComparison.Ordinal);
+            },
+            sixth =>
+            {
+                Assert.Equal(6, sixth.Version);
+                Assert.Equal("flow_trace_context", sixth.Name);
+                Assert.Equal(64, sixth.Sha256.Length);
+                Assert.Contains("flow_trace_context", sixth.Sql, StringComparison.Ordinal);
+                Assert.Contains("trace_context_id uuid PRIMARY KEY", sixth.Sql, StringComparison.Ordinal);
+                Assert.Contains("UNIQUE (scope_id, trace_context_id)", sixth.Sql, StringComparison.Ordinal);
+                Assert.Contains("flow_trace_context_scope_isolation", sixth.Sql, StringComparison.Ordinal);
+                Assert.Contains("evaluation_committed", sixth.Sql, StringComparison.Ordinal);
             });
         Assert.Equal(migrations.Count, DurablePostgreSqlMigrationCatalog.RequiredVersion);
         Assert.Equal(migrations.Count, PostgreSqlDurableRuntimeSchemaManager.RequiredVersion);
@@ -166,16 +179,20 @@ public sealed class DurableSchemaContractTests
             < script.IndexOf("0004_schedule_protocol", StringComparison.Ordinal));
         Assert.True(
             script.IndexOf("0004_schedule_protocol", StringComparison.Ordinal)
-            < script.IndexOf("0005_flow_trace_context", StringComparison.Ordinal));
+            < script.IndexOf("0005_runtime_heartbeat", StringComparison.Ordinal));
+        Assert.True(
+            script.IndexOf("0005_runtime_heartbeat", StringComparison.Ordinal)
+            < script.IndexOf("0006_flow_trace_context", StringComparison.Ordinal));
         Assert.Contains("pg_advisory_lock", script, StringComparison.Ordinal);
         Assert.DoesNotContain("0001_work_shared", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0002_forced_rls", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0003_flow_protocol", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0004_schedule_protocol", pendingOnly, StringComparison.Ordinal);
-        Assert.Contains("0005_flow_trace_context", pendingOnly, StringComparison.Ordinal);
+        Assert.Contains("0005_runtime_heartbeat", pendingOnly, StringComparison.Ordinal);
+        Assert.Contains("0006_flow_trace_context", pendingOnly, StringComparison.Ordinal);
         Assert.DoesNotContain("-- Migration", current, StringComparison.Ordinal);
         Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(-1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(6));
+        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(7));
     }
 
     [Theory]
@@ -366,7 +383,7 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("pg_catalog.pg_policy", recipe, StringComparison.Ordinal);
         Assert.Contains("pg_catalog.pg_get_expr", recipe, StringComparison.Ordinal);
         Assert.Contains(
-            "ALTER POLICY flow_dispatch_global_discovery ON appsurface_durable.flow_dispatch TO %I",
+            "ALTER POLICY flow_dispatch_global_discovery ON appsurface_durable.flow_dispatch TO %I, %I",
             recipe,
             StringComparison.Ordinal);
         Assert.Contains("flow_dispatch_runtime_scope_select", recipe, StringComparison.Ordinal);
@@ -391,7 +408,15 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("WITH GRANT OPTION", recipe, StringComparison.Ordinal);
         Assert.DoesNotContain("\\quit", recipe, StringComparison.Ordinal);
         Assert.Contains("format('ALTER SCHEMA appsurface_durable OWNER TO %I'", recipe, StringComparison.Ordinal);
-        Assert.Contains("appsurface_durable.store_metadata, appsurface_durable.schema_migration", recipe, StringComparison.Ordinal);
+        Assert.Contains(
+            "appsurface_durable.store_metadata, appsurface_durable.schema_migration, appsurface_durable.runtime_heartbeat",
+            recipe,
+            StringComparison.Ordinal);
+        Assert.Contains("runtime_heartbeat_runtime_role", recipe, StringComparison.Ordinal);
+        Assert.Contains(
+            "runtime_due_dispatch_health(integer)'::pg_catalog.regprocedure",
+            recipe,
+            StringComparison.Ordinal);
         Assert.Contains("appsurface_durable.scope_history", recipe, StringComparison.Ordinal);
         Assert.Contains("appsurface_durable.work_operator_command", recipe, StringComparison.Ordinal);
         Assert.Contains(
@@ -420,6 +445,10 @@ public sealed class DurableSchemaContractTests
         Assert.True(grantScopedUpdate > revokeBroadUpdate);
         Assert.Contains(
             "GRANT UPDATE (due_at, state, expected_revision, updated_at) ON appsurface_durable.dispatch",
+            recipe,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "GRANT INSERT, UPDATE (worker_instance_id, runtime_epoch, hosted_surfaces, started_at, last_heartbeat_at, last_successful_sweep_at, draining, pass_active",
             recipe,
             StringComparison.Ordinal);
         Assert.Contains(

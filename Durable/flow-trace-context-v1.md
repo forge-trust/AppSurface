@@ -78,7 +78,7 @@ Run the reference proof with `./Durable/verify-postgresql.sh --quick --flow`. Fo
 
 ## Deployment order and retention
 
-1. Apply `0004_schedule_protocol.sql`, then the reviewed forward-only `0005_flow_trace_context.sql` migration with the migration-owner connection. Never rename or reorder an applied migration.
+1. Apply `0004_schedule_protocol.sql`, then `0005_runtime_heartbeat.sql`, then the reviewed forward-only `0006_flow_trace_context.sql` migration with the migration-owner connection. Never rename or reorder an applied migration.
 2. Re-run [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) after both migrations so only the scoped runtime can read or write trace metadata; the global dispatcher has no access.
 3. Deploy trace-aware binaries. Older supported binaries keep null trace pointers; a later trace-aware rollout interprets those rows as `context.absent` and never backfills.
 
