@@ -112,6 +112,21 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
     }
 
     [Fact]
+    public void Registration_RejectsSharedDispatcherAndRuntimeDataSource()
+    {
+        using var dataSource = CreateDataSource();
+
+        var exception = Assert.Throws<ArgumentException>(() => new ServiceCollection().AddAppSurfaceDurablePostgreSql(
+            dataSource,
+            dataSource,
+            new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+            new PostgreSqlDurableScheduleOptions("durable_runtime")));
+
+        Assert.Equal("runtimeDataSource", exception.ParamName);
+        Assert.Contains("must be distinct", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AdmissionGate_RejectsNewPassesAfterShutdownAdmissionCloses()
     {
         var gate = new DurableRuntimeAdmissionGate();

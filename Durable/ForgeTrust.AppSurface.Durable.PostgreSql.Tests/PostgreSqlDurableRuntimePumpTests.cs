@@ -22,7 +22,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             workOptions,
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -72,7 +72,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableFlowRegistration>(flow);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -121,7 +121,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableFlowRegistration>(flow);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -179,7 +179,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<IDurablePayloadCodec>(scheduleCodec);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -228,7 +228,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -291,7 +291,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<IDurablePayloadCodec>(scheduleCodec);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -352,7 +352,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<IDurablePayloadCodec>(scheduleCodec);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface", maximumClockAdvance: TimeSpan.FromTicks(1)),
             options =>
@@ -401,7 +401,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         var services = new ServiceCollection();
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -433,7 +433,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         var services = new ServiceCollection();
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -469,7 +469,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -516,7 +516,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -562,7 +562,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -606,7 +606,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -657,7 +657,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -701,7 +701,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -753,7 +753,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -809,7 +809,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -868,7 +868,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -928,7 +928,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -978,7 +978,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -1037,7 +1037,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -1094,7 +1094,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -1152,7 +1152,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -1195,7 +1195,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -1249,7 +1249,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -1304,7 +1304,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -1357,7 +1357,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableFlowRegistration>(flow);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>
@@ -1405,7 +1405,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
-            database.DataSource,
+            database.CreateDataSource(),
             new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             options =>

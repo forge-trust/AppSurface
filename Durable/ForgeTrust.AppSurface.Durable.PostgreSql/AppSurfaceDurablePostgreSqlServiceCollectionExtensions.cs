@@ -21,7 +21,9 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
     /// <param name="configure">Optional process-local activation settings.</param>
     /// <returns>A builder that can explicitly add continuous host activation.</returns>
     /// <remarks>
-    /// The supplied roles must remain distinct, non-owner, and free of <c>BYPASSRLS</c>; see the
+    /// The supplied data sources must be distinct and configured with roles that are non-owner and free of
+    /// <c>BYPASSRLS</c>. The identity check prevents reusing one data source for both roles, but cannot validate
+    /// the database credentials; see the
     /// <see href="https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql">PostgreSQL role recipe</see>.
     /// This method performs no network I/O or DDL. Apply migrations with a separate migration-owner data source
     /// through <see cref="IDurableRuntimeSchemaManager"/> before a worker is started.
@@ -39,6 +41,13 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(runtimeDataSource);
         ArgumentNullException.ThrowIfNull(workOptions);
         ArgumentNullException.ThrowIfNull(scheduleOptions);
+        if (ReferenceEquals(dispatcherDataSource, runtimeDataSource))
+        {
+            throw new ArgumentException(
+                "The dispatcher and runtime data sources must be distinct and configured for their separate durable roles.",
+                nameof(runtimeDataSource));
+        }
+
         if (services.Any(static descriptor => descriptor.ServiceType == typeof(PostgreSqlDurableRuntimeRegistration)))
         {
             throw new InvalidOperationException(
