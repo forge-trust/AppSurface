@@ -162,9 +162,9 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         var retry = await retryManager.ApplyAsync();
         var compatible = await retryManager.GetStatusAsync();
-        Assert.Equal([3, 4, 5], retry.AppliedVersions);
+        Assert.Equal([3, 4, 5, 6], retry.AppliedVersions);
         Assert.True(compatible.IsCompatible);
-        Assert.Equal([1, 2, 3, 4, 5], compatible.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6], compatible.AppliedVersions);
     }
 
     [Fact]
@@ -794,7 +794,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             seedFlowDispatch.Parameters.AddWithValue("trace_b", Guid.NewGuid());
             seedFlowDispatch.Parameters.AddWithValue("token_a", Guid.NewGuid());
             seedFlowDispatch.Parameters.AddWithValue("token_b", Guid.NewGuid());
-            Assert.Equal(11, await seedFlowDispatch.ExecuteNonQueryAsync());
+            Assert.Equal(13, await seedFlowDispatch.ExecuteNonQueryAsync());
         }
 
         var dispatcherConnectionString = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
@@ -1109,12 +1109,12 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var results = await Task.WhenAll(first.ApplyAsync().AsTask(), second.ApplyAsync().AsTask())
             .WaitAsync(TimeSpan.FromSeconds(30));
 
-        Assert.Equal([1, 2, 3, 4, 5], results.SelectMany(result => result.AppliedVersions).Order().ToArray());
-        Assert.Contains(results, result => result.AppliedVersions.SequenceEqual([1, 2, 3, 4, 5]));
+        Assert.Equal([1, 2, 3, 4, 5, 6], results.SelectMany(result => result.AppliedVersions).Order().ToArray());
+        Assert.Contains(results, result => result.AppliedVersions.SequenceEqual([1, 2, 3, 4, 5, 6]));
         Assert.Contains(results, result => result.AppliedVersions.Count == 0);
         await using var count = database.DataSource.CreateCommand(
             "SELECT count(*) FROM appsurface_durable.schema_migration;");
-        Assert.Equal(5, (long)(await count.ExecuteScalarAsync())!);
+        Assert.Equal(6, (long)(await count.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -1140,7 +1140,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2, 3, 4, 5], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6], applied.AppliedVersions);
     }
 
     [Fact]
@@ -1205,7 +1205,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2, 3, 4, 5], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6], applied.AppliedVersions);
     }
 
     [Fact]
