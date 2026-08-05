@@ -16,6 +16,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.DoesNotContain("\n  --include ", script, StringComparison.Ordinal);
         Assert.DoesNotContain("\n  --exclude ", script, StringComparison.Ordinal);
         Assert.Contains("--exclusive-test-project ForgeTrust.AppSurface.Config.Tests.csproj", script, StringComparison.Ordinal);
+        Assert.Contains("--exclusive-test-project AuthAspNetCoreDevAuthExample.Tests.csproj", script, StringComparison.Ordinal);
         Assert.Contains("--exclusive-test-project AuthWebRazorWireProofExample.Tests.csproj", script, StringComparison.Ordinal);
         Assert.Contains("--exclusive-test-project ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj", script, StringComparison.Ordinal);
         Assert.Contains("--exclusive-test-project ForgeTrust.RazorWire.Cli.Tests.csproj", script, StringComparison.Ordinal);
@@ -198,7 +199,7 @@ public sealed class CoverageSolutionScriptTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains(
-            "--exclusive-test-project\nForgeTrust.AppSurface.Config.Tests.csproj\n--exclusive-test-project\nAuthWebRazorWireProofExample.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj\n--exclusive-test-project\nForgeTrust.RazorWire.Cli.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Web.Tailwind.Tests.csproj",
+            "--exclusive-test-project\nForgeTrust.AppSurface.Config.Tests.csproj\n--exclusive-test-project\nAuthAspNetCoreDevAuthExample.Tests.csproj\n--exclusive-test-project\nAuthWebRazorWireProofExample.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj\n--exclusive-test-project\nForgeTrust.RazorWire.Cli.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Web.Tailwind.Tests.csproj",
             result.DotnetInvocations,
             StringComparison.Ordinal);
     }
