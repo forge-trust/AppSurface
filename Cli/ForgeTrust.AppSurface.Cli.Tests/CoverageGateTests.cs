@@ -785,6 +785,30 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_RejectsPatchLineModeWithoutPatchSource()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var command = new CoverageGateCommand
+        {
+            CoveragePath = coverage,
+            OutputDirectory = temp.Path,
+            PatchLineModeOption = "codecov",
+            NoGithubSummary = true,
+        };
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV018", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--patch-line-mode", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("patch diff source", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ShouldEvaluateSelectedRazorWireProofSourceFromDiffFile()
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-");

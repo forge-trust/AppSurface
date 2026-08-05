@@ -708,7 +708,7 @@ Options:
 - `--diff-label`: Optional display label for the selected patch source in JSON, Markdown, and GitHub summaries.
 - `--repository-root`: Repository root used to normalize Cobertura paths and diff paths. Defaults to the Git worktree root when available, otherwise the current directory.
 - `--min-patch-line`: Minimum changed-line coverage percentage from `0` through `100`. Requires exactly one patch source: `--diff-base`, `--diff-file`, or `--diff-stdin`. Omit it to report changed-line coverage without gating on it.
-- `--patch-line-mode`: Changed-line calculation mode, either `measurable` (the backwards-compatible default) or `codecov`, case-insensitive.
+- `--patch-line-mode`: Changed-line calculation mode, either `measurable` (the backwards-compatible default) or `codecov`, case-insensitive. Requires exactly one patch source.
 - `--min-patch-branch`: Minimum changed-branch coverage percentage from `0` through `100`. Requires exactly one patch source. Omit it to report changed-branch coverage without gating on it.
 - `--output`: Directory for `coverage-gate.json` and `coverage-gate.md`. Defaults to the coverage file directory.
 - `--github-summary`: Append Markdown to `$GITHUB_STEP_SUMMARY` when it is set. Enabled by default.
@@ -739,6 +739,7 @@ Reports are private local artifacts:
     "patchLine": 94.5,
     "patchBranch": 84.5
   },
+  "patchLineMode": "codecov",
   "patchDiffSource": {
     "kind": "git-base",
     "label": "HEAD^1",
@@ -840,6 +841,8 @@ Diagnostics use `ASCOV###` codes so CI logs are searchable:
 | `ASCOV014` | `--diff-stdin` was requested from an interactive terminal. | Pipe or redirect unified diff text, or use `--diff-file`. |
 | `ASCOV015` | A non-empty external diff artifact is not unified diff text. | Download the diff with `Accept: application/vnd.github.diff`, fix the producer, or use `--diff-base`. |
 | `ASCOV016` | Patch source metadata is invalid. | Correct `--diff-label` or `--repository-root`. |
+| `ASCOV017` | `--patch-line-mode` is not `measurable` or `codecov`. | Use `measurable` or `codecov`. |
+| `ASCOV018` | `--patch-line-mode` was supplied without a patch source. | Pass exactly one patch source or remove `--patch-line-mode`. |
 | `ASCOV020` | The gate ran successfully and coverage is below threshold. | Raise coverage or lower the threshold intentionally in source control. |
 
 ### `appsurface export`

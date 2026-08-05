@@ -95,7 +95,7 @@ internal sealed partial class CoverageGateCommand : ICommand
     /// Gets or sets the changed-line coverage calculation mode.
     /// </summary>
     [CommandOption("patch-line-mode", Description = "Changed-line calculation mode: measurable or codecov. Defaults to measurable.")]
-    public string PatchLineModeOption { get; set; } = "measurable";
+    public string? PatchLineModeOption { get; set; }
 
     /// <summary>
     /// Gets or sets the minimum changed-branch coverage percentage from 0 to 100.
@@ -210,6 +210,11 @@ internal sealed partial class CoverageGateCommand : ICommand
             throw new CommandException("ASCOV016 --diff-label requires a patch diff source.");
         }
 
+        if (diffSourceCount == 0 && PatchLineModeOption is not null)
+        {
+            throw new CommandException("ASCOV018 --patch-line-mode requires a patch diff source.");
+        }
+
         var coveragePath = GetFullPathOrThrow(
             CoveragePath.Trim(),
             "ASCOV001 --coverage must point to a Cobertura XML file.");
@@ -240,7 +245,8 @@ internal sealed partial class CoverageGateCommand : ICommand
 
     private PatchLineMode ParsePatchLineMode()
     {
-        if (string.Equals(PatchLineModeOption, "measurable", StringComparison.OrdinalIgnoreCase))
+        if (PatchLineModeOption is null
+            || string.Equals(PatchLineModeOption, "measurable", StringComparison.OrdinalIgnoreCase))
         {
             return PatchLineMode.Measurable;
         }
