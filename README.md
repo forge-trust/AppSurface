@@ -189,10 +189,12 @@ Run the repository's full AppSurface coverage-and-gate lane:
 ./scripts/coverage-solution.sh
 ```
 
-For a local checkout, the default patch comparison is `origin/main`. The CI workflow overrides that
-value with `HEAD^1` for its pull-request merge checkout, so its patch gate evaluates exactly the
-tested merge tree. Set `COVERAGE_GATE_DIFF_BASE=` to run only the aggregate gate, as CI does for
-baseline builds.
+For a local checkout, the default patch comparison is `origin/main`. The coverage wrapper uses
+[`--patch-line-mode codecov`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate)
+so the local changed-line gate handles partial conditions the same way as Codecov. The CI workflow
+overrides the comparison value with `HEAD^1` for its pull-request merge checkout, so its patch gate
+evaluates exactly the tested merge tree. Set `COVERAGE_GATE_DIFF_BASE=` to run only the aggregate
+gate, as CI does for baseline builds.
 
 This command:
 - Runs each solution test project.
@@ -212,8 +214,8 @@ This command:
 - Gates at 95% line coverage and 85% branch coverage, plus 95% line and 85% branch coverage for
   the selected patch when a diff base is configured.
 - Keeps Codecov's patch status aligned with the repository's 95% patch-line gate through
-  [`codecov.yml`](./codecov.yml), with a 0.5-point tolerance for Codecov treating partially
-  covered lines as misses; the local gate remains authoritative for patch branches.
+  [`codecov.yml`](./codecov.yml) and `--patch-line-mode codecov`, with a 0.5-point tolerance; the
+  local gate remains authoritative for patch branches.
 
 Private package-consuming repositories should use the public CLI runner instead of
 this repository's no-argument script. Start with this copy-pasteable path:
