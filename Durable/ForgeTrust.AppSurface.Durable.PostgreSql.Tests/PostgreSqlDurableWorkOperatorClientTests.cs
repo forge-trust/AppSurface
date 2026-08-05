@@ -1710,6 +1710,49 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         Assert.Equal(DurableProblemCodes.RecoveryEpochRequired, staleEpoch.Problem!.Code);
     }
 
+    [Fact]
+    public async Task ReconcileAsync_DisposesAsyncOnlyScopedServices()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var asyncDisposed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var registration = new OperatorRegistration(
+            "operator.async-scope",
+            DurableProviderSafety.ReconcileBeforeRetry,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.NotApplied, null),
+            onReconcile: services => _ = services.GetRequiredService<AsyncOnlyScopedService>());
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        await using var services = new ServiceCollection()
+            .AddScoped(_ => new AsyncOnlyScopedService(asyncDisposed))
+            .BuildServiceProvider();
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource,
+            registry,
+            services.GetRequiredService<IServiceScopeFactory>(),
+            epoch);
+        var scope = new DurableScopeId("operator-async-scope");
+        var accepted = await AcceptAndPermitAsync(client, database.DataSource, epoch, registration, scope, "async-scope");
+        var revision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            "suspended_reconciliation_required",
+            "ambiguous_external_outcome");
+
+        var result = await operators.ReconcileAsync(new DurableWorkReconcileRequest(
+            scope,
+            accepted.WorkId,
+            new DurableCommandId("operator-async-scope-command"),
+            "operator-test",
+            "provider-proof",
+            revision));
+
+        Assert.True(result.IsSuccess);
+        Assert.True(await asyncDisposed.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
     [Theory]
     [InlineData("missing", DurableProblemCodes.WorkNotFound)]
     [InlineData("stale", DurableProblemCodes.WorkRevisionConflict)]
@@ -2422,7 +2465,8 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         DurableEncodedEffectReconciliation proof,
         TaskCompletionSource<bool>? providerEntered = null,
         TaskCompletionSource<bool>? releaseProvider = null,
-        DurableDataClassification resultClassification = DurableDataClassification.Operational) : DurableWorkRegistration(
+        DurableDataClassification resultClassification = DurableDataClassification.Operational,
+        Action<IServiceProvider>? onReconcile = null) : DurableWorkRegistration(
             workName,
             "v1",
             safety,
@@ -2451,6 +2495,7 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         {
             ReconciliationCount++;
             ReconciliationServices = services;
+            onReconcile?.Invoke(services);
             providerEntered?.TrySetResult(true);
             if (releaseProvider is not null)
             {
@@ -2458,6 +2503,15 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
             }
 
             return proof;
+        }
+    }
+
+    private sealed class AsyncOnlyScopedService(TaskCompletionSource<bool> disposed) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync()
+        {
+            disposed.TrySetResult(true);
+            return ValueTask.CompletedTask;
         }
     }
 

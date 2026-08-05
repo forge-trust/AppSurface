@@ -1009,17 +1009,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.True(accepted.IsSuccess);
 
         var delayedStore = new DelayedLeaseRenewalWorkStore(database.DataSource, epoch);
-        var pump = new PostgreSqlDurableRuntimePump(
-            provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>(),
-            provider.GetRequiredService<IDurableRuntimeSchemaManager>(),
-            provider.GetRequiredService<PostgreSqlDurableRuntimeHealth>(),
-            delayedStore,
-            provider.GetRequiredService<PostgreSqlDurableFlowProcessor>(),
-            provider.GetRequiredService<PostgreSqlDurableScheduleProcessor>(),
-            provider.GetRequiredService<IDurableWorkRegistry>(),
-            provider.GetRequiredService<IServiceScopeFactory>(),
-            provider.GetRequiredService<IDurableRuntimeExecutionBoundary>(),
-            provider.GetRequiredService<DurableRuntimeAdmissionGate>());
+        var pump = CreatePump(provider, delayedStore);
         var running = pump.RunOnceAsync(new DurableRuntimePumpRequest(
             maximumItems: 1,
             surfaces: DurableRuntimeSurface.Work)).AsTask();

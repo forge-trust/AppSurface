@@ -465,6 +465,8 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
 
         await hosted.StopAsync(CancellationToken.None);
         Assert.Equal(DurableRuntimeHealthState.Draining, (await health.GetAsync()).State);
+        hosted.Dispose();
+        hosted.Dispose();
     }
 
     [Fact]

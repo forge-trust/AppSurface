@@ -135,7 +135,7 @@ five-character SQLSTATE. Never log or serialize inner message text, detail, hint
 
 | Code | Problem | Typical cause | Safe action |
 |---|---|---|---|
-| `ASDUR103` | Transient runtime failure | PostgreSQL transport or timeout blocks a bounded runtime pass | Retry after the configured bounded delay and inspect only safe infrastructure telemetry. |
+| `ASDUR103` | Store unavailable | PostgreSQL transport or timeout blocks a bounded runtime pass | Retry after the configured bounded delay and inspect only safe infrastructure telemetry. |
 | `ASDUR406` | Wake listener retry | The advisory wake-listener connection disconnected or timed out | Polling remains authoritative; retry the listener after the configured bounded delay and alert separately from pass failures. |
 | `ASDUR404` | Activator stale | No current heartbeat or successful sweep inside `HeartbeatStaleAfter` | Check that exactly one compatible host or external activator is running, then inspect typed health and role/schema prerequisites. |
 | `ASDUR405` | Worker identity conflict | Another live process owns the configured `WorkerId`, an old generation updated after takeover, or the same runtime instance already has an active pass | Assign a unique worker ID per replica, wait for stale/drain takeover rules, avoid overlapping local activation, and never edit the heartbeat row manually. |

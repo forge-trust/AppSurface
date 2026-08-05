@@ -32,6 +32,7 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
     private readonly CancellationTokenSource _listenerCancellation = new();
     private CancellationTokenRegistration _stoppingRegistration;
     private CancellationTokenSource? _activePassCancellation;
+    private int _disposed;
     private DateTimeOffset? _shutdownDeadlineUtc;
     private Task? _drainTask;
     private Task? _listenerTask;
@@ -100,10 +101,16 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
 
     public override void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         _stoppingRegistration.Dispose();
         _listenerCancellation.Cancel();
         _wakeSignals.Writer.TryComplete();
         base.Dispose();
+        _listenerCancellation.Dispose();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

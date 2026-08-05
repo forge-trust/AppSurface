@@ -852,6 +852,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await AssertDueDispatchHealthAsync(runtimeConnection, 1, 1);
         await AssertDueDispatchHealthAsync(runtimeConnection, 2, 2);
         await AssertDueDispatchHealthAsync(runtimeConnection, 4, 1);
+        await AssertDueDispatchHealthAsync(runtimeConnection, 7, 4);
         foreach (var invalidSurfaces in new[] { 0, 8 })
         {
             var invalidMask = await Assert.ThrowsAsync<PostgresException>(async () =>

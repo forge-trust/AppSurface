@@ -63,7 +63,7 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
                 "The requested Work cannot be reconciled by its immutable registration.");
         }
 
-        using var scope = _scopeFactory.CreateScope();
+        await using var scope = _scopeFactory.CreateAsyncScope();
         var proof = await DurableProviderWorkAdapter.ReconcileAsync(
             registration,
             scope.ServiceProvider,
