@@ -186,9 +186,16 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             return LocalSecretIndexReadResult.Found([], needsRepair: false);
         }
 
-        if (result.Status != LocalSecretResultStatus.Found || result.Value == null)
+        if (result.Status != LocalSecretResultStatus.Found)
         {
             return LocalSecretIndexReadResult.Failed(result.Status, result.Diagnostic!);
+        }
+
+        if (result.Value == null)
+        {
+            return LocalSecretIndexReadResult.Failed(
+                LocalSecretResultStatus.ProviderFailed,
+                invalidIndex("The index read reported success without returning index data."));
         }
 
         string?[] indexedKeys;
