@@ -57,7 +57,7 @@ dotnet tool run appsurface --version
 dotnet tool run appsurface docs --repo .
 dotnet tool run appsurface coverage run --solution ./MyApp.slnx --dry-run
 dotnet tool run appsurface coverage run --solution ./MyApp.slnx
-dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --min-patch-branch 85
+dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --patch-line-mode codecov --min-patch-branch 85
 ```
 
 Update the repo-scoped tool version with:
@@ -264,18 +264,18 @@ meant to verify the Linux platform store.
 
 #### `appsurface secrets transfer`
 
-Create a value-free plan for a reviewed source-to-sink job, then revalidate and apply that artifact:
+Create a value-free plan for a reviewed source-to-destination job, then revalidate and apply that artifact:
 
 ```bash
-appsurface secrets transfer plan --config ./secret-promotion.json --job staging-to-production --out ./staging-to-production.plan.json
-appsurface secrets transfer apply --config ./secret-promotion.json --plan ./staging-to-production.plan.json --apply --confirm staging-to-production
+appsurface secrets transfer plan --config ./secret-transfer.json --job staging-to-production --out ./staging-to-production.plan.json
+appsurface secrets transfer apply --config ./secret-transfer.json --plan ./staging-to-production.plan.json --apply --confirm staging-to-production
 ```
 
 The JSON configuration declares named endpoints and exact jobs. `local` is the built-in LocalSecrets endpoint; Google
 endpoints select either `applicationDefault` or a validated `credentialFile`. A job always supplies the logical key and
-the exact remote source version or destination secret parent. This v1 contract supports LocalSecrets sources promoted to
-Google destinations and Google source versions promoted to Google destinations without exposing arbitrary `--from`/`--to`
-flags.
+the exact remote source version or destination secret parent. Version 1 supports LocalSecrets-to-Google and
+Google-to-Google transfer without exposing arbitrary `--from`/`--to` flags. Version 2 adds the deliberate,
+plan-bound Google-to-LocalSecrets direction described below.
 
 `credentialFile` requires an absolute regular-file path with owner-only file permissions. Its parent directories must
 not use symbolic links and must not be writable by group or other users unless the directory uses the sticky bit.
@@ -300,6 +300,74 @@ starts background synchronization. Writes are ordered but cross-secret atomicity
 workflow persists a value-free journal before the first mutation and updates it atomically after each row; the final
 receipt is the durable summary used by `--resume` to skip rows already confirmed as written. A crash can therefore leave
 a partial receipt, and an uncertain Google write is recorded as `IndeterminateWrite` and is never retried automatically.
+
+##### Materialize one pinned Google version locally (v2)
+
+For the complete local-test setup, including IAM prerequisites, guarded replacement, recovery, and runtime posture,
+start with [Materialize a pinned remote secret for local testing](../../Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/materialize-remote-secrets-for-local-testing.md).
+
+Use this direction when you already have Google Secret Manager IAM access and need a reproducible local integration-test
+clone. It does not create Google secrets, change IAM, or display a value. Choose the version number through Google
+Secret Manager metadata—for example, `gcloud secrets versions list db-password`—then use the full numeric resource.
+Version aliases, including `latest`, are rejected for every remote-to-local transfer because the plan must bind one
+immutable source. See Google's [version metadata guide](https://cloud.google.com/secret-manager/docs/view-secret-version)
+for the metadata-only listing workflow.
+
+```json
+{
+  "version": 2,
+  "endpoints": [
+    {
+      "name": "production-gsm",
+      "provider": "google",
+      "environment": "production",
+      "credential": { "mode": "applicationDefault" }
+    }
+  ],
+  "jobs": [
+    {
+      "name": "clone-production-db-password",
+      "source": "production-gsm",
+      "destination": "local",
+      "rows": [
+        {
+          "key": "Database:Password",
+          "source": "projects/my-project/secrets/db-password/versions/42"
+        }
+      ]
+    }
+  ]
+}
+```
+
+The Google source must have `secretmanager.versions.get` for planning and `secretmanager.versions.access` for apply.
+Run `doctor` and use the same local namespace flags for both plan and apply:
+
+```bash
+appsurface secrets doctor --app MyApp --environment Production
+appsurface secrets transfer plan --config ./remote-to-local.json --job clone-production-db-password --app MyApp --environment Production --out ./clone-production-db-password.plan.json
+appsurface secrets transfer apply --config ./remote-to-local.json --plan ./clone-production-db-password.plan.json --app MyApp --environment Production --apply --confirm clone-production-db-password
+```
+
+`plan` performs metadata-only probes. `apply --apply` accesses the pinned value only after every row passes preflight,
+then emits a value-free `CreatedLocalSecret`, `ReplacedLocalSecret`, or `RecoveredLocalSecret` result and receipt. A
+local target is missing by default. An existing target is a `Conflict`; a replacement requires `--replace` at **plan**
+time and exact `--confirm <job>` at apply time, even when the remote source is not production-labelled. Legacy or
+unattested local values must be deleted explicitly and planned again.
+
+The v2 coordinator supports the built-in platform store and file fallback after `doctor` and transfer-state posture
+checks; `InMemoryAppSurfaceLocalSecretStore` is test-only. Custom `IAppSurfaceLocalSecretStore` implementations receive
+the value-safe `local-secret-transfer-unsupported-store` diagnostic in v2.
+
+If the process stops after the local write begins, do not retry it blindly. Run apply with `--resume <receipt>` so
+AppSurface can compare the pinned remote and local values in memory while holding the same per-key lock. Equal values
+commit the prepared transfer; missing, different, unreadable, corrupt, or unsafe state remains `Conflict` or
+`IndeterminateWrite`. Reconcile with `appsurface secrets delete <key>` and a fresh plan when needed. Local deletion
+clears local transfer evidence and never changes the Google Secret Manager version.
+
+`Production` is a valid local namespace label. It does not turn the laptop into a production host. A host application
+that resolves a local namespace other than `Development`, `Local`, or `Dev` must explicitly set
+`LocalSecretsPostureMode.SingleMachineSelfHosted`; the transfer CLI does not make that host configuration.
 
 ### `appsurface coverage run`
 
@@ -326,10 +394,12 @@ dotnet new tool-manifest
 dotnet tool install ForgeTrust.AppSurface.Cli --prerelease
 dotnet tool run appsurface coverage run --solution ./MyApp.slnx --dry-run
 dotnet tool run appsurface coverage run --solution ./MyApp.slnx
-dotnet tool run appsurface coverage gate --min-line 85 --min-branch 75
+dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75
 ```
 
-Use `--dry-run` before the first real CI run to confirm project discovery, exclusive scheduling, and artifact paths without running tests.
+Use `--dry-run` before the first real CI run to confirm project discovery, collector
+capability, exclusive scheduling, and artifact paths without running tests or cleaning
+the output directory.
 
 #### Add Coverlet First
 
@@ -458,7 +528,16 @@ Use this GitHub Actions shape for a private pull request workflow that already h
 - run: dotnet tool restore
 - run: dotnet restore ./MyApp.slnx
 - run: dotnet tool run appsurface coverage run --solution ./MyApp.slnx --configuration Release --no-restore --test-results junit --slow-test-diagnostics
-- run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75 --diff-base HEAD^1 --min-patch-line 85 --min-patch-branch 75
+- name: Gate coverage
+  shell: bash
+  env:
+    COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
+  run: |
+    gate_args=(coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75)
+    if [[ -n "$COVERAGE_GATE_DIFF_BASE" ]]; then
+      gate_args+=(--diff-base "$COVERAGE_GATE_DIFF_BASE" --min-patch-line 85 --min-patch-branch 75)
+    fi
+    dotnet tool run appsurface "${gate_args[@]}"
 - uses: actions/upload-artifact@v4
   if: always()
   with:
@@ -489,7 +568,7 @@ appsurface coverage merge \
   --output ./TestResults/coverage-merged
 ```
 
-Use `coverage merge` when a CI matrix, custom test harness, or non-AppSurface test producer already writes Cobertura files and you only need AppSurface's package-owned fan-in plus `coverage gate` artifacts. Use `coverage run -> coverage gate` for normal package-consuming .NET repositories where AppSurface should discover projects, invoke `dotnet test`, and merge the Coverlet output. In this repository, the default `./scripts/coverage-solution.sh` lane runs that pair with repository thresholds; its legacy grouped and `--merge-only` modes remain coverage-only until the separate coverage-runner cleanup retires them.
+Use `coverage merge` when a CI matrix, custom test harness, or non-AppSurface test producer already writes Cobertura files and you only need AppSurface's package-owned fan-in plus `coverage gate` artifacts. Use `coverage run -> coverage gate` for normal package-consuming .NET repositories where AppSurface should discover projects, invoke `dotnet test`, and merge the Coverlet output. In this repository, the default no-argument `./scripts/coverage-solution.sh` lane runs that pair with repository thresholds; focused selection and shard fan-in always use the public CLI commands above.
 
 The v1 source contract is intentionally narrow. `--source` must point to an existing directory. The command recursively selects files named exactly `coverage.cobertura.xml`, sorts them by ordinal path, validates that each selected file has a Cobertura `<coverage>` root, and prints the discovered count plus the first few relative paths. A single shard is valid. Files named `Cobertura.xml`, arbitrary `*.xml`, or non-Cobertura XML are not accepted by v1; rename or copy producer artifacts to `coverage.cobertura.xml` before merging.
 
@@ -629,6 +708,7 @@ Options:
 - `--diff-label`: Optional display label for the selected patch source in JSON, Markdown, and GitHub summaries.
 - `--repository-root`: Repository root used to normalize Cobertura paths and diff paths. Defaults to the Git worktree root when available, otherwise the current directory.
 - `--min-patch-line`: Minimum changed-line coverage percentage from `0` through `100`. Requires exactly one patch source: `--diff-base`, `--diff-file`, or `--diff-stdin`. Omit it to report changed-line coverage without gating on it.
+- `--patch-line-mode`: Changed-line calculation mode, either `measurable` (the backwards-compatible default) or `codecov`, case-insensitive. Requires exactly one patch source.
 - `--min-patch-branch`: Minimum changed-branch coverage percentage from `0` through `100`. Requires exactly one patch source. Omit it to report changed-branch coverage without gating on it.
 - `--output`: Directory for `coverage-gate.json` and `coverage-gate.md`. Defaults to the coverage file directory.
 - `--github-summary`: Append Markdown to `$GITHUB_STEP_SUMMARY` when it is set. Enabled by default.
@@ -638,7 +718,7 @@ Use the default tolerance to absorb insignificant coverage-report rounding diffe
 
 The command accepts Cobertura root attributes such as `line-rate`, `branch-rate`, `lines-covered`, `lines-valid`, `branches-covered`, and `branches-valid`. XML parsing disables DTD processing and external resolution. Coverage counts must be non-negative, covered counts cannot exceed valid counts, rates must be from `0` through `1`, and zero valid line or branch counts fail with `ASCOV006` because a quality gate with no measurable denominator is misleading.
 
-Patch coverage counts added or modified diff lines, intersects those lines with Cobertura `<class filename>` and `<line number hits>` entries, and reports covered/measurable lines. Changed lines that do not appear in the Cobertura line map are ignored for the denominator, which keeps docs, project files, generated artifacts, and other non-coverable edits from failing the patch gate. Changed-branch coverage uses Cobertura line-level `condition-coverage` counts on those same changed measurable lines, so ordinary changed statements without branch conditions do not inflate the branch denominator. When a diff has no measurable changed lines or no measurable changed branches, the corresponding patch metric reports `100%` and says so explicitly in Markdown. Empty external diff files or stdin are valid empty patches. Non-empty malformed external artifacts, such as HTML login pages or JSON API errors, fail before coverage is evaluated.
+Patch coverage counts added or modified diff lines, intersects those lines with Cobertura `<class filename>` and `<line number hits>` entries, and reports covered/measurable lines. The default `measurable` mode counts a Cobertura line as covered when `hits > 0`, preserving the original local gate behavior. `codecov` mode retains only changed lines present in Cobertura and counts a line as covered when `hits > 0` and it has no branch data or full condition coverage (`covered == valid`); partial condition coverage therefore counts as an uncovered line, matching Codecov's patch-line calculation. Lines absent from Cobertura remain excluded in both modes, including test-only or otherwise non-instrumented modules that Codecov excludes. The patch-line mode affects only the patch line metric; `--min-patch-branch` remains a separate branch-condition metric and still counts changed Cobertura conditions. When a diff has no measurable changed lines or no measurable changed branches, the corresponding patch metric reports `100%` and says so explicitly in Markdown. Empty external diff files or stdin are valid empty patches. Non-empty malformed external artifacts, such as HTML login pages or JSON API errors, fail before coverage is evaluated.
 
 Reports are private local artifacts:
 
@@ -659,6 +739,7 @@ Reports are private local artifacts:
     "patchLine": 94.5,
     "patchBranch": 84.5
   },
+  "patchLineMode": "codecov",
   "patchDiffSource": {
     "kind": "git-base",
     "label": "HEAD^1",
@@ -709,7 +790,16 @@ Use `coverage gate` after `coverage run`, or after any other private coverage wo
 - run: dotnet tool restore
 - run: dotnet restore ./MyApp.slnx
 - run: dotnet tool run appsurface coverage run --solution ./MyApp.slnx --configuration Release --no-restore
-- run: dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base HEAD^1 --min-patch-line 95 --min-patch-branch 85
+- name: Gate coverage
+  shell: bash
+  env:
+    COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
+  run: |
+    gate_args=(coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85)
+    if [[ -n "$COVERAGE_GATE_DIFF_BASE" ]]; then
+      gate_args+=(--diff-base "$COVERAGE_GATE_DIFF_BASE" --min-patch-line 95 --min-patch-branch 85)
+    fi
+    dotnet tool run appsurface "${gate_args[@]}"
 - uses: actions/upload-artifact@v4
   if: always()
   with:
@@ -751,6 +841,8 @@ Diagnostics use `ASCOV###` codes so CI logs are searchable:
 | `ASCOV014` | `--diff-stdin` was requested from an interactive terminal. | Pipe or redirect unified diff text, or use `--diff-file`. |
 | `ASCOV015` | A non-empty external diff artifact is not unified diff text. | Download the diff with `Accept: application/vnd.github.diff`, fix the producer, or use `--diff-base`. |
 | `ASCOV016` | Patch source metadata is invalid. | Correct `--diff-label` or `--repository-root`. |
+| `ASCOV017` | `--patch-line-mode` is not `measurable` or `codecov`. | Use `measurable` or `codecov`. |
+| `ASCOV018` | `--patch-line-mode` was supplied without a patch source. | Pass exactly one patch source or remove `--patch-line-mode`. |
 | `ASCOV020` | The gate ran successfully and coverage is below threshold. | Raise coverage or lower the threshold intentionally in source control. |
 
 ### `appsurface export`

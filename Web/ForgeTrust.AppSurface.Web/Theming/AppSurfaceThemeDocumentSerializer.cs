@@ -28,6 +28,44 @@ public static partial class AppSurfaceThemeDocumentSerializer
     }
 
     /// <summary>
+    /// Creates the System-first document used by the browser-local preference enhancement.
+    /// </summary>
+    /// <param name="resolution">The configured theme-pair resolution whose Light and Dark branches are emitted.</param>
+    /// <returns>
+    /// A document with System, Light, and Dark selectors, or <see cref="AppSurfaceThemeDocument.Empty"/> when the
+    /// resolution is unsafe to render.
+    /// </returns>
+    /// <remarks>
+    /// This method deliberately replaces the configured startup mode with System while retaining the same Light and
+    /// Dark pair. The browser bootstrap can then select an explicit branch without changing the URL or duplicating
+    /// the HTML document. Safety validation is repeated before serialization so an invalid resolution fails closed
+    /// instead of emitting partially trusted markup.
+    /// </remarks>
+    internal static AppSurfaceThemeDocument SerializePreference(AppSurfaceThemeResolution resolution)
+    {
+        ArgumentNullException.ThrowIfNull(resolution);
+
+        var systemResolution = new AppSurfaceThemeResolution(
+            resolution.Id,
+            AppSurfaceThemeMode.System,
+            resolution.Light,
+            resolution.Dark);
+        if (!AppSurfaceThemeRegistry.IsSafeResolution(systemResolution))
+        {
+            return AppSurfaceThemeDocument.Empty;
+        }
+
+        var rootAttributes =
+            $"data-as-theme=\"{HtmlEncoder.Default.Encode(systemResolution.Id.Value)}\" data-as-theme-mode=\"system\" data-as-theme-schema=\"{AppSurfaceThemeDocument.SchemaVersion}\"";
+        return new AppSurfaceThemeDocument(
+            systemResolution.Id.Value,
+            "system",
+            rootAttributes,
+            "color-scheme: light dark;",
+            BuildHeadContent(systemResolution, "light dark", preferenceModes: true));
+    }
+
+    /// <summary>
     /// Attempts to create a deterministic document from a neutral theme resolution.
     /// </summary>
     /// <param name="resolution">The sealed neutral theme resolution.</param>
@@ -93,7 +131,8 @@ public static partial class AppSurfaceThemeDocumentSerializer
 
     private static string BuildHeadContent(
         AppSurfaceThemeResolution resolution,
-        string colorScheme)
+        string colorScheme,
+        bool preferenceModes = false)
     {
         var builder = new StringBuilder();
         builder.Append("<meta name=\"color-scheme\" content=\"");
@@ -101,17 +140,31 @@ public static partial class AppSurfaceThemeDocumentSerializer
         builder.Append("\" />\n");
         builder.Append(StyleOpenTag);
         builder.Append("\n");
-        AppendCriticalCss(builder, resolution);
+        AppendCriticalCss(builder, resolution, preferenceModes);
         builder.Append(StyleCloseTag);
         return builder.ToString();
     }
 
     private static void AppendCriticalCss(
         StringBuilder builder,
-        AppSurfaceThemeResolution resolution)
+        AppSurfaceThemeResolution resolution,
+        bool preferenceModes)
     {
         var selector = $"[data-as-theme=\"{resolution.Id.Value}\"]";
-        if (resolution.Mode == AppSurfaceThemeMode.Dark)
+        if (preferenceModes)
+        {
+            var systemSelector = selector + "[data-as-theme-mode=\"system\"]";
+            var lightSelector = selector + "[data-as-theme-mode=\"light\"]";
+            var darkSelector = selector + "[data-as-theme-mode=\"dark\"]";
+            AppendBranch(builder, systemSelector + ",\n" + lightSelector, resolution.Light);
+            AppendColorScheme(builder, lightSelector, "light");
+            builder.Append("@media (prefers-color-scheme: dark) {\n");
+            AppendBranch(builder, systemSelector, resolution.Dark, indent: "  ");
+            builder.Append("}\n");
+            AppendBranch(builder, darkSelector, resolution.Dark);
+            AppendColorScheme(builder, darkSelector, "dark");
+        }
+        else if (resolution.Mode == AppSurfaceThemeMode.Dark)
         {
             AppendBranch(builder, selector, resolution.Dark);
         }
@@ -193,6 +246,16 @@ public static partial class AppSurfaceThemeDocumentSerializer
         builder.Append(indent);
         builder.Append("  background-color: var(--as-canvas);\n");
         builder.Append(indent);
+        builder.Append("}\n");
+    }
+
+    private static void AppendColorScheme(StringBuilder builder, string selector, string colorScheme)
+    {
+        builder.Append(selector);
+        builder.Append(" {\n");
+        builder.Append("  color-scheme: ");
+        builder.Append(colorScheme);
+        builder.Append(" !important;\n");
         builder.Append("}\n");
     }
 

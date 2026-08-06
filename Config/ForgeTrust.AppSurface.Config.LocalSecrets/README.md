@@ -135,6 +135,28 @@ Google Secret Manager secret, declare a LocalSecrets-to-Google job and run `apps
 `appsurface secrets transfer apply --apply`. The workflow never prints the value and does not create secrets, grant IAM,
 rotate, or disable old Google versions.
 
+### Local integration testing with a production-labelled namespace
+
+An IAM-authorized developer may materialize a pinned remote version into a local namespace named `Production` for a
+local integration-test clone. That namespace remains local routing metadata; it does not authorize a remote operation or
+make the machine a production host. Follow the [remote-to-local transfer guide](docs/materialize-remote-secrets-for-local-testing.md)
+for the reviewed v2 configuration, numeric source-version requirement, value-safe plan/apply commands, and recovery
+runbook.
+
+The runtime provider remains fail-closed by default. A host that resolves the `Production` local namespace must opt in
+deliberately:
+
+```csharp
+services.ConfigureAppSurfaceLocalSecrets(options =>
+{
+    options.Posture = LocalSecretsPostureMode.SingleMachineSelfHosted;
+});
+```
+
+Without this host setting, the existing `local-secret-posture-development-only` diagnostic is expected. The transfer CLI
+does not change host posture. `appsurface secrets delete <key>` removes only the local clone and its local transfer
+attestation; it never deletes, disables, or changes a remote vault version.
+
 ## Metadata-Only Probes
 
 `IAppSurfaceLocalSecretMetadataStore` is the LocalSecrets seam for transfer planning and overwrite checks. It answers
@@ -212,3 +234,4 @@ Guides:
 - [Migrate from .env](docs/migrate-from-dotenv.md)
 - [Use env or key-per-file in CI and containers](docs/use-env-or-key-per-file-in-ci-and-containers.md)
 - [Move to Google Secret Manager](docs/move-to-future-remote-vault.md)
+- [Materialize a pinned Google Secret Manager version for local testing](docs/materialize-remote-secrets-for-local-testing.md)

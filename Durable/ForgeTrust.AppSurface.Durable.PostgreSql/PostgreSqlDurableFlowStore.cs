@@ -186,6 +186,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
     internal async ValueTask<DurableOperationResult<DurableFlowCommandResult>> StartAsync(
         DurableFlowStartRequest request,
         DurableFlowRegistration registration,
+        DurableTraceContext? traceContext,
         CancellationToken cancellationToken,
         bool retryAfterUniqueViolation = true)
     {
@@ -323,6 +324,26 @@ internal sealed partial class PostgreSqlDurableFlowStore
                 throw new InvalidOperationException($"Flow start expected four writes but PostgreSQL reported {affected}.");
             }
 
+            var trace = await InsertTraceContextAsync(
+                connection,
+                transaction,
+                request.ScopeId,
+                request.InstanceId,
+                traceContext,
+                "command_accepted",
+                cancellationToken).ConfigureAwait(false);
+            await AttachTraceContextAsync(
+                connection,
+                transaction,
+                request.ScopeId,
+                request.InstanceId,
+                trace,
+                request.CommandId.Value,
+                revision: 1,
+                waitId: null,
+                timerId: null,
+                workId: null,
+                cancellationToken).ConfigureAwait(false);
             await NotifyAsync(connection, transaction, dispatchId, cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return DurableOperationResult<DurableFlowCommandResult>.Success(
@@ -337,7 +358,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
             await TryRollbackAsync(transaction).ConfigureAwait(false);
             if (retryAfterUniqueViolation)
             {
-                return await StartAsync(request, registration, cancellationToken, retryAfterUniqueViolation: false)
+                return await StartAsync(request, registration, traceContext, cancellationToken, retryAfterUniqueViolation: false)
                     .ConfigureAwait(false);
             }
 
@@ -358,11 +379,12 @@ internal sealed partial class PostgreSqlDurableFlowStore
     internal ValueTask<DurableOperationResult<DurableFlowCommandResult>> RaiseEventAsync(
         DurableFlowEventRequest request,
         CancellationToken cancellationToken) =>
-        RaiseEventAsync(request, validatePayload: null, cancellationToken);
+        RaiseEventAsync(request, validatePayload: null, traceContext: null, cancellationToken);
 
     internal async ValueTask<DurableOperationResult<DurableFlowCommandResult>> RaiseEventAsync(
         DurableFlowEventRequest request,
         Action<DurableEncodedPayload?>? validatePayload,
+        DurableTraceContext? traceContext,
         CancellationToken cancellationToken,
         bool retryAfterUniqueViolation = true)
     {
@@ -590,6 +612,26 @@ internal sealed partial class PostgreSqlDurableFlowStore
             await AppendHistoryAsync(
                 connection, transaction, current with { Revision = revision, State = "ready" }, "event_accepted",
                 request.CommandId.Value, cancellationToken).ConfigureAwait(false);
+            var trace = await InsertTraceContextAsync(
+                connection,
+                transaction,
+                request.ScopeId,
+                request.InstanceId,
+                traceContext,
+                "event_winner",
+                cancellationToken).ConfigureAwait(false);
+            await AttachTraceContextAsync(
+                connection,
+                transaction,
+                request.ScopeId,
+                request.InstanceId,
+                trace,
+                request.CommandId.Value,
+                revision,
+                wait.WaitId,
+                timerId: null,
+                workId: null,
+                cancellationToken).ConfigureAwait(false);
             await NotifyAsync(connection, transaction, dispatchId, cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return DurableOperationResult<DurableFlowCommandResult>.Success(
@@ -604,7 +646,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
             await TryRollbackAsync(transaction).ConfigureAwait(false);
             if (retryAfterUniqueViolation)
             {
-                return await RaiseEventAsync(request, validatePayload, cancellationToken, retryAfterUniqueViolation: false)
+                return await RaiseEventAsync(request, validatePayload, traceContext, cancellationToken, retryAfterUniqueViolation: false)
                     .ConfigureAwait(false);
             }
 
@@ -624,6 +666,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
 
     internal async ValueTask<DurableOperationResult<DurableFlowCommandResult>> CancelAsync(
         DurableFlowCancelRequest request,
+        DurableTraceContext? traceContext,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -637,12 +680,14 @@ internal sealed partial class PostgreSqlDurableFlowStore
             request.Fingerprint,
             isRelease: false,
             registry: null,
+            traceContext,
             cancellationToken).ConfigureAwait(false);
     }
 
     internal async ValueTask<DurableOperationResult<DurableFlowCommandResult>> ReleaseSuspensionAsync(
         DurableFlowReleaseRequest request,
         IDurableFlowRegistry registry,
+        DurableTraceContext? traceContext,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -657,6 +702,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
             request.Fingerprint,
             isRelease: true,
             registry,
+            traceContext,
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -670,6 +716,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
         DurableCommandFingerprint fingerprint,
         bool isRelease,
         IDurableFlowRegistry? registry,
+        DurableTraceContext? traceContext,
         CancellationToken cancellationToken,
         bool retryAfterUniqueViolation = true)
     {
@@ -930,6 +977,26 @@ internal sealed partial class PostgreSqlDurableFlowStore
                 connection, transaction, current with { Revision = revision, State = nextState },
                 isRelease ? "suspension_released" : "cancellation_requested", commandId.Value, cancellationToken)
                 .ConfigureAwait(false);
+            var trace = await InsertTraceContextAsync(
+                connection,
+                transaction,
+                scopeId,
+                instanceId,
+                traceContext,
+                "command_accepted",
+                cancellationToken).ConfigureAwait(false);
+            await AttachTraceContextAsync(
+                connection,
+                transaction,
+                scopeId,
+                instanceId,
+                trace,
+                commandId.Value,
+                revision,
+                waitId: null,
+                timerId: null,
+                workId: null,
+                cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return DurableOperationResult<DurableFlowCommandResult>.Success(
                 new DurableFlowCommandResult(
@@ -953,6 +1020,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
                     fingerprint,
                     isRelease,
                     registry,
+                    traceContext,
                     cancellationToken,
                     retryAfterUniqueViolation: false).ConfigureAwait(false);
             }

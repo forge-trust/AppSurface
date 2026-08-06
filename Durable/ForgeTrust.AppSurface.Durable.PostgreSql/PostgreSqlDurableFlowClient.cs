@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using ForgeTrust.AppSurface.Core;
 using Npgsql;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql;
@@ -64,7 +66,22 @@ public sealed class PostgreSqlDurableFlowClient : IDurableFlowClient
         }
 
         _ = registration.ContextCodec.DecodeObject(request.Context);
-        return await _store.StartAsync(request, registration, cancellationToken).ConfigureAwait(false);
+        var ambient = DurableTraceContext.CaptureCurrent();
+        using var activity = AppSurfaceActivitySources.Instance.StartActivity(
+            "appsurface.durable.flow.command",
+            ActivityKind.Producer);
+        var capture = activity is null ? ambient : DurableTraceContext.Capture(activity);
+        DurableTraceDiagnostics.Report(capture.DiagnosticCode);
+        var result = await _store.StartAsync(request, registration, capture.Context, cancellationToken).ConfigureAwait(false);
+        DurableTraceTelemetry.Apply(
+            activity,
+            "command",
+            "start",
+            result.Value?.State.ToString().ToLowerInvariant() ?? "unknown",
+            result.IsSuccess ? "accepted" : "rejected",
+            capture.Context?.CorrelationToken ?? Guid.Empty,
+            capture.Status);
+        return result;
     }
 
     /// <inheritdoc />
@@ -73,7 +90,13 @@ public sealed class PostgreSqlDurableFlowClient : IDurableFlowClient
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return await _store.RaiseEventAsync(
+        var ambient = DurableTraceContext.CaptureCurrent();
+        using var activity = AppSurfaceActivitySources.Instance.StartActivity(
+            "appsurface.durable.flow.command",
+            ActivityKind.Producer);
+        var capture = activity is null ? ambient : DurableTraceContext.Capture(activity);
+        DurableTraceDiagnostics.Report(capture.DiagnosticCode);
+        var result = await _store.RaiseEventAsync(
             request,
             payload =>
             {
@@ -83,18 +106,66 @@ public sealed class PostgreSqlDurableFlowClient : IDurableFlowClient
                         .DecodeObject(eventPayload);
                 }
             },
+            capture.Context,
             cancellationToken).ConfigureAwait(false);
+        DurableTraceTelemetry.Apply(
+            activity,
+            "command",
+            "event",
+            result.Value?.State.ToString().ToLowerInvariant() ?? "unknown",
+            result.IsSuccess ? "accepted" : "rejected",
+            capture.Context?.CorrelationToken ?? Guid.Empty,
+            capture.Status);
+        return result;
     }
 
     /// <inheritdoc />
-    public ValueTask<DurableOperationResult<DurableFlowCommandResult>> CancelAsync(
+    public async ValueTask<DurableOperationResult<DurableFlowCommandResult>> CancelAsync(
         DurableFlowCancelRequest request,
-        CancellationToken cancellationToken = default) =>
-        _store.CancelAsync(request, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        var ambient = DurableTraceContext.CaptureCurrent();
+        using var activity = AppSurfaceActivitySources.Instance.StartActivity(
+            "appsurface.durable.flow.command",
+            ActivityKind.Producer);
+        var capture = activity is null ? ambient : DurableTraceContext.Capture(activity);
+        DurableTraceDiagnostics.Report(capture.DiagnosticCode);
+        var result = await _store.CancelAsync(request, capture.Context, cancellationToken).ConfigureAwait(false);
+        DurableTraceTelemetry.Apply(
+            activity,
+            "command",
+            "cancel",
+            result.Value?.State.ToString().ToLowerInvariant() ?? "unknown",
+            result.IsSuccess ? "accepted" : "rejected",
+            capture.Context?.CorrelationToken ?? Guid.Empty,
+            capture.Status);
+        return result;
+    }
 
     /// <inheritdoc />
-    public ValueTask<DurableOperationResult<DurableFlowCommandResult>> ReleaseSuspensionAsync(
+    public async ValueTask<DurableOperationResult<DurableFlowCommandResult>> ReleaseSuspensionAsync(
         DurableFlowReleaseRequest request,
-        CancellationToken cancellationToken = default) =>
-        _store.ReleaseSuspensionAsync(request, _flowRegistry, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        var ambient = DurableTraceContext.CaptureCurrent();
+        using var activity = AppSurfaceActivitySources.Instance.StartActivity(
+            "appsurface.durable.flow.command",
+            ActivityKind.Producer);
+        var capture = activity is null ? ambient : DurableTraceContext.Capture(activity);
+        DurableTraceDiagnostics.Report(capture.DiagnosticCode);
+        var result = await _store.ReleaseSuspensionAsync(
+            request,
+            _flowRegistry,
+            capture.Context,
+            cancellationToken).ConfigureAwait(false);
+        DurableTraceTelemetry.Apply(
+            activity,
+            "command",
+            "release",
+            result.Value?.State.ToString().ToLowerInvariant() ?? "unknown",
+            result.IsSuccess ? "accepted" : "rejected",
+            capture.Context?.CorrelationToken ?? Guid.Empty,
+            capture.Status);
+        return result;
+    }
 }

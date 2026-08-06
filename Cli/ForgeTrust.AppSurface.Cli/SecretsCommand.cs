@@ -21,7 +21,7 @@ internal sealed partial class SecretsCommand : ICommand
     [ExcludeFromCodeCoverage(Justification = "CliFx command discovery covers root help; subcommands carry behavior tests.")]
     public async ValueTask ExecuteAsync(IConsole console)
     {
-        await console.Output.WriteLineAsync("Use 'appsurface secrets init', 'set', 'get', 'list', 'delete', and 'doctor' to manage local development secrets, or 'appsurface secrets transfer plan|apply' for explicit remote transfer.");
+        await console.Output.WriteLineAsync("Use 'appsurface secrets init', 'set', 'get', 'list', 'delete', and 'doctor' to manage local development secrets, or 'appsurface secrets transfer plan' and 'appsurface secrets transfer apply' for explicit remote transfer.");
     }
 }
 
@@ -44,7 +44,7 @@ internal sealed partial class SecretsInitCommand : SecretsCommandBase
 /// Writes a local secret value.
 /// </summary>
 [Command("secrets set", Description = "Set one AppSurface local secret value.")]
-internal sealed partial class SecretsSetCommand : SecretsKeyCommandBase
+internal sealed partial class SecretsSetCommand(LocalSecretsTransferCoordinator transferCoordinator) : SecretsKeyCommandBase
 {
     /// <summary>
     /// Gets or sets the secret value.
@@ -79,7 +79,10 @@ internal sealed partial class SecretsSetCommand : SecretsKeyCommandBase
 
         var context = BuildContext();
         var identity = Normalize(context);
-        var result = context.Store.Set(identity, value);
+        var result = transferCoordinator.InvalidateBeforeMutation(
+            context.Store,
+            identity,
+            () => context.Store.Set(identity, value));
         await WriteResultAsync(console, result, successVerb: "Set");
     }
 }
@@ -139,15 +142,18 @@ internal sealed partial class SecretsListCommand : SecretsCommandBase
 /// <summary>
 /// Deletes one local secret.
 /// </summary>
-[Command("secrets delete", Description = "Delete one AppSurface local secret value.")]
-internal sealed partial class SecretsDeleteCommand : SecretsKeyCommandBase
+[Command("secrets delete", Description = "Delete one local secret and its local transfer attestation; never changes remote vaults.")]
+internal sealed partial class SecretsDeleteCommand(LocalSecretsTransferCoordinator transferCoordinator) : SecretsKeyCommandBase
 {
     /// <inheritdoc />
     public override async ValueTask ExecuteAsync(IConsole console)
     {
         var context = BuildContext();
         var identity = Normalize(context);
-        var result = context.Store.Delete(identity);
+        var result = transferCoordinator.InvalidateBeforeMutation(
+            context.Store,
+            identity,
+            () => context.Store.Delete(identity));
         await WriteResultAsync(console, result, successVerb: "Deleted");
     }
 }
