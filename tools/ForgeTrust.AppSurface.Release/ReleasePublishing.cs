@@ -1,5 +1,3 @@
-using ForgeTrust.AppSurface.ReleaseContracts;
-
 namespace ForgeTrust.AppSurface.Release;
 
 /// <summary>
@@ -9,16 +7,32 @@ internal sealed class ReleasePublishing
 {
     private readonly ReleaseWorkspace _workspace;
     private readonly ICommandRunner _commandRunner;
+    private readonly ReleaseTaggedProjectionResolver _taggedProjectionResolver;
+
+    /// <summary>
+    /// Creates release publishing validation with the standard tagged projection resolver.
+    /// </summary>
+    /// <param name="workspace">Repository workspace paths.</param>
+    /// <param name="commandRunner">Process runner.</param>
+    internal ReleasePublishing(ReleaseWorkspace workspace, ICommandRunner commandRunner)
+        : this(workspace, commandRunner, new ReleaseTaggedProjectionResolver(workspace, commandRunner))
+    {
+    }
 
     /// <summary>
     /// Creates release publishing validation workflow.
     /// </summary>
     /// <param name="workspace">Repository workspace paths.</param>
     /// <param name="commandRunner">Process runner.</param>
-    internal ReleasePublishing(ReleaseWorkspace workspace, ICommandRunner commandRunner)
+    /// <param name="taggedProjectionResolver">Resolver that establishes the tag-bound release state before remote checks.</param>
+    internal ReleasePublishing(
+        ReleaseWorkspace workspace,
+        ICommandRunner commandRunner,
+        ReleaseTaggedProjectionResolver taggedProjectionResolver)
     {
         _workspace = workspace;
         _commandRunner = commandRunner;
+        _taggedProjectionResolver = taggedProjectionResolver;
     }
 
     /// <summary>
@@ -36,112 +50,33 @@ internal sealed class ReleasePublishing
     /// </remarks>
     internal async Task<PublishOutputs> PublishAsync(ReleaseOptions options, CancellationToken cancellationToken)
     {
-        var tag = options.Tag ?? options.Version.TagName;
-        await ValidateAnnotatedTagAsync(tag, cancellationToken);
-        var tagCommit = await RequireCommandOutputAsync("git", ["rev-parse", $"refs/tags/{tag}^{{commit}}"], "release-tag-commit-missing", cancellationToken);
-        await ValidateReachableFromBaseAsync(tag, tagCommit, options.BaseRef, cancellationToken);
-        await ValidatePackagePublishingSucceededAsync(options.Version, tag, tagCommit, cancellationToken);
-        await ValidateGitHubReleaseDraftSafeAsync(tag, cancellationToken);
-
-        var safeTagSegment = Path.GetFileName(tag);
+        var requestedTag = options.Tag ?? options.Version.TagName;
+        var safeTagSegment = Path.GetFileName(requestedTag);
         if (string.IsNullOrWhiteSpace(safeTagSegment))
         {
             throw new ReleaseToolException(ReleaseDiagnostic.Error(
                 "release-tag-invalid-temp-path",
-                $"Tag '{tag}' cannot be used for release output paths.",
+                $"Tag '{requestedTag}' cannot be used for release output paths.",
                 "The tag does not contain a file-name-safe segment for the temporary release notes path.",
                 "Use the canonical release tag form `v{version}` and retry.",
                 "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
         }
 
+        var projection = await _taggedProjectionResolver.ResolveAsync(options, cancellationToken);
+        var tag = projection.Tag;
+        var tagCommit = projection.TagCommit;
+        await ValidatePackagePublishingSucceededAsync(options.Version, tag, tagCommit, cancellationToken);
+        await ValidateGitHubReleaseDraftSafeAsync(tag, cancellationToken);
+
         var notePathInTag = $"releases/v{options.Version}.md";
-        var note = await RequireGitBlobOutputAsync(tag, notePathInTag, "release-note-missing-from-tag", cancellationToken);
-        var sidecarPathInTag = $"releases/v{options.Version}.md.yml";
-        var sidecar = await RequireGitBlobOutputAsync(tag, sidecarPathInTag, "release-sidecar-missing-from-tag", cancellationToken);
-        var releaseManifestPathInTag = $"releases/v{options.Version}.release.json";
-        var releaseManifest = await RequireGitBlobOutputAsync(tag, releaseManifestPathInTag, "release-manifest-missing-from-tag", cancellationToken);
         var evidencePathInTag = $"releases/v{options.Version}.evidence.json";
-        var evidenceJson = await RequireGitBlobOutputAsync(tag, evidencePathInTag, "release-evidence-missing", cancellationToken);
-        string? currentRelease = null;
-        string? currentReleaseSidecar = null;
-        var isV2Evidence = ReleaseEvidence.IsV2(evidenceJson);
-        if (isV2Evidence)
-        {
-            currentRelease = await RequireGitBlobOutputAsync(
-                tag,
-                PackageReleaseLink.CoordinatedReleaseNotesPath,
-                "release-current-pointer-missing-from-tag",
-                cancellationToken);
-            currentReleaseSidecar = await RequireGitBlobOutputAsync(
-                tag,
-                PackageReleaseLink.CoordinatedReleaseSidecarPath,
-                "release-current-pointer-sidecar-missing-from-tag",
-                cancellationToken);
-        }
-
-        var evidence = ReleaseEvidence.ValidateTag(
-            options.Version,
-            options.Version.IsStable ? "stable" : "prerelease",
-            tag,
-            tagCommit.Trim(),
-            note,
-            sidecar,
-            releaseManifest,
-            evidenceJson,
-            currentRelease,
-            currentReleaseSidecar);
-        if (evidence.Diagnostics.Count > 0)
-        {
-            throw new ReleaseToolException(evidence.Diagnostics[0]);
-        }
-
-        if (isV2Evidence)
-        {
-            var packageIndex = await RequireGitBlobOutputAsync(
-                tag,
-                "packages/package-index.yml",
-                "release-package-index-missing-from-tag",
-                cancellationToken);
-            var packageSummary = PackageIndexSummary.Load(packageIndex);
-            if (!ReleaseManifestV2Validator.TryDeserialize(releaseManifest, out var manifest, out var issue)
-                || !ReleaseManifestV2Validator.TryValidatePackageSet(manifest, packageSummary.PublicPublishedPackages, out issue))
-            {
-                throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                    "release-evidence-package-set-mismatch",
-                    "V2 release evidence does not attest to the tagged package-index release surface.",
-                    issue,
-                    "Regenerate the release manifest and evidence from the package index in the tagged release tree.",
-                    "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle"));
-            }
-        }
-
-        if (isV2Evidence && evidence.Bundle is not null)
-        {
-            // V2 compatibility conversion maps PreparationBaseCommit to ContentSourceCommit.
-            await ValidatePreparationBaseContainedByTagAsync(
-                tag,
-                evidence.Bundle.Commits.ContentSourceCommit,
-                tagCommit,
-                cancellationToken);
-        }
-
-        if (evidence.Summary is null)
-        {
-            throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                "release-evidence-schema-invalid",
-                "Release evidence did not produce a validation summary.",
-                "Publish requires tag-bound evidence to deserialize to a complete release evidence bundle.",
-                "Regenerate release evidence from the reviewed release state before publishing.",
-                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
-        }
-
-        var evidenceSummary = evidence.Summary;
-        if (options.Version.IsStable && evidence.Bundle is not null && options.DocsCatalogPath is not null)
+        var evidenceSummary = projection.Evidence.Summary!;
+        if (options.Version.IsStable && projection.Evidence.Bundle is not null && options.DocsCatalogPath is not null)
         {
             var docsEvidence = await ReleaseDocsArchiveGate.ValidateStableAsync(
                 _workspace,
                 options,
-                evidence.Bundle,
+                projection.Evidence.Bundle,
                 cancellationToken);
             if (docsEvidence.Diagnostics.Count > 0)
             {
@@ -164,7 +99,7 @@ internal sealed class ReleasePublishing
         var tempDirectory = Path.Join(Path.GetTempPath(), "appsurface-release", safeTagSegment);
         Directory.CreateDirectory(tempDirectory);
         var notesFile = Path.Join(tempDirectory, "release-notes.md");
-        await File.WriteAllTextAsync(notesFile, note, cancellationToken);
+        await File.WriteAllTextAsync(notesFile, projection.ReleaseNote, cancellationToken);
 
         return new PublishOutputs(
             options.Version.ToString(),
@@ -175,7 +110,7 @@ internal sealed class ReleasePublishing
             options.Version.IsStable ? "stable" : "prerelease",
             evidencePathInTag,
             evidenceSummary.SubjectSha256,
-            tagCommit.Trim(),
+            tagCommit,
             evidenceSummary.DocsReleaseManifestSha256,
             !options.Version.IsStable,
             options.DryRun);
@@ -224,77 +159,6 @@ internal sealed class ReleasePublishing
         AppendOutput(builder, "prerelease", outputs.Prerelease ? "true" : "false");
         await File.AppendAllTextAsync(options.GitHubOutputPath, builder.ToString(), cancellationToken);
     }
-
-    private async Task ValidateAnnotatedTagAsync(string tag, CancellationToken cancellationToken)
-    {
-        var tagType = await RequireCommandOutputAsync("git", ["cat-file", "-t", $"refs/tags/{tag}"], "release-tag-missing", cancellationToken);
-        if (!string.Equals(tagType.Trim(), "tag", StringComparison.Ordinal))
-        {
-            throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                "release-tag-lightweight",
-                $"Tag '{tag}' is not annotated.",
-                $"`git cat-file -t refs/tags/{tag}` returned `{tagType.Trim()}`.",
-                "Create an annotated tag with `git tag -a` so the release has stable provenance.",
-                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
-        }
-    }
-
-    private async Task ValidateReachableFromBaseAsync(string tag, string tagCommit, string baseRef, CancellationToken cancellationToken)
-    {
-        var remoteBaseRef = $"origin/{baseRef}";
-        var result = await _commandRunner.RunAsync(
-            new CommandInvocation("git", ["merge-base", "--is-ancestor", tagCommit.Trim(), remoteBaseRef], _workspace.RepositoryRoot),
-            cancellationToken);
-        if (result.ExitCode != 0)
-        {
-            throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                "release-tag-unreachable-from-base-ref",
-                $"Tag '{tag}' does not point at a commit reachable from {remoteBaseRef}.",
-                result.StandardError.Length == 0 ? $"Commit {tagCommit.Trim()} is not an ancestor of {remoteBaseRef}." : result.StandardError.Trim(),
-                $"Fetch `{remoteBaseRef}`, move the tag only through the normal protected process, and retry.",
-                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
-        }
-    }
-
-    private async Task ValidatePreparationBaseContainedByTagAsync(
-        string tag,
-        string? preparationBaseCommit,
-        string tagCommit,
-        CancellationToken cancellationToken)
-    {
-        var canonicalPreparationBaseCommit = preparationBaseCommit ?? string.Empty;
-        if (!IsCanonicalCommitId(canonicalPreparationBaseCommit))
-        {
-            throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                "release-preparation-base-commit-invalid",
-                $"Tag '{tag}' has V2 release evidence with an invalid preparation base commit.",
-                "V2 evidence must preserve the exact 40-character lowercase Git commit captured before release preparation wrote artifacts.",
-                "Regenerate the release preparation artifacts from the reviewed source commit before creating the tag.",
-                "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle"));
-        }
-
-        var result = await _commandRunner.RunAsync(
-            new CommandInvocation(
-                "git",
-                ["merge-base", "--is-ancestor", canonicalPreparationBaseCommit, tagCommit.Trim()],
-                _workspace.RepositoryRoot),
-            cancellationToken);
-        if (result.ExitCode != 0)
-        {
-            throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                "release-preparation-base-commit-not-contained-by-tag",
-                $"Tag '{tag}' does not contain the V2 evidence preparation base commit.",
-                string.IsNullOrWhiteSpace(result.StandardError)
-                    ? $"Preparation base commit {canonicalPreparationBaseCommit} is not an ancestor of tag commit {tagCommit.Trim()}."
-                    : result.StandardError.Trim(),
-                "Create the annotated tag from a commit that contains the reviewed release preparation artifacts and their captured source commit.",
-                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
-        }
-    }
-
-    private static bool IsCanonicalCommitId(string value) =>
-        value.Length == 40
-        && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private async Task ValidateGitHubReleaseDraftSafeAsync(string tag, CancellationToken cancellationToken)
     {
@@ -389,46 +253,6 @@ internal sealed class ReleasePublishing
                 $"Wait for the protected NuGet {classification.ToLowerInvariant()} publish workflow for this tag to complete successfully, then retry GitHub Release publishing.",
                 "tools/ForgeTrust.AppSurface.Release/README.md#stable-release-policy"));
         }
-    }
-
-    private async Task<string> RequireCommandOutputAsync(
-        string executable,
-        IReadOnlyList<string> arguments,
-        string code,
-        CancellationToken cancellationToken)
-    {
-        var result = await _commandRunner.RunAsync(new CommandInvocation(executable, arguments, _workspace.RepositoryRoot), cancellationToken);
-        if (result.ExitCode != 0)
-        {
-            throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                code,
-                $"Command `{executable} {string.Join(' ', arguments)}` failed.",
-                string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput.Trim() : result.StandardError.Trim(),
-                "Fetch tags and the configured base ref, verify the release artifact exists at the tag commit, then retry.",
-                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
-        }
-
-        return result.StandardOutput.TrimEnd('\r', '\n');
-    }
-
-    private async Task<string> RequireGitBlobOutputAsync(
-        string tag,
-        string pathInTag,
-        string code,
-        CancellationToken cancellationToken)
-    {
-        var result = await _commandRunner.RunAsync(new CommandInvocation("git", ["show", $"{tag}:{pathInTag}"], _workspace.RepositoryRoot), cancellationToken);
-        if (result.ExitCode != 0)
-        {
-            throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                code,
-                $"Command `git show {tag}:{pathInTag}` failed.",
-                string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput.Trim() : result.StandardError.Trim(),
-                "Fetch tags and the configured base ref, verify the release artifact exists at the tag commit, then retry.",
-                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
-        }
-
-        return result.StandardOutput;
     }
 
     private static void AppendOutput(StringBuilder builder, string name, string value)
