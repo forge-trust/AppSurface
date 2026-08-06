@@ -37,6 +37,7 @@ internal sealed class ReleaseProjectionOutputWriter : IDisposable
     private const int WindowsFileAttributeTagInfo = 9;
     private const int WindowsFileRenameInfo = 3;
     private static readonly AsyncLocal<Action<string>?> DirectoryOpenedHook = new();
+    private static readonly AsyncLocal<Action?> TemporaryFileOpenedHook = new();
     private readonly string _directoryPath;
     private readonly List<SafeFileHandle> _directoryHandles = [];
     private SafeFileHandle? _directoryHandle;
@@ -75,6 +76,7 @@ internal sealed class ReleaseProjectionOutputWriter : IDisposable
             using var temporaryFile = writer.CreateTemporaryFile(temporaryFileName);
             try
             {
+                TemporaryFileOpenedHook.Value?.Invoke();
                 await using (var stream = new FileStream(temporaryFile, FileAccess.Write, bufferSize: 4096, isAsync: false))
                 {
                     await stream.WriteAsync(Encoding.UTF8.GetBytes(yaml), cancellationToken);
@@ -123,6 +125,22 @@ internal sealed class ReleaseProjectionOutputWriter : IDisposable
         var previous = DirectoryOpenedHook.Value;
         DirectoryOpenedHook.Value = callback;
         return new DirectoryOpenedHookScope(previous);
+    }
+
+    /// <summary>
+    /// Runs a callback after the temporary output file is created and before its content is written.
+    /// </summary>
+    /// <param name="callback">Callback used by tests to deterministically cancel a write after temporary-file creation.</param>
+    /// <returns>A scope that restores the previous callback.</returns>
+    /// <remarks>
+    /// The callback is async-flow-local so concurrent tests cannot alter another write. Production code leaves the callback unset.
+    /// </remarks>
+    internal static IDisposable UseTemporaryFileOpenedHookForTesting(Action callback)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        var previous = TemporaryFileOpenedHook.Value;
+        TemporaryFileOpenedHook.Value = callback;
+        return new TemporaryFileOpenedHookScope(previous);
     }
 
     /// <summary>
@@ -567,6 +585,14 @@ internal sealed class ReleaseProjectionOutputWriter : IDisposable
         public void Dispose()
         {
             DirectoryOpenedHook.Value = previous;
+        }
+    }
+
+    private sealed class TemporaryFileOpenedHookScope(Action? previous) : IDisposable
+    {
+        public void Dispose()
+        {
+            TemporaryFileOpenedHook.Value = previous;
         }
     }
 

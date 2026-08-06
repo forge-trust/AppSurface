@@ -795,6 +795,23 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task InspectOutputWriterRemovesTemporaryFileWhenCancelledDuringWrite()
+    {
+        var output = ExternalPath("cancelled-during-write-projection.yml");
+        var directory = Path.GetDirectoryName(output)!;
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(output, "keep this sentinel\n");
+        using var cancellation = new CancellationTokenSource();
+        using var hook = ReleaseProjectionOutputWriter.UseTemporaryFileOpenedHookForTesting(cancellation.Cancel);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            ReleaseProjectionOutputWriter.WriteAsync(output, "replacement\n", cancellation.Token));
+
+        Assert.Equal("keep this sentinel\n", await File.ReadAllTextAsync(output));
+        Assert.Empty(Directory.EnumerateFiles(directory, ".cancelled-during-write-projection.yml.*.tmp", SearchOption.TopDirectoryOnly));
+    }
+
+    [Fact]
     public async Task InspectRequiresMatchingExplicitTag()
     {
         await SeedRepositoryAsync();
