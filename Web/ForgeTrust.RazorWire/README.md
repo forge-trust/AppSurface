@@ -935,6 +935,8 @@ export the missing route or asset, fix path casing, mark authoring-only anchors
 with `data-rw-export-ignore`, or choose `--mode hybrid` when live infrastructure
 owns the dependency.
 
+The [AppSurface Web browser-local theme preference](../ForgeTrust.AppSurface.Web/README.md#browser-local-theme-preferences) is presentation-only and needs no RazorWire route discovery, variant rewrite, antiforgery form, or second/third export tree. An opted-in document keeps the same canonical URL and deterministic bootstrap text. A strict static host permits that published script hash and separately hashes its exact inline critical styles; AppSurface Docs versioned trees additionally retain their Docs-critical style hash. Raw Markdown attachments and other non-HTML export responses remain outside the theme adapter.
+
 Those package-based commands require a published package or an explicit local
 package source. The package chooser excludes `ForgeTrust.RazorWire.Cli` until
 issue #171 lands stable public .NET tool packaging.
