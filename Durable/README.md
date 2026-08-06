@@ -28,8 +28,40 @@ The application package registers only passive registries. A provider is selecte
 source preview adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`,
 `0004_schedule_protocol`, `0005_runtime_heartbeat`, and `0006_flow_trace_context`) plus one-operation-at-a-time Work,
 Flow, and Work-first Schedule persistence with versioned W3C causal evidence. PostgreSQL registration remains passive;
-an application explicitly adds one bounded polling host only where it intends continuous activation. It adds no public
-endpoint, dashboard, or automatic migration.
+an application explicitly adds one bounded polling host through [`AddWorkerHost()`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host)
+only where it intends continuous activation. It adds no public endpoint, dashboard, or automatic migration.
+
+## Slice 7 discovery and reconciliation
+
+Slice 7 is still a source-only public preview. Publication of the Durable packages remains held pending coordinated
+release evidence; the documentation below describes the intended discovery and reconciliation contract, not a shipped
+NuGet release or a replacement for deployment review.
+
+Storage registration is passive. The PostgreSQL provider opens no worker and installs no hosted service until the host
+explicitly calls [`AddWorkerHost()`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host). Startup validates the
+stored schema version and active runtime epoch, fails closed on incompatibility, and never applies DDL or silently
+advances schema history.
+
+The forward-only deployment order is:
+
+1. `0001_work_shared.sql`
+2. `0002_forced_rls.sql`
+3. `0003_flow_protocol.sql`
+4. `0004_schedule_protocol.sql`
+5. `0005_runtime_heartbeat.sql`
+6. `0006_flow_trace_context.sql`
+7. [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
+
+The preferred production flow is to generate and review the Durable schema script offline, apply the reviewed
+migrations in the order above, apply the canonical role recipe, and run schema status/preflight before enabling the
+worker host. The [`durable schema` CLI commands](../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands)
+make those checks discoverable. `apply --apply` is an explicit migration-owner operation only; deployments normally
+pass `--connection-env APPSURFACE_DURABLE_MIGRATION_CONNECTION`, and it is never a startup side effect. Offline and
+online commands accept no connection-string argument and never print connection strings.
+
+For recovery, inspect status first, produce a corrected and reviewed forward-only script, then retry the intended
+operation. Never delete or rewrite migration history. The [`durable-postgresql` example](../examples/durable-postgresql/README.md)
+is a local proof of the boundaries above, not production operations guidance.
 
 ## Scale and transport boundary
 

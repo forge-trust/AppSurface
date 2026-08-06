@@ -49,8 +49,31 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("docs export", result.AllText, StringComparison.Ordinal);
         Assert.Contains("coverage", result.AllText, StringComparison.Ordinal);
         Assert.Contains("secrets", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("durable", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EntryPoint_Should_Print_DurableSchemaScript_Help_Without_Online_Connection_Options()
+    {
+        var result = await InvokeEntryPointAsync(["durable", "schema", "script", "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Generate deterministic durable migration SQL", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--from-version", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--output", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("--connection-env", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EntryPoint_Should_Reject_DurableSchemaApply_Without_Explicit_Confirmation()
+    {
+        var result = await InvokeEntryPointAsync(["durable", "schema", "apply"]);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Schema apply is disabled by default", result.AllText, StringComparison.Ordinal);
     }
 
     [Fact]
