@@ -2,7 +2,6 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 
@@ -19,6 +18,8 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
     internal sealed class MacOsV2CompatibilityLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore, IAppSurfaceLocalSecretMigrationStore
     {
         private const string IndexKey = "__appsurface_index__";
+        private const string DoctorKey = "__appsurface_doctor__";
+        private const string StoreName = "macOS Keychain (v2)";
         private const int ErrSecSuccess = 0;
         private const int ErrSecDuplicateItem = -25299;
         private const int ErrSecItemNotFound = -25300;
@@ -48,7 +49,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
         }
 
         /// <inheritdoc />
-        public string Name => nameof(MacOsV2CompatibilityLocalSecretStore);
+        public string Name => StoreName;
 
         /// <inheritdoc />
         public AppSurfaceLocalSecretResult Get(AppSurfaceLocalSecretIdentity identity)
@@ -101,6 +102,12 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
 
             try
             {
+                var index = ReadV2Index(identity.ApplicationName, identity.Environment, identity.KeyPrefix);
+                if (index.Status != LocalSecretResultStatus.Found)
+                {
+                    return AppSurfaceLocalSecretResult.NotFound(index.Status, index.Diagnostic!, Name);
+                }
+
                 var write = WriteV2(identity, value);
                 if (write.Status != LocalSecretResultStatus.Found)
                 {
@@ -202,7 +209,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
                     }
 
                     var identity = normalized.Identity!;
-                    var v2 = ReadV2(identity);
+                    var v2 = ExistsV2(identity);
                     if (v2.Status == LocalSecretResultStatus.Found)
                     {
                         liveV2Keys.Add(key);
@@ -273,7 +280,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
             var probe = ReadV2(NamespaceIdentity(applicationName, environment, keyPrefix));
             return probe.Status switch
             {
-                LocalSecretResultStatus.Missing => AppSurfaceLocalSecretResult.NotFound(
+                LocalSecretResultStatus.Missing or LocalSecretResultStatus.Found => AppSurfaceLocalSecretResult.NotFound(
                     LocalSecretResultStatus.Missing,
                     new AppSurfaceLocalSecretDiagnostic(
                         "local-secret-store-ready",
@@ -282,7 +289,6 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
                         "Set a secret with `appsurface secrets set` for this pinned namespace.",
                         "local-secrets-macos-migration"),
                     Name),
-                LocalSecretResultStatus.Found => AppSurfaceLocalSecretResult.Found(string.Empty, Name),
                 _ => probe
             };
         }
@@ -298,6 +304,12 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
 
             try
             {
+                var v2Index = ReadV2Index(applicationName, environment, keyPrefix);
+                if (v2Index.Status != LocalSecretResultStatus.Found)
+                {
+                    return AppSurfaceLocalSecretMigrationResult.FailedToStart(v2Index.Status, v2Index.Diagnostic!, Name);
+                }
+
                 var legacy = _legacy.List(applicationName, environment, keyPrefix);
                 if (legacy.Status != LocalSecretResultStatus.Found)
                 {
@@ -310,7 +322,11 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
                     var normalized = _normalizer.Normalize(applicationName, environment, keyPrefix, key);
                     if (!normalized.Succeeded)
                     {
-                        rows.Add(new AppSurfaceLocalSecretMigrationRow(key, "Failed", LocalSecretResultStatus.ProviderFailed, InvalidIndex("The legacy index contains an invalid local secret key.")));
+                        rows.Add(new AppSurfaceLocalSecretMigrationRow(
+                            key,
+                            AppSurfaceLocalSecretMigrationAction.Failed,
+                            LocalSecretResultStatus.ProviderFailed,
+                            InvalidIndex("The legacy index contains an invalid local secret key.")));
                         continue;
                     }
 
@@ -320,28 +336,35 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
                     {
                         var index = EnsureV2IndexContains(identity);
                         rows.Add(index.Status == LocalSecretResultStatus.Found
-                            ? new AppSurfaceLocalSecretMigrationRow(key, "AlreadyV2", LocalSecretResultStatus.Found, null)
-                            : new AppSurfaceLocalSecretMigrationRow(key, "Failed", index.Status, index.Diagnostic));
+                            ? new AppSurfaceLocalSecretMigrationRow(key, AppSurfaceLocalSecretMigrationAction.AlreadyV2, LocalSecretResultStatus.Found, null)
+                            : new AppSurfaceLocalSecretMigrationRow(key, AppSurfaceLocalSecretMigrationAction.Failed, index.Status, index.Diagnostic));
                         continue;
                     }
 
                     if (v2.Status != LocalSecretResultStatus.Missing)
                     {
-                        rows.Add(new AppSurfaceLocalSecretMigrationRow(key, "Failed", v2.Status, v2.Diagnostic));
+                        rows.Add(new AppSurfaceLocalSecretMigrationRow(key, AppSurfaceLocalSecretMigrationAction.Failed, v2.Status, v2.Diagnostic));
                         continue;
                     }
 
                     var v1 = _legacy.Get(identity);
-                    if (v1.Status != LocalSecretResultStatus.Found)
+                    if (v1.Status != LocalSecretResultStatus.Found || v1.Value == null)
                     {
-                        rows.Add(new AppSurfaceLocalSecretMigrationRow(key, "Failed", v1.Status, v1.Diagnostic));
+                        var status = v1.Status == LocalSecretResultStatus.Found
+                            ? LocalSecretResultStatus.ProviderFailed
+                            : v1.Status;
+                        rows.Add(new AppSurfaceLocalSecretMigrationRow(
+                            key,
+                            AppSurfaceLocalSecretMigrationAction.Failed,
+                            status,
+                            v1.Diagnostic ?? InvalidLegacyRead()));
                         continue;
                     }
 
-                    var write = WriteV2(identity, v1.Value!);
+                    var write = WriteV2(identity, v1.Value);
                     if (write.Status != LocalSecretResultStatus.Found)
                     {
-                        rows.Add(new AppSurfaceLocalSecretMigrationRow(key, "Failed", write.Status, write.Diagnostic));
+                        rows.Add(new AppSurfaceLocalSecretMigrationRow(key, AppSurfaceLocalSecretMigrationAction.Failed, write.Status, write.Diagnostic));
                         continue;
                     }
 
@@ -349,14 +372,14 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
                     if (verify.Status != LocalSecretResultStatus.Found || !string.Equals(verify.Value, v1.Value, StringComparison.Ordinal))
                     {
                         var failed = verify.Status == LocalSecretResultStatus.Found ? VerificationFailed() : verify;
-                        rows.Add(new AppSurfaceLocalSecretMigrationRow(key, "Failed", failed.Status, failed.Diagnostic));
+                        rows.Add(new AppSurfaceLocalSecretMigrationRow(key, AppSurfaceLocalSecretMigrationAction.Failed, failed.Status, failed.Diagnostic));
                         continue;
                     }
 
                     var indexWrite = EnsureV2IndexContains(identity);
                     rows.Add(indexWrite.Status == LocalSecretResultStatus.Found
-                        ? new AppSurfaceLocalSecretMigrationRow(key, "Migrated", LocalSecretResultStatus.Found, null)
-                        : new AppSurfaceLocalSecretMigrationRow(key, "Failed", indexWrite.Status, indexWrite.Diagnostic));
+                        ? new AppSurfaceLocalSecretMigrationRow(key, AppSurfaceLocalSecretMigrationAction.Migrated, LocalSecretResultStatus.Found, null)
+                        : new AppSurfaceLocalSecretMigrationRow(key, AppSurfaceLocalSecretMigrationAction.Failed, indexWrite.Status, indexWrite.Diagnostic));
                 }
 
                 return AppSurfaceLocalSecretMigrationResult.Completed(rows, Name);
@@ -389,6 +412,14 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
             {
                 Array.Clear(data);
             }
+        }
+
+        private AppSurfaceLocalSecretResult ExistsV2(AppSurfaceLocalSecretIdentity identity)
+        {
+            var status = _interop.Exists(V2Item(identity));
+            return status == ErrSecSuccess
+                ? AppSurfaceLocalSecretResult.Found(string.Empty, Name)
+                : MapStatus(status, "presence check");
         }
 
         private AppSurfaceLocalSecretResult WriteV2(AppSurfaceLocalSecretIdentity identity, string value)
@@ -449,58 +480,23 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
                 : AppSurfaceLocalSecretResult.Found(string.Empty, Name);
         }
 
-        private V2IndexReadResult ReadV2Index(string applicationName, string environment, string? keyPrefix)
-        {
-            var index = ReadV2(IndexIdentity(applicationName, environment, keyPrefix));
-            if (index.Status == LocalSecretResultStatus.Missing)
-            {
-                return V2IndexReadResult.Found([], false);
-            }
-
-            if (index.Status != LocalSecretResultStatus.Found || index.Value == null)
-            {
-                return V2IndexReadResult.Failed(index.Status, index.Diagnostic!);
-            }
-
-            string?[] serialized;
-            try
-            {
-                serialized = JsonSerializer.Deserialize<string?[]>(index.Value) ?? [];
-            }
-            catch (JsonException)
-            {
-                return V2IndexReadResult.Failed(LocalSecretResultStatus.ProviderFailed, InvalidIndex("The v2 index entry could not be parsed."));
-            }
-
-            var keys = new HashSet<string>(StringComparer.Ordinal);
-            var needsRepair = false;
-            foreach (var key in serialized)
-            {
-                if (string.IsNullOrWhiteSpace(key) || string.Equals(key, IndexKey, StringComparison.Ordinal))
-                {
-                    needsRepair = true;
-                    continue;
-                }
-
-                if (!keys.Add(key))
-                {
-                    needsRepair = true;
-                }
-            }
-
-            return V2IndexReadResult.Found(keys, needsRepair);
-        }
+        private LocalSecretIndexReadResult ReadV2Index(string applicationName, string environment, string? keyPrefix)
+            => ReadLocalSecretIndex(
+                () => ReadV2(IndexIdentity(applicationName, environment, keyPrefix)),
+                IndexKey,
+                InvalidIndex,
+                "The v2 index entry could not be parsed.");
 
         private AppSurfaceLocalSecretResult WriteV2Index(string applicationName, string environment, string? keyPrefix, IEnumerable<string> keys) =>
             WriteV2(
                 IndexIdentity(applicationName, environment, keyPrefix),
-                JsonSerializer.Serialize(keys.OrderBy(static key => key, StringComparer.OrdinalIgnoreCase).ThenBy(static key => key, StringComparer.Ordinal).ToArray()));
+                SerializeLocalSecretIndex(keys));
 
         private static AppSurfaceLocalSecretIdentity IndexIdentity(string applicationName, string environment, string? keyPrefix) =>
             new(applicationName, environment, keyPrefix, IndexKey, $"appsurface:v2:{applicationName}:{environment}:{keyPrefix}:{IndexKey}");
 
         private static AppSurfaceLocalSecretIdentity NamespaceIdentity(string applicationName, string environment, string? keyPrefix) =>
-            new(applicationName, environment, keyPrefix, IndexKey, $"appsurface:v2:{applicationName}:{environment}:{keyPrefix}:namespace");
+            new(applicationName, environment, keyPrefix, DoctorKey, $"appsurface:v2:{applicationName}:{environment}:{keyPrefix}:namespace");
 
         private static MacOsSecItemQuery V2Item(AppSurfaceLocalSecretIdentity identity) =>
             new(
@@ -596,6 +592,15 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
                     retryable: true),
                 Name);
 
+        private AppSurfaceLocalSecretDiagnostic InvalidLegacyRead() =>
+            new(
+                "local-secret-legacy-read-invalid",
+                "macOS LocalSecrets received an invalid legacy read result.",
+                "The retained legacy Keychain read reported success without returning a secret value.",
+                "Retry the migration after restoring the current user Keychain session; do not assume this key was migrated.",
+                "local-secrets-macos-migration",
+                retryable: true);
+
         private bool TryAcquire(AppSurfaceLocalSecretIdentity identity, out Mutex? mutex, out AppSurfaceLocalSecretResult? failure)
         {
             mutex = null;
@@ -672,18 +677,6 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
             }
         }
 
-        private sealed record V2IndexReadResult(
-            LocalSecretResultStatus Status,
-            IReadOnlyCollection<string> Keys,
-            bool NeedsRepair,
-            AppSurfaceLocalSecretDiagnostic? Diagnostic)
-        {
-            public static V2IndexReadResult Found(IReadOnlyCollection<string> keys, bool needsRepair) =>
-                new(LocalSecretResultStatus.Found, keys, needsRepair, null);
-
-            public static V2IndexReadResult Failed(LocalSecretResultStatus status, AppSurfaceLocalSecretDiagnostic diagnostic) =>
-                new(status, [], false, diagnostic);
-        }
     }
 
     /// <summary>Describes an immutable file-based macOS <c>SecItem</c> generic-password identity.</summary>
@@ -695,12 +688,47 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
     /// <summary>Isolates native macOS Keychain request construction for deterministic compatibility tests.</summary>
     internal interface IMacOsSecItemInterop
     {
+        /// <summary>
+        /// Reads the raw value for a generic-password <paramref name="query"/>.
+        /// </summary>
+        /// <param name="query">The immutable SecItem identity to read.</param>
+        /// <returns>
+        /// The raw OSStatus and optional copied value. <see cref="MacOsV2CompatibilityLocalSecretStore"/> maps OSStatus
+        /// through its local-secret status mapping; a success status with null data is treated as a fail-closed provider error.
+        /// </returns>
         MacOsSecItemReadResult Read(MacOsSecItemQuery query);
 
+        /// <summary>
+        /// Checks whether a generic-password <paramref name="query"/> exists without requesting its value data.
+        /// </summary>
+        /// <param name="query">The immutable SecItem identity to check.</param>
+        /// <returns>The raw OSStatus, which the v2 store maps through its local-secret status mapping.</returns>
+        int Exists(MacOsSecItemQuery query);
+
+        /// <summary>
+        /// Adds a generic-password <paramref name="value"/> under <paramref name="query"/> without overwriting a record.
+        /// </summary>
+        /// <param name="query">The immutable SecItem identity to add.</param>
+        /// <param name="value">The value bytes to store.</param>
+        /// <returns>
+        /// The raw OSStatus, which the v2 store maps through its local-secret status mapping. Existing records must return
+        /// <c>errSecDuplicateItem</c> so <see cref="MacOsV2CompatibilityLocalSecretStore"/> can route the write to <see cref="Update"/>.
+        /// </returns>
         int Add(MacOsSecItemQuery query, byte[] value);
 
+        /// <summary>
+        /// Replaces the value for an existing generic-password <paramref name="query"/>.
+        /// </summary>
+        /// <param name="query">The immutable SecItem identity to update.</param>
+        /// <param name="value">The replacement value bytes.</param>
+        /// <returns>The raw OSStatus, which the v2 store maps through its local-secret status mapping.</returns>
         int Update(MacOsSecItemQuery query, byte[] value);
 
+        /// <summary>
+        /// Deletes the generic-password record identified by <paramref name="query"/>.
+        /// </summary>
+        /// <param name="query">The immutable SecItem identity to delete.</param>
+        /// <returns>The raw OSStatus, which the v2 store maps through its local-secret status mapping.</returns>
         int Delete(MacOsSecItemQuery query);
     }
 
@@ -750,6 +778,21 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
                 }
 
                 return new MacOsSecItemReadResult(status, data);
+            }
+            finally
+            {
+                Release(result);
+                Release(attributes);
+            }
+        }
+
+        public int Exists(MacOsSecItemQuery query)
+        {
+            var attributes = CreateAttributes(query);
+            IntPtr result = IntPtr.Zero;
+            try
+            {
+                return SecItemCopyMatching(attributes, out result);
             }
             finally
             {

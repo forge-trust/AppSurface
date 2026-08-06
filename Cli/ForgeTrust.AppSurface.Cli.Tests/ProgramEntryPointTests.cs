@@ -144,8 +144,8 @@ public sealed class ProgramEntryPointTests
             new MigrationResultStore(
                 AppSurfaceLocalSecretMigrationResult.Completed(
                     [
-                        new AppSurfaceLocalSecretMigrationRow("stripe:ApiKey", "AlreadyV2", LocalSecretResultStatus.Found, null),
-                        new AppSurfaceLocalSecretMigrationRow("Stripe:ApiKey", "Migrated", LocalSecretResultStatus.Found, null),
+                        new AppSurfaceLocalSecretMigrationRow("stripe:ApiKey", AppSurfaceLocalSecretMigrationAction.AlreadyV2, LocalSecretResultStatus.Found, null),
+                        new AppSurfaceLocalSecretMigrationRow("Stripe:ApiKey", AppSurfaceLocalSecretMigrationAction.Migrated, LocalSecretResultStatus.Found, null),
                     ],
                     "test-migration-store")))
         {
@@ -178,7 +178,7 @@ public sealed class ProgramEntryPointTests
         var command = new TestableSecretsMigrateCommand(
             new MigrationResultStore(
                 AppSurfaceLocalSecretMigrationResult.Completed(
-                    [new AppSurfaceLocalSecretMigrationRow("Stripe:ApiKey", "Failed", LocalSecretResultStatus.Locked, diagnostic)],
+                    [new AppSurfaceLocalSecretMigrationRow("Stripe:ApiKey", AppSurfaceLocalSecretMigrationAction.Failed, LocalSecretResultStatus.Locked, diagnostic)],
                     "test-migration-store")));
         using var console = new FakeInMemoryConsole();
 

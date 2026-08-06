@@ -174,6 +174,68 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         LocalSecretsPlatform? platformOverride = null) =>
         CreateInnerStore(options, linuxSecretToolResolver, platformOverride);
 
+    private static LocalSecretIndexReadResult ReadLocalSecretIndex(
+        Func<AppSurfaceLocalSecretResult> read,
+        string indexKey,
+        Func<string, AppSurfaceLocalSecretDiagnostic> invalidIndex,
+        string parseFailure)
+    {
+        var result = read();
+        if (result.Status == LocalSecretResultStatus.Missing)
+        {
+            return LocalSecretIndexReadResult.Found([], needsRepair: false);
+        }
+
+        if (result.Status != LocalSecretResultStatus.Found || result.Value == null)
+        {
+            return LocalSecretIndexReadResult.Failed(result.Status, result.Diagnostic!);
+        }
+
+        string?[] indexedKeys;
+        try
+        {
+            indexedKeys = JsonSerializer.Deserialize<string?[]>(result.Value) ?? [];
+        }
+        catch (JsonException)
+        {
+            return LocalSecretIndexReadResult.Failed(LocalSecretResultStatus.ProviderFailed, invalidIndex(parseFailure));
+        }
+
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        var needsRepair = false;
+        foreach (var key in indexedKeys)
+        {
+            if (string.IsNullOrWhiteSpace(key) || string.Equals(key, indexKey, StringComparison.Ordinal))
+            {
+                needsRepair = true;
+                continue;
+            }
+
+            if (!keys.Add(key))
+            {
+                needsRepair = true;
+            }
+        }
+
+        return LocalSecretIndexReadResult.Found(keys, needsRepair);
+    }
+
+    private static string SerializeLocalSecretIndex(IEnumerable<string> keys) =>
+        JsonSerializer.Serialize(keys.OrderBy(static key => key, StringComparer.OrdinalIgnoreCase).ThenBy(static key => key, StringComparer.Ordinal).ToArray());
+
+    private sealed record LocalSecretIndexReadResult(
+        LocalSecretResultStatus Status,
+        IReadOnlyCollection<string> Keys,
+        bool NeedsRepair,
+        AppSurfaceLocalSecretDiagnostic? Diagnostic)
+    {
+        public static LocalSecretIndexReadResult Found(IReadOnlyCollection<string> keys, bool needsRepair) =>
+            new(LocalSecretResultStatus.Found, keys, needsRepair, null);
+
+        public static LocalSecretIndexReadResult Failed(LocalSecretResultStatus status, AppSurfaceLocalSecretDiagnostic diagnostic) =>
+            new(status, [], false, diagnostic);
+    }
+
     /// <summary>
     /// Represents platform selections used by deterministic platform-store tests.
     /// </summary>
@@ -1208,55 +1270,19 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             string? keyPrefix,
             IEnumerable<string> keys)
         {
-            var index = JsonSerializer.Serialize(
-                keys.OrderBy(static key => key, StringComparer.OrdinalIgnoreCase).ThenBy(static key => key, StringComparer.Ordinal).ToArray());
+            var index = SerializeLocalSecretIndex(keys);
             var write = WriteStoredValue(IndexIdentity(applicationName, environment, keyPrefix), index);
             return write.Status == LocalSecretResultStatus.Found
                 ? AppSurfaceLocalSecretResult.Found(string.Empty, Name)
                 : write;
         }
 
-        private IndexReadResult ReadIndex(string applicationName, string environment, string? keyPrefix)
-        {
-            var result = ReadStoredValue(IndexIdentity(applicationName, environment, keyPrefix));
-            if (result.Status == LocalSecretResultStatus.Missing)
-            {
-                return IndexReadResult.Found([], needsRepair: false);
-            }
-
-            if (result.Status != LocalSecretResultStatus.Found || result.Value == null)
-            {
-                return IndexReadResult.Failed(result.Status, result.Diagnostic!);
-            }
-
-            string?[] indexedKeys;
-            try
-            {
-                indexedKeys = JsonSerializer.Deserialize<string?[]>(result.Value) ?? [];
-            }
-            catch (JsonException)
-            {
-                return IndexReadResult.Failed(LocalSecretResultStatus.ProviderFailed, InvalidIndexDiagnostic("The platform store index entry could not be parsed."));
-            }
-
-            var keys = new HashSet<string>(StringComparer.Ordinal);
-            var needsRepair = false;
-            foreach (var key in indexedKeys)
-            {
-                if (string.IsNullOrWhiteSpace(key) || string.Equals(key, IndexKey, StringComparison.Ordinal))
-                {
-                    needsRepair = true;
-                    continue;
-                }
-
-                if (!keys.Add(key))
-                {
-                    needsRepair = true;
-                }
-            }
-
-            return IndexReadResult.Found(keys, needsRepair);
-        }
+        private LocalSecretIndexReadResult ReadIndex(string applicationName, string environment, string? keyPrefix) =>
+            ReadLocalSecretIndex(
+                () => ReadStoredValue(IndexIdentity(applicationName, environment, keyPrefix)),
+                IndexKey,
+                InvalidIndexDiagnostic,
+                "The platform store index entry could not be parsed.");
 
         private static AppSurfaceLocalSecretIdentity IndexIdentity(string applicationName, string environment, string? keyPrefix) =>
             new(applicationName, environment, keyPrefix, IndexKey, $"appsurface:{applicationName}:{environment}:{keyPrefix}:{IndexKey}");
@@ -1272,18 +1298,6 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 "Remove the invalid platform index entry, then set the intended LocalSecrets keys again.",
                 "local-secrets-troubleshooting");
 
-        private sealed record IndexReadResult(
-            LocalSecretResultStatus Status,
-            IReadOnlyCollection<string> Keys,
-            bool NeedsRepair,
-            AppSurfaceLocalSecretDiagnostic? Diagnostic)
-        {
-            public static IndexReadResult Found(IReadOnlyCollection<string> keys, bool needsRepair) =>
-                new(LocalSecretResultStatus.Found, keys, needsRepair, null);
-
-            public static IndexReadResult Failed(LocalSecretResultStatus status, AppSurfaceLocalSecretDiagnostic diagnostic) =>
-                new(status, [], false, diagnostic);
-        }
     }
 
     internal abstract class CommandBackedLocalSecretStore : IndexedLocalSecretStore

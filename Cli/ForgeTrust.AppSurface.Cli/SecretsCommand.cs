@@ -167,7 +167,7 @@ internal partial class SecretsMigrateCommand : SecretsCommandBase
 
         foreach (var row in result.Rows)
         {
-            await console.Output.WriteLineAsync($"{row.Key}: {row.Action}");
+            await console.Output.WriteLineAsync($"{row.Key}: {row.Action.ToDisplayString()}");
             if (row.Diagnostic != null)
             {
                 await console.Output.WriteLineAsync(row.Diagnostic.ToDisplayString());

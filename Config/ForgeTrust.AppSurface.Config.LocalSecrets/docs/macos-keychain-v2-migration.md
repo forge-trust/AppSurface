@@ -42,12 +42,13 @@ Run this only in an interactive macOS user session. Use generated, non-secret sm
 not the values themselves:
 
 ```bash
-appsurface secrets init --app MyApp --environment Development
-printf '%s' "smoke-one" | appsurface secrets set Smoke:One --app MyApp --environment Development --stdin
-printf '%s' "smoke-two" | appsurface secrets set Smoke:Two --app MyApp --environment Development --stdin
-printf '%s' "smoke-three" | appsurface secrets set Smoke:Three --app MyApp --environment Development --stdin
+smoke_prefix="Smoke:$(uuidgen)"
+appsurface secrets init --app MyApp --environment Development --prefix "$smoke_prefix"
+printf '%s' "smoke-one" | appsurface secrets set One --app MyApp --environment Development --prefix "$smoke_prefix" --stdin
+printf '%s' "smoke-two" | appsurface secrets set Two --app MyApp --environment Development --prefix "$smoke_prefix" --stdin
+printf '%s' "smoke-three" | appsurface secrets set Three --app MyApp --environment Development --prefix "$smoke_prefix" --stdin
 DOTNET_ENVIRONMENT=Development dotnet run
-printf '%s' "smoke-one-updated" | appsurface secrets set Smoke:One --app MyApp --environment Development --stdin
+printf '%s' "smoke-one-updated" | appsurface secrets set One --app MyApp --environment Development --prefix "$smoke_prefix" --stdin
 DOTNET_ENVIRONMENT=Development dotnet run
 ```
 
