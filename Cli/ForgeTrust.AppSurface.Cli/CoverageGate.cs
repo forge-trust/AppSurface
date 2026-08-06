@@ -92,6 +92,12 @@ internal sealed partial class CoverageGateCommand : ICommand
     public decimal? MinPatchLine { get; set; }
 
     /// <summary>
+    /// Gets or sets the changed-line coverage calculation mode.
+    /// </summary>
+    [CommandOption("patch-line-mode", Description = "Changed-line calculation mode: measurable or codecov. Defaults to measurable.")]
+    public string? PatchLineModeOption { get; set; }
+
+    /// <summary>
     /// Gets or sets the minimum changed-branch coverage percentage from 0 to 100.
     /// </summary>
     [CommandOption("min-patch-branch", Description = "Minimum changed-branch coverage percentage from 0 to 100. Requires one patch source: --diff-base, --diff-file, or --diff-stdin.")]
@@ -156,6 +162,8 @@ internal sealed partial class CoverageGateCommand : ICommand
 
     private CoverageGateRequest CreateRequest()
     {
+        var patchLineMode = ParsePatchLineMode();
+
         if (!CoverageGateEvaluator.IsPercentInRange(MinLine))
         {
             throw new CommandException("ASCOV007 --min-line must be between 0 and 100.");
@@ -202,6 +210,11 @@ internal sealed partial class CoverageGateCommand : ICommand
             throw new CommandException("ASCOV016 --diff-label requires a patch diff source.");
         }
 
+        if (diffSourceCount == 0 && PatchLineModeOption is not null)
+        {
+            throw new CommandException("ASCOV018 --patch-line-mode requires a patch diff source.");
+        }
+
         var coveragePath = GetFullPathOrThrow(
             CoveragePath.Trim(),
             "ASCOV001 --coverage must point to a Cobertura XML file.");
@@ -216,7 +229,8 @@ internal sealed partial class CoverageGateCommand : ICommand
                 ResolveRepositoryRoot(),
                 CreateDiffSource(),
                 MinPatchLine,
-                MinPatchBranchPercent: MinPatchBranch);
+                MinPatchBranchPercent: MinPatchBranch,
+                LineMode: patchLineMode);
 
         return new CoverageGateRequest(
             coveragePath,
@@ -227,6 +241,22 @@ internal sealed partial class CoverageGateCommand : ICommand
             Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY"),
             patchCoverage,
             Tolerance);
+    }
+
+    private PatchLineMode ParsePatchLineMode()
+    {
+        if (PatchLineModeOption is null
+            || string.Equals(PatchLineModeOption, "measurable", StringComparison.OrdinalIgnoreCase))
+        {
+            return PatchLineMode.Measurable;
+        }
+
+        if (string.Equals(PatchLineModeOption, "codecov", StringComparison.OrdinalIgnoreCase))
+        {
+            return PatchLineMode.Codecov;
+        }
+
+        throw new CommandException("ASCOV017 --patch-line-mode must be measurable or codecov.");
     }
 
     private static string GetFullPathOrThrow(string path, string diagnostic)
@@ -424,11 +454,13 @@ internal sealed record CoverageGateRequest(
 /// <param name="DiffSource">Patch diff source used to acquire unified diff text.</param>
 /// <param name="MinPatchLinePercent">Optional changed-line threshold.</param>
 /// <param name="MinPatchBranchPercent">Optional changed-branch threshold.</param>
+/// <param name="LineMode">Changed-line calculation mode. Defaults to <see cref="PatchLineMode.Measurable"/>.</param>
 internal sealed partial record CoveragePatchRequest(
     string RepositoryRoot,
     PatchDiffSource DiffSource,
     decimal? MinPatchLinePercent,
-    decimal? MinPatchBranchPercent = null);
+    decimal? MinPatchBranchPercent = null,
+    PatchLineMode LineMode = PatchLineMode.Measurable);
 
 internal sealed partial record CoveragePatchRequest
 {
@@ -437,14 +469,32 @@ internal sealed partial record CoveragePatchRequest
         string DiffBase,
         decimal? MinPatchLinePercent,
         Func<CancellationToken, Task<string>>? DiffProvider = null,
-        decimal? MinPatchBranchPercent = null)
+        decimal? MinPatchBranchPercent = null,
+        PatchLineMode LineMode = PatchLineMode.Measurable)
         : this(
             RepositoryRoot,
             PatchDiffSource.ForGitBase(DiffBase, DiffBase, DiffProvider),
             MinPatchLinePercent,
-            MinPatchBranchPercent)
+            MinPatchBranchPercent,
+            LineMode)
     {
     }
+}
+
+/// <summary>
+/// Selects the changed-line coverage calculation.
+/// </summary>
+internal enum PatchLineMode
+{
+    /// <summary>
+    /// Counts a Cobertura line as covered when it has at least one hit.
+    /// </summary>
+    Measurable,
+
+    /// <summary>
+    /// Matches Codecov line semantics when Cobertura includes branch condition data.
+    /// </summary>
+    Codecov,
 }
 
 internal enum PatchDiffSourceKind
@@ -595,6 +645,7 @@ internal sealed record PatchDiffSourceReport(
 /// <param name="PatchBranchCoverage">Optional changed-branch coverage metric.</param>
 /// <param name="PatchDiffSource">Optional patch diff source provenance.</param>
 /// <param name="TolerancePercent">Grace margin subtracted from thresholds before evaluation. Defaults to 0.5.</param>
+/// <param name="PatchLineMode">Selected changed-line calculation mode.</param>
 internal sealed record CoverageGateResult(
     string CoveragePath,
     CoverageMetric LineCoverage,
@@ -609,7 +660,8 @@ internal sealed record CoverageGateResult(
     decimal? MinPatchBranchPercent = null,
     PatchBranchCoverageMetric? PatchBranchCoverage = null,
     PatchDiffSourceReport? PatchDiffSource = null,
-    decimal TolerancePercent = 0.5m);
+    decimal TolerancePercent = 0.5m,
+    PatchLineMode? PatchLineMode = null);
 
 /// <summary>
 /// One Cobertura coverage metric expressed as optional covered/valid counts and a percentage.
@@ -746,7 +798,8 @@ internal static class CoverageGateEvaluator
                     request.PatchCoverage?.MinPatchBranchPercent,
                     patchCoverage?.BranchCoverage,
                     patchCoverage?.SourceReport,
-                    request.TolerancePercent);
+                    request.TolerancePercent,
+                    request.PatchCoverage?.LineMode);
             }
         }
         catch (XmlException ex)
@@ -984,6 +1037,7 @@ internal static class PatchCoverageEvaluator
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ValidateLineMode(request.LineMode);
 
         if (request.DiffSource.Kind == PatchDiffSourceKind.GitBase
             && string.IsNullOrWhiteSpace(request.DiffSource.DiffBase))
@@ -1020,6 +1074,7 @@ internal static class PatchCoverageEvaluator
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ValidateLineMode(request.LineMode);
 
         var parseResult = ParseChangedLinesDetailed(artifact.Text);
         if (request.DiffSource.IsExternalArtifact && parseResult.Status == PatchDiffParseStatus.Malformed)
@@ -1052,7 +1107,7 @@ internal static class PatchCoverageEvaluator
                 }
 
                 measurableLineCount++;
-                if (lineCoverage.Covered)
+                if (IsLineCovered(lineCoverage, request.LineMode))
                 {
                     coveredLineCount++;
                 }
@@ -1094,6 +1149,25 @@ internal static class PatchCoverageEvaluator
                 coveredBranchCount,
                 branchPercent));
     }
+
+    private static void ValidateLineMode(PatchLineMode mode)
+    {
+        if (mode is PatchLineMode.Measurable or PatchLineMode.Codecov)
+        {
+            return;
+        }
+
+        throw new CommandException("ASCOV017 --patch-line-mode must be measurable or codecov.");
+    }
+
+    private static bool IsLineCovered(PatchLineCoverageData lineCoverage, PatchLineMode mode) => mode switch
+    {
+        PatchLineMode.Measurable => lineCoverage.Covered,
+        PatchLineMode.Codecov => lineCoverage.Covered
+            && (lineCoverage.Branches is not { } branches
+                || branches.Covered == branches.Valid),
+        _ => throw new CommandException("ASCOV017 --patch-line-mode must be measurable or codecov."),
+    };
 
     internal static IReadOnlyDictionary<string, IReadOnlySet<int>> ParseChangedLines(string diffText)
         => ParseChangedLinesDetailed(diffText).ChangedLines;
@@ -1846,6 +1920,7 @@ internal static class CoverageGateReportWriter
                     patchLine = effectivePatchLineThreshold,
                     patchBranch = effectivePatchBranchThreshold,
                 },
+                patchLineMode = result.PatchLineMode?.ToString().ToLowerInvariant(),
                 patchDiffSource = ToJson(result.PatchDiffSource),
                 line = ToJson(result.LineCoverage),
                 branch = ToJson(result.BranchCoverage),
@@ -1879,6 +1954,11 @@ internal static class CoverageGateReportWriter
         builder.AppendLine(FormattableString.Invariant($"Tolerance: {result.TolerancePercent:0.##}%"));
         if (result.PatchDiffSource is { } source)
         {
+            if (result.PatchLineMode is { } patchLineMode)
+            {
+                builder.AppendLine($"Patch line mode: {patchLineMode.ToString().ToLowerInvariant()}");
+            }
+
             builder.AppendLine($"Patch source: {EscapeMarkdownCell(GetKindText(source.Kind))}");
             builder.AppendLine($"Patch label: {EscapeMarkdownCell(source.Label)}");
             if (!string.IsNullOrWhiteSpace(source.DiffBase))
