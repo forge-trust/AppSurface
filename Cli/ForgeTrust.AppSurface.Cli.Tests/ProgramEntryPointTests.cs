@@ -152,7 +152,7 @@ public sealed class ProgramEntryPointTests
             ApplicationName = "MyApp",
             EnvironmentName = "Development",
         };
-        var console = new FakeInMemoryConsole();
+        using var console = new FakeInMemoryConsole();
 
         await command.ExecuteAsync(console);
 
@@ -180,7 +180,7 @@ public sealed class ProgramEntryPointTests
                 AppSurfaceLocalSecretMigrationResult.Completed(
                     [new AppSurfaceLocalSecretMigrationRow("Stripe:ApiKey", "Failed", LocalSecretResultStatus.Locked, diagnostic)],
                     "test-migration-store")));
-        var console = new FakeInMemoryConsole();
+        using var console = new FakeInMemoryConsole();
 
         var exception = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
 
@@ -208,9 +208,28 @@ public sealed class ProgramEntryPointTests
                     diagnostic,
                     "test-migration-store")));
 
-        var exception = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(new FakeInMemoryConsole()));
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
 
         Assert.Contains("local-secret-store-locked", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsMigrate_Should_UseGenericErrorWhenStartupFailureHasNoDiagnostic()
+    {
+        var command = new TestableSecretsMigrateCommand(
+            new MigrationResultStore(
+                new AppSurfaceLocalSecretMigrationResult(
+                    LocalSecretResultStatus.Locked,
+                    [],
+                    null,
+                    "test-migration-store")));
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
+
+        Assert.Equal("Local secret migration could not start.", exception.Message);
     }
 
     [Fact]

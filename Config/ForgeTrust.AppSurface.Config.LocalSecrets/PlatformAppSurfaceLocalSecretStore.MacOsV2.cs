@@ -666,13 +666,9 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
 
         private static void Release(Mutex mutex)
         {
-            try
+            using (mutex)
             {
                 mutex.ReleaseMutex();
-            }
-            finally
-            {
-                mutex.Dispose();
             }
         }
 
