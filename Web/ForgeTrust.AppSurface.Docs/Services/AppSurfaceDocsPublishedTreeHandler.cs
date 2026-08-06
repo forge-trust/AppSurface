@@ -675,6 +675,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
 
         if (ShouldRewriteHtml(relativeFilePath))
         {
+            ArgumentNullException.ThrowIfNull(html);
             httpContext.Response.Headers["Content-Security-Policy"] = BuildHtmlContentSecurityPolicy(html);
         }
         else if (IsSvgPath(relativeFilePath))
@@ -683,13 +684,8 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         }
     }
 
-    private static string BuildHtmlContentSecurityPolicy(string? html)
+    private static string BuildHtmlContentSecurityPolicy(string html)
     {
-        if (string.IsNullOrWhiteSpace(html))
-        {
-            return LegacyHtmlContentSecurityPolicy;
-        }
-
         var document = new HtmlParser().ParseDocument(html);
         var bootstrapEnabled = document
             .QuerySelectorAll("script[data-as-theme-preference-bootstrap]")
@@ -709,7 +705,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             .Select(style => ToCspSha256(style.TextContent))
             .Concat(
                 document.QuerySelectorAll("[style]")
-                    .Select(element => ToCspSha256(element.GetAttribute("style") ?? string.Empty)))
+                    .Select(element => ToCspSha256(element.GetAttribute("style")!)))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 

@@ -132,6 +132,7 @@ public sealed class AppSurfaceThemeWebIntegrationTests
         Assert.Same(AppSurfaceThemeDocument.Empty, emptyIdDocument);
         Assert.False(AppSurfaceThemeDocumentSerializer.TrySerialize(invalidRoles, out var invalidRolesDocument));
         Assert.Same(AppSurfaceThemeDocument.Empty, invalidRolesDocument);
+        Assert.Same(AppSurfaceThemeDocument.Empty, AppSurfaceThemeDocumentSerializer.SerializePreference(invalidRoles));
         Assert.False(AppSurfaceThemeDocumentSerializer.TrySerialize(invalidContrast, out var invalidContrastDocument));
         Assert.Same(AppSurfaceThemeDocument.Empty, invalidContrastDocument);
     }
@@ -414,6 +415,7 @@ public sealed class AppSurfaceThemeWebIntegrationTests
     [InlineData("with\tspace")]
     [InlineData("contains'quote")]
     [InlineData("contains\"quote")]
+    [InlineData("contains\u0000control")]
     [InlineData("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmn")]
     public void PreferenceOptions_ShouldRejectMissingAndUnsafeStorageKeys(string? storageKey)
     {
@@ -451,6 +453,20 @@ public sealed class AppSurfaceThemeWebIntegrationTests
         Assert.Equal(
             "sha256-" + Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(AppSurfaceThemePreferenceBootstrap.Script))),
             AppSurfaceThemePreferenceCsp.ScriptHash);
+    }
+
+    [Fact]
+    public void PreferenceBootstrap_ShouldRenderWithoutANonceAndRejectNullOptions()
+    {
+        var bootstrap = new AppSurfaceThemePreferenceBootstrap(new AppSurfaceThemePreferenceOptions { StorageKey = "custom-theme" });
+
+        var html = bootstrap.Render(null);
+
+        Assert.Contains("data-as-theme-storage-key=\"custom-theme\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain(" nonce=", html, StringComparison.Ordinal);
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceThemePreferenceBootstrap(null!));
+        Assert.Throws<ArgumentNullException>(
+            () => new AppSurfaceThemePreferenceBootstrap(new AppSurfaceThemePreferenceOptions { StorageKey = null! }));
     }
 
     [Fact]

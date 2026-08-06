@@ -217,6 +217,48 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task TryHandleAsync_ShouldKeepLegacyScriptPolicyForAnEmptyHtmlDocument()
+    {
+        var tree = CreatePublishedTree("empty-html-theme-preference-csp");
+        File.WriteAllText(Path.Join(tree, "index.html"), string.Empty);
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3");
+
+        Assert.True(await handler.TryHandleAsync(request));
+
+        var csp = request.Response.Headers["Content-Security-Policy"].ToString();
+        Assert.Contains("script-src 'none'", csp, StringComparison.Ordinal);
+        Assert.DoesNotContain("allow-scripts", csp, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-as-theme-preference-bootstrap", ReadBody(request), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldAllowTheVerifiedPreferenceBootstrapWithoutStyleHashes()
+    {
+        var services = new ServiceCollection();
+        services.AddAppSurfaceTheming(options => options.Pairs.Add(AppSurfaceThemePair.AppSurface()));
+        services.AddAppSurfaceWebThemePreferences();
+        using var provider = services.BuildServiceProvider();
+        var renderedHead = RenderPreferenceHead(provider, "request-nonce");
+        var scriptEndIndex = renderedHead.IndexOf("</script>", StringComparison.Ordinal) + "</script>".Length;
+        Assert.True(scriptEndIndex > "</script>".Length, "Expected the preference head to contain its bootstrap script.");
+
+        var tree = CreatePublishedTree("unstyled-theme-preference-csp");
+        File.WriteAllText(
+            Path.Join(tree, "index.html"),
+            $"<!DOCTYPE html><html><head>{renderedHead[..scriptEndIndex]}</head><body></body></html>");
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3");
+
+        Assert.True(await handler.TryHandleAsync(request));
+
+        var csp = request.Response.Headers["Content-Security-Policy"].ToString();
+        Assert.Contains("sandbox allow-same-origin allow-scripts", csp, StringComparison.Ordinal);
+        Assert.Contains($"script-src '{AppSurfaceThemePreferenceCsp.ScriptHash}'", csp, StringComparison.Ordinal);
+        Assert.DoesNotContain("unsafe-hashes", csp, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TryHandleAsync_ShouldDenySvg_ForLegacyUnverifiedArchives()
     {
         var tree = CreatePublishedTree("legacy-svg");
