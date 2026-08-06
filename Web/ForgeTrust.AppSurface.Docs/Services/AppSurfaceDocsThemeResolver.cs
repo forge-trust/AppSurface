@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
 using ForgeTrust.AppSurface.Theming;
+using ForgeTrust.AppSurface.Web.Theming;
 
 namespace ForgeTrust.AppSurface.Docs.Services;
 
@@ -29,14 +30,29 @@ internal sealed class AppSurfaceDocsThemeResolver
     /// </summary>
     /// <param name="options">The normalized AppSurface Docs options.</param>
     /// <param name="themeResolver">The shared resolver selected by the container, or <see langword="null"/> for the legacy Docs contract.</param>
+    /// <param name="themeDocumentProvider">
+    /// The Web document provider selected by the container. A System preference document makes every shared Docs
+    /// override satisfy contrast requirements in both branches, even when the neutral default is fixed Light or Dark.
+    /// </param>
     public AppSurfaceDocsThemeResolver(
         AppSurfaceDocsOptions options,
-        IAppSurfaceThemeResolver? themeResolver)
+        IAppSurfaceThemeResolver? themeResolver,
+        IAppSurfaceThemeDocumentProvider? themeDocumentProvider = null)
     {
         ArgumentNullException.ThrowIfNull(options);
 
         var legacyTheme = AppSurfaceDocsThemePolicy.Resolve(options.Theme);
         var sharedResolution = themeResolver?.ResolveDefault();
+        if (sharedResolution is not null
+            && string.Equals(themeDocumentProvider?.GetDocument().RootThemeMode, "system", StringComparison.Ordinal))
+        {
+            sharedResolution = new AppSurfaceThemeResolution(
+                sharedResolution.Id,
+                AppSurfaceThemeMode.System,
+                sharedResolution.Light,
+                sharedResolution.Dark);
+        }
+
         Theme = sharedResolution is not null
             && legacyTheme.Preset == AppSurfaceDocsThemePreset.AppSurfaceDark
             && AppSurfaceThemeRegistry.IsSafeResolution(sharedResolution)

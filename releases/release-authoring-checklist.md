@@ -29,15 +29,18 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 - link the tagged note from [`CHANGELOG.md`](../CHANGELOG.md)
 - open the release preparation pull request and stop for manual maintainer review; automation and coding agents must not merge release PRs or create release tags without an explicit post-review instruction
 
-## After the tag ships
+## When creating and pushing the tag
 
-- create the annotated tag from the maintainer-reviewed merge commit outside the release tool; v1 never creates tags automatically
+- from the maintainer-reviewed merge commit, generate the canonical tag trailers with `./eng/release tag-message --version x.y.z > /tmp/appsurface-vx.y.z-tag-message.txt`, create `git tag -a vx.y.z -F /tmp/appsurface-vx.y.z-tag-message.txt`, and run `./eng/release inspect --version x.y.z --tag vx.y.z --base-ref <release-base>` before pushing the tag; see the [prepared-to-tagged state contract](../tools/ForgeTrust.AppSurface.Release/README.md#prepared-to-tagged-state)
+- the committed versioned sidecar remains `release.state: prepared`; `inspect` creates a temporary verified `tagged` projection for the detached docs-export checkout, so never commit a tagged sidecar back to the release branch
+- if inspection fails before the tag is pushed, delete and recreate the local tag after regenerating the message; if it fails after push, preserve the tag and use a maintainer-approved fix-forward release or recovery path instead of retagging history
 - wait for the protected NuGet workflow for the tag classification to finish first: `nuget-prerelease-publish.yml` for prerelease tags, `nuget-stable-publish.yml` for stable tags
 - for stable tags, treat the workflow's `appsurface-stable-docs-proof-x.y.z` artifact as the pre-NuGet docs proof: it contains the staged catalog plus archive manifests verified before the trusted publishing token was requested
 - run `./eng/release publish --version x.y.z --tag vx.y.z --base-ref <release-base> --dry-run` before the publish workflow promotes the GitHub Release; publish validation checks the release evidence bundle and protected package publish proof at the annotated tag commit, not the local worktree
 - for stable releases, let `release-publish.yml` derive docs publication from the tag: it exports the exact docs tree, runs `./eng/release docs-publication`, uploads `appsurface-docs-vx.y.z.tar.gz` plus `.sha256` to a draft release, verifies staged Pages, deploys Pages, fetches the public catalog/exact manifest, verifies the uploaded asset digest, and only then publishes the draft release
 - keep stable releases blocked until `nuget-stable` publish and `nuget-stable-smoke` install proof exists; `v0.1.0` must not become a GitHub-only release
 - verify the `/docs` release hub resolves to the new tagged note, current policy pages, `versions.json`, and `releases/x.y.z/`
+- after the first release that uses this contract, run a short maintainer retro: record the time from merge to successful local `inspect`, any confusing diagnostic, and whether the recovery guidance was needed; the target is two to five minutes without manual hash calculations
 
 ## Diagnostics and escape hatches
 
