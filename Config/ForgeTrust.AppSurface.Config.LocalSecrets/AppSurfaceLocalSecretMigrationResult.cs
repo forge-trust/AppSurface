@@ -40,7 +40,7 @@ public static class AppSurfaceLocalSecretMigrationActionExtensions
 {
     /// <summary>Returns the stable text rendered by the LocalSecrets migration command.</summary>
     /// <param name="action">The migration action to render.</param>
-/// <returns>The stable action text, or the enum fallback text for an action introduced by a newer implementation.</returns>
+    /// <returns>The stable action text, or the enum fallback text for an action introduced by a newer implementation.</returns>
     public static string ToDisplayString(this AppSurfaceLocalSecretMigrationAction action) =>
         action switch
         {
