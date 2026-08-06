@@ -1,8 +1,9 @@
 # ForgeTrust.AppSurface.Durable.PostgreSql
 
 > **Source-only public preview:** this package supplies explicit PostgreSQL schema management, Work, Flow, Schedule,
-> and an explicitly opted-in bounded runtime host. It remains excluded from publish plans until coordinated release
-> review proves operational conformance. Storage registration itself starts no worker or hosted service.
+> an explicitly opted-in bounded runtime host, and durable W3C causal evidence. It remains excluded from publish plans
+> until coordinated release review proves operational conformance. Storage registration itself starts no worker or hosted
+> service.
 
 Choose this package when an application must commit its domain mutation and durable Work acceptance in the same
 PostgreSQL transaction, and when process-loss recovery must use explicit leases, runtime/scope fences, effect permits,
@@ -23,7 +24,9 @@ Run the source-evaluator [`slice 3 reference workload`](../slice3-reference-work
 atomically with domain mutations, force-terminate a separate process at the committed timer-winner checkpoint, and verify
 the remaining recovery boundaries transactionally with fresh processors. The Work-first
 [`Schedule protocol`](../schedule-protocol-v1.md) remains a bounded Gate A Work-only protocol check; its deterministic
-crash-proof evidence remains deferred. For the runtime activation boundary, use the worker-host path below.
+crash-proof evidence remains deferred. [Durable Flow trace context v1](../flow-trace-context-v1.md) documents the
+value-free causal evidence and process-loss link proof. For the runtime activation boundary, use the worker-host path
+below.
 
 ## Explicit schema and epoch deployment
 
@@ -40,7 +43,12 @@ Runtime mutations take a shared, transaction-scoped advisory fence before valida
 and epoch rotation take the exclusive package lock, so they wait for in-flight runtime transactions and prevent an old
 epoch from committing new durable state after rotation.
 
-Runtime roles never own schema or apply DDL. The package has five migrations: Work/shared state (`0001_work_shared.sql`), forced RLS and privilege revocation (`0002_forced_rls.sql`), Flow protocol persistence (`0003_flow_protocol.sql`), the Work-first Schedule ledger (`0004_schedule_protocol.sql`), and the payload-free runtime heartbeat (`0005_runtime_heartbeat.sql`). Applied schema is forward-only; rolling application code back does not authorize destructive schema rollback. Execute generated SQL with a client that stops on the first error; `psql` callers must pass `-v ON_ERROR_STOP=1`.
+Runtime roles never own schema or apply DDL. The package has six migrations: Work/shared state (`0001_work_shared.sql`),
+forced RLS and privilege revocation (`0002_forced_rls.sql`), Flow protocol persistence (`0003_flow_protocol.sql`), the
+Work-first Schedule ledger (`0004_schedule_protocol.sql`), the payload-free runtime heartbeat
+(`0005_runtime_heartbeat.sql`), and value-free Flow trace context (`0006_flow_trace_context.sql`). Applied schema is
+forward-only; rolling application code back does not authorize destructive schema rollback. Execute generated SQL with a
+client that stops on the first error; `psql` callers must pass `-v ON_ERROR_STOP=1`.
 
 Create host principals outside migrations. Use [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) to
 grant the migration-owner, payload-free dispatcher, and scoped-runtime capabilities. Runtime roles must not receive
@@ -142,8 +150,8 @@ schema to the migration owner. Do not place application-owned objects there.
 | Principal | Allowed privileges |
 | --- | --- |
 | Dispatcher | Schema `USAGE`; global table `SELECT` on payload-free `dispatch` and `flow_dispatch`; `EXECUTE` only on the constrained Schedule claim function. It receives Schedule routing IDs and revision, never raw `schedule_dispatch` columns. |
-| Runtime reads | Schema `USAGE`; table `SELECT` on package metadata, scoped Work, Flow, and Schedule relations. Dispatch reads are scope-filtered by transaction-local RLS. |
-| Runtime inserts | Table `INSERT` on scoped Work, Flow, and Schedule protocol relations. |
+| Runtime reads | Schema `USAGE`; table `SELECT` on package metadata, scoped Work, Flow, Schedule, and Flow trace-context relations. Dispatch reads are scope-filtered by transaction-local RLS. |
+| Runtime inserts | Table `INSERT` on scoped Work, Flow, Schedule, and Flow trace-context relations. |
 | Runtime updates | Reviewed column-level `UPDATE` on mutable Work, Flow instance/wait/timer, Schedule definition/occurrence/dispatch, and dispatch fields; no table-wide update grant. |
 | Runtime sequences | `USAGE` and `SELECT` on every sequence in the package schema. |
 | Runtime heartbeat | Unscoped `SELECT` and `INSERT`, plus reviewed column-level `UPDATE`, on `runtime_heartbeat` for `IDurableRuntimeHealth`. Its forced RLS policy intentionally uses `USING (true)` and `WITH CHECK (true)`; keep this fully trusted runtime credential out of untrusted callers. |
@@ -325,7 +333,7 @@ The runtime pump, health, drain, and host composition are now public through the
 registration extensions. Applications must still keep authorization around all operator/control APIs and must not
 depend on internal PostgreSQL claim/store types.
 
-Read the normative [`Work protocol v1`](../work-protocol-v1.md), [`Flow protocol v1`](../flow-protocol-v1.md), the
+Read the normative [`Work protocol v1`](../work-protocol-v1.md), [`Flow protocol v1`](../flow-protocol-v1.md), [Durable Flow trace context v1](../flow-trace-context-v1.md), the
 [`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md), the
 [`slice 3 reconstruction ledger`](../slice3-reconstruction.md), and the [`slice 4 reconstruction ledger`](../slice4-reconstruction.md) for exact behavior, safe responses, and lineage.
 

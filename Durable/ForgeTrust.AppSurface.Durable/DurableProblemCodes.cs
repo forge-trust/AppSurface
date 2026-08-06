@@ -72,6 +72,10 @@ public static class DurableProblemCodes
     /// <summary>The suspended Flow wait shape cannot safely restore its recorded state.</summary>
     public const string FlowReleaseStateMismatch = "ASDUR211";
 
+    /// <summary>The W3C traceparent header version or structure is invalid.</summary>
+    public const string TraceContextInvalid = "ASDUR212";
+    /// <summary>The W3C tracestate header formatting or length is invalid and was rejected.</summary>
+    public const string TraceStateRejected = "ASDUR213";
     /// <summary>The durable provider schema is not installed.</summary>
     public const string SchemaMissing = "ASDUR400";
     /// <summary>The durable provider schema requires pending migrations.</summary>

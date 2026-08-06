@@ -37,6 +37,8 @@ context.
 | `ASDUR209` | Event contract mismatch | Payload does not match the active typed wait | Send the exact declared payload and reuse the unconsumed event id |
 | `ASDUR210` | Release manifest mismatch | Registration differs from recoverable history | Deploy a compatible registration or migrate explicitly |
 | `ASDUR211` | Release state mismatch | Suspended state and wait/timer/child-work truth disagree | Reconcile authoritative truth before release |
+| `ASDUR212` | Trace context invalid | Persisted or ambient `traceparent` is malformed, unsupported, or unsafe | Drop context and continue the Flow without a causal link |
+| `ASDUR213` | Trace state rejected | A valid parent carried malformed or oversized opaque `tracestate` | Retain the parent link and drop only `tracestate` |
 
 ### ASDUR202
 
@@ -71,6 +73,16 @@ release.
 The persisted suspension descriptor, wait/timer lineage, or child-Work truth cannot be restored without guessing.
 Reconcile authoritative Work and Flow facts first; cancellation or an explicit evidence-backed repair is safer than a
 force-terminate shortcut.
+
+### ASDUR212 and ASDUR213
+
+Trace diagnostics are value-free. `ASDUR212` drops both W3C fields and continues without a link; `ASDUR213` keeps a
+valid W3C `traceparent` and drops only opaque `tracestate`. Neither diagnostic authorizes a retry, changes scope
+authorization, or permits logging raw trace headers. See the [Durable trace-context contract](../Durable/flow-trace-context-v1.md).
+
+Schedule contracts reserve `ASDUR301`-`ASDUR307` for invalid definition, missing schedule, revision conflict, command
+conflict, access denial, evaluation incompatibility, and recovery-state mismatch. A provider must map these codes to its
+tested implementation without changing their meanings.
 
 ## PostgreSQL Schedule provider diagnostics
 

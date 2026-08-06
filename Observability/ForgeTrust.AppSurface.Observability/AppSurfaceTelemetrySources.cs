@@ -1,22 +1,30 @@
 namespace ForgeTrust.AppSurface.Observability;
 
+using ForgeTrust.AppSurface.Core;
+
 /// <summary>
-/// Names the OpenTelemetry sources and meters that AppSurface-owned instrumentation should use.
+/// Provides compatible OpenTelemetry source and meter name surfaces for AppSurface-owned instrumentation.
 /// </summary>
 /// <remarks>
+/// <para>
+/// This type keeps the existing v1 public shape for telemetry names while delegating the canonical AppSurface source name
+/// to <see cref="AppSurfaceActivitySources"/> to avoid a hard dependency on this package from framework code.
+/// </para>
+/// <para>
 /// The v1 observability package registers these names so future AppSurface packages can add spans and metrics without
 /// forcing each application to rediscover source names. This package does not add Flow, Auth, Docs, Intelligence, or
 /// other package-specific telemetry yet.
+/// </para>
 /// </remarks>
 public static class AppSurfaceTelemetrySources
 {
     /// <summary>
-    /// Gets the ActivitySource name reserved for AppSurface-owned spans.
+    /// Gets the canonical ActivitySource name reserved for AppSurface-owned spans.
     /// </summary>
-    public const string ActivitySourceName = "ForgeTrust.AppSurface";
+    public const string ActivitySourceName = AppSurfaceActivitySources.ActivitySourceName;
 
     /// <summary>
-    /// Gets the Meter name reserved for AppSurface-owned metrics.
+    /// Gets the canonical meter name reserved for AppSurface-owned metrics.
     /// </summary>
     public const string MeterName = "ForgeTrust.AppSurface";
 
@@ -29,7 +37,7 @@ public static class AppSurfaceTelemetrySources
     /// </remarks>
     public static IReadOnlyList<string> StandardActivitySourceNames { get; } = Array.AsReadOnly(
         [
-            ActivitySourceName,
+            AppSurfaceActivitySources.ActivitySourceName,
             "Microsoft.AspNetCore",
             "System.Net.Http"
         ]);

@@ -397,11 +397,11 @@ public sealed class PostgreSqlDurableWorkStoreTests
                 await using var restore = database.DataSource.CreateCommand(
                     """
                     UPDATE appsurface_durable.store_metadata
-                    SET schema_version = 5,
+                    SET schema_version = 6,
                         minimum_reader_version = 1,
-                        maximum_reader_version = 5,
+                        maximum_reader_version = 6,
                         minimum_writer_version = 1,
-                        maximum_writer_version = 5
+                        maximum_writer_version = 6
                     WHERE singleton;
                     """);
                 await restore.ExecuteNonQueryAsync();
