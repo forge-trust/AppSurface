@@ -38,6 +38,7 @@ internal sealed class ReleaseProjectionOutputWriter : IDisposable
     private const int WindowsFileRenameInfo = 3;
     private static readonly AsyncLocal<Action<string>?> DirectoryOpenedHook = new();
     private static readonly AsyncLocal<Action?> TemporaryFileOpenedHook = new();
+    private static readonly AsyncLocal<int?> UnixFChmodFailureError = new();
     private readonly string _directoryPath;
     private readonly List<SafeFileHandle> _directoryHandles = [];
     private SafeFileHandle? _directoryHandle;
@@ -141,6 +142,23 @@ internal sealed class ReleaseProjectionOutputWriter : IDisposable
         var previous = TemporaryFileOpenedHook.Value;
         TemporaryFileOpenedHook.Value = callback;
         return new TemporaryFileOpenedHookScope(previous);
+    }
+
+    /// <summary>
+    /// Forces Unix temporary-file permission hardening to fail with a specified native error code.
+    /// </summary>
+    /// <param name="error">Non-zero native error code returned by the test-only failure seam.</param>
+    /// <returns>A scope that restores the previous failure seam.</returns>
+    /// <remarks>
+    /// The seam is async-flow-local so tests can verify cleanup after a permission-hardening failure without depending on host filesystem behavior.
+    /// Production code leaves the seam unset and calls <c>fchmod</c> directly.
+    /// </remarks>
+    internal static IDisposable UseUnixFChmodFailureForTesting(int error)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(error);
+        var previous = UnixFChmodFailureError.Value;
+        UnixFChmodFailureError.Value = error;
+        return new UnixFChmodFailureScope(previous);
     }
 
     /// <summary>
@@ -328,11 +346,18 @@ internal sealed class ReleaseProjectionOutputWriter : IDisposable
         }
 
         var temporaryFile = new SafeFileHandle((nint)descriptor, ownsHandle: true);
-        if (UnixFChmod(descriptor, 0x180) != 0)
+        var testFailureError = UnixFChmodFailureError.Value;
+        if (testFailureError is { } testError)
         {
-            var error = Marshal.GetLastPInvokeError();
+            Marshal.SetLastPInvokeError(testError);
+        }
+
+        if (testFailureError is not null || UnixFChmod(descriptor, 0x180) != 0)
+        {
+            var nativeError = Marshal.GetLastPInvokeError();
             temporaryFile.Dispose();
-            Marshal.SetLastPInvokeError(error);
+            _ = UnlinkAt(DirectoryDescriptor, temporaryFileName, 0);
+            Marshal.SetLastPInvokeError(nativeError);
             throw NativeIOException($"Unable to secure temporary output file '{temporaryFileName}'.");
         }
 
@@ -593,6 +618,14 @@ internal sealed class ReleaseProjectionOutputWriter : IDisposable
         public void Dispose()
         {
             TemporaryFileOpenedHook.Value = previous;
+        }
+    }
+
+    private sealed class UnixFChmodFailureScope(int? previous) : IDisposable
+    {
+        public void Dispose()
+        {
+            UnixFChmodFailureError.Value = previous;
         }
     }
 

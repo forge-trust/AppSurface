@@ -100,6 +100,57 @@ public sealed class ReleaseEvidenceCoverageTests
     }
 
     [Fact]
+    public async Task ValidatePreparedReportsInvalidPreparedSidecar()
+    {
+        var root = TestPathUtils.PathUnder(Path.GetTempPath(), "ReleaseEvidenceCoverage", Guid.NewGuid().ToString("N"));
+        var workspace = new ReleaseWorkspace(root);
+        var manifest = CreateV1Manifest("abc123");
+        const string invalidSidecar = """
+            release:
+              schema: appsurface-release-sidecar-v1
+              state: tagged
+              id: v0.1.0-preview.1
+            trust:
+              status: Prepared
+            """;
+        var bundle = ReleaseEvidence.BuildDraft(
+            workspace,
+            Version,
+            ReleaseClassification,
+            new DateOnly(2026, 5, 25),
+            "abc123",
+            ReleaseNote,
+            invalidSidecar,
+            manifest,
+            Array.Empty<PackagePathUpdate>());
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(workspace.ReleaseEvidencePath(Version))!);
+            await File.WriteAllTextAsync(workspace.ReleaseEvidencePath(Version), ReleaseEvidence.Serialize(bundle));
+            await File.WriteAllTextAsync(workspace.ReleaseNotePath(Version), ReleaseNote);
+            await File.WriteAllTextAsync(workspace.ReleaseSidecarPath(Version), invalidSidecar);
+            await File.WriteAllTextAsync(workspace.ReleaseManifestPath(Version), manifest);
+
+            var result = await ReleaseEvidence.ValidatePreparedAsync(
+                workspace,
+                Version,
+                ReleaseClassification,
+                "abc123",
+                CancellationToken.None);
+
+            Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-sidecar-state-invalid");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void ValidateTagRejectsMalformedV1ReleaseManifestJson()
     {
         const string malformedManifest = "{";

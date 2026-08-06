@@ -276,17 +276,6 @@ internal sealed partial class ReleaseInspectCommand : ReleaseCommandBase, IComma
                 "tools/ForgeTrust.AppSurface.Release/README.md#prepared-to-tagged-state"));
         }
 
-        var directory = Path.GetDirectoryName(resolvedPath);
-        if (string.IsNullOrWhiteSpace(directory))
-        {
-            throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                "release-inspect-output-path-invalid",
-                "Inspect output did not resolve to a writable directory.",
-                $"The output path {resolvedPath} has no parent directory.",
-                "Pass an explicit temporary YAML file path.",
-                "tools/ForgeTrust.AppSurface.Release/README.md#prepared-to-tagged-state"));
-        }
-
         await ReleaseProjectionOutputWriter.WriteAsync(resolvedPath, yaml, cancellationToken);
     }
 }

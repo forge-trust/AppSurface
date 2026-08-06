@@ -187,15 +187,7 @@ internal sealed class ReleaseTaggedProjectionResolver
             throw new ReleaseToolException(evidence.Diagnostics[0]);
         }
 
-        if (evidence.Bundle is null || evidence.Summary is null)
-        {
-            throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                "release-evidence-schema-invalid",
-                "Release evidence did not produce a complete validation result.",
-                "The evidence bundle could not be used to establish the tag binding.",
-                "Regenerate the prepared release artifacts and evidence before creating the annotated tag.",
-                DocsPath));
-        }
+        var evidenceBundle = RequireCompleteValidationResult(evidence);
 
         if (ReleaseEvidence.IsV2(artifacts.Evidence))
         {
@@ -213,12 +205,29 @@ internal sealed class ReleaseTaggedProjectionResolver
 
             await ValidatePreparationBaseContainedByTagAsync(
                 tag,
-                evidence.Bundle.Commits.ContentSourceCommit,
+                evidenceBundle.Commits.ContentSourceCommit,
                 tagCommit,
                 cancellationToken);
         }
 
         return evidence;
+    }
+
+    [System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(
+        Justification = "ReleaseEvidence validates that a diagnostic-free result includes both bundle and summary; this defensive invariant cannot be reached through the public release contracts.")]
+    private static ReleaseEvidenceBundle RequireCompleteValidationResult(ReleaseEvidenceValidationResult evidence)
+    {
+        if (evidence.Bundle is null || evidence.Summary is null)
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-evidence-schema-invalid",
+                "Release evidence did not produce a complete validation result.",
+                "The evidence bundle could not be used to establish the tag binding.",
+                "Regenerate the prepared release artifacts and evidence before creating the annotated tag.",
+                DocsPath));
+        }
+
+        return evidence.Bundle;
     }
 
     private async Task ValidatePreparationBaseContainedByTagAsync(

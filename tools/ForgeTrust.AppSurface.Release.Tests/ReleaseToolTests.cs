@@ -812,6 +812,140 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task InspectOutputWriterRemovesTemporaryFileWhenPermissionHardeningFails()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var output = ExternalPath("permission-hardening-failure-projection.yml");
+        var directory = Path.GetDirectoryName(output)!;
+        Directory.CreateDirectory(directory);
+        using var hook = ReleaseProjectionOutputWriter.UseUnixFChmodFailureForTesting(error: 5);
+
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() =>
+            ReleaseProjectionOutputWriter.WriteAsync(output, "replacement\n", CancellationToken.None));
+
+        Assert.Equal("release-inspect-output-path-invalid", exception.Diagnostic.Code);
+        Assert.Empty(Directory.EnumerateFiles(directory, ".permission-hardening-failure-projection.yml.*.tmp", SearchOption.TopDirectoryOnly));
+    }
+
+    [Fact]
+    public async Task InspectOutputWriterRejectsOutputDirectoryCreatedAfterInspection()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var output = ExternalPath("output-created-during-write-projection.yml");
+        var directory = Path.GetDirectoryName(output)!;
+        Directory.CreateDirectory(directory);
+        using var hook = ReleaseProjectionOutputWriter.UseDirectoryOpenedHookForTesting(_ => Directory.CreateDirectory(output));
+
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() =>
+            ReleaseProjectionOutputWriter.WriteAsync(output, "replacement\n", CancellationToken.None));
+
+        Assert.Equal("release-inspect-output-path-invalid", exception.Diagnostic.Code);
+        Assert.True(Directory.Exists(output));
+        Assert.Empty(Directory.EnumerateFiles(directory, ".output-created-during-write-projection.yml.*.tmp", SearchOption.TopDirectoryOnly));
+    }
+
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    [Fact]
+    public async Task InspectOutputWriterRejectsTemporaryFileCreationWithoutDirectoryWritePermission()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var output = ExternalPath("temporary-file-permission-denied-projection.yml");
+        var directory = Path.GetDirectoryName(output)!;
+        Directory.CreateDirectory(directory);
+        var originalPermissions = File.GetUnixFileMode(directory);
+        using var hook = ReleaseProjectionOutputWriter.UseDirectoryOpenedHookForTesting(_ =>
+            File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserExecute));
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<ReleaseToolException>(() =>
+                ReleaseProjectionOutputWriter.WriteAsync(output, "replacement\n", CancellationToken.None));
+
+            Assert.Equal("release-inspect-output-path-invalid", exception.Diagnostic.Code);
+        }
+        finally
+        {
+            File.SetUnixFileMode(directory, originalPermissions);
+        }
+    }
+
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    [Fact]
+    public async Task InspectOutputWriterRejectsMissingChildDirectoryWithoutParentWritePermission()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var parent = ExternalPath("missing-child-permission-denied");
+        var output = Path.Join(parent, "child", "projection.yml");
+        Directory.CreateDirectory(parent);
+        var originalPermissions = File.GetUnixFileMode(parent);
+
+        try
+        {
+            File.SetUnixFileMode(parent, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+
+            var exception = await Assert.ThrowsAsync<ReleaseToolException>(() =>
+                ReleaseProjectionOutputWriter.WriteAsync(output, "replacement\n", CancellationToken.None));
+
+            Assert.Equal("release-inspect-output-path-invalid", exception.Diagnostic.Code);
+        }
+        finally
+        {
+            File.SetUnixFileMode(parent, originalPermissions);
+        }
+    }
+
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    [Fact]
+    public async Task InspectOutputWriterPreservesCancellationWhenTemporaryFileCleanupIsDenied()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var output = ExternalPath("temporary-file-cleanup-denied-projection.yml");
+        var directory = Path.GetDirectoryName(output)!;
+        Directory.CreateDirectory(directory);
+        var originalPermissions = File.GetUnixFileMode(directory);
+        using var cancellation = new CancellationTokenSource();
+        using var hook = ReleaseProjectionOutputWriter.UseTemporaryFileOpenedHookForTesting(() =>
+        {
+            File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+            cancellation.Cancel();
+        });
+
+        try
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                ReleaseProjectionOutputWriter.WriteAsync(output, "replacement\n", cancellation.Token));
+        }
+        finally
+        {
+            File.SetUnixFileMode(directory, originalPermissions);
+            foreach (var temporaryFile in Directory.EnumerateFiles(directory, ".temporary-file-cleanup-denied-projection.yml.*.tmp", SearchOption.TopDirectoryOnly))
+            {
+                File.Delete(temporaryFile);
+            }
+        }
+    }
+
+    [Fact]
     public async Task InspectRequiresMatchingExplicitTag()
     {
         await SeedRepositoryAsync();
