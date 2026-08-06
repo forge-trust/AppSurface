@@ -137,8 +137,12 @@ WHERE namespace.nspname = 'appsurface_durable'
   AND routine.prokind = 'f' \gexec
 
 SELECT format(
-    'ALTER POLICY flow_dispatch_global_discovery ON appsurface_durable.flow_dispatch TO %I',
-    :'dispatcher_role') \gexec
+    'ALTER POLICY flow_dispatch_global_discovery ON appsurface_durable.flow_dispatch TO %I, %I',
+    :'dispatcher_role',
+    :'migration_owner_role') \gexec
+SELECT format(
+    'ALTER POLICY runtime_heartbeat_runtime_role ON appsurface_durable.runtime_heartbeat TO %I',
+    :'runtime_role') \gexec
 DROP POLICY IF EXISTS flow_dispatch_runtime_scope_select ON appsurface_durable.flow_dispatch;
 SELECT format(
     'CREATE POLICY flow_dispatch_runtime_scope_select ON appsurface_durable.flow_dispatch FOR SELECT TO %I USING (scope_id = nullif(current_setting(''appsurface_durable.scope_id'', true), ''''))',
@@ -198,14 +202,14 @@ SELECT NOT EXISTS
 SELECT bool_and(
     object.relrowsecurity =
       (object.relname IN
-        ('scope', 'scope_history', 'work', 'work_history', 'dispatch', 'work_operator_command', 'effect_permit',
+        ('scope', 'scope_history', 'work', 'work_history', 'dispatch', 'work_operator_command', 'effect_permit', 'runtime_heartbeat',
          'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch',
          'schedule_definition', 'schedule_generation', 'schedule_command', 'schedule_occurrence', 'schedule_dispatch',
          'schedule_history')
         OR object.relname LIKE 'schedule_history_%')
     AND object.relforcerowsecurity =
       (object.relname IN
-        ('scope', 'scope_history', 'work', 'work_history', 'dispatch', 'work_operator_command', 'effect_permit',
+        ('scope', 'scope_history', 'work', 'work_history', 'dispatch', 'work_operator_command', 'effect_permit', 'runtime_heartbeat',
          'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch',
          'schedule_definition', 'schedule_generation', 'schedule_command', 'schedule_occurrence', 'schedule_dispatch',
          'schedule_history')
@@ -293,6 +297,7 @@ WITH expected_policy(relation_name, policy_name, command_name, using_expression,
     ('flow_instance', 'flow_instance_scope_isolation', '*',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('runtime_heartbeat', 'runtime_heartbeat_runtime_role', '*', 'true', 'true'),
     ('flow_timer', 'flow_timer_scope_isolation', '*',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
@@ -376,9 +381,11 @@ SELECT NOT EXISTS
     (
         CASE
             WHEN actual.policy_name = 'flow_dispatch_global_discovery' THEN actual.polroles @> ARRAY[
-                (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'dispatcher_role')]
+                (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'dispatcher_role'),
+                (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'migration_owner_role')]
                 AND actual.polroles <@ ARRAY[
-                    (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'dispatcher_role')]
+                    (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'dispatcher_role'),
+                    (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'migration_owner_role')]
             WHEN actual.policy_name IN ('schedule_dispatch_global_discovery', 'schedule_dispatch_global_lease') THEN actual.polroles @> ARRAY[
                 (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'dispatcher_role'),
                 (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'migration_owner_role')]
@@ -388,7 +395,11 @@ SELECT NOT EXISTS
             WHEN actual.policy_name IN ('flow_dispatch_runtime_scope_select', 'schedule_dispatch_runtime_scope_select', 'schedule_dispatch_scope_update') THEN actual.polroles @> ARRAY[
                 (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'runtime_role')]
                 AND actual.polroles <@ ARRAY[
-                    (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'runtime_role')]
+                (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'runtime_role')]
+            WHEN actual.policy_name = 'runtime_heartbeat_runtime_role' THEN actual.polroles @> ARRAY[
+                (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'runtime_role')]
+                AND actual.polroles <@ ARRAY[
+                (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'runtime_role')]
             ELSE actual.polroles = ARRAY[0]::oid[]
         END
     )
@@ -456,7 +467,7 @@ SELECT NOT EXISTS
        privilege.privilege_name = 'SELECT'
        AND relation.relname IN
        (
-         'store_metadata', 'schema_migration', 'scope', 'work', 'dispatch',
+         'store_metadata', 'schema_migration', 'runtime_heartbeat', 'scope', 'work', 'dispatch',
          'work_operator_command', 'effect_permit', 'scope_history', 'work_history',
          'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch',
          'schedule_definition', 'schedule_generation', 'schedule_command', 'schedule_occurrence', 'schedule_dispatch',
@@ -465,7 +476,7 @@ SELECT NOT EXISTS
        OR privilege.privilege_name = 'INSERT'
        AND relation.relname IN
        (
-         'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
+         'runtime_heartbeat', 'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
          'scope_history', 'work_history',
          'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch',
          'schedule_definition', 'schedule_generation', 'schedule_command', 'schedule_occurrence', 'schedule_dispatch',
@@ -524,7 +535,7 @@ SELECT NOT EXISTS
        privilege.privilege_name = 'SELECT'
        AND column_value.relname IN
        (
-         'store_metadata', 'schema_migration', 'scope', 'work', 'dispatch',
+         'store_metadata', 'schema_migration', 'runtime_heartbeat', 'scope', 'work', 'dispatch',
          'work_operator_command', 'effect_permit', 'scope_history', 'work_history',
          'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch',
          'schedule_definition', 'schedule_generation', 'schedule_command', 'schedule_occurrence', 'schedule_dispatch',
@@ -533,7 +544,7 @@ SELECT NOT EXISTS
        OR privilege.privilege_name = 'INSERT'
        AND column_value.relname IN
        (
-         'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
+         'runtime_heartbeat', 'scope', 'work', 'dispatch', 'work_operator_command', 'effect_permit',
          'scope_history', 'work_history',
          'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch',
          'schedule_definition', 'schedule_generation', 'schedule_command', 'schedule_occurrence', 'schedule_dispatch',
@@ -544,6 +555,13 @@ SELECT NOT EXISTS
        (
          column_value.relname = 'scope'
          AND column_value.attname IN ('generation', 'state', 'updated_at')
+         OR column_value.relname = 'runtime_heartbeat'
+         AND column_value.attname IN
+         (
+           'worker_instance_id', 'runtime_epoch', 'hosted_surfaces', 'started_at', 'last_heartbeat_at', 'last_successful_sweep_at', 'draining', 'pass_active',
+           'pass_started_at', 'last_discovered', 'last_claimed', 'last_processed', 'last_deferred',
+           'last_failed', 'last_pass_elapsed_ms', 'updated_at'
+         )
          OR column_value.relname = 'work'
          AND column_value.attname IN
          (
@@ -677,6 +695,9 @@ SELECT NOT EXISTS
       service.role_name = :'dispatcher_role'
       AND routine.proname = 'claim_schedule_dispatch'
       AND privilege.privilege_name = 'EXECUTE'
+      OR service.role_name = :'runtime_role'
+      AND routine.oid = 'appsurface_durable.runtime_due_dispatch_health(integer)'::pg_catalog.regprocedure
+      AND privilege.privilege_name = 'EXECUTE'
     )
 ) AS service_roles_have_safe_function_privileges \gset
 \if :service_roles_have_safe_function_privileges
@@ -690,8 +711,9 @@ SELECT format('GRANT SELECT ON appsurface_durable.dispatch TO %I', :'dispatcher_
 SELECT format('GRANT SELECT ON appsurface_durable.flow_dispatch TO %I', :'dispatcher_role') \gexec
 SELECT format('GRANT EXECUTE ON FUNCTION appsurface_durable.claim_schedule_dispatch(text, interval) TO %I', :'dispatcher_role') \gexec
 SELECT format('GRANT USAGE ON SCHEMA appsurface_durable TO %I', :'runtime_role') \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO %I', :'runtime_role') \gexec
 SELECT format(
-    'GRANT SELECT ON appsurface_durable.store_metadata, appsurface_durable.schema_migration TO %I',
+    'GRANT SELECT ON appsurface_durable.store_metadata, appsurface_durable.schema_migration, appsurface_durable.runtime_heartbeat TO %I',
     :'runtime_role') \gexec
 SELECT format(
     'GRANT SELECT, INSERT ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.dispatch, appsurface_durable.flow_instance, appsurface_durable.flow_command, appsurface_durable.flow_history, appsurface_durable.flow_wait, appsurface_durable.flow_timer, appsurface_durable.flow_dispatch, appsurface_durable.schedule_definition, appsurface_durable.schedule_generation, appsurface_durable.schedule_command, appsurface_durable.schedule_occurrence, appsurface_durable.schedule_dispatch TO %I',
@@ -728,6 +750,9 @@ SELECT format(
     :'runtime_role') \gexec
 SELECT format(
     'GRANT UPDATE (dispatch_revision, due_at, state, lease_owner, lease_generation, lease_expires_at, updated_at) ON appsurface_durable.schedule_dispatch TO %I',
+    :'runtime_role') \gexec
+SELECT format(
+    'GRANT INSERT, UPDATE (worker_instance_id, runtime_epoch, hosted_surfaces, started_at, last_heartbeat_at, last_successful_sweep_at, draining, pass_active, pass_started_at, last_discovered, last_claimed, last_processed, last_deferred, last_failed, last_pass_elapsed_ms, updated_at) ON appsurface_durable.runtime_heartbeat TO %I',
     :'runtime_role') \gexec
 SELECT format(
     'GRANT SELECT, INSERT ON appsurface_durable.work_operator_command, appsurface_durable.effect_permit TO %I',

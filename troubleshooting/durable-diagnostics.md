@@ -4,8 +4,9 @@ AppSurface Durable uses append-only `ASDURxxx` codes. Messages and operator hist
 Fix, and Docs guidance and must never include credentials, provider response bodies, tokenized URLs, email content, or
 child-sensitive data.
 
-The Durable contract and PostgreSQL source-preview packages emit the codes below. Hosted runtime codes remain reserved.
-A reserved code is part of the compatibility namespace, not evidence that the corresponding behavior exists.
+The Durable contract and PostgreSQL source-preview packages emit the codes below. Hosted-runtime diagnostics use only
+fixed, low-cardinality codes and never expose connection targets, notification payloads, scopes, aggregates, or trace
+context.
 
 ## Available contract diagnostics
 
@@ -130,13 +131,15 @@ if PostgreSQL exposed the missing schema during acceptance, its `InnerException`
 `PostgresException` and SQLSTATE. Log only the API method, outer durable code/status, concrete exception type, and
 five-character SQLSTATE. Never log or serialize inner message text, detail, hint, SQL text, object names, or parameters.
 
-## Reserved hosted-runtime diagnostics
+## PostgreSQL hosted-runtime diagnostics
 
-| Code | Reserved meaning | Hosted-runtime prerequisite |
-|---|---|---|
-| `ASDUR404` | Activator stale | Persisted heartbeat and configured stale bound |
-| `ASDUR405` | Worker identity conflict | Persisted process ownership and drain/handoff behavior |
+| Code | Problem | Typical cause | Safe action |
+|---|---|---|---|
+| `ASDUR103` | Store unavailable | PostgreSQL transport or timeout blocks a bounded runtime pass | Retry after the configured bounded delay and inspect only safe infrastructure telemetry. |
+| `ASDUR406` | Wake listener retry | The advisory wake-listener connection disconnected or timed out | Polling remains authoritative; retry the listener after the configured bounded delay and alert separately from pass failures. |
+| `ASDUR404` | Activator stale | No current heartbeat or successful sweep inside `HeartbeatStaleAfter` | Check that exactly one compatible host or external activator is running, then inspect typed health and role/schema prerequisites. |
+| `ASDUR405` | Worker identity conflict | Another live process owns the configured `WorkerId`, an old generation updated after takeover, or the same runtime instance already has an active pass | Assign a unique worker ID per replica, wait for stale/drain takeover rules, avoid overlapping local activation, and never edit the heartbeat row manually. |
+| `ASDUR400`–`ASDUR403` | Incompatible runtime store | Missing, pending, unsupported, or inconsistent migration state | Apply reviewed migrations with the migration owner, rerun the role recipe, and deploy compatible code; startup intentionally performs no DDL. |
+| `ASDUR108` | Recovery epoch required | The configured runtime epoch differs from the active store epoch | Perform authorized epoch initialization/rotation before enabling the worker host. |
 
-Slices 3, 4, and 5 intentionally have no hosted worker runbook or production activation command. Canonical proofs are the
-source-evaluator [slice 3 reference workload](../Durable/slice3-reference-workload.md), [slice 4 reference workload](../Durable/slice4-reference-workload.md), and [Schedule protocol v1](../Durable/schedule-protocol-v1.md), which manually drive protocol operations
-against real PostgreSQL.
+The canonical activation path is the PostgreSQL package's [worker-host quickstart](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host). Its source preview remains publication-held; real PostgreSQL reference workloads and runtime tests remain the operational proof surface.

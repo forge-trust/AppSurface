@@ -1,8 +1,8 @@
 # ForgeTrust.AppSurface.Durable.PostgreSql
 
-> **Source-only public preview:** this package supplies explicit PostgreSQL schema management and a manually driven Work
-> engine, and a Flow engine. It is excluded from publish plans until slices 5-6 prove Schedule, hosted runtime,
-> drain/recovery, and coordinated operations. It starts no worker or hosted service.
+> **Source-only public preview:** this package supplies explicit PostgreSQL schema management, Work, Flow, Schedule,
+> and an explicitly opted-in bounded runtime host. It remains excluded from publish plans until coordinated release
+> review proves operational conformance. Storage registration itself starts no worker or hosted service.
 
 Choose this package when an application must commit its domain mutation and durable Work acceptance in the same
 PostgreSQL transaction, and when process-loss recovery must use explicit leases, runtime/scope fences, effect permits,
@@ -22,8 +22,8 @@ Run the source-evaluator [`slice 3 reference workload`](../slice3-reference-work
 [`slice 4 reference workload`](../slice4-reference-workload.md) to apply schema explicitly, accept Work and start Flows
 atomically with domain mutations, force-terminate a separate process at the committed timer-winner checkpoint, and verify
 the remaining recovery boundaries transactionally with fresh processors. The Work-first
-[`Schedule protocol`](../schedule-protocol-v1.md) is currently a bounded Gate A Work-only protocol check; its deterministic
-crash-proof evidence remains deferred. None of these are hosted-runtime demonstrations.
+[`Schedule protocol`](../schedule-protocol-v1.md) remains a bounded Gate A Work-only protocol check; its deterministic
+crash-proof evidence remains deferred. For the runtime activation boundary, use the worker-host path below.
 
 ## Explicit schema and epoch deployment
 
@@ -40,9 +40,7 @@ Runtime mutations take a shared, transaction-scoped advisory fence before valida
 and epoch rotation take the exclusive package lock, so they wait for in-flight runtime transactions and prevent an old
 epoch from committing new durable state after rotation.
 
-Runtime roles never own schema or apply DDL. The package has four migrations: Work/shared state (`0001_work_shared.sql`), forced RLS and privilege revocation (`0002_forced_rls.sql`), Flow protocol persistence (`0003_flow_protocol.sql`), and the Work-first Schedule ledger (`0004_schedule_protocol.sql`). Runtime heartbeat and hosted operation remain Slice 6 work. Applied schema is forward-only;
-rolling application code back does not authorize destructive schema rollback. Execute generated SQL with a client that
-stops on the first error; `psql` callers must pass `-v ON_ERROR_STOP=1`.
+Runtime roles never own schema or apply DDL. The package has five migrations: Work/shared state (`0001_work_shared.sql`), forced RLS and privilege revocation (`0002_forced_rls.sql`), Flow protocol persistence (`0003_flow_protocol.sql`), the Work-first Schedule ledger (`0004_schedule_protocol.sql`), and the payload-free runtime heartbeat (`0005_runtime_heartbeat.sql`). Applied schema is forward-only; rolling application code back does not authorize destructive schema rollback. Execute generated SQL with a client that stops on the first error; `psql` callers must pass `-v ON_ERROR_STOP=1`.
 
 Create host principals outside migrations. Use [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) to
 grant the migration-owner, payload-free dispatcher, and scoped-runtime capabilities. Runtime roles must not receive
@@ -51,11 +49,72 @@ authorization. The recipe fails before granting privileges when role names alias
 inherit the migration owner, `SUPERUSER`, or `BYPASSRLS`. It also transfers every package table, sequence, and view to
 the migration owner so pre-existing object ownership cannot preserve runtime DDL authority. Existing direct,
 inherited, or `PUBLIC` schema, relation, column, and sequence privileges outside the documented allowlist cause the
-transactional recipe to fail and roll back; remove those host-managed grants before retrying.
+transactional recipe to fail and roll back; remove those host-managed grants before retrying. The runtime role is
+deliberately fully trusted for the unscoped `runtime_heartbeat` table: the health component owns the
+worker-generation fence through its row lock and compare-and-swap predicates, so applications must not expose that
+credential to untrusted callers.
 
 Apply schema migrations before rerunning the role recipe. A migration can add package relations, but the recipe owns
 the reviewed grants for existing service roles; running it second is required before Flow runtime or dispatcher
 connections can use the new relations.
+
+## Run a worker host
+
+After the schema is current, the recovery epoch is initialized, and the role recipe has run, compose exactly one
+runtime-role and one payload-free dispatcher-role data source. The warm path is designed to reach one hosted Work
+completion in five minutes; it never performs DDL at application startup.
+
+```csharp
+using ForgeTrust.AppSurface.Durable.PostgreSql;
+
+var workOptions = new PostgreSqlDurableWorkOptions(
+    runtimeEpoch,
+    expectedStoreId,
+    PostgreSqlDurableWakeNotificationMode.Enabled);
+
+services.AddAppSurfaceDurablePostgreSql(
+        dispatcherDataSource,
+        runtimeDataSource,
+        workOptions,
+        new PostgreSqlDurableScheduleOptions("appsurface_durable_runtime"),
+        options =>
+        {
+            options.WorkerId = "orders-worker-01"; // unique for every live replica
+            options.MaximumItemsPerPass = 32;
+            options.TimeBudgetPerPass = TimeSpan.FromSeconds(10);
+            options.ShutdownReserve = TimeSpan.FromSeconds(5);
+        })
+    .AddWorkerHost();
+```
+
+`AddAppSurfaceDurablePostgreSql` resolves Work, Flow, Schedule, schema, pump, health, and drain services but installs
+no `IHostedService`, opens no connection, and applies no migration. `AddWorkerHost()` is the standard continuous
+activation path. It validates schema compatibility, the active epoch, and that `TimeBudgetPerPass + ShutdownReserve`
+fits inside `HostOptions.ShutdownTimeout`; an invalid store or host configuration fails closed.
+
+The host calls the same [`IDurableRuntimePump`](../ForgeTrust.AppSurface.Durable.Provider/README.md#activation-and-broker-evolution)
+used by an external activator. A Pass runs at most `MaximumItemsPerPass` committed Turns and rotates Work, Flow, and
+Schedule after each selected-surface attempt. Empty and deferred surfaces advance the cursor without consuming that
+item budget. PostgreSQL remains authoritative for discovery, claims, leases, effect permits, Flow transitions,
+Schedule facts, row-level security, and recovery epochs. Deploy separately identified workers when a long Work
+invocation needs stronger latency isolation from Flow or Schedule.
+
+Enabled notification mode creates one dedicated `LISTEN appsurface_durable_wake` connection. It coalesces and discards
+metadata-only notification payloads; polling remains the recovery path for lost, duplicate, delayed, or unavailable
+hints. A receipt never authorizes a claim.
+
+Resolve [`IDurableRuntimeHealth`](../ForgeTrust.AppSurface.Durable.Provider/README.md#public-api-by-audience) through
+an application-owned authorized health endpoint. `Healthy` is the only ready state; `NotStarted`, `Stale`, `Draining`,
+and `Incompatible` are intentionally not ready. Snapshots contain aggregate counts and fixed codes only—never payload,
+scope, aggregate, connection, or trace values. At shutdown, local admission closes synchronously before the host
+persists drain; already-permitted Work follows its ordinary cancellation/recovery path rather than inventing a result.
+
+For a cold path, apply `0005_runtime_heartbeat.sql` with the migration owner, rerun
+[`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql),
+verify the active epoch and StoreId, deploy with `AddWorkerHost()` disabled, then enable it. Roll back application code
+by disabling the worker host and deploying a previous compatible binary; never destructively roll back a migration. If
+Issue #685 supplies an intervening migration first, renumber this migration to the next contiguous number while preserving
+its content and rerun the role recipe.
 
 ### Role recipe contract
 
@@ -87,6 +146,7 @@ schema to the migration owner. Do not place application-owned objects there.
 | Runtime inserts | Table `INSERT` on scoped Work, Flow, and Schedule protocol relations. |
 | Runtime updates | Reviewed column-level `UPDATE` on mutable Work, Flow instance/wait/timer, Schedule definition/occurrence/dispatch, and dispatch fields; no table-wide update grant. |
 | Runtime sequences | `USAGE` and `SELECT` on every sequence in the package schema. |
+| Runtime heartbeat | Unscoped `SELECT` and `INSERT`, plus reviewed column-level `UPDATE`, on `runtime_heartbeat` for `IDurableRuntimeHealth`. Its forced RLS policy intentionally uses `USING (true)` and `WITH CHECK (true)`; keep this fully trusted runtime credential out of untrusted callers. |
 
 Neither service credential receives schema `CREATE`, table-wide `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`,
 `TRIGGER`, or `MAINTAIN`; the dispatcher receives no sequence privileges. Forced RLS remains an additional scope fence,
@@ -208,7 +268,8 @@ Schedule ID, and revision. Before the processor sets scoped RLS state or bridges
 `current_user` equals `PostgreSqlDurableScheduleOptions.RuntimeRole`. The Work bridge uses the existing caller-owned
 `PostgreSqlDurableWorkTransactionWriter`, so the occurrence link and one Work acceptance commit or roll back together.
 An empty pass returns zero counts. Cancellation stops before the next lease and cannot undo a previously committed fact.
-Do not call the processor in a request loop or register hosted work; hosted activation is reserved for Slice 6.
+Do not call the processor in a request loop. The worker host above is the standard continuous activation path; manual
+processor calls remain useful only for focused tests or an explicitly designed external activator.
 
 The Schedule processor also compares persisted runtime-epoch and scope-generation fences before evaluating a due row.
 A mismatch suspends the Schedule before it can move a cursor or accept Work. Use `ReleaseAfterRecovery` only for an old
@@ -260,8 +321,9 @@ as internal conformance behavior. Recovery release atomically moves an exact amb
 runtime epoch with its Work. When the current attempt has no exact ambiguous permit, release safely makes the Work
 retryable and leaves historical permits unchanged. When an expected exact permit cannot move with the Work, the entire
 release rolls back so later proof remains possible.
-Slice 6 must prove the adopter-facing hosting and operator-control boundary before those operations become public API;
-applications must not depend on internal PostgreSQL types in the meantime.
+The runtime pump, health, drain, and host composition are now public through the Provider SPI and PostgreSQL
+registration extensions. Applications must still keep authorization around all operator/control APIs and must not
+depend on internal PostgreSQL claim/store types.
 
 Read the normative [`Work protocol v1`](../work-protocol-v1.md), [`Flow protocol v1`](../flow-protocol-v1.md), the
 [`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md), the

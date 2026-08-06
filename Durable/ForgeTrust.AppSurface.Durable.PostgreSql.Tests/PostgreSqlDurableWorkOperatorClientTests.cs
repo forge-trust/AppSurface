@@ -1,5 +1,6 @@
 using System.Text;
 using ForgeTrust.AppSurface.Durable.Provider;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
@@ -1591,8 +1592,9 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         var registry = new DurableWorkRegistry([reconcile, manual]);
         var client = new PostgreSqlDurableWorkClient(
             database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        var scopeFactory = new TrackingScopeFactory();
         var operators = new PostgreSqlDurableWorkOperatorClient(
-            database.DataSource, registry, NullServices.Instance, epoch);
+            database.DataSource, registry, scopeFactory, epoch);
 
         var reconcileScope = new DurableScopeId("operator-typed-registration");
         var reconcileAccepted = await AcceptAndPermitAsync(
@@ -1619,6 +1621,8 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         var resumed = await operators.ReconcileAsync(reconcileRequest);
         Assert.True(resumed.IsSuccess);
         Assert.Equal(1, reconcile.ReconciliationCount);
+        Assert.Same(scopeFactory.Scope!.ServiceProvider, reconcile.ReconciliationServices);
+        Assert.True(scopeFactory.Scope.IsDisposed);
 
         var mismatchScope = new DurableScopeId("operator-typed-safety-mismatch");
         var mismatchAccepted = await AcceptAndPermitAsync(
@@ -1704,6 +1708,49 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
             manualRevision));
         Assert.False(staleEpoch.IsSuccess);
         Assert.Equal(DurableProblemCodes.RecoveryEpochRequired, staleEpoch.Problem!.Code);
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_DisposesAsyncOnlyScopedServices()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var epoch = await InitializeAsync(database.DataSource);
+        var asyncDisposed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var registration = new OperatorRegistration(
+            "operator.async-scope",
+            DurableProviderSafety.ReconcileBeforeRetry,
+            new DurableEncodedEffectReconciliation(DurableEffectReconciliationKind.NotApplied, null),
+            onReconcile: services => _ = services.GetRequiredService<AsyncOnlyScopedService>());
+        var registry = new DurableWorkRegistry([registration]);
+        var client = new PostgreSqlDurableWorkClient(
+            database.DataSource, registry, await OptionsAsync(database.DataSource, epoch));
+        await using var services = new ServiceCollection()
+            .AddScoped(_ => new AsyncOnlyScopedService(asyncDisposed))
+            .BuildServiceProvider();
+        var operators = new PostgreSqlDurableWorkOperatorClient(
+            database.DataSource,
+            registry,
+            services.GetRequiredService<IServiceScopeFactory>(),
+            epoch);
+        var scope = new DurableScopeId("operator-async-scope");
+        var accepted = await AcceptAndPermitAsync(client, database.DataSource, epoch, registration, scope, "async-scope");
+        var revision = await ForceStateAsync(
+            database.DataSource,
+            scope,
+            accepted.WorkId,
+            "suspended_reconciliation_required",
+            "ambiguous_external_outcome");
+
+        var result = await operators.ReconcileAsync(new DurableWorkReconcileRequest(
+            scope,
+            accepted.WorkId,
+            new DurableCommandId("operator-async-scope-command"),
+            "operator-test",
+            "provider-proof",
+            revision));
+
+        Assert.True(result.IsSuccess);
+        Assert.True(await asyncDisposed.Task.WaitAsync(TimeSpan.FromSeconds(5)));
     }
 
     [Theory]
@@ -1845,7 +1892,7 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
     [Theory]
     [InlineData("dataSource", "dataSource", typeof(ArgumentNullException))]
     [InlineData("registry", "registry", typeof(ArgumentNullException))]
-    [InlineData("services", "services", typeof(ArgumentNullException))]
+    [InlineData("scopeFactory", "scopeFactory", typeof(ArgumentNullException))]
     [InlineData("runtimeEpoch", "runtimeEpoch", typeof(ArgumentException))]
     public void Constructor_RejectsInvalidDependenciesAndEpoch(
         string invalidArgument,
@@ -1863,7 +1910,7 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
                 null!, registry, NullServices.Instance, epoch),
             "registry" => new PostgreSqlDurableWorkOperatorClient(
                 dataSource, null!, NullServices.Instance, epoch),
-            "services" => new PostgreSqlDurableWorkOperatorClient(
+            "scopeFactory" => new PostgreSqlDurableWorkOperatorClient(
                 dataSource, registry, null!, epoch),
             "runtimeEpoch" => new PostgreSqlDurableWorkOperatorClient(
                 dataSource, registry, NullServices.Instance, Guid.Empty),
@@ -2418,7 +2465,8 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         DurableEncodedEffectReconciliation proof,
         TaskCompletionSource<bool>? providerEntered = null,
         TaskCompletionSource<bool>? releaseProvider = null,
-        DurableDataClassification resultClassification = DurableDataClassification.Operational) : DurableWorkRegistration(
+        DurableDataClassification resultClassification = DurableDataClassification.Operational,
+        Action<IServiceProvider>? onReconcile = null) : DurableWorkRegistration(
             workName,
             "v1",
             safety,
@@ -2426,6 +2474,8 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
             new OperatorCodec("operator.result", resultClassification))
     {
         public int ReconciliationCount { get; private set; }
+
+        public IServiceProvider? ReconciliationServices { get; private set; }
 
         public override bool CanReconcile => ProviderSafety == DurableProviderSafety.ReconcileBeforeRetry;
 
@@ -2444,6 +2494,8 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
             CancellationToken cancellationToken = default)
         {
             ReconciliationCount++;
+            ReconciliationServices = services;
+            onReconcile?.Invoke(services);
             providerEntered?.TrySetResult(true);
             if (releaseProvider is not null)
             {
@@ -2451,6 +2503,15 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
             }
 
             return proof;
+        }
+    }
+
+    private sealed class AsyncOnlyScopedService(TaskCompletionSource<bool> disposed) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync()
+        {
+            disposed.TrySetResult(true);
+            return ValueTask.CompletedTask;
         }
     }
 
@@ -2479,9 +2540,39 @@ public sealed class PostgreSqlDurableWorkOperatorClientTests
         }
     }
 
-    private sealed class NullServices : IServiceProvider
+    private sealed class NullServices : IServiceProvider, IServiceScopeFactory, IServiceScope
     {
         internal static NullServices Instance { get; } = new();
+
+        public IServiceProvider ServiceProvider => this;
+
         public object? GetService(Type serviceType) => null;
+
+        public IServiceScope CreateScope() => this;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class TrackingScopeFactory : IServiceScopeFactory
+    {
+        public TrackingScope? Scope { get; private set; }
+
+        public IServiceScope CreateScope() => Scope = new TrackingScope();
+    }
+
+    private sealed class TrackingScope : IServiceScope
+    {
+        public IServiceProvider ServiceProvider { get; } = new ScopedServices();
+
+        public bool IsDisposed { get; private set; }
+
+        public void Dispose() => IsDisposed = true;
+
+        private sealed class ScopedServices : IServiceProvider
+        {
+            public object? GetService(Type serviceType) => null;
+        }
     }
 }

@@ -15,6 +15,11 @@ public sealed class CoverageSolutionScriptTests
         Assert.DoesNotContain("COVERAGE_RUNNER_PROJECT", script, StringComparison.Ordinal);
         Assert.DoesNotContain("\n  --include ", script, StringComparison.Ordinal);
         Assert.DoesNotContain("\n  --exclude ", script, StringComparison.Ordinal);
+        Assert.Contains("--exclusive-test-project ForgeTrust.AppSurface.Config.Tests.csproj", script, StringComparison.Ordinal);
+        Assert.Contains("--exclusive-test-project AuthAspNetCoreDevAuthExample.Tests.csproj", script, StringComparison.Ordinal);
+        Assert.Contains("--exclusive-test-project AuthWebRazorWireProofExample.Tests.csproj", script, StringComparison.Ordinal);
+        Assert.Contains("--exclusive-test-project ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj", script, StringComparison.Ordinal);
+        Assert.Contains("--exclusive-test-project ForgeTrust.RazorWire.Cli.Tests.csproj", script, StringComparison.Ordinal);
         Assert.Contains("--exclusive-test-project ForgeTrust.AppSurface.Web.Tailwind.Tests.csproj", script, StringComparison.Ordinal);
         Assert.Contains("--test-results junit", script, StringComparison.Ordinal);
         Assert.Contains("--slow-test-diagnostics", script, StringComparison.Ordinal);
@@ -178,6 +183,23 @@ public sealed class CoverageSolutionScriptTests
         Assert.Equal(0, result.ExitCode);
         Assert.Contains(
             "--logger\nGitHubActions;report-warnings=false\n--no-restore",
+            result.DotnetInvocations,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Script_ShouldForwardResourceIntensiveSuitesAsExclusiveCoverageProjects()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var result = await RunScriptAsync([], null, null, dotnetExitCode: 0);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains(
+            "--exclusive-test-project\nForgeTrust.AppSurface.Config.Tests.csproj\n--exclusive-test-project\nAuthAspNetCoreDevAuthExample.Tests.csproj\n--exclusive-test-project\nAuthWebRazorWireProofExample.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj\n--exclusive-test-project\nForgeTrust.RazorWire.Cli.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Web.Tailwind.Tests.csproj",
             result.DotnetInvocations,
             StringComparison.Ordinal);
     }
