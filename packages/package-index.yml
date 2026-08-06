@@ -331,18 +331,18 @@ packages:
   - project: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj
     classification: public
     publish_decision: do_not_publish
-    publish_reason: PostgreSQL Work, Flow, and Schedule source provider remains held until Slice 6 proves hosted runtime, drain/recovery, and coordinated operational conformance.
-    readiness_note: Slices 3-5 supply manually driven Work, crash-resumable Flow, and Work-first Schedule conformance with no hosted worker or production activation.
+    publish_reason: PostgreSQL Work, Flow, Schedule, and explicit worker-host source provider remains held while Durable preview publishing is coordinated.
+    readiness_note: Slices 3-6 supply Work, crash-resumable Flow, Work-first Schedule, and explicit opt-in worker-host conformance; automatic startup activation and production support remain excluded.
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/unreleased.md
     order: 48
-    use_when: Evaluate PostgreSQL-backed atomic Work acceptance, manually driven crash-resumable Flow persistence, and Work-first Schedule storage from source without installing a hosted scheduler.
-    includes: Explicit ordered schema management, StoreId and runtime-epoch fencing, caller-owned Work acceptance, short-transaction Work and Flow clients, Work-first Schedule client and manual processor, payload-free dispatch, Flow waits/timers/activity projection, versioned W3C causal-link persistence and crash proof, leases, effect permits, cancellation, terminal facts, and real PostgreSQL conformance proof.
-    does_not_include: Hosted background scheduler, hosted polling, automatic startup DDL, health/drain hosting, endpoints, telemetry implementation, exactly-once external effects, destructive down migrations, or production support.
+    use_when: Evaluate PostgreSQL-backed atomic Work acceptance, crash-resumable Flow persistence, Work-first Schedule storage, and an explicit opt-in `AddWorkerHost()` activation path from source.
+    includes: Explicit ordered schema management, StoreId and runtime-epoch fencing, caller-owned Work acceptance, short-transaction Work and Flow clients, Work-first Schedule client and manual processor, payload-free dispatch, Flow waits/timers/activity projection, opt-in hosted background polling with health/drain reporting, versioned W3C causal-link persistence and crash proof, leases, effect permits, cancellation, terminal facts, and real PostgreSQL conformance proof.
+    does_not_include: Automatic background activation, automatic startup DDL, endpoints, telemetry implementation, exactly-once external effects, destructive down migrations, or production support.
     start_here_path: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
-    recipe_summary: Evaluate the held PostgreSQL source provider when one database must atomically own Work, explicit one-transition Flow state, [Work-first Schedule storage](../Durable/schedule-protocol-v1.md), and [versioned W3C causal evidence](../Durable/flow-trace-context-v1.md); slices 3-5 start no worker.
+    recipe_summary: Evaluate the held PostgreSQL source provider when one database must atomically own Work, explicit one-transition Flow state, [Work-first Schedule storage](../Durable/schedule-protocol-v1.md), and [versioned W3C causal evidence](../Durable/flow-trace-context-v1.md); use the Slice 6 [`AddWorkerHost()` path](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host) only when explicit hosted processing is required.
     depends_on:
       - ForgeTrust.AppSurface.Durable
       - ForgeTrust.AppSurface.Durable.Provider
