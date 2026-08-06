@@ -125,6 +125,7 @@ public sealed class AppSurfaceThemeWebIntegrationTests
 
         Assert.False(AppSurfaceThemeDocumentSerializer.TrySerialize(null, out var nullDocument));
         Assert.Same(AppSurfaceThemeDocument.Empty, nullDocument);
+        Assert.Throws<ArgumentNullException>(() => AppSurfaceThemeDocumentSerializer.SerializePreference(null!));
         Assert.False(AppSurfaceThemeDocumentSerializer.TrySerialize(invalidMode, out var invalidModeDocument));
         Assert.Same(AppSurfaceThemeDocument.Empty, invalidModeDocument);
         Assert.Same(AppSurfaceThemeDocument.Empty, AppSurfaceThemeDocumentSerializer.Serialize(invalidMode));
@@ -395,6 +396,7 @@ public sealed class AppSurfaceThemeWebIntegrationTests
         var exception = Assert.Throws<InvalidOperationException>(() => services.AddAppSurfaceWebThemePreferences());
 
         Assert.Contains("ASWEBTHEME002", exception.Message, StringComparison.Ordinal);
+        Assert.Contains(nameof(IAppSurfaceThemeResolver), exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -464,9 +466,13 @@ public sealed class AppSurfaceThemeWebIntegrationTests
 
         Assert.Contains("data-as-theme-storage-key=\"custom-theme\"", html, StringComparison.Ordinal);
         Assert.DoesNotContain(" nonce=", html, StringComparison.Ordinal);
-        Assert.Throws<ArgumentNullException>(() => new AppSurfaceThemePreferenceBootstrap(null!));
-        Assert.Throws<ArgumentNullException>(
+        var nullOptionsException = Assert.Throws<ArgumentNullException>(
+            () => new AppSurfaceThemePreferenceBootstrap(null!));
+        var nullStorageKeyException = Assert.Throws<ArgumentNullException>(
             () => new AppSurfaceThemePreferenceBootstrap(new AppSurfaceThemePreferenceOptions { StorageKey = null! }));
+
+        Assert.Equal("options", nullOptionsException.ParamName);
+        Assert.Equal("StorageKey", nullStorageKeyException.ParamName);
     }
 
     [Fact]

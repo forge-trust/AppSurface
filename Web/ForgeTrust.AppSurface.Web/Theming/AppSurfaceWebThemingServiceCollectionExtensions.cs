@@ -27,7 +27,7 @@ public static class AppSurfaceWebThemingServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers browser-local Light/Dark preference support for the configured Web theme pair.
+    /// Registers browser-local System/Light/Dark preference support for the configured Web theme pair.
     /// </summary>
     /// <param name="services">The service collection receiving the preference adapter.</param>
     /// <param name="configure">
@@ -38,8 +38,9 @@ public static class AppSurfaceWebThemingServiceCollectionExtensions
     /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">The configured storage key is blank, unsafe for HTML data attributes, or longer than 64 characters.</exception>
     /// <exception cref="InvalidOperationException">
-    /// Neutral theming has not been registered before this call. Register <c>AddAppSurfaceTheming</c> first so this
-    /// adapter can reuse the host-selected pair.
+    /// An <see cref="ForgeTrust.AppSurface.Theming.IAppSurfaceThemeResolver"/> has not been registered before this
+    /// call. <c>AddAppSurfaceTheming</c> is one supported registration path; hosts may instead register a compatible
+    /// custom resolver for the selected pair.
     /// </exception>
     /// <remarks>
     /// <para>
@@ -64,7 +65,7 @@ public static class AppSurfaceWebThemingServiceCollectionExtensions
         if (!services.Any(descriptor => descriptor.ServiceType == typeof(ForgeTrust.AppSurface.Theming.IAppSurfaceThemeResolver)))
         {
             throw new InvalidOperationException(
-                "ASWEBTHEME002: AddAppSurfaceWebThemePreferences requires AddAppSurfaceTheming to be registered first.");
+                "ASWEBTHEME002: AddAppSurfaceWebThemePreferences requires an IAppSurfaceThemeResolver to be registered first. AddAppSurfaceTheming is one supported registration path.");
         }
 
         var options = new AppSurfaceThemePreferenceOptions();

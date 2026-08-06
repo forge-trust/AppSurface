@@ -27,6 +27,20 @@ public static partial class AppSurfaceThemeDocumentSerializer
         return document;
     }
 
+    /// <summary>
+    /// Creates the System-first document used by the browser-local preference enhancement.
+    /// </summary>
+    /// <param name="resolution">The configured theme-pair resolution whose Light and Dark branches are emitted.</param>
+    /// <returns>
+    /// A document with System, Light, and Dark selectors, or <see cref="AppSurfaceThemeDocument.Empty"/> when the
+    /// resolution is unsafe to render.
+    /// </returns>
+    /// <remarks>
+    /// This method deliberately replaces the configured startup mode with System while retaining the same Light and
+    /// Dark pair. The browser bootstrap can then select an explicit branch without changing the URL or duplicating
+    /// the HTML document. Safety validation is repeated before serialization so an invalid resolution fails closed
+    /// instead of emitting partially trusted markup.
+    /// </remarks>
     internal static AppSurfaceThemeDocument SerializePreference(AppSurfaceThemeResolution resolution)
     {
         ArgumentNullException.ThrowIfNull(resolution);
