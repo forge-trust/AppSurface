@@ -1037,6 +1037,7 @@ internal static class PatchCoverageEvaluator
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ValidateLineMode(request.LineMode);
 
         if (request.DiffSource.Kind == PatchDiffSourceKind.GitBase
             && string.IsNullOrWhiteSpace(request.DiffSource.DiffBase))
@@ -1073,6 +1074,7 @@ internal static class PatchCoverageEvaluator
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ValidateLineMode(request.LineMode);
 
         var parseResult = ParseChangedLinesDetailed(artifact.Text);
         if (request.DiffSource.IsExternalArtifact && parseResult.Status == PatchDiffParseStatus.Malformed)
@@ -1148,11 +1150,24 @@ internal static class PatchCoverageEvaluator
                 branchPercent));
     }
 
-    private static bool IsLineCovered(PatchLineCoverageData lineCoverage, PatchLineMode mode) =>
-        lineCoverage.Covered
-        && (mode != PatchLineMode.Codecov
-            || lineCoverage.Branches is not { } branches
-            || branches.Covered == branches.Valid);
+    private static void ValidateLineMode(PatchLineMode mode)
+    {
+        if (mode is PatchLineMode.Measurable or PatchLineMode.Codecov)
+        {
+            return;
+        }
+
+        throw new CommandException("ASCOV017 --patch-line-mode must be measurable or codecov.");
+    }
+
+    private static bool IsLineCovered(PatchLineCoverageData lineCoverage, PatchLineMode mode) => mode switch
+    {
+        PatchLineMode.Measurable => lineCoverage.Covered,
+        PatchLineMode.Codecov => lineCoverage.Covered
+            && (lineCoverage.Branches is not { } branches
+                || branches.Covered == branches.Valid),
+        _ => throw new CommandException("ASCOV017 --patch-line-mode must be measurable or codecov."),
+    };
 
     internal static IReadOnlyDictionary<string, IReadOnlySet<int>> ParseChangedLines(string diffText)
         => ParseChangedLinesDetailed(diffText).ChangedLines;

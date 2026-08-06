@@ -125,6 +125,64 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_ParsesMixedCaseMeasurablePatchLineMode_WhenDiffBaseIsConfigured()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        Directory.CreateDirectory(Path.Join(temp.Path, "src"));
+        File.WriteAllText(Path.Join(temp.Path, "src", "Foo.cs"), "base" + Environment.NewLine);
+        await RunGitAsync(temp.Path, "init");
+        await RunGitAsync(temp.Path, "config", "user.email", "tests@example.invalid");
+        await RunGitAsync(temp.Path, "config", "user.name", "AppSurface Tests");
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "base");
+        await File.AppendAllTextAsync(Path.Join(temp.Path, "src", "Foo.cs"), "changed" + Environment.NewLine);
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "change");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="2">
+              <packages>
+                <package name="Example">
+                  <classes>
+                    <class name="Example.Foo" filename="src/Foo.cs">
+                      <lines>
+                        <line number="2" hits="1" branch="true" condition-coverage="50% (1/2)" />
+                      </lines>
+                    </class>
+                  </classes>
+                </package>
+              </packages>
+            </coverage>
+            """);
+        var previous = Directory.GetCurrentDirectory();
+        try
+        {
+            Directory.SetCurrentDirectory(temp.Path);
+            var command = new CoverageGateCommand
+            {
+                CoveragePath = coverage,
+                OutputDirectory = temp.Path,
+                MinLine = 100,
+                MinBranch = 0,
+                DiffBase = "HEAD~1",
+                MinPatchLine = 100,
+                PatchLineModeOption = "MeAsUrAbLe",
+                NoGithubSummary = true,
+            };
+            using var console = new FakeInMemoryConsole();
+
+            await command.ExecuteAsync(console, CancellationToken.None);
+
+            Assert.Contains("patch lines 100.00% >= 99.5%", console.ReadOutputString(), StringComparison.Ordinal);
+            Assert.Contains("\"patchLineMode\": \"measurable\"", File.ReadAllText(Path.Join(temp.Path, "coverage-gate.json")), StringComparison.Ordinal);
+            Assert.Contains("Patch line mode: measurable", File.ReadAllText(Path.Join(temp.Path, "coverage-gate.md")), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(previous);
+        }
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ThrowsDiagnostic_WhenGateFails_AfterWritingReports()
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-");
@@ -670,6 +728,42 @@ public sealed class CoverageGateTests
         Assert.False(result.Passed);
         Assert.Equal(0, result.PatchLineCoverage?.CoveredLines);
         Assert.Equal(0, result.PatchLineCoverage?.Percent);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_RejectsUndefinedPatchLineMode()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1">
+              <packages>
+                <package name="Example">
+                  <classes>
+                    <class name="Example.Foo" filename="src/Foo.cs">
+                      <lines>
+                        <line number="1" hits="1" />
+                      </lines>
+                    </class>
+                  </classes>
+                </package>
+              </packages>
+            </coverage>
+            """);
+        var request = new CoveragePatchRequest(
+            temp.Path,
+            "origin/main",
+            100,
+            LineMode: (PatchLineMode)999);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => PatchCoverageEvaluator.EvaluateAsync(
+                coverage,
+                request,
+                string.Empty,
+                CancellationToken.None));
+
+        Assert.Contains("ASCOV017", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("--patch-line-mode", exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
