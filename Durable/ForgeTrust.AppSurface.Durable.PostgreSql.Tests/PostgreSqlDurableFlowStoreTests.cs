@@ -1291,6 +1291,20 @@ public sealed class DurableSlice4ReferenceWorkloadTests
         var flows = new DurableFlowRegistry([registration], work, payloads);
         var options = new PostgreSqlDurableWorkOptions(epoch, status.StoreId);
         var client = new PostgreSqlDurableFlowClient(database.DataSource, flows, payloads, options);
+        var completionActivities = new System.Collections.Concurrent.ConcurrentQueue<Activity>();
+        using var traceListener = new ActivityListener
+        {
+            ShouldListenTo = static source => source.Name == AppSurfaceActivitySources.ActivitySourceName,
+            Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+            ActivityStopped = activity =>
+            {
+                if (activity.OperationName == "appsurface.durable.flow.activity")
+                {
+                    completionActivities.Enqueue(activity);
+                }
+            },
+        };
+        ActivitySource.AddActivityListener(traceListener);
         var flowProcessor = new PostgreSqlDurableFlowProcessor(
             database.DataSource,
             database.DataSource,
@@ -1308,13 +1322,31 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             registration.FlowId,
             registration.FlowVersion,
             contextCodec.EncodeObject(new byte[] { 1 }));
-        Assert.True((await client.StartAsync(start)).IsSuccess);
+        using (var incoming = new Activity("activity-completion-incoming").SetIdFormat(ActivityIdFormat.W3C).Start())
+        {
+            Assert.True((await client.StartAsync(start)).IsSuccess);
+        }
 
         var activityDecision = await flowProcessor.TryProcessAsync(
             Assert.Single(await flowProcessor.DiscoverAsync()),
             "flow-activity-worker");
         Assert.Equal(DurableFlowState.WaitingForActivity, activityDecision.State);
         Assert.NotNull(activityDecision.ChildWorkId);
+
+        string scheduledTraceParent;
+        await using (var scheduledTrace = database.DataSource.CreateCommand(
+                         """
+                         SELECT trace.traceparent
+                         FROM appsurface_durable.work AS work
+                         JOIN appsurface_durable.flow_trace_context AS trace
+                           ON trace.scope_id = work.scope_id AND trace.trace_context_id = work.trace_context_id
+                         WHERE work.scope_id = @scope_id AND work.work_id = @work_id;
+                         """))
+        {
+            scheduledTrace.Parameters.AddWithValue("scope_id", scope.Value);
+            scheduledTrace.Parameters.AddWithValue("work_id", activityDecision.ChildWorkId!.Value.Value);
+            scheduledTraceParent = (string)(await scheduledTrace.ExecuteScalarAsync())!;
+        }
 
         var workStore = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
         var childCandidate = Assert.Single(await workStore.DiscoverAsync(10));
@@ -1330,6 +1362,51 @@ public sealed class DurableSlice4ReferenceWorkloadTests
                 "{}",
                 resultCodec.EncodeObject(new byte[] { 7, 8 })));
         Assert.Equal(DurableWorkState.Succeeded, completion.State);
+
+        string completionTraceParent;
+        await using (var completionTrace = database.DataSource.CreateCommand(
+                         """
+                         SELECT
+                             trace.traceparent,
+                             (SELECT flow.trace_context_id IS NOT DISTINCT FROM trace.trace_context_id
+                              FROM appsurface_durable.flow_instance AS flow
+                              WHERE flow.scope_id = @scope_id AND flow.flow_instance_id = @flow_instance_id),
+                             (SELECT history.trace_context_id IS NOT DISTINCT FROM trace.trace_context_id
+                              FROM appsurface_durable.flow_history AS history
+                              WHERE history.scope_id = @scope_id AND history.flow_instance_id = @flow_instance_id
+                                AND history.aggregate_revision = @completion_revision),
+                             (SELECT wait.trace_context_id IS NOT DISTINCT FROM trace.trace_context_id
+                              FROM appsurface_durable.flow_wait AS wait
+                              WHERE wait.scope_id = @scope_id AND wait.flow_instance_id = @flow_instance_id
+                                AND wait.child_work_id = @work_id),
+                             (SELECT work.trace_context_id IS NOT DISTINCT FROM trace.trace_context_id
+                              FROM appsurface_durable.work AS work
+                              WHERE work.scope_id = @scope_id AND work.work_id = @work_id)
+                         FROM appsurface_durable.flow_trace_context AS trace
+                         WHERE trace.scope_id = @scope_id AND trace.flow_instance_id = @flow_instance_id
+                           AND trace.cause_kind = 'activity_completed';
+                         """))
+        {
+            completionTrace.Parameters.AddWithValue("scope_id", scope.Value);
+            completionTrace.Parameters.AddWithValue("flow_instance_id", instance.Value);
+            completionTrace.Parameters.AddWithValue("completion_revision", checked(activityDecision.Revision + 1));
+            completionTrace.Parameters.AddWithValue("work_id", activityDecision.ChildWorkId!.Value.Value);
+            await using var reader = await completionTrace.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            completionTraceParent = reader.GetString(0);
+            Assert.True(reader.GetBoolean(1));
+            Assert.True(reader.GetBoolean(2));
+            Assert.True(reader.GetBoolean(3));
+            Assert.True(reader.GetBoolean(4));
+            Assert.False(await reader.ReadAsync());
+        }
+        var completionActivity = Assert.Single(completionActivities);
+        var completionLink = Assert.Single(completionActivity.Links);
+        Assert.Equal(scheduledTraceParent[3..35], completionLink.Context.TraceId.ToHexString());
+        Assert.Equal(scheduledTraceParent[36..52], completionLink.Context.SpanId.ToHexString());
+        Assert.Equal(completionTraceParent[3..35], completionActivity.TraceId.ToHexString());
+        Assert.Equal(completionTraceParent[36..52], completionActivity.SpanId.ToHexString());
+        Assert.Equal("linked", completionActivity.GetTagItem(DurableTraceTelemetry.ContextStatus));
 
         var resumed = await client.GetAsync(new DurableFlowGetRequest(scope, instance));
         Assert.Equal(DurableFlowState.Ready, resumed.Value!.State);

@@ -6,6 +6,12 @@ namespace ForgeTrust.AppSurface.Durable;
 /// <summary>Creates durable runtime activities as new roots with an optional committed-cause link.</summary>
 internal static class DurableTraceActivity
 {
+    /// <summary>Starts a short-lived unparented durable execution with an optional committed-cause link.</summary>
+    /// <remarks>
+    /// The returned scope must be disposed to end the Activity. If a caller ambient Activity exists, creation and
+    /// disposal run without that execution context so the durable execution remains a root and the caller remains
+    /// unchanged. Activity-listener failures are relayed synchronously to the caller.
+    /// </remarks>
     internal static DurableTraceActivityScope StartRoot(
         string operationName,
         ActivityKind kind,

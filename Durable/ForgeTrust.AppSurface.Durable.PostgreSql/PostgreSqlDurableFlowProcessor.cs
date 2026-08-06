@@ -243,9 +243,7 @@ internal sealed class PostgreSqlDurableFlowProcessor
                 ActivityKind.Consumer,
                 timerTrace.Context);
             var timerActivity = timerActivityScope.Activity;
-            var timerExecutionTrace = timerActivity is null
-                ? timerTrace
-                : DurableTraceContext.Capture(timerActivity);
+            var timerExecutionTrace = DurableTraceContext.CaptureExecution(timerActivity, timerTrace);
             if (timerActivity is not null)
             {
                 DurableTraceDiagnostics.Report(timerExecutionTrace.DiagnosticCode);
@@ -309,9 +307,7 @@ internal sealed class PostgreSqlDurableFlowProcessor
             ActivityKind.Consumer,
             claim.TraceContext.Context);
         var activity = activityScope.Activity;
-        var executionTrace = activity is null
-            ? claim.TraceContext
-            : DurableTraceContext.Capture(activity);
+        var executionTrace = DurableTraceContext.CaptureExecution(activity, claim.TraceContext);
         if (activity is not null)
         {
             DurableTraceDiagnostics.Report(executionTrace.DiagnosticCode);

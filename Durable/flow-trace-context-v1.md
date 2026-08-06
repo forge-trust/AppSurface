@@ -45,7 +45,7 @@ Only these tags are emitted by Durable instrumentation:
 - `appsurface.durable.flow.state`
 - `appsurface.durable.outcome`
 - `appsurface.durable.correlation_token` (only when a validated context exists)
-- `appsurface.durable.context.status`
+- `appsurface.durable.context.status` (`ambient` for command capture; otherwise the committed trigger's `linked`, `absent`, or `invalid` status, even though the fresh execution receives a new W3C context)
 
 Configure the canonical `ForgeTrust.AppSurface` source through the [Observability package](../Observability/ForgeTrust.AppSurface.Observability/README.md) or a host-owned OpenTelemetry registration.
 

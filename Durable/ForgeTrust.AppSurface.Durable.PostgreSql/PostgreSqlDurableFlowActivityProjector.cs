@@ -120,9 +120,7 @@ internal static class PostgreSqlDurableFlowActivityProjector
                 ActivityKind.Consumer,
                 workTrace.Context);
             var activity = activityScope.Activity;
-            var completionTrace = activity is null
-                ? workTrace
-                : DurableTraceContext.Capture(activity);
+            var completionTrace = DurableTraceContext.CaptureExecution(activity, workTrace);
             if (activity is not null)
             {
                 DurableTraceDiagnostics.Report(completionTrace.DiagnosticCode);

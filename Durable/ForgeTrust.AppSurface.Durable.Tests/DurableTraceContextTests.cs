@@ -215,6 +215,22 @@ public sealed class DurableTraceContextTests
     }
 
     [Fact]
+    public void CaptureExecution_UsesTheFreshContextAndRetainsTheCommittedCauseStatus()
+    {
+        var committedCause = DurableTraceContext.Parse(
+            "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01",
+            traceState: null);
+        using var execution = new Activity("durable-execution").SetIdFormat(ActivityIdFormat.W3C).Start();
+
+        var capture = DurableTraceContext.CaptureExecution(execution, committedCause);
+
+        Assert.NotNull(capture.Context);
+        Assert.Equal(DurableTraceContextStatus.Linked, capture.Status);
+        Assert.Null(capture.DiagnosticCode);
+        Assert.NotEqual(committedCause.Context!.TraceId, capture.Context.TraceId);
+    }
+
+    [Fact]
     public void StartRoot_WithAmbientActivity_CreatesAnUnparentedExecutionWithCauseLink()
     {
         using var listener = new ActivityListener
