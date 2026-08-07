@@ -486,7 +486,7 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             await client.ListAsync(new DurableFlowListRequest(scope, pageSize: 10)));
         Assert.Contains(DurableProblemCodes.SchemaUpgradeRequired, upgradeRequired.Message, StringComparison.Ordinal);
 
-        metadata.Parameters["schema_version"].Value = 3;
+        metadata.Parameters["schema_version"].Value = PostgreSqlDurableWorkStore.RequiredSchemaVersion;
         metadata.Parameters["store_id"].Value = Guid.NewGuid();
         Assert.Equal(1, await metadata.ExecuteNonQueryAsync());
         var storeMismatch = await Assert.ThrowsAsync<InvalidOperationException>(async () =>

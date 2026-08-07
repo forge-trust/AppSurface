@@ -503,7 +503,7 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
                 @scope_id, @work_id, @revision, @event_type, @command_id, @actor_id, @reason_code,
                  @attempt_number, @lease_generation, @scope_generation,
                  CASE WHEN @replace_epoch THEN @runtime_epoch ELSE @work_epoch END,
-                 jsonb_build_object('resulting_state', @state)
+                 jsonb_strip_nulls(jsonb_build_object('resulting_state', @state, 'resolution_kind', @resolution_kind))
             FROM updated_dispatch
             WHERE @permit_status IS NULL OR (SELECT count(*) FROM updated_permit) = 1
             RETURNING scope_id, work_id
@@ -511,7 +511,7 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
             (
             UPDATE appsurface_durable.work_operator_command
             SET status = 'completed', resulting_state = @state, resulting_revision = @revision,
-                completed_at = clock_timestamp()
+                resolution_kind = @resolution_kind, completed_at = clock_timestamp()
             FROM inserted_history
             WHERE work_operator_command.scope_id = inserted_history.scope_id
               AND work_operator_command.work_id = inserted_history.work_id
@@ -546,6 +546,16 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
         sql.Parameters.AddWithValue("lease_generation", snapshot.LeaseGeneration);
         sql.Parameters.AddWithValue("scope_generation", snapshot.ScopeGeneration);
         sql.Parameters.AddWithValue("command_id", command.CommandId.Value);
+        sql.Parameters.Add(new NpgsqlParameter("resolution_kind", NpgsqlDbType.Text)
+        {
+            Value = command.Resolution switch
+            {
+                DurableManualResolutionKind.Applied => "applied",
+                DurableManualResolutionKind.ProvenNotApplied => "proven_not_applied",
+                null => DBNull.Value,
+                _ => throw new ArgumentOutOfRangeException(nameof(command)),
+            },
+        });
         sql.Parameters.Add(new NpgsqlParameter("permit_status", NpgsqlDbType.Text)
         {
             Value = transition.PermitProof is { } permitProof

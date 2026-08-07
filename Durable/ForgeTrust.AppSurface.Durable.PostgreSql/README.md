@@ -43,10 +43,11 @@ Runtime mutations take a shared, transaction-scoped advisory fence before valida
 and epoch rotation take the exclusive package lock, so they wait for in-flight runtime transactions and prevent an old
 epoch from committing new durable state after rotation.
 
-Runtime roles never own schema or apply DDL. The package has six migrations: Work/shared state (`0001_work_shared.sql`),
+Runtime roles never own schema or apply DDL. The package has seven migrations: Work/shared state (`0001_work_shared.sql`),
 forced RLS and privilege revocation (`0002_forced_rls.sql`), Flow protocol persistence (`0003_flow_protocol.sql`), the
 Work-first Schedule ledger (`0004_schedule_protocol.sql`), the payload-free runtime heartbeat
-(`0005_runtime_heartbeat.sql`), and value-free Flow trace context (`0006_flow_trace_context.sql`). Applied schema is
+(`0005_runtime_heartbeat.sql`), value-free Flow trace context (`0006_flow_trace_context.sql`), and evidence-first
+Flow repair (`0007_flow_repair.sql`). Applied schema is
 forward-only; rolling application code back does not authorize destructive schema rollback. Execute generated SQL with a
 client that stops on the first error; `psql` callers must pass `-v ON_ERROR_STOP=1`.
 
@@ -332,6 +333,25 @@ release rolls back so later proof remains possible.
 The runtime pump, health, drain, and host composition are now public through the Provider SPI and PostgreSQL
 registration extensions. Applications must still keep authorization around all operator/control APIs and must not
 depend on internal PostgreSQL claim/store types.
+
+## Repair an ASDUR211 child-effect suspension
+
+Apply the additive [`0007_flow_repair.sql`](Migrations/0007_flow_repair.sql) migration, rerun the
+[`configure-postgresql-roles.sql`](../configure-postgresql-roles.sql) recipe, and deploy a compatible source-preview
+binary before enabling repair callers. Existing suspensions that lack the V1 descriptor identity intentionally return
+`ASDUR214`; the migration does not invent a digest from an incomplete legacy shape.
+
+An authorized host resolves `IFlowRepairOperatorClient`, calls `GetAssessmentAsync` with its trusted scope and Flow
+id, chooses a current payload-free candidate, then submits its matching static request factory. A completed-effect
+candidate proves a retained typed Work result; a no-effect candidate proves a named `manual_resolve` command with
+`resolution_kind = proven_not_applied`. The repair transaction locks scoped evidence, records one terminal repair
+command, and returns a receipt for an applied or exact-duplicate request. It never calls a Work executor. A stale
+assessment returns a refusal or race result instead of guessing.
+
+`ReleaseSuspensionAsync` is not a repair shortcut: V1 child-effect descriptors fail with `ASDUR211`. If no candidate
+is offered, retain the suspension, follow the relevant `ASDUR214`–`ASDUR216` remediation, and do not use direct SQL
+to change Work, wait, or Flow state. Rollback is code-level: disable repair callers or return to a compatible binary
+while retaining the forward-only additive schema.
 
 Read the normative [`Work protocol v1`](../work-protocol-v1.md), [`Flow protocol v1`](../flow-protocol-v1.md), [Durable Flow trace context v1](../flow-trace-context-v1.md), the
 [`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md), the

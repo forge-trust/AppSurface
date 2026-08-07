@@ -36,9 +36,12 @@ context.
 | `ASDUR208` | Flow not found | No instance exists in the authorized scope | Verify scope and opaque instance id |
 | `ASDUR209` | Event contract mismatch | Payload does not match the active typed wait | Send the exact declared payload and reuse the unconsumed event id |
 | `ASDUR210` | Release manifest mismatch | Registration differs from recoverable history | Deploy a compatible registration or migrate explicitly |
-| `ASDUR211` | Release state mismatch | Suspended state and wait/timer/child-work truth disagree | Reconcile authoritative truth before release |
+| `ASDUR211` | Release state mismatch | Suspended state and wait/timer/child-work truth disagree | Use Flow repair for a V1 child-effect descriptor; otherwise reconcile before release |
 | `ASDUR212` | Trace context invalid | Persisted or ambient `traceparent` is malformed, unsupported, or unsafe | Drop context and continue the Flow without a causal link |
 | `ASDUR213` | Trace state rejected | A valid parent carried malformed or oversized opaque `tracestate` | Retain the parent link and drop only `tracestate` |
+| `ASDUR214` | Repair descriptor upgrade required | The suspension has no complete V1 child-effect descriptor identity | Deploy compatible writers, apply migration `0007`, and obtain a fresh assessment |
+| `ASDUR215` | Repair evidence mismatch | Locked Work, wait, result, history, or manual-resolution evidence differs | Reload the payload-free assessment; never substitute direct SQL evidence |
+| `ASDUR216` | Repair action unsupported | The retained state is outside the two-action repair matrix | Preserve the suspension and use a documented recovery path |
 
 ### ASDUR202
 
@@ -73,6 +76,14 @@ release.
 The persisted suspension descriptor, wait/timer lineage, or child-Work truth cannot be restored without guessing.
 Reconcile authoritative Work and Flow facts first; cancellation or an explicit evidence-backed repair is safer than a
 force-terminate shortcut.
+
+### ASDUR214–ASDUR216
+
+The Flow repair operator refuses rather than infers missing truth. `ASDUR214` means an older or mixed writer did not
+persist the V1 descriptor schema and digest. `ASDUR215` means a fresh request no longer matches locked Work, wait,
+result, history, or manual-resolution evidence. `ASDUR216` means neither supported assertion applies. Apply the
+forward-only migration and role recipe, call the payload-free repair assessment again, and submit only its current
+candidate. Do not use `ReleaseSuspensionAsync` or direct SQL as a workaround.
 
 ### ASDUR212 and ASDUR213
 
@@ -123,7 +134,10 @@ before any bounded retry.
 | `ASDUR208` | Flow not found | Instance ID does not exist within the specified scope. |
 | `ASDUR209` | Event contract mismatch | Payload schema version or contract ID does not match active wait registration. |
 | `ASDUR210` | Release manifest mismatch | Recovery manifest registration disagrees with persisted history. |
-| `ASDUR211` | Release state mismatch | Suspended state and active wait/timer/work records disagree; reconcile before release. |
+| `ASDUR211` | Release state mismatch | Suspended state and active wait/timer/work records disagree; V1 child-effect descriptors require repair, not release. |
+| `ASDUR214` | Repair descriptor upgrade required | V1 descriptor identity is absent or unsupported; apply `0007` and reload assessment. |
+| `ASDUR215` | Repair evidence mismatch | Locked evidence changed or is incompatible; submit only a fresh assessment candidate. |
+| `ASDUR216` | Repair action unsupported | The retained state is outside the two supported assertions; preserve evidence. |
 | `ASDUR400` | Durable schema is missing | Apply reviewed forward-only migrations with a migration-owner connection. |
 | `ASDUR401` | Durable schema upgrade is required | Apply every known pending migration before this reader/writer. |
 | `ASDUR402` | Durable schema version is too new or unsupported | Deploy compatible package code; do not bypass supported ranges. |

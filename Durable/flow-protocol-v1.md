@@ -51,8 +51,8 @@ Schema management and epoch rotation take the same exclusive session advisory lo
 
 | Operation | Transaction and locks | Required validation | Result and durable effects |
 | --- | --- | --- | --- |
-| **Get schema status** | Read-only deployment connection | Migration hashes for `0001`, `0002`, `0003` | Reports compatibility (compatible, missing, inconsistent, old/new); includes `StoreId` and active epoch. |
-| **Apply migrations** | Migration owner; session advisory lock | Pre/post migration hashes for the current forward catalog, including `0001_work_shared`, `0002_forced_rls`, and `0003_flow_protocol` | Applies pending known migrations in sequence under lock; fails closed on SHA-256 mismatch. The Flow protocol does not claim later Schedule behavior. |
+| **Get schema status** | Read-only deployment connection | Migration hashes for the current forward catalog (`0001` through `0007`) | Reports compatibility (compatible, missing, inconsistent, old/new); includes `StoreId` and active epoch. |
+| **Apply migrations** | Migration owner; session advisory lock | Pre/post migration hashes for the current forward catalog, including `0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`, and `0007_flow_repair` | Applies pending known migrations in sequence under lock; fails closed on SHA-256 mismatch. |
 | **Start Flow** | Client-owned short transaction; scope -> flow_instance -> flow_command -> flow_dispatch -> flow_history | Target, StoreId, active epoch, registry, definition fingerprint, `start_idempotency_key` | Atomically creates `flow_instance` (state `ready`), records `flow_command`, appends `flow_history` event, or returns exact duplicate. |
 | **Deliver External Event** | Scoped transaction; scope -> flow_instance -> flow_command -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | Target, StoreId, active epoch, unique `event_id`, matching active `waiting_event` | Records command, resolves active wait (`event_won`), supersedes timer if scheduled, updates `flow_instance` to `ready`, appends history. Exact re-delivery returns the original duplicate-stable outcome. |
 | **Fire Timer** | Payload-free discovery claim, then scoped transition; scope -> flow_instance -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | StoreId, active epoch, `state = 'scheduled'`, `due_at <= clock_timestamp()` | Updates timer to `fired`, resolves event wait (`timer_won`), updates `flow_instance` to `ready`, appends history. |
@@ -62,6 +62,7 @@ Schema management and epoch rotation take the same exclusive session advisory lo
 | **Cancel Flow** | Scoped transaction; scope -> flow_instance -> flow_command -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | Target, active instance, authorized actor/reason | If `ready`/`waiting`, cancels active waits/timers and transitions to `canceled`. If activity in-flight, transitions to `cancel_pending`. |
 | **Suspend Flow** | Scoped transaction; scope -> flow_instance -> flow_history | Invalid transition, non-restorable child failure, code mismatch (`ASDUR200`/`ASDUR201`/`ASDUR211`) | Sets state to `suspended`, records `suspended_from_state` and the suspension reason in `suspension_descriptor` and Flow history, keeps terminal fields null, and appends audit history. |
 | **Release Suspended Flow** | Scoped transaction; scope -> flow_instance -> flow_command -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | Operator command, expected revision, valid epoch, authorized resolution | Clears suspension, restores original or target state, appends command and history record. |
+| **Repair ASDUR211 child effect** | Scoped transaction; scope -> child Work -> Flow -> repair command -> activity wait -> Flow dispatch -> Work operator command/history -> Flow history | Closed V1 descriptor, expected revisions, retained result or `proven_not_applied` proof | Appends an immutable repair command/receipt, changes only the named Flow/wait/dispatch lineage, and never invokes the child executor. |
 | **Disable Scope** | Scoped transaction; canonical lock order | Active scope generation, actor/reason | Permanent tombstone on scope; atomically suspends non-terminal Flow instances and Work items in scope. |
 
 ## 11 Crash recovery boundaries
@@ -98,8 +99,9 @@ Flow persistence guarantees deterministic recovery across 11 explicit process cr
 - **`RuntimeEpoch`**: Must match the currently active epoch initialized or rotated via `IDurableRuntimeSchemaManager`. Stale epoch fails closed with `ASDUR108` or epoch fence violation.
 - **`WakeNotificationMode`**: Flow and Work engines share PostgreSQL `LISTEN`/`NOTIFY` notification settings (default: `Disabled`).
 - **Schema Compatibility**: Shared schema manager checks the current forward migration catalog. Flow requires its
-  `0001_work_shared.sql`, `0002_forced_rls.sql`, and `0003_flow_protocol.sql` prerequisites and remains compatible with
-  later Schedule migrations that it does not interpret.
+  `0001_work_shared.sql`, `0002_forced_rls.sql`, and `0003_flow_protocol.sql` prerequisites. The evidence-first
+  repair boundary additionally requires `0007_flow_repair.sql`, including its typed activity-wait identity and
+  immutable repair-command tables.
 
 ## Migration order and rollback posture
 
@@ -108,6 +110,11 @@ PostgreSQL Flow schema requires applying migrations strictly in order:
 1. `0001_work_shared.sql`: Defines `store_metadata`, `schema_migration`, `scope`, `work`, `dispatch`, `work_operator_command`, `effect_permit`, `scope_history`, `work_history`.
 2. `0002_forced_rls.sql`: Enables and forces Row Level Security on Work entities.
 3. `0003_flow_protocol.sql`: Defines the six Flow relations, indexes, constraints, and forced RLS policies.
+4. `0004_schedule_protocol.sql`: Adds the Work-first Schedule ledger.
+5. `0005_runtime_heartbeat.sql`: Adds the payload-free runtime heartbeat and health state.
+6. `0006_flow_trace_context.sql`: Adds value-free Flow causal trace context.
+7. `0007_flow_repair.sql`: Adds V1 child-suspension descriptor identity, typed activity-result expectations, immutable
+   repair command/collision ledgers, and `resolution_kind` evidence for manual Work resolution.
 
 After applying any migration that adds package relations, run [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) again: migrations must run first, then the role recipe grants the reviewed Flow privileges to existing dispatcher and scoped-runtime roles.
 
@@ -122,7 +129,8 @@ After applying any migration that adds package relations, run [`configure-postgr
 
 ## Security and Row-Level Security (RLS)
 
-All six Flow tables, including payload-free `flow_dispatch`, have Row Level Security enabled and forced:
+All scoped Flow relations, including the original six Flow tables, payload-free `flow_dispatch`, and the
+`flow_repair_command`/`flow_repair_collision` ledgers, have Row Level Security enabled and forced:
 
 The dispatcher credential normally receives global `flow_dispatch` discovery. Run `configure-postgresql-roles.sql`
 immediately after applying `0003` and before granting `SELECT` on `flow_dispatch`: the migration's
@@ -161,7 +169,30 @@ Flow operations emit append-only `ASDURxxx` codes. Safe error reporting excludes
 | `ASDUR208` | Flow not found | Instance ID does not exist within the specified scope. |
 | `ASDUR209` | Event contract mismatch | Payload schema version or contract ID does not match active wait registration. |
 | `ASDUR210` | Release manifest mismatch | Recovery manifest registration disagrees with persisted history. |
-| `ASDUR211` | Release state mismatch | Suspended state and active wait/timer/work records disagree; reconcile before release. |
-| `ASDUR400`-`ASDUR403` | Schema manager errors | Apply pending schema migrations `0001`-`0003` using migration owner credentials. |
+| `ASDUR211` | Release state mismatch | Suspended state and active wait/timer/work records disagree; V1 child-effect descriptors require repair, not release. |
+| `ASDUR214` | Repair descriptor upgrade required | The suspension lacks the complete V1 child-effect descriptor digest; upgrade compatible writers and obtain a fresh assessment. |
+| `ASDUR215` | Repair evidence mismatch | Locked Work, wait, result, history, or manual-resolution proof differs from the request; reload the assessment. |
+| `ASDUR216` | Repair action unsupported | The retained state is outside the two-action repair matrix; preserve evidence and use another documented recovery path. |
+| `ASDUR400`-`ASDUR403` | Schema manager errors | Apply every pending forward-only migration through `0007` using migration-owner credentials. |
 
 See the [diagnostics catalog](../troubleshooting/durable-diagnostics.md) for full error details.
+
+## Repair an ASDUR211 child-effect suspension
+
+The V1 repair boundary is `IFlowRepairOperatorClient` from the
+[Provider package](ForgeTrust.AppSurface.Durable.Provider/README.md#flow-repair-operator-preview). Hosts authorize
+the scope before calling it. `ActorId` is durable audit metadata only and never authorizes a request.
+
+1. Call `GetAssessmentAsync` for the trusted scope and Flow instance. The result is payload-free and advisory.
+2. Submit only one candidate using `DurableFlowRepairRequest.AssertChildEffectCompleted` or
+   `AssertChildEffectNotApplied`, preserving its Flow revision, descriptor digest, child Work revision, and retained
+   history reference.
+3. Store the applied receipt or return the exact receipt from a duplicate. A changed request under the same command
+   id records a collision; it never overwrites prior repair truth.
+
+Completed-effect repair accepts a retained terminal result only when the full result identity, SHA-256, Work history,
+and registered codec agree under lock. It marks the same wait completed, copies the retained result to the Flow, then
+makes the Flow dispatch available. No-effect repair accepts only a completed `manual_resolve` command and matching
+Work history with `resolution_kind = proven_not_applied`; it restores the same wait to `active` while leaving the
+child Work in `retry_wait` for the ordinary Work protocol to claim later. `ReleaseSuspensionAsync` is deliberately
+refused for the V1 descriptor, and neither repair action changes a Work/effect-permit row or invokes an executor.

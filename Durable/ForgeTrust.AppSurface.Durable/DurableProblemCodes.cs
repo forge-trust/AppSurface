@@ -72,6 +72,13 @@ public static class DurableProblemCodes
     /// <summary>The suspended Flow wait shape cannot safely restore its recorded state.</summary>
     public const string FlowReleaseStateMismatch = "ASDUR211";
 
+    /// <summary>The Flow repair suspension descriptor predates the V1 evidence contract and cannot be safely interpreted.</summary>
+    public const string FlowRepairDescriptorUpgradeRequired = "ASDUR214";
+    /// <summary>The retained Flow repair evidence does not match the locked Work, wait, or history truth.</summary>
+    public const string FlowRepairEvidenceMismatch = "ASDUR215";
+    /// <summary>The requested Flow repair action is outside the closed V1 repair state matrix.</summary>
+    public const string FlowRepairActionUnsupported = "ASDUR216";
+
     /// <summary>The W3C traceparent header version or structure is invalid.</summary>
     public const string TraceContextInvalid = "ASDUR212";
     /// <summary>The W3C tracestate header formatting or length is invalid and was rejected.</summary>

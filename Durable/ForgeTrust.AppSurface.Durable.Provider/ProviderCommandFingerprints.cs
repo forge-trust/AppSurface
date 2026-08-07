@@ -55,6 +55,93 @@ internal static class ProviderCommandFingerprints
         return new DurableCommandFingerprint(schemaId, Convert.ToHexStringLower(hash.GetHashAndReset()));
     }
 
+    internal static DurableCommandFingerprint CreateFlowRepair(
+        DurableScopeId scopeId,
+        DurableFlowInstanceId instanceId,
+        long expectedFlowRevision,
+        string expectedSuspensionDescriptorSha256,
+        DurableFlowRepairAction action,
+        DurableFlowRepairEvidenceReference evidence,
+        string actorId,
+        string reasonCode)
+    {
+        var schemaId = GetFlowRepairSchemaId(action);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        Append(hash, schemaId);
+        Append(hash, scopeId.Value);
+        Append(hash, instanceId.Value);
+        Append(hash, expectedFlowRevision);
+        Append(hash, expectedSuspensionDescriptorSha256);
+        Append(hash, (long)action);
+        Append(hash, evidence.ChildWorkId.Value);
+        Append(hash, evidence.ExpectedChildWorkRevision);
+        Append(hash, evidence.ChildWorkHistoryEventId);
+        AppendOptional(hash, evidence.ExpectedChildResultSha256);
+        AppendOptional(hash, evidence.RequiredWorkOperatorCommandId?.Value);
+        Append(hash, actorId);
+        Append(hash, reasonCode);
+        return new DurableCommandFingerprint(schemaId, Convert.ToHexStringLower(hash.GetHashAndReset()));
+    }
+
+    internal static string GetFlowRepairSchemaId(DurableFlowRepairAction action) => action switch
+    {
+        DurableFlowRepairAction.AssertChildEffectCompleted => "appsurface.durable.flow.repair.completed.v1",
+        DurableFlowRepairAction.AssertChildEffectNotApplied => "appsurface.durable.flow.repair.not-applied.v1",
+        _ => throw new ArgumentOutOfRangeException(nameof(action)),
+    };
+
+    internal static string CreateFlowRepairReceipt(
+        DurableScopeId scopeId,
+        DurableFlowInstanceId instanceId,
+        DurableCommandId commandId,
+        DurableFlowRepairAction action,
+        DurableCommandFingerprint requestFingerprint,
+        string suspensionDescriptorSha256,
+        DurableFlowRepairEvidenceReference evidence,
+        string actorId,
+        string reasonCode,
+        DurableFlowState priorState,
+        long priorRevision,
+        DurableFlowState resultingState,
+        long resultingRevision,
+        long resultingFlowHistoryEventId,
+        DateTimeOffset acceptedAtUtc)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        Append(hash, "appsurface.durable.flow.repair.receipt.v1");
+        Append(hash, scopeId.Value);
+        Append(hash, instanceId.Value);
+        Append(hash, commandId.Value);
+        Append(hash, (long)action);
+        Append(hash, requestFingerprint.SchemaId);
+        Append(hash, requestFingerprint.Sha256);
+        Append(hash, suspensionDescriptorSha256);
+        Append(hash, evidence.ExpectedChildResultSha256 is null ? 1L : 0L);
+        Append(hash, evidence.ChildWorkId.Value);
+        Append(hash, evidence.ExpectedChildWorkRevision);
+        Append(hash, evidence.ChildWorkHistoryEventId);
+        AppendOptional(hash, evidence.ExpectedChildResultSha256);
+        AppendOptional(hash, evidence.RequiredWorkOperatorCommandId?.Value);
+        Append(hash, actorId);
+        Append(hash, reasonCode);
+        Append(hash, (long)priorState);
+        Append(hash, priorRevision);
+        Append(hash, (long)resultingState);
+        Append(hash, resultingRevision);
+        Append(hash, resultingFlowHistoryEventId);
+        Append(hash, acceptedAtUtc.ToUniversalTime().Ticks);
+        return Convert.ToHexStringLower(hash.GetHashAndReset());
+    }
+
+    private static void AppendOptional(IncrementalHash hash, string? value)
+    {
+        Append(hash, value is null ? 0L : 1L);
+        if (value is not null)
+        {
+            Append(hash, value);
+        }
+    }
+
     private static void Append(IncrementalHash hash, string value)
     {
         var bytes = Encoding.UTF8.GetBytes(value);

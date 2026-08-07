@@ -26,8 +26,9 @@ public, testable contracts without friend access to the application package. The
 
 The application package registers only passive registries. A provider is selected explicitly by the host. The PostgreSQL
 source preview adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`,
-`0004_schedule_protocol`, `0005_runtime_heartbeat`, and `0006_flow_trace_context`) plus one-operation-at-a-time Work,
-Flow, and Work-first Schedule persistence with versioned W3C causal evidence. PostgreSQL registration remains passive;
+`0004_schedule_protocol`, `0005_runtime_heartbeat`, `0006_flow_trace_context`, and `0007_flow_repair`) plus
+one-operation-at-a-time Work, Flow, and Work-first Schedule persistence with versioned W3C causal evidence and
+evidence-first Flow repair. PostgreSQL registration remains passive;
 an application explicitly adds one bounded polling host only where it intends continuous activation. It adds no public
 endpoint, dashboard, or automatic migration.
 
