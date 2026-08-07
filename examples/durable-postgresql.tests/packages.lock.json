@@ -480,6 +480,9 @@
           "Microsoft.Extensions.Options": "[10.0.8, )"
         }
       },
+      "forgetrust.appsurface.testing": {
+        "type": "Project"
+      },
       "forgetrust.appsurface.workers": {
         "type": "Project",
         "dependencies": {
