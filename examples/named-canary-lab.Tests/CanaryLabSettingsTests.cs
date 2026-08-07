@@ -71,6 +71,32 @@ public sealed class CanaryLabSettingsTests
         Assert.Equal("NamedCanaryLab:Scenario must be Pass, Pending, or Stale.", exception.Message);
     }
 
+    [Theory]
+    [InlineData("OperatorToken", "")]
+    [InlineData("Candidate", " ")]
+    [InlineData("Environment", "\t")]
+    [InlineData("Scenario", "")]
+    public void Create_RejectsBlankRequiredConfiguration(string settingName, string value)
+    {
+        var values = CreateValues();
+        values[$"{CanaryLabSettings.SectionName}:{settingName}"] = value;
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            CanaryLabSettings.Create(
+                new ConfigurationBuilder().AddInMemoryCollection(values).Build(),
+                new TestHostEnvironment(Environments.Development)));
+
+        Assert.Equal($"NamedCanaryLab:{settingName} must be configured.", exception.Message);
+    }
+
+    [Fact]
+    public void MatchesOperatorToken_RejectsNullCandidateTokens()
+    {
+        var settings = CanaryLabSettings.Create(CreateConfiguration(), new TestHostEnvironment(Environments.Development));
+
+        Assert.Throws<ArgumentNullException>(() => settings.MatchesOperatorToken(null!));
+    }
+
     [Fact]
     public void Module_UsesHostConfigurationAndRegistersStartupValidation()
     {
@@ -118,9 +144,11 @@ public sealed class CanaryLabSettingsTests
         using var client = app.GetTestClient();
         using var response = await client.GetAsync("/");
         var body = await response.Content.ReadAsStringAsync();
+        using var anonymousCanaryResponse = await client.GetAsync($"/_appsurface/canaries/{NamedCanaryLabApp.CanaryName}");
 
         Assert.True(response.IsSuccessStatusCode);
         Assert.Equal("AppSurface named-canary lab is running.", body);
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, anonymousCanaryResponse.StatusCode);
     }
 
     internal static IConfiguration CreateConfiguration() =>

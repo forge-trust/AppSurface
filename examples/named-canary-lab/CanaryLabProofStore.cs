@@ -18,9 +18,16 @@ internal sealed record CanaryProofRecord(
 /// <summary>Holds development-only proof records without persisting raw markers or payloads.</summary>
 internal sealed class CanaryLabProofStore
 {
-    private readonly ConcurrentDictionary<string, CanaryProofRecord> _records = new(StringComparer.Ordinal);
+    /// <summary>Caps process-local records so an authenticated trigger cannot grow the sample's memory without bound.</summary>
+    public const int MaximumRecordCount = 128;
 
-    public CanaryProofRecord Record(CanaryProofRecord candidate)
+    private readonly ConcurrentDictionary<string, CanaryProofRecord> _records = new(StringComparer.Ordinal);
+    private int _recordSlotCount;
+
+    /// <summary>
+    /// Records the newest evidence for a marker, or returns <see langword="null"/> when a new marker would exceed the local bound.
+    /// </summary>
+    public CanaryProofRecord? Record(CanaryProofRecord candidate)
     {
         ArgumentNullException.ThrowIfNull(candidate);
 
@@ -28,11 +35,22 @@ internal sealed class CanaryLabProofStore
         {
             if (!_records.TryGetValue(candidate.MarkerFingerprint, out var existing))
             {
+                if (!TryReserveRecordSlot())
+                {
+                    if (_records.TryGetValue(candidate.MarkerFingerprint, out existing))
+                    {
+                        continue;
+                    }
+
+                    return null;
+                }
+
                 if (_records.TryAdd(candidate.MarkerFingerprint, candidate))
                 {
                     return candidate;
                 }
 
+                Interlocked.Decrement(ref _recordSlotCount);
                 continue;
             }
 
@@ -50,6 +68,23 @@ internal sealed class CanaryLabProofStore
 
     public bool TryRead(string markerFingerprint, out CanaryProofRecord proof) =>
         _records.TryGetValue(markerFingerprint, out proof!);
+
+    private bool TryReserveRecordSlot()
+    {
+        while (true)
+        {
+            var currentCount = Volatile.Read(ref _recordSlotCount);
+            if (currentCount >= MaximumRecordCount)
+            {
+                return false;
+            }
+
+            if (Interlocked.CompareExchange(ref _recordSlotCount, currentCount + 1, currentCount) == currentCount)
+            {
+                return true;
+            }
+        }
+    }
 }
 
 /// <summary>Creates internal lookup fingerprints without retaining opaque marker values.</summary>

@@ -19,7 +19,7 @@ PASS canary=lab.proof attempts=1 elapsed=...
 Named-canary lab 'pass' scenario verified safely.
 ```
 
-The verifier is a POSIX convenience path, not a new product surface. It builds the lab and source CLI before starting the local host, cleans up the local child process, and does not print credentials, markers, marker fingerprints, endpoint bodies, application payloads, or local logs.
+The verifier is a POSIX convenience path, not a new product surface. It builds the lab and source CLI before starting the local host, cleans up the local child process, and does not print credentials, markers, marker fingerprints, endpoint bodies, application payloads, or local logs. It supplies trigger headers through curl's standard input, so they are not expanded into curl process arguments.
 It allows up to two minutes for the loopback bind after that build, but stops earlier when the child process exits.
 
 ## What runs where
@@ -32,7 +32,7 @@ set marker + freshness       --->   bound proof store            --->   evaluato
 poll CLI exit code                  candidate/environment check         no trigger, no deploy
 ```
 
-The trigger and the named-canary route use the same local operator policy in this lab. The trigger is application-owned. `appsurface canary poll` is read-only: it never starts the workflow, changes traffic, deploys, rolls back, or selects a CI platform.
+The trigger and the named-canary route use the same local operator policy in this lab. It deliberately models one local development operator, not a multi-operator production permission design. The trigger is application-owned. `appsurface canary poll` is read-only: it never starts the workflow, changes traffic, deploys, rolls back, or selects a CI platform. The process-local proof cache is capped at 128 distinct markers; a full cache returns a bounded `429` response and should be cleared by restarting the lab rather than treated as rollout health. Trigger markers follow the named-canary marker profile, so an accepted proof is always pollable with the same marker.
 
 ## Manual walkthrough
 
@@ -78,10 +78,12 @@ curl --silent --show-error --fail http://127.0.0.1:61260/ >/dev/null
 
 curl --silent --show-error --fail \
   --request POST \
-  --header "Authorization: Bearer $NAMED_CANARY_LAB_OPERATOR_TOKEN" \
-  --header "X-AppSurface-Canary-Marker: $NAMED_CANARY_LAB_MARKER" \
+  --config - \
   --output /dev/null \
-  http://127.0.0.1:61260/lab/canary/trigger
+  http://127.0.0.1:61260/lab/canary/trigger <<EOF
+header = "Authorization: Bearer $NAMED_CANARY_LAB_OPERATOR_TOKEN"
+header = "X-AppSurface-Canary-Marker: $NAMED_CANARY_LAB_MARKER"
+EOF
 
 APPSURFACE_CANARY_TOKEN="$NAMED_CANARY_LAB_OPERATOR_TOKEN" \
 APPSURFACE_CANARY_MARKER="$NAMED_CANARY_LAB_MARKER" \
@@ -184,7 +186,7 @@ The sample is intentionally Development-only. It fails outside `Development`, us
 | Lab component | Replace it with in your application |
 | --- | --- |
 | Local bearer-token handler | Your host-owned authentication scheme and deploy-operator policy. |
-| Local process dictionary | A durable proof source that binds candidate/version, environment, authorized producer, marker, and observed time. |
+| Local process dictionary | A bounded or evicting durable proof source that binds candidate/version, environment, authorized producer, marker, and observed time. |
 | Startup scenario | The real synthetic, integration, browser, or load workflow that exercises the release risk you chose. |
 | `CanaryLabEvaluator` | Your application-owned evaluator, following the [complete Web fixture](../../Web/ForgeTrust.AppSurface.Web.Tests.CanaryConsumerFixture/CanaryConsumerFixture.cs). |
 | Shell exit branch | Your deployment system’s policy for continuing, retrying, investigating, approving, or rolling back. |

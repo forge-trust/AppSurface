@@ -15,7 +15,9 @@ namespace NamedCanaryLab;
 internal static class NamedCanaryLabApp
 {
     public const string CanaryName = "lab.proof";
+    private const int MaximumMarkerUtf8Bytes = 256;
     private static readonly TimeSpan StaleOffset = TimeSpan.FromMinutes(5);
+    private static readonly Encoding StrictUtf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     public static Task RunAsync(string[] args) => WebApp<NamedCanaryLabModule>.RunAsync(args);
 
@@ -100,11 +102,20 @@ internal static class NamedCanaryLabApp
                 observedAt -= StaleOffset;
             }
 
-            proofStore.Record(new CanaryProofRecord(
+            var recorded = proofStore.Record(new CanaryProofRecord(
                 settings.Identity,
                 CanaryLabMarkerFingerprint.Create(marker),
                 observedAt,
                 AppSurfaceCanaryStatus.Pass));
+            if (recorded is null)
+            {
+                return Results.Json(
+                    new CanaryLabProblem(
+                        "proof-store-full",
+                        "The local proof store is full.",
+                        "Restart the Development-only lab before triggering a new marker."),
+                    statusCode: StatusCodes.Status429TooManyRequests);
+            }
         }
 
         return Results.Accepted(
@@ -124,7 +135,25 @@ internal static class NamedCanaryLabApp
         }
 
         marker = values[0]!;
-        return Encoding.UTF8.GetByteCount(marker) <= 256;
+        return IsValidMarker(marker);
+    }
+
+    /// <summary>Validates the same opaque-marker profile required by the named-canary evaluation route.</summary>
+    internal static bool IsValidMarker(string? marker)
+    {
+        if (string.IsNullOrWhiteSpace(marker) || marker.Any(char.IsControl))
+        {
+            return false;
+        }
+
+        try
+        {
+            return StrictUtf8.GetByteCount(marker) <= MaximumMarkerUtf8Bytes;
+        }
+        catch (EncoderFallbackException)
+        {
+            return false;
+        }
     }
 }
 

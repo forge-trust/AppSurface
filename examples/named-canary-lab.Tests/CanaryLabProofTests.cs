@@ -65,6 +65,23 @@ public sealed class CanaryLabProofTests
     }
 
     [Fact]
+    public async Task Evaluator_TreatsEvidenceAtTheFreshnessBoundaryAsCurrent()
+    {
+        var store = new CanaryLabProofStore();
+        var observedAt = DateTimeOffset.UtcNow;
+        store.Record(new CanaryProofRecord(
+            new CanaryProofIdentity("candidate-sentinel", "development"),
+            CanaryLabMarkerFingerprint.Create(Marker),
+            observedAt,
+            AppSurfaceCanaryStatus.Pass));
+
+        var result = await CreateEvaluator(store).EvaluateAsync(Context(observedAt), CancellationToken.None);
+
+        Assert.Equal(AppSurfaceCanaryStatus.Pass, result.Status);
+        Assert.Equal(observedAt, result.ObservedAt);
+    }
+
+    [Fact]
     public async Task Evaluator_ReturnsStaleWhenProofPredatesFreshnessBoundary()
     {
         var store = new CanaryLabProofStore();
@@ -83,7 +100,7 @@ public sealed class CanaryLabProofTests
     }
 
     [Fact]
-    public async Task Evaluator_ReturnsFailForCandidateMismatchAndFixedNegativeRecord()
+    public async Task Evaluator_ReturnsFailForIdentityMismatchAndFixedNegativeRecord()
     {
         var mismatchStore = new CanaryLabProofStore();
         mismatchStore.Record(new CanaryProofRecord(
@@ -95,6 +112,17 @@ public sealed class CanaryLabProofTests
         var mismatch = await CreateEvaluator(mismatchStore).EvaluateAsync(Context(), CancellationToken.None);
         Assert.Equal(AppSurfaceCanaryStatus.Fail, mismatch.Status);
         Assert.Equal("candidate-mismatch", mismatch.ReasonCode);
+
+        var environmentMismatchStore = new CanaryLabProofStore();
+        environmentMismatchStore.Record(new CanaryProofRecord(
+            new CanaryProofIdentity("candidate-sentinel", "other-environment"),
+            CanaryLabMarkerFingerprint.Create(Marker),
+            DateTimeOffset.UtcNow,
+            AppSurfaceCanaryStatus.Pass));
+
+        var environmentMismatch = await CreateEvaluator(environmentMismatchStore).EvaluateAsync(Context(), CancellationToken.None);
+        Assert.Equal(AppSurfaceCanaryStatus.Fail, environmentMismatch.Status);
+        Assert.Equal("candidate-mismatch", environmentMismatch.ReasonCode);
 
         var failureStore = new CanaryLabProofStore();
         failureStore.Record(new CanaryProofRecord(
@@ -157,6 +185,62 @@ public sealed class CanaryLabProofTests
             CreateEvaluator(store).EvaluateAsync(Context(), CancellationToken.None).AsTask());
 
         Assert.Equal("The named-canary lab store contains an unsupported proof status.", exception.Message);
+    }
+
+    [Fact]
+    public void Evaluator_RejectsNullContextsAndCancelledRequests()
+    {
+        var evaluator = CreateEvaluator(new CanaryLabProofStore());
+        using var cancellationSource = new CancellationTokenSource();
+        cancellationSource.Cancel();
+
+        Assert.Throws<ArgumentNullException>(() => evaluator.EvaluateAsync(null!, CancellationToken.None));
+        Assert.Throws<OperationCanceledException>(() => evaluator.EvaluateAsync(Context(), cancellationSource.Token));
+    }
+
+    [Fact]
+    public async Task Store_PreservesTheNewestEvidenceWhenConcurrentWritersRace()
+    {
+        var store = new CanaryLabProofStore();
+        var identity = new CanaryProofIdentity("candidate-sentinel", "development");
+        var fingerprint = CanaryLabMarkerFingerprint.Create(Marker);
+        var firstObservedAt = DateTimeOffset.UtcNow;
+        var candidates = Enumerable.Range(0, 64)
+            .Select(offset => new CanaryProofRecord(
+                identity,
+                fingerprint,
+                firstObservedAt.AddSeconds(offset),
+                AppSurfaceCanaryStatus.Pass))
+            .ToArray();
+
+        await Task.WhenAll(candidates.Select(candidate => Task.Run(() => store.Record(candidate))));
+
+        Assert.True(store.TryRead(fingerprint, out var stored));
+        Assert.Equal(candidates[^1].ObservedAt, stored.ObservedAt);
+    }
+
+    [Fact]
+    public void Store_RejectsNullEvidenceAndNewMarkersPastItsBound()
+    {
+        var store = new CanaryLabProofStore();
+        var identity = new CanaryProofIdentity("candidate-sentinel", "development");
+
+        Assert.Throws<ArgumentNullException>(() => store.Record(null!));
+        for (var index = 0; index < CanaryLabProofStore.MaximumRecordCount; index++)
+        {
+            var marker = $"marker-{index}";
+            Assert.NotNull(store.Record(new CanaryProofRecord(
+                identity,
+                CanaryLabMarkerFingerprint.Create(marker),
+                DateTimeOffset.UtcNow,
+                AppSurfaceCanaryStatus.Pass)));
+        }
+
+        Assert.Null(store.Record(new CanaryProofRecord(
+            identity,
+            CanaryLabMarkerFingerprint.Create("marker-over-capacity"),
+            DateTimeOffset.UtcNow,
+            AppSurfaceCanaryStatus.Pass)));
     }
 
     private static CanaryLabEvaluator CreateEvaluator(CanaryLabProofStore store) =>

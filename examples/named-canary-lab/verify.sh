@@ -68,10 +68,12 @@ fi
 fresh_since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 curl --silent --show-error --fail \
   --request POST \
-  --header "Authorization: Bearer $operator_token" \
-  --header "X-AppSurface-Canary-Marker: $marker" \
+  --config - \
   --output /dev/null \
-  "$base_url/lab/canary/trigger"
+  "$base_url/lab/canary/trigger" <<EOF
+header = "Authorization: Bearer $operator_token"
+header = "X-AppSurface-Canary-Marker: $marker"
+EOF
 
 set +e
 APPSURFACE_CANARY_TOKEN="$operator_token" \

@@ -27,6 +27,10 @@ public sealed class NamedCanaryLabReadmeTests
         Assert.True(
             readme.IndexOf("## First local proof (POSIX)", StringComparison.Ordinal)
                 < readme.IndexOf("## Manual walkthrough", StringComparison.Ordinal));
+
+        var verifier = File.ReadAllText(Path.Join(FindRepositoryRoot(), "examples", "named-canary-lab", "verify.sh"));
+        Assert.Contains("--config -", verifier, StringComparison.Ordinal);
+        Assert.DoesNotContain("--header \"Authorization:", verifier, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()
