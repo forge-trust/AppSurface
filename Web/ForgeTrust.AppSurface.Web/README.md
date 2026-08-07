@@ -282,7 +282,7 @@ the proof query. The deploy caller triggers synthetic work before evaluation and
 Issue [#624](https://github.com/forge-trust/AppSurface/issues/624) adds a bounded evidence envelope and fixed
 completion telemetry. It constrains shape and exposure; it does not classify or redact application-authored text. Issue
 [#625](https://github.com/forge-trust/AppSurface/issues/625) adds the [`appsurface canary poll` caller rail](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-canary-poll), and
-[#626](https://github.com/forge-trust/AppSurface/issues/626) adds the runnable, neutral
+[#626](https://github.com/forge-trust/AppSurface/issues/626) adds the hands-on, neutral
 [named-canary adoption lab](../../examples/named-canary-lab/README.md). It demonstrates a protected application-owned
 trigger, bounded proof store, and caller gate without claiming rollout health or production approval. Until that operator rail is
 proved, this API remains preview. The bounded aggregate snapshot composes registered checks for one protected deploy

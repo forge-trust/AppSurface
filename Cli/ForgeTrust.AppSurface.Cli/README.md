@@ -73,7 +73,7 @@ dotnet tool run appsurface --version
 
 Use this command after an application has registered and protected a [named canary](../../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints). It is not a liveness or readiness probe, does not trigger synthetic work, and never changes deployment state.
 
-For a runnable protected-trigger → proof → poll example, start with the [named-canary adoption lab](../../examples/named-canary-lab/README.md). It demonstrates how a caller can gate on the CLI exit code while the application keeps ownership of the workflow, evidence, and release decision.
+For a hands-on protected-trigger → proof → poll example, start with the [named-canary adoption lab](../../examples/named-canary-lab/README.md). It demonstrates how a caller can gate on the CLI exit code while the application keeps ownership of the workflow, evidence, and release decision.
 
 AppSurface is open source: this CLI is a reusable deployment-proof client, while each application remains responsible for its protected endpoint, authorization policy, and deployment decision.
 
