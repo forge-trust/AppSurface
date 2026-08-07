@@ -106,14 +106,15 @@ internal abstract class ReleaseCommandBase
     /// Creates service objects for the resolved repository root.
     /// </summary>
     /// <param name="options">Resolved command options.</param>
-    /// <returns>Workspace, checker, preparation, and publishing services.</returns>
+    /// <returns>Workspace, checker, preparation, tagged projection resolver, and publishing services.</returns>
     protected ReleaseServices CreateServices(ReleaseOptions options)
     {
         var workspace = new ReleaseWorkspace(options.RepositoryRoot);
         var checker = new ReleaseChecker(workspace, _commandRunner);
         var preparation = new ReleasePreparation(workspace, checker, _clock);
-        var publishing = new ReleasePublishing(workspace, _commandRunner);
-        return new ReleaseServices(workspace, checker, preparation, publishing);
+        var resolver = new ReleaseTaggedProjectionResolver(workspace, _commandRunner);
+        var publishing = new ReleasePublishing(workspace, _commandRunner, resolver);
+        return new ReleaseServices(workspace, checker, preparation, resolver, publishing);
     }
 
     private ReleaseOptions BuildOptions()
@@ -263,10 +264,12 @@ internal abstract class ReleaseCommandBase
     /// <param name="Workspace">Workspace path helper.</param>
     /// <param name="Checker">Readiness checker.</param>
     /// <param name="Preparation">Release preparation workflow.</param>
+    /// <param name="TaggedProjectionResolver">Prepared-to-tagged projection resolver.</param>
     /// <param name="Publishing">Release publishing workflow.</param>
     protected sealed record ReleaseServices(
         ReleaseWorkspace Workspace,
         ReleaseChecker Checker,
         ReleasePreparation Preparation,
+        ReleaseTaggedProjectionResolver TaggedProjectionResolver,
         ReleasePublishing Publishing);
 }

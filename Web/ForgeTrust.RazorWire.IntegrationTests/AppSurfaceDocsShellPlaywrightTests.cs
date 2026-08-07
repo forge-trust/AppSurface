@@ -36,6 +36,7 @@ public sealed class AppSurfaceDocsShellPlaywrightTests
               const main = document.getElementById('main-content');
               return Boolean(sidebar)
                 && sidebar.getAttribute('aria-hidden') === 'true'
+                && sidebar.hasAttribute('inert')
                 && openButton?.getAttribute('aria-expanded') === 'false'
                 && Boolean(sidebarOverlay)
                 && window.getComputedStyle(sidebarOverlay).display === 'none'
@@ -59,6 +60,7 @@ public sealed class AppSurfaceDocsShellPlaywrightTests
                 && sidebar.getAttribute('aria-hidden') === 'false'
                 && sidebar.getAttribute('role') === 'dialog'
                 && sidebar.getAttribute('aria-modal') === 'true'
+                && !sidebar.hasAttribute('inert')
                 && openButton?.getAttribute('aria-expanded') === 'true'
                 && Boolean(sidebarOverlay)
                 && window.getComputedStyle(sidebarOverlay).display !== 'none'
@@ -84,6 +86,7 @@ public sealed class AppSurfaceDocsShellPlaywrightTests
               const openButton = document.getElementById('docs-sidebar-open');
               return Boolean(sidebar)
                 && sidebar.getAttribute('aria-hidden') === 'true'
+                && sidebar.hasAttribute('inert')
                 && openButton?.getAttribute('aria-expanded') === 'false'
                 && Boolean(sidebarOverlay)
                 && window.getComputedStyle(sidebarOverlay).display === 'none'
@@ -98,6 +101,39 @@ public sealed class AppSurfaceDocsShellPlaywrightTests
 
         Assert.Equal("false", await page.GetAttributeAsync("#docs-sidebar-open", "aria-expanded"));
         Assert.False(await page.Locator("#docs-sidebar-overlay").IsVisibleAsync());
+    }
+
+    [Fact]
+    public async Task DesktopSidebar_ShouldMoveFocusBeforeBecomingInertOnMobileResize()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize { Width = 1366, Height = 844 }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync(_fixture.DocsUrl);
+        var sidebarLink = page.Locator("#docs-sidebar nav[aria-label='Documentation navigation'] a:visible").First;
+        await sidebarLink.WaitForAsync(new LocatorWaitForOptions
+        {
+            State = WaitForSelectorState.Visible,
+            Timeout = 15_000
+        });
+        await sidebarLink.FocusAsync();
+
+        await page.SetViewportSizeAsync(390, 844);
+        await page.WaitForFunctionAsync(
+            """
+            () => {
+              const sidebar = document.getElementById('docs-sidebar');
+              const openButton = document.getElementById('docs-sidebar-open');
+              return sidebar?.hasAttribute('inert')
+                && sidebar.getAttribute('aria-hidden') === 'true'
+                && document.activeElement === openButton;
+            }
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
     }
 
     [Fact]

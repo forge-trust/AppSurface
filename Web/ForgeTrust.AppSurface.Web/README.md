@@ -66,9 +66,9 @@ Then import the TagHelpers and opt into the document root/head in the layout tha
 </head>
 ```
 
-The root helper emits `data-as-theme`, `data-as-theme-mode`, a stable `data-as-theme-schema="1"` payload marker, and a `color-scheme` declaration. The head helper emits `<meta name="color-scheme">` followed by a deterministic `data-as-theme-critical` stylesheet before external stylesheets. `System` emits light values and a dark `prefers-color-scheme` branch; `Light` and `Dark` emit only their selected branch. Exactly one head payload is emitted per MVC request even if a layout or partial repeats the helper. Neither helper emits scripts, page-hiding CSS, storage access, or a switcher.
+The root helper emits `data-as-theme`, `data-as-theme-mode`, a stable `data-as-theme-schema="1"` payload marker, and a `color-scheme` declaration. The base head helper emits `<meta name="color-scheme">` followed by a deterministic `data-as-theme-critical` stylesheet before external stylesheets. `System` emits light values and a dark `prefers-color-scheme` branch; `Light` and `Dark` emit only their selected branch. Exactly one head payload is emitted per MVC request even if a layout or partial repeats the helper. The base adapter emits no scripts, page-hiding CSS, storage access, or switcher.
 
-The optional `nonce` attribute is copied only to the live inline critical style:
+For the base adapter, the optional `nonce` attribute is copied to the live inline critical style:
 
 ```cshtml
 <appsurface-theme-head nonce="@Model.CspNonce" />
@@ -77,6 +77,70 @@ The optional `nonce` attribute is copied only to the live inline critical style:
 The host owns generating that per-response nonce and its `style-src` policy. Static exports use the same canonical payload without a nonce. If the root already declares `color-scheme`, AppSurface preserves it and marks `data-as-theme-color-scheme-conflict="true"`; correct the host declaration rather than relying on hidden precedence.
 
 Use the neutral package's [theme contract](../../ForgeTrust.AppSurface.Theming/README.md) for roles, validation, typed application extras, diagnostics, and deliberately deferred preference/tenant policy. Use the [Docs migration guide](../ForgeTrust.AppSurface.Docs/README.md#theme-pairs-migration) when the application hosts AppSurface Docs. RazorWire's generated-error boundary is documented in [Failed Form UX](../ForgeTrust.RazorWire/Docs/form-failures.md#appsurface-theme-pairs).
+
+### Browser-local theme preferences
+
+Use browser-local preferences when Light and Dark change only presentation and one canonical HTML response must remain safe for caches, search, analytics, and static export. This is a progressive Web enhancement: it never writes a cookie, reads request or account state, changes a URL, or introduces a `Vary` value. Do not use it when theme choice changes semantic content, authorization, tenant state, or needs to follow a signed-in user between devices; those are application-owned policies.
+
+Register the neutral pair, then replace the fixed Web document with the one-call preference adapter. The adapter establishes the ordinary Web integration itself, so do not add `AddAppSurfaceWebTheming()` merely to make this work:
+
+```csharp
+using ForgeTrust.AppSurface.Theming;
+using ForgeTrust.AppSurface.Web;
+
+services.AddAppSurfaceTheming(options =>
+{
+    options.DefaultTheme = new AppSurfaceThemeId("appsurface");
+    options.DefaultMode = AppSurfaceThemeMode.System;
+    options.Pairs.Add(AppSurfaceThemePair.AppSurface());
+});
+services.AddAppSurfaceWebThemePreferences(options => options.StorageKey = "site-theme");
+```
+
+The opt-in always server-renders the selected pair in `System` mode. Its deterministic parser-blocking bootstrap appears before the critical style and any application stylesheets, validates only stored `light` or `dark`, and changes the root mode before the stylesheet can paint. The System cascade is independently complete, so blocked JavaScript, disabled storage, malformed values, an absent value, or a stored `system` value all remain readable and follow the operating system without a page-hiding phase. A host that previously configured fixed Light or Dark knowingly changes its Web fallback to System by calling this API; leave the opt-in out to retain the fixed #696 document exactly.
+
+The precedence is intentionally short and browser-only:
+
+1. A valid selection made in the current document takes effect immediately.
+2. A valid origin-scoped local-storage value (`light` or `dark`) is applied before paint on later loads.
+3. Otherwise the server-rendered System branch follows `prefers-color-scheme`.
+
+The configured neutral default still chooses the theme pair, but the preference adapter does not treat a configured Light/Dark *mode* as a fourth browser preference. Explicit System removes the storage key. A failed storage write leaves the current document at the selected mode and reports `persistence: "session"`; it does not promise a future reload will retain it. If the root helper reports `data-as-theme-color-scheme-conflict="true"`, the enhancement leaves System in place and keeps controls hidden so the host-owned declaration is never silently overridden.
+
+The package remains headless. Place a native group outside an application data form, start it hidden, and let the bootstrap reveal it only after binding:
+
+```cshtml
+<fieldset data-as-theme-preference-control hidden>
+  <legend>Appearance</legend>
+  <label><input type="radio" name="site-theme-preference" value="system" /> System</label>
+  <label><input type="radio" name="site-theme-preference" value="light" /> Light</label>
+  <label><input type="radio" name="site-theme-preference" value="dark" /> Dark</label>
+</fieldset>
+<p id="theme-status" aria-live="polite"></p>
+<noscript><p>This site follows your operating-system appearance setting.</p></noscript>
+```
+
+The shared radio `name` preserves native keyboard behavior within one control; because the group is not inside a submitted form, it does not become application request data. If responsive markup renders more than one preference control with the same name, the bootstrap scopes each group so their checked states cannot cancel one another. The script dispatches `appsurface-theme-preference-change` only after user or cross-tab changes. Its validated `detail` is `{ mode, persistence, source }`, where persistence is `stored`, `session`, or `system`, and source is `control` or `storage`. The host owns localized feedback, for example:
+
+```js
+window.addEventListener("appsurface-theme-preference-change", event => {
+  const { mode, persistence } = event.detail;
+  document.getElementById("theme-status").textContent =
+    persistence === "session"
+      ? `Using ${mode} for this visit only.`
+      : `Appearance set to ${mode}.`;
+});
+```
+
+Controls synchronize across same-origin tabs through the browser `storage` event. Existing forced-colors token fallbacks remain authoritative; use native focus styles and do not represent selection with colour alone. Theme-sensitive images need root-attribute CSS or equivalent application logic—an OS-media `<picture>` source follows only System and cannot see a manual root override.
+
+#### CSP, static export, privacy, and rollback
+
+For dynamic pages, pass the same host-generated nonce to `<appsurface-theme-head>` and allow that nonce in both `script-src` and `style-src`. For a static host, add the stable script hash from `AppSurfaceThemePreferenceCsp.ScriptHash` to `script-src`; the storage key is an encoded data attribute and never changes that hash. A strict static policy must also hash the exact emitted `data-as-theme-critical` style, plus `data-docs-theme-critical` when [AppSurface Docs](../ForgeTrust.AppSurface.Docs/README.md#theme-pairs-migration) maps shared tokens, and every host-authored inline `<style>` block. Those style hashes are export-output-specific, so AppSurface never tells a host to use `unsafe-inline` as the secure default. The [RazorWire static-export contract](../ForgeTrust.RazorWire/README.md#static-export) remains one HTML tree per page.
+
+The adapter stores only one non-sensitive string in browser local storage and sends it nowhere. The host remains responsible for any disclosure or retention policy applicable to browser storage. Static and versioned Docs pages keep the same origin-scoped key; protected [Markdown download](../ForgeTrust.AppSurface.Docs/README.md#protected-markdown-download) responses remain raw `text/markdown` attachments with no HTML, bootstrap, or theme rewriting.
+
+To roll back, remove `AddAppSurfaceWebThemePreferences()` and keep the existing root/head markup. The ordinary fixed Web provider resumes; old local values are inert and can be cleared by host policy if necessary. There are no routes, cookies, cache entries, or server records to migrate.
 
 ### PWA application badging
 

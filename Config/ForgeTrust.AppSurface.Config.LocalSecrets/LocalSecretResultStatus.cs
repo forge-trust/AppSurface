@@ -36,5 +36,12 @@ public enum LocalSecretResultStatus
     ConversionFailed = 7,
 
     /// <summary>The provider failed unexpectedly.</summary>
-    ProviderFailed = 8
+    ProviderFailed = 8,
+
+    /// <summary>
+    /// A readable legacy macOS Keychain record exists, but no current v2 record exists yet.
+    /// This is terminal so AppHost resolution never claims cross-process parity before an operator runs
+    /// <c>appsurface secrets migrate</c> for the same pinned namespace.
+    /// </summary>
+    MigrationRequired = 9
 }

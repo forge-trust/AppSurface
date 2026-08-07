@@ -1436,17 +1436,31 @@ services.AddAppSurfaceWebTheming();
 services.AddAppSurfaceDocs();
 ```
 
+To offer the browser-local appearance picker demonstrated by the Docs consumer fixture, replace the explicit Web call with the opt-in preference adapter before `AddAppSurfaceDocs()`:
+
+```csharp
+services.AddAppSurfaceTheming(options =>
+{
+    options.DefaultTheme = new AppSurfaceThemeId("appsurface");
+    options.Pairs.Add(AppSurfaceThemePair.AppSurface());
+});
+services.AddAppSurfaceWebThemePreferences(options => options.StorageKey = "docs-theme");
+services.AddAppSurfaceDocs();
+```
+
+This keeps one canonical page and one static tree per Docs version. It is origin-scoped browser storage only: Light and Dark never change Docs routes, archive routes, canonical metadata, raw Markdown downloads, cookies, account state, cache keys, or server rendering. When Docs uses the shared `AppSurfaceDark` bridge, the layout includes a hidden native `System`/`Light`/`Dark` radio group that the opt-in bootstrap reveals after binding. The fixed `GraphiteDark` compatibility preset stays dark and deliberately omits that control; hosts that do not opt in also retain the legacy dark behavior. See the [Web preference guide](../ForgeTrust.AppSurface.Web/README.md#browser-local-theme-preferences) for the precedence, localizable status event, no-script behavior, privacy boundary, forced-colors guidance, and rollback.
+
 | Before | After |
 | --- | --- |
 | `AppSurfaceDark` produced only the established dark Docs variable graph. | It maps Docs-owned surfaces, code tokens, search states, tables, archive/status pages, and focus treatment to the shared System/Light/Dark semantic branch while keeping Docs variables internal. |
 | `GraphiteDark` was a dark preset. | It remains a Docs-local dark compatibility preset; it is not a shared pair. |
-| `#rgb` color overrides were accepted. | They remain accepted and apply only to the supported Docs accent/link roles. Shared role values remain strict `#RRGGBB`. When a shared Light or System branch cannot render an override at the documented contrast threshold, Docs keeps the safe semantic pair role for that branch instead of emitting the override. |
+| `#rgb` color overrides were accepted. | They remain accepted and apply only to the supported Docs accent/link roles. Shared role values remain strict `#RRGGBB`. When a rendered branch cannot meet the documented contrast threshold, Docs keeps the safe semantic pair role instead of emitting the override; browser-local preferences therefore validate every Light and Dark branch, even if the host default is fixed. |
 
 Docs preserves density, chrome, layout override behavior, and the default dark experience when no shared resolver is registered. The package layout emits the Web root/head opt-ins plus a Docs-critical variable mapping before the package stylesheet. Published-tree rewriting preserves that root metadata and both critical styles, so static archives match live output apart from a host-request CSP nonce.
 
 `AddAppSurfaceDocs()` always registers the Web theme-document adapter. When no `IAppSurfaceThemeResolver` is already registered, it also adds the built-in pair with the legacy `Dark` default. Register them explicitly before `AddAppSurfaceDocs()` only when the host needs a different pair or System/Light behavior.
 
-For a nonce-based `style-src` policy, the host stores its per-response nonce before Razor executes. The package layout applies it only to the two live critical styles; static exports remain nonce-free and deterministic.
+For a nonce-based CSP policy, the host stores its per-response nonce before Razor executes. The package layout applies it to the two live critical styles and, when the preference adapter is enabled, to the deterministic preference bootstrap; static exports remain nonce-free and deterministic.
 
 ```csharp
 using ForgeTrust.AppSurface.Web.Theming;
@@ -1455,6 +1469,8 @@ context.Items[AppSurfaceThemeCspNonce.HttpContextItemKey] = hostGeneratedNonce;
 ```
 
 Do not put the nonce in `AppSurfaceDocsOptions`, configuration files, logs, or static exports. The host owns nonce generation and CSP headers.
+
+For static/versioned Docs, allow the [published preference script hash](../ForgeTrust.AppSurface.Web/README.md#csp-static-export-privacy-and-rollback) only when the exported bootstrap is present, and calculate hashes for every exported inline style, including `data-as-theme-critical`, `data-docs-theme-critical`, and host-authored additions. The published-tree handler recognizes the known bootstrap hash while continuing to block all other inline scripts; it removes request nonces from the three generated payloads. Markdown download routes remain `text/markdown` attachments and do not enter this HTML/CSP path.
 
 Do not treat `--docs-*` variables as a consumer API. They are Docs implementation details derived from stable shared `--as-*` semantic inputs. The supported consumer contract is the neutral [theme-pair reference](../../ForgeTrust.AppSurface.Theming/README.md), this Docs options section, and the documented Razor layout override boundary.
 

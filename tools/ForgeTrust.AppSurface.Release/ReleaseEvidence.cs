@@ -683,7 +683,31 @@ internal static class ReleaseEvidence
         await AddFileContentAsync(artifactContents, workspace.DisplayPath(workspace.ReleaseNotePath(version)), workspace.ReleaseNotePath(version), cancellationToken);
         await AddFileContentAsync(artifactContents, workspace.DisplayPath(workspace.ReleaseSidecarPath(version)), workspace.ReleaseSidecarPath(version), cancellationToken);
         await AddFileContentAsync(artifactContents, workspace.DisplayPath(workspace.ReleaseManifestPath(version)), workspace.ReleaseManifestPath(version), cancellationToken);
+        await ValidatePreparedSidecarAsync(workspace, version, diagnostics, cancellationToken);
         ValidateArtifactDigests(bundle, artifactContents, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle");
+    }
+
+    private static async Task ValidatePreparedSidecarAsync(
+        ReleaseWorkspace workspace,
+        SemVer version,
+        List<ReleaseDiagnostic> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        var sidecarPath = workspace.ReleaseSidecarPath(version);
+        if (!File.Exists(sidecarPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var sidecar = await ReleaseSidecar.LoadAsync(sidecarPath, cancellationToken);
+            sidecar.EnsurePrepared(version, workspace.DisplayPath(sidecarPath));
+        }
+        catch (ReleaseToolException ex)
+        {
+            diagnostics.Add(ex.Diagnostic);
+        }
     }
 
     private static async Task AddFileContentAsync(

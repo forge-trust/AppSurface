@@ -13,12 +13,13 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 /// LocalSecrets store that delegates to the current operating system's user secret facility when available.
 /// </summary>
 /// <remarks>
-/// macOS uses Security.framework Keychain generic passwords, Windows uses current-user Credential Manager generic credentials,
-/// Linux uses Secret Service through <c>secret-tool</c>, and unsupported sessions return display-safe diagnostics.
+/// macOS uses an entitlement-free Security.framework <c>SecItem</c> v2 Keychain namespace with retained legacy-record
+/// migration diagnostics, Windows uses current-user Credential Manager generic credentials, Linux uses Secret Service through
+/// <c>secret-tool</c>, and unsupported sessions return display-safe diagnostics.
 /// </remarks>
 [ExcludeFromCodeCoverage(
     Justification = "Real OS credential stores depend on desktop session state, prompts, and native services; deterministic tests cover fake stores and status mapping.")]
-public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore
+public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore, IAppSurfaceLocalSecretMigrationStore
 {
     private static readonly string[] LinuxSecretToolTrustedCandidates = ["/usr/bin/secret-tool", "/bin/secret-tool"];
 
@@ -84,6 +85,20 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
     public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) =>
         _inner.Doctor(applicationName, environment, keyPrefix);
 
+    /// <inheritdoc />
+    public AppSurfaceLocalSecretMigrationResult Migrate(string applicationName, string environment, string? keyPrefix) =>
+        _inner is IAppSurfaceLocalSecretMigrationStore migrationStore
+            ? migrationStore.Migrate(applicationName, environment, keyPrefix)
+            : AppSurfaceLocalSecretMigrationResult.FailedToStart(
+                LocalSecretResultStatus.UnsupportedPlatform,
+                new AppSurfaceLocalSecretDiagnostic(
+                    "local-secret-migration-unsupported",
+                    "Local secret migration is unavailable for this platform store.",
+                    "This LocalSecrets store does not retain macOS legacy Keychain records that can be migrated into the v2 namespace.",
+                    "Use the macOS OS-backed store for this namespace, or set the intended value explicitly with `appsurface secrets set`.",
+                    "local-secrets-macos-migration"),
+                Name);
+
     private static IAppSurfaceLocalSecretStore CreateInnerStore(
         AppSurfaceLocalSecretsOptions options,
         LinuxSecretToolResolver linuxSecretToolResolver,
@@ -109,7 +124,9 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
-            return new MacOsKeychainLocalSecretStore();
+            return new MacOsV2CompatibilityLocalSecretStore(
+                new MacOsKeychainLocalSecretStore(),
+                NativeMacOsSecItemInterop.Instance);
         }
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
@@ -156,6 +173,75 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         LinuxSecretToolResolver linuxSecretToolResolver,
         LocalSecretsPlatform? platformOverride = null) =>
         CreateInnerStore(options, linuxSecretToolResolver, platformOverride);
+
+    private static LocalSecretIndexReadResult ReadLocalSecretIndex(
+        Func<AppSurfaceLocalSecretResult> read,
+        string indexKey,
+        Func<string, AppSurfaceLocalSecretDiagnostic> invalidIndex,
+        string parseFailure)
+    {
+        var result = read();
+        if (result.Status == LocalSecretResultStatus.Missing)
+        {
+            return LocalSecretIndexReadResult.Found([], needsRepair: false);
+        }
+
+        if (result.Status != LocalSecretResultStatus.Found)
+        {
+            return LocalSecretIndexReadResult.Failed(result.Status, result.Diagnostic!);
+        }
+
+        if (result.Value == null)
+        {
+            return LocalSecretIndexReadResult.Failed(
+                LocalSecretResultStatus.ProviderFailed,
+                invalidIndex("The index read reported success without returning index data."));
+        }
+
+        string?[] indexedKeys;
+        try
+        {
+            indexedKeys = JsonSerializer.Deserialize<string?[]>(result.Value) ?? [];
+        }
+        catch (JsonException)
+        {
+            return LocalSecretIndexReadResult.Failed(LocalSecretResultStatus.ProviderFailed, invalidIndex(parseFailure));
+        }
+
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        var needsRepair = false;
+        foreach (var key in indexedKeys)
+        {
+            if (string.IsNullOrWhiteSpace(key) || string.Equals(key, indexKey, StringComparison.Ordinal))
+            {
+                needsRepair = true;
+                continue;
+            }
+
+            if (!keys.Add(key))
+            {
+                needsRepair = true;
+            }
+        }
+
+        return LocalSecretIndexReadResult.Found(keys, needsRepair);
+    }
+
+    private static string SerializeLocalSecretIndex(IEnumerable<string> keys) =>
+        JsonSerializer.Serialize(keys.OrderBy(static key => key, StringComparer.OrdinalIgnoreCase).ThenBy(static key => key, StringComparer.Ordinal).ToArray());
+
+    private sealed record LocalSecretIndexReadResult(
+        LocalSecretResultStatus Status,
+        IReadOnlyCollection<string> Keys,
+        bool NeedsRepair,
+        AppSurfaceLocalSecretDiagnostic? Diagnostic)
+    {
+        public static LocalSecretIndexReadResult Found(IReadOnlyCollection<string> keys, bool needsRepair) =>
+            new(LocalSecretResultStatus.Found, keys, needsRepair, null);
+
+        public static LocalSecretIndexReadResult Failed(LocalSecretResultStatus status, AppSurfaceLocalSecretDiagnostic diagnostic) =>
+            new(status, [], false, diagnostic);
+    }
 
     /// <summary>
     /// Represents platform selections used by deterministic platform-store tests.
@@ -1191,55 +1277,19 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             string? keyPrefix,
             IEnumerable<string> keys)
         {
-            var index = JsonSerializer.Serialize(
-                keys.OrderBy(static key => key, StringComparer.OrdinalIgnoreCase).ThenBy(static key => key, StringComparer.Ordinal).ToArray());
+            var index = SerializeLocalSecretIndex(keys);
             var write = WriteStoredValue(IndexIdentity(applicationName, environment, keyPrefix), index);
             return write.Status == LocalSecretResultStatus.Found
                 ? AppSurfaceLocalSecretResult.Found(string.Empty, Name)
                 : write;
         }
 
-        private IndexReadResult ReadIndex(string applicationName, string environment, string? keyPrefix)
-        {
-            var result = ReadStoredValue(IndexIdentity(applicationName, environment, keyPrefix));
-            if (result.Status == LocalSecretResultStatus.Missing)
-            {
-                return IndexReadResult.Found([], needsRepair: false);
-            }
-
-            if (result.Status != LocalSecretResultStatus.Found || result.Value == null)
-            {
-                return IndexReadResult.Failed(result.Status, result.Diagnostic!);
-            }
-
-            string?[] indexedKeys;
-            try
-            {
-                indexedKeys = JsonSerializer.Deserialize<string?[]>(result.Value) ?? [];
-            }
-            catch (JsonException)
-            {
-                return IndexReadResult.Failed(LocalSecretResultStatus.ProviderFailed, InvalidIndexDiagnostic("The platform store index entry could not be parsed."));
-            }
-
-            var keys = new HashSet<string>(StringComparer.Ordinal);
-            var needsRepair = false;
-            foreach (var key in indexedKeys)
-            {
-                if (string.IsNullOrWhiteSpace(key) || string.Equals(key, IndexKey, StringComparison.Ordinal))
-                {
-                    needsRepair = true;
-                    continue;
-                }
-
-                if (!keys.Add(key))
-                {
-                    needsRepair = true;
-                }
-            }
-
-            return IndexReadResult.Found(keys, needsRepair);
-        }
+        private LocalSecretIndexReadResult ReadIndex(string applicationName, string environment, string? keyPrefix) =>
+            ReadLocalSecretIndex(
+                () => ReadStoredValue(IndexIdentity(applicationName, environment, keyPrefix)),
+                IndexKey,
+                InvalidIndexDiagnostic,
+                "The platform store index entry could not be parsed.");
 
         private static AppSurfaceLocalSecretIdentity IndexIdentity(string applicationName, string environment, string? keyPrefix) =>
             new(applicationName, environment, keyPrefix, IndexKey, $"appsurface:{applicationName}:{environment}:{keyPrefix}:{IndexKey}");
@@ -1255,18 +1305,6 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 "Remove the invalid platform index entry, then set the intended LocalSecrets keys again.",
                 "local-secrets-troubleshooting");
 
-        private sealed record IndexReadResult(
-            LocalSecretResultStatus Status,
-            IReadOnlyCollection<string> Keys,
-            bool NeedsRepair,
-            AppSurfaceLocalSecretDiagnostic? Diagnostic)
-        {
-            public static IndexReadResult Found(IReadOnlyCollection<string> keys, bool needsRepair) =>
-                new(LocalSecretResultStatus.Found, keys, needsRepair, null);
-
-            public static IndexReadResult Failed(LocalSecretResultStatus status, AppSurfaceLocalSecretDiagnostic diagnostic) =>
-                new(status, [], false, diagnostic);
-        }
     }
 
     internal abstract class CommandBackedLocalSecretStore : IndexedLocalSecretStore
