@@ -206,6 +206,58 @@ serialize command replay, validate lifecycle sequencing, and compare every live 
 against the immutable manifest before verification or deletion. The application still owns authorization and the opaque
 external-archive receipt: PostgreSQL proves source correspondence, not external storage availability or legal adequacy.
 
+The application supplies command identity, actor, reason, and the expected lifecycle sequence for every mutation. A
+minimal orchestration shape is:
+
+```csharp
+var assessmentResult = await retention.AssessAsync(
+    new DurableRetentionAssessmentRequest(scopeId, flowInstanceId),
+    cancellationToken);
+
+if (!assessmentResult.IsSuccess ||
+    assessmentResult.Value.Status != DurableRetentionAssessmentStatus.Safe)
+{
+    // Stop for Blocked or Indeterminate; do not create a manifest.
+    return;
+}
+
+var manifestResult = await retention.CreateManifestAsync(
+    new DurableRetentionManifestCreateRequest(
+        new DurableCommandId("retention-manifest-command"),
+        assessmentResult.Value),
+    cancellationToken);
+var manifest = manifestResult.Value.Manifest;
+var package = (await retention.BuildArchivePackageAsync(
+    scopeId,
+    manifest.ManifestId,
+    cancellationToken)).Value;
+
+await archiveStore.WriteAsync(package, cancellationToken);
+var receipt = await archiveStore.CreateReceiptAsync(package, cancellationToken);
+var sequence = manifest.LifecycleSequence;
+
+await retention.RecordArchiveReceiptAsync(
+    new DurableRetentionRecordArchiveReceiptRequest(
+        scopeId, manifest.ManifestId, new DurableCommandId("retention-receipt-command"),
+        actorId, "verified-flow-retention", sequence, receipt),
+    cancellationToken);
+await retention.VerifyArchiveAsync(
+    new DurableRetentionVerifyArchiveRequest(
+        scopeId, manifest.ManifestId, new DurableCommandId("retention-verify-command"),
+        actorId, "verified-flow-retention", sequence + 1),
+    cancellationToken);
+await retention.PurgeAsync(
+    new DurableRetentionPurgeRequest(
+        scopeId, manifest.ManifestId, new DurableCommandId("retention-purge-command"),
+        actorId, "verified-flow-retention", sequence + 2),
+    cancellationToken);
+```
+
+Treat each `DurableOperationResult` as a checked boundary: handle `IsSuccess == false`, preserve the returned
+command outcome for retries, and stop on `Blocked`, `Indeterminate`, source changes, stale lifecycle sequences, or
+holds. The archive write and receipt creation are external application steps; the provider never treats a receipt as
+proof that external bytes are durable or legally adequate.
+
 `DFA1` package bytes are returned before external I/O. The archive receipt is an opaque adopter assertion, not a URI,
 availability check, encryption proof, or compliance determination. Source-correspondence verification rebuilds the
 canonical package and compares its SHA-256 and frozen closure digest. Applications must document and operate their own

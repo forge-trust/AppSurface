@@ -85,7 +85,7 @@ This approach aims to:
 ### [Durable](./Durable/README.md)
 
 - [**ForgeTrust.AppSurface.Durable**](./Durable/ForgeTrust.AppSurface.Durable/README.md) – Source-preview contracts for portable Work, resumable Flow, schedules, payloads, registration, and clients without installing a runtime.
-- [**ForgeTrust.AppSurface.Durable.Provider**](./Durable/ForgeTrust.AppSurface.Durable.Provider/README.md) – Public runtime-provider and operator SPI for claims, bounded activation, health, drain, recovery, and controlled repair.
+- [**ForgeTrust.AppSurface.Durable.Provider**](./Durable/ForgeTrust.AppSurface.Durable.Provider/README.md) – Public runtime-provider and operator SPI for claims, bounded activation, health, drain, recovery, controlled repair, and verified Flow-retention lifecycle contracts.
 - [**ForgeTrust.AppSurface.Durable.PostgreSql**](./Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) – Held PostgreSQL source provider for explicit schema management, atomic Work acceptance, manually driven Flow persistence, [Work-first Schedule storage](./Durable/schedule-protocol-v1.md), and verified per-Flow retention; it starts no hosted worker.
 
 ### [Console](./Console/README.md)

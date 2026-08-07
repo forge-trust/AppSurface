@@ -312,8 +312,8 @@ packages:
   - project: Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj
     classification: public
     publish_decision: do_not_publish
-    publish_reason: Public-preview Provider SPI remains held after the PostgreSQL provider milestone until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, and coordinated operational conformance.
-    readiness_note: Slice 3 supplies PostgreSQL Work conformance; publication remains held for the slices 4-6 coordinated release gate.
+    publish_reason: Public-preview Provider SPI remains held after the PostgreSQL provider milestone until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, verified-retention, and coordinated operational conformance.
+    readiness_note: Slice 3 supplies PostgreSQL Work conformance; verified-retention evidence and the remaining slices 4-6 coordinated release gate are still required.
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
@@ -323,7 +323,7 @@ packages:
     includes: Runtime pump, health, drain, recovery inventory, operator mutation, claimed-work adaptation, provider command-fingerprint contracts, and the verified Flow-retention assessment, manifest, archive-package, receipt, hold, and purge contracts.
     does_not_include: PostgreSQL storage, migrations, polling implementation, scheduling execution, hosted services, endpoints, telemetry implementation, or provider conformance evidence.
     start_here_path: Durable/ForgeTrust.AppSurface.Durable.Provider/README.md
-    recipe_summary: Reference the source-preview Provider SPI only when implementing or hosting a durable runtime; applications normally depend on `ForgeTrust.AppSurface.Durable` alone.
+    recipe_summary: Reference the source-preview Provider SPI only when implementing or hosting a durable runtime; applications normally depend on `ForgeTrust.AppSurface.Durable` alone, while retention implementers and operators may also need `ForgeTrust.AppSurface.Durable.Provider` for the application-authorized retention contracts.
     depends_on:
       - ForgeTrust.AppSurface.Durable
     expected_dependency_package_ids:
@@ -331,8 +331,8 @@ packages:
   - project: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj
     classification: public
     publish_decision: do_not_publish
-    publish_reason: PostgreSQL Work, Flow, Schedule, and explicit worker-host source provider remains held while Durable preview publishing is coordinated.
-    readiness_note: Slices 3-6 supply Work, crash-resumable Flow, Work-first Schedule, and explicit opt-in worker-host conformance; automatic startup activation and production support remain excluded.
+    publish_reason: PostgreSQL Work, Flow, Schedule, explicit worker-host, and verified-retention source provider remains held while Durable preview publishing is coordinated.
+    readiness_note: Slices 3-6 supply Work, crash-resumable Flow, Work-first Schedule, explicit opt-in worker-host, and verified-retention conformance; automatic startup activation and production support remain excluded.
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready

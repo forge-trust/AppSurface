@@ -82,9 +82,10 @@ continuation token, or multi-Flow manifest. See the [PostgreSQL retention deploy
 ## Operational prerequisites
 
 Before any provider can be published, it must supply storage and migration ownership, polling/schedule execution,
-restore fencing, graceful drain, privacy-bounded diagnostics and telemetry, packed-consumer proof, and conformance tests
-against this SPI. The source-preview PostgreSQL provider now supplies Work, Flow, Schedule, hosted activation, and
-drain/recovery conformance; coordinated release evidence remains the publication gate.
+restore fencing, graceful drain, privacy-bounded diagnostics and telemetry, packed-consumer proof, verified-retention
+evidence when the retention SPI is implemented, and conformance tests against this SPI. The source-preview PostgreSQL
+provider now supplies Work, Flow, Schedule, hosted activation, drain/recovery, and verified-retention conformance;
+coordinated release evidence remains the publication gate.
 
 See the [`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md) for currently available contract,
 PostgreSQL Work, and hosted-runtime codes.
