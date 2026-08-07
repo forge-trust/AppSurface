@@ -36,7 +36,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     }
 
     [Fact]
-    public void AddAppSurfaceKeycloak_WhenLoginThemeConfigured_MountsAndDescribesTheValidatedTheme()
+    public async Task AddAppSurfaceKeycloak_WhenLoginThemeConfigured_MountsAndDescribesTheValidatedTheme()
     {
         using var directory = new TempDirectory();
         var source = Path.Join(directory.Path, "application");
@@ -59,10 +59,28 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         Assert.NotNull(resource.Theme);
         Assert.Equal("application", resource.Theme.Name);
         Assert.Equal(image.Value, resource.Theme.BaseImage);
+        var imageAnnotation = Assert.Single(resource.Resource.Resource.Annotations.OfType<ContainerImageAnnotation>());
+        Assert.Equal(image.Registry, imageAnnotation.Registry);
+        Assert.Equal(image.Image, imageAnnotation.Image);
+        Assert.Null(imageAnnotation.Tag);
+        Assert.Equal(image.Sha256, imageAnnotation.SHA256);
         Assert.True(resource.Resource.Resource.TryGetContainerMounts(out var mounts));
         var mount = Assert.Single(mounts, annotation => annotation.Target == "/opt/keycloak/themes/application");
         Assert.Equal(Path.GetFullPath(source), mount.Source);
         Assert.True(mount.IsReadOnly);
+        Assert.True(resource.Resource.Resource.TryGetEnvironmentVariables(out var environmentAnnotations));
+        var environment = new Dictionary<string, object>(StringComparer.Ordinal);
+        var context = new EnvironmentCallbackContext(
+            new DistributedApplicationExecutionContext(DistributedApplicationOperation.Run),
+            environment,
+            CancellationToken.None);
+        foreach (var annotation in environmentAnnotations)
+        {
+            await annotation.Callback(context);
+        }
+
+        Assert.Equal("false", Assert.IsType<string>(environment["KC_SPI_THEME_CACHE_THEMES"]));
+        Assert.Equal("false", Assert.IsType<string>(environment["KC_SPI_THEME_CACHE_TEMPLATES"]));
 
         var realmJson = File.ReadAllText(resource.RealmImportFile);
         Assert.Contains("\"loginTheme\": \"application\"", realmJson, StringComparison.Ordinal);

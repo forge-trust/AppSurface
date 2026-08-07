@@ -407,6 +407,28 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
     }
 
     [Fact]
+    public void BuildContract_Write_WhenSourceFileIsReplacedWithSymbolicLink_ThrowsBuildDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var source = CreateTheme(directory.Path, "application");
+        var stylesheet = Path.Join(source, "login", "resources", "site.css");
+        var externalFile = Path.Join(directory.Path, "external.css");
+        File.WriteAllText(stylesheet, "body { color: black; }");
+        File.WriteAllText(externalFile, "body { color: white; }");
+        var contract = AppSurfaceKeycloakThemeBuildContract.Create(CreateOptions(source));
+        File.Delete(stylesheet);
+        if (!TryCreateFileSymbolicLink(stylesheet, externalFile))
+        {
+            return;
+        }
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => contract.Write(Path.Join(directory.Path, "build-context")));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeBuildContractInvalid, exception.Code);
+        Assert.Contains("changed after", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BuildContract_VerifyPackagedThemeWhenUnexpectedFileExists_ThrowsBuildDiagnostic()
     {
         using var directory = new TempDirectory();
