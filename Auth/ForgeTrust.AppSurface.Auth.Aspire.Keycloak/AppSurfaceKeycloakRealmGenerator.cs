@@ -116,6 +116,9 @@ public static class AppSurfaceKeycloakRealmGenerator
             ["username"] = user.Username,
             ["enabled"] = true,
             ["firstName"] = user.DisplayName,
+            ["lastName"] = "Local User",
+            ["email"] = $"{user.Username}@appsurface.local",
+            ["emailVerified"] = true,
             ["attributes"] = CreateAttributes(user),
             ["credentials"] = new JsonArray(
                 new JsonObject

@@ -23,6 +23,10 @@ The web proof listens on `http://localhost:5059`. Sign in with one of the local-
 | `admin` | `appsurface-admin-local-only` | Shows the admin AppSurface proof role. |
 | `viewer` | `appsurface-viewer-local-only` | Shows the viewer AppSurface proof role. |
 
+The generated local users include a deterministic non-deliverable email address and surname. This satisfies Keycloak's
+default profile requirements, so the proof redirects directly after password sign-in instead of asking developers to
+complete a profile. These fields exist only in the disposable local realm and are not runtime configuration.
+
 Run the noninteractive proof when a local container runtime is available:
 
 ```bash
