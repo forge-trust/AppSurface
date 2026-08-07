@@ -14,7 +14,7 @@ appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3
 
 The CLI also includes public coverage commands for private-by-default CI coverage enforcement. `appsurface coverage run` discovers or accepts instrumented .NET test projects, writes local coverage artifacts, and merges Cobertura through the package-owned ReportGenerator dependency in the same command. `appsurface coverage merge` fans in existing Cobertura shards from matrix or custom test workflows without reading a consumer tool manifest. `appsurface coverage gate` evaluates the merged local Cobertura XML, writes JSON and Markdown reports, and can append the same Markdown to GitHub Actions step summaries without uploading coverage data to a hosted coverage service.
 
-`appsurface secrets` manages the first-secret workflow for `ForgeTrust.AppSurface.Config.LocalSecrets`: initialize a local namespace, set one key, verify presence without printing the value, list names, delete keys, and run doctor diagnostics for platform availability.
+`appsurface secrets` manages the first-secret workflow for `ForgeTrust.AppSurface.Config.LocalSecrets`: initialize a local namespace, set one key, verify presence without printing the value, list names, explicitly migrate retained macOS Keychain records to v2, delete keys, and run doctor diagnostics for platform availability.
 
 `appsurface pwa verify` checks install metadata or the optional server-known push-readiness surface served by `ForgeTrust.AppSurface.Web`. Push readiness includes worker/helper evidence and may report an optional VAPID-backed rail as `not-configured` on a no-provider sample. Install verification remains the default schema-v2 contract. Push verification is additive schema v3 evidence and keeps browser support, installation state, permission, subscription, notification display, and delivery outside the verifier's claims.
 
@@ -238,6 +238,19 @@ appsurface secrets doctor --app MyApp --environment Development
 appsurface secrets list --names-only --app MyApp --environment Development
 appsurface secrets get Stripe:ApiKey --app MyApp --environment Development
 ```
+
+On macOS, `get` can report terminal `local-secret-migration-required` when a readable v1 record has no v2 counterpart.
+Run the matching namespace migration before retrying the AppHost:
+
+```bash
+appsurface secrets migrate --app MyApp --environment Development
+DOTNET_ENVIRONMENT=Development dotnet run
+```
+
+`migrate` never prints values, retains v1 records for recovery, and never overwrites an existing v2 value. V2 becomes
+canonical once present, so update it through `appsurface secrets set`. Keep `--app`, `--environment`, and `--prefix`
+identical to the runtime LocalSecrets options. The [macOS v2 migration guide](../../Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/macos-keychain-v2-migration.md)
+includes status meanings and a three-key CLI/AppHost smoke.
 
 `get` verifies presence and source without printing the secret value. `list` prints currently retrievable names only:
 platform-backed stores validate indexed names against live values and silently remove stale names when validation and

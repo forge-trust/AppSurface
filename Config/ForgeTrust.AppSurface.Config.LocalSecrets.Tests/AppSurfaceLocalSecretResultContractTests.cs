@@ -18,6 +18,11 @@ public sealed class AppSurfaceLocalSecretResultContractTests
         Assert.Equal(6, (int)LocalSecretResultStatus.InvalidIdentity);
         Assert.Equal(7, (int)LocalSecretResultStatus.ConversionFailed);
         Assert.Equal(8, (int)LocalSecretResultStatus.ProviderFailed);
+        Assert.Equal(9, (int)LocalSecretResultStatus.MigrationRequired);
+
+        Assert.Equal(0, (int)AppSurfaceLocalSecretMigrationAction.Migrated);
+        Assert.Equal(1, (int)AppSurfaceLocalSecretMigrationAction.AlreadyV2);
+        Assert.Equal(2, (int)AppSurfaceLocalSecretMigrationAction.Failed);
     }
 
     [Fact]
@@ -33,6 +38,19 @@ public sealed class AppSurfaceLocalSecretResultContractTests
         ValueSafeAssert.DoesNotExpose("sk_test_secret", found.ToString());
         Assert.Contains("Value: none", nullValue.ToString(), StringComparison.Ordinal);
         Assert.Equal("status", exception.ParamName);
+    }
+
+    [Fact]
+    public void MigrationResultFactories_Should_RejectFoundStatusForFailedToStartAndKeepActionTextStable()
+    {
+        var exception = Assert.Throws<ArgumentException>(() =>
+            AppSurfaceLocalSecretMigrationResult.FailedToStart(LocalSecretResultStatus.Found, Diagnostic(), "Fixed"));
+
+        Assert.Equal("status", exception.ParamName);
+        Assert.Equal("Migrated", AppSurfaceLocalSecretMigrationAction.Migrated.ToDisplayString());
+        Assert.Equal("AlreadyV2", AppSurfaceLocalSecretMigrationAction.AlreadyV2.ToDisplayString());
+        Assert.Equal("Failed", AppSurfaceLocalSecretMigrationAction.Failed.ToDisplayString());
+        Assert.Equal("999", ((AppSurfaceLocalSecretMigrationAction)999).ToDisplayString());
     }
 
     [Fact]
