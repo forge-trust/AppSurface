@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
@@ -25,6 +27,7 @@ public sealed class AppSurfaceKeycloakThemeBuildContract
         PackagedManifest = AppSurfaceKeycloakThemeManifest.CreatePackagedManifest(
             registration.Manifest,
             registration.DevelopmentOnlyResourcePaths);
+        Digest = CreateDigest(Registration, Manifest, PackagedManifest);
     }
 
     /// <summary>
@@ -46,6 +49,12 @@ public sealed class AppSurfaceKeycloakThemeBuildContract
     /// validates.
     /// </remarks>
     public AppSurfaceKeycloakThemeManifest PackagedManifest { get; }
+
+    /// <summary>
+    /// Gets the deterministic digest that binds the registration, source manifest, packaged manifest, and
+    /// Containerfile contract.
+    /// </summary>
+    public string Digest { get; }
 
     /// <summary>
     /// Creates a deterministic build contract from a configured login theme.
@@ -77,13 +86,17 @@ public sealed class AppSurfaceKeycloakThemeBuildContract
             throw BuildContractInvalid("build context directory must not already exist; choose a fresh output location.");
         }
 
-        var parent = Path.GetDirectoryName(destination);
-        if (string.IsNullOrWhiteSpace(parent))
+        var parent = Path.GetDirectoryName(destination)!;
+
+        try
         {
-            throw BuildContractInvalid("build context directory must have a parent directory.");
+            Directory.CreateDirectory(parent);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw BuildContractInvalid($"build context parent directory could not be created safely ({exception.GetType().Name}).");
         }
 
-        Directory.CreateDirectory(parent);
         var temporary = Path.Join(parent, $".{Path.GetFileName(destination)}.{Guid.NewGuid():N}.tmp");
         try
         {
@@ -160,7 +173,10 @@ public sealed class AppSurfaceKeycloakThemeBuildContract
         FROM {Registration.BaseImage}
         COPY --chown=keycloak:keycloak themes/{Registration.Name}/ /opt/keycloak/themes/{Registration.Name}/
         LABEL org.appsurface.keycloak.theme.name="{Registration.Name}"
+        LABEL org.appsurface.keycloak.theme.source-manifest-digest="{Manifest.Digest}"
         LABEL org.appsurface.keycloak.theme.manifest-digest="{PackagedManifest.Digest}"
+        LABEL org.appsurface.keycloak.theme.build-contract-digest="{Digest}"
+        LABEL org.appsurface.keycloak.theme.base-image="{Registration.BaseImage}"
         LABEL org.appsurface.keycloak.theme.platform="{Registration.Platform}"
         {CreateTemplateBaselineLabel()}
         """;
@@ -179,9 +195,31 @@ public sealed class AppSurfaceKeycloakThemeBuildContract
         catch (AppSurfaceKeycloakException exception)
             when (exception.Code == AppSurfaceKeycloakDiagnosticCodes.ThemeSourceInvalid)
         {
-            throw BuildContractInvalid($"source file '{file.RelativePath}' changed after this build contract was created.");
+            throw SourceChanged($"source file '{file.RelativePath}' changed after this build contract was created.");
         }
     }
+
+    private static string CreateDigest(
+        AppSurfaceKeycloakThemeRegistration registration,
+        AppSurfaceKeycloakThemeManifest manifest,
+        AppSurfaceKeycloakThemeManifest packagedManifest)
+    {
+        var canonical = string.Join(
+            "\n",
+            "appsurface-keycloak-theme-build-contract-v1",
+            registration.Name,
+            registration.BaseImage,
+            registration.Platform,
+            manifest.Digest,
+            packagedManifest.Digest,
+            registration.TemplateBaselineDigest ?? string.Empty);
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+    }
+
+    private static AppSurfaceKeycloakException SourceChanged(string detail) =>
+        new(
+            AppSurfaceKeycloakDiagnosticCodes.ThemeSourceChanged,
+            $"Problem: AppSurface Keycloak login-theme source changed after validation. Cause: {detail} Fix: regenerate the manifest and build contract from the current source before packaging. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md#build-contract. Code: {AppSurfaceKeycloakDiagnosticCodes.ThemeSourceChanged}.");
 
     private static AppSurfaceKeycloakException BuildContractInvalid(string detail) =>
         new(

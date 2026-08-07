@@ -23,6 +23,7 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 - for stable releases, confirm `releases/vx.y.z.evidence.json` records `docsArchive.exactTreePath`, `docsArchive.releaseManifestSha256`, and matching `docsArchive.catalogEntry` fields from the staged docs catalog
 - confirm the generated current pointer targets the tagged note and the [package registry](../packages/README.md) keeps every `classification: public` plus `publish_decision: publish` package on `release_track: coordinated`; release prep must not rewrite those package rows
 - review the generated [package readiness evidence](../packages/readiness.md) and resolve or explicitly track package-index blockers before asking maintainers to approve package artifacts; this package-index evidence is separate from the per-version release evidence bundle
+- when a release includes a Keycloak login theme, retain the matching `keycloak-theme-evidence` CI artifact and compatible tuple before selecting a realm theme; see the [theme upgrade and rollback procedure](../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/docs/theme-upgrade.md)
 - check that the tagged note gives adopters direct paths to related guides, examples, package docs, and command references instead of only naming the capability
 - when a tagged or release-candidate note supersedes a preview page, remove the preview source file and carry its browser routes as `redirect_aliases` on the new canonical note
 - keep the trust bar accurate for the release state and archive location

@@ -98,9 +98,59 @@ var buildContext = buildContract.Write("artifacts/keycloak-theme");
 buildContract.VerifyPackagedTheme(Path.Join(buildContext, "themes", "application"));
 ```
 
-The fresh output directory contains a source snapshot under `themes/<name>` without development-only assets, a `Containerfile`, and an `appsurface-keycloak-theme-manifest.json` evidence file containing both source and packaged manifests. The Containerfile uses the immutable image reference and labels the theme name, platform, and packaged-manifest digest. `VerifyPackagedTheme` fails if content is missing, added, or changed. The package does not build or push the image, mutate a production realm, deploy infrastructure, or automate rollout/rollback; those remain application and operations responsibilities.
+The fresh output directory contains a source snapshot under `themes/<name>` without development-only assets, a `Containerfile`, and an `appsurface-keycloak-theme-manifest.json` evidence file containing both source and packaged manifests. `Digest` binds the registration, both manifests, platform, base image, and template baseline. The Containerfile labels the theme name, source and packaged manifests, build-contract digest, base image, and platform. `VerifyPackagedTheme` fails if content is missing, added, or changed. The package does not build or push the image, mutate a production realm, deploy infrastructure, or automate rollout/rollback; those remain application and operations responsibilities.
 
 For a mutable source, recreate the build contract immediately before packaging. A source change after registration makes build-context materialization fail before it copies an unproven file into the image context.
+
+## Release Evidence
+
+After an application-owned CI build produces its digest-pinned theme image, bind it to the validated source and
+packaged manifests before any realm selection:
+
+    var releaseEvidence = AppSurfaceKeycloakThemeReleaseEvidence.Create(
+        buildContract,
+        "registry.example/appsurface-keycloak-theme:1.0@sha256:<64-lowercase-hex-digest>");
+    releaseEvidence.Write("artifacts/keycloak-theme-evidence.json");
+
+The atomically written tuple records the theme name, source and packaged-manifest digests, build-contract digest,
+pinned Keycloak base image, final image, platform, and optional template-baseline digest. It excludes realm JSON,
+credentials, property values, source-machine paths, and image layers. Applications should publish the tuple with
+their CI artifact, then select the matching realm theme only after the image is available. Call `Verify(...)` before
+reusing a tuple to reject a changed image or build contract.
+
+## Theme Verification
+
+There are two distinct proofs. The local AppHost proof mounts mutable source read-only and disables only development
+theme caches; it is for fast iteration and never release evidence. The immutable proof builds a fresh context,
+checks the image labels and exact theme subtree, starts a disposable Linux/amd64 Keycloak realm, reads back
+`loginTheme`, renders an authorization challenge, and hash-checks a declared same-origin resource. The package owns
+the deterministic inputs and evidence format. Application CI owns Docker, image publication, and the disposable
+runtime invocation.
+
+An assets-only theme inherits Keycloak's templates and form semantics. A copied FreeMarker template remains subject
+to the reviewed baseline policy, and a Keycloak-image change always requires the [upgrade procedure](docs/theme-upgrade.md).
+
+## CI Evidence
+
+The repository's required `keycloak-theme-evidence` job proves the checked-in sample against
+`quay.io/keycloak/keycloak:26.6@sha256:22c8cf9e79af88d320499c93994bb2c319ca255092d8ae7c7a45dd46d68192e2` on
+Linux/amd64. It uploads a `keycloak-theme-evidence` artifact with `pass`, `fail`, or `not-run` status, safe manifest
+and build-contract digests, a candidate OCI manifest digest, and no credentials, realm import, source path, or image
+layer. `not-run` and `fail` are release-gate failures. A consuming release must replace the candidate image digest
+with its pushed immutable registry reference before calling `AppSurfaceKeycloakThemeReleaseEvidence.Create`.
+
+This job is deliberately not production automation. It neither pushes the image nor mutates a production realm.
+Use the compatible tuple and order in the [upgrade and rollback procedure](docs/theme-upgrade.md) for those
+application-owned operations.
+
+## Upgrade and Rollback
+
+Treat the theme name, source manifest, packaged manifest, build-contract digest, final image digest, pinned
+Keycloak base image, platform, and template baseline as one compatible tuple. Publish and health-check the new image
+before selecting its theme. To roll back, restore the earlier verified image first, select the theme from its matching
+tuple, read back the selection and declared resource, record rollback evidence, then retain the former image until
+the rollback window closes. See the ordered [upgrade and rollback procedure](docs/theme-upgrade.md) for the full
+checklist and template-baseline requirements.
 
 ## Defaults
 
@@ -132,7 +182,7 @@ paired web proof remains HTTP on its fixed loopback port.
 
 Admin credentials, seeded user passwords, raw realm JSON, tokens, client secrets, provider response bodies, and raw claims are never projected into runtime app configuration.
 
-## Persistent Data Pitfall
+## Persistent-data Recovery
 
 Disposable data is the default because Keycloak startup realm import is deterministic on repeat runs. `UsePersistentDataVolume = true` keeps Keycloak data outside the container lifecycle; it also preserves admin credentials and imported realm state. If you change users, redirect URIs, or admin credentials while persistent data is enabled, delete the volume before expecting startup import to recreate the realm.
 
@@ -153,9 +203,23 @@ Diagnostics use `ASKEYC001+` codes and follow Problem/Cause/Fix/Docs wording. Co
 | `ASKEYC012` | Theme source entries collide after slash or case normalization. | Rename one of the colliding files so the theme is portable across supported hosts. |
 | `ASKEYC013` | A required theme property name or resource is absent. | Correct the declaration or source without adding sensitive values to evidence. |
 | `ASKEYC014` | A copied FreeMarker template has no reviewed upstream baseline. | Record the matching baseline for the pinned Keycloak image before packaging. |
+| `ASKEYC015` | The pinned Keycloak archive layout is unsupported. | Stop and review the exact image layout before template compatibility work. |
+| `ASKEYC016` | The live source changed after its manifest was generated. | Regenerate the manifest and build contract before packaging. |
 | `ASKEYC017` | Build context or packaged content differs from the validated manifest. | Create a fresh build context and rebuild from the same source/image evidence tuple. |
+| `ASKEYC018` | Image identity, labels, or packaged theme content differs from evidence. | Rebuild the matching image from the validated build contract. |
+| `ASKEYC019` | The Linux/amd64 runtime proof was unavailable or timed out. | Run the named CI job; `not-run` is not release success. |
+| `ASKEYC020` | Disposable-realm readback did not select the expected login theme. | Reset only disposable proof data and rerun the matching tuple. |
+| `ASKEYC021` | A required login resource was missing, cross-origin, redirected, oversized, or hash-mismatched. | Repair the declared same-origin resource and rebuild the image. |
 
 If the Aspire CLI is missing, install it before running the AppHost. If local development certificates block startup, run `aspire certs trust` or `dotnet dev-certs https --trust` from an interactive shell.
+
+## Escape Hatches
+
+Use the underlying Aspire resource for ordinary local customization, a consumer-owned Containerfile for an
+application-owned image pipeline, or an assets-only theme for the smallest supported themed path. Non-amd64 and
+alternative runtimes may run deterministic source tests, but they cannot replace the named Linux/amd64 release proof.
+Production Keycloak, image publication, realm mutation, rollout, and rollback remain operator-owned and unsupported
+by this package.
 
 ## Release Guidance
 

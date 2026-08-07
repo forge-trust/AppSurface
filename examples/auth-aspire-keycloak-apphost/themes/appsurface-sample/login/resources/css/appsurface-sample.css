@@ -1,5 +1,6 @@
 body.login-pf {
   background: #f7f9fc;
+  color: #13233a;
 }
 
 #kc-header-wrapper {
@@ -9,4 +10,28 @@ body.login-pf {
 
 .pf-v5-c-login__main {
   border-top: 4px solid #3567a8;
+  max-width: 36rem;
+}
+
+.pf-v5-c-form-control:focus-visible,
+.pf-v5-c-button:focus-visible,
+a:focus-visible {
+  outline: 3px solid #1d5fa7;
+  outline-offset: 3px;
+}
+
+@media (max-width: 40rem) {
+  .pf-v5-c-login__main {
+    border-top-width: 3px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }

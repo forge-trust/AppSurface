@@ -131,6 +131,32 @@ public sealed class AppSurfaceKeycloakThemeOptions
             new AppSurfaceKeycloakThemeRegistration(Name, BaseImage.Value, Platform, manifest.Digest, templateBaselineDigest));
     }
 
+    internal AppSurfaceKeycloakThemeOptions CreateSnapshot()
+    {
+        var snapshot = new AppSurfaceKeycloakThemeOptions(Name, SourceDirectory, BaseImage)
+        {
+            Platform = Platform,
+            TemplateBaselineDirectory = TemplateBaselineDirectory,
+        };
+
+        foreach (var requiredProperty in RequiredThemeProperties)
+        {
+            snapshot.RequiredThemeProperties.Add(requiredProperty);
+        }
+
+        foreach (var requiredResourcePath in RequiredResourcePaths)
+        {
+            snapshot.RequiredResourcePaths.Add(requiredResourcePath);
+        }
+
+        foreach (var developmentOnlyResourcePath in DevelopmentOnlyResourcePaths)
+        {
+            snapshot.DevelopmentOnlyResourcePaths.Add(developmentOnlyResourcePath);
+        }
+
+        return snapshot;
+    }
+
     private string? ValidateTemplateBaseline(AppSurfaceKeycloakThemeManifest manifest, string sourceBaseDirectory)
     {
         var templatePaths = manifest.Files

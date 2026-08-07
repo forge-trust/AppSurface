@@ -365,6 +365,8 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
         var containerfile = File.ReadAllText(Path.Join(destination, "Containerfile"));
         Assert.Contains(contract.Registration.BaseImage, containerfile, StringComparison.Ordinal);
         Assert.Contains(contract.Manifest.Digest, containerfile, StringComparison.Ordinal);
+        Assert.Contains(contract.Digest, containerfile, StringComparison.Ordinal);
+        Assert.Matches("^[a-f0-9]{64}$", contract.Digest);
         Assert.Contains(
             $"LABEL org.appsurface.keycloak.theme.name=\"{contract.Registration.Name}\"",
             containerfile,
@@ -391,7 +393,7 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
     }
 
     [Fact]
-    public void BuildContract_Write_WhenSourceContentChangesAfterRegistration_ThrowsBuildDiagnostic()
+    public void BuildContract_Write_WhenSourceContentChangesAfterRegistration_ThrowsSourceChangedDiagnostic()
     {
         using var directory = new TempDirectory();
         var source = CreateTheme(directory.Path, "application");
@@ -402,12 +404,38 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
 
         var exception = Assert.Throws<AppSurfaceKeycloakException>(() => contract.Write(Path.Join(directory.Path, "build-context")));
 
-        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeBuildContractInvalid, exception.Code);
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeSourceChanged, exception.Code);
         Assert.Contains("changed after", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void BuildContract_Write_WhenSourceFileIsReplacedWithSymbolicLink_ThrowsBuildDiagnostic()
+    public void Manifest_ReadVerifiedFile_WhenExpectedLengthIsInvalid_ThrowsSourceDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var source = CreateTheme(directory.Path, "application");
+        var invalidEntry = new AppSurfaceKeycloakThemeManifestEntry("login/theme.properties", -1, new string('a', 64));
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => AppSurfaceKeycloakThemeManifest.ReadVerifiedFile(source, invalidEntry));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeSourceInvalid, exception.Code);
+    }
+
+    [Fact]
+    public void Manifest_ReadVerifiedFile_WhenSourceIsShorterThanExpected_ThrowsSourceDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var source = CreateTheme(directory.Path, "application");
+        var manifest = CreateOptions(source).CreateRegistration(directory.Path).Manifest;
+        var entry = manifest.Files.Single(file => file.RelativePath == "login/theme.properties");
+        var oversizedEntry = entry with { Length = entry.Length + 1 };
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => AppSurfaceKeycloakThemeManifest.ReadVerifiedFile(source, oversizedEntry));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeSourceInvalid, exception.Code);
+    }
+
+    [Fact]
+    public void BuildContract_Write_WhenSourceFileIsReplacedWithSymbolicLink_ThrowsSourceChangedDiagnostic()
     {
         using var directory = new TempDirectory();
         var source = CreateTheme(directory.Path, "application");
@@ -424,7 +452,7 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
 
         var exception = Assert.Throws<AppSurfaceKeycloakException>(() => contract.Write(Path.Join(directory.Path, "build-context")));
 
-        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeBuildContractInvalid, exception.Code);
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeSourceChanged, exception.Code);
         Assert.Contains("changed after", exception.Message, StringComparison.Ordinal);
     }
 
@@ -442,6 +470,84 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
         var exception = Assert.Throws<AppSurfaceKeycloakException>(() => contract.VerifyPackagedTheme(Path.Join(destination, "themes", "application")));
 
         Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeBuildContractInvalid, exception.Code);
+    }
+
+    [Fact]
+    public void ThemeReleaseEvidence_Write_ProducesSecretSafeImmutableTuple()
+    {
+        using var directory = new TempDirectory();
+        var contract = AppSurfaceKeycloakThemeBuildContract.Create(CreateOptions(CreateTheme(directory.Path, "application")));
+
+        var evidence = AppSurfaceKeycloakThemeReleaseEvidence.Create(
+            contract,
+            $"registry.example/appsurface-keycloak-theme:1.0@sha256:{new string('b', 64)}");
+        var output = evidence.Write(Path.Join(directory.Path, "evidence", "keycloak-theme-evidence.json"));
+
+        Assert.Equal(Path.GetFullPath(output), output);
+        var json = File.ReadAllText(output);
+        Assert.Contains(contract.Manifest.Digest, json, StringComparison.Ordinal);
+        Assert.Contains(contract.PackagedManifest.Digest, json, StringComparison.Ordinal);
+        Assert.Contains(contract.Digest, json, StringComparison.Ordinal);
+        Assert.Contains(contract.Registration.BaseImage, json, StringComparison.Ordinal);
+        Assert.DoesNotContain(directory.Path, json, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(json);
+        Assert.Equal("appsurface-keycloak-theme-release-evidence-v1", document.RootElement.GetProperty("schema").GetString());
+        Assert.Equal(
+            [
+                "schema",
+                "themeName",
+                "sourceManifestDigest",
+                "packagedManifestDigest",
+                "buildContractDigest",
+                "keycloakBaseImage",
+                "finalImage",
+                "platform",
+                "templateBaselineDigest",
+            ],
+            document.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.DoesNotContain("sourceDirectory", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("password", json, StringComparison.OrdinalIgnoreCase);
+
+        evidence.Verify(
+            contract,
+            $"registry.example/appsurface-keycloak-theme:1.0@sha256:{new string('b', 64)}");
+
+        var blankOutput = Assert.Throws<AppSurfaceKeycloakException>(() => evidence.Write(" "));
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeBuildContractInvalid, blankOutput.Code);
+        var existingFile = Assert.Throws<AppSurfaceKeycloakException>(() => evidence.Write(output));
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeBuildContractInvalid, existingFile.Code);
+        var occupiedParent = Path.Join(directory.Path, "occupied-evidence-parent");
+        File.WriteAllText(occupiedParent, "occupied");
+        var unavailableParent = Assert.Throws<AppSurfaceKeycloakException>(() => evidence.Write(Path.Join(occupiedParent, "evidence.json")));
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeBuildContractInvalid, unavailableParent.Code);
+        var mismatchedImage = Assert.Throws<AppSurfaceKeycloakException>(() => evidence.Verify(
+            contract,
+            $"registry.example/appsurface-keycloak-theme:1.1@sha256:{new string('c', 64)}"));
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemePackagedImageInvalid, mismatchedImage.Code);
+    }
+
+    [Fact]
+    public void ThemeReleaseEvidence_Write_WhenDestinationAppearsDuringAtomicMove_ThrowsBuildDiagnosticAndCleansTemporaryFile()
+    {
+        using var directory = new TempDirectory();
+        var contract = AppSurfaceKeycloakThemeBuildContract.Create(CreateOptions(CreateTheme(directory.Path, "application")));
+        var evidence = AppSurfaceKeycloakThemeReleaseEvidence.Create(
+            contract,
+            $"registry.example/appsurface-keycloak-theme:1.0@sha256:{new string('b', 64)}");
+
+        var output = Path.Join(directory.Path, "race.json");
+        AppSurfaceKeycloakThemeReleaseEvidence.BeforeMoveForTesting = path => _ = Directory.CreateDirectory(path);
+        try
+        {
+            var exception = Assert.Throws<AppSurfaceKeycloakException>(() => evidence.Write(output));
+
+            Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeBuildContractInvalid, exception.Code);
+            Assert.Empty(Directory.EnumerateFiles(directory.Path, ".race.json.*.tmp"));
+        }
+        finally
+        {
+            AppSurfaceKeycloakThemeReleaseEvidence.BeforeMoveForTesting = null;
+        }
     }
 
     [Fact]
@@ -470,16 +576,19 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
         var contract = AppSurfaceKeycloakThemeBuildContract.Create(CreateOptions(CreateTheme(directory.Path, "application")));
         var existingDirectory = Path.Join(directory.Path, "existing-directory");
         var existingFile = Path.Join(directory.Path, "existing-file");
+        var occupiedParent = Path.Join(directory.Path, "occupied-parent");
         Directory.CreateDirectory(existingDirectory);
         File.WriteAllText(existingFile, "occupied");
+        File.WriteAllText(occupiedParent, "occupied");
 
         var blankOutput = Assert.Throws<AppSurfaceKeycloakException>(() => contract.Write(" "));
         var directoryOutput = Assert.Throws<AppSurfaceKeycloakException>(() => contract.Write(existingDirectory));
         var fileOutput = Assert.Throws<AppSurfaceKeycloakException>(() => contract.Write(existingFile));
+        var unavailableParent = Assert.Throws<AppSurfaceKeycloakException>(() => contract.Write(Path.Join(occupiedParent, "context")));
         var blankPackagedTheme = Assert.Throws<AppSurfaceKeycloakException>(() => contract.VerifyPackagedTheme(" "));
 
         Assert.All(
-            [blankOutput, directoryOutput, fileOutput, blankPackagedTheme],
+            [blankOutput, directoryOutput, fileOutput, unavailableParent, blankPackagedTheme],
             exception => Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeBuildContractInvalid, exception.Code));
     }
 

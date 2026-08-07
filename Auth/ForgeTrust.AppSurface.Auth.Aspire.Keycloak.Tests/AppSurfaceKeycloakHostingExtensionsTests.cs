@@ -43,6 +43,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         Directory.CreateDirectory(Path.Join(source, "login", "resources"));
         File.WriteAllText(Path.Join(source, "login", "theme.properties"), "parent=keycloak\n");
         File.WriteAllText(Path.Join(source, "login", "resources", "site.css"), "body { color: black; }");
+        File.WriteAllText(Path.Join(source, "login", "resources", "dev-only.css"), "body { outline-color: black; }");
         var builder = DistributedApplication.CreateBuilder([]);
         var keycloakPort = GetAvailablePort();
         var webProofPort = GetAvailablePort();
@@ -53,7 +54,15 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
             options.KeycloakPort = keycloakPort;
             options.WebProofPort = webProofPort;
             options.RealmImportDirectory = Path.Join(directory.Path, "realms");
-            options.LoginTheme = AppSurfaceKeycloakThemeOptions.Login("application", source, image);
+            options.RedirectUris.Clear();
+            options.RedirectUris.Add(new Uri($"http://localhost:{webProofPort}/signin-appsurface-oidc", UriKind.Absolute));
+            options.PostLogoutRedirectUris.Clear();
+            options.PostLogoutRedirectUris.Add(new Uri($"http://localhost:{webProofPort}/signout-callback-appsurface-oidc", UriKind.Absolute));
+            var loginTheme = AppSurfaceKeycloakThemeOptions.Login("application", source, image);
+            loginTheme.RequiredThemeProperties.Add("parent");
+            loginTheme.RequiredResourcePaths.Add("login/resources/site.css");
+            loginTheme.DevelopmentOnlyResourcePaths.Add("login/resources/dev-only.css");
+            options.LoginTheme = loginTheme;
         });
 
         Assert.NotNull(resource.Theme);
@@ -84,6 +93,41 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
 
         var realmJson = File.ReadAllText(resource.RealmImportFile);
         Assert.Contains("\"loginTheme\": \"application\"", realmJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AddAppSurfaceKeycloak_CapturesAValidatedSnapshotBeforeTheConfigureCallbackCanBeMutated()
+    {
+        using var directory = new TempDirectory();
+        var source = Path.Join(directory.Path, "application");
+        Directory.CreateDirectory(Path.Join(source, "login", "resources"));
+        File.WriteAllText(Path.Join(source, "login", "theme.properties"), "parent=keycloak\n");
+        File.WriteAllText(Path.Join(source, "login", "resources", "site.css"), "body { color: black; }");
+        var builder = DistributedApplication.CreateBuilder([]);
+        var keycloakPort = GetAvailablePort();
+        var webProofPort = GetAvailablePort();
+        var image = AppSurfaceKeycloakImageReference.Parse($"quay.io/keycloak/keycloak:26.6@sha256:{new string('b', 64)}");
+        AppSurfaceKeycloakOptions? configured = null;
+
+        var resource = builder.AddAppSurfaceKeycloak("keycloak-snapshot", options =>
+        {
+            configured = options;
+            options.KeycloakPort = keycloakPort;
+            options.WebProofPort = webProofPort;
+            options.RealmImportDirectory = Path.Join(directory.Path, "realms");
+            options.LoginTheme = AppSurfaceKeycloakThemeOptions.Login("application", source, image);
+        });
+
+        configured!.Realm = "mutated-realm";
+        configured.LoginTheme!.Name = "mutated-theme";
+        configured.SeededUsers[0].Claims["appsurface_role"] = "mutated";
+
+        Assert.Equal($"https://localhost:{keycloakPort}/realms/appsurface-dev", resource.Configuration.Authority);
+        Assert.Equal("application", resource.Theme!.Name);
+        var realmJson = File.ReadAllText(resource.RealmImportFile);
+        Assert.Contains("\"realm\": \"appsurface-dev\"", realmJson, StringComparison.Ordinal);
+        Assert.Contains("\"loginTheme\": \"application\"", realmJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("mutated", realmJson, StringComparison.Ordinal);
     }
 
     [Fact]

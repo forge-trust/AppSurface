@@ -27,15 +27,15 @@ public static class AppSurfaceKeycloakHostingExtensions
             RealmImportDirectory = AppSurfaceKeycloakRealmImportPaths.ResolveImportDirectory(AppContext.BaseDirectory, name),
         };
         configure?.Invoke(options);
-        options.Validate();
-        var themeRegistration = options.CreateThemeRegistration(AppContext.BaseDirectory);
+        var snapshot = options.CreateValidatedSnapshot();
+        var themeRegistration = snapshot.CreateThemeRegistration(AppContext.BaseDirectory);
 
-        AppSurfaceKeycloakPortPreflight.ThrowIfOccupied(options.KeycloakPort, nameof(options.KeycloakPort));
-        AppSurfaceKeycloakPortPreflight.ThrowIfOccupied(options.WebProofPort, nameof(options.WebProofPort));
+        AppSurfaceKeycloakPortPreflight.ThrowIfOccupied(snapshot.KeycloakPort, nameof(snapshot.KeycloakPort));
+        AppSurfaceKeycloakPortPreflight.ThrowIfOccupied(snapshot.WebProofPort, nameof(snapshot.WebProofPort));
 
-        var realmFile = AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options);
-        var keycloak = builder.AddKeycloak(name, options.KeycloakPort)
-            .WithRealmImport(options.RealmImportDirectory);
+        var realmFile = AppSurfaceKeycloakRealmGenerator.WriteRealmImport(snapshot);
+        var keycloak = builder.AddKeycloak(name, snapshot.KeycloakPort)
+            .WithRealmImport(snapshot.RealmImportDirectory);
         if (themeRegistration is not null)
         {
             keycloak = keycloak
@@ -46,16 +46,16 @@ public static class AppSurfaceKeycloakHostingExtensions
                 .WithEnvironment("KC_SPI_THEME_CACHE_THEMES", "false")
                 .WithEnvironment("KC_SPI_THEME_CACHE_TEMPLATES", "false");
         }
-        if (options.UsePersistentDataVolume)
+        if (snapshot.UsePersistentDataVolume)
         {
             keycloak = keycloak.WithDataVolume();
         }
 
-        var projection = options.CreateConfigurationProjection();
+        var projection = snapshot.CreateConfigurationProjection();
         return new AppSurfaceKeycloakResource(
             keycloak,
             projection,
-            new AppSurfaceKeycloakReadinessProbe(options),
+            new AppSurfaceKeycloakReadinessProbe(snapshot),
             realmFile,
             themeRegistration?.Registration);
     }

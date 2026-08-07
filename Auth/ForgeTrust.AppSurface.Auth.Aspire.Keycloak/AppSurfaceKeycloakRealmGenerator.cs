@@ -13,6 +13,14 @@ public static class AppSurfaceKeycloakRealmGenerator
         WriteIndented = true,
     };
 
+    private static readonly AsyncLocal<Action<string>?> BeforeMoveForTestingSlot = new();
+
+    internal static Action<string>? BeforeMoveForTesting
+    {
+        get => BeforeMoveForTestingSlot.Value;
+        set => BeforeMoveForTestingSlot.Value = value;
+    }
+
     /// <summary>
     /// Generates deterministic realm import JSON from validated options.
     /// </summary>
@@ -48,13 +56,18 @@ public static class AppSurfaceKeycloakRealmGenerator
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
 
-        Directory.CreateDirectory(options.RealmImportDirectory);
         var path = AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath(options.RealmImportDirectory, options.Realm);
         var temporaryPath = Path.Join(options.RealmImportDirectory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
         try
         {
+            Directory.CreateDirectory(options.RealmImportDirectory);
             File.WriteAllText(temporaryPath, Generate(options));
+            BeforeMoveForTesting?.Invoke(path);
             File.Move(temporaryPath, path, overwrite: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw RealmEvidenceInvalid($"the realm import could not be materialized safely ({exception.GetType().Name}).");
         }
         finally
         {
@@ -90,6 +103,11 @@ public static class AppSurfaceKeycloakRealmGenerator
             },
             ["protocolMappers"] = new JsonArray(CreateRoleMapper()),
         };
+
+    private static AppSurfaceKeycloakException RealmEvidenceInvalid(string detail) =>
+        new(
+            AppSurfaceKeycloakDiagnosticCodes.RealmEvidenceInvalid,
+            $"Problem: AppSurface Keycloak realm import evidence is invalid. Cause: {detail} Fix: use an application-owned writable local import directory and regenerate disposable proof data. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md#persistent-data-recovery. Code: {AppSurfaceKeycloakDiagnosticCodes.RealmEvidenceInvalid}.");
 
     private static JsonObject CreateRoleMapper() =>
         new()

@@ -151,6 +151,44 @@ public sealed class AppSurfaceKeycloakOptions
     internal AppSurfaceKeycloakThemeRegistrationState? CreateThemeRegistration(string sourceBaseDirectory) =>
         LoginTheme?.CreateRegistration(sourceBaseDirectory);
 
+    internal AppSurfaceKeycloakOptions CreateValidatedSnapshot()
+    {
+        var snapshot = new AppSurfaceKeycloakOptions
+        {
+            Realm = Realm,
+            ClientId = ClientId,
+            ClientDisplayName = ClientDisplayName,
+            CallbackPath = CallbackPath,
+            SignedOutCallbackPath = SignedOutCallbackPath,
+            KeycloakPort = KeycloakPort,
+            WebProofPort = WebProofPort,
+            UsePersistentDataVolume = UsePersistentDataVolume,
+            RealmImportDirectory = RealmImportDirectory,
+            LoginTheme = LoginTheme?.CreateSnapshot(),
+        };
+
+        snapshot.RedirectUris.Clear();
+        foreach (var redirectUri in RedirectUris)
+        {
+            snapshot.RedirectUris.Add(redirectUri);
+        }
+
+        snapshot.PostLogoutRedirectUris.Clear();
+        foreach (var postLogoutRedirectUri in PostLogoutRedirectUris)
+        {
+            snapshot.PostLogoutRedirectUris.Add(postLogoutRedirectUri);
+        }
+
+        snapshot.SeededUsers.Clear();
+        foreach (var user in SeededUsers)
+        {
+            snapshot.SeededUsers.Add(CreateUserSnapshot(user));
+        }
+
+        snapshot.Validate();
+        return snapshot;
+    }
+
     private void EnsureDefaultUris()
     {
         if (RedirectUris.Count == 0)
@@ -239,6 +277,18 @@ public sealed class AppSurfaceKeycloakOptions
         var user = new AppSurfaceKeycloakUserOptions(username, password, subject, displayName);
         user.Claims["appsurface_role"] = role;
         return user;
+    }
+
+    private static AppSurfaceKeycloakUserOptions CreateUserSnapshot(AppSurfaceKeycloakUserOptions user)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        var snapshot = new AppSurfaceKeycloakUserOptions(user.Username, user.Password, user.Subject, user.DisplayName);
+        foreach (var claim in user.Claims)
+        {
+            snapshot.Claims.Add(claim.Key, claim.Value);
+        }
+
+        return snapshot;
     }
 
     private static AppSurfaceKeycloakException Invalid(string optionName, string detail) =>
