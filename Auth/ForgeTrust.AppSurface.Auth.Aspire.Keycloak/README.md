@@ -113,13 +113,16 @@ The paired web app receives only:
 
 ```json
 {
-  "Authentication:Oidc:Authority": "http://localhost:8080/realms/appsurface-dev",
+  "Authentication:Oidc:Authority": "https://localhost:8080/realms/appsurface-dev",
   "Authentication:Oidc:ClientId": "appsurface-web",
   "Authentication:Oidc:CallbackPath": "/signin-appsurface-oidc",
   "Authentication:Oidc:SignedOutCallbackPath": "/signout-callback-appsurface-oidc",
   "Authentication:Oidc:RequireClientSecret": "false"
 }
 ```
+
+The local Keycloak authority is HTTPS because Aspire publishes its browser-facing Keycloak endpoint over TLS, while the
+paired web proof remains HTTP on its fixed loopback port.
 
 Admin credentials, seeded user passwords, raw realm JSON, tokens, client secrets, provider response bodies, and raw claims are never projected into runtime app configuration.
 

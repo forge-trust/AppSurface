@@ -17,7 +17,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         var (resource, keycloakPort) = AddWithAvailablePorts(builder, directory.Path, usePersistentDataVolume: true);
 
         Assert.Equal("appsurface-web", resource.Configuration.ClientId);
-        Assert.Equal($"http://localhost:{keycloakPort}/realms/appsurface-dev", resource.Configuration.Authority);
+        Assert.Equal($"https://localhost:{keycloakPort}/realms/appsurface-dev", resource.Configuration.Authority);
         Assert.Equal(Path.Join(directory.Path, "appsurface-dev-realm.json"), resource.RealmImportFile);
         Assert.True(File.Exists(resource.RealmImportFile));
         Assert.NotNull(resource.Resource);
@@ -72,7 +72,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     public void Projection_WhenClientSecretRequired_UsesBooleanStringAndRejectsNullProject()
     {
         var projection = new AppSurfaceKeycloakConfigurationProjection(
-            "http://localhost:8080/realms/appsurface-dev",
+            "https://localhost:8080/realms/appsurface-dev",
             "appsurface-web",
             "/signin-appsurface-oidc",
             "/signout-callback-appsurface-oidc",

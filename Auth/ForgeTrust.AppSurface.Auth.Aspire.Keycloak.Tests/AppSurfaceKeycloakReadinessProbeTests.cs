@@ -17,7 +17,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
 
         var result = await probe.CheckOnceAsync();
 
-        Assert.Equal("http://localhost:8080/realms/appsurface-dev", result.Authority);
+        Assert.Equal("https://localhost:8080/realms/appsurface-dev", result.Authority);
         Assert.Equal("appsurface-web", result.ClientId);
     }
 
@@ -72,7 +72,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         using var client = new HttpClient(new StubHandler(request =>
         {
             AssertMetadataRequest(request);
-            return Json("""{"issuer":"http://localhost:8080/realms/other"}""");
+            return Json("""{"issuer":"https://localhost:8080/realms/other"}""");
         }));
         var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
 
@@ -186,7 +186,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         {
             if (request.RequestUri?.AbsolutePath.EndsWith("/.well-known/openid-configuration", StringComparison.Ordinal) == true)
             {
-                return Json("""{"issuer":"http://localhost:8080/realms/appsurface-dev"}""");
+                return Json("""{"issuer":"https://localhost:8080/realms/appsurface-dev"}""");
             }
 
             AssertAuthorizationRequest(request);
@@ -214,7 +214,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         {
             if (request.RequestUri?.AbsolutePath.EndsWith("/.well-known/openid-configuration", StringComparison.Ordinal) == true)
             {
-                return Json("""{"issuer":"http://localhost:8080/realms/appsurface-dev"}""");
+                return Json("""{"issuer":"https://localhost:8080/realms/appsurface-dev"}""");
             }
 
             AssertAuthorizationRequest(request);
@@ -241,7 +241,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         {
             if (request.RequestUri?.AbsolutePath.EndsWith("/.well-known/openid-configuration", StringComparison.Ordinal) == true)
             {
-                return Json("""{"issuer":"http://localhost:8080/realms/appsurface-dev"}""");
+                return Json("""{"issuer":"https://localhost:8080/realms/appsurface-dev"}""");
             }
 
             AssertAuthorizationRequest(request);
@@ -269,7 +269,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         {
             if (request.RequestUri?.AbsolutePath.EndsWith("/.well-known/openid-configuration", StringComparison.Ordinal) == true)
             {
-                return Json("""{"issuer":"http://localhost:8080/realms/appsurface-dev"}""");
+                return Json("""{"issuer":"https://localhost:8080/realms/appsurface-dev"}""");
             }
 
             AssertAuthorizationRequest(request);
@@ -297,7 +297,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         {
             if (request.RequestUri?.AbsolutePath.EndsWith("/.well-known/openid-configuration", StringComparison.Ordinal) == true)
             {
-                return Json("""{"issuer":"http://localhost:8080/realms/appsurface-dev"}""");
+                return Json("""{"issuer":"https://localhost:8080/realms/appsurface-dev"}""");
             }
 
             return new HttpResponseMessage(HttpStatusCode.OK);
@@ -409,7 +409,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         {
             if (request.RequestUri?.AbsolutePath.EndsWith("/.well-known/openid-configuration", StringComparison.Ordinal) == true)
             {
-                return Json("""{"issuer":"http://localhost:8080/realms/appsurface-dev"}""");
+                return Json("""{"issuer":"https://localhost:8080/realms/appsurface-dev"}""");
             }
 
             return new HttpResponseMessage(HttpStatusCode.OK);
@@ -498,7 +498,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
     {
         if (request.RequestUri?.AbsolutePath.EndsWith("/.well-known/openid-configuration", StringComparison.Ordinal) == true)
         {
-            return Json("""{"issuer":"http://localhost:8080/realms/appsurface-dev"}""");
+            return Json("""{"issuer":"https://localhost:8080/realms/appsurface-dev"}""");
         }
 
         AssertAuthorizationRequest(request);

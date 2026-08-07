@@ -69,7 +69,7 @@ public static class AppSurfaceKeycloakDefaults
     /// </summary>
     /// <param name="realm">The Keycloak realm name.</param>
     /// <param name="port">The local Keycloak host port.</param>
-    /// <returns>The local HTTP authority URL.</returns>
+    /// <returns>The local HTTPS authority URL.</returns>
     public static string Authority(string realm = Realm, int port = KeycloakPort) =>
-        $"http://localhost:{port}/realms/{realm}";
+        $"https://localhost:{port}/realms/{realm}";
 }
