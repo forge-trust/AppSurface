@@ -72,6 +72,12 @@ This is the living release note for the next coordinated AppSurface version afte
   canaries by exact name or durable tag, receive ordinal partial outcomes under explicit concurrency and deadline caps,
   and parse a privacy-safe envelope with fixed telemetry. The feature does not add triggers, retries, polling, readiness
   effects, or authorization-policy ownership; hosts retain those decisions.
+- [`ForgeTrust.AppSurface.Config.LocalSecrets`](../Config/ForgeTrust.AppSurface.Config.LocalSecrets/README.md) now
+  uses an entitlement-free macOS `SecItem` v2 Keychain namespace for cross-process LocalSecrets parity. Readable
+  retained v1 records surface a terminal migration diagnostic instead of being silently consumed; operators can use
+  [`appsurface secrets migrate`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-secrets) to copy them safely
+  without exposing values. The [migration guide](../Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/macos-keychain-v2-migration.md)
+  covers namespace matching, resumable recovery, canonical-v2 precedence, and the interactive three-key smoke.
 - The PostgreSQL durable schema adds the Schedule ledger, payload-free dispatch leases, forced-RLS history partitions, and a reviewed role recipe. Operators can use the [migration and role setup guidance](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#explicit-schema-and-epoch-deployment) before enabling the manual processor.
 - The PostgreSQL durable source preview now provides explicit worker-host composition. Passive registration resolves the
   bounded runtime pump, typed health and drain control, and authorized Work and scope control clients without starting a
