@@ -49,7 +49,7 @@ internal static class DurablePostgreSqlLocalExample
             Console.Error.WriteLine("Local durable proof canceled. Connection strings and runtime epoch values are never printed.");
             return 130;
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
         {
             Console.Error.WriteLine($"Command failed with {exception.GetType().Name}.");
             Console.Error.WriteLine("Connection strings and runtime epoch values are never printed.");

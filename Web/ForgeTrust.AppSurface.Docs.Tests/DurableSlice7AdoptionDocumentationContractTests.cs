@@ -20,7 +20,11 @@ public sealed class DurableSlice7AdoptionDocumentationContractTests
         Assert.Contains("APPSURFACE_DURABLE_DISPATCHER_CONNECTION", tutorial, StringComparison.Ordinal);
         Assert.Contains("APPSURFACE_DURABLE_RUNTIME_CONNECTION", tutorial, StringComparison.Ordinal);
         Assert.Contains("APPSURFACE_DURABLE_RUNTIME_EPOCH", tutorial, StringComparison.Ordinal);
-        Assert.Contains("../../Durable/configure-postgresql-roles.sql", tutorial, StringComparison.Ordinal);
+        Assert.Contains(
+            "https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql",
+            tutorial,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("../../Durable/configure-postgresql-roles.sql", tutorial, StringComparison.Ordinal);
         Assert.DoesNotContain("POSTGRES_PASSWORD=", tutorial, StringComparison.Ordinal);
         Assert.Contains("require_command dotnet", prerequisiteScript, StringComparison.Ordinal);
         Assert.Contains("require_command docker", prerequisiteScript, StringComparison.Ordinal);
@@ -139,6 +143,17 @@ public sealed class DurableSlice7AdoptionDocumentationContractTests
         Assert.Contains("application startup never applies DDL", documentation, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void LocalTutorialTimingEvidence_ShouldLinkToTheCanonicalPublishedManifest()
+    {
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var timingEvidence = Read(repoRoot, "Durable/evidence/postgresql-slice7/local-tutorial-timing.md");
+        const string manifestUrl = "https://github.com/forge-trust/AppSurface/blob/main/Durable/evidence/postgresql-slice7/warm/run.json";
+
+        Assert.Contains(manifestUrl, timingEvidence, StringComparison.Ordinal);
+        Assert.DoesNotContain("](warm/run.json)", timingEvidence, StringComparison.Ordinal);
+    }
+
     private static string Read(string repoRoot, string path) =>
         File.ReadAllText(TestPathUtils.PathUnder(repoRoot, path));
 
@@ -148,19 +163,19 @@ public sealed class DurableSlice7AdoptionDocumentationContractTests
         string? dotnetScript,
         string? dockerScript)
     {
-        var directory = Path.Combine(Path.GetTempPath(), $"appsurface-durable-prerequisites-{Guid.NewGuid():N}");
-        var commandDirectory = Path.Combine(directory, "bin");
+        var directory = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-durable-prerequisites-{Guid.NewGuid():N}");
+        var commandDirectory = TestPathUtils.PathUnder(directory, "bin");
         Directory.CreateDirectory(commandDirectory);
         try
         {
             if (dotnetScript is not null)
             {
-                WriteExecutable(Path.Combine(commandDirectory, "dotnet"), dotnetScript);
+                WriteExecutable(TestPathUtils.PathUnder(commandDirectory, "dotnet"), dotnetScript);
             }
 
             if (dockerScript is not null)
             {
-                WriteExecutable(Path.Combine(commandDirectory, "docker"), dockerScript);
+                WriteExecutable(TestPathUtils.PathUnder(commandDirectory, "docker"), dockerScript);
             }
 
             using var process = Process.Start(new ProcessStartInfo("/bin/bash", script)

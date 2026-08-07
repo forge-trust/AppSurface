@@ -1,5 +1,6 @@
 using ForgeTrust.AppSurface.Durable.PostgreSql;
 using ForgeTrust.AppSurface.Durable.Provider;
+using ForgeTrust.AppSurface.Testing;
 using Npgsql;
 using Testcontainers.PostgreSql;
 
@@ -23,7 +24,8 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
     [Fact]
     public async Task Commands_bootstrap_and_verify_the_restricted_local_postgresql_proof()
     {
-        var roleRecipePath = Path.Combine(FindRepositoryRoot(), "Durable", "configure-postgresql-roles.sql");
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var roleRecipePath = TestPathUtils.PathUnder(repositoryRoot, "Durable", "configure-postgresql-roles.sql");
         await using var container = new PostgreSqlBuilder(PostgreSqlImage)
             .WithDatabase(DatabaseName)
             .WithUsername(AdministratorUser)
@@ -132,19 +134,6 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
             Password = password,
         };
         return builder.ConnectionString;
-    }
-
-    private static string FindRepositoryRoot()
-    {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "ForgeTrust.AppSurface.slnx")))
-            {
-                return directory.FullName;
-            }
-        }
-
-        throw new DirectoryNotFoundException("Unable to locate the repository root for the durable role recipe.");
     }
 
     private static void AssertWorkerSchemaGuardRejectsEveryChange()

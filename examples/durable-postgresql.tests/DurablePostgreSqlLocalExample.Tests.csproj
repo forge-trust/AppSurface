@@ -35,5 +35,6 @@
 
   <ItemGroup>
     <ProjectReference Include="../durable-postgresql/DurablePostgreSqlLocalExample.csproj" />
+    <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
   </ItemGroup>
 </Project>

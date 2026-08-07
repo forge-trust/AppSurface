@@ -17,7 +17,7 @@ Install all of the following before starting:
 - A repository checkout. The transcript creates its three separate local PostgreSQL roles: migration owner,
   payload-free dispatcher, and scoped runtime.
 
-The canonical [`configure-postgresql-roles.sql`](../../Durable/configure-postgresql-roles.sql) recipe owns the reviewed grants. Do not substitute ad-hoc grants or a copied role script. The dispatcher and runtime roles must be distinct non-owner login roles without `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION`, or `BYPASSRLS`.
+The canonical [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) recipe owns the reviewed grants. Do not substitute ad-hoc grants or a copied role script. The dispatcher and runtime roles must be distinct non-owner login roles without `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION`, or `BYPASSRLS`.
 
 Only these configuration names are required. Values are placeholders and must never be committed or printed:
 

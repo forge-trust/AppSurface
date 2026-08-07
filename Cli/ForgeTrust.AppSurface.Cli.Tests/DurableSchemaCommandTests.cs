@@ -1,6 +1,7 @@
 using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Durable.PostgreSql;
+using ForgeTrust.AppSurface.Testing;
 using Npgsql;
 using Testcontainers.PostgreSql;
 
@@ -717,7 +718,7 @@ public sealed class DurableSchemaCommandTests
 
         internal static DurableTestDirectory Create(string prefix)
         {
-            var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), prefix + Guid.NewGuid().ToString("N"));
+            var path = TestPathUtils.PathUnder(System.IO.Path.GetTempPath(), prefix + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(path);
             return new DurableTestDirectory(path);
         }
