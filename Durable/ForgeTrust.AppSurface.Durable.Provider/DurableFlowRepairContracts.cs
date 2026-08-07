@@ -305,9 +305,26 @@ public sealed record DurableFlowRepairReceipt
             throw new ArgumentException("The receipt action must match the request fingerprint schema.", nameof(requestFingerprint));
         }
 
+        if (priorState != DurableFlowState.Suspended)
+        {
+            throw new ArgumentException("A Flow repair receipt must begin from the suspended state.", nameof(priorState));
+        }
+
+        var expectedResultingState = action == DurableFlowRepairAction.AssertChildEffectCompleted
+            ? DurableFlowState.Ready
+            : DurableFlowState.WaitingForActivity;
+        if (resultingState != expectedResultingState)
+        {
+            throw new ArgumentException("The Flow repair receipt state must match its evidence-backed action.", nameof(resultingState));
+        }
+
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(priorRevision);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(resultingRevision);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(resultingFlowHistoryEventId);
+        if (resultingRevision != checked(priorRevision + 1))
+        {
+            throw new ArgumentException("A Flow repair receipt must advance exactly one Flow revision.", nameof(resultingRevision));
+        }
         ScopeId = scopeId;
         InstanceId = instanceId;
         CommandId = commandId;

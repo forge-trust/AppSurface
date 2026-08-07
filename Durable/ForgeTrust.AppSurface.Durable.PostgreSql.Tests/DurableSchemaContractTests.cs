@@ -122,6 +122,8 @@ public sealed class DurableSchemaContractTests
                 Assert.Contains("suspension_descriptor_schema", seventh.Sql, StringComparison.Ordinal);
                 Assert.Contains("result_contract_id", seventh.Sql, StringComparison.Ordinal);
                 Assert.Contains("resolution_kind", seventh.Sql, StringComparison.Ordinal);
+                Assert.Contains("NOT VALID", seventh.Sql, StringComparison.Ordinal);
+                Assert.Contains("VALIDATE CONSTRAINT", seventh.Sql, StringComparison.Ordinal);
                 Assert.Contains("FORCE ROW LEVEL SECURITY", seventh.Sql, StringComparison.Ordinal);
             });
         Assert.Equal(migrations.Count, DurablePostgreSqlMigrationCatalog.RequiredVersion);

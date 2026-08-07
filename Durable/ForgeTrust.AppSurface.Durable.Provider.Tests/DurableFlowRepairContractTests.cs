@@ -81,6 +81,54 @@ public sealed class DurableFlowRepairContractTests
             5,
             19,
             DateTimeOffset.UtcNow));
+        Assert.Throws<ArgumentException>(() => new DurableFlowRepairReceipt(
+            Scope,
+            Flow,
+            Command,
+            completed.Action,
+            completed.Fingerprint,
+            Digest,
+            completed.Evidence,
+            completed.ActorId,
+            completed.ReasonCode,
+            DurableFlowState.Ready,
+            4,
+            DurableFlowState.Ready,
+            5,
+            19,
+            DateTimeOffset.UtcNow));
+        Assert.Throws<ArgumentException>(() => new DurableFlowRepairReceipt(
+            Scope,
+            Flow,
+            Command,
+            completed.Action,
+            completed.Fingerprint,
+            Digest,
+            completed.Evidence,
+            completed.ActorId,
+            completed.ReasonCode,
+            DurableFlowState.Suspended,
+            4,
+            DurableFlowState.WaitingForActivity,
+            5,
+            19,
+            DateTimeOffset.UtcNow));
+        Assert.Throws<ArgumentException>(() => new DurableFlowRepairReceipt(
+            Scope,
+            Flow,
+            Command,
+            completed.Action,
+            completed.Fingerprint,
+            Digest,
+            completed.Evidence,
+            completed.ActorId,
+            completed.ReasonCode,
+            DurableFlowState.Suspended,
+            4,
+            DurableFlowState.Ready,
+            6,
+            19,
+            DateTimeOffset.UtcNow));
     }
 
     [Fact]

@@ -119,6 +119,35 @@ public sealed class PostgreSqlDurableFlowRepairTests
             suspended.Value.Revision));
         Assert.Equal(DurableProblemCodes.FlowReleaseStateMismatch, legacyRelease.Problem!.Code);
 
+        var oldShapeAssessment = await repairs.GetAssessmentAsync(new DurableFlowRepairAssessmentRequest(scope, instance));
+        Assert.True(oldShapeAssessment.IsSuccess);
+        Assert.NotNull(oldShapeAssessment.Value!.SuspensionDescriptorSha256);
+        await SetFlowRepairDescriptorAsync(database.DataSource, scope, instance, null);
+        var legacyAssessment = await repairs.GetAssessmentAsync(new DurableFlowRepairAssessmentRequest(scope, instance));
+        Assert.True(legacyAssessment.IsSuccess);
+        Assert.Null(legacyAssessment.Value!.SuspensionDescriptorSha256);
+        Assert.Empty(legacyAssessment.Value.Candidates);
+        var legacyRepair = await repairs.RepairAsync(DurableFlowRepairRequest.AssertChildEffectCompleted(
+            scope,
+            instance,
+            new DurableCommandId($"flow-repair-legacy-descriptor-{scenario}"),
+            oldShapeAssessment.Value.Revision,
+            new string('a', 64),
+            childWorkId,
+            failed.Revision,
+            1,
+            new string('b', 64),
+            "operator",
+            "legacy-descriptor"));
+        Assert.True(legacyRepair.IsSuccess);
+        Assert.Equal(DurableFlowRepairOutcome.Refused, legacyRepair.Value!.Outcome);
+        Assert.Equal(DurableProblemCodes.FlowRepairDescriptorUpgradeRequired, legacyRepair.Value.Problem!.Code);
+        await SetFlowRepairDescriptorAsync(
+            database.DataSource,
+            scope,
+            instance,
+            oldShapeAssessment.Value.SuspensionDescriptorSha256!);
+
         var proof = await operators.ResolveAsync(new DurableWorkManualResolutionRequest(
             scope,
             childWorkId,
@@ -130,6 +159,39 @@ public sealed class PostgreSqlDurableFlowRepairTests
             effectApplied ? resultCodec.EncodeObject(new byte[] { 3 }) : null));
         Assert.True(proof.IsSuccess);
         Assert.Equal(effectApplied ? DurableWorkState.Succeeded : DurableWorkState.Ready, proof.Value!.State);
+
+        if (effectApplied)
+        {
+            await UpdateWorkResultPayloadAsync(database.DataSource, scope, childWorkId, [9]);
+            var tamperedAssessment = await repairs.GetAssessmentAsync(new DurableFlowRepairAssessmentRequest(scope, instance));
+            Assert.True(tamperedAssessment.IsSuccess);
+            var tamperedCandidate = Assert.Single(tamperedAssessment.Value!.Candidates);
+            var tampered = await repairs.RepairAsync(CreateRepairRequest(
+                effectApplied,
+                scope,
+                instance,
+                new DurableCommandId("flow-repair-tampered-payload"),
+                tamperedAssessment.Value,
+                tamperedCandidate.Evidence,
+                tamperedCandidate.Evidence.ChildWorkHistoryEventId,
+                "tampered-persisted-payload"));
+            Assert.True(tampered.IsSuccess);
+            Assert.Equal(DurableFlowRepairOutcome.Refused, tampered.Value!.Outcome);
+            Assert.Equal(DurableProblemCodes.FlowRepairEvidenceMismatch, tampered.Value.Problem!.Code);
+            await UpdateWorkResultPayloadAsync(database.DataSource, scope, childWorkId, [3]);
+        }
+
+        var independentInstance = new DurableFlowInstanceId($"independent-{scenario}");
+        Assert.True((await flows.StartAsync(new DurableFlowStartRequest(
+            scope,
+            new DurableCommandId($"flow-repair-independent-start-{scenario}"),
+            $"flow-repair-independent-key-{scenario}",
+            independentInstance,
+            flowRegistration.FlowId,
+            flowRegistration.FlowVersion,
+            contextCodec.EncodeObject(new byte[] { 4 })))).IsSuccess);
+        var independentBeforeRepair = await flows.GetAsync(new DurableFlowGetRequest(scope, independentInstance));
+        Assert.Equal(DurableFlowState.Ready, independentBeforeRepair.Value!.State);
 
         var assessment = await repairs.GetAssessmentAsync(new DurableFlowRepairAssessmentRequest(scope, instance));
         Assert.True(assessment.IsSuccess);
@@ -167,6 +229,25 @@ public sealed class PostgreSqlDurableFlowRepairTests
             evidence,
             evidence.ChildWorkHistoryEventId,
             effectApplied ? "provider-confirmed-applied" : "provider-confirmed-no-effect");
+        await using (var blocker = await database.DataSource.OpenConnectionAsync())
+        await using (var blockerTransaction = await blocker.BeginTransactionAsync())
+        {
+            await using var lockFlow = new Npgsql.NpgsqlCommand(
+                "SELECT 1 FROM appsurface_durable.flow_instance WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id FOR UPDATE;",
+                blocker,
+                blockerTransaction);
+            lockFlow.Parameters.AddWithValue("scope_id", scope.Value);
+            lockFlow.Parameters.AddWithValue("flow_instance_id", instance.Value);
+            Assert.Equal(1, (int)(await lockFlow.ExecuteScalarAsync())!);
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+                await repairs.RepairAsync(request, cancellation.Token));
+            await blockerTransaction.RollbackAsync();
+        }
+        var afterCancellation = await flows.GetAsync(new DurableFlowGetRequest(scope, instance));
+        Assert.Equal(DurableFlowState.Suspended, afterCancellation.Value!.State);
+        Assert.Equal(assessment.Value.Revision, afterCancellation.Value.Revision);
+        Assert.Equal(0L, await CountRepairCommandsAsync(database.DataSource, scope, request.CommandId));
         var applied = await repairs.RepairAsync(request);
         var duplicate = await repairs.RepairAsync(request);
         var collisionRequest = CreateRepairRequest(
@@ -209,6 +290,9 @@ public sealed class PostgreSqlDurableFlowRepairTests
         Assert.Equal(
             effectApplied ? DurableFlowState.Ready : DurableFlowState.WaitingForActivity,
             (await flows.GetAsync(new DurableFlowGetRequest(scope, instance))).Value!.State);
+        var independentAfterRepair = await flows.GetAsync(new DurableFlowGetRequest(scope, independentInstance));
+        Assert.Equal(independentBeforeRepair.Value.State, independentAfterRepair.Value!.State);
+        Assert.Equal(independentBeforeRepair.Value.Revision, independentAfterRepair.Value.Revision);
         Assert.Equal(
             effectApplied ? "succeeded" : "retry_wait",
             await ReadWorkStateAsync(database.DataSource, scope, childWorkId));
@@ -217,6 +301,13 @@ public sealed class PostgreSqlDurableFlowRepairTests
             await ReadFlowWaitStateAsync(database.DataSource, scope, instance));
         Assert.Equal(1L, await CountRepairCommandsAsync(database.DataSource, scope, request.CommandId));
         Assert.Equal(1L, await CountRepairCollisionsAsync(database.DataSource, scope, request.CommandId));
+        await UpdateRepairReceiptSha256Async(database.DataSource, scope, request.CommandId, new string('f', 64));
+        var receiptTamper = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await repairs.RepairAsync(request));
+        Assert.Equal(
+            "The persisted Flow repair receipt digest does not match its retained canonical evidence.",
+            receiptTamper.Message);
+        Assert.DoesNotContain("[3]", receiptTamper.Message, StringComparison.Ordinal);
     }
 
     private static async ValueTask<string> ReadWorkStateAsync(
@@ -265,6 +356,53 @@ public sealed class PostgreSqlDurableFlowRepairTests
         command.Parameters.AddWithValue("scope_id", scope.Value);
         command.Parameters.AddWithValue("command_id", commandId.Value);
         return (long)(await command.ExecuteScalarAsync())!;
+    }
+
+    private static async ValueTask UpdateWorkResultPayloadAsync(
+        Npgsql.NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableWorkId workId,
+        byte[] payload)
+    {
+        await using var command = dataSource.CreateCommand(
+            "UPDATE appsurface_durable.work SET result_payload = @result_payload WHERE scope_id = @scope_id AND work_id = @work_id;");
+        command.Parameters.AddWithValue("result_payload", payload);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("work_id", workId.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+    }
+
+    private static async ValueTask SetFlowRepairDescriptorAsync(
+        Npgsql.NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableFlowInstanceId instance,
+        string? descriptorSha256)
+    {
+        await using var command = dataSource.CreateCommand(
+            "UPDATE appsurface_durable.flow_instance SET suspension_descriptor_schema = @schema, suspension_descriptor_sha256 = @sha256 WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id;");
+        command.Parameters.AddWithValue(
+            "schema",
+            descriptorSha256 is null
+                ? DBNull.Value
+                : "appsurface.durable.flow.child-suspension.v1");
+        command.Parameters.AddWithValue("sha256", descriptorSha256 ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("flow_instance_id", instance.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+    }
+
+    private static async ValueTask UpdateRepairReceiptSha256Async(
+        Npgsql.NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableCommandId commandId,
+        string receiptSha256)
+    {
+        await using var command = dataSource.CreateCommand(
+            "UPDATE appsurface_durable.flow_repair_command SET receipt_sha256 = @receipt_sha256 WHERE scope_id = @scope_id AND command_id = @command_id;");
+        command.Parameters.AddWithValue("receipt_sha256", receiptSha256);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("command_id", commandId.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
     }
 
     private static DurableFlowRepairRequest CreateRepairRequest(

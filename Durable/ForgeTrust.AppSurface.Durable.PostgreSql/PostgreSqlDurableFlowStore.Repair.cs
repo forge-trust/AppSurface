@@ -1,6 +1,8 @@
 using ForgeTrust.AppSurface.Durable.Provider;
 using Npgsql;
 using NpgsqlTypes;
+using System.Security.Cryptography;
+using System.Text.Json;
 using static ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableProtocolCodec;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql;
@@ -243,8 +245,6 @@ internal sealed partial class PostgreSqlDurableFlowStore
                     existing.ObservedRevision));
             }
 
-            var work = await LockRepairWorkAsync(
-                connection, transaction, request.ScopeId, request.Evidence.ChildWorkId, cancellationToken).ConfigureAwait(false);
             var flow = await LockRepairFlowAsync(
                 connection, transaction, request.ScopeId, request.InstanceId, cancellationToken).ConfigureAwait(false);
             if (flow is null)
@@ -290,6 +290,14 @@ internal sealed partial class PostgreSqlDurableFlowStore
                 request.InstanceId,
                 request.Evidence.ChildWorkId,
                 cancellationToken).ConfigureAwait(false);
+            var work = wait is null
+                ? null
+                : await LockRepairWorkAsync(
+                    connection,
+                    transaction,
+                    request.ScopeId,
+                    request.Evidence.ChildWorkId,
+                    cancellationToken).ConfigureAwait(false);
             var descriptorProblem = ValidateRepairShape(request, flow, wait, work);
             if (descriptorProblem is not null)
             {
@@ -559,6 +567,10 @@ internal sealed partial class PostgreSqlDurableFlowStore
         if (work.Revision != request.Evidence.ExpectedChildWorkRevision
             || work.State is not ("succeeded" or "succeeded_after_cancel_requested")
             || work.Result is null
+            || !string.Equals(
+                Convert.ToHexStringLower(SHA256.HashData(work.Result.Content)),
+                work.Result.Sha256,
+                StringComparison.Ordinal)
             || !string.Equals(work.Result.Sha256, request.Evidence.ExpectedChildResultSha256, StringComparison.Ordinal)
             || !wait.ResultMatches(work.Result))
         {
@@ -589,7 +601,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
             _ = registration.ResultCodec.DecodeObject(work.Result.ToPayload());
             return null;
         }
-        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or JsonException)
         {
             return EvidenceMismatch(request.CommandId.Value);
         }
@@ -1070,7 +1082,6 @@ internal sealed partial class PostgreSqlDurableFlowStore
         }
 
         return new RepairWorkRow(
-            new DurableWorkId(reader.GetString(0)),
             reader.GetString(1),
             reader.GetString(2),
             reader.GetString(3),
@@ -1225,7 +1236,6 @@ internal sealed partial class PostgreSqlDurableFlowStore
     }
 
     private sealed record RepairWorkRow(
-        DurableWorkId WorkId,
         string WorkName,
         string WorkVersion,
         string State,

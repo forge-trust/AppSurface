@@ -747,8 +747,33 @@ public sealed class PostgreSqlSchemaIntegrationTests
                 dispatch_id, scope_id, kind, flow_instance_id, due_at, state, expected_revision
             )
             VALUES
-            (@dispatch_a, 'flow-rls-scope-a', 'flow', 'flow-rls-instance-a', clock_timestamp(), 'available', 1),
-            (@dispatch_b, 'flow-rls-scope-b', 'flow', 'flow-rls-instance-b', clock_timestamp(), 'available', 1);
+                (@dispatch_a, 'flow-rls-scope-a', 'flow', 'flow-rls-instance-a', clock_timestamp(), 'available', 1),
+                (@dispatch_b, 'flow-rls-scope-b', 'flow', 'flow-rls-instance-b', clock_timestamp(), 'available', 1);
+
+            INSERT INTO appsurface_durable.flow_repair_command
+            (
+                scope_id, command_id, flow_instance_id, action, request_schema, request_sha256,
+                expected_flow_revision, suspension_descriptor_sha256, child_work_id,
+                expected_child_work_revision, child_work_history_event_id, expected_child_result_sha256,
+                actor_id, reason_code, outcome, problem_code
+            )
+            VALUES
+            (
+                'flow-rls-scope-a', 'flow-rls-repair-a', 'flow-rls-instance-a', 'assert_child_effect_completed',
+                'tests.flow-repair.v1', repeat('0', 64), 1, repeat('0', 64), 'flow-rls-child-a', 1, 1,
+                repeat('0', 64), 'operator', 'test', 'refused', 'ASDUR214'
+            ),
+            (
+                'flow-rls-scope-b', 'flow-rls-repair-b', 'flow-rls-instance-b', 'assert_child_effect_completed',
+                'tests.flow-repair.v1', repeat('1', 64), 1, repeat('1', 64), 'flow-rls-child-b', 1, 1,
+                repeat('1', 64), 'operator', 'test', 'refused', 'ASDUR214'
+            );
+
+            INSERT INTO appsurface_durable.flow_repair_collision
+                (scope_id, command_id, conflicting_request_schema, conflicting_request_sha256)
+            VALUES
+                ('flow-rls-scope-a', 'flow-rls-repair-a', 'tests.flow-repair.v1', repeat('2', 64)),
+                ('flow-rls-scope-b', 'flow-rls-repair-b', 'tests.flow-repair.v1', repeat('3', 64));
 
             INSERT INTO appsurface_durable.flow_trace_context
                 (trace_context_id, scope_id, flow_instance_id, contract_version, traceparent,
@@ -799,7 +824,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             seedFlowDispatch.Parameters.AddWithValue("trace_b", Guid.NewGuid());
             seedFlowDispatch.Parameters.AddWithValue("token_a", Guid.NewGuid());
             seedFlowDispatch.Parameters.AddWithValue("token_b", Guid.NewGuid());
-            Assert.Equal(13, await seedFlowDispatch.ExecuteNonQueryAsync());
+            Assert.Equal(17, await seedFlowDispatch.ExecuteNonQueryAsync());
         }
 
         var dispatcherConnectionString = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
@@ -912,6 +937,11 @@ public sealed class PostgreSqlSchemaIntegrationTests
             unscopedTraceRead.CommandText = "SELECT count(*) FROM appsurface_durable.flow_trace_context;";
             Assert.Equal(0L, (long)(await unscopedTraceRead.ExecuteScalarAsync())!);
         }
+        await using (var unscopedRepairRead = runtimeConnection.CreateCommand())
+        {
+            unscopedRepairRead.CommandText = "SELECT count(*) FROM appsurface_durable.flow_repair_command;";
+            Assert.Equal(0L, (long)(await unscopedRepairRead.ExecuteScalarAsync())!);
+        }
 
         await using (var scopedTransaction = await runtimeConnection.BeginTransactionAsync())
         {
@@ -943,6 +973,18 @@ public sealed class PostgreSqlSchemaIntegrationTests
             {
                 Assert.True(await reader.ReadAsync());
                 Assert.Equal("flow-rls-scope-a", reader.GetString(0));
+                Assert.False(await reader.ReadAsync());
+            }
+
+            await using (var scopedRepairRead = new NpgsqlCommand(
+                "SELECT scope_id, command_id FROM appsurface_durable.flow_repair_command ORDER BY scope_id, command_id;",
+                runtimeConnection,
+                scopedTransaction))
+            await using (var reader = await scopedRepairRead.ExecuteReaderAsync())
+            {
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal("flow-rls-scope-a", reader.GetString(0));
+                Assert.Equal("flow-rls-repair-a", reader.GetString(1));
                 Assert.False(await reader.ReadAsync());
             }
 
@@ -983,6 +1025,29 @@ public sealed class PostgreSqlSchemaIntegrationTests
             }
 
             await scopedTransaction.CommitAsync();
+        }
+
+        await using (var rejectedRepairTransaction = await runtimeConnection.BeginTransactionAsync())
+        {
+            await using (var setScope = new NpgsqlCommand(
+                "SELECT set_config('appsurface_durable.scope_id', @scope_id, true);",
+                runtimeConnection,
+                rejectedRepairTransaction))
+            {
+                setScope.Parameters.AddWithValue("scope_id", "flow-rls-scope-a");
+                await setScope.ExecuteNonQueryAsync();
+            }
+
+            var crossScopeRepair = await Assert.ThrowsAsync<PostgresException>(async () =>
+            {
+                await using var insert = new NpgsqlCommand(
+                    "INSERT INTO appsurface_durable.flow_repair_collision (scope_id, command_id, conflicting_request_schema, conflicting_request_sha256) VALUES ('flow-rls-scope-b', 'flow-rls-repair-rejected', 'tests.flow-repair.v1', repeat('4', 64));",
+                    runtimeConnection,
+                    rejectedRepairTransaction);
+                await insert.ExecuteNonQueryAsync();
+            });
+            Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, crossScopeRepair.SqlState);
+            await rejectedRepairTransaction.RollbackAsync();
         }
 
         var denied = await Assert.ThrowsAsync<PostgresException>(async () =>

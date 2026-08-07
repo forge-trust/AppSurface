@@ -2,7 +2,9 @@
 
 ALTER TABLE appsurface_durable.flow_instance
     ADD COLUMN suspension_descriptor_schema text,
-    ADD COLUMN suspension_descriptor_sha256 char(64),
+    ADD COLUMN suspension_descriptor_sha256 char(64);
+
+ALTER TABLE appsurface_durable.flow_instance
     ADD CONSTRAINT ck_flow_instance_suspension_descriptor_identity
     CHECK
     (
@@ -12,14 +14,27 @@ ALTER TABLE appsurface_durable.flow_instance
             suspension_descriptor_schema = 'appsurface.durable.flow.child-suspension.v1'
             AND suspension_descriptor_sha256 ~ '^[0-9a-f]{64}$'
         )
-    );
+    ) NOT VALID;
+
+ALTER TABLE appsurface_durable.flow_instance
+    VALIDATE CONSTRAINT ck_flow_instance_suspension_descriptor_identity;
 
 ALTER TABLE appsurface_durable.flow_wait
-    ADD COLUMN result_contract_id text CHECK (result_contract_id IS NULL OR length(result_contract_id) BETWEEN 1 AND 256),
-    ADD COLUMN result_schema_version text CHECK (result_schema_version IS NULL OR length(result_schema_version) BETWEEN 1 AND 100),
-    ADD COLUMN result_codec_id text CHECK (result_codec_id IS NULL OR length(result_codec_id) BETWEEN 1 AND 320),
-    ADD COLUMN result_classification text CHECK (result_classification IS NULL OR length(result_classification) BETWEEN 1 AND 64),
-    ADD COLUMN result_retention text CHECK (result_retention IS NULL OR length(result_retention) BETWEEN 1 AND 128),
+    ADD COLUMN result_contract_id text,
+    ADD COLUMN result_schema_version text,
+    ADD COLUMN result_codec_id text,
+    ADD COLUMN result_classification text,
+    ADD COLUMN result_retention text,
+    ADD CONSTRAINT ck_flow_wait_result_contract_id
+    CHECK (result_contract_id IS NULL OR length(result_contract_id) BETWEEN 1 AND 256) NOT VALID,
+    ADD CONSTRAINT ck_flow_wait_result_schema_version
+    CHECK (result_schema_version IS NULL OR length(result_schema_version) BETWEEN 1 AND 100) NOT VALID,
+    ADD CONSTRAINT ck_flow_wait_result_codec_id
+    CHECK (result_codec_id IS NULL OR length(result_codec_id) BETWEEN 1 AND 320) NOT VALID,
+    ADD CONSTRAINT ck_flow_wait_result_classification
+    CHECK (result_classification IS NULL OR length(result_classification) BETWEEN 1 AND 64) NOT VALID,
+    ADD CONSTRAINT ck_flow_wait_result_retention
+    CHECK (result_retention IS NULL OR length(result_retention) BETWEEN 1 AND 128) NOT VALID,
     ADD CONSTRAINT ck_flow_wait_activity_result_identity
     CHECK
     (
@@ -36,14 +51,23 @@ ALTER TABLE appsurface_durable.flow_wait
                 (result_contract_id IS NOT NULL AND result_schema_version IS NOT NULL AND result_codec_id IS NOT NULL
                     AND result_classification IS NOT NULL AND result_retention IS NOT NULL)
             ))
-    );
+    ) NOT VALID;
+
+ALTER TABLE appsurface_durable.flow_wait
+    VALIDATE CONSTRAINT ck_flow_wait_result_contract_id,
+    VALIDATE CONSTRAINT ck_flow_wait_result_schema_version,
+    VALIDATE CONSTRAINT ck_flow_wait_result_codec_id,
+    VALIDATE CONSTRAINT ck_flow_wait_result_classification,
+    VALIDATE CONSTRAINT ck_flow_wait_result_retention,
+    VALIDATE CONSTRAINT ck_flow_wait_activity_result_identity;
 
 ALTER TABLE appsurface_durable.work_operator_command
-    ADD COLUMN resolution_kind text CHECK
+    ADD COLUMN resolution_kind text,
+    ADD CONSTRAINT ck_work_operator_command_resolution_kind_value CHECK
     (
         resolution_kind IS NULL
         OR resolution_kind IN ('applied', 'proven_not_applied')
-    ),
+    ) NOT VALID,
     ADD CONSTRAINT ck_work_operator_command_resolution_kind
     CHECK
     (
@@ -55,7 +79,11 @@ ALTER TABLE appsurface_durable.work_operator_command
             ))
         OR
         (command_type <> 'manual_resolve' AND resolution_kind IS NULL)
-    );
+    ) NOT VALID;
+
+ALTER TABLE appsurface_durable.work_operator_command
+    VALIDATE CONSTRAINT ck_work_operator_command_resolution_kind_value,
+    VALIDATE CONSTRAINT ck_work_operator_command_resolution_kind;
 
 CREATE TABLE appsurface_durable.flow_repair_command
 (
