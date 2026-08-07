@@ -21,7 +21,7 @@ internal sealed partial class SecretsCommand : ICommand
     [ExcludeFromCodeCoverage(Justification = "CliFx command discovery covers root help; subcommands carry behavior tests.")]
     public async ValueTask ExecuteAsync(IConsole console)
     {
-        await console.Output.WriteLineAsync("Use 'appsurface secrets init', 'set', 'get', 'list', 'delete', and 'doctor' to manage local development secrets, or 'appsurface secrets transfer plan|apply' for explicit remote transfer.");
+        await console.Output.WriteLineAsync("Use 'appsurface secrets init', 'set', 'get', 'list', 'migrate', 'delete', and 'doctor' to manage local development secrets, or 'appsurface secrets transfer plan' and 'appsurface secrets transfer apply' for explicit remote transfer.");
     }
 }
 
@@ -44,7 +44,7 @@ internal sealed partial class SecretsInitCommand : SecretsCommandBase
 /// Writes a local secret value.
 /// </summary>
 [Command("secrets set", Description = "Set one AppSurface local secret value.")]
-internal sealed partial class SecretsSetCommand : SecretsKeyCommandBase
+internal sealed partial class SecretsSetCommand(LocalSecretsTransferCoordinator transferCoordinator) : SecretsKeyCommandBase
 {
     /// <summary>
     /// Gets or sets the secret value.
@@ -79,7 +79,10 @@ internal sealed partial class SecretsSetCommand : SecretsKeyCommandBase
 
         var context = BuildContext();
         var identity = Normalize(context);
-        var result = context.Store.Set(identity, value);
+        var result = transferCoordinator.InvalidateBeforeMutation(
+            context.Store,
+            identity,
+            () => context.Store.Set(identity, value));
         await WriteResultAsync(console, result, successVerb: "Set");
     }
 }
@@ -137,17 +140,75 @@ internal sealed partial class SecretsListCommand : SecretsCommandBase
 }
 
 /// <summary>
+/// Explicitly migrates readable legacy macOS LocalSecrets records into the current v2 Keychain namespace.
+/// </summary>
+/// <remarks>
+/// The command is intentionally unavailable for deterministic file stores and other platforms. It never prints secret
+/// values, never deletes v1 records, and never overwrites an existing v2 record; use <c>secrets set</c> to update a
+/// canonical v2 value after migration.
+/// </remarks>
+[Command("secrets migrate", Description = "Migrate readable legacy macOS LocalSecrets records into the v2 namespace without printing values.")]
+internal partial class SecretsMigrateCommand : SecretsCommandBase
+{
+    /// <inheritdoc />
+    public override async ValueTask ExecuteAsync(IConsole console)
+    {
+        var context = BuildContext();
+        if (context.Store is not IAppSurfaceLocalSecretMigrationStore migrationStore)
+        {
+            throw new CommandException(MigrationUnsupported().ToDisplayString());
+        }
+
+        var result = migrationStore.Migrate(context.ApplicationName, context.Environment, context.KeyPrefix);
+        if (result.Status != LocalSecretResultStatus.Found)
+        {
+            throw new CommandException(result.Diagnostic?.ToDisplayString() ?? "Local secret migration could not start.");
+        }
+
+        foreach (var row in result.Rows)
+        {
+            await console.Output.WriteLineAsync($"{row.Key}: {row.Action.ToDisplayString()}");
+            if (row.Diagnostic != null)
+            {
+                await console.Output.WriteLineAsync(row.Diagnostic.ToDisplayString());
+            }
+        }
+
+        await console.Output.WriteLineAsync($"Migrated: {result.Migrated}");
+        await console.Output.WriteLineAsync($"AlreadyV2: {result.AlreadyV2}");
+        await console.Output.WriteLineAsync($"Failed: {result.Failed}");
+        await console.Output.WriteLineAsync($"Source: {result.Source}");
+
+        if (result.Failed != 0)
+        {
+            throw new CommandException("One or more local secrets could not be migrated. Review the value-safe per-key diagnostics, resolve the issue, and rerun the same command.");
+        }
+    }
+
+    private static AppSurfaceLocalSecretDiagnostic MigrationUnsupported() =>
+        new(
+            "local-secret-migration-unsupported",
+            "Local secret migration is unavailable for this store.",
+            "Only the macOS platform store can retain and migrate the legacy Keychain records affected by this compatibility transition.",
+            "Use the macOS OS-backed store for this namespace, or set the intended value explicitly with `appsurface secrets set`.",
+            "local-secrets-macos-migration");
+}
+
+/// <summary>
 /// Deletes one local secret.
 /// </summary>
-[Command("secrets delete", Description = "Delete one AppSurface local secret value.")]
-internal sealed partial class SecretsDeleteCommand : SecretsKeyCommandBase
+[Command("secrets delete", Description = "Delete one local secret and its local transfer attestation; never changes remote vaults.")]
+internal sealed partial class SecretsDeleteCommand(LocalSecretsTransferCoordinator transferCoordinator) : SecretsKeyCommandBase
 {
     /// <inheritdoc />
     public override async ValueTask ExecuteAsync(IConsole console)
     {
         var context = BuildContext();
         var identity = Normalize(context);
-        var result = context.Store.Delete(identity);
+        var result = transferCoordinator.InvalidateBeforeMutation(
+            context.Store,
+            identity,
+            () => context.Store.Delete(identity));
         await WriteResultAsync(console, result, successVerb: "Deleted");
     }
 }

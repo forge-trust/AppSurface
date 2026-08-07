@@ -1,5 +1,8 @@
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Theming;
+using ForgeTrust.AppSurface.Web;
+using ForgeTrust.AppSurface.Web.Theming;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
@@ -93,6 +96,37 @@ public sealed class AppSurfaceDocsThemePairTests
 
         Assert.Contains("--docs-color-accent:#0af;", theme.CriticalCss, StringComparison.Ordinal);
         Assert.Contains("--docs-color-link:#9cf;", theme.CriticalCss, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolver_ShouldRejectDarkSafeOverridesWhenTheWebPreferenceDocumentAlsoExposesLight()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Theme = new AppSurfaceDocsThemeOptions
+            {
+                Colors = new AppSurfaceDocsThemeColorOptions { LinkColor = "#9cf" }
+            }
+        };
+        AppSurfaceDocsThemePolicy.Normalize(options.Theme);
+        var pair = AppSurfaceThemePair.AppSurface();
+        var services = new ServiceCollection();
+        services.AddAppSurfaceTheming(themeOptions =>
+        {
+            themeOptions.Pairs.Add(pair);
+            themeOptions.DefaultMode = AppSurfaceThemeMode.Dark;
+        });
+        services.AddAppSurfaceWebThemePreferences();
+        using var provider = services.BuildServiceProvider();
+        var darkResolution = provider.GetRequiredService<IAppSurfaceThemeResolver>().ResolveDefault();
+
+        var theme = new AppSurfaceDocsThemeResolver(
+            options,
+            new StubThemeResolver(darkResolution),
+            provider.GetRequiredService<IAppSurfaceThemeDocumentProvider>()).Theme;
+
+        Assert.Contains("--docs-color-link:var(--as-link);", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.DoesNotContain("--docs-color-link:#9cf;", theme.CriticalCss, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -196,4 +230,5 @@ public sealed class AppSurfaceDocsThemePairTests
     {
         public AppSurfaceThemeResolution ResolveDefault() => resolution;
     }
+
 }

@@ -7,12 +7,15 @@ AppSurface Durable is a source-only public preview of portable durable contracts
 - [`ForgeTrust.AppSurface.Durable.Provider`](ForgeTrust.AppSurface.Durable.Provider/README.md) is the runtime-provider and
   operator SPI for claims, pumping, health, drain, recovery, and controlled repair.
 - [`ForgeTrust.AppSurface.Durable.PostgreSql`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md) is the first
-  authoritative-store implementation. Slices 3 and 4 supply explicit schema management, a Work engine, and a Flow engine;
-  they start no hosted worker.
+  authoritative-store implementation. Slices 3–6 supply explicit schema management, Work, Flow, Schedule, and an
+  explicitly opted-in hosted runtime.
 
-All three packages are machine-held out of every publish plan until slices 5-6 prove Schedule, hosted runtime,
-drain/recovery, and operational conformance in a coordinated release review. They can be built and packed directly for
-contract verification, but they are not a supported NuGet release.
+All three packages are machine-held out of every publish plan pending coordinated release evidence. They can be built
+and packed directly for contract verification, but they are not a supported NuGet release.
+
+For the internal W3C causal-link contract, safe telemetry attributes, deployment order, and reference proof, read
+[Durable Flow trace context v1](flow-trace-context-v1.md). It supplies persistence and crash-proof seams now; it does
+not make Slice 4 a hosted runtime.
 
 ## Why this boundary
 
@@ -22,8 +25,11 @@ public, testable contracts without friend access to the application package. The
 `ForgeTrust.AppSurface.Durable.PostgreSql` → `ForgeTrust.AppSurface.Durable.Provider` → `ForgeTrust.AppSurface.Durable`
 
 The application package registers only passive registries. A provider is selected explicitly by the host. The PostgreSQL
-source preview adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`, `0004_schedule_protocol`) and one-operation-at-a-time Work, Flow, and Work-first Schedule persistence, but no polling host or hosted
-scheduling activation, hosted service, endpoint, or telemetry implementation.
+source preview adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`,
+`0004_schedule_protocol`, `0005_runtime_heartbeat`, and `0006_flow_trace_context`) plus one-operation-at-a-time Work,
+Flow, and Work-first Schedule persistence with versioned W3C causal evidence. PostgreSQL registration remains passive;
+an application explicitly adds one bounded polling host only where it intends continuous activation. It adds no public
+endpoint, dashboard, or automatic migration.
 
 ## Scale and transport boundary
 
@@ -47,10 +53,10 @@ The preview persists explicit Work and Flow decisions rather than arbitrary `asy
 exactly-once claim for external effects. Provider safety, immutable execution identity, revision fences, and versioned
 command fingerprints make ambiguity observable and fail closed.
 
-Operational failures use the shared [`ASDURxxx` diagnostics catalog](../troubleshooting/durable-diagnostics.md). Codes
-for later hosted-runtime behavior remain reserved there.
+Operational failures use the shared [`ASDURxxx` diagnostics catalog](../troubleshooting/durable-diagnostics.md), including
+the fixed hosted-runtime liveness and worker-generation codes.
 
-For the PostgreSQL boundary, start with the [`slice 3 reference workload`](slice3-reference-workload.md), [`slice 4 reference workload`](slice4-reference-workload.md), and [`Schedule protocol v1`](schedule-protocol-v1.md), then use the
+For the PostgreSQL boundary, start with the [`slice 3 reference workload`](slice3-reference-workload.md), [`slice 4 reference workload`](slice4-reference-workload.md), [`Schedule protocol v1`](schedule-protocol-v1.md), and [Durable Flow trace context v1](flow-trace-context-v1.md), then use the
 normative [`Work protocol v1`](work-protocol-v1.md) and [`Flow protocol v1`](flow-protocol-v1.md). The
 [`slice 3 reconstruction ledger`](slice3-reconstruction.md) and [`slice 4 reconstruction ledger`](slice4-reconstruction.md) account for every artifact in the superseded branches.
 

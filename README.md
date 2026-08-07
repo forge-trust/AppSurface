@@ -94,7 +94,7 @@ This approach aims to:
 
 ### [Web](./Web/README.md)
 
-- [**ForgeTrust.AppSurface.Web**](./Web/ForgeTrust.AppSurface.Web/README.md) – Bootstraps ASP.NET Core apps, lets modules register pre-routing middleware, endpoint-aware middleware, and endpoints, and includes [protected preview named deploy canary evaluation and bounded snapshots](./Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints), conventional browser status pages, and opt-in production 500 pages.
+- [**ForgeTrust.AppSurface.Web**](./Web/ForgeTrust.AppSurface.Web/README.md) – Bootstraps ASP.NET Core apps, lets modules register pre-routing middleware, endpoint-aware middleware, and endpoints, and includes [browser-local presentation preferences with one canonical document](./Web/ForgeTrust.AppSurface.Web/README.md#browser-local-theme-preferences), [protected preview named deploy canary evaluation and bounded snapshots](./Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints), conventional browser status pages, and opt-in production 500 pages.
 - [**ForgeTrust.AppSurface.Web.Push**](./Web/ForgeTrust.AppSurface.Web.Push/README.md) – Optional protected Web Push subscription and one-attempt delivery rail with app-owned custody, explicit cookie-antiforgery or bearer mapping, exact push-service origin allowlisting, and safe terminal cleanup.
 - [**ForgeTrust.AppSurface.Web.OpenApi**](./Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) – Optional module that adds OpenAPI generation with development-only endpoint exposure by default.
 - [**ForgeTrust.RazorWire**](./Web/ForgeTrust.RazorWire/README.md) – Adds reactive Razor-based streaming, islands, and CDN-default export tooling for server-rendered web apps.
@@ -105,7 +105,7 @@ This approach aims to:
 
 ### [CLI](./Cli/ForgeTrust.AppSurface.Cli/README.md)
 
-- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including [`appsurface canary poll`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-canary-poll) bounded read-only deployment proof for protected AppSurface Web named canaries, `appsurface docs` preview/export workflows, `appsurface secrets` local-secret diagnostics, `appsurface coverage run` private test orchestration, `appsurface coverage merge` Cobertura fan-in, and `appsurface coverage gate` local threshold enforcement.
+- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including [`appsurface canary poll`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-canary-poll) bounded read-only deployment proof for protected AppSurface Web named canaries, `appsurface docs` preview/export workflows, `appsurface secrets` local-secret diagnostics, `appsurface coverage run` package-consumer test orchestration, `appsurface coverage merge` Cobertura fan-in, and `appsurface coverage gate` local threshold enforcement.
 
 ### [Dependency](./Dependency/README.md)
 
@@ -189,15 +189,19 @@ Run the repository's full AppSurface coverage-and-gate lane:
 ./scripts/coverage-solution.sh
 ```
 
-For a local checkout, the default patch comparison is `origin/main`. The CI workflow overrides that
-value with `HEAD^1` for its pull-request merge checkout, so its patch gate evaluates exactly the
-tested merge tree. Set `COVERAGE_GATE_DIFF_BASE=` to run only the aggregate gate, as CI does for
-baseline builds.
+For a local checkout, the default patch comparison is `origin/main`. The coverage wrapper uses
+[`--patch-line-mode codecov`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate)
+so the local changed-line gate handles partial conditions the same way as Codecov. The CI workflow
+overrides the comparison value with `HEAD^1` for its pull-request merge checkout, so its patch gate
+evaluates exactly the tested merge tree. Set `COVERAGE_GATE_DIFF_BASE=` to run only the aggregate
+gate, as CI does for baseline builds.
 
 This command:
 - Runs each solution test project.
-- Collects coverage only for `ForgeTrust.AppSurface.*` modules.
-- Excludes test modules (`*.Tests` and `*.IntegrationTests`) from coverage.
+- Leaves assembly scope to the public CLI and Coverlet defaults; the merged artifact
+  includes RazorWire production sources when their tests exercise them.
+- Uses the public CLI's default test-module exclusions (`*.Tests` and
+  `*.IntegrationTests`).
 - Produces one merged Cobertura file at `TestResults/coverage-merged/coverage.cobertura.xml`.
 - Produces AppSurface-managed JUnit files as `TestResults/coverage-merged/junit-coverage-<index>-<project-name-hash>.xml`.
 - Writes a summary to `TestResults/coverage-merged/summary.txt`.
@@ -210,32 +214,51 @@ This command:
 - Gates at 95% line coverage and 85% branch coverage, plus 95% line and 85% branch coverage for
   the selected patch when a diff base is configured.
 - Keeps Codecov's patch status aligned with the repository's 95% patch-line gate through
-  [`codecov.yml`](./codecov.yml), with a 0.5-point tolerance for Codecov treating partially
-  covered lines as misses; the local gate remains authoritative for patch branches.
+  [`codecov.yml`](./codecov.yml) and `--patch-line-mode codecov`, with a 0.5-point tolerance; the
+  local gate remains authoritative for patch branches.
 
-Private package-consuming repositories should use the public CLI runner instead of this repository's script:
+Private package-consuming repositories should use the public CLI runner instead of
+this repository's no-argument script. Start with this copy-pasteable path:
 
 ```bash
+dotnet new tool-manifest
+dotnet tool install ForgeTrust.AppSurface.Cli --prerelease
 dotnet add tests/MyApp.Tests/MyApp.Tests.csproj package coverlet.collector
+dotnet tool run appsurface coverage run --solution ./MyApp.slnx --dry-run
 dotnet tool run appsurface coverage run --solution ./MyApp.slnx
 dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75
 ```
 
-The `appsurface coverage run` command discovers `.sln`/`.slnx` test projects or accepts repeated `--test-project` values, runs Coverlet-instrumented projects, writes private local artifacts under `TestResults/coverage-merged`, and merges Cobertura through the CLI package's ReportGenerator dependency without reading the consumer repo's tool manifest. The default driver requires a direct `coverlet.collector` reference in every selected VSTest project and never falls back; native Microsoft Testing Platform projects are rejected, while `--coverage-driver msbuild` remains an explicit compatibility path. See [coverage driver selection](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection) for prerequisites, migration guidance, and pitfalls. Its [no-progress watchdog](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog) emits 30-second heartbeats by default, warns after 10 minutes without observable progress, and can perform bounded whole-process-tree cleanup with `--watchdog fail`. Solution-discovery consumers can use repeatable [`--exclude-test-project`](./Cli/ForgeTrust.AppSurface.Cli/README.md#exclude-discovered-test-projects) globs to omit selected test projects from coverage execution while leaving the solution build unchanged. No separate merge command is required for ordinary package consumers: `coverage run` produces `TestResults/coverage-merged/coverage.cobertura.xml` directly. Managed test results are opt-in with `--test-results junit`; this requires selected test projects to reference `JunitXml.TestLogger`. `--slow-test-diagnostics` implies managed JUnit results and writes `slow-test-diagnostics.md` and `.json` beside the merged coverage file. Use `appsurface coverage merge --source ./TestResults/coverage-shards --output ./TestResults/coverage-merged` when a matrix job or custom test workflow already produced shard files named `coverage.cobertura.xml`. The optional `appsurface coverage gate` command evaluates that merged Cobertura file locally, writes `coverage-gate.json` and `coverage-gate.md`, appends the Markdown report to `$GITHUB_STEP_SUMMARY` when GitHub Actions provides it, and fails with `ASCOV020` when line, branch, or configured patch coverage is below threshold. Patch coverage accepts exactly one source: `--diff-base` for local Git history, `--diff-file` for a CI-produced unified diff artifact, or `--diff-stdin` for piped unified diff text. External diff artifacts are private local inputs, are bounded at 20 MiB, and fail closed when non-empty content is not unified diff text. The coverage commands are intentionally private-by-default: they do not upload coverage, call GitHub APIs, or store trends.
+The `appsurface coverage run` command discovers `.sln`/`.slnx` test projects or accepts repeated `--test-project` values, runs Coverlet-instrumented projects, writes private local artifacts under `TestResults/coverage-merged`, and merges Cobertura through the CLI package's ReportGenerator dependency without reading the consumer repo's tool manifest. `--dry-run` performs the same collector capability preflight before tests or output cleanup, so it is the safe first command for a new repository. The default driver requires a direct `coverlet.collector` reference in every selected VSTest project and never falls back; native Microsoft Testing Platform projects are rejected, while `--coverage-driver msbuild` remains an explicit compatibility path. See [coverage driver selection](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection) for prerequisites, migration guidance, and pitfalls. Its [no-progress watchdog](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog) emits 30-second heartbeats by default, warns after 10 minutes without observable progress, and can perform bounded whole-process-tree cleanup with `--watchdog fail`. Solution-discovery consumers can use repeatable [`--exclude-test-project`](./Cli/ForgeTrust.AppSurface.Cli/README.md#exclude-discovered-test-projects) globs to omit selected test projects from coverage execution while leaving the solution build unchanged. Use explicit [`--include` and `--exclude` filters](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) only when a consumer owns that assembly-scope policy. No separate merge command is required for ordinary package consumers: `coverage run` produces `TestResults/coverage-merged/coverage.cobertura.xml` directly. Managed test results are opt-in with `--test-results junit`; this requires selected test projects to reference `JunitXml.TestLogger`. `--slow-test-diagnostics` implies managed JUnit results and writes `slow-test-diagnostics.md` and `.json` beside the merged coverage file. Use `appsurface coverage merge --source ./TestResults/coverage-shards --output ./TestResults/coverage-merged` when a matrix job or custom test workflow already produced shard files named `coverage.cobertura.xml`. The optional `appsurface coverage gate` command evaluates that merged Cobertura file locally, writes `coverage-gate.json` and `coverage-gate.md`, appends the Markdown report to `$GITHUB_STEP_SUMMARY` when GitHub Actions provides it, and fails with `ASCOV020` when line, branch, or configured patch coverage is below threshold. Patch coverage accepts exactly one source: `--diff-base` for local Git history, `--diff-file` for a CI-produced unified diff artifact, or `--diff-stdin` for piped unified diff text. External diff artifacts are private local inputs, are bounded at 20 MiB, and fail closed when non-empty content is not unified diff text. The coverage commands are intentionally private-by-default: they do not upload coverage, call GitHub APIs, or store trends.
 
-The legacy grouped script modes remain coverage-only for bounded local or CI experiments; use the
-public [`appsurface coverage gate`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate)
-command separately when a grouped artifact needs gating:
+### Focused and sharded coverage
+
+`scripts/coverage-solution.sh` accepts no arguments and exists only for this
+repository's full run-and-gate policy. Use the public CLI when selecting a subset,
+changing output, or merging shards:
 
 ```bash
-BUILD_CONFIGURATION=Release BUILD_SOLUTION=false ./scripts/coverage-solution.sh --group web --output TestResults/coverage-groups/web
-./scripts/coverage-solution.sh --list-groups
-./scripts/coverage-solution.sh --merge-only TestResults/coverage-groups --output TestResults/coverage-merged
+dotnet tool run appsurface coverage run \
+  --test-project Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj \
+  --test-project tools/ForgeTrust.AppSurface.MarkdownSnippets.Tests/ForgeTrust.AppSurface.MarkdownSnippets.Tests.csproj
+dotnet tool run appsurface coverage run \
+  --solution ./ForgeTrust.AppSurface.slnx \
+  --exclude-test-project "**/*IntegrationTests.csproj" \
+  --dry-run
+dotnet tool run appsurface coverage merge \
+  --source ./TestResults/coverage-shards \
+  --output ./TestResults/coverage-merged
 ```
 
-Available bounded groups are `core`, `tools`, `web`, `docs`, `razorwire`, and `integration`.
+The former repository-only group taxonomy has no public CLI replacement. Select exact
+test projects with repeated `--test-project`, or use solution discovery with repeatable
+`--exclude-test-project` globs. If a shell or CI configuration still supplies a retired
+wrapper argument or `TEST_GROUP`, `INCLUDE_FILTER`, `EXCLUDE_FILTER`, or
+`BUILD_SOLUTION`, unset it and use the public command named in the wrapper's exit-2
+diagnostic.
 
-Default PR validation keeps solution coverage in one lane until measured group runs prove they reduce total GitHub Actions minutes, not just wall-clock time.
+Default PR validation keeps solution coverage in one lane until a future public-CLI
+matrix design proves it reduces total GitHub Actions minutes, not just wall-clock time.
 
 The current CI critical-path policy and timing baseline live in [eng/ci-critical-path.md](./eng/ci-critical-path.md).
 

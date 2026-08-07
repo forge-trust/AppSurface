@@ -1,7 +1,13 @@
+using System.Security.Cryptography;
+using System.Text;
 using AngleSharp.Html.Parser;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Theming;
+using ForgeTrust.AppSurface.Web;
+using ForgeTrust.AppSurface.Web.TagHelpers;
 using ForgeTrust.AppSurface.Web.Theming;
+using Microsoft.AspNetCore.Razor.TagHelpers;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
@@ -29,7 +35,7 @@ public sealed class AppSurfaceDocsThemePairStaticExportTests
     public void PublishedTreeRewrite_ShouldRemoveThemeNoncesOnTheDefaultStableMount()
     {
         const string html = """
-            <!DOCTYPE html><html data-as-theme="appsurface"><head><style nonce="request-theme-nonce" data-as-theme-critical>html{--as-canvas:#f8fafc;}</style><style data-docs-theme-critical nonce="request-docs-nonce">html{--docs-color-surface-canvas:var(--as-canvas);}</style><script nonce="preserve-me">window.staticExport = true;</script></head><body></body></html>
+            <!DOCTYPE html><html data-as-theme="appsurface"><head><script data-as-theme-preference-bootstrap nonce="request-preference-nonce">window.preferenceBootstrap = true;</script><style nonce="request-theme-nonce" data-as-theme-critical>html{--as-canvas:#f8fafc;}</style><style data-docs-theme-critical nonce="request-docs-nonce">html{--docs-color-surface-canvas:var(--as-canvas);}</style><script nonce="preserve-me">window.staticExport = true;</script></head><body></body></html>
             """;
 
         var rewritten = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(html, "/docs");
@@ -37,9 +43,11 @@ public sealed class AppSurfaceDocsThemePairStaticExportTests
 
         Assert.DoesNotContain("request-theme-nonce", rewritten, StringComparison.Ordinal);
         Assert.DoesNotContain("request-docs-nonce", rewritten, StringComparison.Ordinal);
+        Assert.DoesNotContain("request-preference-nonce", rewritten, StringComparison.Ordinal);
+        Assert.Null(document.QuerySelector("script[data-as-theme-preference-bootstrap]")?.GetAttribute("nonce"));
         Assert.Null(document.QuerySelector("style[data-as-theme-critical]")?.GetAttribute("nonce"));
         Assert.Null(document.QuerySelector("style[data-docs-theme-critical]")?.GetAttribute("nonce"));
-        Assert.Equal("preserve-me", document.QuerySelector("script")?.GetAttribute("nonce"));
+        Assert.Equal("preserve-me", document.QuerySelector("script:not([data-as-theme-preference-bootstrap])")?.GetAttribute("nonce"));
     }
 
     [Fact]
@@ -83,6 +91,63 @@ public sealed class AppSurfaceDocsThemePairStaticExportTests
         Assert.Null(archived.QuerySelector("style[data-docs-theme-critical]")?.GetAttribute("nonce"));
         Assert.Equal("preserve-me", archived.QuerySelector("script")?.GetAttribute("nonce"));
     }
+
+    [Fact]
+    public void PublishedTreeRewrite_ShouldKeepTheVerifiedPreferenceBootstrapAndRemoveItsRequestNonce()
+    {
+        var services = new ServiceCollection();
+        services.AddAppSurfaceTheming(options => options.Pairs.Add(AppSurfaceThemePair.AppSurface()));
+        services.AddAppSurfaceWebThemePreferences(options => options.StorageKey = "docs-theme");
+        using var provider = services.BuildServiceProvider();
+        var themeDocument = provider.GetRequiredService<IAppSurfaceThemeDocumentProvider>().GetDocument();
+        var preferenceHead = RenderHead(provider, "live-preference-nonce");
+        var docsTheme = new AppSurfaceDocsThemeResolver(
+            new AppSurfaceDocsOptions(),
+            new StubThemeResolver(CreateSystemResolution())).Theme;
+        var liveHtml = $"""
+            <!DOCTYPE html><html {themeDocument.RootAttributes} style="{themeDocument.RootStyle}"><head>{preferenceHead}<style data-docs-theme-critical nonce="live-docs-nonce">{docsTheme.CriticalCss}</style></head><body></body></html>
+            """;
+
+        var staticHtml = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(liveHtml, "/docs/v/1.2.3");
+        var document = new HtmlParser().ParseDocument(staticHtml);
+        var bootstrap = Assert.Single(document.QuerySelectorAll("script[data-as-theme-preference-bootstrap]"));
+
+        Assert.Null(bootstrap.GetAttribute("nonce"));
+        Assert.Equal(AppSurfaceThemePreferenceCsp.ScriptHash, ToCspSha256(bootstrap.TextContent));
+        Assert.Null(document.QuerySelector("style[data-as-theme-critical]")?.GetAttribute("nonce"));
+        Assert.Null(document.QuerySelector("style[data-docs-theme-critical]")?.GetAttribute("nonce"));
+        Assert.Single(document.QuerySelectorAll("style[data-as-theme-critical]"));
+        Assert.Single(document.QuerySelectorAll("style[data-docs-theme-critical]"));
+    }
+
+    private static AppSurfaceThemeResolution CreateSystemResolution()
+    {
+        var pair = AppSurfaceThemePair.AppSurface();
+        return new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.System, pair.Light, pair.Dark);
+    }
+
+    private static string RenderHead(IServiceProvider provider, string nonce)
+    {
+        var helper = new AppSurfaceThemeHeadTagHelper(
+            provider.GetRequiredService<IAppSurfaceThemeDocumentProvider>(),
+            provider)
+        {
+            Nonce = nonce
+        };
+        var output = new TagHelperOutput(
+            "appsurface-theme-head",
+            new TagHelperAttributeList(),
+            (_, _) => Task.FromResult<TagHelperContent>(new DefaultTagHelperContent()));
+
+        helper.Process(
+            new TagHelperContext(new TagHelperAttributeList(), new Dictionary<object, object>(), "preference-head"),
+            output);
+
+        return output.Content.GetContent();
+    }
+
+    private static string ToCspSha256(string value) =>
+        "sha256-" + Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private sealed class StubThemeResolver(AppSurfaceThemeResolution resolution) : IAppSurfaceThemeResolver
     {

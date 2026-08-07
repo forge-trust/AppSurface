@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Npgsql;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql;
@@ -20,10 +21,12 @@ internal static class PostgreSqlDurableFlowActivityProjector
 
         const string lineageSql = """
             SELECT wait.flow_instance_id, wait.wait_id, wait.callsite_id,
-                   work.result_payload IS NOT NULL
+                   work.result_payload IS NOT NULL, trace.traceparent, trace.tracestate
             FROM appsurface_durable.flow_wait AS wait
             JOIN appsurface_durable.work AS work
               ON work.scope_id = wait.scope_id AND work.work_id = wait.child_work_id
+            LEFT JOIN appsurface_durable.flow_trace_context AS trace
+              ON trace.scope_id = work.scope_id AND trace.trace_context_id = work.trace_context_id
             WHERE wait.scope_id = @scope_id AND wait.child_work_id = @work_id
               AND wait.kind = 'activity' AND wait.state IN ('active', 'suspended');
             """;
@@ -31,6 +34,7 @@ internal static class PostgreSqlDurableFlowActivityProjector
         Guid waitId = default;
         string? callsiteId = null;
         var hasResultPayload = false;
+        var workTrace = DurableTraceContextCapture.Absent;
         await using (var lineage = new NpgsqlCommand(lineageSql, connection, transaction))
         {
             lineage.Parameters.AddWithValue("scope_id", scopeId.Value);
@@ -42,6 +46,9 @@ internal static class PostgreSqlDurableFlowActivityProjector
                 waitId = reader.GetGuid(1);
                 callsiteId = reader.GetString(2);
                 hasResultPayload = reader.GetBoolean(3);
+                workTrace = reader.IsDBNull(4)
+                    ? DurableTraceContextCapture.Absent
+                    : DurableTraceContext.Parse(reader.GetString(4), reader.IsDBNull(5) ? null : reader.GetString(5));
             }
         }
 
@@ -107,6 +114,18 @@ internal static class PostgreSqlDurableFlowActivityProjector
         var revision = checked(flowRevision + 1);
         if (succeeded && !canceledParent && hasResultPayload)
         {
+            DurableTraceDiagnostics.Report(workTrace.DiagnosticCode);
+            using var activityScope = DurableTraceActivity.StartRoot(
+                "appsurface.durable.flow.activity",
+                ActivityKind.Consumer,
+                workTrace.Context);
+            var activity = activityScope.Activity;
+            var completionTrace = DurableTraceContext.CaptureExecution(activity, workTrace);
+            if (activity is not null)
+            {
+                DurableTraceDiagnostics.Report(completionTrace.DiagnosticCode);
+            }
+
             await ProjectSuccessAsync(
                 connection,
                 transaction,
@@ -118,6 +137,34 @@ internal static class PostgreSqlDurableFlowActivityProjector
                 revision,
                 definitionFingerprint,
                 cancellationToken).ConfigureAwait(false);
+            var trace = await PostgreSqlDurableFlowStore.InsertTraceContextAsync(
+                connection,
+                transaction,
+                scopeId,
+                instanceId.Value,
+                completionTrace.Context,
+                "activity_completed",
+                cancellationToken).ConfigureAwait(false);
+            await PostgreSqlDurableFlowStore.AttachTraceContextAsync(
+                connection,
+                transaction,
+                scopeId,
+                instanceId.Value,
+                trace,
+                commandId: null,
+                revision,
+                waitId,
+                timerId: null,
+                workId,
+                cancellationToken).ConfigureAwait(false);
+            DurableTraceTelemetry.Apply(
+                activity,
+                "activity",
+                "activity",
+                "ready",
+                "completed",
+                completionTrace.Context?.CorrelationToken ?? Guid.Empty,
+                completionTrace.Status);
             return;
         }
 

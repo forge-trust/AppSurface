@@ -120,6 +120,85 @@
     color-scheme: dark;
 }
 
+/*
+ * Docs predates the shared theme pair and still has a small number of Tailwind slate utilities in its Razor views.
+ * Preserve those views while a host opts into browser-local light/system preferences by mapping Tailwind's neutral
+ * palette back to the Docs semantic tokens. Dark and legacy fixed-dark hosts keep Tailwind's original palette.
+ */
+html[data-as-theme-mode="light"] {
+    --color-slate-50: var(--docs-color-text-strong);
+    --color-slate-100: var(--docs-color-text-strong);
+    --color-slate-200: var(--docs-color-text-default);
+    --color-slate-300: var(--docs-color-text-muted);
+    --color-slate-400: var(--docs-color-text-subtle);
+    --color-slate-500: var(--docs-color-text-faint);
+    --color-slate-600: var(--docs-color-border-strong);
+    --color-slate-700: var(--docs-color-border-default);
+    --color-slate-800: var(--docs-color-border-muted);
+    --color-slate-900: var(--docs-color-surface-raised);
+    --color-slate-950: var(--docs-color-surface-canvas);
+    --color-amber-100: var(--docs-color-visited-link);
+    --color-amber-200: var(--docs-color-visited-link);
+    --color-emerald-100: var(--docs-color-link);
+    --color-emerald-200: var(--docs-color-link);
+    --color-emerald-300: var(--docs-color-link);
+    --color-rose-100: var(--as-danger);
+    --color-rose-200: var(--as-danger);
+    --color-rose-300: var(--as-danger);
+    --color-sky-100: var(--docs-color-link);
+}
+
+html[data-as-theme-mode="light"] .text-white {
+    color: var(--docs-color-text-strong);
+}
+
+html[data-as-theme-mode="light"] [class~="border-white/10"] {
+    border-color: var(--docs-color-border-muted);
+}
+
+html[data-as-theme-mode="light"] .docs-token-bg-accent.text-slate-950,
+html[data-as-theme-mode="light"] .docs-token-bg-accent-strong.text-white {
+    color: var(--color-white);
+}
+
+@media (prefers-color-scheme: light) {
+    html[data-as-theme-mode="system"] {
+        --color-slate-50: var(--docs-color-text-strong);
+        --color-slate-100: var(--docs-color-text-strong);
+        --color-slate-200: var(--docs-color-text-default);
+        --color-slate-300: var(--docs-color-text-muted);
+        --color-slate-400: var(--docs-color-text-subtle);
+        --color-slate-500: var(--docs-color-text-faint);
+        --color-slate-600: var(--docs-color-border-strong);
+        --color-slate-700: var(--docs-color-border-default);
+        --color-slate-800: var(--docs-color-border-muted);
+        --color-slate-900: var(--docs-color-surface-raised);
+        --color-slate-950: var(--docs-color-surface-canvas);
+        --color-amber-100: var(--docs-color-visited-link);
+        --color-amber-200: var(--docs-color-visited-link);
+        --color-emerald-100: var(--docs-color-link);
+        --color-emerald-200: var(--docs-color-link);
+        --color-emerald-300: var(--docs-color-link);
+        --color-rose-100: var(--as-danger);
+        --color-rose-200: var(--as-danger);
+        --color-rose-300: var(--as-danger);
+        --color-sky-100: var(--docs-color-link);
+    }
+
+    html[data-as-theme-mode="system"] .text-white {
+        color: var(--docs-color-text-strong);
+    }
+
+    html[data-as-theme-mode="system"] [class~="border-white/10"] {
+        border-color: var(--docs-color-border-muted);
+    }
+
+    html[data-as-theme-mode="system"] .docs-token-bg-accent.text-slate-950,
+    html[data-as-theme-mode="system"] .docs-token-bg-accent-strong.text-white {
+        color: var(--color-white);
+    }
+}
+
 .docs-shell-root {
     background: var(--docs-color-surface-canvas);
     border-color: var(--docs-color-border-muted);
@@ -652,6 +731,50 @@ body {
 .docs-page-meta-download svg {
     width: 0.85rem;
     height: 0.85rem;
+}
+
+.docs-theme-preference {
+    display: grid;
+    gap: 0.45rem;
+    margin: 0 1rem;
+    border: 1px solid var(--docs-color-border-default);
+    border-radius: 0.5rem;
+    padding: 0.7rem 0.8rem;
+    color: var(--docs-color-text-muted);
+    font-size: 0.75rem;
+}
+
+.docs-theme-preference legend {
+    padding: 0 0.2rem;
+    color: var(--docs-color-text-subtle);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.docs-theme-preference label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    cursor: pointer;
+}
+
+.docs-theme-preference input {
+    accent-color: var(--docs-color-accent);
+}
+
+.docs-theme-preference label:has(input:focus-visible) {
+    border-radius: 0.2rem;
+    outline: var(--docs-focus-outline);
+    outline-offset: 0.15rem;
+}
+
+.docs-theme-preference-noscript {
+    margin: 0 1rem 0.75rem;
+    color: var(--docs-color-text-subtle);
+    font-size: 0.75rem;
+    line-height: 1.4;
 }
 
 @media (pointer: coarse) {

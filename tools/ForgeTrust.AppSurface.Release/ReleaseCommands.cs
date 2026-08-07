@@ -125,6 +125,162 @@ internal sealed partial class ReleasePrepareCommand : ReleaseCommandBase, IComma
 }
 
 /// <summary>
+/// Renders canonical annotated-tag trailers from the prepared release artifacts at HEAD.
+/// </summary>
+[Command("tag-message", Description = "Render canonical annotated-tag binding trailers from prepared release artifacts at HEAD.")]
+internal sealed partial class ReleaseTagMessageCommand : ReleaseCommandBase, ICommand
+{
+    /// <summary>
+    /// Creates the tag-message command.
+    /// </summary>
+    /// <param name="executionContext">Execution context supplied by the entry point.</param>
+    /// <param name="commandRunner">Runner used for Git calls.</param>
+    /// <param name="clock">Clock used by shared command construction.</param>
+    public ReleaseTagMessageCommand(ReleaseExecutionContext executionContext, ICommandRunner commandRunner, IReleaseClock clock)
+        : base(executionContext, commandRunner, clock)
+    {
+    }
+
+    /// <inheritdoc />
+    protected override string CommandName => "tag-message";
+
+    /// <inheritdoc />
+    public ValueTask ExecuteAsync(IConsole console)
+    {
+        return ExecuteWithDiagnosticsAsync(console, async (options, cancellationToken) =>
+        {
+            var services = CreateServices(options);
+            var message = await services.TaggedProjectionResolver.GenerateTagMessageAsync(options.Version, cancellationToken);
+            await console.Output.WriteAsync(message);
+            return 0;
+        });
+    }
+}
+
+/// <summary>
+/// Inspects a local annotated release tag and renders the validated tagged projection.
+/// </summary>
+[Command("inspect", Description = "Verify an annotated release tag and render the tag-bound tagged projection.")]
+internal sealed partial class ReleaseInspectCommand : ReleaseCommandBase, ICommand
+{
+    /// <summary>
+    /// Creates the inspect command.
+    /// </summary>
+    /// <param name="executionContext">Execution context supplied by the entry point.</param>
+    /// <param name="commandRunner">Runner used for Git calls.</param>
+    /// <param name="clock">Clock used by shared command construction.</param>
+    public ReleaseInspectCommand(ReleaseExecutionContext executionContext, ICommandRunner commandRunner, IReleaseClock clock)
+        : base(executionContext, commandRunner, clock)
+    {
+    }
+
+    /// <summary>
+    /// Gets the annotated release tag to inspect.
+    /// </summary>
+    [CommandOption("tag", Description = "Annotated tag to inspect. Must match --version with a leading v.")]
+    public string? Tag { get; set; }
+
+    /// <summary>
+    /// Gets the branch that must contain the tag commit.
+    /// </summary>
+    [CommandOption("base-ref", Description = "Branch name or supported origin branch ref that must contain the tag commit. Defaults to main.")]
+    public string? BaseRef { get; set; }
+
+    /// <summary>
+    /// Gets an optional explicit output path for the tagged sidecar projection.
+    /// </summary>
+    /// <remarks>
+    /// The command validates all tag-bound inputs before writing this path, then opens each parent directory without following links and
+    /// atomically replaces the output through that retained directory object. The release-publish docs job uses a runner-temporary file and
+    /// explicitly overlays it only in its disposable detached checkout. The path must resolve outside the repository source tree so inspection
+    /// cannot overwrite a prepared release artifact.
+    /// </remarks>
+    [CommandOption("out", Description = "Optional temporary YAML output path outside the repository for the validated tagged sidecar projection.")]
+    public string? OutputPath { get; set; }
+
+    /// <inheritdoc />
+    protected override string CommandName => "inspect";
+
+    /// <inheritdoc />
+    protected override string? ResolveTag(SemVer version)
+    {
+        if (string.IsNullOrWhiteSpace(Tag))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-tag-required",
+                "Inspecting a release requires an explicit tag.",
+                "The local proof must bind one exact annotated tag to the requested release version.",
+                "Pass --tag v<version> after creating the annotated tag locally.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#prepared-to-tagged-state"));
+        }
+
+        if (!string.Equals(Tag, version.TagName, StringComparison.Ordinal))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-tag-version-mismatch",
+                "The requested tag does not match the requested version.",
+                $"Version {version} maps to tag {version.TagName}, but inspect received {Tag}.",
+                "Use matching --version and --tag values so the release identity cannot split.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#prepared-to-tagged-state"));
+        }
+
+        return Tag;
+    }
+
+    /// <inheritdoc />
+    protected override string ResolveBaseRef()
+    {
+        return ReleasePublishCommand.NormalizeBaseRef(BaseRef);
+    }
+
+    /// <inheritdoc />
+    public ValueTask ExecuteAsync(IConsole console)
+    {
+        return ExecuteWithDiagnosticsAsync(console, async (options, cancellationToken) =>
+        {
+            var services = CreateServices(options);
+            var projection = await services.TaggedProjectionResolver.ResolveAsync(options, cancellationToken);
+            if (string.IsNullOrWhiteSpace(OutputPath))
+            {
+                await console.Output.WriteAsync(projection.SidecarYaml);
+                return 0;
+            }
+
+            await WriteProjectionAsync(OutputPath, options.RepositoryRoot, projection.SidecarYaml, cancellationToken);
+            await console.Output.WriteLineAsync($"release.state: tagged{Environment.NewLine}release.tag: {projection.Tag}{Environment.NewLine}release.commit: {projection.TagCommit}{Environment.NewLine}release.tagger_utc: {projection.TaggerTimestamp.ToUniversalTime():O}{Environment.NewLine}release.binding: {ReleaseTagBinding.RequiredKeyCount}/{ReleaseTagBinding.RequiredKeyCount} verified");
+            return 0;
+        });
+    }
+
+    private static async Task WriteProjectionAsync(string outputPath, string repositoryRoot, string yaml, CancellationToken cancellationToken)
+    {
+        var resolvedPath = Path.GetFullPath(outputPath, repositoryRoot);
+        if (string.Equals(resolvedPath, Path.GetPathRoot(resolvedPath), StringComparison.Ordinal)
+            || Directory.Exists(resolvedPath))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-inspect-output-path-invalid",
+                "Inspect output must be a file path, not a root or directory.",
+                $"The resolved output path is {resolvedPath}.",
+                "Pass an explicit temporary YAML file path such as a file under RUNNER_TEMP.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#prepared-to-tagged-state"));
+        }
+
+        if (ReleaseWorkspace.IsUnderPath(repositoryRoot, resolvedPath))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-inspect-output-path-invalid",
+                "Inspect output must stay outside the repository source tree.",
+                $"The resolved output path {resolvedPath} is under {Path.GetFullPath(repositoryRoot)}.",
+                "Pass an ordinary temporary file path such as a file under RUNNER_TEMP.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#prepared-to-tagged-state"));
+        }
+
+        await ReleaseProjectionOutputWriter.WriteAsync(resolvedPath, yaml, cancellationToken);
+    }
+}
+
+/// <summary>
 /// Validates tag state and emits GitHub Release workflow outputs.
 /// </summary>
 [Command("publish", Description = "Validate an annotated tag and emit structured GitHub Release workflow outputs.")]
@@ -248,7 +404,7 @@ internal sealed partial class ReleasePublishCommand : ReleaseCommandBase, IComma
             : Path.GetFullPath(DocsTrustedReleaseRootPath, repoRoot);
     }
 
-    private static string NormalizeBaseRef(string? baseRef)
+    internal static string NormalizeBaseRef(string? baseRef)
     {
         if (string.IsNullOrWhiteSpace(baseRef))
         {

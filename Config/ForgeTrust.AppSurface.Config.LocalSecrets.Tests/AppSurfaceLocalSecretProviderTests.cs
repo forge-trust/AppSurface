@@ -52,6 +52,7 @@ public sealed class AppSurfaceLocalSecretProviderTests
     [InlineData(LocalSecretResultStatus.Locked)]
     [InlineData(LocalSecretResultStatus.UnsupportedPlatform)]
     [InlineData(LocalSecretResultStatus.ProviderFailed)]
+    [InlineData(LocalSecretResultStatus.MigrationRequired)]
     public void GetValue_Should_StopResolutionForTerminalStoreStates(LocalSecretResultStatus status)
     {
         var store = new FixedResultStore(AppSurfaceLocalSecretResult.NotFound(

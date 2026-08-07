@@ -117,8 +117,119 @@ public sealed class ProgramEntryPointTests
         var result = await InvokeProgramEntryPointAsync(["secrets"]);
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("appsurface secrets transfer plan|apply", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("migrate", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("appsurface secrets transfer plan", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("appsurface secrets transfer apply", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("plan|apply", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("transfer google", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsMigrate_Should_ExplainWhenTheSelectedStoreDoesNotRetainMacOsLegacyRecords()
+    {
+        using var temp = TempDirectory.Create("appsurface-secrets-");
+        var storePath = Path.Join(temp.Path, "local-secrets.json");
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["secrets", "migrate", "--app", "MyApp", "--environment", "Development", "--store-file", storePath]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("local-secret-migration-unsupported", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsMigrate_Should_RenderCompletedRowsAndCountersWithoutValues()
+    {
+        var command = new TestableSecretsMigrateCommand(
+            new MigrationResultStore(
+                AppSurfaceLocalSecretMigrationResult.Completed(
+                    [
+                        new AppSurfaceLocalSecretMigrationRow("stripe:ApiKey", AppSurfaceLocalSecretMigrationAction.AlreadyV2, LocalSecretResultStatus.Found, null),
+                        new AppSurfaceLocalSecretMigrationRow("Stripe:ApiKey", AppSurfaceLocalSecretMigrationAction.Migrated, LocalSecretResultStatus.Found, null),
+                    ],
+                    "test-migration-store")))
+        {
+            ApplicationName = "MyApp",
+            EnvironmentName = "Development",
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await command.ExecuteAsync(console);
+
+        var output = console.ReadOutputString();
+        Assert.Contains("Stripe:ApiKey: Migrated", output, StringComparison.Ordinal);
+        Assert.Contains("stripe:ApiKey: AlreadyV2", output, StringComparison.Ordinal);
+        Assert.Contains("Migrated: 1", output, StringComparison.Ordinal);
+        Assert.Contains("AlreadyV2: 1", output, StringComparison.Ordinal);
+        Assert.Contains("Failed: 0", output, StringComparison.Ordinal);
+        Assert.Contains("Source: test-migration-store", output, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-secret-value", output);
+    }
+
+    [Fact]
+    public async Task SecretsMigrate_Should_RenderFailedRowDiagnosticsThenReturnFailure()
+    {
+        var diagnostic = new AppSurfaceLocalSecretDiagnostic(
+            "local-secret-store-locked",
+            "Local secret store is locked.",
+            "The retained Keychain item cannot be read.",
+            "Unlock Keychain and retry.",
+            "local-secrets-macos-migration");
+        var command = new TestableSecretsMigrateCommand(
+            new MigrationResultStore(
+                AppSurfaceLocalSecretMigrationResult.Completed(
+                    [new AppSurfaceLocalSecretMigrationRow("Stripe:ApiKey", AppSurfaceLocalSecretMigrationAction.Failed, LocalSecretResultStatus.Locked, diagnostic)],
+                    "test-migration-store")));
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
+
+        var output = console.ReadOutputString();
+        Assert.Contains("Stripe:ApiKey: Failed", output, StringComparison.Ordinal);
+        Assert.Contains("local-secret-store-locked", output, StringComparison.Ordinal);
+        Assert.Contains("Failed: 1", output, StringComparison.Ordinal);
+        Assert.Contains("One or more local secrets could not be migrated", exception.Message, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-secret-value", output);
+    }
+
+    [Fact]
+    public async Task SecretsMigrate_Should_StopWhenMigrationCannotStart()
+    {
+        var diagnostic = new AppSurfaceLocalSecretDiagnostic(
+            "local-secret-store-locked",
+            "Local secret store is locked.",
+            "The migration cannot safely begin.",
+            "Unlock Keychain and retry.",
+            "local-secrets-macos-migration");
+        var command = new TestableSecretsMigrateCommand(
+            new MigrationResultStore(
+                AppSurfaceLocalSecretMigrationResult.FailedToStart(
+                    LocalSecretResultStatus.Locked,
+                    diagnostic,
+                    "test-migration-store")));
+
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
+
+        Assert.Contains("local-secret-store-locked", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecretsMigrate_Should_UseGenericErrorWhenStartupFailureHasNoDiagnostic()
+    {
+        var command = new TestableSecretsMigrateCommand(
+            new MigrationResultStore(
+                new AppSurfaceLocalSecretMigrationResult(
+                    LocalSecretResultStatus.Locked,
+                    [],
+                    null,
+                    "test-migration-store")));
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
+
+        Assert.Equal("Local secret migration could not start.", exception.Message);
     }
 
     [Fact]
@@ -199,6 +310,92 @@ public sealed class ProgramEntryPointTests
         var planArtifact = await File.ReadAllTextAsync(planPath);
         var receiptArtifact = await File.ReadAllTextAsync($"{planPath}.receipt.json");
         ValueSafeAssert.DoesNotExpose("sentinel-local-secret", plan.AllText + dryRun.AllText + apply.AllText + planArtifact + receiptArtifact);
+    }
+
+    [Fact]
+    public async Task SecretsTransferCommands_Should_MaterializePinnedV2SourceIntoProductionNamedLocalNamespace()
+    {
+        using var temp = TempDirectory.Create("appsurface-transfer-");
+        var storePath = Path.Join(temp.Path, "secrets.json");
+        var configPath = Path.Join(temp.Path, "transfer.json");
+        var planPath = Path.Join(temp.Path, "transfer.plan.json");
+        const string source = "projects/production/secrets/stripe-api-key/versions/7";
+        await File.WriteAllTextAsync(configPath, """
+            {"version":2,"endpoints":[{"name":"production","provider":"google","environment":"production","credential":{"mode":"applicationDefault"}}],"jobs":[{"name":"clone-production","source":"production","destination":"local","rows":[{"key":"Stripe:ApiKey","source":"projects/production/secrets/stripe-api-key/versions/7"}]}]}
+            """);
+        var client = new FakeGoogleSecretTransferClient();
+        client.Versions[source] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var coordinator = new LocalSecretsTransferCoordinator(Path.Join(temp.Path, "transfer-state"));
+        var workflow = new SecretPromotionWorkflow(
+            new DefaultSecretPromotionGoogleClientFactory(client),
+            null,
+            coordinator);
+        var shared = new[] { "--app", $"V2Transfer{Guid.NewGuid():N}", "--environment", "Production", "--store-file", storePath };
+
+        var plan = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "plan", "--config", configPath, "--job", "clone-production", "--out", planPath, .. shared],
+            options => RegisterSecretPromotionWorkflow(options, workflow, coordinator));
+        var withoutConfirmation = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "apply", "--config", configPath, "--plan", planPath, "--apply", .. shared],
+            options => RegisterSecretPromotionWorkflow(options, workflow, coordinator));
+        var applied = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "apply", "--config", configPath, "--plan", planPath, "--apply", "--confirm", "clone-production", .. shared],
+            options => RegisterSecretPromotionWorkflow(options, workflow, coordinator));
+        var repeated = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "apply", "--config", configPath, "--plan", planPath, "--apply", "--confirm", "clone-production", .. shared],
+            options => RegisterSecretPromotionWorkflow(options, workflow, coordinator));
+
+        Assert.Equal(0, plan.ExitCode);
+        Assert.Equal(2, withoutConfirmation.ExitCode);
+        Assert.Equal(0, applied.ExitCode);
+        Assert.Equal(1, repeated.ExitCode);
+        Assert.Contains("CreatedLocalSecret", applied.AllText, StringComparison.Ordinal);
+        Assert.Contains("LocalSecretsPostureMode.SingleMachineSelfHosted", applied.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Retryable:", applied.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("LocalSecretsPostureMode.SingleMachineSelfHosted", repeated.AllText, StringComparison.Ordinal);
+        Assert.Equal(1, client.AccessCalls);
+        ValueSafeAssert.DoesNotExpose("sentinel-remote-secret", plan.AllText + withoutConfirmation.AllText + applied.AllText + File.ReadAllText(planPath) + File.ReadAllText($"{planPath}.receipt.json"));
+    }
+
+    [Fact]
+    public async Task SecretsSetCommand_ShouldInvalidateLocalTransferAttestationBeforeMutation()
+    {
+        using var temp = TempDirectory.Create("appsurface-transfer-");
+        var storePath = Path.Join(temp.Path, "secrets.json");
+        var configPath = Path.Join(temp.Path, "transfer.json");
+        var initialPlanPath = Path.Join(temp.Path, "initial.plan.json");
+        var replacementPlanPath = Path.Join(temp.Path, "replacement.plan.json");
+        const string source = "projects/staging/secrets/stripe-api-key/versions/7";
+        await File.WriteAllTextAsync(configPath, """
+            {"version":2,"endpoints":[{"name":"staging","provider":"google","environment":"staging","credential":{"mode":"applicationDefault"}}],"jobs":[{"name":"clone-staging","source":"staging","destination":"local","rows":[{"key":"Stripe:ApiKey","source":"projects/staging/secrets/stripe-api-key/versions/7"}]}]}
+            """);
+        var client = new FakeGoogleSecretTransferClient();
+        client.Versions[source] = Encoding.UTF8.GetBytes("sentinel-remote-secret");
+        var coordinator = new LocalSecretsTransferCoordinator(Path.Join(temp.Path, "transfer-state"));
+        var workflow = new SecretPromotionWorkflow(new DefaultSecretPromotionGoogleClientFactory(client), null, coordinator);
+        var shared = new[] { "--app", $"V2Mutation{Guid.NewGuid():N}", "--environment", "Development", "--store-file", storePath };
+
+        var plan = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "plan", "--config", configPath, "--job", "clone-staging", "--out", initialPlanPath, .. shared],
+            options => RegisterSecretPromotionWorkflow(options, workflow, coordinator));
+        var applied = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "apply", "--config", configPath, "--plan", initialPlanPath, "--apply", .. shared],
+            options => RegisterSecretPromotionWorkflow(options, workflow, coordinator));
+        var set = await InvokeProgramEntryPointAsync(
+            ["secrets", "set", "Stripe:ApiKey", "--stdin", .. shared],
+            options => RegisterLocalTransferCoordinator(options, coordinator),
+            "sentinel-manual-secret\n");
+        var replacementPlan = await InvokeProgramEntryPointAsync(
+            ["secrets", "transfer", "plan", "--config", configPath, "--job", "clone-staging", "--out", replacementPlanPath, "--replace", .. shared],
+            options => RegisterSecretPromotionWorkflow(options, workflow, coordinator));
+
+        Assert.Equal(0, plan.ExitCode);
+        Assert.Equal(0, applied.ExitCode);
+        Assert.Equal(0, set.ExitCode);
+        Assert.Equal(1, replacementPlan.ExitCode);
+        Assert.Contains("local-secret-transfer-unattested-destination", replacementPlan.AllText, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("sentinel-remote-secret", plan.AllText + applied.AllText + set.AllText + replacementPlan.AllText);
+        ValueSafeAssert.DoesNotExpose("sentinel-manual-secret", set.AllText + replacementPlan.AllText);
     }
 
     [Fact]
@@ -3305,6 +3502,24 @@ public sealed class ProgramEntryPointTests
         options.CustomRegistrations.Add(services => services.AddSingleton<IAppSurfaceGoogleSecretTransferClient>(client));
     }
 
+    private static void RegisterSecretPromotionWorkflow(
+        ConsoleOptions options,
+        SecretPromotionWorkflow workflow,
+        LocalSecretsTransferCoordinator? coordinator = null)
+    {
+        if (coordinator is not null)
+        {
+            RegisterLocalTransferCoordinator(options, coordinator);
+        }
+
+        options.CustomRegistrations.Add(services => services.AddSingleton(workflow));
+    }
+
+    private static void RegisterLocalTransferCoordinator(ConsoleOptions options, LocalSecretsTransferCoordinator coordinator)
+    {
+        options.CustomRegistrations.Add(services => services.AddSingleton(coordinator));
+    }
+
     private static void RegisterCanaryPollHttpClient(ConsoleOptions options, ICanaryPollHttpClient client)
     {
         options.CustomRegistrations.Add(services => services.AddSingleton(client));
@@ -4322,6 +4537,33 @@ public sealed class ProgramEntryPointTests
             PlatformOptions = options;
             return Store;
         }
+    }
+
+    private sealed class TestableSecretsMigrateCommand(IAppSurfaceLocalSecretStore store) : SecretsMigrateCommand
+    {
+        protected override IAppSurfaceLocalSecretStore CreatePlatformStore(AppSurfaceLocalSecretsOptions options) => store;
+    }
+
+    private sealed class MigrationResultStore(AppSurfaceLocalSecretMigrationResult result) : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMigrationStore
+    {
+        public string Name => "test-migration-store";
+
+        public AppSurfaceLocalSecretResult Get(AppSurfaceLocalSecretIdentity identity) =>
+            throw new NotSupportedException();
+
+        public AppSurfaceLocalSecretResult Set(AppSurfaceLocalSecretIdentity identity, string value) =>
+            throw new NotSupportedException();
+
+        public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity) =>
+            throw new NotSupportedException();
+
+        public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix) =>
+            throw new NotSupportedException();
+
+        public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) =>
+            throw new NotSupportedException();
+
+        public AppSurfaceLocalSecretMigrationResult Migrate(string applicationName, string environment, string? keyPrefix) => result;
     }
 
     private static AppSurfaceLocalSecretDiagnostic CreateLocalSecretDiagnostic(string code) =>

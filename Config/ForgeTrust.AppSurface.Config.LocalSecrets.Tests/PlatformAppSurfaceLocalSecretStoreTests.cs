@@ -637,6 +637,19 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void IndexedStoreList_Should_ReturnAnInvalidIndexDiagnostic_WhenIndexReadReportsFoundWithoutValue()
+    {
+        var store = new IndexedMemoryStore();
+        store.ReturnFoundWithoutValueForIndex("MyApp", "Development", null);
+
+        var result = store.List("MyApp", "Development", null);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, result.Status);
+        Assert.Equal("local-secret-index-invalid", result.Diagnostic?.Code);
+        Assert.Contains("success without returning index data", result.Diagnostic?.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void IndexedStoreDelete_Should_ReturnProviderFailedAndNotRepair_WhenIndexIsCorrupt()
     {
         var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
@@ -752,6 +765,10 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
 
         public void FailRead(AppSurfaceLocalSecretIdentity identity, LocalSecretResultStatus status) =>
             _readFailures[identity.StorageName] = Failure(status);
+
+        public void ReturnFoundWithoutValueForIndex(string applicationName, string environment, string? keyPrefix) =>
+            _readFailures[IndexStorageName(applicationName, environment, keyPrefix)] =
+                new AppSurfaceLocalSecretResult(LocalSecretResultStatus.Found, null, null, Name);
 
         public void FailNextWrite(LocalSecretResultStatus status) => _nextWriteFailure = status;
 

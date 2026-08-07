@@ -7,6 +7,7 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
 {
     private const int RequiredServerVersion = 170005;
+    private readonly List<NpgsqlDataSource> _additionalDataSources = [];
     private readonly string _databaseName;
     private readonly string? _maintenanceConnectionString;
     private readonly PostgreSqlContainer? _container;
@@ -28,6 +29,14 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
     internal NpgsqlDataSource DataSource { get; }
 
     internal string ConnectionString { get; }
+
+    /// <summary>Creates a separately owned data source for testing configuration that requires distinct instances.</summary>
+    internal NpgsqlDataSource CreateDataSource()
+    {
+        var dataSource = NpgsqlDataSource.Create(ConnectionString);
+        _additionalDataSources.Add(dataSource);
+        return dataSource;
+    }
 
     internal static async ValueTask<PostgreSqlIntegrationTestDatabase> TryCreateAsync()
     {
@@ -130,6 +139,11 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        foreach (var additionalDataSource in _additionalDataSources)
+        {
+            await additionalDataSource.DisposeAsync();
+        }
+
         await DataSource.DisposeAsync();
         if (_container is not null)
         {

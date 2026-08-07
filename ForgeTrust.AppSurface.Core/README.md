@@ -44,6 +44,22 @@ caller intentionally accepts an arbitrary absolute destination rather than a pat
 
 Keep these values separate. ASP.NET static web assets use the host application name to find runtime manifests. Passing a custom display label such as `CustomDocsHost` into the host environment can make static asset requests resolve against a manifest that does not exist. When a test or custom host needs a different manifest identity, set `StartupContext.OverrideEntryPointAssembly` instead of overloading `ApplicationName`.
 
+## Tracing source boundaries
+
+Packages that emit [`System.Diagnostics.Activity`](https://learn.microsoft.com/dotnet/api/system.diagnostics.activity) instances can use the canonical source name from this package through
+`AppSurfaceActivitySources.ActivitySourceName` (or `AppSurfaceActivitySources.Instance`). This API is dependency-neutral
+to `ForgeTrust.AppSurface.Core` and avoids requiring `ForgeTrust.AppSurface.Observability` in framework code.
+
+For observability registration defaults and the full list of source and meter names, use
+[`AppSurfaceTelemetrySources` in `ForgeTrust.AppSurface.Observability`](../Observability/ForgeTrust.AppSurface.Observability/README.md).
+
+Pitfalls:
+
+- Prefer the shared `AppSurfaceActivitySources.ActivitySourceName` value over hard-coded strings so Flow/Durable and other
+  packages stay aligned as telemetry naming evolves.
+- Do not dispose `AppSurfaceActivitySources.Instance`; it is intentionally process-lived to match the AppSurface activity
+  source boundary.
+
 ## Environment resolution
 
 `StartupContext.EnvironmentProvider` defaults to `DefaultEnvironmentProvider`, which keeps AppSurface module decisions aligned with the Generic Host arguments. When startup receives `--environment Development` or `--environment=Development`, `StartupContext.IsDevelopment` reports `true` before module hooks run.

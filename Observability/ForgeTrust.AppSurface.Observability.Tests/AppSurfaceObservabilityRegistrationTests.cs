@@ -392,6 +392,30 @@ public sealed class AppSurfaceObservabilityRegistrationTests
         Assert.Throws<NotSupportedException>(() => meters[0] = "changed");
     }
 
+    [Fact]
+    public void TelemetrySources_ForwardCanonicalAppSurfaceActivitySourceNameToCore()
+    {
+        Assert.Equal(AppSurfaceActivitySources.ActivitySourceName, AppSurfaceTelemetrySources.ActivitySourceName);
+
+        var sources = Assert.IsAssignableFrom<IList<string>>(AppSurfaceTelemetrySources.StandardActivitySourceNames);
+
+        Assert.Equal(AppSurfaceActivitySources.StandardActivitySourceNames, sources.Take(1));
+        Assert.Equal(
+            [
+                AppSurfaceActivitySources.ActivitySourceName,
+                "Microsoft.AspNetCore",
+                "System.Net.Http"
+            ],
+            sources);
+    }
+
+    [Fact]
+    public void TelemetrySources_KeepCompatibleCanonicalMeterName()
+    {
+        Assert.Equal("ForgeTrust.AppSurface", AppSurfaceTelemetrySources.MeterName);
+        Assert.Contains("ForgeTrust.AppSurface", AppSurfaceTelemetrySources.StandardMeterNames);
+    }
+
     private static StartupContext CreateContext(string applicationName)
     {
         return new StartupContext([], new TestHostModule(), applicationName);

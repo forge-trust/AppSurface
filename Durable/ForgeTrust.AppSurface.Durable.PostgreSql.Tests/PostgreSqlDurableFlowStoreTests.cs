@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Flow;
 using Npgsql;
 
@@ -1290,6 +1291,20 @@ public sealed class DurableSlice4ReferenceWorkloadTests
         var flows = new DurableFlowRegistry([registration], work, payloads);
         var options = new PostgreSqlDurableWorkOptions(epoch, status.StoreId);
         var client = new PostgreSqlDurableFlowClient(database.DataSource, flows, payloads, options);
+        var completionActivities = new System.Collections.Concurrent.ConcurrentQueue<Activity>();
+        using var traceListener = new ActivityListener
+        {
+            ShouldListenTo = static source => source.Name == AppSurfaceActivitySources.ActivitySourceName,
+            Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+            ActivityStopped = activity =>
+            {
+                if (activity.OperationName == "appsurface.durable.flow.activity")
+                {
+                    completionActivities.Enqueue(activity);
+                }
+            },
+        };
+        ActivitySource.AddActivityListener(traceListener);
         var flowProcessor = new PostgreSqlDurableFlowProcessor(
             database.DataSource,
             database.DataSource,
@@ -1307,13 +1322,31 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             registration.FlowId,
             registration.FlowVersion,
             contextCodec.EncodeObject(new byte[] { 1 }));
-        Assert.True((await client.StartAsync(start)).IsSuccess);
+        using (var incoming = new Activity("activity-completion-incoming").SetIdFormat(ActivityIdFormat.W3C).Start())
+        {
+            Assert.True((await client.StartAsync(start)).IsSuccess);
+        }
 
         var activityDecision = await flowProcessor.TryProcessAsync(
             Assert.Single(await flowProcessor.DiscoverAsync()),
             "flow-activity-worker");
         Assert.Equal(DurableFlowState.WaitingForActivity, activityDecision.State);
         Assert.NotNull(activityDecision.ChildWorkId);
+
+        string scheduledTraceParent;
+        await using (var scheduledTrace = database.DataSource.CreateCommand(
+                         """
+                         SELECT trace.traceparent
+                         FROM appsurface_durable.work AS work
+                         JOIN appsurface_durable.flow_trace_context AS trace
+                           ON trace.scope_id = work.scope_id AND trace.trace_context_id = work.trace_context_id
+                         WHERE work.scope_id = @scope_id AND work.work_id = @work_id;
+                         """))
+        {
+            scheduledTrace.Parameters.AddWithValue("scope_id", scope.Value);
+            scheduledTrace.Parameters.AddWithValue("work_id", activityDecision.ChildWorkId!.Value.Value);
+            scheduledTraceParent = (string)(await scheduledTrace.ExecuteScalarAsync())!;
+        }
 
         var workStore = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
         var childCandidate = Assert.Single(await workStore.DiscoverAsync(10));
@@ -1329,6 +1362,51 @@ public sealed class DurableSlice4ReferenceWorkloadTests
                 "{}",
                 resultCodec.EncodeObject(new byte[] { 7, 8 })));
         Assert.Equal(DurableWorkState.Succeeded, completion.State);
+
+        string completionTraceParent;
+        await using (var completionTrace = database.DataSource.CreateCommand(
+                         """
+                         SELECT
+                             trace.traceparent,
+                             (SELECT flow.trace_context_id IS NOT DISTINCT FROM trace.trace_context_id
+                              FROM appsurface_durable.flow_instance AS flow
+                              WHERE flow.scope_id = @scope_id AND flow.flow_instance_id = @flow_instance_id),
+                             (SELECT history.trace_context_id IS NOT DISTINCT FROM trace.trace_context_id
+                              FROM appsurface_durable.flow_history AS history
+                              WHERE history.scope_id = @scope_id AND history.flow_instance_id = @flow_instance_id
+                                AND history.aggregate_revision = @completion_revision),
+                             (SELECT wait.trace_context_id IS NOT DISTINCT FROM trace.trace_context_id
+                              FROM appsurface_durable.flow_wait AS wait
+                              WHERE wait.scope_id = @scope_id AND wait.flow_instance_id = @flow_instance_id
+                                AND wait.child_work_id = @work_id),
+                             (SELECT work.trace_context_id IS NOT DISTINCT FROM trace.trace_context_id
+                              FROM appsurface_durable.work AS work
+                              WHERE work.scope_id = @scope_id AND work.work_id = @work_id)
+                         FROM appsurface_durable.flow_trace_context AS trace
+                         WHERE trace.scope_id = @scope_id AND trace.flow_instance_id = @flow_instance_id
+                           AND trace.cause_kind = 'activity_completed';
+                         """))
+        {
+            completionTrace.Parameters.AddWithValue("scope_id", scope.Value);
+            completionTrace.Parameters.AddWithValue("flow_instance_id", instance.Value);
+            completionTrace.Parameters.AddWithValue("completion_revision", checked(activityDecision.Revision + 1));
+            completionTrace.Parameters.AddWithValue("work_id", activityDecision.ChildWorkId!.Value.Value);
+            await using var reader = await completionTrace.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            completionTraceParent = reader.GetString(0);
+            Assert.True(reader.GetBoolean(1));
+            Assert.True(reader.GetBoolean(2));
+            Assert.True(reader.GetBoolean(3));
+            Assert.True(reader.GetBoolean(4));
+            Assert.False(await reader.ReadAsync());
+        }
+        var completionActivity = Assert.Single(completionActivities);
+        var completionLink = Assert.Single(completionActivity.Links);
+        Assert.Equal(scheduledTraceParent[3..35], completionLink.Context.TraceId.ToHexString());
+        Assert.Equal(scheduledTraceParent[36..52], completionLink.Context.SpanId.ToHexString());
+        Assert.Equal(completionTraceParent[3..35], completionActivity.TraceId.ToHexString());
+        Assert.Equal(completionTraceParent[36..52], completionActivity.SpanId.ToHexString());
+        Assert.Equal("linked", completionActivity.GetTagItem(DurableTraceTelemetry.ContextStatus));
 
         var resumed = await client.GetAsync(new DurableFlowGetRequest(scope, instance));
         Assert.Equal(DurableFlowState.Ready, resumed.Value!.State);
@@ -1976,6 +2054,12 @@ public sealed class DurableSlice4ReferenceWorkloadTests
         var flows = new DurableFlowRegistry([registration], work, payloads);
         var options = new PostgreSqlDurableWorkOptions(epoch, status.StoreId);
         var client = new PostgreSqlDurableFlowClient(database.DataSource, flows, payloads, options);
+        using var crashTraceListener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == AppSurfaceActivitySources.ActivitySourceName,
+            Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+        };
+        ActivitySource.AddActivityListener(crashTraceListener);
         var processor = new PostgreSqlDurableFlowProcessor(
             database.DataSource,
             database.DataSource,
@@ -1985,6 +2069,9 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             options);
         var scope = new DurableScopeId("slice4-timer-race");
         var instance = new DurableFlowInstanceId("timer-flow");
+        using var incoming = new Activity("timer-race-incoming")
+            .SetIdFormat(ActivityIdFormat.W3C)
+            .Start();
         Assert.True((await client.StartAsync(new DurableFlowStartRequest(
             scope,
             new DurableCommandId("timer-start"),
@@ -1994,10 +2081,38 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             registration.FlowVersion,
             codec.EncodeObject(new byte[] { 1 })))).IsSuccess);
 
-        var waiting = await processor.TryProcessAsync(
-            Assert.Single(await processor.DiscoverAsync()),
-            "timer-register-worker");
+        await using (var corruptTraceState = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.flow_trace_context
+            SET tracestate = 'vendor=value=unsafe'
+            WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id
+              AND cause_kind = 'command_accepted';
+            """))
+        {
+            corruptTraceState.Parameters.AddWithValue("scope_id", scope.Value);
+            corruptTraceState.Parameters.AddWithValue("flow_instance_id", instance.Value);
+            Assert.Equal(1, await corruptTraceState.ExecuteNonQueryAsync());
+        }
+
+        using var diagnosticOutput = new StringWriter();
+        using var diagnosticListener = new TextWriterTraceListener(diagnosticOutput);
+        Trace.Listeners.Add(diagnosticListener);
+        PostgreSqlFlowProcessingResult waiting;
+        try
+        {
+            waiting = await processor.TryProcessAsync(
+                Assert.Single(await processor.DiscoverAsync()),
+                "timer-register-worker");
+            diagnosticListener.Flush();
+        }
+        finally
+        {
+            Trace.Listeners.Remove(diagnosticListener);
+        }
+
         Assert.Equal(DurableFlowState.WaitingForEvent, waiting.State);
+        Assert.Contains(DurableProblemCodes.TraceStateRejected, diagnosticOutput.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("vendor=value=unsafe", diagnosticOutput.ToString(), StringComparison.Ordinal);
         await ForceTimerDueAsync(database.DataSource, scope, instance);
         var timerCandidate = Assert.Single(await processor.DiscoverAsync());
         Assert.Equal(PostgreSqlFlowDispatchKind.Timer, timerCandidate.Kind);
@@ -2009,6 +2124,46 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             instance);
         Assert.Equal("flow.timer-resolution.committed", crashCheckpoint.Phase);
         Assert.Equal(waiting.Revision + 1, crashCheckpoint.Revision);
+        Assert.Equal("appsurface.durable.telemetry.evidence", crashCheckpoint.Event);
+        Assert.NotNull(crashCheckpoint.TraceEvidence);
+        Assert.Equal("appsurface.durable.flow.timer", crashCheckpoint.TraceEvidence.Operation);
+        Assert.True(Guid.TryParse(crashCheckpoint.TraceEvidence.CorrelationToken, out _));
+        Assert.NotEmpty(crashCheckpoint.TraceEvidence.Links);
+
+        await using (var trace = database.DataSource.CreateCommand(
+            """
+            SELECT
+                count(*),
+                count(*) FILTER (WHERE cause_kind = 'command_accepted'),
+                count(*) FILTER (WHERE cause_kind = 'evaluation_committed'),
+                count(*) FILTER (WHERE cause_kind = 'evaluation_committed' AND tracestate IS NULL),
+                count(*) FILTER (WHERE cause_kind = 'timer_winner'),
+                (SELECT trace_context_id IS NOT NULL
+                 FROM appsurface_durable.flow_instance
+                 WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id),
+                (SELECT trace_context_id IS NOT NULL
+                 FROM appsurface_durable.flow_wait
+                 WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id),
+                (SELECT trace_context_id IS NOT NULL
+                 FROM appsurface_durable.flow_timer
+                 WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id)
+            FROM appsurface_durable.flow_trace_context
+            WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id;
+            """))
+        {
+            trace.Parameters.AddWithValue("scope_id", scope.Value);
+            trace.Parameters.AddWithValue("flow_instance_id", instance.Value);
+            await using var reader = await trace.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(3L, reader.GetInt64(0));
+            Assert.Equal(1L, reader.GetInt64(1));
+            Assert.Equal(1L, reader.GetInt64(2));
+            Assert.Equal(1L, reader.GetInt64(3));
+            Assert.Equal(1L, reader.GetInt64(4));
+            Assert.True(reader.GetBoolean(5));
+            Assert.True(reader.GetBoolean(6));
+            Assert.True(reader.GetBoolean(7));
+        }
 
         var restartedProcessor = new PostgreSqlDurableFlowProcessor(
             database.DataSource,
@@ -2053,6 +2208,12 @@ public sealed class DurableSlice4ReferenceWorkloadTests
         var registration = new TimerTestFlowRegistration(codec);
         var flows = new DurableFlowRegistry([registration], work, payloads);
         var options = new PostgreSqlDurableWorkOptions(epoch, status.StoreId);
+        using var traceListener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == AppSurfaceActivitySources.ActivitySourceName,
+            Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+        };
+        ActivitySource.AddActivityListener(traceListener);
         var client = new PostgreSqlDurableFlowClient(database.DataSource, flows, payloads, options);
         var processor = new PostgreSqlDurableFlowProcessor(
             database.DataSource,
@@ -2078,6 +2239,8 @@ public sealed class DurableSlice4ReferenceWorkloadTests
                 "timer-cardinality-register-worker")).State);
         await ForceTimerDueAsync(database.DataSource, scope, instance);
         var timerCandidate = Assert.Single(await processor.DiscoverAsync());
+        var traceCountBefore = await CountFlowTraceContextsAsync(database.DataSource, scope, instance);
+        Assert.Equal(2, traceCountBefore);
 
         await using (var delete = database.DataSource.CreateCommand(
             """
@@ -2093,6 +2256,7 @@ public sealed class DurableSlice4ReferenceWorkloadTests
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await processor.TryProcessAsync(timerCandidate, "timer-cardinality-resolve-worker"));
         Assert.Contains("exactly once", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(traceCountBefore, await CountFlowTraceContextsAsync(database.DataSource, scope, instance));
 
         await using var verify = database.DataSource.CreateCommand(
             """
@@ -2115,6 +2279,73 @@ public sealed class DurableSlice4ReferenceWorkloadTests
         Assert.Equal("active", reader.GetString(1));
         Assert.Equal("scheduled", reader.GetString(2));
         Assert.Equal("available", reader.GetString(3));
+    }
+
+    [Fact]
+    public async Task TraceAttachment_MissingRequestedPointerRollsBackEveryTraceMutation()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "tests", "slice4-trace-attachment-cardinality");
+        var status = await schema.GetStatusAsync();
+        var codec = new PostgreSqlOpaqueTestCodec("tests.flow.context", "v1");
+        var payloads = new DurablePayloadCodecRegistry([codec]);
+        var work = new DurableWorkRegistry([]);
+        var registration = new WaitingTestFlowRegistration(codec);
+        var flows = new DurableFlowRegistry([registration], work, payloads);
+        var options = new PostgreSqlDurableWorkOptions(epoch, status.StoreId);
+        var client = new PostgreSqlDurableFlowClient(database.DataSource, flows, payloads, options);
+        var scope = new DurableScopeId("slice4-trace-attachment-cardinality");
+        var instance = new DurableFlowInstanceId("trace-attachment-cardinality-flow");
+        Assert.True((await client.StartAsync(new DurableFlowStartRequest(
+            scope,
+            new DurableCommandId("trace-attachment-cardinality-start"),
+            "trace-attachment-cardinality-start-key",
+            instance,
+            registration.FlowId,
+            registration.FlowVersion,
+            codec.EncodeObject(new byte[] { 1 })))).IsSuccess);
+
+        await using var connection = await database.DataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using (var setScope = new NpgsqlCommand(
+                         "SELECT set_config('appsurface_durable.scope_id', @scope_id, true);",
+                         connection,
+                         transaction))
+        {
+            setScope.Parameters.AddWithValue("scope_id", scope.Value);
+            await setScope.ExecuteNonQueryAsync();
+        }
+
+        var trace = await PostgreSqlDurableFlowStore.InsertTraceContextAsync(
+            connection,
+            transaction,
+            scope,
+            instance,
+            DurableTraceContext.Parse(
+                "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01",
+                traceState: null).Context,
+            "command_accepted",
+            CancellationToken.None);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await PostgreSqlDurableFlowStore.AttachTraceContextAsync(
+                connection,
+                transaction,
+                scope,
+                instance,
+                trace,
+                commandId: "trace-attachment-cardinality-start",
+                revision: 1,
+                waitId: null,
+                timerId: null,
+                workId: new DurableWorkId("missing-trace-attachment-work"),
+                CancellationToken.None));
+
+        Assert.Equal("The durable trace context attachment expected 4 pointer updates.", exception.Message);
+        await transaction.RollbackAsync();
+        Assert.Equal(0, await CountFlowTraceContextsAsync(database.DataSource, scope, instance));
     }
 
     [Fact]
@@ -2192,6 +2423,12 @@ public sealed class DurableSlice4ReferenceWorkloadTests
         var registration = new TimerTestFlowRegistration(codec);
         var flows = new DurableFlowRegistry([registration], work, payloads);
         var barriers = new RecordingFlowBarrierObserver();
+        using var traceListener = new ActivityListener
+        {
+            ShouldListenTo = static source => source.Name == AppSurfaceActivitySources.ActivitySourceName,
+            Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+        };
+        ActivitySource.AddActivityListener(traceListener);
         var options = new PostgreSqlDurableWorkOptions(epoch, status.StoreId);
         var client = new PostgreSqlDurableFlowClient(database.DataSource, flows, payloads, options);
         var processor = new PostgreSqlDurableFlowProcessor(
@@ -2204,6 +2441,7 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             barriers: barriers);
         var scope = new DurableScopeId("slice4-timer-barrier");
         var instance = new DurableFlowInstanceId("timer-barrier-flow");
+        using var incoming = new Activity("timer-barrier-incoming").SetIdFormat(ActivityIdFormat.W3C).Start();
         Assert.True((await client.StartAsync(new DurableFlowStartRequest(
             scope,
             new DurableCommandId("timer-barrier-start"),
@@ -2224,6 +2462,14 @@ public sealed class DurableSlice4ReferenceWorkloadTests
             "timer-barrier-resolve-worker");
         Assert.Equal(PostgreSqlFlowProcessingOutcome.Applied, result.Outcome);
         Assert.Contains("flow.timer-resolution.committed", barriers.Barriers);
+        var traceEvidence = Assert.Single(
+            barriers.TraceEvidence,
+            evidence => evidence?.Operation == "appsurface.durable.flow.timer");
+        Assert.NotNull(traceEvidence);
+        Assert.NotEmpty(traceEvidence.TraceId);
+        Assert.NotEmpty(traceEvidence.SpanId);
+        Assert.True(Guid.TryParse(traceEvidence.CorrelationToken, out _));
+        Assert.Single(traceEvidence.Links);
     }
 
     [Fact]
@@ -3106,6 +3352,22 @@ public sealed class DurableSlice4ReferenceWorkloadTests
         return (long)(await command.ExecuteScalarAsync())!;
     }
 
+    private static async ValueTask<long> CountFlowTraceContextsAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableFlowInstanceId instance)
+    {
+        await using var command = dataSource.CreateCommand(
+            """
+            SELECT count(*)
+            FROM appsurface_durable.flow_trace_context
+            WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id;
+            """);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("flow_instance_id", instance.Value);
+        return (long)(await command.ExecuteScalarAsync())!;
+    }
+
     private static void WriteEvidence(string scenario, long terminalRevision)
     {
         var directory = Environment.GetEnvironmentVariable("APPSURFACE_POSTGRES_REFERENCE_EVIDENCE_DIRECTORY");
@@ -3541,14 +3803,18 @@ public sealed class DurableSlice4ReferenceWorkloadTests
     {
         internal List<string> Barriers { get; } = [];
 
+        internal List<PostgreSqlFlowTelemetryEvidence?> TraceEvidence { get; } = [];
+
         public ValueTask ObserveAsync(
             string barrier,
             DurableScopeId scopeId,
             DurableFlowInstanceId instanceId,
             long revision,
+            PostgreSqlFlowTelemetryEvidence? traceEvidence,
             CancellationToken cancellationToken)
         {
             Barriers.Add(barrier);
+            TraceEvidence.Add(traceEvidence);
             return ValueTask.CompletedTask;
         }
     }
