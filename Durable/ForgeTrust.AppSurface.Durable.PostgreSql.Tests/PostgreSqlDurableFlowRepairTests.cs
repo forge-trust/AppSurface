@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ForgeTrust.AppSurface.Durable.Provider;
 using ForgeTrust.AppSurface.Flow;
 using Microsoft.Extensions.DependencyInjection;
@@ -110,6 +111,20 @@ public sealed class PostgreSqlDurableFlowRepairTests
 
         var suspended = await flows.GetAsync(new DurableFlowGetRequest(scope, instance));
         Assert.Equal(DurableFlowState.Suspended, suspended.Value!.State);
+        await using (var assessmentBlocker = await database.DataSource.OpenConnectionAsync())
+        await using (var assessmentTransaction = await assessmentBlocker.BeginTransactionAsync())
+        {
+            await using var lockFlowTable = new Npgsql.NpgsqlCommand(
+                "LOCK TABLE appsurface_durable.flow_instance IN ACCESS EXCLUSIVE MODE;",
+                assessmentBlocker,
+                assessmentTransaction);
+            await lockFlowTable.ExecuteNonQueryAsync();
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+                await repairs.GetAssessmentAsync(new DurableFlowRepairAssessmentRequest(scope, instance), cancellation.Token));
+            await assessmentTransaction.RollbackAsync();
+        }
+
         var legacyRelease = await flows.ReleaseSuspensionAsync(new DurableFlowReleaseRequest(
             scope,
             new DurableCommandId($"flow-repair-legacy-release-{scenario}"),
@@ -119,6 +134,11 @@ public sealed class PostgreSqlDurableFlowRepairTests
             suspended.Value.Revision));
         Assert.Equal(DurableProblemCodes.FlowReleaseStateMismatch, legacyRelease.Problem!.Code);
 
+        var missingAssessment = await repairs.GetAssessmentAsync(new DurableFlowRepairAssessmentRequest(
+            scope,
+            new DurableFlowInstanceId($"flow-repair-missing-assessment-{scenario}")));
+        Assert.False(missingAssessment.IsSuccess);
+        Assert.Equal(DurableProblemCodes.FlowNotFound, missingAssessment.Problem!.Code);
         var oldShapeAssessment = await repairs.GetAssessmentAsync(new DurableFlowRepairAssessmentRequest(scope, instance));
         Assert.True(oldShapeAssessment.IsSuccess);
         Assert.NotNull(oldShapeAssessment.Value!.SuspensionDescriptorSha256);
@@ -147,6 +167,62 @@ public sealed class PostgreSqlDurableFlowRepairTests
             scope,
             instance,
             oldShapeAssessment.Value.SuspensionDescriptorSha256!);
+
+        var descriptorRequest = DurableFlowRepairRequest.AssertChildEffectCompleted(
+            scope,
+            instance,
+            new DurableCommandId($"flow-repair-descriptor-{scenario}"),
+            oldShapeAssessment.Value.Revision,
+            oldShapeAssessment.Value.SuspensionDescriptorSha256!,
+            childWorkId,
+            failed.Revision,
+            1,
+            new string('b', 64),
+            "operator",
+            "descriptor-check");
+        await SetScopeStateAsync(database.DataSource, scope, "disabled");
+        var disabled = await repairs.RepairAsync(descriptorRequest);
+        Assert.False(disabled.IsSuccess);
+        Assert.Equal(DurableProblemCodes.ScopeDisabled, disabled.Problem!.Code);
+        await SetScopeStateAsync(database.DataSource, scope, "active");
+
+        var mismatchedChild = await repairs.RepairAsync(DurableFlowRepairRequest.AssertChildEffectCompleted(
+            scope,
+            instance,
+            new DurableCommandId($"flow-repair-mismatched-child-{scenario}"),
+            oldShapeAssessment.Value.Revision,
+            oldShapeAssessment.Value.SuspensionDescriptorSha256!,
+            new DurableWorkId($"flow-repair-other-child-{scenario}"),
+            failed.Revision,
+            1,
+            new string('b', 64),
+            "operator",
+            "mismatched-child"));
+        Assert.True(mismatchedChild.IsSuccess);
+        Assert.Equal(DurableFlowRepairOutcome.Refused, mismatchedChild.Value!.Outcome);
+        Assert.Equal(DurableProblemCodes.FlowRepairActionUnsupported, mismatchedChild.Value.Problem!.Code);
+
+        await SetFlowRepairDescriptorCodeAsync(database.DataSource, scope, instance, "tampered");
+        var descriptorMismatch = await repairs.RepairAsync(DurableFlowRepairRequest.AssertChildEffectCompleted(
+            scope,
+            instance,
+            new DurableCommandId($"flow-repair-tampered-descriptor-{scenario}"),
+            oldShapeAssessment.Value.Revision,
+            oldShapeAssessment.Value.SuspensionDescriptorSha256!,
+            childWorkId,
+            failed.Revision,
+            1,
+            new string('b', 64),
+            "operator",
+            "tampered-descriptor"));
+        Assert.True(descriptorMismatch.IsSuccess);
+        Assert.Equal(DurableFlowRepairOutcome.Refused, descriptorMismatch.Value!.Outcome);
+        Assert.Equal(DurableProblemCodes.FlowRepairEvidenceMismatch, descriptorMismatch.Value.Problem!.Code);
+        await SetFlowRepairDescriptorCodeAsync(
+            database.DataSource,
+            scope,
+            instance,
+            "flow.child_work_requires_attention");
 
         var proof = await operators.ResolveAsync(new DurableWorkManualResolutionRequest(
             scope,
@@ -192,6 +268,9 @@ public sealed class PostgreSqlDurableFlowRepairTests
             contextCodec.EncodeObject(new byte[] { 4 })))).IsSuccess);
         var independentBeforeRepair = await flows.GetAsync(new DurableFlowGetRequest(scope, independentInstance));
         Assert.Equal(DurableFlowState.Ready, independentBeforeRepair.Value!.State);
+        var independentAssessment = await repairs.GetAssessmentAsync(new DurableFlowRepairAssessmentRequest(scope, independentInstance));
+        Assert.True(independentAssessment.IsSuccess);
+        Assert.Empty(independentAssessment.Value!.Candidates);
 
         var assessment = await repairs.GetAssessmentAsync(new DurableFlowRepairAssessmentRequest(scope, instance));
         Assert.True(assessment.IsSuccess);
@@ -229,6 +308,143 @@ public sealed class PostgreSqlDurableFlowRepairTests
             evidence,
             evidence.ChildWorkHistoryEventId,
             effectApplied ? "provider-confirmed-applied" : "provider-confirmed-no-effect");
+        if (effectApplied)
+        {
+            var incompatibleResultCodec = new PostgreSqlOpaqueTestCodec("tests.repair.incompatible-result", "v1");
+            var incompatibleRegistration = new PostgreSqlOpaqueTestWorkRegistration(
+                workRegistration.WorkName,
+                workRegistration.WorkVersion,
+                workRegistration.ProviderSafety,
+                workCodec,
+                incompatibleResultCodec);
+            IFlowRepairOperatorClient incompatibleRepairs = new PostgreSqlDurableFlowRepairOperatorClient(
+                database.DataSource,
+                new DurableWorkRegistry([incompatibleRegistration]),
+                options);
+            var incompatibleResult = await incompatibleRepairs.RepairAsync(CreateRepairRequest(
+                effectApplied,
+                scope,
+                instance,
+                new DurableCommandId($"flow-repair-incompatible-result-{scenario}"),
+                assessment.Value,
+                evidence,
+                evidence.ChildWorkHistoryEventId,
+                "incompatible-result"));
+            Assert.True(incompatibleResult.IsSuccess);
+            Assert.Equal(DurableFlowRepairOutcome.Refused, incompatibleResult.Value!.Outcome);
+            Assert.Equal(DurableProblemCodes.FlowRepairEvidenceMismatch, incompatibleResult.Value.Problem!.Code);
+
+            var throwingRegistration = new PostgreSqlOpaqueTestWorkRegistration(
+                workRegistration.WorkName,
+                workRegistration.WorkVersion,
+                workRegistration.ProviderSafety,
+                workCodec,
+                new ThrowingPayloadCodec(resultCodec));
+            IFlowRepairOperatorClient throwingRepairs = new PostgreSqlDurableFlowRepairOperatorClient(
+                database.DataSource,
+                new DurableWorkRegistry([throwingRegistration]),
+                options);
+            var malformedResult = await throwingRepairs.RepairAsync(CreateRepairRequest(
+                effectApplied,
+                scope,
+                instance,
+                new DurableCommandId($"flow-repair-malformed-result-{scenario}"),
+                assessment.Value,
+                evidence,
+                evidence.ChildWorkHistoryEventId,
+                "malformed-result"));
+            Assert.True(malformedResult.IsSuccess);
+            Assert.Equal(DurableFlowRepairOutcome.Refused, malformedResult.Value!.Outcome);
+            Assert.Equal(DurableProblemCodes.FlowRepairEvidenceMismatch, malformedResult.Value.Problem!.Code);
+
+            foreach (var field in new[] { "contract", "version", "codec", "classification", "retention" })
+            {
+                var original = await ReadWorkResultMetadataAsync(database.DataSource, scope, childWorkId, field);
+                await SetWorkResultMetadataAsync(database.DataSource, scope, childWorkId, field, $"tampered-{field}");
+                var metadataMismatch = await repairs.RepairAsync(CreateRepairRequest(
+                    effectApplied,
+                    scope,
+                    instance,
+                    new DurableCommandId($"flow-repair-{field}-mismatch-{scenario}"),
+                    assessment.Value,
+                    evidence,
+                    evidence.ChildWorkHistoryEventId,
+                    $"{field}-mismatch"));
+                Assert.True(metadataMismatch.IsSuccess);
+                Assert.Equal(DurableFlowRepairOutcome.Refused, metadataMismatch.Value!.Outcome);
+                Assert.Equal(DurableProblemCodes.FlowRepairEvidenceMismatch, metadataMismatch.Value.Problem!.Code);
+                await SetWorkResultMetadataAsync(database.DataSource, scope, childWorkId, field, original);
+            }
+        }
+        else
+        {
+            await SetWorkLeaseOwnerAsync(database.DataSource, scope, childWorkId, "unexpected-lease");
+            var leased = await repairs.RepairAsync(CreateRepairRequest(
+                effectApplied,
+                scope,
+                instance,
+                new DurableCommandId($"flow-repair-leased-child-{scenario}"),
+                assessment.Value,
+                evidence,
+                evidence.ChildWorkHistoryEventId,
+                "leased-child"));
+            Assert.True(leased.IsSuccess);
+            Assert.Equal(DurableFlowRepairOutcome.Refused, leased.Value!.Outcome);
+            Assert.Equal(DurableProblemCodes.FlowRepairEvidenceMismatch, leased.Value.Problem!.Code);
+            await SetWorkLeaseOwnerAsync(database.DataSource, scope, childWorkId, null);
+        }
+        await CreateDiscardUpdateTriggerAsync(database.DataSource, "flow_instance");
+        try
+        {
+            var flowFence = await Assert.ThrowsAsync<InvalidOperationException>(async () => await repairs.RepairAsync(request));
+            Assert.Equal(
+                effectApplied
+                    ? "The Flow repair lost its locked completed-effect revision fence."
+                    : "The Flow repair lost its locked no-effect revision fence.",
+                flowFence.Message);
+        }
+        finally
+        {
+            await DropDiscardUpdateTriggerAsync(database.DataSource, "flow_instance");
+        }
+
+        await CreateDiscardUpdateTriggerAsync(database.DataSource, "flow_wait");
+        try
+        {
+            var waitFence = await Assert.ThrowsAsync<InvalidOperationException>(async () => await repairs.RepairAsync(request));
+            Assert.Equal(
+                effectApplied
+                    ? "The Flow repair could not resolve exactly one locked activity wait."
+                    : "The Flow repair could not restore exactly one locked activity wait.",
+                waitFence.Message);
+        }
+        finally
+        {
+            await DropDiscardUpdateTriggerAsync(database.DataSource, "flow_wait");
+        }
+
+        await DeleteFlowDispatchAsync(database.DataSource, scope, instance);
+        try
+        {
+            var missingDispatch = await Assert.ThrowsAsync<InvalidOperationException>(async () => await repairs.RepairAsync(request));
+            Assert.Equal("The Flow repair could not project its unique Flow dispatch row.", missingDispatch.Message);
+        }
+        finally
+        {
+            await InsertFlowDispatchAsync(database.DataSource, scope, instance, assessment.Value.Revision);
+        }
+
+        await CreateDiscardRepairCommandInsertTriggerAsync(database.DataSource);
+        try
+        {
+            var missingCommand = await Assert.ThrowsAsync<InvalidOperationException>(async () => await repairs.RepairAsync(request));
+            Assert.Equal("The Flow repair did not persist one terminal command record.", missingCommand.Message);
+        }
+        finally
+        {
+            await DropDiscardRepairCommandInsertTriggerAsync(database.DataSource);
+        }
+
         await using (var blocker = await database.DataSource.OpenConnectionAsync())
         await using (var blockerTransaction = await blocker.BeginTransactionAsync())
         {
@@ -248,8 +464,11 @@ public sealed class PostgreSqlDurableFlowRepairTests
         Assert.Equal(DurableFlowState.Suspended, afterCancellation.Value!.State);
         Assert.Equal(assessment.Value.Revision, afterCancellation.Value.Revision);
         Assert.Equal(0L, await CountRepairCommandsAsync(database.DataSource, scope, request.CommandId));
-        var applied = await repairs.RepairAsync(request);
-        var duplicate = await repairs.RepairAsync(request);
+        var concurrentResults = await Task.WhenAll(
+            repairs.RepairAsync(request).AsTask(),
+            repairs.RepairAsync(request).AsTask());
+        var applied = Assert.Single(concurrentResults, result => result.Value?.Outcome == DurableFlowRepairOutcome.Applied);
+        var duplicate = Assert.Single(concurrentResults, result => result.Value?.Outcome == DurableFlowRepairOutcome.Duplicate);
         var collisionRequest = CreateRepairRequest(
             effectApplied,
             scope,
@@ -321,6 +540,100 @@ public sealed class PostgreSqlDurableFlowRepairTests
         command.Parameters.AddWithValue("work_id", workId.Value);
         return (string)(await command.ExecuteScalarAsync())!;
     }
+
+    private static async ValueTask CreateDiscardUpdateTriggerAsync(
+        Npgsql.NpgsqlDataSource dataSource,
+        string tableName)
+    {
+        var triggerName = GetDiscardTriggerName(tableName);
+        await using var command = dataSource.CreateCommand(
+            $"""
+            CREATE FUNCTION appsurface_durable.{triggerName}_function()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                RETURN NULL;
+            END;
+            $$;
+            CREATE TRIGGER {triggerName}
+            BEFORE UPDATE ON appsurface_durable.{tableName}
+            FOR EACH ROW
+            EXECUTE FUNCTION appsurface_durable.{triggerName}_function();
+            """);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async ValueTask DropDiscardUpdateTriggerAsync(
+        Npgsql.NpgsqlDataSource dataSource,
+        string tableName)
+    {
+        var triggerName = GetDiscardTriggerName(tableName);
+        await using var command = dataSource.CreateCommand(
+            $"DROP TRIGGER IF EXISTS {triggerName} ON appsurface_durable.{tableName}; DROP FUNCTION IF EXISTS appsurface_durable.{triggerName}_function();");
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async ValueTask DeleteFlowDispatchAsync(
+        Npgsql.NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableFlowInstanceId instance)
+    {
+        await using var command = dataSource.CreateCommand(
+            "DELETE FROM appsurface_durable.flow_dispatch WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND kind = 'flow';");
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("flow_instance_id", instance.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+    }
+
+    private static async ValueTask InsertFlowDispatchAsync(
+        Npgsql.NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableFlowInstanceId instance,
+        long expectedRevision)
+    {
+        await using var command = dataSource.CreateCommand(
+            "INSERT INTO appsurface_durable.flow_dispatch (dispatch_id, scope_id, kind, flow_instance_id, due_at, state, expected_revision) VALUES (@dispatch_id, @scope_id, 'flow', @flow_instance_id, clock_timestamp(), 'suspended', @expected_revision);");
+        command.Parameters.AddWithValue("dispatch_id", Guid.NewGuid());
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("flow_instance_id", instance.Value);
+        command.Parameters.AddWithValue("expected_revision", expectedRevision);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+    }
+
+    private static async ValueTask CreateDiscardRepairCommandInsertTriggerAsync(Npgsql.NpgsqlDataSource dataSource)
+    {
+        await using var command = dataSource.CreateCommand(
+            """
+            CREATE FUNCTION appsurface_durable.discard_flow_repair_command_insert_function()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                RETURN NULL;
+            END;
+            $$;
+            CREATE TRIGGER discard_flow_repair_command_insert
+            BEFORE INSERT ON appsurface_durable.flow_repair_command
+            FOR EACH ROW
+            EXECUTE FUNCTION appsurface_durable.discard_flow_repair_command_insert_function();
+            """);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async ValueTask DropDiscardRepairCommandInsertTriggerAsync(Npgsql.NpgsqlDataSource dataSource)
+    {
+        await using var command = dataSource.CreateCommand(
+            "DROP TRIGGER IF EXISTS discard_flow_repair_command_insert ON appsurface_durable.flow_repair_command; DROP FUNCTION IF EXISTS appsurface_durable.discard_flow_repair_command_insert_function();");
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static string GetDiscardTriggerName(string tableName) => tableName switch
+    {
+        "flow_instance" => "discard_flow_instance_update",
+        "flow_wait" => "discard_flow_wait_update",
+        _ => throw new ArgumentOutOfRangeException(nameof(tableName)),
+    };
 
     private static async ValueTask<string> ReadFlowWaitStateAsync(
         Npgsql.NpgsqlDataSource dataSource,
@@ -405,6 +718,102 @@ public sealed class PostgreSqlDurableFlowRepairTests
         Assert.Equal(1, await command.ExecuteNonQueryAsync());
     }
 
+    private static async ValueTask SetScopeStateAsync(
+        Npgsql.NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        string state)
+    {
+        await using var command = dataSource.CreateCommand(
+            "UPDATE appsurface_durable.scope SET state = @state WHERE scope_id = @scope_id;");
+        command.Parameters.AddWithValue("state", state);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+    }
+
+    private static async ValueTask SetFlowRepairDescriptorCodeAsync(
+        Npgsql.NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableFlowInstanceId instance,
+        string code)
+    {
+        await using var command = dataSource.CreateCommand(
+            "UPDATE appsurface_durable.flow_instance SET suspension_descriptor = jsonb_set(suspension_descriptor, '{code}', to_jsonb(@code::text)) WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id;");
+        command.Parameters.AddWithValue("code", code);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("flow_instance_id", instance.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+    }
+
+    private static async ValueTask SetResultContractIdAsync(
+        Npgsql.NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableFlowInstanceId instance,
+        DurableWorkId workId,
+        string contractId)
+    {
+        await using var command = dataSource.CreateCommand(
+            "UPDATE appsurface_durable.work SET result_contract_id = @contract_id WHERE scope_id = @scope_id AND work_id = @work_id; UPDATE appsurface_durable.flow_wait SET result_contract_id = @contract_id WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND child_work_id = @work_id;");
+        command.Parameters.AddWithValue("contract_id", contractId);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("flow_instance_id", instance.Value);
+        command.Parameters.AddWithValue("work_id", workId.Value);
+        Assert.Equal(2, await command.ExecuteNonQueryAsync());
+    }
+
+    private static async ValueTask SetWorkLeaseOwnerAsync(
+        Npgsql.NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableWorkId workId,
+        string? leaseOwner)
+    {
+        await using var command = dataSource.CreateCommand(
+            "UPDATE appsurface_durable.work SET lease_owner = @lease_owner WHERE scope_id = @scope_id AND work_id = @work_id;");
+        command.Parameters.AddWithValue("lease_owner", leaseOwner ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("work_id", workId.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+    }
+
+    private static async ValueTask<string> ReadWorkResultMetadataAsync(
+        Npgsql.NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableWorkId workId,
+        string field)
+    {
+        var column = GetResultMetadataColumn(field);
+        await using var command = dataSource.CreateCommand(
+            $"SELECT {column} FROM appsurface_durable.work WHERE scope_id = @scope_id AND work_id = @work_id;");
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("work_id", workId.Value);
+        return (string)(await command.ExecuteScalarAsync())!;
+    }
+
+    private static async ValueTask SetWorkResultMetadataAsync(
+        Npgsql.NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableWorkId workId,
+        string field,
+        string value)
+    {
+        var column = GetResultMetadataColumn(field);
+        await using var command = dataSource.CreateCommand(
+            $"UPDATE appsurface_durable.work SET {column} = @value WHERE scope_id = @scope_id AND work_id = @work_id;");
+        command.Parameters.AddWithValue("value", value);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("work_id", workId.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+    }
+
+    private static string GetResultMetadataColumn(string field) => field switch
+    {
+        "contract" => "result_contract_id",
+        "version" => "result_schema_version",
+        "codec" => "result_codec_id",
+        "classification" => "result_classification",
+        "retention" => "result_retention_policy_id",
+        _ => throw new ArgumentOutOfRangeException(nameof(field)),
+    };
+
     private static DurableFlowRepairRequest CreateRepairRequest(
         bool effectApplied,
         DurableScopeId scope,
@@ -473,5 +882,16 @@ public sealed class PostgreSqlDurableFlowRepairTests
                     workRegistration.WorkVersion,
                     workRegistration.ProviderSafety,
                     workCodec.EncodeObject(new byte[] { 2 }))));
+    }
+
+    private sealed class ThrowingPayloadCodec(IDurablePayloadCodec inner) : IDurablePayloadCodec
+    {
+        public Type PayloadType => inner.PayloadType;
+        public string ContractName => inner.ContractName;
+        public string ContractVersion => inner.ContractVersion;
+        public DurableDataClassification Classification => inner.Classification;
+        public string RetentionPolicyId => inner.RetentionPolicyId;
+        public DurableEncodedPayload EncodeObject(object value) => inner.EncodeObject(value);
+        public object DecodeObject(DurableEncodedPayload payload) => throw new JsonException("Malformed test payload.");
     }
 }
