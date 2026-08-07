@@ -33,6 +33,19 @@ aspire run --non-interactive --apphost examples/auth-aspire-keycloak-apphost/Aut
 The verifier checks Keycloak metadata, generated realm/client evidence, forbidden secret markers in the realm evidence,
 the authorization challenge, `/auth/proof/status`, and `/auth/proof/protected`.
 
+## Theme Lifecycle
+
+The default sample intentionally stays on the no-theme path so a real OIDC login remains a five-minute proof. To activate its checked-in assets-only `appsurface-sample` theme, set an immutable Keycloak image reference before running the same local profile:
+
+```bash
+export AUTH_ASPIRE_KEYCLOAK_THEME_IMAGE='quay.io/keycloak/keycloak:26.6@sha256:<64-lowercase-hex-digest>'
+aspire run --apphost examples/auth-aspire-keycloak-apphost/AuthAspireKeycloakAppHost.csproj -- local
+```
+
+The package handles local read-only mounting, development-only cache switches, realm `loginTheme` selection, source manifest generation, and an immutable-image-ready build contract. See the [package theme quickstart](../../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md#theme-quickstart) and [build contract](../../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md#build-contract).
+
+Keep production image build/push, realm mutation, rollout, and rollback in application CI and operator runbooks. A bind mount and disabled theme caches are local-development behavior only.
+
 ## Recovery
 
 | What you see | Likely cause | Fix |
@@ -42,6 +55,8 @@ the authorization challenge, `/auth/proof/status`, and `/auth/proof/protected`.
 | `ASKEYC002` | Port `8080` or `5059` is occupied. | Stop the other process or override the matching option in the AppHost. |
 | `ASKEYC003` | Keycloak metadata did not become reachable. | Inspect container logs and confirm port/container runtime health. |
 | `ASKEYC006` | Client id or redirect URI does not match imported realm state. | Reset stale Keycloak data or keep callback path and web proof port aligned. |
+| `ASKEYC010`–`ASKEYC013` | Theme name, image, source, property, or resource declaration is invalid. | Read the package source-policy guidance, then rebuild the manifest. |
+| `ASKEYC017` | Materialized or packaged theme content differs from the manifest. | Recreate the build context from a fresh source snapshot and rebuild the image. |
 | Browser warns about local certificates | Development certificates are missing or untrusted. | Run `aspire certs trust` or `dotnet dev-certs https --trust` from an interactive shell. |
 | Sign-in says invalid username or password | You used a production credential or stale persisted realm. | Use the seeded local-only users above, or delete the persistent Keycloak data volume and rerun. |
 | Login fails after enabling persistent data | A persisted realm/admin state is stale. | Delete the Keycloak data volume and rerun with disposable defaults. |

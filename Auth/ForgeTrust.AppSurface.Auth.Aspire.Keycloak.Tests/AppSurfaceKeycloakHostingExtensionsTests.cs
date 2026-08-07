@@ -36,6 +36,39 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     }
 
     [Fact]
+    public void AddAppSurfaceKeycloak_WhenLoginThemeConfigured_MountsAndDescribesTheValidatedTheme()
+    {
+        using var directory = new TempDirectory();
+        var source = Path.Join(directory.Path, "application");
+        Directory.CreateDirectory(Path.Join(source, "login", "resources"));
+        File.WriteAllText(Path.Join(source, "login", "theme.properties"), "parent=keycloak\n");
+        File.WriteAllText(Path.Join(source, "login", "resources", "site.css"), "body { color: black; }");
+        var builder = DistributedApplication.CreateBuilder([]);
+        var keycloakPort = GetAvailablePort();
+        var webProofPort = GetAvailablePort();
+        var image = AppSurfaceKeycloakImageReference.Parse($"quay.io/keycloak/keycloak:26.6@sha256:{new string('a', 64)}");
+
+        var resource = builder.AddAppSurfaceKeycloak("keycloak-theme", options =>
+        {
+            options.KeycloakPort = keycloakPort;
+            options.WebProofPort = webProofPort;
+            options.RealmImportDirectory = Path.Join(directory.Path, "realms");
+            options.LoginTheme = AppSurfaceKeycloakThemeOptions.Login("application", source, image);
+        });
+
+        Assert.NotNull(resource.Theme);
+        Assert.Equal("application", resource.Theme.Name);
+        Assert.Equal(image.Value, resource.Theme.BaseImage);
+        Assert.True(resource.Resource.Resource.TryGetContainerMounts(out var mounts));
+        var mount = Assert.Single(mounts, annotation => annotation.Target == "/opt/keycloak/themes/application");
+        Assert.Equal(Path.GetFullPath(source), mount.Source);
+        Assert.True(mount.IsReadOnly);
+
+        var realmJson = File.ReadAllText(resource.RealmImportFile);
+        Assert.Contains("\"loginTheme\": \"application\"", realmJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Projection_WhenClientSecretRequired_UsesBooleanStringAndRejectsNullProject()
     {
         var projection = new AppSurfaceKeycloakConfigurationProjection(

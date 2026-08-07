@@ -15,11 +15,13 @@ public sealed class AppSurfaceKeycloakResource
     /// <param name="configuration">The secret-safe web configuration projection.</param>
     /// <param name="readiness">The readiness probe for this resource.</param>
     /// <param name="realmImportFile">The generated realm import file path.</param>
+    /// <param name="theme">Optional secret-safe login-theme evidence.</param>
     public AppSurfaceKeycloakResource(
         IResourceBuilder<KeycloakResource> resource,
         AppSurfaceKeycloakConfigurationProjection configuration,
         AppSurfaceKeycloakReadinessProbe readiness,
-        string realmImportFile)
+        string realmImportFile,
+        AppSurfaceKeycloakThemeRegistration? theme = null)
     {
         ArgumentNullException.ThrowIfNull(resource);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -30,6 +32,7 @@ public sealed class AppSurfaceKeycloakResource
         Configuration = configuration;
         Readiness = readiness;
         RealmImportFile = realmImportFile;
+        Theme = theme;
     }
 
     /// <summary>
@@ -52,4 +55,9 @@ public sealed class AppSurfaceKeycloakResource
     /// Gets the generated realm import file path.
     /// </summary>
     public string RealmImportFile { get; }
+
+    /// <summary>
+    /// Gets secret-safe evidence for the optional local login theme.
+    /// </summary>
+    public AppSurfaceKeycloakThemeRegistration? Theme { get; }
 }

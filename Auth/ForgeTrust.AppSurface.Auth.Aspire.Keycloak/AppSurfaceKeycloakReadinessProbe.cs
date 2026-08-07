@@ -8,6 +8,7 @@ namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 /// </summary>
 public sealed class AppSurfaceKeycloakReadinessProbe
 {
+    private const int MaximumAuthorizationResponseBytes = 16 * 1024;
     private static readonly HttpClient DefaultHttpClient = new(new HttpClientHandler { AllowAutoRedirect = false })
     {
         Timeout = AppSurfaceKeycloakDefaults.ReadinessTimeout,
@@ -76,7 +77,7 @@ public sealed class AppSurfaceKeycloakReadinessProbe
         {
             throw new AppSurfaceKeycloakException(
                 AppSurfaceKeycloakDiagnosticCodes.MetadataUnavailable,
-                $"Problem: Keycloak OpenID metadata is unavailable. Cause: {ex.Message} Fix: confirm the container runtime is available, port {_options.KeycloakPort} is free, and Keycloak finished realm import. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {AppSurfaceKeycloakDiagnosticCodes.MetadataUnavailable}.");
+                $"Problem: Keycloak OpenID metadata is unavailable. Cause: HTTP request failed ({ex.GetType().Name}). Fix: confirm the container runtime is available, port {_options.KeycloakPort} is free, and Keycloak finished realm import. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md. Code: {AppSurfaceKeycloakDiagnosticCodes.MetadataUnavailable}.");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -154,6 +155,13 @@ public sealed class AppSurfaceKeycloakReadinessProbe
                 throw RealmEvidence("realm import does not contain a users array.");
             }
 
+            if (_options.LoginTheme is not null
+                && (!root.TryGetProperty("loginTheme", out var loginTheme)
+                    || !string.Equals(loginTheme.GetString(), _options.LoginTheme.Name, StringComparison.Ordinal)))
+            {
+                throw RealmEvidence("realm import does not contain the expected login theme.");
+            }
+
             var client = clients.EnumerateArray()
                 .FirstOrDefault(candidate => string.Equals(GetOptionalString(candidate, "clientId"), _options.ClientId, StringComparison.Ordinal));
             if (client.ValueKind == JsonValueKind.Undefined)
@@ -228,8 +236,10 @@ public sealed class AppSurfaceKeycloakReadinessProbe
     private async Task CheckAuthorizationChallengeAsync(AppSurfaceKeycloakConfigurationProjection projection, CancellationToken cancellationToken)
     {
         var authorizationUri = $"{projection.Authority}/protocol/openid-connect/auth?client_id={Uri.EscapeDataString(projection.ClientId)}&redirect_uri={Uri.EscapeDataString(_options.RedirectUris[0].ToString())}&response_type=code&scope=openid&state=appsurface-state&nonce=appsurface-nonce";
-        using var response = await _httpClient.GetAsync(authorizationUri, cancellationToken).ConfigureAwait(false);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        using var response = await _httpClient
+            .GetAsync(authorizationUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+            .ConfigureAwait(false);
+        var body = await ReadBoundedBodyAsync(response.Content, cancellationToken).ConfigureAwait(false);
 
         if (response.StatusCode == HttpStatusCode.BadRequest
             || body.Contains("invalid_client", StringComparison.OrdinalIgnoreCase)
@@ -254,6 +264,31 @@ public sealed class AppSurfaceKeycloakReadinessProbe
             or HttpStatusCode.RedirectMethod
             or HttpStatusCode.TemporaryRedirect
             or HttpStatusCode.PermanentRedirect;
+
+    private static async Task<string> ReadBoundedBodyAsync(HttpContent content, CancellationToken cancellationToken)
+    {
+        if (content.Headers.ContentLength is > MaximumAuthorizationResponseBytes)
+        {
+            return string.Empty;
+        }
+
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+        var readBuffer = new byte[4096];
+        while (buffer.Length < MaximumAuthorizationResponseBytes)
+        {
+            var remaining = MaximumAuthorizationResponseBytes - (int)buffer.Length;
+            var read = await stream.ReadAsync(readBuffer.AsMemory(0, Math.Min(readBuffer.Length, remaining)), cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+            {
+                break;
+            }
+
+            buffer.Write(readBuffer, 0, read);
+        }
+
+        return System.Text.Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
+    }
 
     private static string? GetOptionalString(JsonElement element, string propertyName) =>
         element.ValueKind == JsonValueKind.Object

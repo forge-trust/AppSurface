@@ -30,6 +30,10 @@ public static class AppSurfaceKeycloakRealmGenerator
             ["clients"] = new JsonArray(CreateClient(options)),
             ["users"] = new JsonArray(options.SeededUsers.Select(CreateUser).ToArray<JsonNode?>()),
         };
+        if (options.LoginTheme is not null)
+        {
+            realm["loginTheme"] = options.LoginTheme.Name;
+        }
 
         return realm.ToJsonString(SerializerOptions);
     }
@@ -46,7 +50,27 @@ public static class AppSurfaceKeycloakRealmGenerator
 
         Directory.CreateDirectory(options.RealmImportDirectory);
         var path = AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath(options.RealmImportDirectory, options.Realm);
-        File.WriteAllText(path, Generate(options));
+        var temporaryPath = Path.Join(options.RealmImportDirectory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.WriteAllText(temporaryPath, Generate(options));
+            File.Move(temporaryPath, path, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Preserve the primary write or replace failure; the next startup can remove the owned temporary file.
+            }
+        }
+
         return path;
     }
 

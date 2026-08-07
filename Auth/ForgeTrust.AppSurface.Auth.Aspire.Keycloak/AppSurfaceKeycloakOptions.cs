@@ -61,6 +61,16 @@ public sealed class AppSurfaceKeycloakOptions
     public string RealmImportDirectory { get; set; } = CreateDefaultRealmImportDirectory();
 
     /// <summary>
+    /// Gets or sets the optional application-owned login theme used by the local Keycloak AppHost proof.
+    /// </summary>
+    /// <remarks>
+    /// When absent, Keycloak's existing behavior and the package's original five-minute proof remain unchanged.
+    /// When present, the package validates and read-only mounts the theme only for local AppHost use; it does not
+    /// publish an image or mutate a production realm.
+    /// </remarks>
+    public AppSurfaceKeycloakThemeOptions? LoginTheme { get; set; }
+
+    /// <summary>
     /// Gets mutable redirect URIs imported into the public OIDC client.
     /// </summary>
     public IList<Uri> RedirectUris { get; } = [];
@@ -90,6 +100,7 @@ public sealed class AppSurfaceKeycloakOptions
         ValidatePath(SignedOutCallbackPath, nameof(SignedOutCallbackPath));
         ValidatePort(KeycloakPort, nameof(KeycloakPort));
         ValidatePort(WebProofPort, nameof(WebProofPort));
+        LoginTheme?.Validate();
 
         if (string.IsNullOrWhiteSpace(RealmImportDirectory))
         {
@@ -136,6 +147,9 @@ public sealed class AppSurfaceKeycloakOptions
             SignedOutCallbackPath,
             requireClientSecret: false);
     }
+
+    internal AppSurfaceKeycloakThemeRegistrationState? CreateThemeRegistration(string sourceBaseDirectory) =>
+        LoginTheme?.CreateRegistration(sourceBaseDirectory);
 
     private void EnsureDefaultUris()
     {

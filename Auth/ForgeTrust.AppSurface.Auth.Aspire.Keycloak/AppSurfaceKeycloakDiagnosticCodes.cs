@@ -34,4 +34,34 @@ public static class AppSurfaceKeycloakDiagnosticCodes
     /// The Keycloak authorization endpoint rejected the configured public client or redirect URI.
     /// </summary>
     public const string AuthorizationChallengeInvalid = "ASKEYC006";
+
+    /// <summary>
+    /// Login-theme configuration or its immutable image reference is invalid.
+    /// </summary>
+    public const string InvalidThemeConfiguration = "ASKEYC010";
+
+    /// <summary>
+    /// Login-theme source is missing, unsafe, unsupported, or exceeds deterministic bounds.
+    /// </summary>
+    public const string ThemeSourceInvalid = "ASKEYC011";
+
+    /// <summary>
+    /// Theme source entries collide after normalized or case-insensitive path comparison.
+    /// </summary>
+    public const string ThemeSourceCollision = "ASKEYC012";
+
+    /// <summary>
+    /// A required login-theme property or resource declaration cannot be satisfied safely.
+    /// </summary>
+    public const string ThemePropertiesInvalid = "ASKEYC013";
+
+    /// <summary>
+    /// Copied FreeMarker templates are missing a bounded upstream baseline or contain an unreviewed override.
+    /// </summary>
+    public const string ThemeTemplateBaselineInvalid = "ASKEYC014";
+
+    /// <summary>
+    /// A materialized build context or packaged theme does not match deterministic source evidence.
+    /// </summary>
+    public const string ThemeBuildContractInvalid = "ASKEYC017";
 }

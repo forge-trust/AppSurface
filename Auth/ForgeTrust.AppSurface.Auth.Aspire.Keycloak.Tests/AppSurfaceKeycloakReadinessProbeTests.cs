@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json.Nodes;
 using ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests;
@@ -18,6 +19,48 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
 
         Assert.Equal("http://localhost:8080/realms/appsurface-dev", result.Authority);
         Assert.Equal("appsurface-web", result.ClientId);
+    }
+
+    [Fact]
+    public async Task CheckOnceAsync_WhenConfiguredLoginThemeMatchesRealmEvidence_Succeeds()
+    {
+        using var directory = new TempDirectory();
+        var options = CreateOptionsWithTheme(directory.Path);
+        AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options);
+        using var client = new HttpClient(new StubHandler(MetadataThenOk));
+        var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
+
+        var result = await probe.CheckOnceAsync();
+
+        Assert.Equal("appsurface-dev", result.Realm);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("other-theme")]
+    public async Task CheckOnceAsync_WhenConfiguredLoginThemeDoesNotMatchRealmEvidence_ThrowsRealmDiagnostic(string? realmTheme)
+    {
+        using var directory = new TempDirectory();
+        var options = CreateOptionsWithTheme(directory.Path);
+        var realmImport = AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options);
+        var realm = JsonNode.Parse(File.ReadAllText(realmImport))!.AsObject();
+        if (realmTheme is null)
+        {
+            realm.Remove("loginTheme");
+        }
+        else
+        {
+            realm["loginTheme"] = realmTheme;
+        }
+
+        File.WriteAllText(realmImport, realm.ToJsonString());
+        using var client = new HttpClient(new StubHandler(MetadataThenOk));
+        var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
+
+        var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.RealmEvidenceInvalid, exception.Code);
+        Assert.Contains("login theme", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -73,7 +116,8 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());
 
         Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.MetadataUnavailable, exception.Code);
-        Assert.Contains("connection refused", exception.Message, StringComparison.Ordinal);
+        Assert.Contains(nameof(HttpRequestException), exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("connection refused", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -213,6 +257,33 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
 
         Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.AuthorizationChallengeInvalid, exception.Code);
         Assert.Contains("HTTP 500", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckOnceAsync_WhenAuthorizationResponseExceedsBodyLimit_DoesNotMaterializeIt()
+    {
+        using var directory = new TempDirectory();
+        var options = CreateOptions(directory.Path);
+        AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options);
+        using var client = new HttpClient(new StubHandler(request =>
+        {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/.well-known/openid-configuration", StringComparison.Ordinal) == true)
+            {
+                return Json("""{"issuer":"http://localhost:8080/realms/appsurface-dev"}""");
+            }
+
+            AssertAuthorizationRequest(request);
+            return new HttpResponseMessage(HttpStatusCode.Redirect)
+            {
+                Content = new LargeBodyContent(),
+                Headers = { Location = new Uri("http://localhost:5059/signin-appsurface-oidc?code=local") },
+            };
+        }));
+        var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
+
+        var result = await probe.CheckOnceAsync();
+
+        Assert.Equal("appsurface-dev", result.Realm);
     }
 
     [Fact]
@@ -461,6 +532,19 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
             RealmImportDirectory = directory,
         };
 
+    private static AppSurfaceKeycloakOptions CreateOptionsWithTheme(string directory)
+    {
+        var themeDirectory = Path.Join(directory, "theme");
+        Directory.CreateDirectory(Path.Join(themeDirectory, "login", "resources"));
+        File.WriteAllText(Path.Join(themeDirectory, "login", "theme.properties"), "parent=keycloak\n");
+        var options = CreateOptions(directory);
+        options.LoginTheme = AppSurfaceKeycloakThemeOptions.Login(
+            "application",
+            themeDirectory,
+            AppSurfaceKeycloakImageReference.Parse($"quay.io/keycloak/keycloak:26.6@sha256:{new string('a', 64)}"));
+        return options;
+    }
+
     private static HttpResponseMessage Json(string json) =>
         new(HttpStatusCode.OK)
         {
@@ -478,5 +562,17 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             Task.FromResult(_respond(request));
+    }
+
+    private sealed class LargeBodyContent : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            throw new InvalidOperationException("The oversized authorization body should not be materialized.");
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 16 * 1024 + 1;
+            return true;
+        }
     }
 }

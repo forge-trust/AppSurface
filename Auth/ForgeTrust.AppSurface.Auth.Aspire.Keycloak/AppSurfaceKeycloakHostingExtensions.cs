@@ -28,6 +28,7 @@ public static class AppSurfaceKeycloakHostingExtensions
         };
         configure?.Invoke(options);
         options.Validate();
+        var themeRegistration = options.CreateThemeRegistration(AppContext.BaseDirectory);
 
         AppSurfaceKeycloakPortPreflight.ThrowIfOccupied(options.KeycloakPort, nameof(options.KeycloakPort));
         AppSurfaceKeycloakPortPreflight.ThrowIfOccupied(options.WebProofPort, nameof(options.WebProofPort));
@@ -35,6 +36,16 @@ public static class AppSurfaceKeycloakHostingExtensions
         var realmFile = AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options);
         var keycloak = builder.AddKeycloak(name, options.KeycloakPort)
             .WithRealmImport(options.RealmImportDirectory);
+        if (themeRegistration is not null)
+        {
+            keycloak = keycloak
+                .WithImage(themeRegistration.BaseImage.Image, themeRegistration.BaseImage.Tag)
+                .WithImageRegistry(themeRegistration.BaseImage.Registry)
+                .WithImageSHA256(themeRegistration.BaseImage.Sha256)
+                .WithBindMount(themeRegistration.SourceDirectory, $"/opt/keycloak/themes/{themeRegistration.Registration.Name}", isReadOnly: true)
+                .WithEnvironment("KC_SPI_THEME_CACHE_THEMES", "false")
+                .WithEnvironment("KC_SPI_THEME_CACHE_TEMPLATES", "false");
+        }
         if (options.UsePersistentDataVolume)
         {
             keycloak = keycloak.WithDataVolume();
@@ -45,6 +56,7 @@ public static class AppSurfaceKeycloakHostingExtensions
             keycloak,
             projection,
             new AppSurfaceKeycloakReadinessProbe(options),
-            realmFile);
+            realmFile,
+            themeRegistration?.Registration);
     }
 }
