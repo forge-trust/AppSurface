@@ -63,6 +63,31 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         Assert.Contains("login theme", exception.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("lastName", "Other User", "expected local profile surname")]
+    [InlineData("email", "other@appsurface.local", "expected local profile email")]
+    [InlineData("emailVerified", false, "expected verified local profile email")]
+    public async Task CheckOnceAsync_WhenSeededUserProfileEvidenceIsIncomplete_ThrowsRealmDiagnostic(
+        string propertyName,
+        object propertyValue,
+        string expectedMessage)
+    {
+        using var directory = new TempDirectory();
+        var options = CreateOptions(directory.Path);
+        var realmImportPath = AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options);
+        var realm = JsonNode.Parse(File.ReadAllText(realmImportPath))!.AsObject();
+        var seededUser = realm["users"]!.AsArray()[0]!.AsObject();
+        seededUser[propertyName] = JsonValue.Create(propertyValue);
+        File.WriteAllText(realmImportPath, realm.ToJsonString());
+        using var client = new HttpClient(new StubHandler(MetadataThenOk));
+        var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
+
+        var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.RealmEvidenceInvalid, exception.Code);
+        Assert.Contains(expectedMessage, exception.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task CheckOnceAsync_WhenIssuerMismatch_ThrowsMetadataDiagnostic()
     {
@@ -284,6 +309,35 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         var result = await probe.CheckOnceAsync();
 
         Assert.Equal("appsurface-dev", result.Realm);
+    }
+
+    [Fact]
+    public async Task CheckOnceAsync_WhenUnknownLengthAuthorizationResponseExceedsBodyLimit_RemainsBounded()
+    {
+        using var directory = new TempDirectory();
+        var options = CreateOptions(directory.Path);
+        AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options);
+        var content = new UnknownLengthLargeBodyContent();
+        using var client = new HttpClient(new StubHandler(request =>
+        {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/.well-known/openid-configuration", StringComparison.Ordinal) == true)
+            {
+                return Json("{\"issuer\":\"https://localhost:8080/realms/appsurface-dev\"}");
+            }
+
+            AssertAuthorizationRequest(request);
+            return new HttpResponseMessage(HttpStatusCode.Redirect)
+            {
+                Content = content,
+                Headers = { Location = new Uri("http://localhost:5059/signin-appsurface-oidc?code=local") },
+            };
+        }));
+        var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
+
+        var result = await probe.CheckOnceAsync();
+
+        Assert.Equal("appsurface-dev", result.Realm);
+        Assert.Equal(16 * 1024, content.BytesRead);
     }
 
     [Fact]
@@ -573,6 +627,43 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         {
             length = 16 * 1024 + 1;
             return true;
+        }
+    }
+
+    private sealed class UnknownLengthLargeBodyContent : HttpContent
+    {
+        private readonly byte[] _body = new byte[(16 * 1024) + 1];
+
+        public int BytesRead { get; private set; }
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            throw new InvalidOperationException("The probe should read the response stream directly.");
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+
+        protected override Task<Stream> CreateContentReadStreamAsync() =>
+            Task.FromResult<Stream>(new TrackingReadStream(_body, read => BytesRead += read));
+    }
+
+    private sealed class TrackingReadStream : MemoryStream
+    {
+        private readonly Action<int> _onRead;
+
+        public TrackingReadStream(byte[] buffer, Action<int> onRead)
+            : base(buffer, writable: false)
+        {
+            _onRead = onRead;
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var read = await base.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            _onRead(read);
+            return read;
         }
     }
 }

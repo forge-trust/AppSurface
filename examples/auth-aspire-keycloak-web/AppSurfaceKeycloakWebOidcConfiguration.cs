@@ -12,6 +12,9 @@ namespace AuthAspireKeycloakWeb;
 /// </remarks>
 public static class AppSurfaceKeycloakWebOidcConfiguration
 {
+    private const string LocalAuthority = "https://localhost:8080/realms/appsurface-dev";
+    private const string LocalClientId = "appsurface-web";
+
     /// <summary>
     /// Applies the local Keycloak authority, callback paths, client id, and sign-out token-persistence requirement.
     /// </summary>
@@ -27,10 +30,13 @@ public static class AppSurfaceKeycloakWebOidcConfiguration
         options.SignedOutCallbackPath = configuration["Authentication:Oidc:SignedOutCallbackPath"] ?? AppSurfaceOidcAuthOptions.DefaultSignedOutCallbackPath;
         options.ConfigureOpenIdConnect(oidc =>
         {
-            oidc.Authority = configuration["Authentication:Oidc:Authority"] ?? "https://localhost:8080/realms/appsurface-dev";
-            oidc.ClientId = configuration["Authentication:Oidc:ClientId"] ?? "appsurface-web";
+            oidc.Authority = configuration["Authentication:Oidc:Authority"] ?? LocalAuthority;
+            oidc.ClientId = configuration["Authentication:Oidc:ClientId"] ?? LocalClientId;
             oidc.RequireHttpsMetadata = true;
-            oidc.SaveTokens = true;
+            oidc.SaveTokens = configuration.GetValue(
+                "Authentication:Oidc:SaveTokens",
+                string.Equals(oidc.Authority, LocalAuthority, StringComparison.Ordinal)
+                && string.Equals(oidc.ClientId, LocalClientId, StringComparison.Ordinal));
         });
     }
 }

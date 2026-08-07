@@ -120,13 +120,14 @@ public sealed class AppSurfaceKeycloakThemeOptions
 
         var sourceDirectory = Path.GetFullPath(SourceDirectory, sourceBaseDirectory);
         var manifest = AppSurfaceKeycloakThemeManifest.Create(Name, sourceDirectory);
-        ValidateRequirements(manifest, sourceDirectory);
+        var developmentOnlyResourcePaths = ValidateRequirements(manifest, sourceDirectory);
         var templateBaselineDigest = ValidateTemplateBaseline(manifest, sourceBaseDirectory);
         return new AppSurfaceKeycloakThemeRegistrationState(
             sourceDirectory,
             manifest,
             BaseImage,
             templateBaselineDigest,
+            developmentOnlyResourcePaths,
             new AppSurfaceKeycloakThemeRegistration(Name, BaseImage.Value, Platform, manifest.Digest, templateBaselineDigest));
     }
 
@@ -168,7 +169,7 @@ public sealed class AppSurfaceKeycloakThemeOptions
         return baseline.Digest;
     }
 
-    private void ValidateRequirements(AppSurfaceKeycloakThemeManifest manifest, string sourceDirectory)
+    private IReadOnlySet<string> ValidateRequirements(AppSurfaceKeycloakThemeManifest manifest, string sourceDirectory)
     {
         var paths = manifest.Files.Select(file => file.RelativePath).ToHashSet(StringComparer.Ordinal);
         foreach (var requiredResourcePath in RequiredResourcePaths)
@@ -180,6 +181,7 @@ public sealed class AppSurfaceKeycloakThemeOptions
             }
         }
 
+        var developmentOnlyPaths = new HashSet<string>(StringComparer.Ordinal);
         foreach (var developmentOnlyResourcePath in DevelopmentOnlyResourcePaths)
         {
             var normalizedPath = NormalizeDeclaredPath(developmentOnlyResourcePath, nameof(DevelopmentOnlyResourcePaths));
@@ -187,16 +189,24 @@ public sealed class AppSurfaceKeycloakThemeOptions
             {
                 throw RequirementsInvalid($"development-only resource '{normalizedPath}' is missing from the source manifest.");
             }
+
+            if (string.Equals(normalizedPath, "login/theme.properties", StringComparison.Ordinal))
+            {
+                throw RequirementsInvalid("login/theme.properties cannot be development-only because packaged themes require it.");
+            }
+
+            developmentOnlyPaths.Add(normalizedPath);
         }
 
         if (RequiredThemeProperties.Count == 0)
         {
-            return;
+            return developmentOnlyPaths;
         }
 
-        var propertiesPath = Path.Join(sourceDirectory, "login", "theme.properties");
+        var propertiesEntry = manifest.Files.Single(file => string.Equals(file.RelativePath, "login/theme.properties", StringComparison.Ordinal));
+        var properties = System.Text.Encoding.UTF8.GetString(AppSurfaceKeycloakThemeManifest.ReadVerifiedFile(sourceDirectory, propertiesEntry));
         var names = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var line in File.ReadLines(propertiesPath))
+        foreach (var line in properties.Split('\n'))
         {
             var trimmed = line.Trim();
             if (trimmed.Length == 0 || trimmed.StartsWith('#') || trimmed.StartsWith('!'))
@@ -218,10 +228,17 @@ public sealed class AppSurfaceKeycloakThemeOptions
                 throw RequirementsInvalid($"required theme property '{requiredProperty}' is missing from login/theme.properties.");
             }
         }
+
+        return developmentOnlyPaths;
     }
 
     private static string NormalizeDeclaredPath(string value, string optionName)
     {
+        if (value is null)
+        {
+            throw Invalid(optionName, "paths cannot contain null entries.");
+        }
+
         var normalized = value.Replace('\\', '/');
         if (string.IsNullOrWhiteSpace(normalized)
             || normalized.StartsWith("/", StringComparison.Ordinal)
@@ -269,7 +286,7 @@ public sealed class AppSurfaceKeycloakThemeOptions
     private static AppSurfaceKeycloakException RequirementsInvalid(string detail) =>
         new(
             AppSurfaceKeycloakDiagnosticCodes.ThemePropertiesInvalid,
-            $"Problem: AppSurface Keycloak login theme requirements are invalid. Cause: {detail} Fix: update declared property or resource names without adding their values to evidence. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md#assets-only-themes. Code: {AppSurfaceKeycloakDiagnosticCodes.ThemePropertiesInvalid}.");
+            $"Problem: AppSurface Keycloak login theme requirements are invalid. Cause: {detail} Fix: update declared property or resource names without adding their values to evidence. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md#source-policy. Code: {AppSurfaceKeycloakDiagnosticCodes.ThemePropertiesInvalid}.");
 
     private static AppSurfaceKeycloakException TemplateBaselineInvalid(string detail) =>
         new(

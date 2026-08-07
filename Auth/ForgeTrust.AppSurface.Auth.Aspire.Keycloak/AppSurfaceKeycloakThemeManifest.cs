@@ -16,8 +16,10 @@ public sealed record AppSurfaceKeycloakThemeManifest(
     string Digest)
 {
     private const int MaximumFileCount = 256;
+    private const int MaximumDirectoryCount = 256;
     private const long MaximumFileBytes = 1_048_576;
     private const long MaximumTotalBytes = 8_388_608;
+    private const int ReadBufferBytes = 81_920;
 
     private static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -37,6 +39,63 @@ public sealed record AppSurfaceKeycloakThemeManifest(
 
     internal static AppSurfaceKeycloakThemeManifest CreateTemplateBaseline(string themeName, string sourceDirectory)
         => CreateSafely(themeName, sourceDirectory, TemplateExtensions, requireThemeProperties: false);
+
+    internal static AppSurfaceKeycloakThemeManifest CreatePackagedManifest(
+        AppSurfaceKeycloakThemeManifest sourceManifest,
+        IReadOnlySet<string> developmentOnlyResourcePaths)
+    {
+        ArgumentNullException.ThrowIfNull(sourceManifest);
+        ArgumentNullException.ThrowIfNull(developmentOnlyResourcePaths);
+
+        return CreateFromFiles(
+            sourceManifest.ThemeName,
+            sourceManifest.Files.Where(file => !developmentOnlyResourcePaths.Contains(file.RelativePath)).ToArray());
+    }
+
+    internal static byte[] ReadVerifiedFile(
+        string sourceDirectory,
+        AppSurfaceKeycloakThemeManifestEntry expectedFile)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceDirectory);
+        ArgumentNullException.ThrowIfNull(expectedFile);
+
+        if (expectedFile.Length is < 0 or > MaximumFileBytes)
+        {
+            throw SourceInvalid($"file '{expectedFile.RelativePath}' has an invalid bounded length.");
+        }
+
+        var root = Path.GetFullPath(sourceDirectory);
+        var rootPrefix = Path.EndsInDirectorySeparator(root) ? root : $"{root}{Path.DirectorySeparatorChar}";
+        var path = Path.GetFullPath(Path.Join(root, expectedFile.RelativePath.Replace('/', Path.DirectorySeparatorChar)));
+        if (!path.StartsWith(rootPrefix, StringComparison.Ordinal)
+            || IsReparsePoint(root)
+            || IsReparsePoint(path))
+        {
+            throw SourceInvalid($"file '{expectedFile.RelativePath}' is no longer a safe source entry.");
+        }
+
+        var bytes = new byte[(int)expectedFile.Length];
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, ReadBufferBytes, FileOptions.SequentialScan);
+        var offset = 0;
+        while (offset < bytes.Length)
+        {
+            var read = stream.Read(bytes, offset, bytes.Length - offset);
+            if (read == 0)
+            {
+                throw SourceInvalid($"file '{expectedFile.RelativePath}' changed after manifest validation.");
+            }
+
+            offset += read;
+        }
+
+        if (stream.ReadByte() != -1
+            || !string.Equals(Convert.ToHexStringLower(SHA256.HashData(bytes)), expectedFile.Sha256, StringComparison.Ordinal))
+        {
+            throw SourceInvalid($"file '{expectedFile.RelativePath}' changed after manifest validation.");
+        }
+
+        return bytes;
+    }
 
     private static AppSurfaceKeycloakThemeManifest CreateSafely(
         string themeName,
@@ -72,6 +131,7 @@ public sealed record AppSurfaceKeycloakThemeManifest(
 
         var entries = new List<AppSurfaceKeycloakThemeManifestEntry>();
         var collisionKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var directoryCount = 0;
         long totalBytes = 0;
         foreach (var entry in Directory.EnumerateFileSystemEntries(sourceDirectory, "*", SearchOption.AllDirectories))
         {
@@ -82,6 +142,12 @@ public sealed record AppSurfaceKeycloakThemeManifest(
 
             if (Directory.Exists(entry))
             {
+                directoryCount++;
+                if (directoryCount > MaximumDirectoryCount)
+                {
+                    throw SourceInvalid($"the source exceeds the {MaximumDirectoryCount} directory limit.");
+                }
+
                 continue;
             }
 
@@ -97,19 +163,7 @@ public sealed record AppSurfaceKeycloakThemeManifest(
                 throw SourceInvalid($"the source contains unsupported file '{relativePath}'.");
             }
 
-            var length = new FileInfo(entry).Length;
-            if (length > MaximumFileBytes)
-            {
-                throw SourceInvalid($"file '{relativePath}' exceeds the {MaximumFileBytes} byte limit.");
-            }
-
-            totalBytes += length;
-            if (totalBytes > MaximumTotalBytes)
-            {
-                throw SourceInvalid($"the source exceeds the {MaximumTotalBytes} byte total limit.");
-            }
-
-            entries.Add(new AppSurfaceKeycloakThemeManifestEntry(relativePath, length, Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(entry)))));
+            entries.Add(ReadFile(entry, relativePath, ref totalBytes));
             if (entries.Count > MaximumFileCount)
             {
                 throw SourceInvalid($"the source exceeds the {MaximumFileCount} file limit.");
@@ -122,11 +176,50 @@ public sealed record AppSurfaceKeycloakThemeManifest(
             throw SourceInvalid("the source must contain login/theme.properties.");
         }
 
+        return CreateFromFiles(themeName, orderedFiles);
+    }
+
+    private static AppSurfaceKeycloakThemeManifest CreateFromFiles(
+        string themeName,
+        IReadOnlyList<AppSurfaceKeycloakThemeManifestEntry> files)
+    {
         var canonical = string.Join(
             "\n",
-            orderedFiles.Select(entry => $"{entry.RelativePath}\n{entry.Length}\n{entry.Sha256}"));
+            files.Select(entry => $"{entry.RelativePath}\n{entry.Length}\n{entry.Sha256}"));
         var digest = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
-        return new AppSurfaceKeycloakThemeManifest(themeName, orderedFiles, digest);
+        return new AppSurfaceKeycloakThemeManifest(themeName, files, digest);
+    }
+
+    private static AppSurfaceKeycloakThemeManifestEntry ReadFile(string path, string relativePath, ref long totalBytes)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, ReadBufferBytes, FileOptions.SequentialScan);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[ReadBufferBytes];
+        long length = 0;
+        while (true)
+        {
+            var read = stream.Read(buffer, 0, buffer.Length);
+            if (read == 0)
+            {
+                break;
+            }
+
+            length += read;
+            if (length > MaximumFileBytes)
+            {
+                throw SourceInvalid($"file '{relativePath}' exceeds the {MaximumFileBytes} byte limit.");
+            }
+
+            totalBytes += read;
+            if (totalBytes > MaximumTotalBytes)
+            {
+                throw SourceInvalid($"the source exceeds the {MaximumTotalBytes} byte total limit.");
+            }
+
+            hash.AppendData(buffer.AsSpan(0, read));
+        }
+
+        return new AppSurfaceKeycloakThemeManifestEntry(relativePath, length, Convert.ToHexStringLower(hash.GetHashAndReset()));
     }
 
     private static bool IsReparsePoint(string path) =>

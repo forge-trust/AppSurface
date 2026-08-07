@@ -22,6 +22,9 @@ public sealed class AppSurfaceKeycloakThemeBuildContract
         _sourceDirectory = registration.SourceDirectory;
         Registration = registration.Registration;
         Manifest = registration.Manifest;
+        PackagedManifest = AppSurfaceKeycloakThemeManifest.CreatePackagedManifest(
+            registration.Manifest,
+            registration.DevelopmentOnlyResourcePaths);
     }
 
     /// <summary>
@@ -33,6 +36,16 @@ public sealed class AppSurfaceKeycloakThemeBuildContract
     /// Gets the deterministic source manifest used by this build contract.
     /// </summary>
     public AppSurfaceKeycloakThemeManifest Manifest { get; }
+
+    /// <summary>
+    /// Gets the deterministic manifest for the immutable image context after development-only resources are excluded.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Manifest"/> retains the complete validated local source manifest. Use this property to prove the
+    /// packaged image content that <see cref="Write(string)"/> materializes and <see cref="VerifyPackagedTheme(string)"/>
+    /// validates.
+    /// </remarks>
+    public AppSurfaceKeycloakThemeManifest PackagedManifest { get; }
 
     /// <summary>
     /// Creates a deterministic build contract from a configured login theme.
@@ -76,18 +89,17 @@ public sealed class AppSurfaceKeycloakThemeBuildContract
         {
             var themeDestination = Path.Join(temporary, "themes", Registration.Name);
             Directory.CreateDirectory(themeDestination);
-            foreach (var file in Manifest.Files)
+            foreach (var file in PackagedManifest.Files)
             {
-                var source = Path.Join(_sourceDirectory, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
                 var target = Path.Join(themeDestination, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                File.Copy(source, target);
+                CopyVerifiedSourceFile(file, target);
             }
 
             File.WriteAllText(Path.Join(temporary, ContainerfileName), CreateContainerfile());
             File.WriteAllText(
                 Path.Join(temporary, ManifestName),
-                JsonSerializer.Serialize(new ThemeBuildEvidence(Registration, Manifest), JsonOptions));
+                JsonSerializer.Serialize(new ThemeBuildEvidence(Registration, Manifest, PackagedManifest), JsonOptions));
 
             VerifyPackagedTheme(themeDestination);
             Directory.Move(temporary, destination);
@@ -113,7 +125,7 @@ public sealed class AppSurfaceKeycloakThemeBuildContract
     /// Verifies that a materialized or extracted image theme directory exactly matches this contract's manifest.
     /// </summary>
     /// <param name="packagedThemeDirectory">The directory corresponding to <c>/opt/keycloak/themes/{name}</c>.</param>
-    /// <exception cref="AppSurfaceKeycloakException">The packaged content does not match the registered source manifest.</exception>
+    /// <exception cref="AppSurfaceKeycloakException">The packaged content does not match <see cref="PackagedManifest"/>.</exception>
     public void VerifyPackagedTheme(string packagedThemeDirectory)
     {
         if (string.IsNullOrWhiteSpace(packagedThemeDirectory))
@@ -132,10 +144,10 @@ public sealed class AppSurfaceKeycloakThemeBuildContract
             throw BuildContractInvalid("packaged theme content is missing, unsafe, or contains an unexpected file.");
         }
 
-        if (!string.Equals(packagedManifest.Digest, Manifest.Digest, StringComparison.Ordinal))
+        if (!string.Equals(packagedManifest.Digest, PackagedManifest.Digest, StringComparison.Ordinal))
         {
             throw BuildContractInvalid(
-                $"packaged theme manifest digest '{packagedManifest.Digest}' does not match expected digest '{Manifest.Digest}'.");
+                $"packaged theme manifest digest '{packagedManifest.Digest}' does not match expected digest '{PackagedManifest.Digest}'.");
         }
     }
 
@@ -147,9 +159,9 @@ public sealed class AppSurfaceKeycloakThemeBuildContract
         $"""
         FROM {Registration.BaseImage}
         COPY --chown=keycloak:keycloak themes/{Registration.Name}/ /opt/keycloak/themes/{Registration.Name}/
-        LABEL org.appsurface.keycloak.theme.name=\"{Registration.Name}\"
-        LABEL org.appsurface.keycloak.theme.manifest-digest=\"{Manifest.Digest}\"
-        LABEL org.appsurface.keycloak.theme.platform=\"{Registration.Platform}\"
+        LABEL org.appsurface.keycloak.theme.name="{Registration.Name}"
+        LABEL org.appsurface.keycloak.theme.manifest-digest="{PackagedManifest.Digest}"
+        LABEL org.appsurface.keycloak.theme.platform="{Registration.Platform}"
         {CreateTemplateBaselineLabel()}
         """;
 
@@ -158,6 +170,19 @@ public sealed class AppSurfaceKeycloakThemeBuildContract
             ? string.Empty
             : $"LABEL org.appsurface.keycloak.theme.template-baseline-digest=\"{Registration.TemplateBaselineDigest}\"";
 
+    private void CopyVerifiedSourceFile(AppSurfaceKeycloakThemeManifestEntry file, string target)
+    {
+        try
+        {
+            File.WriteAllBytes(target, AppSurfaceKeycloakThemeManifest.ReadVerifiedFile(_sourceDirectory, file));
+        }
+        catch (AppSurfaceKeycloakException exception)
+            when (exception.Code == AppSurfaceKeycloakDiagnosticCodes.ThemeSourceInvalid)
+        {
+            throw BuildContractInvalid($"source file '{file.RelativePath}' changed after this build contract was created.");
+        }
+    }
+
     private static AppSurfaceKeycloakException BuildContractInvalid(string detail) =>
         new(
             AppSurfaceKeycloakDiagnosticCodes.ThemeBuildContractInvalid,
@@ -165,5 +190,6 @@ public sealed class AppSurfaceKeycloakThemeBuildContract
 
     private sealed record ThemeBuildEvidence(
         AppSurfaceKeycloakThemeRegistration Registration,
-        AppSurfaceKeycloakThemeManifest Manifest);
+        AppSurfaceKeycloakThemeManifest Manifest,
+        AppSurfaceKeycloakThemeManifest PackagedManifest);
 }

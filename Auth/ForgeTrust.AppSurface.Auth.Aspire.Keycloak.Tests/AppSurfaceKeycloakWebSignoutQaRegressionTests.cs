@@ -26,4 +26,26 @@ public sealed class AppSurfaceKeycloakWebSignoutQaRegressionTests
         Assert.True(oidc.RequireHttpsMetadata);
         Assert.True(oidc.SaveTokens);
     }
+
+    [Fact]
+    public void WebProofConfiguration_DoesNotPersistTokensForAnOverriddenProviderByDefault()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["Authentication:Oidc:Authority"] = "https://identity.example.test/realms/appsurface",
+                    ["Authentication:Oidc:ClientId"] = "production-web",
+                })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddAppSurfaceOidcAuth(options =>
+            AppSurfaceKeycloakWebOidcConfiguration.Configure(options, configuration));
+
+        using var provider = services.BuildServiceProvider();
+        var oidc = provider.GetRequiredService<IOptionsMonitor<OpenIdConnectOptions>>()
+            .Get(AppSurfaceOidcAuthOptions.DefaultOidcScheme);
+
+        Assert.False(oidc.SaveTokens);
+    }
 }

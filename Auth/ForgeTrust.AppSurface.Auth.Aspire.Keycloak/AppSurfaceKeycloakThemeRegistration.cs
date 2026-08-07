@@ -20,4 +20,5 @@ internal sealed record AppSurfaceKeycloakThemeRegistrationState(
     AppSurfaceKeycloakThemeManifest Manifest,
     AppSurfaceKeycloakImageReference BaseImage,
     string? TemplateBaselineDigest,
+    IReadOnlySet<string> DevelopmentOnlyResourcePaths,
     AppSurfaceKeycloakThemeRegistration Registration);

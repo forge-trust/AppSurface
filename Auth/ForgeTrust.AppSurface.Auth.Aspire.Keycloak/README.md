@@ -53,28 +53,30 @@ keycloak.Configuration.ApplyTo(web)
 The original no-theme path stays the fastest proof. Opt into a local application-owned login theme only after pinning the Keycloak image you intend to test:
 
 ```csharp
-var keycloak = builder.AddAppSurfaceKeycloak("auth", options =>
-{
-    options.LoginTheme = AppSurfaceKeycloakThemeOptions.Login(
-        name: "application",
-        sourceDirectory: "../Identity/KeycloakTheme",
-        baseImage: AppSurfaceKeycloakImageReference.Parse(
-            "quay.io/keycloak/keycloak:26.6@sha256:<64-lowercase-hex-digest>"));
+var themeSource = Path.GetFullPath("../Identity/KeycloakTheme", AppContext.BaseDirectory);
+var loginTheme = AppSurfaceKeycloakThemeOptions.Login(
+    name: "application",
+    sourceDirectory: themeSource,
+    baseImage: AppSurfaceKeycloakImageReference.Parse(
+        "quay.io/keycloak/keycloak:26.6@sha256:<64-lowercase-hex-digest>"));
+loginTheme.RequiredThemeProperties.Add("parent");
+loginTheme.RequiredResourcePaths.Add("login/resources/css/site.css");
 
-    options.LoginTheme.RequiredThemeProperties.Add("parent");
-    options.LoginTheme.RequiredResourcePaths.Add("login/resources/css/site.css");
-});
+var keycloak = builder.AddAppSurfaceKeycloak("auth", options => options.LoginTheme = loginTheme);
 ```
 
-The source root contains `login/theme.properties`; its `login` directory is mounted read-only at `/opt/keycloak/themes/application`. The local AppHost disables only Keycloak's theme and template caches. It selects `loginTheme` in the generated disposable realm import and returns safe `keycloak.Theme` evidence containing the name, image reference, platform, and source-manifest digest. That theme evidence never exposes the source-machine path, property values, realm JSON, bootstrap credentials, or token material.
+Relative theme paths are resolved against the AppHost process base directory. Resolve them explicitly, as shown, or copy
+the theme into the AppHost output tree before registration.
+
+The source root contains `login/theme.properties` and is mounted read-only at `/opt/keycloak/themes/application`. The local AppHost disables only Keycloak's theme and template caches. The mount intentionally reflects source edits for local development, while `keycloak.Theme` evidence captures the registration-time manifest only. It selects `loginTheme` in the generated disposable realm import and returns safe evidence containing the name, image reference, platform, and source-manifest digest. That evidence never exposes the source-machine path, property values, realm JSON, bootstrap credentials, or token material.
 
 `LoginTheme` is optional. When it is absent, resource image configuration, realm JSON, and the existing five-minute local login behavior remain unchanged. The initial exact-image proof platform is `linux/amd64`; a different value is rejected instead of being silently presented as release evidence.
 
 ## Source Policy
 
-A theme source is a bounded regular-file tree rooted at `login/theme.properties`. The validator rejects missing roots, symbolic links/reparse points, traversal, unsupported files, more than 256 files, individual files larger than 1 MiB, and trees larger than 8 MiB. Allowed files are Keycloak theme resources: `.properties`, `.ftl`, CSS, JavaScript, standard image formats, and common font formats.
+A theme source is a bounded regular-file tree rooted at `login/theme.properties`. The validator rejects missing roots, symbolic links/reparse points, traversal, unsupported files, more than 256 files or directories, individual files larger than 1 MiB, and trees larger than 8 MiB. Allowed files are Keycloak theme resources: `.properties`, `.ftl`, CSS, JavaScript, standard image formats, and common font formats.
 
-The manifest sorts slash-normalized relative paths ordinally and records each file's byte length and SHA-256 digest; its digest is independent of machine-local source paths and file enumeration order. `RequiredThemeProperties` checks only property names, never serializes their values. `RequiredResourcePaths` and `DevelopmentOnlyResourcePaths` must resolve inside the manifest; a development-only declaration does not make an asset eligible for future packaged-image proof.
+The manifest sorts slash-normalized relative paths ordinally and records each file's byte length and SHA-256 digest; its digest is independent of machine-local source paths and file enumeration order. `RequiredThemeProperties` checks only property names, never serializes their values. `RequiredResourcePaths` and `DevelopmentOnlyResourcePaths` must resolve inside the manifest. The complete source manifest retains development-only assets as local evidence, while `AppSurfaceKeycloakThemeBuildContract.PackagedManifest` excludes them from the immutable image context and packaged-content proof. `login/theme.properties` cannot be development-only because a packaged Keycloak theme requires it.
 
 ## Template Overrides
 
@@ -87,7 +89,7 @@ The baseline is evidence, not automatic migration. AppSurface never edits a Free
 Use `AppSurfaceKeycloakThemeBuildContract` to create the consumer-owned immutable image context:
 
 ```csharp
-var buildContract = AppSurfaceKeycloakThemeBuildContract.Create(options.LoginTheme);
+var buildContract = AppSurfaceKeycloakThemeBuildContract.Create(loginTheme);
 var buildContext = buildContract.Write("artifacts/keycloak-theme");
 
 // Application or CI owns this command, image tag, registry, and rollout.
@@ -96,9 +98,9 @@ var buildContext = buildContract.Write("artifacts/keycloak-theme");
 buildContract.VerifyPackagedTheme(Path.Join(buildContext, "themes", "application"));
 ```
 
-The fresh output directory contains a source snapshot under `themes/<name>`, a `Containerfile`, and an `appsurface-keycloak-theme-manifest.json` evidence file. The Containerfile uses the immutable image reference and labels the theme name, platform, and manifest digest. `VerifyPackagedTheme` fails if content is missing, added, or changed. The package does not build or push the image, mutate a production realm, deploy infrastructure, or automate rollout/rollback; those remain application and operations responsibilities.
+The fresh output directory contains a source snapshot under `themes/<name>` without development-only assets, a `Containerfile`, and an `appsurface-keycloak-theme-manifest.json` evidence file containing both source and packaged manifests. The Containerfile uses the immutable image reference and labels the theme name, platform, and packaged-manifest digest. `VerifyPackagedTheme` fails if content is missing, added, or changed. The package does not build or push the image, mutate a production realm, deploy infrastructure, or automate rollout/rollback; those remain application and operations responsibilities.
 
-For a mutable source, recreate the build contract immediately before packaging. A source change after registration causes packaged-manifest verification to fail rather than producing an image with unproven content.
+For a mutable source, recreate the build contract immediately before packaging. A source change after registration makes build-context materialization fail before it copies an unproven file into the image context.
 
 ## Defaults
 

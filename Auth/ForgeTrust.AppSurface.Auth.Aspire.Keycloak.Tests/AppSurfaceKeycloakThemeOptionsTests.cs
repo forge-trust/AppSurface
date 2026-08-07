@@ -84,6 +84,60 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
     }
 
     [Fact]
+    public void CreateRegistration_WhenSourceDirectoryIsASymbolicLink_ThrowsSourceDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var source = CreateTheme(directory.Path, "source");
+        var symbolicLink = Path.Join(directory.Path, "linked-source");
+        if (!TryCreateDirectorySymbolicLink(symbolicLink, source))
+        {
+            return;
+        }
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => CreateOptions(symbolicLink).CreateRegistration(directory.Path));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeSourceInvalid, exception.Code);
+        Assert.Contains("symbolic link", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CreateRegistration_WhenSourceContainsSymbolicLink_ThrowsSourceDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var source = CreateTheme(directory.Path, "application");
+        var externalFile = Path.Join(directory.Path, "external.css");
+        var symbolicLink = Path.Join(source, "login", "resources", "linked.css");
+        File.WriteAllText(externalFile, "body { color: black; }");
+        if (!TryCreateFileSymbolicLink(symbolicLink, externalFile))
+        {
+            return;
+        }
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => CreateOptions(source).CreateRegistration(directory.Path));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeSourceInvalid, exception.Code);
+        Assert.Contains("symbolic links", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CreateRegistration_WhenSourcePathsCollideAfterNormalization_ThrowsSourceCollisionDiagnostic()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        using var directory = new TempDirectory();
+        var source = CreateTheme(directory.Path, "application");
+        File.WriteAllText(Path.Join(source, "login", "resources", "site.css"), "body { color: black; }");
+        File.WriteAllText(Path.Join(source, "login", "resources", "SITE.css"), "body { color: white; }");
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => CreateOptions(source).CreateRegistration(directory.Path));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeSourceCollision, exception.Code);
+    }
+
+    [Fact]
     public void CreateRegistration_WhenBaseImageIsNull_ThrowsArgumentNullException()
     {
         using var directory = new TempDirectory();
@@ -177,6 +231,7 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
         var exception = Assert.Throws<AppSurfaceKeycloakException>(() => theme.CreateRegistration(directory.Path));
 
         Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemePropertiesInvalid, exception.Code);
+        Assert.Contains("README.md#source-policy", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -229,6 +284,41 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
         Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemePropertiesInvalid, exception.Code);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CreateRegistration_WhenDeclaredResourcePathIsNull_ThrowsConfigurationDiagnostic(bool developmentOnly)
+    {
+        using var directory = new TempDirectory();
+        var theme = CreateOptions(CreateTheme(directory.Path, "application"));
+        if (developmentOnly)
+        {
+            theme.DevelopmentOnlyResourcePaths.Add(null!);
+        }
+        else
+        {
+            theme.RequiredResourcePaths.Add(null!);
+        }
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => theme.CreateRegistration(directory.Path));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.InvalidThemeConfiguration, exception.Code);
+        Assert.Contains("null entries", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CreateRegistration_WhenThemePropertiesAreDevelopmentOnly_ThrowsRequirementsDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var theme = CreateOptions(CreateTheme(directory.Path, "application"));
+        theme.DevelopmentOnlyResourcePaths.Add("login/theme.properties");
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => theme.CreateRegistration(directory.Path));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemePropertiesInvalid, exception.Code);
+        Assert.Contains("cannot be development-only", exception.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void CreateRegistration_UnsupportedSourceFile_ThrowsSourceDiagnostic()
     {
@@ -275,6 +365,11 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
         var containerfile = File.ReadAllText(Path.Join(destination, "Containerfile"));
         Assert.Contains(contract.Registration.BaseImage, containerfile, StringComparison.Ordinal);
         Assert.Contains(contract.Manifest.Digest, containerfile, StringComparison.Ordinal);
+        Assert.Contains(
+            $"LABEL org.appsurface.keycloak.theme.name=\"{contract.Registration.Name}\"",
+            containerfile,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("\\\"", containerfile, StringComparison.Ordinal);
         Assert.True(File.Exists(Path.Join(destination, "appsurface-keycloak-theme-manifest.json")));
         contract.VerifyPackagedTheme(Path.Join(destination, "themes", "application"));
     }
@@ -296,6 +391,22 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
     }
 
     [Fact]
+    public void BuildContract_Write_WhenSourceContentChangesAfterRegistration_ThrowsBuildDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var source = CreateTheme(directory.Path, "application");
+        var stylesheet = Path.Join(source, "login", "resources", "site.css");
+        File.WriteAllText(stylesheet, "body { color: black; }");
+        var contract = AppSurfaceKeycloakThemeBuildContract.Create(CreateOptions(source));
+        File.WriteAllText(stylesheet, "body { color: red; }");
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => contract.Write(Path.Join(directory.Path, "build-context")));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeBuildContractInvalid, exception.Code);
+        Assert.Contains("changed after", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BuildContract_VerifyPackagedThemeWhenUnexpectedFileExists_ThrowsBuildDiagnostic()
     {
         using var directory = new TempDirectory();
@@ -309,6 +420,25 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
         var exception = Assert.Throws<AppSurfaceKeycloakException>(() => contract.VerifyPackagedTheme(Path.Join(destination, "themes", "application")));
 
         Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeBuildContractInvalid, exception.Code);
+    }
+
+    [Fact]
+    public void BuildContract_Write_ExcludesDevelopmentOnlyResourcesFromPackagedEvidence()
+    {
+        using var directory = new TempDirectory();
+        var source = CreateTheme(directory.Path, "application");
+        File.WriteAllText(Path.Join(source, "login", "resources", "site.css"), "body { color: black; }");
+        File.WriteAllText(Path.Join(source, "login", "resources", "local-debug.css"), "body { outline: solid; }");
+        var theme = CreateOptions(source);
+        theme.DevelopmentOnlyResourcePaths.Add("login/resources/local-debug.css");
+        var contract = AppSurfaceKeycloakThemeBuildContract.Create(theme);
+        var destination = contract.Write(Path.Join(directory.Path, "build-context"));
+
+        Assert.Contains(contract.Manifest.Files, file => file.RelativePath == "login/resources/local-debug.css");
+        Assert.DoesNotContain(contract.PackagedManifest.Files, file => file.RelativePath == "login/resources/local-debug.css");
+        Assert.False(File.Exists(Path.Join(destination, "themes", "application", "login", "resources", "local-debug.css")));
+        Assert.Contains(contract.PackagedManifest.Digest, contract.CreateContainerfile(), StringComparison.Ordinal);
+        contract.VerifyPackagedTheme(Path.Join(destination, "themes", "application"));
     }
 
     [Fact]
@@ -434,6 +564,22 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
         Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeSourceInvalid, exception.Code);
     }
 
+    [Fact]
+    public void CreateRegistration_WhenSourceExceedsDirectoryCount_ThrowsSourceDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var source = CreateTheme(directory.Path, "application");
+        for (var index = 0; index <= 256; index++)
+        {
+            Directory.CreateDirectory(Path.Join(source, $"empty-{index}"));
+        }
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => CreateOptions(source).CreateRegistration(directory.Path));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeSourceInvalid, exception.Code);
+        Assert.Contains("directory limit", exception.Message, StringComparison.Ordinal);
+    }
+
     private static AppSurfaceKeycloakThemeOptions CreateOptions(string source) =>
         AppSurfaceKeycloakThemeOptions.Login(
             "application",
@@ -446,5 +592,31 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
         Directory.CreateDirectory(Path.Join(source, "login", "resources"));
         File.WriteAllText(Path.Join(source, "login", "theme.properties"), "parent=keycloak\nstyles=css/site.css\n");
         return source;
+    }
+
+    private static bool TryCreateDirectorySymbolicLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryCreateFileSymbolicLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            File.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
     }
 }

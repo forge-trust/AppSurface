@@ -55,7 +55,7 @@ Keep production image build/push, realm mutation, rollout, and rollback in appli
 | `ASKEYC002` | Port `8080` or `5059` is occupied. | Stop the other process or override the matching option in the AppHost. |
 | `ASKEYC003` | Keycloak metadata did not become reachable. | Inspect container logs and confirm port/container runtime health. |
 | `ASKEYC006` | Client id or redirect URI does not match imported realm state. | Reset stale Keycloak data or keep callback path and web proof port aligned. |
-| `ASKEYC010`–`ASKEYC013` | Theme name, image, source, property, or resource declaration is invalid. | Read the package source-policy guidance, then rebuild the manifest. |
+| `ASKEYC010`–`ASKEYC014` | Theme name, image, source, property, resource, or template-baseline declaration is invalid. | Read the package source-policy guidance, then rebuild the manifest. |
 | `ASKEYC017` | Materialized or packaged theme content differs from the manifest. | Recreate the build context from a fresh source snapshot and rebuild the image. |
 | Browser warns about local certificates | Development certificates are missing or untrusted. | Run `aspire certs trust` or `dotnet dev-certs https --trust` from an interactive shell. |
 | Sign-in says invalid username or password | You used a production credential or stale persisted realm. | Use the seeded local-only users above, or delete the persistent Keycloak data volume and rerun. |

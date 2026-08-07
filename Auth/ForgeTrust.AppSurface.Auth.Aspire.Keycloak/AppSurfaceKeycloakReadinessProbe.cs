@@ -171,13 +171,44 @@ public sealed class AppSurfaceKeycloakReadinessProbe
 
             CheckClientRedirectEvidence(client);
 
-            var users = userElements.EnumerateArray()
-                .Select(user => GetOptionalString(user, "username"))
-                .ToHashSet(StringComparer.Ordinal);
-            foreach (var user in _options.SeededUsers.Where(user => !users.Contains(user.Username)))
+            var users = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            foreach (var userElement in userElements.EnumerateArray())
             {
-                throw RealmEvidence($"realm import does not contain seeded user '{user.Username}'.");
+                var username = GetOptionalString(userElement, "username");
+                if (username is not null)
+                {
+                    users.TryAdd(username, userElement);
+                }
             }
+
+            foreach (var user in _options.SeededUsers)
+            {
+                if (!users.TryGetValue(user.Username, out var userEvidence))
+                {
+                    throw RealmEvidence($"realm import does not contain seeded user '{user.Username}'.");
+                }
+
+                CheckSeededUserProfileEvidence(userEvidence, user.Username);
+            }
+        }
+    }
+
+    private static void CheckSeededUserProfileEvidence(JsonElement user, string username)
+    {
+        if (!string.Equals(GetOptionalString(user, "lastName"), "Local User", StringComparison.Ordinal))
+        {
+            throw RealmEvidence($"seeded user '{username}' does not contain the expected local profile surname.");
+        }
+
+        if (!string.Equals(GetOptionalString(user, "email"), $"{username}@appsurface.local", StringComparison.Ordinal))
+        {
+            throw RealmEvidence($"seeded user '{username}' does not contain the expected local profile email.");
+        }
+
+        if (!user.TryGetProperty("emailVerified", out var emailVerified)
+            || emailVerified.ValueKind is not JsonValueKind.True)
+        {
+            throw RealmEvidence($"seeded user '{username}' does not contain the expected verified local profile email.");
         }
     }
 
