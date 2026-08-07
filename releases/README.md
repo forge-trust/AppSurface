@@ -43,8 +43,9 @@ schema ownership, migrations `0001` through `0006`, the canonical PostgreSQL rol
 explicit `AddWorkerHost()` hosting, startup schema/epoch validation without DDL, and recovery procedures. The package
 chooser is the machine-facing install map; the [Durable discovery guide](../Durable/README.md#slice-7-discovery-and-reconciliation)
 is the reader-facing operational boundary. The `durable schema` commands do not change this hold: scripts are offline,
-online commands use a named migration-owner environment variable without accepting or printing connection strings, and
-the example is local proof rather than production operations guidance.
+status and preflight resolve a named connection environment variable, and apply requires a named migration-owner
+environment variable. No command accepts or prints connection strings; the least-privilege role guidance still applies
+to each online operation. The example is local proof rather than production operations guidance.
 
 ## Release format
 

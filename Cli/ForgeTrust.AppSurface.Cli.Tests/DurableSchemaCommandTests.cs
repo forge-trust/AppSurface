@@ -368,6 +368,13 @@ public sealed class DurableSchemaCommandTests
             return await DurableSchemaScriptOutput.WriteAsync(path, script, force: true, CancellationToken.None);
         });
 
+        static string ReadWithReplaceSharing(string path)
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Write | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            return reader.ReadToEnd();
+        }
+
         var writes = new[] { StartWrite(firstScript), StartWrite(secondScript) };
         Task? reader = null;
         var publishedPaths = Array.Empty<string>();
@@ -376,11 +383,11 @@ public sealed class DurableSchemaCommandTests
             Assert.True(writersReady.Wait(TimeSpan.FromSeconds(5)), "Both writers should reach the final publication window.");
             reader = Task.Run(() =>
             {
-                observations.Enqueue(File.ReadAllText(path));
+                observations.Enqueue(ReadWithReplaceSharing(path));
                 readerObservedInitialFile.Set();
                 while (Volatile.Read(ref reading) == 1)
                 {
-                    observations.Enqueue(File.ReadAllText(path));
+                    observations.Enqueue(ReadWithReplaceSharing(path));
                 }
             });
             Assert.True(

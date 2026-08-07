@@ -311,6 +311,10 @@ internal sealed class DurableSchemaCommandService : IDurableSchemaCommandService
 }
 
 /// <summary>CLI-safe schema compatibility projection.</summary>
+/// <param name="Compatibility">The package-defined compatibility state that determines whether durable reads and writes may begin.</param>
+/// <param name="InstalledVersion">The non-negative durable schema version currently installed in the target database.</param>
+/// <param name="RequiredVersion">The non-negative durable schema version required by this package version.</param>
+/// <param name="PendingVersions">The ordered, non-null migration versions that remain to be applied; empty when no migration is pending.</param>
 internal sealed record DurableSchemaStatusView(
     DurableRuntimeSchemaCompatibility Compatibility,
     int InstalledVersion,
@@ -329,6 +333,9 @@ internal sealed record DurableSchemaStatusView(
 }
 
 /// <summary>CLI-safe schema apply projection.</summary>
+/// <param name="FromVersion">The non-negative schema version observed before the explicit apply operation began.</param>
+/// <param name="ToVersion">The non-negative schema version observed after the apply operation completed.</param>
+/// <param name="AppliedVersions">The ordered, non-null migration versions applied by this invocation; empty when the schema was already current.</param>
 internal sealed record DurableSchemaApplyView(int FromVersion, int ToVersion, IReadOnlyList<int> AppliedVersions);
 
 /// <summary>Renders stable, secret-safe schema diagnostics.</summary>

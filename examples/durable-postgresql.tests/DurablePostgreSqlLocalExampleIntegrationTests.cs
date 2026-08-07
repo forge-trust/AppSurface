@@ -115,6 +115,90 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
         Assert.Contains("within 0.001 seconds", error.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task WorkerCatalogFingerprint_detects_every_schema_definition_type_that_worker_startup_must_not_change()
+    {
+        await using var container = new PostgreSqlBuilder(PostgreSqlImage)
+            .WithDatabase(DatabaseName)
+            .WithUsername(AdministratorUser)
+            .WithPassword(AdministratorPassword)
+            .Build();
+        await container.StartAsync();
+
+        await using var administratorDataSource = NpgsqlDataSource.Create(container.GetConnectionString());
+        var schemaManager = new PostgreSqlDurableRuntimeSchemaManager(administratorDataSource);
+        await schemaManager.ApplyAsync();
+        var schemaStatus = await schemaManager.GetStatusAsync();
+
+        await AssertCatalogMutationIsDetectedAsync(
+            administratorDataSource,
+            schemaStatus,
+            """
+            CREATE TABLE appsurface_durable.fingerprint_constraint_test (value integer NOT NULL);
+            """,
+            """
+            ALTER TABLE appsurface_durable.fingerprint_constraint_test
+                ADD CONSTRAINT fingerprint_constraint_test_value_check CHECK (value >= 0);
+            """);
+        await AssertCatalogMutationIsDetectedAsync(
+            administratorDataSource,
+            schemaStatus,
+            """
+            CREATE TABLE appsurface_durable.fingerprint_trigger_test (value integer NOT NULL);
+            CREATE FUNCTION appsurface_durable.fingerprint_trigger_function()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $function$
+            BEGIN
+                RETURN NEW;
+            END;
+            $function$;
+            """,
+            """
+            CREATE TRIGGER fingerprint_trigger_test_before_insert
+                BEFORE INSERT ON appsurface_durable.fingerprint_trigger_test
+                FOR EACH ROW EXECUTE FUNCTION appsurface_durable.fingerprint_trigger_function();
+            """);
+        await AssertCatalogMutationIsDetectedAsync(
+            administratorDataSource,
+            schemaStatus,
+            """
+            CREATE TABLE appsurface_durable.fingerprint_policy_test (value integer NOT NULL);
+            ALTER TABLE appsurface_durable.fingerprint_policy_test ENABLE ROW LEVEL SECURITY;
+            """,
+            """
+            CREATE POLICY fingerprint_policy_test_select
+                ON appsurface_durable.fingerprint_policy_test
+                FOR SELECT
+                USING (value >= 0);
+            """);
+        await AssertCatalogMutationIsDetectedAsync(
+            administratorDataSource,
+            schemaStatus,
+            """
+            CREATE FUNCTION appsurface_durable.fingerprint_function_test()
+            RETURNS integer
+            LANGUAGE sql
+            AS 'SELECT 1';
+            """,
+            """
+            CREATE OR REPLACE FUNCTION appsurface_durable.fingerprint_function_test()
+            RETURNS integer
+            LANGUAGE sql
+            AS 'SELECT 2';
+            """);
+        await AssertCatalogMutationIsDetectedAsync(
+            administratorDataSource,
+            schemaStatus,
+            """
+            CREATE TABLE appsurface_durable.fingerprint_default_test (value integer DEFAULT 1);
+            """,
+            """
+            ALTER TABLE appsurface_durable.fingerprint_default_test
+                ALTER COLUMN value SET DEFAULT 2;
+            """);
+    }
+
     private static async Task CreateTutorialRolesAsync(NpgsqlDataSource administratorDataSource)
     {
         await using var command = administratorDataSource.CreateCommand(
@@ -123,6 +207,28 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
             CREATE ROLE {DispatcherRole} LOGIN PASSWORD '{DispatcherPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE {RuntimeRole} LOGIN PASSWORD '{RuntimePassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             """);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task AssertCatalogMutationIsDetectedAsync(
+        NpgsqlDataSource administratorDataSource,
+        DurableRuntimeSchemaStatus schemaStatus,
+        string setupSql,
+        string mutationSql)
+    {
+        await ExecuteSqlAsync(administratorDataSource, setupSql);
+        var catalogBefore = await DurablePostgreSqlLocalExample.ReadDurableCatalogFingerprintAsync(administratorDataSource, CancellationToken.None);
+        await ExecuteSqlAsync(administratorDataSource, mutationSql);
+        var catalogAfter = await DurablePostgreSqlLocalExample.ReadDurableCatalogFingerprintAsync(administratorDataSource, CancellationToken.None);
+
+        Assert.NotEqual(catalogBefore, catalogAfter);
+        Assert.Throws<InvalidOperationException>(() =>
+            DurablePostgreSqlLocalExample.EnsureWorkerHostDidNotChangeSchema(schemaStatus, schemaStatus, catalogBefore, catalogAfter));
+    }
+
+    private static async Task ExecuteSqlAsync(NpgsqlDataSource administratorDataSource, string sql)
+    {
+        await using var command = administratorDataSource.CreateCommand(sql);
         await command.ExecuteNonQueryAsync();
     }
 

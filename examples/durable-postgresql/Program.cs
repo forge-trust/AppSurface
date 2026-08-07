@@ -308,7 +308,12 @@ internal static class DurablePostgreSqlLocalExample
         }
     }
 
-    static async Task<string> ReadDurableCatalogFingerprintAsync(NpgsqlDataSource dataSource, CancellationToken cancellationToken)
+    /// <summary>Reads a stable fingerprint of every schema definition the worker host must leave unchanged.</summary>
+    /// <remarks>
+    /// The fingerprint uses package-qualified catalog definitions and ordered textual identifiers instead of object IDs so
+    /// the same catalog state has the same representation before and after a worker-host pass.
+    /// </remarks>
+    internal static async Task<string> ReadDurableCatalogFingerprintAsync(NpgsqlDataSource dataSource, CancellationToken cancellationToken)
     {
         const string sql = """
         WITH catalog_entry AS
@@ -320,9 +325,19 @@ internal static class DurablePostgreSqlLocalExample
 
             UNION ALL
 
-            SELECT format('attribute|%s|%s|%s|%s|%s', relation.relname, attribute.attname, attribute.atttypid::pg_catalog.regtype, attribute.attnotnull, attribute.atthasdef)
+            SELECT format(
+                'attribute|%s|%s|%s|%s|%s|%s',
+                relation.relname,
+                attribute.attname,
+                attribute.atttypid::pg_catalog.regtype,
+                attribute.attnotnull,
+                attribute.atthasdef,
+                coalesce(pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid, true), '<none>'))
             FROM pg_catalog.pg_attribute AS attribute
             JOIN pg_catalog.pg_class AS relation ON relation.oid = attribute.attrelid
+            LEFT JOIN pg_catalog.pg_attrdef AS default_value
+                ON default_value.adrelid = attribute.attrelid
+                AND default_value.adnum = attribute.attnum
             JOIN pg_catalog.pg_namespace AS namespace_value ON namespace_value.oid = relation.relnamespace
             WHERE namespace_value.nspname = 'appsurface_durable'
               AND attribute.attnum > 0
@@ -330,7 +345,66 @@ internal static class DurablePostgreSqlLocalExample
 
             UNION ALL
 
-            SELECT format('function|%s|%s|%s', routine.proname, pg_catalog.pg_get_function_identity_arguments(routine.oid), routine.proowner)
+            SELECT format(
+                'constraint|%s|%s|%s|%s|%s|%s|%s',
+                relation.relname,
+                constraint_value.conname,
+                constraint_value.contype,
+                constraint_value.convalidated,
+                constraint_value.condeferrable,
+                constraint_value.condeferred,
+                coalesce(pg_catalog.pg_get_constraintdef(constraint_value.oid, true), '<none>'))
+            FROM pg_catalog.pg_constraint AS constraint_value
+            JOIN pg_catalog.pg_class AS relation ON relation.oid = constraint_value.conrelid
+            JOIN pg_catalog.pg_namespace AS namespace_value ON namespace_value.oid = relation.relnamespace
+            WHERE namespace_value.nspname = 'appsurface_durable'
+
+            UNION ALL
+
+            SELECT format(
+                'trigger|%s|%s|%s|%s|%s|%s',
+                relation.relname,
+                trigger_value.tgname,
+                trigger_value.tgtype,
+                trigger_value.tgenabled,
+                trigger_value.tgisinternal,
+                coalesce(pg_catalog.pg_get_triggerdef(trigger_value.oid, true), '<none>'))
+            FROM pg_catalog.pg_trigger AS trigger_value
+            JOIN pg_catalog.pg_class AS relation ON relation.oid = trigger_value.tgrelid
+            JOIN pg_catalog.pg_namespace AS namespace_value ON namespace_value.oid = relation.relnamespace
+            WHERE namespace_value.nspname = 'appsurface_durable'
+
+            UNION ALL
+
+            SELECT format(
+                'policy|%s|%s|%s|%s|%s|%s|%s',
+                relation.relname,
+                policy_value.polname,
+                policy_value.polcmd,
+                policy_value.polpermissive,
+                coalesce(
+                    (
+                        SELECT string_agg(
+                            CASE WHEN policy_roles.role_id = 0 THEN 'PUBLIC' ELSE pg_catalog.pg_get_userbyid(policy_roles.role_id) END,
+                            ','
+                            ORDER BY CASE WHEN policy_roles.role_id = 0 THEN 'PUBLIC' ELSE pg_catalog.pg_get_userbyid(policy_roles.role_id) END)
+                        FROM unnest(policy_value.polroles) AS policy_roles(role_id)),
+                    '<none>'),
+                coalesce(pg_catalog.pg_get_expr(policy_value.polqual, policy_value.polrelid, true), '<none>'),
+                coalesce(pg_catalog.pg_get_expr(policy_value.polwithcheck, policy_value.polrelid, true), '<none>'))
+            FROM pg_catalog.pg_policy AS policy_value
+            JOIN pg_catalog.pg_class AS relation ON relation.oid = policy_value.polrelid
+            JOIN pg_catalog.pg_namespace AS namespace_value ON namespace_value.oid = relation.relnamespace
+            WHERE namespace_value.nspname = 'appsurface_durable'
+
+            UNION ALL
+
+            SELECT format(
+                'function|%s|%s|%s|%s',
+                routine.proname,
+                pg_catalog.pg_get_function_identity_arguments(routine.oid),
+                pg_catalog.pg_get_userbyid(routine.proowner),
+                coalesce(pg_catalog.pg_get_functiondef(routine.oid), '<none>'))
             FROM pg_catalog.pg_proc AS routine
             JOIN pg_catalog.pg_namespace AS namespace_value ON namespace_value.oid = routine.pronamespace
             WHERE namespace_value.nspname = 'appsurface_durable'
