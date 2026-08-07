@@ -281,10 +281,11 @@ internal static class DurablePostgreSqlLocalExample
         CancellationToken cancellationToken,
         TimeSpan? waitTimeout = null)
     {
-        const int timeoutSeconds = 10;
+        const int defaultTimeoutSeconds = 10;
         const int pollMilliseconds = 250;
+        var effectiveWaitTimeout = waitTimeout ?? TimeSpan.FromSeconds(defaultTimeoutSeconds);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        deadline.CancelAfter(waitTimeout ?? TimeSpan.FromSeconds(timeoutSeconds));
+        deadline.CancelAfter(effectiveWaitTimeout);
         try
         {
             while (true)
@@ -302,7 +303,8 @@ internal static class DurablePostgreSqlLocalExample
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new TimeoutException($"AddWorkerHost did not complete a bounded hosted worker pass within {timeoutSeconds} seconds.");
+            throw new TimeoutException(FormattableString.Invariant(
+                $"AddWorkerHost did not complete a bounded hosted worker pass within {effectiveWaitTimeout.TotalSeconds:0.###} seconds."));
         }
     }
 

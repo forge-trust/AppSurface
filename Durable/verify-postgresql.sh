@@ -15,6 +15,7 @@ list_log="$work_dir/list-tests.log"
 test_log="$work_dir/test-output.log"
 recovery_list_log="$work_dir/recovery-list-tests.log"
 recovery_test_log="$work_dir/recovery-test-output.log"
+recovery_evidence_file=""
 v2_worktree=""
 
 usage() {
@@ -22,6 +23,9 @@ usage() {
 }
 
 cleanup() {
+  if [[ -n "$recovery_evidence_file" && -f "$recovery_evidence_file" ]]; then
+    rm -f -- "$recovery_evidence_file"
+  fi
   if [[ -n "$v2_worktree" && -d "$v2_worktree" ]]; then
     git -C "$repo_root" worktree remove --force "$v2_worktree" >/dev/null 2>&1 || true
   fi
@@ -180,6 +184,7 @@ if [[ -n "$evidence_mode" || -n "$evidence_output" ]]; then
       || fail "evidence output must be a regular file when it already exists: $output_name.json"
     rm -f -- "$output_file"
   done
+  recovery_evidence_file="$(mktemp "$evidence_output/.forward-migration-recovery.XXXXXX")"
 fi
 
 started_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -258,7 +263,9 @@ case "$mode" in
         '      "SourceElapsedMilliseconds": null' \
         '    }' \
         '  ]' \
-        '}' > "$evidence_output/forward-migration-recovery.json"
+        '}' > "$recovery_evidence_file"
+      mv -- "$recovery_evidence_file" "$evidence_output/forward-migration-recovery.json"
+      recovery_evidence_file=""
     elif [[ "$use_schedule" == "true" ]]; then
       dotnet test "$project" \
         --filter "$target_test_filter" \

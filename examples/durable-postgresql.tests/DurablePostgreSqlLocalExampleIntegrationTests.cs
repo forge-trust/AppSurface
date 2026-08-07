@@ -110,7 +110,7 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
                 cancellationToken: CancellationToken.None,
                 waitTimeout: TimeSpan.FromMilliseconds(1)));
 
-        Assert.Contains("within 10 seconds", error.Message, StringComparison.Ordinal);
+        Assert.Contains("within 0.001 seconds", error.Message, StringComparison.Ordinal);
     }
 
     private static async Task CreateTutorialRolesAsync(NpgsqlDataSource administratorDataSource)
