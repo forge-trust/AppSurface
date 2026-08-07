@@ -94,7 +94,7 @@ public sealed class DurableSchemaCommandTests
         Assert.False(service.OnlineOperationCalled);
 
         using var directory = DurableTestDirectory.Create("appsurface-durable-schema-");
-        var path = Path.Combine(directory.Path, "reviewed.sql");
+        var path = Path.Join(directory.Path, "reviewed.sql");
         await File.WriteAllTextAsync(path, "existing");
         command.OutputPath = path;
 
@@ -314,7 +314,7 @@ public sealed class DurableSchemaCommandTests
     public async Task Script_output_cancellation_publishes_no_destination_or_temporary_file()
     {
         using var directory = DurableTestDirectory.Create("appsurface-durable-schema-canceled-");
-        var path = Path.Combine(directory.Path, "canceled.sql");
+        var path = Path.Join(directory.Path, "canceled.sql");
         using var cancellationSource = new CancellationTokenSource();
         cancellationSource.Cancel();
 
@@ -330,8 +330,8 @@ public sealed class DurableSchemaCommandTests
     public async Task Script_output_pre_cancellation_does_not_create_a_missing_parent_directory()
     {
         using var directory = DurableTestDirectory.Create("appsurface-durable-schema-canceled-parent-");
-        var missingParent = Path.Combine(directory.Path, "missing");
-        var path = Path.Combine(missingParent, "canceled.sql");
+        var missingParent = Path.Join(directory.Path, "missing");
+        var path = Path.Join(missingParent, "canceled.sql");
         using var cancellationSource = new CancellationTokenSource();
         cancellationSource.Cancel();
 
@@ -346,12 +346,13 @@ public sealed class DurableSchemaCommandTests
     public async Task Script_output_force_publishes_only_complete_scripts_when_two_writers_race()
     {
         using var directory = DurableTestDirectory.Create("appsurface-durable-schema-race-");
-        var path = Path.Combine(directory.Path, "reviewed.sql");
+        var path = Path.Join(directory.Path, "reviewed.sql");
         await File.WriteAllTextAsync(path, "original");
         const string firstScript = "SELECT 'first';\n";
         const string secondScript = "SELECT 'second';\n";
         using var writersReady = new CountdownEvent(2);
         using var publishRelease = new ManualResetEventSlim(initialState: false);
+        using var readerObservedInitialFile = new ManualResetEventSlim(initialState: false);
         var observations = new System.Collections.Concurrent.ConcurrentQueue<string>();
         var reading = 1;
 
@@ -374,11 +375,16 @@ public sealed class DurableSchemaCommandTests
             Assert.True(writersReady.Wait(TimeSpan.FromSeconds(5)), "Both writers should reach the final publication window.");
             reader = Task.Run(() =>
             {
+                observations.Enqueue(File.ReadAllText(path));
+                readerObservedInitialFile.Set();
                 while (Volatile.Read(ref reading) == 1)
                 {
                     observations.Enqueue(File.ReadAllText(path));
                 }
             });
+            Assert.True(
+                readerObservedInitialFile.Wait(TimeSpan.FromSeconds(5)),
+                "The reader should observe the original complete script before writers publish their replacements.");
         }
         finally
         {
@@ -410,7 +416,7 @@ public sealed class DurableSchemaCommandTests
     public async Task Script_output_without_force_preserves_a_target_created_before_publication()
     {
         using var directory = DurableTestDirectory.Create("appsurface-durable-schema-target-race-");
-        var path = Path.Combine(directory.Path, "reviewed.sql");
+        var path = Path.Join(directory.Path, "reviewed.sql");
         using var publishHook = DurableSchemaScriptOutput.UseTemporaryFileWrittenHookForTesting(
             () => File.WriteAllText(path, "concurrent target"));
 
@@ -426,7 +432,7 @@ public sealed class DurableSchemaCommandTests
     public async Task Script_output_cancellation_after_temporary_write_preserves_the_existing_target()
     {
         using var directory = DurableTestDirectory.Create("appsurface-durable-schema-post-write-cancel-");
-        var path = Path.Combine(directory.Path, "reviewed.sql");
+        var path = Path.Join(directory.Path, "reviewed.sql");
         await File.WriteAllTextAsync(path, "existing");
         using var cancellationSource = new CancellationTokenSource();
         using var publishHook = DurableSchemaScriptOutput.UseTemporaryFileWrittenHookForTesting(cancellationSource.Cancel);
@@ -443,7 +449,7 @@ public sealed class DurableSchemaCommandTests
     public async Task Script_output_directory_destination_reports_a_safe_failure_without_orphaning_a_temporary_file()
     {
         using var directory = DurableTestDirectory.Create("appsurface-durable-schema-directory-");
-        var outputDirectory = Path.Combine(directory.Path, "directory-output");
+        var outputDirectory = Path.Join(directory.Path, "directory-output");
         Directory.CreateDirectory(outputDirectory);
 
         var error = await Assert.ThrowsAsync<CommandException>(

@@ -385,7 +385,7 @@ internal static class DurableSchemaScriptOutput
 
             cancellationToken.ThrowIfCancellationRequested();
             Directory.CreateDirectory(directory);
-            var temporaryPath = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+            var temporaryPath = Path.Join(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
             try
             {
                 await File.WriteAllTextAsync(temporaryPath, script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken).ConfigureAwait(false);
@@ -440,11 +440,9 @@ internal static class DurableSchemaScriptOutput
         {
             File.Delete(temporaryPath);
         }
-        catch (IOException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-        }
-        catch (UnauthorizedAccessException)
-        {
+            // Best-effort cleanup must not mask the script output's primary outcome.
         }
     }
 
