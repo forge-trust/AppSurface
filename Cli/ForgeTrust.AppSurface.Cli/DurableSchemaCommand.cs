@@ -90,7 +90,8 @@ internal sealed partial class DurableSchemaScriptCommand(IDurableSchemaCommandSe
 
         if (string.IsNullOrWhiteSpace(OutputPath))
         {
-            await console.Output.WriteAsync(script).ConfigureAwait(false);
+            var cancellationToken = console.RegisterCancellationHandler();
+            await console.Output.WriteAsync(script.AsMemory(), cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -226,6 +227,11 @@ internal abstract class DurableSchemaOnlineCommandBase(IDurableSchemaCommandServ
             throw new CommandException(
                 $"Durable schema database operation timed out after its {FormatOnlineOperationTimeout()} deadline. Check PostgreSQL readiness or the package advisory lock, then retry.");
         }
+        catch (ArgumentException)
+        {
+            throw new CommandException(
+                "Durable schema connection configuration is invalid. Check the named environment variable without printing its value, then retry.");
+        }
     }
 
     /// <summary>Writes a stable schema status without exposing connection or server details.</summary>
@@ -355,6 +361,8 @@ internal static class DurableSchemaDiagnostics
 /// <summary>Writes generated scripts with atomic publication and explicit overwrite protection.</summary>
 internal static class DurableSchemaScriptOutput
 {
+    private static readonly AsyncLocal<Action?> TemporaryFileWrittenHook = new();
+
     /// <summary>Writes <paramref name="script"/> beside the requested destination then atomically publishes it.</summary>
     internal static async Task<string> WriteAsync(string requestedPath, string script, bool force, CancellationToken cancellationToken)
     {
@@ -367,6 +375,7 @@ internal static class DurableSchemaScriptOutput
         string path;
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             path = Path.GetFullPath(requestedPath.Trim());
             var directory = Path.GetDirectoryName(path);
             if (string.IsNullOrEmpty(directory))
@@ -374,11 +383,14 @@ internal static class DurableSchemaScriptOutput
                 throw new IOException("The output path has no directory.");
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             Directory.CreateDirectory(directory);
             var temporaryPath = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
             try
             {
                 await File.WriteAllTextAsync(temporaryPath, script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken).ConfigureAwait(false);
+                TemporaryFileWrittenHook.Value?.Invoke();
+                cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
                     File.Move(temporaryPath, path, overwrite: force);
@@ -409,6 +421,19 @@ internal static class DurableSchemaScriptOutput
         }
     }
 
+    /// <summary>Runs a callback after temporary SQL output is written and before publication.</summary>
+    /// <remarks>
+    /// This test-only seam is async-flow-local so concurrent output tests can deterministically exercise the final
+    /// publish window without affecting production writes or other tests.
+    /// </remarks>
+    internal static IDisposable UseTemporaryFileWrittenHookForTesting(Action callback)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        var previous = TemporaryFileWrittenHook.Value;
+        TemporaryFileWrittenHook.Value = callback;
+        return new TemporaryFileWrittenHookScope(previous);
+    }
+
     private static void TryDeleteTemporaryFile(string temporaryPath)
     {
         try
@@ -420,6 +445,14 @@ internal static class DurableSchemaScriptOutput
         }
         catch (UnauthorizedAccessException)
         {
+        }
+    }
+
+    private sealed class TemporaryFileWrittenHookScope(Action? previous) : IDisposable
+    {
+        public void Dispose()
+        {
+            TemporaryFileWrittenHook.Value = previous;
         }
     }
 }

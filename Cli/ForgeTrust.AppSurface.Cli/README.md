@@ -37,7 +37,9 @@ default; deployments normally pass `--connection-env APPSURFACE_DURABLE_MIGRATIO
 accepts a connection-string argument or prints a connection string, credential, or environment-secret value.
 `apply --apply` is the only database-mutating command in this family; it is an explicit migration-owner action and
 is never performed by application startup. `script --output` can atomically publish or replace the named local file,
-but it never opens a database connection.
+but it never opens a database connection. Write generated SQL only to an operator-controlled directory: atomic
+publication protects readers from partial content, but it cannot make a directory shared with an untrusted local
+principal safe from path replacement.
 
 The preferred production flow remains: generate and review the offline schema script, apply migrations `0001` through
 `0006` in order, apply the canonical role recipe, run status and preflight, then explicitly enable

@@ -10,36 +10,39 @@ internal static class DurableExampleContracts
     internal const string WorkVersion = "v1";
     internal const string FlowId = "example.local-flow";
     internal const string FlowVersion = "v1";
+    private const string CodecVersion = "v1";
+    private const int MaximumPayloadBytes = 1_024;
+    private const string RetentionPolicyId = "local-proof";
 
     internal static IDurablePayloadCodec<LocalProofWork> CreateWorkCodec() =>
         new SystemTextJsonDurablePayloadCodec<LocalProofWork>(
             "example.local-proof.work",
-            "v1",
+            CodecVersion,
             DurableDataClassification.Operational,
             DurableExampleJsonContext.Default.LocalProofWork,
-            static value => !string.IsNullOrWhiteSpace(value.SafeCode) && value.SafeCode.Length <= 64,
-            maximumBytes: 1_024,
-            retentionPolicyId: "local-proof");
+            static value => HasSafeCode(value.SafeCode),
+            maximumBytes: MaximumPayloadBytes,
+            retentionPolicyId: RetentionPolicyId);
 
     internal static IDurablePayloadCodec<LocalProofResult> CreateResultCodec() =>
         new SystemTextJsonDurablePayloadCodec<LocalProofResult>(
             "example.local-proof.result",
-            "v1",
+            CodecVersion,
             DurableDataClassification.Operational,
             DurableExampleJsonContext.Default.LocalProofResult,
-            static value => !string.IsNullOrWhiteSpace(value.SafeCode) && value.SafeCode.Length <= 64,
-            maximumBytes: 1_024,
-            retentionPolicyId: "local-proof");
+            static value => HasSafeCode(value.SafeCode),
+            maximumBytes: MaximumPayloadBytes,
+            retentionPolicyId: RetentionPolicyId);
 
     internal static IDurablePayloadCodec<LocalProofFlowContext> CreateFlowCodec() =>
         new SystemTextJsonDurablePayloadCodec<LocalProofFlowContext>(
             "example.local-proof.flow-context",
-            "v1",
+            CodecVersion,
             DurableDataClassification.Operational,
             DurableExampleJsonContext.Default.LocalProofFlowContext,
-            static value => !string.IsNullOrWhiteSpace(value.SafeCode) && value.SafeCode.Length <= 64,
-            maximumBytes: 1_024,
-            retentionPolicyId: "local-proof");
+            static value => HasSafeCode(value.SafeCode),
+            maximumBytes: MaximumPayloadBytes,
+            retentionPolicyId: RetentionPolicyId);
 
     internal static FlowDefinition<LocalProofFlowContext> CreateFlowDefinition() =>
         FlowGraphBuilder<LocalProofFlowContext>
@@ -47,6 +50,9 @@ internal static class DurableExampleContracts
             .AddNode("complete", new LocalProofCompleteFlowNode())
             .StartAt("complete")
             .Build();
+
+    private static bool HasSafeCode(string safeCode) =>
+        !string.IsNullOrWhiteSpace(safeCode) && safeCode.Length <= 64;
 }
 
 /// <summary>Represents a non-secret payload used only by the local tutorial's bounded Work proof.</summary>

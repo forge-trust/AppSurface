@@ -5,7 +5,7 @@ This source-preview tutorial proves the current public [`ForgeTrust.AppSurface.D
 The [AppSurface CLI](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands) owns migration status, reviewed scripts, preflight, and guarded apply. This example owns only two local-proof commands:
 
 - `schema-bootstrap-dev` initializes one active epoch only with `DOTNET_ENVIRONMENT=Development`, `APPSURFACE_DURABLE_LOCAL_PROOF=1`, a loopback migration-owner connection, and the tutorial's migration-owner role; it does not apply migrations.
-- `verify-local` uses the separate loopback runtime and dispatcher identities to register Work, Flow, Schedule, health, drain, the bounded pump, and an explicitly composed `AddWorkerHost()`—without starting a continuous worker or doing DDL.
+- `verify-local` uses the separate loopback runtime and dispatcher identities to register Work, Flow, Schedule, health, drain, and the bounded pump; it starts the explicitly composed `AddWorkerHost()` until it completes a hosted pass, verifies the durable catalog and migration metadata are unchanged, then stops it without doing DDL.
 
 ## Prerequisites
 
@@ -13,8 +13,7 @@ Install all of the following before starting:
 
 - .NET 10 SDK.
 - Docker Engine or Docker Desktop with Linux containers.
-- PostgreSQL 17 client tools: `psql` and `pg_isready`.
-- A free local TCP port `54329`.
+- A free local TCP port. The transcript defaults to `54329` but uses one shell variable so a different free loopback port stays consistent.
 - A repository checkout. The transcript creates its three separate local PostgreSQL roles: migration owner,
   payload-free dispatcher, and scoped runtime.
 
@@ -33,6 +32,22 @@ APPSURFACE_DURABLE_RUNTIME_CONNECTION
 APPSURFACE_DURABLE_RUNTIME_EPOCH
 ```
 
+### Copy-paste prerequisite check
+
+Choose the loopback port once, then run this Bash check before starting the PostgreSQL container. It reports a missing
+.NET 10 SDK, Docker daemon, or occupied local port before any migration command runs. It only prints the
+later-required configuration names, never their values. The offline script in the next section still needs none of
+these variables or a running database.
+
+```bash
+export APPSURFACE_DURABLE_LOCAL_PORT="${APPSURFACE_DURABLE_LOCAL_PORT:-54329}"
+APPSURFACE_DURABLE_PREREQUISITE_PORT="$APPSURFACE_DURABLE_LOCAL_PORT" \
+  bash examples/durable-postgresql/check-prerequisites.sh
+```
+
+The checked-in script uses Bash's loopback TCP probe, so it fails closed when the selected port is occupied without
+requiring optional host PostgreSQL tools.
+
 ## Ten-minute PostgreSQL 17 transcript
 
 In Terminal 1, run a disposable database:
@@ -41,17 +56,17 @@ In Terminal 1, run a disposable database:
 docker run --rm --name appsurface-durable-postgres \
   -e POSTGRES_HOST_AUTH_METHOD=trust \
   -e POSTGRES_DB=appsurface_durable_example \
-  -p 127.0.0.1:54329:5432 postgres:17
+  -p "127.0.0.1:${APPSURFACE_DURABLE_LOCAL_PORT}:5432" postgres:17
 ```
 
 In Terminal 2, wait at most 30 seconds before any migration operation:
 
 ```console
 for attempt in $(seq 1 30); do
-  pg_isready -h 127.0.0.1 -p 54329 -d appsurface_durable_example && break
+  docker exec appsurface-durable-postgres pg_isready -U postgres -d appsurface_durable_example && break
   sleep 1
 done
-pg_isready -h 127.0.0.1 -p 54329 -d appsurface_durable_example || exit 1
+docker exec appsurface-durable-postgres pg_isready -U postgres -d appsurface_durable_example || exit 1
 ```
 
 Create the local-only roles with the disposable container's bootstrap administrator. This disposable container binds
@@ -72,6 +87,7 @@ docker exec appsurface-durable-postgres \
 read -r -s -p 'Migration-owner password: ' migration_owner_password; printf '\n'
 read -r -s -p 'Dispatcher password: ' dispatcher_password; printf '\n'
 read -r -s -p 'Runtime password: ' runtime_password; printf '\n'
+case $- in *x*) appsurface_restore_xtrace=1; set +x ;; esac
 umask 077
 export APPSURFACE_DURABLE_PASSFILE="$(mktemp)"
 trap 'rm -f "$APPSURFACE_DURABLE_PASSFILE"' EXIT
@@ -82,9 +98,9 @@ escape_pgpass_field() {
 migration_owner_passfile_password="$(escape_pgpass_field "$migration_owner_password")" || { printf 'Password cannot contain a newline.\n' >&2; exit 1; }
 dispatcher_passfile_password="$(escape_pgpass_field "$dispatcher_password")" || { printf 'Password cannot contain a newline.\n' >&2; exit 1; }
 runtime_passfile_password="$(escape_pgpass_field "$runtime_password")" || { printf 'Password cannot contain a newline.\n' >&2; exit 1; }
-printf '127.0.0.1:54329:appsurface_durable_example:appsurface_durable_owner:%s\n' "$migration_owner_passfile_password" > "$APPSURFACE_DURABLE_PASSFILE"
-printf '127.0.0.1:54329:appsurface_durable_example:appsurface_durable_dispatcher:%s\n' "$dispatcher_passfile_password" >> "$APPSURFACE_DURABLE_PASSFILE"
-printf '127.0.0.1:54329:appsurface_durable_example:appsurface_durable_runtime:%s\n' "$runtime_passfile_password" >> "$APPSURFACE_DURABLE_PASSFILE"
+printf '127.0.0.1:%s:appsurface_durable_example:appsurface_durable_owner:%s\n' "$APPSURFACE_DURABLE_LOCAL_PORT" "$migration_owner_passfile_password" > "$APPSURFACE_DURABLE_PASSFILE"
+printf '127.0.0.1:%s:appsurface_durable_example:appsurface_durable_dispatcher:%s\n' "$APPSURFACE_DURABLE_LOCAL_PORT" "$dispatcher_passfile_password" >> "$APPSURFACE_DURABLE_PASSFILE"
+printf '127.0.0.1:%s:appsurface_durable_example:appsurface_durable_runtime:%s\n' "$APPSURFACE_DURABLE_LOCAL_PORT" "$runtime_passfile_password" >> "$APPSURFACE_DURABLE_PASSFILE"
 printf '%s\n%s\n' "$migration_owner_password" "$migration_owner_password" | \
   docker exec -i appsurface-durable-postgres psql -U postgres -d appsurface_durable_example -c '\password appsurface_durable_owner'
 printf '%s\n%s\n' "$dispatcher_password" "$dispatcher_password" | \
@@ -92,8 +108,12 @@ printf '%s\n%s\n' "$dispatcher_password" "$dispatcher_password" | \
 printf '%s\n%s\n' "$runtime_password" "$runtime_password" | \
   docker exec -i appsurface-durable-postgres psql -U postgres -d appsurface_durable_example -c '\password appsurface_durable_runtime'
 unset migration_owner_password dispatcher_password runtime_password migration_owner_passfile_password dispatcher_passfile_password runtime_passfile_password
+if [ "${appsurface_restore_xtrace:-0}" = 1 ]; then set -x; fi
+unset appsurface_restore_xtrace
 export PGPASSFILE="$APPSURFACE_DURABLE_PASSFILE"
 ```
+
+The credential block temporarily disables shell xtrace when it was enabled, so password expansions cannot be copied into command logs; its prior tracing state is restored after the password values are unset.
 
 Generate the migration script without configuring or opening a database connection. Review the resulting SQL before application:
 
@@ -107,24 +127,25 @@ Set the migration-owner value only in the shell environment, then use guarded CL
 the temporary passfile, never a password; `--connection-env` names a variable and never takes a connection string:
 
 ```console
-export APPSURFACE_DURABLE_MIGRATION_CONNECTION="Host=127.0.0.1;Port=54329;Database=appsurface_durable_example;Username=appsurface_durable_owner;Passfile=$APPSURFACE_DURABLE_PASSFILE"
+export APPSURFACE_DURABLE_MIGRATION_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_owner;Passfile=$APPSURFACE_DURABLE_PASSFILE"
 dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
   durable schema apply --connection-env APPSURFACE_DURABLE_MIGRATION_CONNECTION --apply
 # Expected: Durable schema: 0 -> 6; applied: 0001, 0002, 0003, 0004, 0005, 0006.
 ```
 
-Apply the reviewed role recipe after migrations, then configure separate dispatcher and runtime values:
+Apply the reviewed role recipe after migrations with the disposable container's bootstrap administrator, then configure
+separate dispatcher and runtime values. This keeps the transcript self-contained: no host PostgreSQL client is required.
 
 ```console
-psql -v ON_ERROR_STOP=1 \
-  -h 127.0.0.1 -p 54329 -U appsurface_durable_owner -d appsurface_durable_example \
+docker exec -i appsurface-durable-postgres \
+  psql -v ON_ERROR_STOP=1 -U postgres -d appsurface_durable_example \
   -v migration_owner_role=appsurface_durable_owner \
   -v dispatcher_role=appsurface_durable_dispatcher \
   -v runtime_role=appsurface_durable_runtime \
-  -f Durable/configure-postgresql-roles.sql
+  -f - < Durable/configure-postgresql-roles.sql
 
-export APPSURFACE_DURABLE_DISPATCHER_CONNECTION="Host=127.0.0.1;Port=54329;Database=appsurface_durable_example;Username=appsurface_durable_dispatcher;Passfile=$APPSURFACE_DURABLE_PASSFILE"
-export APPSURFACE_DURABLE_RUNTIME_CONNECTION="Host=127.0.0.1;Port=54329;Database=appsurface_durable_example;Username=appsurface_durable_runtime;Passfile=$APPSURFACE_DURABLE_PASSFILE"
+export APPSURFACE_DURABLE_DISPATCHER_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_dispatcher;Passfile=$APPSURFACE_DURABLE_PASSFILE"
+export APPSURFACE_DURABLE_RUNTIME_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_runtime;Passfile=$APPSURFACE_DURABLE_PASSFILE"
 export APPSURFACE_DURABLE_RUNTIME_EPOCH='<stable UUID supplied by deployment>'
 ```
 
@@ -136,7 +157,7 @@ DOTNET_ENVIRONMENT=Development APPSURFACE_DURABLE_LOCAL_PROOF=1 \
 # Expected: [schema-bootstrap-dev] active epoch initialized
 ```
 
-Finally, run the bounded proof. It requires the same Development and explicit local-proof confirmation, loopback targets, and the `appsurface_durable_dispatcher` and `appsurface_durable_runtime` roles before it accepts one local Work, Flow, and Work-targeted Schedule; persists W3C Flow trace context; processes one all-surfaces bounded pass; checks health; drains and resumes; and proves `AddWorkerHost()` composition without starting it:
+Finally, run the bounded proof. It requires the same Development and explicit local-proof confirmation, loopback targets, and the `appsurface_durable_dispatcher` and `appsurface_durable_runtime` roles before it accepts one local Work, Flow, and Work-targeted Schedule; persists W3C Flow trace context; processes one all-surfaces bounded pass; checks health; drains and resumes; then starts and stops `AddWorkerHost()` after one hosted pass while asserting the durable catalog and migration metadata are unchanged:
 
 ```console
 DOTNET_ENVIRONMENT=Development APPSURFACE_DURABLE_LOCAL_PROOF=1 \
@@ -154,11 +175,11 @@ DOTNET_ENVIRONMENT=Development APPSURFACE_DURABLE_LOCAL_PROOF=1 \
 | Runtime host | `APPSURFACE_DURABLE_RUNTIME_CONNECTION`, `APPSURFACE_DURABLE_RUNTIME_EPOCH` | Run the opted-in worker, bounded passes, health, and drain. | Apply DDL, own package objects, or change the active epoch. |
 | Application operator | Application-owned identity and authorization | Expose deliberately authorized application controls. | Receive generic raw database or Durable CLI access. |
 
-`AddAppSurfaceDurablePostgreSql(...)` registration is passive. Call `.AddWorkerHost()` only in a continuously live worker process after schema, roles, and epoch have been verified. The example composes that host to prove the boundary but does not start it.
+`AddAppSurfaceDurablePostgreSql(...)` registration is passive. Call `.AddWorkerHost()` only in a continuously live worker process after schema, roles, and epoch have been verified. The example starts that host under the restricted tutorial roles, waits for one hosted pass, confirms it leaves the durable catalog and migration metadata unchanged, then stops it immediately.
 
 ## Recovery and upgrades
 
-1. Run `appsurface durable schema status` and `preflight` with a scoped read-only deployment connection, such as the runtime connection in this tutorial, to identify the authoritative state. Reserve the migration-owner variable for reviewed apply and epoch operations.
+1. Run `appsurface durable schema status --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION` and `appsurface durable schema preflight --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION` with a scoped read-only deployment connection, such as the runtime connection in this tutorial, to identify the authoritative state. Reserve the migration-owner variable for reviewed apply and epoch operations.
 2. Correct role setup or review a forward-only script generated from the installed version.
 3. Apply through the explicit migration-owner workflow, rerun the canonical role recipe after migrations, then retry preflight and the local proof.
 
