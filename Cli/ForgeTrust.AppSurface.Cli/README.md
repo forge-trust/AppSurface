@@ -14,7 +14,7 @@ appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3
 
 The CLI also includes public coverage commands for private-by-default CI coverage enforcement. `appsurface coverage run` discovers or accepts instrumented .NET test projects, writes local coverage artifacts, and merges Cobertura through the package-owned ReportGenerator dependency in the same command. `appsurface coverage merge` fans in existing Cobertura shards from matrix or custom test workflows without reading a consumer tool manifest. `appsurface coverage gate` evaluates the merged local Cobertura XML, writes JSON and Markdown reports, and can append the same Markdown to GitHub Actions step summaries without uploading coverage data to a hosted coverage service.
 
-`appsurface secrets` manages the first-secret workflow for `ForgeTrust.AppSurface.Config.LocalSecrets`: initialize a local namespace, set one key, verify presence without printing the value, list names, delete keys, and run doctor diagnostics for platform availability.
+`appsurface secrets` manages the first-secret workflow for `ForgeTrust.AppSurface.Config.LocalSecrets`: initialize a local namespace, set one key, verify presence without printing the value, list names, explicitly migrate retained macOS Keychain records to v2, delete keys, and run doctor diagnostics for platform availability.
 
 `appsurface pwa verify` checks install metadata or the optional server-known push-readiness surface served by `ForgeTrust.AppSurface.Web`. Push readiness includes worker/helper evidence and may report an optional VAPID-backed rail as `not-configured` on a no-provider sample. Install verification remains the default schema-v2 contract. Push verification is additive schema v3 evidence and keeps browser support, installation state, permission, subscription, notification display, and delivery outside the verifier's claims.
 
@@ -57,7 +57,7 @@ dotnet tool run appsurface --version
 dotnet tool run appsurface docs --repo .
 dotnet tool run appsurface coverage run --solution ./MyApp.slnx --dry-run
 dotnet tool run appsurface coverage run --solution ./MyApp.slnx
-dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --min-patch-branch 85
+dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --patch-line-mode codecov --min-patch-branch 85
 ```
 
 Update the repo-scoped tool version with:
@@ -210,6 +210,19 @@ appsurface secrets doctor --app MyApp --environment Development
 appsurface secrets list --names-only --app MyApp --environment Development
 appsurface secrets get Stripe:ApiKey --app MyApp --environment Development
 ```
+
+On macOS, `get` can report terminal `local-secret-migration-required` when a readable v1 record has no v2 counterpart.
+Run the matching namespace migration before retrying the AppHost:
+
+```bash
+appsurface secrets migrate --app MyApp --environment Development
+DOTNET_ENVIRONMENT=Development dotnet run
+```
+
+`migrate` never prints values, retains v1 records for recovery, and never overwrites an existing v2 value. V2 becomes
+canonical once present, so update it through `appsurface secrets set`. Keep `--app`, `--environment`, and `--prefix`
+identical to the runtime LocalSecrets options. The [macOS v2 migration guide](../../Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/macos-keychain-v2-migration.md)
+includes status meanings and a three-key CLI/AppHost smoke.
 
 `get` verifies presence and source without printing the secret value. `list` prints currently retrievable names only:
 platform-backed stores validate indexed names against live values and silently remove stale names when validation and
@@ -708,6 +721,7 @@ Options:
 - `--diff-label`: Optional display label for the selected patch source in JSON, Markdown, and GitHub summaries.
 - `--repository-root`: Repository root used to normalize Cobertura paths and diff paths. Defaults to the Git worktree root when available, otherwise the current directory.
 - `--min-patch-line`: Minimum changed-line coverage percentage from `0` through `100`. Requires exactly one patch source: `--diff-base`, `--diff-file`, or `--diff-stdin`. Omit it to report changed-line coverage without gating on it.
+- `--patch-line-mode`: Changed-line calculation mode, either `measurable` (the backwards-compatible default) or `codecov`, case-insensitive. Requires exactly one patch source.
 - `--min-patch-branch`: Minimum changed-branch coverage percentage from `0` through `100`. Requires exactly one patch source. Omit it to report changed-branch coverage without gating on it.
 - `--output`: Directory for `coverage-gate.json` and `coverage-gate.md`. Defaults to the coverage file directory.
 - `--github-summary`: Append Markdown to `$GITHUB_STEP_SUMMARY` when it is set. Enabled by default.
@@ -717,7 +731,7 @@ Use the default tolerance to absorb insignificant coverage-report rounding diffe
 
 The command accepts Cobertura root attributes such as `line-rate`, `branch-rate`, `lines-covered`, `lines-valid`, `branches-covered`, and `branches-valid`. XML parsing disables DTD processing and external resolution. Coverage counts must be non-negative, covered counts cannot exceed valid counts, rates must be from `0` through `1`, and zero valid line or branch counts fail with `ASCOV006` because a quality gate with no measurable denominator is misleading.
 
-Patch coverage counts added or modified diff lines, intersects those lines with Cobertura `<class filename>` and `<line number hits>` entries, and reports covered/measurable lines. Changed lines that do not appear in the Cobertura line map are ignored for the denominator, which keeps docs, project files, generated artifacts, and other non-coverable edits from failing the patch gate. Changed-branch coverage uses Cobertura line-level `condition-coverage` counts on those same changed measurable lines, so ordinary changed statements without branch conditions do not inflate the branch denominator. When a diff has no measurable changed lines or no measurable changed branches, the corresponding patch metric reports `100%` and says so explicitly in Markdown. Empty external diff files or stdin are valid empty patches. Non-empty malformed external artifacts, such as HTML login pages or JSON API errors, fail before coverage is evaluated.
+Patch coverage counts added or modified diff lines, intersects those lines with Cobertura `<class filename>` and `<line number hits>` entries, and reports covered/measurable lines. The default `measurable` mode counts a Cobertura line as covered when `hits > 0`, preserving the original local gate behavior. `codecov` mode retains only changed lines present in Cobertura and counts a line as covered when `hits > 0` and it has no branch data or full condition coverage (`covered == valid`); partial condition coverage therefore counts as an uncovered line, matching Codecov's patch-line calculation. Lines absent from Cobertura remain excluded in both modes, including test-only or otherwise non-instrumented modules that Codecov excludes. The patch-line mode affects only the patch line metric; `--min-patch-branch` remains a separate branch-condition metric and still counts changed Cobertura conditions. When a diff has no measurable changed lines or no measurable changed branches, the corresponding patch metric reports `100%` and says so explicitly in Markdown. Empty external diff files or stdin are valid empty patches. Non-empty malformed external artifacts, such as HTML login pages or JSON API errors, fail before coverage is evaluated.
 
 Reports are private local artifacts:
 
@@ -738,6 +752,7 @@ Reports are private local artifacts:
     "patchLine": 94.5,
     "patchBranch": 84.5
   },
+  "patchLineMode": "codecov",
   "patchDiffSource": {
     "kind": "git-base",
     "label": "HEAD^1",
@@ -839,6 +854,8 @@ Diagnostics use `ASCOV###` codes so CI logs are searchable:
 | `ASCOV014` | `--diff-stdin` was requested from an interactive terminal. | Pipe or redirect unified diff text, or use `--diff-file`. |
 | `ASCOV015` | A non-empty external diff artifact is not unified diff text. | Download the diff with `Accept: application/vnd.github.diff`, fix the producer, or use `--diff-base`. |
 | `ASCOV016` | Patch source metadata is invalid. | Correct `--diff-label` or `--repository-root`. |
+| `ASCOV017` | `--patch-line-mode` is not `measurable` or `codecov`. | Use `measurable` or `codecov`. |
+| `ASCOV018` | `--patch-line-mode` was supplied without a patch source. | Pass exactly one patch source or remove `--patch-line-mode`. |
 | `ASCOV020` | The gate ran successfully and coverage is below threshold. | Raise coverage or lower the threshold intentionally in source control. |
 
 ### `appsurface export`

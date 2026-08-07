@@ -306,6 +306,60 @@ public sealed class ReleaseEvidenceV2CoverageTests
     }
 
     [Fact]
+    public async Task ValidatePreparedRejectsMissingReleaseSidecar()
+    {
+        var fixture = CreateFixture();
+
+        try
+        {
+            await WritePreparedFilesAsync(fixture);
+            File.Delete(fixture.Workspace.ReleaseSidecarPath(fixture.Version));
+
+            var result = await ReleaseEvidenceV2.ValidatePreparedAsync(
+                fixture.Workspace,
+                fixture.Version,
+                fixture.Classification,
+                fixture.BaseCommit,
+                ReleaseEvidenceV2.Serialize(fixture.Bundle),
+                CancellationToken.None);
+
+            AssertDiagnostic(result, "release-evidence-artifact-digest-mismatch");
+        }
+        finally
+        {
+            DeleteWorkspace(fixture.Workspace);
+        }
+    }
+
+    [Fact]
+    public async Task ValidatePreparedRejectsTaggedReleaseSidecarWithMatchingDigest()
+    {
+        var fixture = CreateFixture();
+        var taggedSidecar = fixture.ReleaseSidecar.Replace("state: prepared", "state: tagged", StringComparison.Ordinal);
+        var bundle = ReplaceArtifact(fixture.Bundle, fixture.Bundle.ReleaseSidecarPath, taggedSidecar);
+
+        try
+        {
+            await WritePreparedFilesAsync(fixture);
+            await WriteFileAsync(fixture.Workspace.ReleaseSidecarPath(fixture.Version), taggedSidecar);
+
+            var result = await ReleaseEvidenceV2.ValidatePreparedAsync(
+                fixture.Workspace,
+                fixture.Version,
+                fixture.Classification,
+                fixture.BaseCommit,
+                ReleaseEvidenceV2.Serialize(bundle),
+                CancellationToken.None);
+
+            AssertDiagnostic(result, "release-sidecar-state-invalid");
+        }
+        finally
+        {
+            DeleteWorkspace(fixture.Workspace);
+        }
+    }
+
+    [Fact]
     public void ValidateTagRejectsMissingPreparationBaseCommit()
     {
         var fixture = CreateFixture();
@@ -517,7 +571,15 @@ public sealed class ReleaseEvidenceV2CoverageTests
         var workspace = new ReleaseWorkspace(
             TestPathUtils.PathUnder(Path.GetTempPath(), "ReleaseEvidenceV2Coverage", Guid.NewGuid().ToString("N")));
         var releaseNote = $"# Release {version}\n";
-        var releaseSidecar = $"title: Release {version}\n";
+        var releaseSidecar = $$"""
+            release:
+              schema: appsurface-release-sidecar-v1
+              state: prepared
+              id: {{version.TagName}}
+            title: Release {{version}}
+            trust:
+              status: Prepared
+            """;
         var currentRelease = ReleaseCurrentPointer.Build(version);
         var currentReleaseSidecar = "title: Current coordinated release\n";
         var manifest = new ReleaseManifestV2(

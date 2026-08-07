@@ -94,7 +94,7 @@ This approach aims to:
 
 ### [Web](./Web/README.md)
 
-- [**ForgeTrust.AppSurface.Web**](./Web/ForgeTrust.AppSurface.Web/README.md) – Bootstraps ASP.NET Core apps, lets modules register pre-routing middleware, endpoint-aware middleware, and endpoints, and includes [protected preview named deploy canary evaluation and bounded snapshots](./Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints), conventional browser status pages, and opt-in production 500 pages.
+- [**ForgeTrust.AppSurface.Web**](./Web/ForgeTrust.AppSurface.Web/README.md) – Bootstraps ASP.NET Core apps, lets modules register pre-routing middleware, endpoint-aware middleware, and endpoints, and includes [browser-local presentation preferences with one canonical document](./Web/ForgeTrust.AppSurface.Web/README.md#browser-local-theme-preferences), [protected preview named deploy canary evaluation and bounded snapshots](./Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints), conventional browser status pages, and opt-in production 500 pages.
 - [**ForgeTrust.AppSurface.Web.Push**](./Web/ForgeTrust.AppSurface.Web.Push/README.md) – Optional protected Web Push subscription and one-attempt delivery rail with app-owned custody, explicit cookie-antiforgery or bearer mapping, exact push-service origin allowlisting, and safe terminal cleanup.
 - [**ForgeTrust.AppSurface.Web.OpenApi**](./Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) – Optional module that adds OpenAPI generation with development-only endpoint exposure by default.
 - [**ForgeTrust.RazorWire**](./Web/ForgeTrust.RazorWire/README.md) – Adds reactive Razor-based streaming, islands, and CDN-default export tooling for server-rendered web apps.
@@ -189,10 +189,12 @@ Run the repository's full AppSurface coverage-and-gate lane:
 ./scripts/coverage-solution.sh
 ```
 
-For a local checkout, the default patch comparison is `origin/main`. The CI workflow overrides that
-value with `HEAD^1` for its pull-request merge checkout, so its patch gate evaluates exactly the
-tested merge tree. Set `COVERAGE_GATE_DIFF_BASE=` to run only the aggregate gate, as CI does for
-baseline builds.
+For a local checkout, the default patch comparison is `origin/main`. The coverage wrapper uses
+[`--patch-line-mode codecov`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate)
+so the local changed-line gate handles partial conditions the same way as Codecov. The CI workflow
+overrides the comparison value with `HEAD^1` for its pull-request merge checkout, so its patch gate
+evaluates exactly the tested merge tree. Set `COVERAGE_GATE_DIFF_BASE=` to run only the aggregate
+gate, as CI does for baseline builds.
 
 This command:
 - Runs each solution test project.
@@ -212,8 +214,8 @@ This command:
 - Gates at 95% line coverage and 85% branch coverage, plus 95% line and 85% branch coverage for
   the selected patch when a diff base is configured.
 - Keeps Codecov's patch status aligned with the repository's 95% patch-line gate through
-  [`codecov.yml`](./codecov.yml), with a 0.5-point tolerance for Codecov treating partially
-  covered lines as misses; the local gate remains authoritative for patch branches.
+  [`codecov.yml`](./codecov.yml) and `--patch-line-mode codecov`, with a 0.5-point tolerance; the
+  local gate remains authoritative for patch branches.
 
 Private package-consuming repositories should use the public CLI runner instead of
 this repository's no-argument script. Start with this copy-pasteable path:

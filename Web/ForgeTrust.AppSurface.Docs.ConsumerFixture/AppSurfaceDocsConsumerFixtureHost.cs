@@ -58,6 +58,9 @@ public static class AppSurfaceDocsConsumerFixtureHost
 
         public void ConfigureServices(StartupContext context, IServiceCollection services)
         {
+            // The fixture is the executable consumer reference for the Web-only preference adapter. AppSurface Docs
+            // itself remains compatible with the fixed legacy dark default unless its host opts in explicitly.
+            services.AddAppSurfaceWebThemePreferences(options => options.StorageKey = "appsurface_docs_theme");
         }
 
         public void RegisterDependentModules(ModuleDependencyBuilder builder)

@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using AngleSharp.Html.Parser;
+using ForgeTrust.AppSurface.Web.Theming;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.FileProviders.Physical;
@@ -26,8 +27,8 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
 {
     private const string MaxRewrittenFileSizeKey = "AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes";
     private const string RewriteLimitDocsAnchor = "AppSurface Docs README section 'Published tree rewrite limit'";
-    private const string HtmlContentSecurityPolicy = "sandbox allow-same-origin; default-src 'self'; script-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'self' 'unsafe-inline'";
     private const string SvgContentSecurityPolicy = "sandbox; default-src 'none'; script-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
+    private const string LegacyHtmlContentSecurityPolicy = "sandbox allow-same-origin; default-src 'self'; script-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'self' 'unsafe-inline'";
 
     private static readonly FileExtensionContentTypeProvider ContentTypeProvider = new();
     private readonly IReadOnlyList<AppSurfaceDocsPublishedTreeMount> _mounts;
@@ -526,7 +527,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
                 httpContext.Request.PathBase.Value,
                 mount.CanonicalRootPath,
                 publicOrigin);
-            SetSuccessHeaders(httpContext, contentType, fileInfo, relativeFilePath);
+            SetSuccessHeaders(httpContext, contentType, fileInfo, relativeFilePath, rewrittenHtml);
             await WriteUtf8TextAsync(httpContext, rewrittenHtml, contentType);
             return;
         }
@@ -656,7 +657,12 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             : "application/octet-stream";
     }
 
-    private static void SetSuccessHeaders(HttpContext httpContext, string contentType, IFileInfo fileInfo, string relativeFilePath)
+    private static void SetSuccessHeaders(
+        HttpContext httpContext,
+        string contentType,
+        IFileInfo fileInfo,
+        string relativeFilePath,
+        string? html = null)
     {
         httpContext.Response.StatusCode = StatusCodes.Status200OK;
         httpContext.Response.ContentType = contentType;
@@ -669,13 +675,57 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
 
         if (ShouldRewriteHtml(relativeFilePath))
         {
-            httpContext.Response.Headers["Content-Security-Policy"] = HtmlContentSecurityPolicy;
+            ArgumentNullException.ThrowIfNull(html);
+            httpContext.Response.Headers["Content-Security-Policy"] = BuildHtmlContentSecurityPolicy(html);
         }
         else if (IsSvgPath(relativeFilePath))
         {
             httpContext.Response.Headers["Content-Security-Policy"] = SvgContentSecurityPolicy;
         }
     }
+
+    private static string BuildHtmlContentSecurityPolicy(string html)
+    {
+        var document = new HtmlParser().ParseDocument(html);
+        var bootstrapEnabled = document
+            .QuerySelectorAll("script[data-as-theme-preference-bootstrap]")
+            .Any(script => string.Equals(
+                ToCspSha256(script.TextContent),
+                AppSurfaceThemePreferenceCsp.ScriptHash,
+                StringComparison.Ordinal));
+        if (!bootstrapEnabled)
+        {
+            // Existing published trees may carry host-authored inline styles outside the Docs/theme markers. Preserve
+            // their established CSP until a preference bootstrap opts the document into the strict, hash-complete path.
+            return LegacyHtmlContentSecurityPolicy;
+        }
+
+        var styleHashes = document
+            .QuerySelectorAll("style")
+            .Select(style => ToCspSha256(style.TextContent))
+            .Concat(
+                document.QuerySelectorAll("[style]")
+                    .Select(element => ToCspSha256(element.GetAttribute("style")!)))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        var builder = new StringBuilder("sandbox allow-same-origin allow-scripts; default-src 'self'; script-src '");
+        builder.Append(AppSurfaceThemePreferenceCsp.ScriptHash);
+        builder.Append("'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'self'");
+        if (styleHashes.Length > 0)
+        {
+            builder.Append(" 'unsafe-hashes'");
+            foreach (var styleHash in styleHashes)
+            {
+                builder.Append(" '").Append(styleHash).Append('\'');
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static string ToCspSha256(string source) =>
+        "sha256-" + Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(source)));
 
     private async Task<RewrittenFileReadResult> ReadRewrittenFileAsync(
         HttpContext httpContext,
@@ -963,8 +1013,10 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
     /// <c>docsVersionsUrl</c> client field is removed because version archive navigation is rendered server-side. When
     /// <paramref name="mountRootPath" /> and <paramref name="routeRootPath" /> are both the default <c>/docs</c>,
     /// rewrites only occur if <paramref name="requestPathBase" /> is non-empty so sub-path-hosted apps still emit
-    /// <c>/some-base/docs/...</c> links. Request-scoped CSP nonces are always removed from the generated AppSurface and
-    /// Docs critical-theme styles, because published output must remain a deterministic, reusable artifact.
+    /// <c>/some-base/docs/...</c> links. Request-scoped CSP nonces are always removed from the generated AppSurface
+    /// preference bootstrap and critical-theme styles, because published output must remain a deterministic, reusable
+    /// artifact. The handler recognizes only the package's published bootstrap hash when allowing scripts in a
+    /// versioned Docs response; all other inline scripts remain blocked.
     /// </remarks>
     internal static string RewriteHtml(
         string html,
@@ -996,6 +1048,11 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
         foreach (var style in document.QuerySelectorAll("style[data-as-theme-critical][nonce], style[data-docs-theme-critical][nonce]"))
         {
             style.RemoveAttribute("nonce");
+        }
+
+        foreach (var bootstrap in document.QuerySelectorAll("script[data-as-theme-preference-bootstrap][nonce]"))
+        {
+            bootstrap.RemoveAttribute("nonce");
         }
 
         foreach (var element in document.QuerySelectorAll("[href]"))
@@ -1070,7 +1127,8 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
     {
         if (!html.Contains("nonce", StringComparison.OrdinalIgnoreCase)
             || (!html.Contains("data-as-theme-critical", StringComparison.OrdinalIgnoreCase)
-                && !html.Contains("data-docs-theme-critical", StringComparison.OrdinalIgnoreCase)))
+                && !html.Contains("data-docs-theme-critical", StringComparison.OrdinalIgnoreCase)
+                && !html.Contains("data-as-theme-preference-bootstrap", StringComparison.OrdinalIgnoreCase)))
         {
             return html;
         }
@@ -1080,6 +1138,12 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
         foreach (var style in document.QuerySelectorAll("style[data-as-theme-critical][nonce], style[data-docs-theme-critical][nonce]"))
         {
             style.RemoveAttribute("nonce");
+            nonceRemoved = true;
+        }
+
+        foreach (var bootstrap in document.QuerySelectorAll("script[data-as-theme-preference-bootstrap][nonce]"))
+        {
+            bootstrap.RemoveAttribute("nonce");
             nonceRemoved = true;
         }
 
