@@ -60,5 +60,7 @@ For the PostgreSQL boundary, start with the [`slice 3 reference workload`](slice
 normative [`Work protocol v1`](work-protocol-v1.md) and [`Flow protocol v1`](flow-protocol-v1.md). The
 [`slice 3 reconstruction ledger`](slice3-reconstruction.md) and [`slice 4 reconstruction ledger`](slice4-reconstruction.md) account for every artifact in the superseded branches.
 
+Terminal Flow evidence now has a [verified retention lifecycle](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#verified-flow-retention): a bounded per-Flow assessment, immutable manifest, reproducible archive package, receipt/source correspondence proof, optional hold, and separately authorized idempotent purge. It is intentionally not an age-based deletion feature. The application owns authorization, archive transport, encryption, availability, policy duration, and compliance.
+
 The [slice 2 API budget](api-budget.md) records which original public contracts were retained, moved, added,
 internalized, or removed. The package test projects enforce the corresponding member-level API snapshots.

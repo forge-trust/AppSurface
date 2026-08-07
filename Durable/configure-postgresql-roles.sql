@@ -1,13 +1,16 @@
 \set ON_ERROR_STOP on
 
 -- Required psql variables contain role names as data, never raw SQL identifiers:
---   migration_owner_role, dispatcher_role, runtime_role
+--   migration_owner_role, dispatcher_role, runtime_role, retention_operator_role
 SELECT :'migration_owner_role' <> :'dispatcher_role'
    AND :'migration_owner_role' <> :'runtime_role'
-   AND :'dispatcher_role' <> :'runtime_role' AS roles_are_distinct \gset
+   AND :'migration_owner_role' <> :'retention_operator_role'
+   AND :'dispatcher_role' <> :'runtime_role'
+   AND :'dispatcher_role' <> :'retention_operator_role'
+   AND :'runtime_role' <> :'retention_operator_role' AS roles_are_distinct \gset
 \if :roles_are_distinct
 \else
-  \echo 'Migration owner, dispatcher, and scoped runtime roles must be distinct.'
+  \echo 'Migration owner, dispatcher, scoped runtime, and retention operator roles must be distinct.'
   SELECT 1 / 0;
 \endif
 
@@ -41,6 +44,16 @@ SELECT EXISTS
   SELECT 1 / 0;
 \endif
 
+SELECT EXISTS
+(
+  SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = :'retention_operator_role'
+) AS role_exists \gset
+\if :role_exists
+\else
+  \echo 'Required scoped retention operator role does not exist:' :'retention_operator_role'
+  SELECT 1 / 0;
+\endif
+
 SELECT bool_and(role_value.rolcanlogin)
    AND bool_and(NOT role_value.rolsuper)
    AND bool_and(NOT role_value.rolcreatedb)
@@ -49,10 +62,10 @@ SELECT bool_and(role_value.rolcanlogin)
    AND bool_and(NOT role_value.rolbypassrls)
   AS service_roles_are_restricted_login_leaves
 FROM pg_catalog.pg_roles AS role_value
-WHERE role_value.rolname IN (:'dispatcher_role', :'runtime_role') \gset
+WHERE role_value.rolname IN (:'dispatcher_role', :'runtime_role', :'retention_operator_role') \gset
 \if :service_roles_are_restricted_login_leaves
 \else
-  \echo 'Dispatcher and scoped runtime roles must be LOGIN roles without SUPERUSER, CREATEDB, CREATEROLE, REPLICATION, or BYPASSRLS.'
+  \echo 'Dispatcher, scoped runtime, and retention operator roles must be LOGIN roles without SUPERUSER, CREATEDB, CREATEROLE, REPLICATION, or BYPASSRLS.'
   SELECT 1 / 0;
 \endif
 
@@ -60,7 +73,7 @@ WITH service_role AS
 (
   SELECT role_value.oid
   FROM pg_catalog.pg_roles AS role_value
-  WHERE role_value.rolname IN (:'dispatcher_role', :'runtime_role')
+  WHERE role_value.rolname IN (:'dispatcher_role', :'runtime_role', :'retention_operator_role')
 )
 SELECT NOT EXISTS
 (
@@ -72,7 +85,7 @@ SELECT NOT EXISTS
 ) AS service_roles_are_membership_free \gset
 \if :service_roles_are_membership_free
 \else
-  \echo 'Dispatcher and scoped runtime roles must be exact login leaves with no role memberships in either direction.'
+  \echo 'Dispatcher, scoped runtime, and retention operator roles must be exact login leaves with no role memberships in either direction.'
   SELECT 1 / 0;
 \endif
 
@@ -81,11 +94,11 @@ SELECT NOT EXISTS
   SELECT 1
   FROM pg_catalog.pg_database AS database_value
   JOIN pg_catalog.pg_roles AS owner_role ON owner_role.oid = database_value.datdba
-  WHERE owner_role.rolname IN (:'dispatcher_role', :'runtime_role')
+  WHERE owner_role.rolname IN (:'dispatcher_role', :'runtime_role', :'retention_operator_role')
 ) AS service_roles_do_not_own_database \gset
 \if :service_roles_do_not_own_database
 \else
-  \echo 'Dispatcher and scoped runtime roles must not own any database.'
+  \echo 'Dispatcher, scoped runtime, and retention operator roles must not own any database.'
   SELECT 1 / 0;
 \endif
 
@@ -147,6 +160,10 @@ DROP POLICY IF EXISTS flow_dispatch_runtime_scope_select ON appsurface_durable.f
 SELECT format(
     'CREATE POLICY flow_dispatch_runtime_scope_select ON appsurface_durable.flow_dispatch FOR SELECT TO %I USING (scope_id = nullif(current_setting(''appsurface_durable.scope_id'', true), ''''))',
     :'runtime_role') \gexec
+DROP POLICY IF EXISTS flow_dispatch_retention_scope_select ON appsurface_durable.flow_dispatch;
+SELECT format(
+    'CREATE POLICY flow_dispatch_retention_scope_select ON appsurface_durable.flow_dispatch FOR SELECT TO %I USING (scope_id = nullif(current_setting(''appsurface_durable.scope_id'', true), ''''))',
+    :'retention_operator_role') \gexec
 SELECT format(
     'ALTER POLICY schedule_dispatch_global_discovery ON appsurface_durable.schedule_dispatch TO %I, %I',
     :'dispatcher_role',
@@ -205,14 +222,16 @@ SELECT bool_and(
         ('scope', 'scope_history', 'work', 'work_history', 'dispatch', 'work_operator_command', 'effect_permit', 'runtime_heartbeat',
          'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch',
          'schedule_definition', 'schedule_generation', 'schedule_command', 'schedule_occurrence', 'schedule_dispatch',
-         'schedule_history', 'flow_trace_context')
+         'schedule_history', 'flow_trace_context', 'flow_retention_manifest', 'flow_retention_manifest_item',
+         'flow_retention_manifest_summary', 'flow_retention_manifest_event', 'flow_retention_command')
         OR object.relname LIKE 'schedule_history_%')
     AND object.relforcerowsecurity =
       (object.relname IN
         ('scope', 'scope_history', 'work', 'work_history', 'dispatch', 'work_operator_command', 'effect_permit', 'runtime_heartbeat',
          'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch',
          'schedule_definition', 'schedule_generation', 'schedule_command', 'schedule_occurrence', 'schedule_dispatch',
-         'schedule_history', 'flow_trace_context')
+         'schedule_history', 'flow_trace_context', 'flow_retention_manifest', 'flow_retention_manifest_item',
+         'flow_retention_manifest_summary', 'flow_retention_manifest_event', 'flow_retention_command')
         OR object.relname LIKE 'schedule_history_%'))
   AS durable_rls_flags_are_exact
 FROM pg_catalog.pg_class AS object
@@ -286,6 +305,8 @@ WITH expected_policy(relation_name, policy_name, command_name, using_expression,
     ('flow_dispatch', 'flow_dispatch_global_discovery', 'r', 'true', NULL::text),
     ('flow_dispatch', 'flow_dispatch_runtime_scope_select', 'r',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))', NULL::text),
+    ('flow_dispatch', 'flow_dispatch_retention_scope_select', 'r',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))', NULL::text),
     ('flow_dispatch', 'flow_dispatch_scope_insert', 'a', NULL::text,
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
     ('flow_dispatch', 'flow_dispatch_scope_update', 'w',
@@ -295,6 +316,21 @@ WITH expected_policy(relation_name, policy_name, command_name, using_expression,
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
     ('flow_trace_context', 'flow_trace_context_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('flow_retention_command', 'flow_retention_command_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('flow_retention_manifest', 'flow_retention_manifest_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('flow_retention_manifest_event', 'flow_retention_manifest_event_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('flow_retention_manifest_item', 'flow_retention_manifest_item_scope_isolation', '*',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
+      '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('flow_retention_manifest_summary', 'flow_retention_manifest_summary_scope_isolation', '*',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
     ('flow_instance', 'flow_instance_scope_isolation', '*',
@@ -399,6 +435,10 @@ SELECT NOT EXISTS
                 (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'runtime_role')]
                 AND actual.polroles <@ ARRAY[
                 (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'runtime_role')]
+            WHEN actual.policy_name = 'flow_dispatch_retention_scope_select' THEN actual.polroles @> ARRAY[
+                (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'retention_operator_role')]
+                AND actual.polroles <@ ARRAY[
+                (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'retention_operator_role')]
             WHEN actual.policy_name = 'runtime_heartbeat_runtime_role' THEN actual.polroles @> ARRAY[
                 (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'runtime_role')]
                 AND actual.polroles <@ ARRAY[
@@ -420,18 +460,20 @@ SELECT NOT
 (
   pg_catalog.has_schema_privilege(:'dispatcher_role', 'appsurface_durable', 'CREATE')
   OR pg_catalog.has_schema_privilege(:'runtime_role', 'appsurface_durable', 'CREATE')
+  OR pg_catalog.has_schema_privilege(:'retention_operator_role', 'appsurface_durable', 'CREATE')
   OR pg_catalog.has_schema_privilege(:'dispatcher_role', 'appsurface_durable', 'USAGE WITH GRANT OPTION')
   OR pg_catalog.has_schema_privilege(:'runtime_role', 'appsurface_durable', 'USAGE WITH GRANT OPTION')
+  OR pg_catalog.has_schema_privilege(:'retention_operator_role', 'appsurface_durable', 'USAGE WITH GRANT OPTION')
 ) AS service_roles_have_safe_schema_privileges \gset
 \if :service_roles_have_safe_schema_privileges
 \else
-  \echo 'Dispatcher and scoped runtime roles must not have schema CREATE or grant options.'
+  \echo 'Dispatcher, scoped runtime, and retention operator roles must not have schema CREATE or grant options.'
   SELECT 1 / 0;
 \endif
 
 WITH service_role(role_name) AS
 (
-  VALUES (:'dispatcher_role'), (:'runtime_role')
+  VALUES (:'dispatcher_role'), (:'runtime_role'), (:'retention_operator_role')
 ),
 durable_relation AS
 (
@@ -486,17 +528,25 @@ SELECT NOT EXISTS
          'schedule_history', 'flow_trace_context'
        )
      )
+     OR service.role_name = :'retention_operator_role'
+     AND privilege.privilege_name = 'SELECT'
+     AND relation.relname IN
+     (
+       'scope', 'work', 'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch',
+       'flow_trace_context', 'flow_retention_manifest', 'flow_retention_manifest_item', 'flow_retention_manifest_summary',
+       'flow_retention_manifest_event', 'flow_retention_command'
+     )
    )
 ) AS service_roles_have_safe_relation_privileges \gset
 \if :service_roles_have_safe_relation_privileges
 \else
-  \echo 'Dispatcher or scoped runtime role has an effective durable-table privilege outside the package allowlist.'
+  \echo 'Dispatcher, scoped runtime, or retention operator role has an effective durable-table privilege outside the package allowlist.'
   SELECT 1 / 0;
 \endif
 
 WITH service_role(role_name) AS
 (
-  VALUES (:'dispatcher_role'), (:'runtime_role')
+  VALUES (:'dispatcher_role'), (:'runtime_role'), (:'retention_operator_role')
 ),
 durable_column AS
 (
@@ -619,17 +669,25 @@ SELECT NOT EXISTS
          )
        )
      )
+     OR service.role_name = :'retention_operator_role'
+     AND privilege.privilege_name = 'SELECT'
+     AND column_value.relname IN
+     (
+       'scope', 'work', 'flow_instance', 'flow_command', 'flow_history', 'flow_wait', 'flow_timer', 'flow_dispatch',
+       'flow_trace_context', 'flow_retention_manifest', 'flow_retention_manifest_item', 'flow_retention_manifest_summary',
+       'flow_retention_manifest_event', 'flow_retention_command'
+     )
    )
 ) AS service_roles_have_safe_column_privileges \gset
 \if :service_roles_have_safe_column_privileges
 \else
-  \echo 'Dispatcher or scoped runtime role has an effective durable-column privilege outside the package allowlist.'
+  \echo 'Dispatcher, scoped runtime, or retention operator role has an effective durable-column privilege outside the package allowlist.'
   SELECT 1 / 0;
 \endif
 
 WITH service_role(role_name) AS
 (
-  VALUES (:'dispatcher_role'), (:'runtime_role')
+  VALUES (:'dispatcher_role'), (:'runtime_role'), (:'retention_operator_role')
 ),
 durable_sequence AS
 (
@@ -663,13 +721,13 @@ SELECT NOT EXISTS
 ) AS service_roles_have_safe_sequence_privileges \gset
 \if :service_roles_have_safe_sequence_privileges
 \else
-  \echo 'Dispatcher or scoped runtime role has an effective durable-sequence privilege outside the package allowlist.'
+  \echo 'Dispatcher, scoped runtime, or retention operator role has an effective durable-sequence privilege outside the package allowlist.'
   SELECT 1 / 0;
 \endif
 
 WITH service_role(role_name) AS
 (
-  VALUES (:'dispatcher_role'), (:'runtime_role')
+  VALUES (:'dispatcher_role'), (:'runtime_role'), (:'retention_operator_role')
 ),
 durable_function AS
 (
@@ -701,11 +759,18 @@ SELECT NOT EXISTS
       OR service.role_name = :'runtime_role'
       AND routine.oid = 'appsurface_durable.runtime_due_dispatch_health(integer)'::pg_catalog.regprocedure
       AND privilege.privilege_name = 'EXECUTE'
+      OR service.role_name = :'retention_operator_role'
+      AND routine.oid IN
+      (
+        'appsurface_durable.create_flow_retention_manifest(text, text, text, text, char(64), text, char(64), integer, bigint, jsonb, text, text, char(64))'::pg_catalog.regprocedure,
+        'appsurface_durable.apply_flow_retention_lifecycle(text, text, text, text, text, char(64), text, text, bigint, text, text, char(64), text, char(64), integer, boolean)'::pg_catalog.regprocedure
+      )
+      AND privilege.privilege_name = 'EXECUTE'
     )
 ) AS service_roles_have_safe_function_privileges \gset
 \if :service_roles_have_safe_function_privileges
 \else
-  \echo 'Dispatcher or scoped runtime role has an effective durable-function privilege outside the package allowlist.'
+  \echo 'Dispatcher, scoped runtime, or retention operator role has an effective durable-function privilege outside the package allowlist.'
   SELECT 1 / 0;
 \endif
 
@@ -713,6 +778,20 @@ SELECT format('GRANT USAGE ON SCHEMA appsurface_durable TO %I', :'dispatcher_rol
 SELECT format('GRANT SELECT ON appsurface_durable.dispatch TO %I', :'dispatcher_role') \gexec
 SELECT format('GRANT SELECT ON appsurface_durable.flow_dispatch TO %I', :'dispatcher_role') \gexec
 SELECT format('GRANT EXECUTE ON FUNCTION appsurface_durable.claim_schedule_dispatch(text, interval) TO %I', :'dispatcher_role') \gexec
+SELECT format('REVOKE ALL ON SCHEMA appsurface_durable FROM %I', :'retention_operator_role') \gexec
+SELECT format('REVOKE ALL ON ALL TABLES IN SCHEMA appsurface_durable FROM %I', :'retention_operator_role') \gexec
+SELECT format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA appsurface_durable FROM %I', :'retention_operator_role') \gexec
+SELECT format('REVOKE ALL ON ALL FUNCTIONS IN SCHEMA appsurface_durable FROM %I', :'retention_operator_role') \gexec
+SELECT format('GRANT USAGE ON SCHEMA appsurface_durable TO %I', :'retention_operator_role') \gexec
+SELECT format(
+    'GRANT SELECT ON appsurface_durable.scope, appsurface_durable.work, appsurface_durable.flow_instance, appsurface_durable.flow_command, appsurface_durable.flow_history, appsurface_durable.flow_wait, appsurface_durable.flow_timer, appsurface_durable.flow_dispatch, appsurface_durable.flow_trace_context, appsurface_durable.flow_retention_manifest, appsurface_durable.flow_retention_manifest_item, appsurface_durable.flow_retention_manifest_summary, appsurface_durable.flow_retention_manifest_event, appsurface_durable.flow_retention_command TO %I',
+    :'retention_operator_role') \gexec
+SELECT format(
+    'GRANT EXECUTE ON FUNCTION appsurface_durable.create_flow_retention_manifest(text, text, text, text, char(64), text, char(64), integer, bigint, jsonb, text, text, char(64)) TO %I',
+    :'retention_operator_role') \gexec
+SELECT format(
+    'GRANT EXECUTE ON FUNCTION appsurface_durable.apply_flow_retention_lifecycle(text, text, text, text, text, char(64), text, text, bigint, text, text, char(64), text, char(64), integer, boolean) TO %I',
+    :'retention_operator_role') \gexec
 SELECT format('GRANT USAGE ON SCHEMA appsurface_durable TO %I', :'runtime_role') \gexec
 SELECT format('GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO %I', :'runtime_role') \gexec
 SELECT format(

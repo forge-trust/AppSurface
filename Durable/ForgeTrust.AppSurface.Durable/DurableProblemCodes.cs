@@ -76,6 +76,14 @@ public static class DurableProblemCodes
     public const string TraceContextInvalid = "ASDUR212";
     /// <summary>The W3C tracestate header formatting or length is invalid and was rejected.</summary>
     public const string TraceStateRejected = "ASDUR213";
+    /// <summary>The requested retention manifest is absent from the authorized scope.</summary>
+    public const string RetentionManifestNotFound = "ASDUR214";
+    /// <summary>The Flow source no longer corresponds to a frozen retention manifest.</summary>
+    public const string RetentionSourceChanged = "ASDUR215";
+    /// <summary>The expected retention lifecycle sequence is stale.</summary>
+    public const string RetentionLifecycleConflict = "ASDUR216";
+    /// <summary>The requested retention lifecycle transition is not safe in the current state.</summary>
+    public const string RetentionLifecycleRejected = "ASDUR217";
     /// <summary>The durable provider schema is not installed.</summary>
     public const string SchemaMissing = "ASDUR400";
     /// <summary>The durable provider schema requires pending migrations.</summary>

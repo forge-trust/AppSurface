@@ -9,7 +9,7 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 public sealed class DurableSchemaContractTests
 {
     [Fact]
-    public void MigrationCatalog_IsExactlySixOrderedChecksummedResources()
+    public void MigrationCatalog_IsExactlySevenOrderedChecksummedResources()
     {
         var migrations = DurablePostgreSqlMigrationCatalog.Load();
 
@@ -111,6 +111,24 @@ public sealed class DurableSchemaContractTests
                 Assert.Contains("UNIQUE (scope_id, trace_context_id)", sixth.Sql, StringComparison.Ordinal);
                 Assert.Contains("flow_trace_context_scope_isolation", sixth.Sql, StringComparison.Ordinal);
                 Assert.Contains("evaluation_committed", sixth.Sql, StringComparison.Ordinal);
+            },
+            seventh =>
+            {
+                Assert.Equal(7, seventh.Version);
+                Assert.Equal("flow_retention", seventh.Name);
+                Assert.Equal(64, seventh.Sha256.Length);
+                Assert.Contains("flow_retention_manifest", seventh.Sql, StringComparison.Ordinal);
+                Assert.Contains("flow_retention_manifest_item", seventh.Sql, StringComparison.Ordinal);
+                Assert.Contains("flow_retention_manifest_event", seventh.Sql, StringComparison.Ordinal);
+                Assert.Contains("flow_retention_command", seventh.Sql, StringComparison.Ordinal);
+                Assert.Contains("retention_lifecycle_sequence", seventh.Sql, StringComparison.Ordinal);
+                Assert.Contains("FORCE ROW LEVEL SECURITY", seventh.Sql, StringComparison.Ordinal);
+                Assert.Contains("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;", seventh.Sql, StringComparison.Ordinal);
+                Assert.Contains("must be installed in the public schema for Flow retention", seventh.Sql, StringComparison.Ordinal);
+                Assert.Contains(
+                    "PERFORM 1 FROM appsurface_durable.flow_trace_context\n    WHERE scope_id = p_scope_id AND flow_instance_id = p_flow_instance_id FOR UPDATE;",
+                    seventh.Sql,
+                    StringComparison.Ordinal);
             });
         Assert.Equal(migrations.Count, DurablePostgreSqlMigrationCatalog.RequiredVersion);
         Assert.Equal(migrations.Count, PostgreSqlDurableRuntimeSchemaManager.RequiredVersion);
@@ -183,6 +201,9 @@ public sealed class DurableSchemaContractTests
         Assert.True(
             script.IndexOf("0005_runtime_heartbeat", StringComparison.Ordinal)
             < script.IndexOf("0006_flow_trace_context", StringComparison.Ordinal));
+        Assert.True(
+            script.IndexOf("0006_flow_trace_context", StringComparison.Ordinal)
+            < script.IndexOf("0007_flow_retention", StringComparison.Ordinal));
         Assert.Contains("pg_advisory_lock", script, StringComparison.Ordinal);
         Assert.DoesNotContain("0001_work_shared", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0002_forced_rls", pendingOnly, StringComparison.Ordinal);
@@ -190,9 +211,10 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("0004_schedule_protocol", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0005_runtime_heartbeat", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0006_flow_trace_context", pendingOnly, StringComparison.Ordinal);
+        Assert.Contains("0007_flow_retention", pendingOnly, StringComparison.Ordinal);
         Assert.DoesNotContain("-- Migration", current, StringComparison.Ordinal);
         Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(-1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(7));
+        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(8));
     }
 
     [Theory]
@@ -370,7 +392,7 @@ public sealed class DurableSchemaContractTests
             "Durable/configure-postgresql-roles.sql"));
 
         Assert.DoesNotContain("to_regrole", recipe, StringComparison.Ordinal);
-        Assert.Equal(3, CountOccurrences(recipe, "WHERE rolname = :"));
+        Assert.Equal(4, CountOccurrences(recipe, "WHERE rolname = :"));
         Assert.Contains("AS roles_are_distinct", recipe, StringComparison.Ordinal);
         Assert.Contains("AS service_roles_are_restricted_login_leaves", recipe, StringComparison.Ordinal);
         Assert.Contains("AS service_roles_are_membership_free", recipe, StringComparison.Ordinal);
@@ -387,6 +409,9 @@ public sealed class DurableSchemaContractTests
             recipe,
             StringComparison.Ordinal);
         Assert.Contains("flow_dispatch_runtime_scope_select", recipe, StringComparison.Ordinal);
+        Assert.Contains("retention_operator_role", recipe, StringComparison.Ordinal);
+        Assert.Contains("flow_dispatch_retention_scope_select", recipe, StringComparison.Ordinal);
+        Assert.Contains("flow_retention_manifest", recipe, StringComparison.Ordinal);
         foreach (var restrictedAttribute in new[]
                  {
                      "rolcanlogin", "rolsuper", "rolcreatedb", "rolcreaterole", "rolreplication", "rolbypassrls",

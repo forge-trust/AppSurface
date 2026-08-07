@@ -47,6 +47,48 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
     }
 
     [Fact]
+    public void FlowRetentionRegistration_RequiresPassiveStorageAndAThirdDataSource()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = CreateDataSource();
+
+        Assert.Throws<InvalidOperationException>(() =>
+            new ServiceCollection().AddAppSurfaceDurablePostgreSqlFlowRetention(dispatcher));
+
+        var services = new ServiceCollection();
+        services.AddAppSurfaceDurablePostgreSql(
+            dispatcher,
+            runtime,
+            new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+            new PostgreSqlDurableScheduleOptions("durable_runtime"));
+
+        Assert.Throws<ArgumentException>(() => services.AddAppSurfaceDurablePostgreSqlFlowRetention(dispatcher));
+        Assert.Throws<ArgumentException>(() => services.AddAppSurfaceDurablePostgreSqlFlowRetention(runtime));
+    }
+
+    [Fact]
+    public void FlowRetentionRegistration_IsIdempotentAndResolvesTheDedicatedClient()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = CreateDataSource();
+        using var retention = CreateDataSource();
+        var services = new ServiceCollection();
+        services.AddAppSurfaceDurablePostgreSql(
+            dispatcher,
+            runtime,
+            new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+            new PostgreSqlDurableScheduleOptions("durable_runtime"));
+
+        Assert.Same(services, services.AddAppSurfaceDurablePostgreSqlFlowRetention(retention));
+        Assert.Same(services, services.AddAppSurfaceDurablePostgreSqlFlowRetention(retention));
+
+        using var provider = services.BuildServiceProvider();
+        var concrete = provider.GetRequiredService<PostgreSqlDurableFlowRetentionClient>();
+
+        Assert.Same(concrete, provider.GetRequiredService<IDurableFlowRetentionClient>());
+    }
+
+    [Fact]
     public void WorkerHost_IsExplicitIdempotentAndRequiresPassiveStorage()
     {
         Assert.Throws<InvalidOperationException>(() => new ServiceCollection().AddAppSurfaceDurableWorkerHost());

@@ -43,6 +43,7 @@ Every public type in this package belongs to one of these provider-facing famili
 | Work-store implementers | `DurableClaimedWork`, `DurablePreparedWorkInvocation`, `DurableProviderWorkAdapter` | Validate a claim, derive immutable execution identity, and invoke the adopter registry |
 | Application-authorized control implementers | Work get/cancel/list/snapshot types and `IDurableWorkControlClient`; scope disable types and `IDurableScopeControlClient` | Expose bounded, scoped, payload-free operational control |
 | Application-authorized operator implementers | Operator outcome/resolution/result/request types and `IDurableWorkOperatorClient` | Reconcile, resolve, safely retry, or recovery-release suspended Work |
+| Application-authorized retention implementers | `IDurableFlowRetentionClient`, bounded assessment/manifest/package/receipt/hold/purge types | Prove one exact terminal Flow source set before a separately authorized purge |
 
 The SPI accepts and returns public Durable identifiers and command fingerprints. Collection results defensively copy
 inputs, default identifiers are rejected, timestamps normalize to UTC, page sizes are bounded, and every mutation uses
@@ -64,6 +65,19 @@ lease turnover cannot create a new external idempotency identity.
 Work reconcile, manual resolution, safe retry, and recovery release each use a distinct v1 fingerprint schema. A
 provider persists the schema id and digest with command outcome truth. A repeated command id with `UnsupportedSchema` or
 `Conflict` fails closed; it must never repeat reconciliation merely because the command id matches.
+
+## Verified Flow retention
+
+`IDurableFlowRetentionClient` is an evidence boundary, not a cleanup scheduler. An application first assesses exactly
+one Flow and receives `Safe`, `Blocked`, or `Indeterminate` with a typed reason. Only a still-matching safe assessment
+can create an immutable manifest. The provider then builds a reproducible `DFA1` package, records an adopter-supplied
+archive receipt, verifies source correspondence, permits an application-owned hold, and accepts a separate
+compare-and-swap purge command.
+
+The application must authorize every call and owns archive transport, encryption, retention duration, availability,
+and legal/compliance requirements. Receipt verification proves the package corresponds to the frozen PostgreSQL source;
+it does not prove external bytes are present or adequate. No API accepts an archive URI, raw SQL, age-range deletion,
+continuation token, or multi-Flow manifest. See the [PostgreSQL retention deployment guidance](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md#verified-flow-retention).
 
 ## Operational prerequisites
 
