@@ -1,13 +1,13 @@
 {
   "SchemaVersion": 1,
-  "RunId": "20260806T091414Z-52307",
+  "RunId": "20260807T044734Z-72095",
   "DatabaseSource": "postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302",
-  "StartedAtUtc": "2026-08-06T09:14:38Z",
+  "StartedAtUtc": "2026-08-07T04:48:04Z",
   "ElapsedMilliseconds": 5000,
   "Scenario": "forward-migration-recovery",
   "TestName": "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlSchemaIntegrationTests.FailedMigration_RollsBackPartialDdlAndRetriesFromLastCommittedVersion",
   "Mode": "warm",
-  "SourceSha256": "1c09ab919575afdc83cbea1fe142d46b5050f8857b69e764b45af8461eddb451",
+  "SourceSha256": "4bf6aea437d712c62334e224928deea4eadaa9d1450b3aa2d51b1b20e2fb1895",
   "FinalState": "retried-from-last-committed-version",
   "Events": [
     {
