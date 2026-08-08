@@ -118,6 +118,22 @@ public sealed class CanaryLabSettingsTests
     }
 
     [Fact]
+    public void Module_RejectsNonDevelopmentWhenSettingsAreResolved()
+    {
+        var module = new NamedCanaryLabModule();
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(CreateConfiguration());
+        module.ConfigureServices(
+            new StartupContext([], module, EnvironmentProvider: new TestEnvironmentProvider(isDevelopment: false)),
+            services);
+
+        using var provider = services.BuildServiceProvider();
+        var exception = Assert.Throws<InvalidOperationException>(() => provider.GetRequiredService<CanaryLabSettings>());
+
+        Assert.Equal("The named-canary lab may run only in the Development environment.", exception.Message);
+    }
+
+    [Fact]
     public async Task Module_ExecutesAllLifecycleHooksAndMapsTheLocalStatusRoute()
     {
         var module = new NamedCanaryLabModule();
@@ -162,23 +178,11 @@ public sealed class CanaryLabSettingsTests
         [$"{CanaryLabSettings.SectionName}:Scenario"] = "Pass",
     };
 
-    private sealed class TestHostEnvironment(string environmentName) : IHostEnvironment
+    private sealed class TestEnvironmentProvider(bool isDevelopment = true) : IEnvironmentProvider
     {
-        public string EnvironmentName { get; set; } = environmentName;
+        public string Environment => isDevelopment ? Environments.Development : Environments.Production;
 
-        public string ApplicationName { get; set; } = "NamedCanaryLab.Tests";
-
-        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
-
-        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } =
-            new Microsoft.Extensions.FileProviders.NullFileProvider();
-    }
-
-    private sealed class TestEnvironmentProvider : IEnvironmentProvider
-    {
-        public string Environment => Environments.Development;
-
-        public bool IsDevelopment => true;
+        public bool IsDevelopment => isDevelopment;
 
         public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;
     }

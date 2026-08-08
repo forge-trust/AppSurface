@@ -20,7 +20,7 @@ public sealed class NamedCanaryLabEndpointTests
     public async Task TriggerAndCanaryRoutes_AreProtectedAndPassWithoutLeakingRawValues()
     {
         await using var host = await CreateHostAsync(CanaryLabScenario.Pass);
-        using var client = host.Client;
+        var client = host.Client;
 
         using var anonymousResponse = await client.PostAsync("/lab/canary/trigger", content: null);
         Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
@@ -52,7 +52,7 @@ public sealed class NamedCanaryLabEndpointTests
         string expectedReason)
     {
         await using var host = await CreateHostAsync(Enum.Parse<CanaryLabScenario>(scenarioName));
-        using var client = host.Client;
+        var client = host.Client;
 
         using var triggerResponse = await client.SendAsync(TriggerRequest());
         Assert.Equal(HttpStatusCode.Accepted, triggerResponse.StatusCode);
@@ -70,7 +70,7 @@ public sealed class NamedCanaryLabEndpointTests
     public async Task Trigger_RejectsMissingMarkerWithoutEchoingCredentials()
     {
         await using var host = await CreateHostAsync(CanaryLabScenario.Pass);
-        using var client = host.Client;
+        var client = host.Client;
         using var request = new HttpRequestMessage(HttpMethod.Post, "/lab/canary/trigger")
         {
             Headers = { Authorization = new AuthenticationHeaderValue("Bearer", Token) },
@@ -87,7 +87,7 @@ public sealed class NamedCanaryLabEndpointTests
     public async Task Trigger_RejectsInvalidMarkerShapesWithoutEchoingCredentials()
     {
         await using var host = await CreateHostAsync(CanaryLabScenario.Pass);
-        using var client = host.Client;
+        var client = host.Client;
         var invalidValues = new[]
         {
             new[] { " " },
@@ -114,7 +114,7 @@ public sealed class NamedCanaryLabEndpointTests
     public async Task CanaryRoute_RejectsWrongOrMalformedBearerCredentials()
     {
         await using var host = await CreateHostAsync(CanaryLabScenario.Pass);
-        using var client = host.Client;
+        var client = host.Client;
 
         foreach (var authorization in new[]
                  {
@@ -134,7 +134,7 @@ public sealed class NamedCanaryLabEndpointTests
     public async Task Trigger_AcceptsTheExactUtf8MarkerLimit()
     {
         await using var host = await CreateHostAsync(CanaryLabScenario.Pass);
-        using var client = host.Client;
+        var client = host.Client;
         var marker = new string('é', 128);
         using var request = TriggerRequest(marker);
 
@@ -156,7 +156,7 @@ public sealed class NamedCanaryLabEndpointTests
     public async Task CanaryRoute_RejectsEmptyOrCaseMismatchedBearerCredentials(string authorization)
     {
         await using var host = await CreateHostAsync(CanaryLabScenario.Pass);
-        using var client = host.Client;
+        var client = host.Client;
         using var request = CanaryRequest(DateTimeOffset.UtcNow.AddMinutes(-1));
         request.Headers.Remove("Authorization");
         request.Headers.TryAddWithoutValidation("Authorization", authorization);
@@ -170,13 +170,25 @@ public sealed class NamedCanaryLabEndpointTests
     public async Task CanaryRoute_RejectsOversizedBearerCredentials()
     {
         await using var host = await CreateHostAsync(CanaryLabScenario.Pass);
-        using var client = host.Client;
+        var client = host.Client;
         using var request = CanaryRequest(DateTimeOffset.UtcNow.AddMinutes(-1));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", new string('t', 16 * 1024));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", new string('t', 16 * 1024 + 1));
 
         using var response = await client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CanaryRoute_AcceptsBearerCredentialsAtTheExactTokenLimit()
+    {
+        var token = new string('t', 16 * 1024);
+        await using var host = await CreateHostAsync(CanaryLabScenario.Pending, token);
+        using var request = CanaryRequest(DateTimeOffset.UtcNow.AddMinutes(-1), token);
+
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
     }
 
     [Fact]
@@ -204,14 +216,14 @@ public sealed class NamedCanaryLabEndpointTests
         Assert.DoesNotContain(Marker, body, StringComparison.Ordinal);
     }
 
-    private static async Task<LabTestHost> CreateHostAsync(CanaryLabScenario scenario)
+    private static async Task<LabTestHost> CreateHostAsync(CanaryLabScenario scenario, string operatorToken = Token)
     {
         var builder = WebApplication.CreateBuilder(
             new WebApplicationOptions { EnvironmentName = Environments.Development });
         builder.WebHost.UseTestServer();
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            [$"{CanaryLabSettings.SectionName}:OperatorToken"] = Token,
+            [$"{CanaryLabSettings.SectionName}:OperatorToken"] = operatorToken,
             [$"{CanaryLabSettings.SectionName}:Candidate"] = "candidate-sentinel",
             [$"{CanaryLabSettings.SectionName}:Environment"] = "development",
             [$"{CanaryLabSettings.SectionName}:Scenario"] = scenario.ToString(),
@@ -232,10 +244,10 @@ public sealed class NamedCanaryLabEndpointTests
         return request;
     }
 
-    private static HttpRequestMessage CanaryRequest(DateTimeOffset freshSince)
+    private static HttpRequestMessage CanaryRequest(DateTimeOffset freshSince, string operatorToken = Token)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, $"/_appsurface/canaries/{NamedCanaryLabApp.CanaryName}");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", operatorToken);
         request.Headers.Add(AppSurfaceCanaryHeaderNames.Marker, Marker);
         request.Headers.Add(AppSurfaceCanaryHeaderNames.FreshSince, freshSince.ToUniversalTime().ToString("O"));
         return request;
@@ -257,6 +269,10 @@ public sealed class NamedCanaryLabEndpointTests
 
         public IServiceProvider Services => app.Services;
 
-        public ValueTask DisposeAsync() => app.DisposeAsync();
+        public async ValueTask DisposeAsync()
+        {
+            Client.Dispose();
+            await app.DisposeAsync();
+        }
     }
 }

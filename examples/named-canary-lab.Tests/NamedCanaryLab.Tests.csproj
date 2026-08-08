@@ -28,7 +28,6 @@
 
   <ItemGroup>
     <ProjectReference Include="../named-canary-lab/NamedCanaryLab.csproj" />
-    <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
   </ItemGroup>
 
   <ItemGroup>

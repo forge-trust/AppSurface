@@ -7,6 +7,16 @@ internal sealed class CanaryLabEvaluator(
     CanaryLabProofStore proofStore,
     CanaryLabSettings settings) : IAppSurfaceCanaryEvaluator
 {
+    /// <summary>
+    /// Evaluates existing proof in order: marker and freshness registration, proof presence, candidate and environment binding,
+    /// freshness, then the stored workflow status. It returns <c>proof-not-observed</c>, <c>candidate-mismatch</c>,
+    /// <c>proof-stale</c>, <c>proof-observed</c>, or <c>workflow-failed</c> as applicable.
+    /// </summary>
+    /// <param name="context">Named-canary request that supplies the opaque marker and freshness boundary.</param>
+    /// <param name="cancellationToken">Cancellation token for the caller-owned evaluation.</param>
+    /// <returns>Bounded canary result based only on existing local proof.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when registration omitted a marker or freshness boundary.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when retained proof has an unsupported status.</exception>
     public ValueTask<AppSurfaceCanaryResult> EvaluateAsync(
         AppSurfaceCanaryEvaluationContext context,
         CancellationToken cancellationToken)

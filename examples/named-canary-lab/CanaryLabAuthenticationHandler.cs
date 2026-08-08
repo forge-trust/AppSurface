@@ -8,7 +8,9 @@ namespace NamedCanaryLab;
 /// <summary>Authenticates a Development-only local operator without logging its credential.</summary>
 internal sealed class CanaryLabAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
 {
+    /// <summary>Names the Development-only bearer scheme registered by <see cref="NamedCanaryLabApp"/>.</summary>
     public const string SchemeName = "NamedCanaryLabOperator";
+    private const int MaximumOperatorTokenLength = 16 * 1024;
 
     private readonly CanaryLabSettings _settings;
 
@@ -28,12 +30,13 @@ internal sealed class CanaryLabAuthenticationHandler : AuthenticationHandler<Aut
         const string prefix = "Bearer ";
         if (!authorization.StartsWith(prefix, StringComparison.Ordinal)
             || authorization.Length <= prefix.Length
-            || authorization.Length > 16 * 1024)
+            || authorization.Length > prefix.Length + MaximumOperatorTokenLength)
         {
             return Task.FromResult(AuthenticateResult.NoResult());
         }
 
-        if (!_settings.MatchesOperatorToken(authorization[prefix.Length..]))
+        var token = authorization[prefix.Length..];
+        if (!_settings.MatchesOperatorToken(token))
         {
             return Task.FromResult(AuthenticateResult.NoResult());
         }
@@ -49,5 +52,6 @@ internal sealed class CanaryLabAuthenticationHandler : AuthenticationHandler<Aut
 /// <summary>Names the host-owned authorization policy used by the lab routes.</summary>
 internal static class CanaryLabPolicies
 {
+    /// <summary>Names the policy that requires the <see cref="CanaryLabAuthenticationHandler.SchemeName"/> operator on lab routes.</summary>
     public const string OperatorsOnly = "NamedCanaryLabOperatorsOnly";
 }

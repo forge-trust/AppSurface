@@ -75,12 +75,12 @@ internal static class NamedCanaryLabApp
         ArgumentNullException.ThrowIfNull(endpoints);
 
         endpoints.MapGet("/", () => Results.Text("AppSurface named-canary lab is running.", "text/plain"));
-        endpoints.MapPost("/lab/canary/trigger", TriggerAsync)
+        endpoints.MapPost("/lab/canary/trigger", Trigger)
             .RequireAuthorization(CanaryLabPolicies.OperatorsOnly);
         endpoints.MapAppSurfaceCanaries(CanaryLabPolicies.OperatorsOnly);
     }
 
-    private static IResult TriggerAsync(
+    private static IResult Trigger(
         HttpContext httpContext,
         CanaryLabSettings settings,
         CanaryLabProofStore proofStore,

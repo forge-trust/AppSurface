@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
 using ForgeTrust.AppSurface.Web;
@@ -6,9 +7,15 @@ using ForgeTrust.AppSurface.Web;
 namespace NamedCanaryLab;
 
 /// <summary>Identifies the candidate and environment to which application proof is bound.</summary>
+/// <param name="Candidate">Deployment candidate that produced the proof.</param>
+/// <param name="Environment">Deployment environment that produced the proof.</param>
 internal sealed record CanaryProofIdentity(string Candidate, string Environment);
 
 /// <summary>Stores only the bounded local facts required to evaluate a named canary.</summary>
+/// <param name="Identity">Candidate and environment to which the proof is bound.</param>
+/// <param name="MarkerFingerprint">One-way lookup fingerprint for the opaque marker.</param>
+/// <param name="ObservedAt">UTC instant when the local workflow observed the proof.</param>
+/// <param name="Status">Outcome recorded by the local synthetic workflow.</param>
 internal sealed record CanaryProofRecord(
     CanaryProofIdentity Identity,
     string MarkerFingerprint,
@@ -25,8 +32,12 @@ internal sealed class CanaryLabProofStore
     private int _recordSlotCount;
 
     /// <summary>
-    /// Records the newest evidence for a marker, or returns <see langword="null"/> when a new marker would exceed the local bound.
+    /// Records evidence for a marker. A newer record replaces older evidence, an older record leaves the current one intact,
+    /// and a new marker returns <see langword="null"/> when it would exceed the local bound.
     /// </summary>
+    /// <param name="candidate">Candidate evidence to retain when its marker has capacity or a newer observation time.</param>
+    /// <returns>The retained record, or <see langword="null"/> only when a new marker cannot be accommodated.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="candidate"/> is <see langword="null"/>.</exception>
     public CanaryProofRecord? Record(CanaryProofRecord candidate)
     {
         ArgumentNullException.ThrowIfNull(candidate);
@@ -66,8 +77,12 @@ internal sealed class CanaryLabProofStore
         }
     }
 
-    public bool TryRead(string markerFingerprint, out CanaryProofRecord proof) =>
-        _records.TryGetValue(markerFingerprint, out proof!);
+    /// <summary>Reads the retained proof for a marker fingerprint without triggering new work.</summary>
+    /// <param name="markerFingerprint">Fingerprint produced by <see cref="CanaryLabMarkerFingerprint.Create"/>.</param>
+    /// <param name="proof">Retained proof when the fingerprint is present; otherwise <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> when a proof is present; otherwise <see langword="false"/>.</returns>
+    public bool TryRead(string markerFingerprint, [MaybeNullWhen(false)] out CanaryProofRecord proof) =>
+        _records.TryGetValue(markerFingerprint, out proof);
 
     private bool TryReserveRecordSlot()
     {
@@ -90,9 +105,13 @@ internal sealed class CanaryLabProofStore
 /// <summary>Creates internal lookup fingerprints without retaining opaque marker values.</summary>
 internal static class CanaryLabMarkerFingerprint
 {
+    /// <summary>Creates a lowercase SHA-256 hexadecimal fingerprint for a nonblank opaque marker.</summary>
+    /// <param name="marker">Opaque marker value to fingerprint without retaining it.</param>
+    /// <returns>Lowercase hexadecimal SHA-256 fingerprint.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="marker"/> is <see langword="null"/>, empty, or whitespace.</exception>
     public static string Create(string marker)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(marker);
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(marker))).ToLowerInvariant();
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(marker)));
     }
 }

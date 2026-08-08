@@ -1,5 +1,4 @@
 using ForgeTrust.AppSurface.Web;
-using Microsoft.Extensions.Hosting;
 
 namespace NamedCanaryLab.Tests;
 
@@ -241,6 +240,15 @@ public sealed class CanaryLabProofTests
             CanaryLabMarkerFingerprint.Create("marker-over-capacity"),
             DateTimeOffset.UtcNow,
             AppSurfaceCanaryStatus.Pass)));
+
+        var updatedExisting = new CanaryProofRecord(
+            identity,
+            CanaryLabMarkerFingerprint.Create("marker-0"),
+            DateTimeOffset.UtcNow.AddSeconds(1),
+            AppSurfaceCanaryStatus.Fail);
+        Assert.Same(updatedExisting, store.Record(updatedExisting));
+        Assert.True(store.TryRead(updatedExisting.MarkerFingerprint, out var stored));
+        Assert.Same(updatedExisting, stored);
     }
 
     private static CanaryLabEvaluator CreateEvaluator(CanaryLabProofStore store) =>
@@ -253,15 +261,4 @@ public sealed class CanaryLabProofTests
     private static AppSurfaceCanaryEvaluationContext Context(DateTimeOffset? freshSince = null) =>
         new(NamedCanaryLabApp.CanaryName, Marker, freshSince ?? DateTimeOffset.UtcNow.AddMinutes(-1));
 
-    private sealed class TestHostEnvironment : IHostEnvironment
-    {
-        public string EnvironmentName { get; set; } = Environments.Development;
-
-        public string ApplicationName { get; set; } = "NamedCanaryLab.Tests";
-
-        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
-
-        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } =
-            new Microsoft.Extensions.FileProviders.NullFileProvider();
-    }
 }
