@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.ReleaseContracts;
 using Markdig;
 
 namespace ForgeTrust.AppSurface.Release;
@@ -116,10 +117,24 @@ internal sealed class ReleaseChecker
 
         if (File.Exists(_workspace.UnreleasedPath))
         {
-            var unreleased = await File.ReadAllTextAsync(_workspace.UnreleasedPath, cancellationToken);
-            // Validate Markdown syntax; the syntax tree is intentionally discarded.
-            Markdown.Parse(unreleased);
-            AddNarrativeWarnings(unreleased, warnings);
+            try
+            {
+                var unreleasedTemplate = await File.ReadAllTextAsync(_workspace.UnreleasedPath, cancellationToken);
+                var entries = await UnreleasedEntryComposer.LoadAsync(_workspace.UnreleasedEntriesDirectory, cancellationToken);
+                var unreleased = UnreleasedEntryComposer.Compose(unreleasedTemplate, entries.Entries);
+                // Validate Markdown syntax; the syntax tree is intentionally discarded.
+                Markdown.Parse(unreleased);
+                AddNarrativeWarnings(unreleased, warnings);
+            }
+            catch (UnreleasedEntryException ex)
+            {
+                errors.Add(ReleaseDiagnostic.Error(
+                    "release-unreleased-entry-invalid",
+                    "The append-only unreleased entry set cannot be composed.",
+                    ex.Message,
+                    "Use one correctly named entry file with an exact supported section directive, and keep exactly one marker for every section in releases/unreleased.md.",
+                    "releases/README.md#append-only-unreleased-entries"));
+            }
         }
 
         if (File.Exists(_workspace.PackageIndexPath))

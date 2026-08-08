@@ -272,6 +272,55 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldComposeUnreleasedEntriesWithoutPublishingTheirFiles()
+    {
+        await WriteMarkdownAsync(
+            "releases/unreleased.md",
+            """
+            # Unreleased
+
+            ## What is taking shape
+
+            <!-- appsurface:unreleased-entries section="taking-shape" -->
+            - Add merged public changes here as they land.
+
+            ## Included in the next coordinated version
+
+            <!-- appsurface:unreleased-entries section="included" -->
+            - Add release-facing changes here as they land.
+
+            ## Migration watch
+
+            <!-- appsurface:unreleased-entries section="migration-watch" -->
+            - Record breaking or behavior-changing guidance here.
+            """);
+        await WriteMarkdownAsync(
+            "releases/unreleased.entries/2026-08-08-release-workflow.md",
+            """
+            <!-- appsurface:unreleased-entry section="included" -->
+            ### Release workflow
+
+            - Parallel pull requests add independent release-note entries.
+            """);
+        var harvester = new MarkdownHarvester(
+            _loggerFake,
+            File.ReadAllTextAsync,
+            CreatePathPolicy(
+                options =>
+                {
+                    options.Harvest.Paths.IncludeGlobs = ["releases/**/*.md"];
+                    options.Harvest.Markdown.ExcludeGlobs = ["releases/unreleased.entries/**"];
+                }));
+
+        var doc = Assert.Single(await harvester.HarvestAsync(_testRoot));
+
+        Assert.Equal("releases/unreleased.md", doc.Path);
+        Assert.Contains("Release workflow", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("Parallel pull requests add independent release-note entries.", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("Add release-facing changes here as they land.", doc.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldSkipOversizedMarkdownBeforeReadingOrParsing()
     {
         var markdownPath = CombineUnder(_testRoot, "Large.md");

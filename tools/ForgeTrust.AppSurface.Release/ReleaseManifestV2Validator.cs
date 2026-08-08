@@ -28,7 +28,8 @@ internal static class ReleaseManifestV2Validator
         "publishedPackageProjects",
         "coordinatedPackageReleaseNoteResolutions",
         "diagnostics",
-        "warningIds"
+        "warningIds",
+        "consumedUnreleasedEntryPaths"
     };
 
     internal static bool TryDeserialize(string json, [NotNullWhen(true)] out ReleaseManifestV2? manifest, out string issue)
@@ -71,7 +72,8 @@ internal static class ReleaseManifestV2Validator
                 || manifest.PublishedPackageProjects is null
                 || manifest.CoordinatedPackageReleaseNoteResolutions is null
                 || manifest.Diagnostics is null
-                || manifest.WarningIds is null)
+                || manifest.WarningIds is null
+                || manifest.ConsumedUnreleasedEntryPaths is null)
             {
                 issue = "Release manifest has missing required V2 values.";
                 manifest = null;
@@ -92,10 +94,14 @@ internal static class ReleaseManifestV2Validator
             var parsed = manifest;
             var projects = parsed.PublishedPackageProjects.ToArray();
             var resolutionProjects = parsed.CoordinatedPackageReleaseNoteResolutions.Select(item => item.Project).ToArray();
+            var consumedEntryPaths = parsed.ConsumedUnreleasedEntryPaths.ToArray();
             if (!projects.SequenceEqual(projects.OrderBy(project => project, StringComparer.Ordinal), StringComparer.Ordinal)
                 || projects.Distinct(StringComparer.Ordinal).Count() != projects.Length
                 || !resolutionProjects.SequenceEqual(resolutionProjects.OrderBy(project => project, StringComparer.Ordinal), StringComparer.Ordinal)
                 || resolutionProjects.Distinct(StringComparer.Ordinal).Count() != resolutionProjects.Length
+                || !consumedEntryPaths.SequenceEqual(consumedEntryPaths.OrderBy(path => path, StringComparer.Ordinal), StringComparer.Ordinal)
+                || consumedEntryPaths.Distinct(StringComparer.Ordinal).Count() != consumedEntryPaths.Length
+                || consumedEntryPaths.Any(path => string.IsNullOrWhiteSpace(path) || !UnreleasedEntryComposer.IsEntryPath(path))
                 || parsed.CoordinatedPackageReleaseNoteResolutions.Any(item =>
                     !string.Equals(item.Source, "coordinated", StringComparison.Ordinal)
                     || !string.Equals(item.AliasPath, PackageReleaseLink.CoordinatedReleaseNotesPath, StringComparison.Ordinal)

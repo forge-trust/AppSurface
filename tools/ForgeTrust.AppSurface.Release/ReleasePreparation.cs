@@ -12,6 +12,8 @@ internal sealed class ReleasePreparation
     private readonly ReleaseChecker _checker;
     private readonly IReleaseClock _clock;
     private readonly Func<CancellationToken, Task>? _beforeWriteAsync;
+    private readonly Func<UnreleasedEntrySnapshot, CancellationToken, Task>? _beforeArchiveEntryAsync;
+    private readonly Func<UnreleasedEntrySnapshot, string, CancellationToken, Task>? _afterArchiveEntryHandoffAsync;
 
     /// <summary>
     /// Creates release preparation workflow.
@@ -20,16 +22,22 @@ internal sealed class ReleasePreparation
     /// <param name="checker">Release readiness checker.</param>
     /// <param name="clock">Clock for default dates.</param>
     /// <param name="beforeWriteAsync">Optional test seam invoked after release content is rendered and before pointer-digest revalidation.</param>
+    /// <param name="beforeArchiveEntryAsync">Optional test seam invoked after an entry's final digest check and immediately before its guarded archive handoff.</param>
+    /// <param name="afterArchiveEntryHandoffAsync">Optional test seam invoked after a source entry moves to private recovery and before the moved bytes are verified.</param>
     internal ReleasePreparation(
         ReleaseWorkspace workspace,
         ReleaseChecker checker,
         IReleaseClock clock,
-        Func<CancellationToken, Task>? beforeWriteAsync = null)
+        Func<CancellationToken, Task>? beforeWriteAsync = null,
+        Func<UnreleasedEntrySnapshot, CancellationToken, Task>? beforeArchiveEntryAsync = null,
+        Func<UnreleasedEntrySnapshot, string, CancellationToken, Task>? afterArchiveEntryHandoffAsync = null)
     {
         _workspace = workspace;
         _checker = checker;
         _clock = clock;
         _beforeWriteAsync = beforeWriteAsync;
+        _beforeArchiveEntryAsync = beforeArchiveEntryAsync;
+        _afterArchiveEntryHandoffAsync = afterArchiveEntryHandoffAsync;
     }
 
     /// <summary>
@@ -41,7 +49,7 @@ internal sealed class ReleasePreparation
     /// <remarks>
     /// Preparation is a deterministic repository-file rewrite: it runs readiness checks, reads the unreleased note and sidecar,
     /// builds versioned release artifacts, refreshes the frozen tree-local current pointer, rolls <c>CHANGELOG.md</c>, resets unreleased
-    /// files, and records diagnostics in the release manifest. Coordinated package rows are intentionally not rewritten: each docs export
+    /// files, removes consumed append-only unreleased entries, and records diagnostics in the release manifest. Coordinated package rows are intentionally not rewritten: each docs export
     /// freezes the current pointer that was generated for its release. Dry-run mode performs all reads and rendering but does not write files.
     /// The method does not create git branches, tags, commits, package artifacts, or GitHub Releases; workflows own those operations.
     /// Callers should treat any readiness errors as blocking and should avoid running against a dirty or concurrently modified tree.
@@ -61,7 +69,24 @@ internal sealed class ReleasePreparation
         var date = options.Date ?? _clock.TodayUtc();
         var currentPointerSnapshot = await CaptureFileDigestAsync(_workspace.CurrentReleasePath, cancellationToken);
         var currentPointerSidecarSnapshot = await CaptureFileDigestAsync(_workspace.CurrentReleaseSidecarPath, cancellationToken);
-        var unreleased = await File.ReadAllTextAsync(_workspace.UnreleasedPath, cancellationToken);
+        UnreleasedEntrySet unreleasedEntries;
+        string unreleased;
+        try
+        {
+            var unreleasedTemplate = await File.ReadAllTextAsync(_workspace.UnreleasedPath, cancellationToken);
+            unreleasedEntries = await UnreleasedEntryComposer.LoadAsync(_workspace.UnreleasedEntriesDirectory, cancellationToken);
+            unreleased = UnreleasedEntryComposer.Compose(unreleasedTemplate, unreleasedEntries.Entries);
+        }
+        catch (UnreleasedEntryException ex)
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-unreleased-entry-invalid",
+                "The append-only unreleased entry set cannot be composed.",
+                ex.Message,
+                "Use one correctly named entry file with an exact supported section directive, and keep exactly one marker for every section in releases/unreleased.md.",
+                "releases/README.md#append-only-unreleased-entries"));
+        }
+
         var sidecar = await ReleaseSidecar.LoadAsync(_workspace.UnreleasedSidecarPath, cancellationToken);
         var currentReleaseSidecar = await File.ReadAllTextAsync(_workspace.CurrentReleaseSidecarPath, cancellationToken);
         var packageSummary = await PackageIndexSummary.LoadAsync(_workspace.PackageIndexPath, cancellationToken);
@@ -98,7 +123,12 @@ internal sealed class ReleasePreparation
             packageSummary.PublicPublishedPackages.Select(package => package.Project).OrderBy(project => project, StringComparer.Ordinal).ToArray(),
             coordinatedResolutions,
             check.Errors.Concat(check.Warnings).Select(ReleaseDiagnosticRecord.FromDiagnostic).ToArray(),
-            check.Warnings.Select(warning => warning.Code).ToArray());
+            check.Warnings.Select(warning => warning.Code).ToArray())
+        {
+            ConsumedUnreleasedEntryPaths = unreleasedEntries.Paths
+                .Select(_workspace.DisplayPath)
+                .ToArray()
+        };
         var releaseManifestContent = JsonSerializer.Serialize(manifest, ReleaseJson.Options) + Environment.NewLine;
         var evidence = ReleaseEvidence.BuildDraftV2(
             _workspace,
@@ -139,21 +169,38 @@ internal sealed class ReleasePreparation
             await EnsurePreparationBaseCommitUnchangedAsync(check.SourceCommit, cancellationToken);
             await EnsureFileDigestUnchangedAsync(currentPointerSnapshot, cancellationToken);
             await EnsureFileDigestUnchangedAsync(currentPointerSidecarSnapshot, cancellationToken);
+            foreach (var entrySnapshot in unreleasedEntries.Snapshots)
+            {
+                await EnsureUnreleasedEntryDigestUnchangedAsync(entrySnapshot, cancellationToken);
+            }
+
             foreach (var (path, _) in writes)
             {
                 EnsureSafeWriteTarget(path);
             }
 
-            foreach (var (path, content) in writes)
+            foreach (var (path, content) in writes.Take(writes.Count - 1))
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                 await File.WriteAllTextAsync(path, content, cancellationToken);
                 generatedPaths.Add(_workspace.DisplayPath(path));
             }
+
+            foreach (var entrySnapshot in unreleasedEntries.Snapshots)
+            {
+                await ArchiveUnreleasedEntryAsync(entrySnapshot, cancellationToken);
+                generatedPaths.Add(_workspace.DisplayPath(entrySnapshot.Path));
+            }
+
+            var (currentPointerPath, currentPointerContent) = writes[^1];
+            Directory.CreateDirectory(Path.GetDirectoryName(currentPointerPath)!);
+            await File.WriteAllTextAsync(currentPointerPath, currentPointerContent, cancellationToken);
+            generatedPaths.Add(_workspace.DisplayPath(currentPointerPath));
         }
         else
         {
             generatedPaths.AddRange(writes.Select(write => _workspace.DisplayPath(write.Key)));
+            generatedPaths.AddRange(unreleasedEntries.Paths.Select(_workspace.DisplayPath));
         }
 
         return new ReleasePreparationResult(check, generatedPaths, options.DryRun, evidence.ToSummary("draft evidence for release-prep review"));
@@ -234,6 +281,128 @@ internal sealed class ReleasePreparation
         await using var stream = File.OpenRead(path);
         var hash = await SHA256.HashDataAsync(stream, cancellationToken);
         return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private async Task EnsureUnreleasedEntryDigestUnchangedAsync(UnreleasedEntrySnapshot snapshot, CancellationToken cancellationToken)
+    {
+        var currentDigest = await ComputeFileDigestAsync(snapshot.Path, cancellationToken);
+        if (string.Equals(snapshot.Sha256, currentDigest, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        throw new ReleaseToolException(ReleaseDiagnostic.Error(
+            "release-unreleased-entry-concurrent-update",
+            "An unreleased entry changed while release preparation was running.",
+            $"`{_workspace.DisplayPath(snapshot.Path)}` no longer matches the digest used to build the tagged release note.",
+            "Review the concurrent entry update, remove only partial generated release artifacts if any were written, and rerun ./eng/release prepare. Do not delete the entry by hand.",
+            "releases/README.md#append-only-unreleased-entries"));
+    }
+
+    /// <summary>
+    /// Removes one consumed entry without deleting a concurrently replaced file.
+    /// </summary>
+    /// <remarks>
+    /// Filesystem deletion is pathname-based, so a digest check immediately followed by <see cref="File.Delete(string)"/>
+    /// could delete a replacement written in the intervening window. The guarded handoff atomically moves the current
+    /// pathname to a private recovery location, verifies the moved bytes, and deletes only that verified private file.
+    /// When the bytes differ, it restores the candidate without overwrite; if another writer already recreated the source
+    /// pathname, the changed candidate remains in the recovery location for manual reconciliation instead of being lost.
+    /// </remarks>
+    private async Task ArchiveUnreleasedEntryAsync(UnreleasedEntrySnapshot snapshot, CancellationToken cancellationToken)
+    {
+        await EnsureUnreleasedEntryDigestUnchangedAsync(snapshot, cancellationToken);
+        if (_beforeArchiveEntryAsync is not null)
+        {
+            await _beforeArchiveEntryAsync(snapshot, cancellationToken);
+        }
+
+        EnsureSafeWriteTarget(snapshot.Path);
+        var recoveryPath = CreateUnreleasedEntryRecoveryPath(snapshot.Path);
+        EnsureSafeRecoveryDirectory(Path.GetDirectoryName(recoveryPath)!);
+        EnsureSafeWriteTarget(recoveryPath);
+
+        try
+        {
+            File.Move(snapshot.Path, recoveryPath, overwrite: false);
+        }
+        catch (IOException ex)
+        {
+            throw ConcurrentUnreleasedEntryUpdate(snapshot, recoveryPath: null, $"The guarded archive handoff could not move the entry: {ex.Message}");
+        }
+
+        if (_afterArchiveEntryHandoffAsync is not null)
+        {
+            await _afterArchiveEntryHandoffAsync(snapshot, recoveryPath, cancellationToken);
+        }
+
+        var movedDigest = await ComputeFileDigestAsync(recoveryPath, cancellationToken);
+        if (string.Equals(snapshot.Sha256, movedDigest, StringComparison.Ordinal))
+        {
+            EnsureSafeWriteTarget(recoveryPath);
+            File.Delete(recoveryPath);
+            return;
+        }
+
+        if (TryRestoreUnreleasedEntry(recoveryPath, snapshot.Path))
+        {
+            throw ConcurrentUnreleasedEntryUpdate(snapshot, recoveryPath: null, "The entry changed after release preparation's final digest check and was restored without deletion.");
+        }
+
+        throw ConcurrentUnreleasedEntryUpdate(
+            snapshot,
+            recoveryPath,
+            "The entry changed after release preparation's final digest check and another writer recreated its source path before the changed candidate could be restored.");
+    }
+
+    private string CreateUnreleasedEntryRecoveryPath(string entryPath)
+    {
+        var recoveryDirectory = _workspace.PathFor("releases/.release-prep-recovery");
+        return Path.Combine(recoveryDirectory, $"{Guid.NewGuid():N}-{Path.GetFileName(entryPath)}.recovery");
+    }
+
+    private void EnsureSafeRecoveryDirectory(string recoveryDirectory)
+    {
+        var releasesDirectory = Path.GetDirectoryName(recoveryDirectory)!;
+        if (!ReleaseDocsArchiveGate.TryValidateNoReparseSegments(_workspace.RepositoryRoot, releasesDirectory, out var releasesDirectoryIssue))
+        {
+            throw UnsafePreparationOutput(recoveryDirectory, releasesDirectoryIssue ?? "The releases directory is outside the repository or includes a reparse point.");
+        }
+
+        Directory.CreateDirectory(recoveryDirectory);
+        if (!ReleaseDocsArchiveGate.TryValidateNoReparseSegments(_workspace.RepositoryRoot, recoveryDirectory, out var recoveryDirectoryIssue))
+        {
+            throw UnsafePreparationOutput(recoveryDirectory, recoveryDirectoryIssue ?? "The entry recovery directory is outside the repository or includes a reparse point.");
+        }
+    }
+
+    private static bool TryRestoreUnreleasedEntry(string recoveryPath, string entryPath)
+    {
+        try
+        {
+            File.Move(recoveryPath, entryPath, overwrite: false);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+    }
+
+    private ReleaseToolException ConcurrentUnreleasedEntryUpdate(
+        UnreleasedEntrySnapshot snapshot,
+        string? recoveryPath,
+        string cause)
+    {
+        var recoveryGuidance = recoveryPath is null
+            ? "The changed entry remains at or was restored to its original path."
+            : $"The changed entry was preserved at '{_workspace.DisplayPath(recoveryPath)}' because its original path was recreated.";
+        return new ReleaseToolException(ReleaseDiagnostic.Error(
+            "release-unreleased-entry-concurrent-update",
+            "An unreleased entry changed while release preparation was running.",
+            $"{cause} {recoveryGuidance}",
+            "Review the concurrent entry update, preserve any recovery file, remove only partial generated release artifacts if any were written, and rerun ./eng/release prepare. Do not delete the entry by hand.",
+            "releases/README.md#append-only-unreleased-entries"));
     }
 
     private async Task EnsurePreparationBaseCommitUnchangedAsync(string? preparationBaseCommit, CancellationToken cancellationToken)

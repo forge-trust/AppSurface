@@ -57,15 +57,21 @@ internal static class ReleaseNoteBuilder
 
             - Add merged public changes here as they land.
 
+            <!-- appsurface:unreleased-entries section="taking-shape" -->
+
             ## Included in the next coordinated version
 
             ### Release and docs surface
 
-            - Add release-facing changes here.
+            - Add release-facing changes here as they land.
+
+            <!-- appsurface:unreleased-entries section="included" -->
 
             ## Migration watch
 
             - Record-breaking or behavior-changing guidance here before it moves into the tagged release note.
+
+            <!-- appsurface:unreleased-entries section="migration-watch" -->
 
             """;
     }

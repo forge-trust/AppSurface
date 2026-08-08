@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using ForgeTrust.AppSurface.Docs.Models;
+using ForgeTrust.AppSurface.ReleaseContracts;
 using Markdig;
 using Markdig.Renderers.Html;
 using Markdig.Syntax;
@@ -17,6 +18,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
 {
     private const string HarvesterType = nameof(MarkdownHarvester);
     private const string UnsafeTrustMigrationHrefMetadataDiagnosticCode = "unsafe-trust-migration-href";
+    private const string ComposedUnreleasedDownloadUnavailableDiagnosticCode = "unreleased-entry-composed-download-unavailable";
     private static readonly string[] SidecarExtensions = [".yml", ".yaml"];
     private const int MinOutlineHeadingLevel = 2;
     private const int MaxOutlineHeadingLevel = 3;
@@ -386,6 +388,15 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                         content = await _readAllTextAsync(file, cancellationToken);
                     }
 
+                    var isComposedUnreleasedNote = relativePath.Equals("releases/unreleased.md", StringComparison.Ordinal);
+                    if (isComposedUnreleasedNote)
+                    {
+                        var entries = await UnreleasedEntryComposer.LoadAsync(
+                            Path.Combine(rootPath, "releases", UnreleasedEntryComposer.EntriesDirectoryName),
+                            cancellationToken);
+                        content = UnreleasedEntryComposer.Compose(content, entries.Entries);
+                    }
+
                     var (markdownBody, frontMatterResult) = MarkdownFrontMatterParser.ExtractWithDiagnostics(content);
                     ReportMetadataDiagnostics(relativePath, frontMatterResult.Diagnostics, diagnostics);
                     var sidecarMetadata = await ReadMetadataSidecarAsync(file, relativePath, cancellationToken, diagnostics);
@@ -416,7 +427,18 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                     if (sourceBytes is not null)
                     {
                         var eligibility = frontMatterResult.DownloadEligibility;
-                        if (eligibility == MarkdownDownloadEligibility.Eligible)
+                        if (eligibility == MarkdownDownloadEligibility.Eligible && isComposedUnreleasedNote)
+                        {
+                            sourceBytes = null;
+                            diagnostics.Add(new DocHarvestDiagnostic(
+                                ComposedUnreleasedDownloadUnavailableDiagnosticCode,
+                                DocHarvestDiagnosticSeverity.Warning,
+                                HarvesterType,
+                                $"Markdown download was unavailable for '{relativePath}' because the rendered note is composed from append-only unreleased entries.",
+                                "Protected Markdown download serves exact checked-in source bytes, while the living release note is assembled at harvest time.",
+                                "Remove download_markdown: true from the living unreleased note; use the rendered page or archive the composed tagged release note instead."));
+                        }
+                        else if (eligibility == MarkdownDownloadEligibility.Eligible)
                         {
                             eligibleSourceBytes = checked(eligibleSourceBytes + sourceBytes.LongLength);
                             if (!sourceCaptureExceededBudget
