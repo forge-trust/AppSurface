@@ -806,27 +806,27 @@ public sealed class PostgreSqlDurableFlowRetentionClient : IDurableFlowRetention
     internal static DurableOperationResult<DurableRetentionManifestCreateResult>? MapManifestCreateProcedureOutcome(
         DurableRetentionManifestCreateRequest request,
         string outcome) => outcome switch
-    {
-        "command_conflict" => Failure<DurableRetentionManifestCreateResult>(
-            DurableProblemCodes.CommandConflict,
-            "The retention manifest command identity was already used with different semantics.",
-            "A retry changed the frozen source facts or request fields.",
-            "Reuse the exact command or create a new command after a new assessment.",
-            request.CommandId.Value),
-        "source_rejected" or "scope_rejected" => Failure<DurableRetentionManifestCreateResult>(
-            DurableProblemCodes.RetentionSourceChanged,
-            "The Flow source changed before its retention manifest could be frozen.",
-            "The database procedure could no longer prove the assessed source was terminal and bounded.",
-            "Assess the exact Flow again and create a manifest from the new result.",
-            request.Assessment.FlowInstanceId.Value),
-        "lifecycle_rejected" => Failure<DurableRetentionManifestCreateResult>(
-            DurableProblemCodes.RetentionLifecycleRejected,
-            "This Flow already has an immutable retention manifest.",
-            "A one-Flow source set is assessed and retained through at most one lifecycle manifest.",
-            "Read the existing manifest; do not create a second archive or purge decision for this Flow.",
-            request.Assessment.FlowInstanceId.Value),
-        _ => null,
-    };
+        {
+            "command_conflict" => Failure<DurableRetentionManifestCreateResult>(
+                DurableProblemCodes.CommandConflict,
+                "The retention manifest command identity was already used with different semantics.",
+                "A retry changed the frozen source facts or request fields.",
+                "Reuse the exact command or create a new command after a new assessment.",
+                request.CommandId.Value),
+            "source_rejected" or "scope_rejected" => Failure<DurableRetentionManifestCreateResult>(
+                DurableProblemCodes.RetentionSourceChanged,
+                "The Flow source changed before its retention manifest could be frozen.",
+                "The database procedure could no longer prove the assessed source was terminal and bounded.",
+                "Assess the exact Flow again and create a manifest from the new result.",
+                request.Assessment.FlowInstanceId.Value),
+            "lifecycle_rejected" => Failure<DurableRetentionManifestCreateResult>(
+                DurableProblemCodes.RetentionLifecycleRejected,
+                "This Flow already has an immutable retention manifest.",
+                "A one-Flow source set is assessed and retained through at most one lifecycle manifest.",
+                "Read the existing manifest; do not create a second archive or purge decision for this Flow.",
+                request.Assessment.FlowInstanceId.Value),
+            _ => null,
+        };
 
     /// <summary>Maps one stable lifecycle procedure response into the public retention mutation result.</summary>
     internal static DurableOperationResult<DurableRetentionMutationResult> MapLifecycleProcedureOutcome(
@@ -834,28 +834,28 @@ public sealed class PostgreSqlDurableFlowRetentionClient : IDurableFlowRetention
         string outcome,
         string? state,
         long? sequence) => outcome switch
-    {
-        "applied" => DurableOperationResult<DurableRetentionMutationResult>.Success(new DurableRetentionMutationResult(
-                request.ManifestId, DurableRetentionMutationOutcome.Applied, ParseState(state!), sequence!.Value)),
-        "duplicate" => DurableOperationResult<DurableRetentionMutationResult>.Success(new DurableRetentionMutationResult(
-                request.ManifestId, DurableRetentionMutationOutcome.Duplicate, ParseState(state!), sequence!.Value)),
-        "already_purged" => DurableOperationResult<DurableRetentionMutationResult>.Success(new DurableRetentionMutationResult(
-                request.ManifestId, DurableRetentionMutationOutcome.AlreadyPurged, DurableRetentionManifestState.Purged, sequence!.Value)),
-        "command_conflict" => Failure<DurableRetentionMutationResult>(
-            DurableProblemCodes.CommandConflict,
-            "The retention lifecycle command identity was already used with different semantics.",
-            "A retry changed the lifecycle request fields.",
-            "Reuse the exact command or make a new authorized lifecycle decision.",
-            request.CommandId.Value),
-        "manifest_not_found" => Failure<DurableRetentionMutationResult>(
-            DurableProblemCodes.RetentionManifestNotFound,
-            "The retention manifest was not found in the authorized durable scope.",
-            "The manifest does not exist or belongs to another scope.",
-            "Verify the trusted scope and manifest identity before retrying.",
-            request.ManifestId.Value),
-        "lifecycle_conflict" => LifecycleConflict(request.ManifestId),
-        _ => LifecycleRejected(request.ManifestId, "The database retention procedure rejected the lifecycle transition."),
-    };
+        {
+            "applied" => DurableOperationResult<DurableRetentionMutationResult>.Success(new DurableRetentionMutationResult(
+                    request.ManifestId, DurableRetentionMutationOutcome.Applied, ParseState(state!), sequence!.Value)),
+            "duplicate" => DurableOperationResult<DurableRetentionMutationResult>.Success(new DurableRetentionMutationResult(
+                    request.ManifestId, DurableRetentionMutationOutcome.Duplicate, ParseState(state!), sequence!.Value)),
+            "already_purged" => DurableOperationResult<DurableRetentionMutationResult>.Success(new DurableRetentionMutationResult(
+                    request.ManifestId, DurableRetentionMutationOutcome.AlreadyPurged, DurableRetentionManifestState.Purged, sequence!.Value)),
+            "command_conflict" => Failure<DurableRetentionMutationResult>(
+                DurableProblemCodes.CommandConflict,
+                "The retention lifecycle command identity was already used with different semantics.",
+                "A retry changed the lifecycle request fields.",
+                "Reuse the exact command or make a new authorized lifecycle decision.",
+                request.CommandId.Value),
+            "manifest_not_found" => Failure<DurableRetentionMutationResult>(
+                DurableProblemCodes.RetentionManifestNotFound,
+                "The retention manifest was not found in the authorized durable scope.",
+                "The manifest does not exist or belongs to another scope.",
+                "Verify the trusted scope and manifest identity before retrying.",
+                request.ManifestId.Value),
+            "lifecycle_conflict" => LifecycleConflict(request.ManifestId),
+            _ => LifecycleRejected(request.ManifestId, "The database retention procedure rejected the lifecycle transition."),
+        };
 
     private static async ValueTask<DurableRetentionManifest?> ReadManifestAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, DurableScopeId scopeId, DurableRetentionManifestId manifestId, CancellationToken cancellationToken)
     {
