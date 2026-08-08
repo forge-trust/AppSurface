@@ -820,7 +820,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
             handle,
             FileAccess.Write,
             bufferSize: 4096,
-            isAsync: true);
+            isAsync: false);
         stream.SetLength(0);
         await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         await writer.WriteAsync(contents.AsMemory(), cancellationToken);

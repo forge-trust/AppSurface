@@ -755,7 +755,7 @@ The target artifacts are a compact local remediation queue derived from the same
 Cobertura evidence as the gate. They are written beside the existing reports in the selected
 gate output directory; the default `coverage run` location is `TestResults/coverage-merged`.
 The directory is already ignored by the repository's existing
-[`TestResults` rule](../../.gitignore), so target files are intentionally not added as separate
+[`TestResults` rule](https://github.com/forge-trust/AppSurface/blob/main/.gitignore), so target files are intentionally not added as separate
 `.gitignore` entries and should remain private local artifacts.
 
 Target extraction is threshold-independent: supplying exactly one of `--diff-base`, `--diff-file`,
