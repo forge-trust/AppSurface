@@ -850,7 +850,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         string contents,
         CancellationToken cancellationToken)
     {
-        await using (var stream = new FileStream(
+        using (var stream = new FileStream(
             temporaryPath,
             new FileStreamOptions
             {
@@ -859,9 +859,14 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
                 Share = FileShare.None,
                 Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
             }))
-        await using (var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+        using (var writer = new StreamWriter(
+            stream,
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            bufferSize: 1024,
+            leaveOpen: true))
         {
             await writer.WriteAsync(contents.AsMemory(), cancellationToken);
+            await writer.FlushAsync(cancellationToken);
         }
     }
 
