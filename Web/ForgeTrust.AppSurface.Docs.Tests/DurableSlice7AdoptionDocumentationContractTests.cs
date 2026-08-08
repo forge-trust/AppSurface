@@ -86,6 +86,38 @@ public sealed class DurableSlice7AdoptionDocumentationContractTests
     }
 
     [Fact]
+    public async Task PrerequisiteScript_ShouldExecuteWhenItsPathContainsSpaces()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var sourceScript = TestPathUtils.PathUnder(repoRoot, "examples/durable-postgresql/check-prerequisites.sh");
+        var directory = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface durable prerequisites {Guid.NewGuid():N}");
+        var script = TestPathUtils.PathUnder(directory, "check-prerequisites.sh");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.Copy(sourceScript, script);
+
+            var result = await RunPrerequisiteScriptAsync(
+                script,
+                "0",
+                "#!/bin/bash\nprintf '10.0.100\\n'\n",
+                "#!/bin/bash\n[[ \"${1:-}\" == 'info' ]]\n");
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("local TCP port 0 must be an integer from 1 through 65535", result.StandardError, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task PrerequisiteScript_ShouldReportMissingAndUnavailableTools()
     {
         if (OperatingSystem.IsWindows())
@@ -178,7 +210,7 @@ public sealed class DurableSlice7AdoptionDocumentationContractTests
                 WriteExecutable(TestPathUtils.PathUnder(commandDirectory, "docker"), dockerScript);
             }
 
-            using var process = Process.Start(new ProcessStartInfo("/bin/bash", script)
+            var startInfo = new ProcessStartInfo("/bin/bash")
             {
                 RedirectStandardError = true,
                 RedirectStandardOutput = true,
@@ -188,7 +220,9 @@ public sealed class DurableSlice7AdoptionDocumentationContractTests
                     ["PATH"] = commandDirectory,
                     ["APPSURFACE_DURABLE_PREREQUISITE_PORT"] = port,
                 },
-            })!;
+            };
+            startInfo.ArgumentList.Add(script);
+            using var process = Process.Start(startInfo)!;
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             try
             {
