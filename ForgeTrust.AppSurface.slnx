@@ -65,6 +65,8 @@
     <Project Path="Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj" />
   </Folder>
   <Folder Name="/Examples/">
+    <Project Path="examples/durable-postgresql/DurablePostgreSqlLocalExample.csproj" />
+    <Project Path="examples/durable-postgresql.tests/DurablePostgreSqlLocalExample.Tests.csproj" />
     <Project Path="examples/auth-aspire-keycloak-apphost/AuthAspireKeycloakAppHost.csproj" />
     <Project Path="examples/auth-aspire-keycloak-verifier/AuthAspireKeycloakVerifier.csproj" />
     <Project Path="examples/auth-aspire-keycloak-web/AuthAspireKeycloakWeb.csproj" />

@@ -1,0 +1,39 @@
+{
+  "SchemaVersion": 1,
+  "RunId": "20260807T044734Z-72095",
+  "Scenario": "caller-owned-transaction",
+  "Mode": "warm",
+  "DatabaseSource": "postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302",
+  "StartedAtUtc": "2026-08-07T04:47:45.364508+00:00",
+  "ElapsedMilliseconds": 2808,
+  "FinalState": "accepted",
+  "Events": [
+    {
+      "Sequence": 1,
+      "Category": "application",
+      "Operation": "schema.apply-and-activate",
+      "Outcome": "compatible",
+      "TransactionBoundary": "migration-owner",
+      "ElapsedMilliseconds": 2770,
+      "SourceElapsedMilliseconds": null
+    },
+    {
+      "Sequence": 2,
+      "Category": "transaction",
+      "Operation": "domain-mutation-and-work-acceptance",
+      "Outcome": "rolled-back",
+      "TransactionBoundary": "caller-owned",
+      "ElapsedMilliseconds": 2799,
+      "SourceElapsedMilliseconds": null
+    },
+    {
+      "Sequence": 3,
+      "Category": "transaction",
+      "Operation": "domain-mutation-and-work-acceptance",
+      "Outcome": "committed",
+      "TransactionBoundary": "caller-owned",
+      "ElapsedMilliseconds": 2803,
+      "SourceElapsedMilliseconds": null
+    }
+  ]
+}
