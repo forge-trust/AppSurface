@@ -245,6 +245,14 @@ internal sealed partial class PostgreSqlDurableFlowStore
                     existing.ObservedRevision));
             }
 
+            // Work completion holds the child Work row before projecting its parent Flow and wait. Keep repair in
+            // that order so a retrying child cannot deadlock with its evidence-backed repair.
+            var work = await LockRepairWorkAsync(
+                connection,
+                transaction,
+                request.ScopeId,
+                request.Evidence.ChildWorkId,
+                cancellationToken).ConfigureAwait(false);
             var flow = await LockRepairFlowAsync(
                 connection, transaction, request.ScopeId, request.InstanceId, cancellationToken).ConfigureAwait(false);
             if (flow is null)
@@ -290,14 +298,6 @@ internal sealed partial class PostgreSqlDurableFlowStore
                 request.InstanceId,
                 request.Evidence.ChildWorkId,
                 cancellationToken).ConfigureAwait(false);
-            var work = wait is null
-                ? null
-                : await LockRepairWorkAsync(
-                    connection,
-                    transaction,
-                    request.ScopeId,
-                    request.Evidence.ChildWorkId,
-                    cancellationToken).ConfigureAwait(false);
             var descriptorProblem = ValidateRepairShape(request, flow, wait, work);
             if (descriptorProblem is not null)
             {

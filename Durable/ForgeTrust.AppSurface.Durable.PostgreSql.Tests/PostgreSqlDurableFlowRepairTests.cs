@@ -290,6 +290,40 @@ public sealed class PostgreSqlDurableFlowRepairTests
             evidence,
             evidence.ChildWorkHistoryEventId + 1,
             "invalid-retained-history");
+        if (!effectApplied)
+        {
+            await using var completionTransactionConnection = await database.DataSource.OpenConnectionAsync();
+            await using var completionTransaction = await completionTransactionConnection.BeginTransactionAsync();
+            await using (var workLock = new Npgsql.NpgsqlCommand(
+                "SELECT 1 FROM appsurface_durable.work WHERE scope_id = @scope_id AND work_id = @work_id FOR UPDATE;",
+                completionTransactionConnection,
+                completionTransaction))
+            {
+                workLock.Parameters.AddWithValue("scope_id", scope.Value);
+                workLock.Parameters.AddWithValue("work_id", childWorkId.Value);
+                Assert.Equal(1, (int)(await workLock.ExecuteScalarAsync())!);
+            }
+
+            var blockedRepair = repairs.RepairAsync(refusedRequest).AsTask();
+            using var waitForRepair = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await WaitForRepairToBlockOnWorkAsync(database.DataSource, waitForRepair.Token);
+            await using (var flowLock = new Npgsql.NpgsqlCommand(
+                "SELECT 1 FROM appsurface_durable.flow_instance WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id FOR UPDATE;",
+                completionTransactionConnection,
+                completionTransaction))
+            {
+                flowLock.Parameters.AddWithValue("scope_id", scope.Value);
+                flowLock.Parameters.AddWithValue("flow_instance_id", instance.Value);
+                flowLock.CommandTimeout = 5;
+                Assert.Equal(1, (int)(await flowLock.ExecuteScalarAsync(waitForRepair.Token))!);
+            }
+
+            await completionTransaction.CommitAsync(waitForRepair.Token);
+            var blockedRepairResult = await blockedRepair.WaitAsync(waitForRepair.Token);
+            Assert.True(blockedRepairResult.IsSuccess);
+            Assert.Equal(DurableFlowRepairOutcome.Refused, blockedRepairResult.Value!.Outcome);
+        }
+
         var refused = await repairs.RepairAsync(refusedRequest);
         var refusedReplay = await repairs.RepairAsync(refusedRequest);
         Assert.True(refused.IsSuccess);
@@ -527,6 +561,34 @@ public sealed class PostgreSqlDurableFlowRepairTests
             "The persisted Flow repair receipt digest does not match its retained canonical evidence.",
             receiptTamper.Message);
         Assert.DoesNotContain("[3]", receiptTamper.Message, StringComparison.Ordinal);
+    }
+
+    private static async Task WaitForRepairToBlockOnWorkAsync(
+        Npgsql.NpgsqlDataSource dataSource,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT EXISTS
+            (
+                SELECT 1
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                  AND wait_event_type = 'Lock'
+                  AND query LIKE '%FROM appsurface_durable.work%'
+                  AND query LIKE '%FOR UPDATE%'
+            );
+            """;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await using var command = dataSource.CreateCommand(sql);
+            if (await command.ExecuteScalarAsync(cancellationToken) is true)
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(25), cancellationToken);
+        }
     }
 
     private static async ValueTask<string> ReadWorkStateAsync(
