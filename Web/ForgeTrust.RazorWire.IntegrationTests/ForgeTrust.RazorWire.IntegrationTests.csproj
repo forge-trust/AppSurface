@@ -35,6 +35,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="VisualBaselines/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../../ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj" />
     <ProjectReference Include="../../ForgeTrust.AppSurface.Theming/ForgeTrust.AppSurface.Theming.csproj" />
     <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />

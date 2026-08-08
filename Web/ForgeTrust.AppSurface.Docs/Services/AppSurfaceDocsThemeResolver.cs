@@ -727,7 +727,7 @@ internal static class AppSurfaceDocsThemePolicy
         AppendForcedColor(builder, "--docs-color-state-outline-rail-hover-end", "Canvas");
         AppendForcedColor(builder, "--docs-focus-ring-inset", "0 0 0 1px Highlight inset");
         AppendForcedColor(builder, "--docs-focus-outline", "2px solid Highlight");
-        builder.Append("  }\n}");
+        builder.Append("  }\n  html[data-as-theme] .docs-gradient-title{background:none;color:CanvasText;-webkit-text-fill-color:CanvasText;}\n}");
         return builder.ToString();
     }
 

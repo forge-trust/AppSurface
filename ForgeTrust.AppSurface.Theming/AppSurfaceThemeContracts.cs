@@ -163,6 +163,22 @@ public sealed record AppSurfaceThemePair
             new AppSurfaceThemeRoles(
                 "#0f172a", "#172554", "#1e293b", "#f8fafc", "#cbd5e1", "#94a3b8",
                 "#60a5fa", "#93c5fd", "#93c5fd", "#c4b5fd", "#fca5a5", "#facc15"));
+
+    /// <summary>Creates the built-in Graphite semantic light/dark pair.</summary>
+    /// <returns>A new immutable pair instance named <c>graphite</c>.</returns>
+    /// <remarks>
+    /// Graphite is a shared semantic pair for hosts that register AppSurface theming. It is distinct from the
+    /// Docs-local fixed-dark <c>GraphiteDark</c> compatibility preset, which does not register a shared pair.
+    /// </remarks>
+    public static AppSurfaceThemePair Graphite() =>
+        new(
+            new AppSurfaceThemeId("graphite"),
+            new AppSurfaceThemeRoles(
+                "#f7f7f8", "#ffffff", "#eef0f2", "#17212b", "#52606d", "#6b7280",
+                "#0369a1", "#075985", "#075985", "#6b21a8", "#b42318", "#0369a1"),
+            new AppSurfaceThemeRoles(
+                "#080a0d", "#101216", "#151820", "#f8fafc", "#c9ced8", "#647085",
+                "#38bdf8", "#818cf8", "#93c5fd", "#c4b5fd", "#fda4af", "#facc15"));
 }
 
 /// <summary>Represents the sealed default pair together with its host-selected mode.</summary>
