@@ -27,6 +27,32 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
     }
 
+    [Fact]
+    public void ReleasePreparationChangePolicyRejectsPackageReadmeChanges()
+    {
+        var result = ReleasePreparationChangePolicy.Validate(
+            "1.2.3",
+            [
+                new("A", "releases/v1.2.3.md"),
+                new("A", "releases/v1.2.3.md.yml"),
+                new("A", "releases/v1.2.3.release.json"),
+                new("A", "releases/v1.2.3.evidence.json"),
+                new("M", "releases/current.md"),
+                new("M", "CHANGELOG.md"),
+                new("M", "releases/unreleased.md"),
+                new("M", "releases/unreleased.md.yml"),
+                new("M", "Web/ForgeTrust.AppSurface.Web/README.md")
+            ]);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Errors,
+            error => string.Equals(
+                error,
+                "Unexpected release-preparation path: Web/ForgeTrust.AppSurface.Web/README.md.",
+                StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData("", "A requested release version is required.")]
     [InlineData("1.2.3", "Required release-preparation path is missing: releases/v1.2.3.md.yml.", "releases/v1.2.3.md")]

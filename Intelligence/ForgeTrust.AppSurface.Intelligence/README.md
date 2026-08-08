@@ -288,6 +288,8 @@ OpenTelemetry remains the operational telemetry path for logs, metrics, and trac
 
 Use AppSurface.Intelligence when you want reusable semantic contracts, lifecycle metadata, privacy-shape validation, safe diagnostics, and freedom to forward to any product analytics backend. Use a local validator when a host app is iterating before the package surface is available or before a contract pack is ready to publish. Use PostHog directly only when you intentionally accept a vendor-specific event shape and a separate privacy-review process.
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-`ForgeTrust.AppSurface.Intelligence` follows the AppSurface public-preview compatibility policy. The current package family release guidance is tracked in the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md), while the event contracts in this package remain `Experimental` until dogfood usage promotes them.
+This package has an explicitly experimental or publication-held contract. Do not treat it as a normal prerelease install; use the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for the current publication decision, proof requirements, and migration guidance.
+<!-- appsurface-release-guidance: end -->

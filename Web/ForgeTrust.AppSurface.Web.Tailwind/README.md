@@ -6,10 +6,11 @@ Tailwind CSS integration for AppSurface web applications with zero Node.js depen
 
 This package wires the Tailwind standalone CLI into the AppSurface web build pipeline so your app can compile generated CSS during builds and run Tailwind in watch mode during development.
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
-
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for current release risk, migration guidance, and readiness.
+<!-- appsurface-release-guidance: end -->
 ## Features
 
 - **No Node.js required**: Uses the official standalone Tailwind CLI binaries.

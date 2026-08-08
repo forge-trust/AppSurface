@@ -37,6 +37,7 @@ Good docs pull requests usually include:
 - Decision guidance that explains when to use the API and when another approach fits better.
 - Pitfalls that call out ordering requirements, generated output, hosting assumptions, or common mistakes.
 - Verification notes for commands, links, snippets, or examples that were checked.
+- For shared package-policy text, follow the [PackageIndex release-guidance maintainer guide](./tools/ForgeTrust.AppSurface.PackageIndex/README.md#release-guidance) instead of hand-copying `## Release Guidance` prose across package READMEs.
 
 ## Test fixture path policy
 
@@ -75,6 +76,7 @@ Literal expected paths and tests intentionally exercising `Path.Join` or `Path.C
 ## Maintainer workflow
 
 - Use the [release authoring checklist](./releases/release-authoring-checklist.md) when preparing a release.
+- Use the [PackageIndex maintainer guide](./tools/ForgeTrust.AppSurface.PackageIndex/README.md) when package manifest, generated chooser, readiness, or README release-guidance policy changes.
 - Use the [tagged release template](./releases/templates/tagged-release-template.md) when cutting the first versioned release note.
 - Keep private maintainer-only recovery notes outside harvested public docs. In this repository, `.github/` is the safe home for that material.
 

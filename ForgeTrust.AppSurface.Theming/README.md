@@ -4,10 +4,11 @@
 
 For an ASP.NET Core application, begin with the [Web theme-pairs quickstart](../Web/ForgeTrust.AppSurface.Web/README.md#theme-pairs-quickstart). `ForgeTrust.AppSurface.Web` references this package and supplies the Razor integration. Install this package directly only when authoring another package-owned adapter.
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../packages/README.md) and [release hub](../releases/README.md) for current release risk, migration guidance, and readiness.
-
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for current release risk, migration guidance, and readiness.
+<!-- appsurface-release-guidance: end -->
 ## Contract
 
 A pair has one canonical lowercase identifier (letter-led, 63 characters or fewer, with only lowercase letters, digits, and single interior hyphens) and a complete `Light` and `Dark` set of these roles:
