@@ -197,6 +197,44 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
             ALTER TABLE appsurface_durable.fingerprint_default_test
                 ALTER COLUMN value SET DEFAULT 2;
             """);
+        await AssertCatalogMutationIsDetectedAsync(
+            administratorDataSource,
+            schemaStatus,
+            """
+            CREATE TABLE appsurface_durable.fingerprint_index_test (value integer NOT NULL);
+            CREATE INDEX fingerprint_index_test_value ON appsurface_durable.fingerprint_index_test (value);
+            """,
+            """
+            DROP INDEX appsurface_durable.fingerprint_index_test_value;
+            CREATE INDEX fingerprint_index_test_value
+                ON appsurface_durable.fingerprint_index_test (value)
+                WHERE value >= 0;
+            """);
+        await AssertCatalogMutationIsDetectedAsync(
+            administratorDataSource,
+            schemaStatus,
+            """
+            CREATE VIEW appsurface_durable.fingerprint_view_test AS
+                SELECT 1 AS value;
+            """,
+            """
+            CREATE OR REPLACE VIEW appsurface_durable.fingerprint_view_test AS
+                SELECT 2 AS value;
+            """);
+        await AssertCatalogMutationIsDetectedAsync(
+            administratorDataSource,
+            schemaStatus,
+            """
+            CREATE MATERIALIZED VIEW appsurface_durable.fingerprint_materialized_view_test AS
+                SELECT 1 AS value
+                WITH NO DATA;
+            """,
+            """
+            DROP MATERIALIZED VIEW appsurface_durable.fingerprint_materialized_view_test;
+            CREATE MATERIALIZED VIEW appsurface_durable.fingerprint_materialized_view_test AS
+                SELECT 2 AS value
+                WITH NO DATA;
+            """);
     }
 
     private static async Task CreateTutorialRolesAsync(NpgsqlDataSource administratorDataSource)

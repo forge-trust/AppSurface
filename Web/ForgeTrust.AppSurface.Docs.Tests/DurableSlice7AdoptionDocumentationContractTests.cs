@@ -118,6 +118,36 @@ public sealed class DurableSlice7AdoptionDocumentationContractTests
     }
 
     [Fact]
+    public async Task PrerequisiteScript_ShouldReportTimeoutAfterStoppingTheScript()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var directory = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-durable-timeout-{Guid.NewGuid():N}");
+        var script = TestPathUtils.PathUnder(directory, "never-completes.sh");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            WriteExecutable(script, "#!/bin/bash\nwhile true; do :; done\n");
+
+            var error = await Assert.ThrowsAsync<TimeoutException>(() => RunPrerequisiteScriptAsync(
+                script,
+                "0",
+                dotnetScript: null,
+                dockerScript: null,
+                timeoutDuration: TimeSpan.FromMilliseconds(100)));
+
+            Assert.Contains("did not complete within", error.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task PrerequisiteScript_ShouldReportMissingAndUnavailableTools()
     {
         if (OperatingSystem.IsWindows())
@@ -193,7 +223,8 @@ public sealed class DurableSlice7AdoptionDocumentationContractTests
         string script,
         string port,
         string? dotnetScript,
-        string? dockerScript)
+        string? dockerScript,
+        TimeSpan? timeoutDuration = null)
     {
         var directory = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-durable-prerequisites-{Guid.NewGuid():N}");
         var commandDirectory = TestPathUtils.PathUnder(directory, "bin");
@@ -223,14 +254,25 @@ public sealed class DurableSlice7AdoptionDocumentationContractTests
             };
             startInfo.ArgumentList.Add(script);
             using var process = Process.Start(startInfo)!;
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var timeout = new CancellationTokenSource(timeoutDuration ?? TimeSpan.FromSeconds(10));
             try
             {
                 await process.WaitForExitAsync(timeout.Token);
             }
             catch (OperationCanceledException)
             {
-                process.Kill(entireProcessTree: true);
+                if (!process.HasExited)
+                {
+                    try
+                    {
+                        process.Kill(entireProcessTree: true);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // The script can exit after HasExited observes it running; preserve the timeout result either way.
+                    }
+                }
+
                 await process.WaitForExitAsync();
                 var timedOutStandardOutput = await process.StandardOutput.ReadToEndAsync();
                 var timedOutStandardError = await process.StandardError.ReadToEndAsync();

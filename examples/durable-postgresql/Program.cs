@@ -311,7 +311,8 @@ internal static class DurablePostgreSqlLocalExample
     /// <summary>Reads a stable fingerprint of every schema definition the worker host must leave unchanged.</summary>
     /// <remarks>
     /// The fingerprint uses package-qualified catalog definitions and ordered textual identifiers instead of object IDs so
-    /// the same catalog state has the same representation before and after a worker-host pass.
+    /// the same catalog state has the same representation before and after a worker-host pass. It includes index and view
+    /// definitions because their semantics can change without changing their catalog object identities.
     /// </remarks>
     internal static async Task<string> ReadDurableCatalogFingerprintAsync(NpgsqlDataSource dataSource, CancellationToken cancellationToken)
     {
@@ -322,6 +323,34 @@ internal static class DurablePostgreSqlLocalExample
             FROM pg_catalog.pg_class AS relation
             JOIN pg_catalog.pg_namespace AS namespace_value ON namespace_value.oid = relation.relnamespace
             WHERE namespace_value.nspname = 'appsurface_durable'
+
+            UNION ALL
+
+            SELECT format(
+                'index|%s|%s|%s|%s|%s',
+                table_relation.relname,
+                index_relation.relname,
+                index_value.indisunique,
+                index_value.indisprimary,
+                coalesce(pg_catalog.pg_get_indexdef(index_value.indexrelid), '<none>'))
+            FROM pg_catalog.pg_index AS index_value
+            JOIN pg_catalog.pg_class AS index_relation ON index_relation.oid = index_value.indexrelid
+            JOIN pg_catalog.pg_class AS table_relation ON table_relation.oid = index_value.indrelid
+            JOIN pg_catalog.pg_namespace AS namespace_value ON namespace_value.oid = table_relation.relnamespace
+            WHERE namespace_value.nspname = 'appsurface_durable'
+
+            UNION ALL
+
+            SELECT format(
+                'view|%s|%s|%s|%s',
+                relation.relkind,
+                relation.relname,
+                relation.relowner,
+                coalesce(pg_catalog.pg_get_viewdef(relation.oid, true), '<none>'))
+            FROM pg_catalog.pg_class AS relation
+            JOIN pg_catalog.pg_namespace AS namespace_value ON namespace_value.oid = relation.relnamespace
+            WHERE namespace_value.nspname = 'appsurface_durable'
+              AND relation.relkind IN ('v', 'm')
 
             UNION ALL
 
