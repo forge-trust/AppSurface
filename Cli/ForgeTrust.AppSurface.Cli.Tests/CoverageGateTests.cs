@@ -3671,7 +3671,10 @@ public sealed class CoverageGateTests
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             async () => await RunGitAsync(temp.Path, "commit", "-m", "empty"));
 
-        Assert.Contains("git -c commit.gpgsign=false commit -m empty failed:", exception.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            "git -c commit.gpgsign=false -c maintenance.auto=false -c gc.auto=0 commit -m empty failed:",
+            exception.Message,
+            StringComparison.Ordinal);
     }
 
     private static async Task RunGitAsync(string workingDirectory, params string[] arguments)
@@ -3688,6 +3691,13 @@ public sealed class CoverageGateTests
         {
             executedArguments.Add("-c");
             executedArguments.Add("commit.gpgsign=false");
+            // Git for Windows can run automatic maintenance after a commit and retain handles
+            // under .git/objects after the commit process exits. Test repositories are temporary,
+            // so disable maintenance and automatic GC to keep their cleanup deterministic.
+            executedArguments.Add("-c");
+            executedArguments.Add("maintenance.auto=false");
+            executedArguments.Add("-c");
+            executedArguments.Add("gc.auto=0");
         }
 
         foreach (var argument in arguments)
