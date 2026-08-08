@@ -8,14 +8,18 @@ drive each operation deterministically.
 ## Authoritative records
 
 PostgreSQL is the sole durable truth for Flow state. The `appsurface_durable` schema owns flow instances, idempotency keys,
-commands, event delivery tracking, execution history, active waits, timers, and RLS security policies alongside the Work/shared protocol tables.
+commands, event delivery tracking, execution history, active waits, timers, repair ledgers, and RLS security policies alongside the Work/shared protocol tables.
 
-- **`appsurface_durable.flow_instance`**: Primary state table keyed by `(scope_id, flow_instance_id)`. Tracks current node, execution state, context/resume payload envelopes, active epoch, scope generation, lease ownership, and suspension details.
+- **`appsurface_durable.flow_instance`**: Primary state table keyed by `(scope_id, flow_instance_id)`. Tracks current node, execution state, context/resume payload envelopes, active epoch, scope generation, lease ownership, and suspension details, including the V1 child-effect descriptor schema and digest when present.
 - **`appsurface_durable.flow_command`**: Command log keyed by `(scope_id, command_id)`. Deduplicates incoming `start`, `event`, `cancel`, and `release` commands. Enforces start identity through `ix_flow_command_start_idempotency` and single-use event delivery through `ix_flow_command_event`.
 - **`appsurface_durable.flow_history`**: Append-only sequence of execution events keyed by auto-incrementing `event_id`. Records state transitions, node entries/exits, inputs, outputs, context snapshots, and diagnostic details in `jsonb`.
-- **`appsurface_durable.flow_wait`**: Retained wait lineage keyed by `wait_id`. Supports `event` and `activity` waits, permits at most one active/suspended wait per Flow, and links child activities through `(scope_id, child_work_id)`.
+- **`appsurface_durable.flow_wait`**: Retained wait lineage keyed by `wait_id`. Supports `event` and `activity` waits, permits at most one active/suspended wait per Flow, links child activities through `(scope_id, child_work_id)`, and retains the typed result identity expected for a V1 repairable activity.
 - **`appsurface_durable.flow_timer`**: Scheduled timers keyed by `timer_id`, tied to an exact wait and registered Flow revision.
 - **`appsurface_durable.flow_dispatch`**: The payload-free global discovery surface for Flow and timer candidates. The dispatcher can select it but cannot mutate or read payload tables.
+- **`appsurface_durable.flow_repair_command`**: Immutable scoped command and receipt ledger keyed by `(scope_id, command_id)`. Binds the request fingerprint, descriptor digest, action-specific Work evidence, terminal outcome, and receipt digest.
+- **`appsurface_durable.flow_repair_collision`**: Immutable scoped record of divergent request fingerprints that reused a repair command id.
+
+V1 no-effect repair also depends on `appsurface_durable.work_operator_command.resolution_kind`, which records whether a completed manual resolution is `applied` or `proven_not_applied`.
 
 ## Flow state machine
 
@@ -61,8 +65,8 @@ Schema management and epoch rotation take the same exclusive session advisory lo
 | **Complete Activity Wait** | Scoped transaction; scope -> child Work -> parent Flow -> flow_wait -> flow_dispatch -> Work dispatch -> Work history -> Flow history | Terminal Work fact, matching `child_work_id` | Resolves the wait, records the typed activity result or suspension descriptor, transitions the parent, and appends both histories atomically. |
 | **Cancel Flow** | Scoped transaction; scope -> flow_instance -> flow_command -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | Target, active instance, authorized actor/reason | If `ready`/`waiting`, cancels active waits/timers and transitions to `canceled`. If activity in-flight, transitions to `cancel_pending`. |
 | **Suspend Flow** | Scoped transaction; scope -> flow_instance -> flow_history | Invalid transition, non-restorable child failure, code mismatch (`ASDUR200`/`ASDUR201`/`ASDUR211`) | Sets state to `suspended`, records `suspended_from_state` and the suspension reason in `suspension_descriptor` and Flow history, keeps terminal fields null, and appends audit history. |
-| **Release Suspended Flow** | Scoped transaction; scope -> flow_instance -> flow_command -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | Operator command, expected revision, valid epoch, authorized resolution | Clears suspension, restores original or target state, appends command and history record. |
-| **Repair ASDUR211 child effect** | Scoped transaction; scope -> child Work -> Flow -> repair command -> activity wait -> Flow dispatch -> Work operator command/history -> Flow history | Closed V1 descriptor, expected revisions, retained result or `proven_not_applied` proof | Appends an immutable repair command/receipt, changes only the named Flow/wait/dispatch lineage, and never invokes the child executor. |
+| **Release Suspended Flow** | Scoped transaction; scope -> flow_instance -> flow_command -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | Operator command, expected revision, valid epoch, authorized resolution | Clears suspension, restores original or target state, appends command and history record. It refuses V1 `ASDUR211` child-effect descriptors, which require the repair operation. |
+| **Repair ASDUR211 child effect** | Scoped transaction; scope -> Flow -> activity wait -> child Work -> repair command -> Flow dispatch -> Work operator command/history -> Flow history | Closed V1 descriptor, expected revisions, retained result or `proven_not_applied` proof | Appends an immutable repair command/receipt, changes only the named Flow/wait/dispatch lineage, and never invokes the child executor. |
 | **Disable Scope** | Scoped transaction; canonical lock order | Active scope generation, actor/reason | Permanent tombstone on scope; atomically suspends non-terminal Flow instances and Work items in scope. |
 
 ## 11 Crash recovery boundaries
@@ -78,7 +82,7 @@ Flow persistence guarantees deterministic recovery across 11 explicit process cr
 7. **Event Delivery Pre-Commit**: Crash during external event delivery transaction. Transaction rolls back; `event_id` is unconsumed and `flow_wait` remains `active`. Caller may retry event delivery.
 8. **Event Delivered (`event_won`), Flow Evaluation Pending**: Crash after event delivery commits (`flow_command` accepted, wait state `event_won`, timer superseded, Flow state `ready`). Discovery finds Flow in `ready` state with delivered event payload and evaluates next step.
 9. **Timer Fired (`timer_won`), Flow Evaluation Pending**: Crash after timer fire transaction commits (`flow_timer` state `fired`, wait state `timer_won`, Flow state `ready`). Discovery finds Flow in `ready` state with timer-expiry signal and evaluates next step.
-10. **Flow Suspended**: Crash after safety suspension commits (`state = 'suspended'`). Instance remains durable in `suspended` state with preserved `suspended_from_state`. Requires explicit operator release or reconciliation command.
+10. **Flow Suspended**: Crash after safety suspension commits (`state = 'suspended'`). Instance remains durable in `suspended` state with preserved `suspended_from_state`. A V1 `ASDUR211` child-effect descriptor requires evidence-backed repair; other suspension states require an explicit release or reconciliation command.
 11. **Flow Terminal State Committed (`completed` / `faulted` / `canceled`)**: Crash after terminal state commit. `flow_instance` is permanently terminal; subsequent commands or events are safely rejected with `already_terminal` or `ASDUR110`.
 
 ## Idempotency and race resolution matrix

@@ -96,8 +96,9 @@ services.AddAppSurfaceDurablePostgreSql(
     .AddWorkerHost();
 ```
 
-`AddAppSurfaceDurablePostgreSql` resolves Work, Flow, Schedule, schema, pump, health, and drain services but installs
-no `IHostedService`, opens no connection, and applies no migration. `AddWorkerHost()` is the standard continuous
+`AddAppSurfaceDurablePostgreSql` resolves Work, Flow, Schedule, schema, pump, health, drain, and
+`IFlowRepairOperatorClient` services but installs no `IHostedService`, opens no connection, and applies no migration.
+`AddWorkerHost()` is the standard continuous
 activation path. It validates schema compatibility, the active epoch, and that `TimeBudgetPerPass + ShutdownReserve`
 fits inside `HostOptions.ShutdownTimeout`; an invalid store or host configuration fails closed.
 
@@ -118,12 +119,10 @@ and `Incompatible` are intentionally not ready. Snapshots contain aggregate coun
 scope, aggregate, connection, or trace values. At shutdown, local admission closes synchronously before the host
 persists drain; already-permitted Work follows its ordinary cancellation/recovery path rather than inventing a result.
 
-For a cold path, apply `0005_runtime_heartbeat.sql` with the migration owner, rerun
+For a cold path, apply every pending forward-only migration through `0007_flow_repair.sql` with the migration owner, rerun
 [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql),
 verify the active epoch and StoreId, deploy with `AddWorkerHost()` disabled, then enable it. Roll back application code
-by disabling the worker host and deploying a previous compatible binary; never destructively roll back a migration. If
-Issue #685 supplies an intervening migration first, renumber this migration to the next contiguous number while preserving
-its content and rerun the role recipe.
+by disabling the worker host and deploying a previous compatible binary; never destructively roll back a migration.
 
 ### Role recipe contract
 
