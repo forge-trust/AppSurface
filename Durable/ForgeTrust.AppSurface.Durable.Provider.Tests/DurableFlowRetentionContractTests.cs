@@ -135,6 +135,7 @@ public sealed class DurableFlowRetentionContractTests
             "durable-flow-archive-v1",
             "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08");
         var package = new DurableArchivePackageV1(manifest, bytes, packageDigest, 2);
+        bytes[0] = (byte)'X';
         var receipt = new DurableArchiveReceiptV1("archive-receipt", packageDigest, Closure, 2);
         var record = new DurableRetentionRecordArchiveReceiptRequest(
             Scope, manifest.ManifestId, Command, "operator", "archive", 1, receipt);
@@ -147,7 +148,7 @@ public sealed class DurableFlowRetentionContractTests
         var purge = new DurableRetentionPurgeRequest(
             Scope, manifest.ManifestId, new DurableCommandId("retention-purge"), "operator", "purge", 3);
 
-        Assert.Equal(bytes, package.Bytes.ToArray());
+        Assert.Equal("test"u8.ToArray(), package.Bytes.ToArray());
         Assert.Equal(packageDigest, package.PackageDigest);
         Assert.Equal(DurableCommandFingerprintMatch.Exact, record.Fingerprint.Compare(replay.Fingerprint));
         Assert.Equal("appsurface.durable.flow.retention.hold.v1", hold.Fingerprint.SchemaId);

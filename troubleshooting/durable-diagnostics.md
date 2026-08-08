@@ -42,7 +42,7 @@ context.
 | `ASDUR214` | Retention manifest not found | Manifest ID does not exist in the authorized scope | Verify the authorized scope and manifest ID, or assess and create a new manifest |
 | `ASDUR215` | Retention source changed | Flow source items or closure digest changed after assessment/manifest creation | Assess and create a new manifest; do not archive or purge stale source state |
 | `ASDUR216` | Retention lifecycle conflict | Expected lifecycle sequence is stale or another operation committed first | Read current manifest state and retry using its active lifecycle sequence |
-| `ASDUR217` | Retention lifecycle rejected | Manifest is not in the required state, or a legal hold / active child prevents transition | Read manifest state and follow assess -> manifest -> receipt -> verify -> hold/purge order |
+| `ASDUR217` | Retention lifecycle rejected | Manifest is not in the required state, or a legal hold / active child prevents transition | Read manifest state and follow the lifecycle order. Release a legal hold only after an explicitly authorized legal or compliance decision; otherwise keep the hold and do not purge. |
 
 ### ASDUR202
 
@@ -98,7 +98,7 @@ The expected lifecycle sequence supplied with the retention command does not mat
 
 ### ASDUR217
 
-The retention operation cannot proceed because the manifest is in an invalid state for the operation (such as attempting purge before verification or recording receipt after purge), or because an active legal hold or child Work blocks execution. Verify lifecycle ordering and release any active legal hold before retrying.
+The retention operation cannot proceed because the manifest is in an invalid state for the operation (such as attempting purge before verification or recording receipt after purge), or because an active legal hold or child Work blocks execution. Verify lifecycle ordering and the blocking condition. Release a legal hold only after an explicitly authorized legal or compliance decision; otherwise keep the hold and do not purge.
 
 Schedule contracts reserve `ASDUR301`-`ASDUR307` for invalid definition, missing schedule, revision conflict, command
 conflict, access denial, evaluation incompatibility, and recovery-state mismatch. A provider must map these codes to its
@@ -147,7 +147,7 @@ before any bounded retry.
 | `ASDUR214` | Retention manifest not found | Verify scope and manifest ID; recreate manifest if necessary. |
 | `ASDUR215` | Retention source changed | Re-assess Flow closure; do not purge with stale manifest. |
 | `ASDUR216` | Retention lifecycle conflict | Reload manifest sequence and retry command. |
-| `ASDUR217` | Retention lifecycle rejected | Verify lifecycle sequence and release legal holds before purging. |
+| `ASDUR217` | Retention lifecycle rejected | Verify lifecycle sequence and hold authorization. Release a legal hold only after an explicitly authorized decision; otherwise do not purge. |
 | `ASDUR400` | Durable schema is missing | Apply reviewed forward-only migrations with a migration-owner connection. |
 | `ASDUR401` | Durable schema upgrade is required | Apply every known pending migration before this reader/writer. |
 | `ASDUR402` | Durable schema version is too new or unsupported | Deploy compatible package code; do not bypass supported ranges. |
