@@ -18,10 +18,11 @@ It also does not configure application-side OpenTelemetry exporters. Use [`Forge
 
 For deterministic tests of profile-based AppHosts, use [`ForgeTrust.AppSurface.Aspire.Testing`](../ForgeTrust.AppSurface.Aspire.Testing/README.md). Native AppHosts that build directly from [`DistributedApplication.CreateBuilder(args)`](https://learn.microsoft.com/dotnet/api/aspire.hosting.distributedapplication.createbuilder) should continue using [Aspire's native testing API](https://learn.microsoft.com/dotnet/aspire/testing/overview).
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
-
+This AppHost-oriented package follows the coordinated AppSurface release policy. Before using a prerelease build in an AppHost, development, or test environment, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for publication status, compatibility guidance, and readiness.
+<!-- appsurface-release-guidance: end -->
 ## Installation
 
 ```bash

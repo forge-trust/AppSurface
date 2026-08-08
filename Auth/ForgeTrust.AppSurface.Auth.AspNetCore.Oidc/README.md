@@ -4,9 +4,11 @@
 
 Use this package when an ASP.NET Core web app already has an identity provider selected and wants a shorter, safer cookie + OIDC setup for AppSurface modules. The package composes `ForgeTrust.AppSurface.Auth.AspNetCore` so request principals and host-owned policy decisions still flow through the existing AppSurface auth adapter.
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for current release risk, migration guidance, and readiness.
+<!-- appsurface-release-guidance: end -->
 
 Use the [AppSurface Auth adoption ladder](../../start-here/auth-adoption-ladder.md) when deciding whether OIDC convenience registration is the right rung or whether raw ASP.NET Core/provider setup, DevAuth, or Auth.Testing is safer.
 
