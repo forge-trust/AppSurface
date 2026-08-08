@@ -79,7 +79,17 @@ internal sealed record ReleaseManifestV2(
     IReadOnlyList<string> PublishedPackageProjects,
     IReadOnlyList<CoordinatedPackageReleaseNoteResolution> CoordinatedPackageReleaseNoteResolutions,
     IReadOnlyList<ReleaseDiagnosticRecord> Diagnostics,
-    IReadOnlyList<string> WarningIds);
+    IReadOnlyList<string> WarningIds)
+{
+    /// <summary>
+    /// Gets the append-only unreleased-entry paths composed into this release and removed during preparation.
+    /// </summary>
+    /// <remarks>
+    /// The V2 evidence bundle digests this manifest, so this ordered list is the proof that a release-preparation
+    /// pull request may delete precisely these source entries and no others.
+    /// </remarks>
+    public IReadOnlyList<string> ConsumedUnreleasedEntryPaths { get; init; } = [];
+}
 
 /// <summary>
 /// Records how a public package's coordinated release alias resolves in the prepared documentation tree.

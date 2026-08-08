@@ -19,8 +19,10 @@ public sealed class ReleaseWorkflowPolicyTests
                 new("M", "releases/current.md"),
                 new("M", "CHANGELOG.md"),
                 new("M", "releases/unreleased.md"),
-                new("M", "releases/unreleased.md.yml")
-            ]);
+                new("M", "releases/unreleased.md.yml"),
+                new("D", "releases/unreleased.entries/2026-08-08-release-workflow.md")
+            ],
+            ["releases/unreleased.entries/2026-08-08-release-workflow.md"]);
 
         Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
     }
@@ -113,8 +115,59 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, error => error.Contains("current.md.yml", StringComparison.Ordinal));
         Assert.Contains(result.Errors, error => error.Contains("Unexpected", StringComparison.Ordinal));
-        Assert.Contains(result.Errors, error => error.Contains("Deletes", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, error => error.Contains("may delete only", StringComparison.Ordinal));
         Assert.Contains(result.Errors, error => error.Contains("Renames", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ReleasePreparationChangePolicyRejectsUnexpectedUnreleasedEntryChanges()
+    {
+        var result = ReleasePreparationChangePolicy.Validate(
+            "1.2.3",
+            [
+                new("A", "releases/v1.2.3.md"),
+                new("A", "releases/v1.2.3.md.yml"),
+                new("A", "releases/v1.2.3.release.json"),
+                new("A", "releases/v1.2.3.evidence.json"),
+                new("M", "releases/current.md"),
+                new("M", "CHANGELOG.md"),
+                new("M", "releases/unreleased.md"),
+                new("M", "releases/unreleased.md.yml"),
+                new("A", "releases/unreleased.entries/2026-08-08-feature.md"),
+                new("D", "releases/unreleased.entries/not-an-entry.md")
+            ]);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => error.Contains("Unexpected release-preparation path", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, error => error.Contains("may delete only", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ReleasePreparationChangePolicyRequiresManifestProofForEveryArchivedEntry()
+    {
+        var requiredChanges = new[]
+        {
+            new ReleasePreparationChange("A", "releases/v1.2.3.md"),
+            new ReleasePreparationChange("A", "releases/v1.2.3.md.yml"),
+            new ReleasePreparationChange("A", "releases/v1.2.3.release.json"),
+            new ReleasePreparationChange("A", "releases/v1.2.3.evidence.json"),
+            new ReleasePreparationChange("M", "releases/current.md"),
+            new ReleasePreparationChange("M", "CHANGELOG.md"),
+            new ReleasePreparationChange("M", "releases/unreleased.md"),
+            new ReleasePreparationChange("M", "releases/unreleased.md.yml"),
+            new ReleasePreparationChange("D", "releases/unreleased.entries/2026-08-08-archived.md")
+        };
+
+        var unprovenDeletion = ReleasePreparationChangePolicy.Validate("1.2.3", requiredChanges);
+        var missingDeletion = ReleasePreparationChangePolicy.Validate(
+            "1.2.3",
+            requiredChanges[..^1],
+            ["releases/unreleased.entries/2026-08-08-archived.md"]);
+
+        Assert.False(unprovenDeletion.IsValid);
+        Assert.Contains(unprovenDeletion.Errors, error => error.Contains("may delete only", StringComparison.Ordinal));
+        Assert.False(missingDeletion.IsValid);
+        Assert.Contains(missingDeletion.Errors, error => error.Contains("does not delete", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -171,9 +224,15 @@ public sealed class ReleaseWorkflowPolicyTests
         var error = await errorTask;
         Assert.True(process.ExitCode == 0, error);
 
+        var manifestPath = Path.Combine(repositoryRoot, "releases", $"v{version}.release.json");
+        var manifestJson = await File.ReadAllTextAsync(manifestPath);
+        Assert.True(ReleaseManifestV2Validator.TryDeserialize(manifestJson, out var manifest, out var manifestIssue), manifestIssue);
+        Assert.Equal(version, manifest!.Version);
+
         var result = ReleasePreparationChangePolicy.Validate(
             version,
-            ReleasePreparationChangePolicy.ParseNameStatus(output));
+            ReleasePreparationChangePolicy.ParseNameStatus(output),
+            manifest.ConsumedUnreleasedEntryPaths);
 
         Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
     }
@@ -192,6 +251,22 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("--allow-existing-targets", workflow, StringComparison.Ordinal);
         Assert.Contains("RELEASE_PREP_POLICY_VERSION", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("--filter FullyQualifiedName~ReleasePreparationChangePolicyValidatesPullRequestDiff", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReleaseContractWorkflowValidatesAppendOnlyEntriesAndTemplateMarkers()
+    {
+        var workflow = await ReadRepositoryFileAsync(".github/workflows/release-contract.yml");
+
+        Assert.Contains("github.rest.repos.getContent", workflow, StringComparison.Ordinal);
+        Assert.Contains("validateUnreleasedTemplate", workflow, StringComparison.Ordinal);
+        Assert.Contains("validateAddedUnreleasedEntries", workflow, StringComparison.Ordinal);
+        Assert.Contains("hasValidEntryDate", workflow, StringComparison.Ordinal);
+        Assert.Contains("Feature pull requests must not edit releases/unreleased.md", workflow, StringComparison.Ordinal);
+        Assert.Contains("appsurface:unreleased-entry directive", workflow, StringComparison.Ordinal);
+        Assert.Contains("must not introduce a top-level # or ## heading", workflow, StringComparison.Ordinal);
+        Assert.Contains("must contain exactly one", workflow, StringComparison.Ordinal);
+        Assert.Contains("must not contain unsupported append-only entry markers", workflow, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -225,6 +300,8 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("current_pointer_markdown_added", prep, StringComparison.Ordinal);
         Assert.Contains("current_pointer_sidecar_added", prep, StringComparison.Ordinal);
         Assert.Contains("M:releases/unreleased.md", prep, StringComparison.Ordinal);
+        Assert.Contains("releases/unreleased.entries", prep, StringComparison.Ordinal);
+        Assert.Contains("git add -u -- releases/unreleased.entries", prep, StringComparison.Ordinal);
         Assert.Contains("bootstrap both releases/current.md and releases/current.md.yml together", prep, StringComparison.Ordinal);
         Assert.Contains("without exactly one added or modified versioned release manifest", prep, StringComparison.Ordinal);
         Assert.Contains("releases/v${VERSION}.release.json", prep, StringComparison.Ordinal);
