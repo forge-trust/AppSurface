@@ -210,6 +210,12 @@ internal sealed partial class CoverageRunCommand : ICommand
     [CommandOption("watchdog", Description = "Stall handling mode: warn, fail, or off. Defaults to warn.")]
     public string Watchdog { get; set; } = "warn";
 
+    /// <summary>
+    /// Gets or sets a value indicating whether the command must fail when a known sandbox marker is present.
+    /// </summary>
+    [CommandOption("require-non-sandbox", Description = "Fail before discovery, output cleanup, build, or tests when a known sandbox environment marker is present.")]
+    public bool RequireNonSandbox { get; set; }
+
     /// <inheritdoc />
     [ExcludeFromCodeCoverage]
     public async ValueTask ExecuteAsync(IConsole console)
@@ -336,7 +342,8 @@ internal sealed partial class CoverageRunCommand : ICommand
             heartbeatInterval,
             noProgressTimeout,
             watchdogMode,
-            coverageDriver);
+            coverageDriver,
+            RequireNonSandbox);
     }
 
     private CoverageRunScheduleMode ParseScheduleMode()
@@ -464,6 +471,7 @@ internal sealed partial class CoverageRunCommand : ICommand
 /// <param name="NoProgressTimeout">Maximum no-observable-progress duration for an active operation.</param>
 /// <param name="WatchdogMode">Action taken when an operation crosses the no-progress timeout.</param>
 /// <param name="CoverageDriver">VSTest coverage integration selected once for the complete run.</param>
+/// <param name="RequireNonSandbox">Whether an enabled known sandbox environment marker fails the run before side effects.</param>
 internal sealed record CoverageRunRequest(
     string? SolutionPath,
     IReadOnlyList<string> TestProjects,
@@ -491,7 +499,8 @@ internal sealed record CoverageRunRequest(
     TimeSpan HeartbeatInterval,
     TimeSpan NoProgressTimeout,
     CoverageRunWatchdogMode WatchdogMode,
-    CoverageRunDriver CoverageDriver);
+    CoverageRunDriver CoverageDriver,
+    bool RequireNonSandbox);
 
 /// <summary>
 /// Scheduling modes supported by <c>coverage run</c>.
@@ -562,6 +571,7 @@ internal sealed class CoverageRunWorkflow
     private readonly Action? _timingsStaged;
     private readonly Action<string>? _deleteStagedCoverageFile;
     private readonly Func<string, string, CancellationToken, Task<CoverageRunDiagnosticLogWriteResult>>? _appendCleanupDiagnostic;
+    private readonly Func<string, string?> _getEnvironmentVariable;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CoverageRunWorkflow"/> class.
@@ -576,6 +586,7 @@ internal sealed class CoverageRunWorkflow
     /// <param name="appendCleanupDiagnostic">Optional test seam that replaces writing a cleanup diagnostic to its dedicated log.</param>
     /// <param name="slowTestDiagnosticsStaged">Optional test seam invoked after diagnostics staging completes and before cancellation is rechecked.</param>
     /// <param name="beforeSlowTestDiagnosticsPromotion">Optional test seam invoked after a prior canonical artifact is backed up and before a staged artifact is promoted.</param>
+    /// <param name="getEnvironmentVariable">Optional environment lookup used by the sandbox preflight.</param>
     public CoverageRunWorkflow(
         ICoverageRunProcessRunner processRunner,
         ICoverageRunReportGenerator reportGenerator,
@@ -586,7 +597,8 @@ internal sealed class CoverageRunWorkflow
         Action<string>? deleteStagedCoverageFile = null,
         Func<string, string, CancellationToken, Task<CoverageRunDiagnosticLogWriteResult>>? appendCleanupDiagnostic = null,
         Action? slowTestDiagnosticsStaged = null,
-        Action<string>? beforeSlowTestDiagnosticsPromotion = null)
+        Action<string>? beforeSlowTestDiagnosticsPromotion = null,
+        Func<string, string?>? getEnvironmentVariable = null)
     {
         _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
         _reportGenerator = reportGenerator ?? throw new ArgumentNullException(nameof(reportGenerator));
@@ -598,6 +610,7 @@ internal sealed class CoverageRunWorkflow
         _timingsStaged = timingsStaged;
         _deleteStagedCoverageFile = deleteStagedCoverageFile;
         _appendCleanupDiagnostic = appendCleanupDiagnostic;
+        _getEnvironmentVariable = getEnvironmentVariable ?? Environment.GetEnvironmentVariable;
     }
 
     /// <summary>
@@ -614,6 +627,8 @@ internal sealed class CoverageRunWorkflow
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(console);
+
+        CoverageRunSandboxGuard.Validate(request.RequireNonSandbox, _getEnvironmentVariable);
 
         if (request.SlowTestDiagnostics && request.TestResults == CoverageRunTestResultFormat.None)
         {
@@ -3615,6 +3630,76 @@ internal static class CoverageRunOutputGuard
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
     }
+}
+
+/// <summary>
+/// Detects explicit sandbox environment markers when callers require non-sandboxed coverage execution.
+/// </summary>
+/// <remarks>
+/// This guard intentionally does not infer a sandbox from generic container signals such as Docker or CI.
+/// Those environments are valid coverage hosts, while the named markers below identify an execution restriction.
+/// </remarks>
+internal static class CoverageRunSandboxGuard
+{
+    private static readonly string[] MarkerNames =
+    [
+        "CODEX_SANDBOX",
+        "SANDBOX_MODE",
+        "IN_SANDBOX",
+        "IS_SANDBOX",
+    ];
+
+    /// <summary>
+    /// Fails when a required non-sandboxed run has an explicit sandbox marker.
+    /// </summary>
+    /// <param name="requireNonSandbox">Whether sandbox execution must be rejected.</param>
+    /// <param name="getEnvironmentVariable">Environment lookup function.</param>
+    internal static void Validate(bool requireNonSandbox, Func<string, string?> getEnvironmentVariable)
+    {
+        if (!requireNonSandbox)
+        {
+            return;
+        }
+
+        var marker = GetMarkerName(getEnvironmentVariable);
+        if (marker is null)
+        {
+            return;
+        }
+
+        throw CoverageRunDiagnostics.Create(
+            "ASCOV116",
+            "--require-non-sandbox detected a sandbox environment.",
+            $"The {marker} environment marker was set for this process.",
+            "Run coverage outside the sandbox, or omit --require-non-sandbox when the restriction is intentional.",
+            "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+    }
+
+    /// <summary>
+    /// Gets the first enabled sandbox marker name, without exposing its value.
+    /// </summary>
+    /// <param name="getEnvironmentVariable">Environment lookup function.</param>
+    /// <returns>The marker name, or <see langword="null"/> when no known sandbox marker is enabled.</returns>
+    internal static string? GetMarkerName(Func<string, string?> getEnvironmentVariable)
+    {
+        ArgumentNullException.ThrowIfNull(getEnvironmentVariable);
+        foreach (var markerName in MarkerNames)
+        {
+            var value = getEnvironmentVariable(markerName);
+            if (!string.IsNullOrWhiteSpace(value) && !IsDisabled(value))
+            {
+                return markerName;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsDisabled(string value)
+        => string.Equals(value.Trim(), "0", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value.Trim(), "false", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value.Trim(), "off", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value.Trim(), "no", StringComparison.OrdinalIgnoreCase);
 }
 
 internal static class CoverageRunDiagnostics

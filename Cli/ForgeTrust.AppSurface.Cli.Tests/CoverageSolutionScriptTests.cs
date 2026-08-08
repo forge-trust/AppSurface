@@ -32,6 +32,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("--min-patch-line 95", script, StringComparison.Ordinal);
         Assert.Contains("--min-patch-branch 85", script, StringComparison.Ordinal);
         Assert.Contains("--patch-line-mode codecov", script, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_REQUIRE_NON_SANDBOX:-true", script, StringComparison.Ordinal);
         Assert.Equal(3, CountOccurrences(script, "--no-restore"));
         Assert.Contains("if [[ -n \"$COVERAGE_GATE_DIFF_BASE\" ]]; then", script, StringComparison.Ordinal);
     }
@@ -186,6 +187,35 @@ public sealed class CoverageSolutionScriptTests
             "--logger\nGitHubActions;report-warnings=false\n--no-restore",
             result.DotnetInvocations,
             StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("false", false)]
+    public async Task Script_ShouldRequireNonSandboxByDefaultWithExplicitRestrictedRunEscapeHatch(
+        string? requireNonSandbox,
+        bool expectsRequirement)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var result = await RunScriptAsync(
+            [],
+            "COVERAGE_REQUIRE_NON_SANDBOX",
+            requireNonSandbox,
+            dotnetExitCode: 0);
+
+        Assert.Equal(0, result.ExitCode);
+        if (expectsRequirement)
+        {
+            Assert.Contains("--require-non-sandbox", result.DotnetInvocations, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.DoesNotContain("--require-non-sandbox", result.DotnetInvocations, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

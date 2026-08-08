@@ -110,9 +110,10 @@ internal sealed partial class CoverageGateCommand : ICommand
     internal Func<CancellationToken, Task<string>>? StdinTextProvider { get; set; }
 
     /// <summary>
-    /// Gets or sets the directory where coverage-gate.json and coverage-gate.md are written.
+    /// Gets or sets the directory where coverage-gate.json, coverage-gate.md, and patch target
+    /// artifacts are written.
     /// </summary>
-    [CommandOption("output", Description = "Output directory for coverage-gate.json and coverage-gate.md.")]
+    [CommandOption("output", Description = "Output directory for coverage-gate reports and active patch target artifacts.")]
     public string? OutputDirectory { get; set; }
 
     /// <summary>
@@ -153,6 +154,10 @@ internal sealed partial class CoverageGateCommand : ICommand
         var status = result.Passed ? "PASS" : "FAIL";
         await console.Output.WriteLineAsync(RenderConsoleSummary(status, result, request));
         await console.Output.WriteLineAsync($"Reports: {result.JsonReportPath} and {result.MarkdownReportPath}");
+        if (result.PatchTargetsJsonPath is not null && result.PatchTargetsMarkdownPath is not null)
+        {
+            await console.Output.WriteLineAsync($"Patch targets: {result.PatchTargetsJsonPath} and {result.PatchTargetsMarkdownPath}");
+        }
 
         if (!result.Passed)
         {
@@ -646,6 +651,9 @@ internal sealed record PatchDiffSourceReport(
 /// <param name="PatchDiffSource">Optional patch diff source provenance.</param>
 /// <param name="TolerancePercent">Grace margin subtracted from thresholds before evaluation. Defaults to 0.5.</param>
 /// <param name="PatchLineMode">Selected changed-line calculation mode.</param>
+/// <param name="PatchAnalysis">Internal normalized patch evidence used for both metrics and targets.</param>
+/// <param name="PatchTargetsJsonPath">Patch target JSON path when patch evaluation is active.</param>
+/// <param name="PatchTargetsMarkdownPath">Patch target Markdown path when patch evaluation is active.</param>
 internal sealed record CoverageGateResult(
     string CoveragePath,
     CoverageMetric LineCoverage,
@@ -661,7 +669,28 @@ internal sealed record CoverageGateResult(
     PatchBranchCoverageMetric? PatchBranchCoverage = null,
     PatchDiffSourceReport? PatchDiffSource = null,
     decimal TolerancePercent = 0.5m,
-    PatchLineMode? PatchLineMode = null);
+    PatchLineMode? PatchLineMode = null,
+    PatchCoverageAnalysis? PatchAnalysis = null,
+    string? PatchTargetsJsonPath = null,
+    string? PatchTargetsMarkdownPath = null);
+
+/// <summary>
+/// Names of the gate report artifacts that the CLI owns inside a validated output directory.
+/// </summary>
+internal static class CoverageGateArtifactNames
+{
+    /// <summary>JSON summary report filename.</summary>
+    public const string Json = "coverage-gate.json";
+
+    /// <summary>Markdown summary report filename.</summary>
+    public const string Markdown = "coverage-gate.md";
+
+    /// <summary>Agent-actionable patch target JSON filename.</summary>
+    public const string PatchTargetsJson = "coverage-patch-targets.json";
+
+    /// <summary>Agent-actionable patch target Markdown filename.</summary>
+    public const string PatchTargetsMarkdown = "coverage-patch-targets.md";
+}
 
 /// <summary>
 /// One Cobertura coverage metric expressed as optional covered/valid counts and a percentage.
@@ -711,6 +740,36 @@ internal sealed record PatchCoverageMetrics(
     PatchDiffSourceReport SourceReport,
     PatchLineCoverageMetric LineCoverage,
     PatchBranchCoverageMetric BranchCoverage);
+
+/// <summary>
+/// Normalized patch evidence from which the patch gate metrics and remediation targets are derived.
+/// </summary>
+/// <param name="SourceReport">Patch diff provenance captured during evaluation.</param>
+/// <param name="LineMode">Changed-line calculation mode that produced the metrics.</param>
+/// <param name="Lines">Changed lines in deterministic repository-relative path and line order.</param>
+/// <param name="Metrics">Aggregate metrics derived from <paramref name="Lines"/>.</param>
+internal sealed record PatchCoverageAnalysis(
+    PatchDiffSourceReport SourceReport,
+    PatchLineMode LineMode,
+    IReadOnlyList<PatchCoverageLine> Lines,
+    PatchCoverageMetrics Metrics);
+
+/// <summary>
+/// One changed source line and the merged Cobertura evidence, when Cobertura reported that line.
+/// </summary>
+/// <param name="Path">Repository-relative source path.</param>
+/// <param name="Line">One-based source line number.</param>
+/// <param name="IsMeasured">Whether Cobertura reported the changed line.</param>
+/// <param name="LineCovered">Raw line execution state when the line is measured.</param>
+/// <param name="CoveredConditions">Covered condition count when Cobertura reported conditions.</param>
+/// <param name="ValidConditions">Total condition count when Cobertura reported conditions.</param>
+internal sealed record PatchCoverageLine(
+    string Path,
+    int Line,
+    bool IsMeasured,
+    bool? LineCovered,
+    int? CoveredConditions,
+    int? ValidConditions);
 
 internal enum PatchDiffParseStatus
 {
@@ -775,9 +834,10 @@ internal static class CoverageGateEvaluator
 
                 var lineCoverage = ReadMetric(reader, "line", "lines-covered", "lines-valid", "line-rate");
                 var branchCoverage = ReadMetric(reader, "branch", "branches-covered", "branches-valid", "branch-rate");
-                var patchCoverage = request.PatchCoverage is null
+                var patchAnalysis = request.PatchCoverage is null
                     ? null
-                    : await PatchCoverageEvaluator.EvaluateAsync(request.CoveragePath, request.PatchCoverage, cancellationToken);
+                    : await PatchCoverageEvaluator.AnalyzeAsync(request.CoveragePath, request.PatchCoverage, cancellationToken);
+                var patchCoverage = patchAnalysis?.Metrics;
                 var effectiveLineThreshold = GetEffectiveThreshold(request.MinLinePercent, request.TolerancePercent);
                 var effectiveBranchThreshold = GetEffectiveThreshold(request.MinBranchPercent, request.TolerancePercent);
                 var passed = lineCoverage.Percent >= effectiveLineThreshold
@@ -791,15 +851,18 @@ internal static class CoverageGateEvaluator
                     request.MinLinePercent,
                     request.MinBranchPercent,
                     passed,
-                    Path.Join(request.OutputDirectory, "coverage-gate.json"),
-                    Path.Join(request.OutputDirectory, "coverage-gate.md"),
+                    Path.Join(request.OutputDirectory, CoverageGateArtifactNames.Json),
+                    Path.Join(request.OutputDirectory, CoverageGateArtifactNames.Markdown),
                     request.PatchCoverage?.MinPatchLinePercent,
                     patchCoverage?.LineCoverage,
                     request.PatchCoverage?.MinPatchBranchPercent,
                     patchCoverage?.BranchCoverage,
                     patchCoverage?.SourceReport,
                     request.TolerancePercent,
-                    request.PatchCoverage?.LineMode);
+                    request.PatchCoverage?.LineMode,
+                    patchAnalysis,
+                    patchAnalysis is null ? null : Path.Join(request.OutputDirectory, CoverageGateArtifactNames.PatchTargetsJson),
+                    patchAnalysis is null ? null : Path.Join(request.OutputDirectory, CoverageGateArtifactNames.PatchTargetsMarkdown));
             }
         }
         catch (XmlException ex)
@@ -1035,6 +1098,20 @@ internal static class PatchCoverageEvaluator
         string coveragePath,
         CoveragePatchRequest request,
         CancellationToken cancellationToken)
+        => (await AnalyzeAsync(coveragePath, request, cancellationToken)).Metrics;
+
+    /// <summary>
+    /// Reads the patch and Cobertura line map once, retaining the normalized evidence used for
+    /// aggregate patch metrics and agent-actionable targets.
+    /// </summary>
+    /// <param name="coveragePath">Cobertura XML file.</param>
+    /// <param name="request">Changed-line coverage request.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Normalized changed-line evidence and its derived metrics.</returns>
+    internal static async Task<PatchCoverageAnalysis> AnalyzeAsync(
+        string coveragePath,
+        CoveragePatchRequest request,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ValidateLineMode(request.LineMode);
@@ -1046,7 +1123,7 @@ internal static class PatchCoverageEvaluator
         }
 
         var artifact = await request.DiffSource.ReadAsync(request.RepositoryRoot, cancellationToken);
-        return await EvaluateAsync(coveragePath, request, artifact, cancellationToken);
+        return await AnalyzeAsync(coveragePath, request, artifact, cancellationToken);
     }
 
     /// <summary>
@@ -1062,12 +1139,27 @@ internal static class PatchCoverageEvaluator
         CoveragePatchRequest request,
         string diffText,
         CancellationToken cancellationToken)
+        => (await AnalyzeAsync(coveragePath, request, diffText, cancellationToken)).Metrics;
+
+    /// <summary>
+    /// Builds normalized changed-line evidence from supplied unified diff text.
+    /// </summary>
+    /// <param name="coveragePath">Cobertura XML file.</param>
+    /// <param name="request">Changed-line coverage request.</param>
+    /// <param name="diffText">Unified git diff text.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Normalized changed-line evidence and its derived metrics.</returns>
+    internal static async Task<PatchCoverageAnalysis> AnalyzeAsync(
+        string coveragePath,
+        CoveragePatchRequest request,
+        string diffText,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return await EvaluateAsync(coveragePath, request, PatchDiffArtifact.FromText(diffText), cancellationToken);
+        return await AnalyzeAsync(coveragePath, request, PatchDiffArtifact.FromText(diffText), cancellationToken);
     }
 
-    private static async Task<PatchCoverageMetrics> EvaluateAsync(
+    private static async Task<PatchCoverageAnalysis> AnalyzeAsync(
         string coveragePath,
         CoveragePatchRequest request,
         PatchDiffArtifact artifact,
@@ -1085,38 +1177,76 @@ internal static class PatchCoverageEvaluator
 
         var changedLines = parseResult.ChangedLines;
         var lineHits = await ReadLineCoverageMapAsync(coveragePath, request.RepositoryRoot, cancellationToken);
-        var changedLineCount = 0;
+        var lines = new List<PatchCoverageLine>();
+        foreach (var (file, changedFileLines) in changedLines.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        {
+            if (!lineHits.TryGetValue(file, out var fileHits))
+            {
+                lines.AddRange(changedFileLines
+                    .OrderBy(line => line)
+                    .Select(line => new PatchCoverageLine(file, line, false, null, null, null)));
+                continue;
+            }
+
+            foreach (var line in changedFileLines.OrderBy(line => line))
+            {
+                if (!fileHits.TryGetValue(line, out var lineCoverage))
+                {
+                    lines.Add(new PatchCoverageLine(file, line, false, null, null, null));
+                    continue;
+                }
+
+                lines.Add(new PatchCoverageLine(
+                    file,
+                    line,
+                    true,
+                    lineCoverage.Covered,
+                    lineCoverage.Branches?.Covered,
+                    lineCoverage.Branches?.Valid));
+            }
+        }
+
+        var sourceReport = new PatchDiffSourceReport(
+            request.DiffSource.Kind,
+            request.DiffSource.Label,
+            request.DiffSource.DiffBase,
+            request.DiffSource.Path,
+            artifact.Bytes,
+            artifact.Sha256,
+            artifact.Empty,
+            request.DiffSource.IsExternalArtifact);
+        var metrics = CreateMetrics(sourceReport, request.DiffSource.DiffBase, request.LineMode, lines);
+        return new PatchCoverageAnalysis(sourceReport, request.LineMode, lines, metrics);
+    }
+
+    private static PatchCoverageMetrics CreateMetrics(
+        PatchDiffSourceReport sourceReport,
+        string? diffBase,
+        PatchLineMode lineMode,
+        IReadOnlyList<PatchCoverageLine> lines)
+    {
+        var changedLineCount = lines.Count;
         var measurableLineCount = 0;
         var coveredLineCount = 0;
         var measurableBranchCount = 0;
         var coveredBranchCount = 0;
-
-        foreach (var (file, lines) in changedLines)
+        foreach (var line in lines)
         {
-            changedLineCount += lines.Count;
-            if (!lineHits.TryGetValue(file, out var fileHits))
+            if (!line.IsMeasured)
             {
                 continue;
             }
 
-            foreach (var line in lines)
+            measurableLineCount++;
+            if (IsLineCovered(line, lineMode))
             {
-                if (!fileHits.TryGetValue(line, out var lineCoverage))
-                {
-                    continue;
-                }
+                coveredLineCount++;
+            }
 
-                measurableLineCount++;
-                if (IsLineCovered(lineCoverage, request.LineMode))
-                {
-                    coveredLineCount++;
-                }
-
-                if (lineCoverage.Branches is { } branches)
-                {
-                    measurableBranchCount += branches.Valid;
-                    coveredBranchCount += branches.Covered;
-                }
+            if (line.ValidConditions is { } validConditions)
+            {
+                measurableBranchCount += validConditions;
+                coveredBranchCount += line.CoveredConditions!.Value;
             }
         }
 
@@ -1127,23 +1257,15 @@ internal static class PatchCoverageEvaluator
             ? 100m
             : Math.Round(coveredBranchCount * 100m / measurableBranchCount, 4, MidpointRounding.AwayFromZero);
         return new PatchCoverageMetrics(
-            new PatchDiffSourceReport(
-                request.DiffSource.Kind,
-                request.DiffSource.Label,
-                request.DiffSource.DiffBase,
-                request.DiffSource.Path,
-                artifact.Bytes,
-                artifact.Sha256,
-                artifact.Empty,
-                request.DiffSource.IsExternalArtifact),
+            sourceReport,
             new PatchLineCoverageMetric(
-                request.DiffSource.DiffBase,
+                diffBase,
                 changedLineCount,
                 measurableLineCount,
                 coveredLineCount,
                 linePercent),
             new PatchBranchCoverageMetric(
-                request.DiffSource.DiffBase,
+                diffBase,
                 changedLineCount,
                 measurableBranchCount,
                 coveredBranchCount,
@@ -1160,12 +1282,11 @@ internal static class PatchCoverageEvaluator
         throw new CommandException("ASCOV017 --patch-line-mode must be measurable or codecov.");
     }
 
-    private static bool IsLineCovered(PatchLineCoverageData lineCoverage, PatchLineMode mode) => mode switch
+    private static bool IsLineCovered(PatchCoverageLine line, PatchLineMode mode) => mode switch
     {
-        PatchLineMode.Measurable => lineCoverage.Covered,
-        PatchLineMode.Codecov => lineCoverage.Covered
-            && (lineCoverage.Branches is not { } branches
-                || branches.Covered == branches.Valid),
+        PatchLineMode.Measurable => line.LineCovered == true,
+        PatchLineMode.Codecov => line.LineCovered == true
+            && (!line.CoveredConditions.HasValue || line.CoveredConditions == line.ValidConditions),
         _ => throw new CommandException("ASCOV017 --patch-line-mode must be measurable or codecov."),
     };
 
@@ -1692,7 +1813,7 @@ internal static class PatchCoverageEvaluator
             var relative = Path.GetRelativePath(repositoryRoot, path);
             if (relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathFullyQualified(relative))
             {
-                return NormalizeRelativePath(path);
+                return null;
             }
 
             path = relative;
@@ -1701,16 +1822,39 @@ internal static class PatchCoverageEvaluator
         return NormalizeRelativePath(path);
     }
 
-    private static string NormalizeRelativePath(string path)
+    private static string? NormalizeRelativePath(string path)
     {
-        path = path.Replace('\\', '/').TrimStart('/');
+        path = path.Replace('\\', '/');
+        if (path.StartsWith("/", StringComparison.Ordinal) || IsWindowsDriveQualifiedPath(path))
+        {
+            return null;
+        }
+
+        path = path.TrimStart('/');
         while (path.StartsWith("./", StringComparison.Ordinal))
         {
             path = path[2..];
         }
 
-        return path;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Any(segment => segment is "." or ".."))
+        {
+            return null;
+        }
+
+        return string.Join('/', segments);
     }
+
+    private static bool IsWindowsDriveQualifiedPath(string path) =>
+        path.Length >= 3
+        && char.IsAsciiLetter(path[0])
+        && path[1] == ':'
+        && path[2] == '/';
 
     private static bool TryReadHunkRange(
         string header,
@@ -1871,7 +2015,10 @@ internal static class GitRepositoryRootResolver
 /// </summary>
 internal static class CoverageGateReportWriter
 {
+    private const int PatchTargetsSchemaVersion = 1;
+
     private const int GithubSummaryLimitBytes = 1024 * 1024;
+    private const int MaximumNotMeasuredSamples = 10;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -1886,56 +2033,109 @@ internal static class CoverageGateReportWriter
     /// <param name="result">Gate result to render.</param>
     /// <param name="request">Original gate request.</param>
     /// <param name="cancellationToken">Cancellation token for file IO.</param>
+    /// <param name="beforeArtifactWrite">Optional test seam invoked after output acquisition and artifact preflight.</param>
     /// <returns>A task that completes when output files are written.</returns>
     public static async Task WriteAsync(
         CoverageGateResult result,
         CoverageGateRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action? beforeArtifactWrite = null)
     {
         ArgumentNullException.ThrowIfNull(result);
         ArgumentNullException.ThrowIfNull(request);
 
-        Directory.CreateDirectory(request.OutputDirectory);
-        var effectiveLineThreshold = CoverageGateEvaluator.GetEffectiveThreshold(result.MinLinePercent, result.TolerancePercent);
-        var effectiveBranchThreshold = CoverageGateEvaluator.GetEffectiveThreshold(result.MinBranchPercent, result.TolerancePercent);
-        var effectivePatchLineThreshold = GetEffectiveThreshold(result.MinPatchLinePercent, result.TolerancePercent);
-        var effectivePatchBranchThreshold = GetEffectiveThreshold(result.MinPatchBranchPercent, result.TolerancePercent);
-        var json = JsonSerializer.Serialize(
-            new
-            {
-                passed = result.Passed,
-                coverage = result.CoveragePath,
-                tolerancePercent = result.TolerancePercent,
-                thresholds = new
-                {
-                    line = result.MinLinePercent,
-                    branch = result.MinBranchPercent,
-                    patchLine = result.MinPatchLinePercent,
-                    patchBranch = result.MinPatchBranchPercent,
-                },
-                effectiveThresholds = new
-                {
-                    line = effectiveLineThreshold,
-                    branch = effectiveBranchThreshold,
-                    patchLine = effectivePatchLineThreshold,
-                    patchBranch = effectivePatchBranchThreshold,
-                },
-                patchLineMode = result.PatchLineMode?.ToString().ToLowerInvariant(),
-                patchDiffSource = ToJson(result.PatchDiffSource),
-                line = ToJson(result.LineCoverage),
-                branch = ToJson(result.BranchCoverage),
-                patchLine = ToJson(result.PatchLineCoverage),
-                patchBranch = ToJson(result.PatchBranchCoverage),
-            },
-            JsonOptions);
-        await File.WriteAllTextAsync(result.JsonReportPath, json + Environment.NewLine, cancellationToken);
-
-        var markdown = RenderMarkdown(result);
-        await File.WriteAllTextAsync(result.MarkdownReportPath, markdown, cancellationToken);
-
-        if (request.WriteGithubSummary && !string.IsNullOrWhiteSpace(request.GithubStepSummaryPath))
+        try
         {
-            await AppendGithubSummaryAsync(request.GithubStepSummaryPath, markdown, cancellationToken);
+            using var outputLease = CoverageRunOutputLease.Acquire(request.OutputDirectory);
+            outputLease.ValidateOwnedGateArtifacts(
+            [
+                CoverageGateArtifactNames.Json,
+                CoverageGateArtifactNames.Markdown,
+                CoverageGateArtifactNames.PatchTargetsJson,
+                CoverageGateArtifactNames.PatchTargetsMarkdown,
+            ]);
+            beforeArtifactWrite?.Invoke();
+            var effectiveLineThreshold = CoverageGateEvaluator.GetEffectiveThreshold(result.MinLinePercent, result.TolerancePercent);
+            var effectiveBranchThreshold = CoverageGateEvaluator.GetEffectiveThreshold(result.MinBranchPercent, result.TolerancePercent);
+            var effectivePatchLineThreshold = GetEffectiveThreshold(result.MinPatchLinePercent, result.TolerancePercent);
+            var effectivePatchBranchThreshold = GetEffectiveThreshold(result.MinPatchBranchPercent, result.TolerancePercent);
+            var json = JsonSerializer.Serialize(
+                new
+                {
+                    passed = result.Passed,
+                    coverage = result.CoveragePath,
+                    tolerancePercent = result.TolerancePercent,
+                    thresholds = new
+                    {
+                        line = result.MinLinePercent,
+                        branch = result.MinBranchPercent,
+                        patchLine = result.MinPatchLinePercent,
+                        patchBranch = result.MinPatchBranchPercent,
+                    },
+                    effectiveThresholds = new
+                    {
+                        line = effectiveLineThreshold,
+                        branch = effectiveBranchThreshold,
+                        patchLine = effectivePatchLineThreshold,
+                        patchBranch = effectivePatchBranchThreshold,
+                    },
+                    patchLineMode = result.PatchLineMode?.ToString().ToLowerInvariant(),
+                    patchDiffSource = ToJson(result.PatchDiffSource),
+                    line = ToJson(result.LineCoverage),
+                    branch = ToJson(result.BranchCoverage),
+                    patchLine = ToJson(result.PatchLineCoverage),
+                    patchBranch = ToJson(result.PatchBranchCoverage),
+                },
+                JsonOptions);
+            await WriteOwnedArtifactAsync(
+                outputLease,
+                CoverageGateArtifactNames.Json,
+                json + Environment.NewLine,
+                cancellationToken);
+
+            var markdown = RenderMarkdown(result);
+            await WriteOwnedArtifactAsync(
+                outputLease,
+                CoverageGateArtifactNames.Markdown,
+                markdown,
+                cancellationToken);
+
+            if (result.PatchAnalysis is { } analysis)
+            {
+                var targets = CreatePatchTargetRenderModel(analysis);
+                await WriteOwnedArtifactAsync(
+                    outputLease,
+                    CoverageGateArtifactNames.PatchTargetsJson,
+                    RenderPatchTargetsJson(analysis, targets) + Environment.NewLine,
+                    cancellationToken);
+                await WriteOwnedArtifactAsync(
+                    outputLease,
+                    CoverageGateArtifactNames.PatchTargetsMarkdown,
+                    RenderPatchTargetsMarkdown(analysis, targets),
+                    cancellationToken);
+            }
+            else
+            {
+                outputLease.DeleteOwnedGateArtifact(CoverageGateArtifactNames.PatchTargetsJson);
+                outputLease.DeleteOwnedGateArtifact(CoverageGateArtifactNames.PatchTargetsMarkdown);
+            }
+
+            if (request.WriteGithubSummary && !string.IsNullOrWhiteSpace(request.GithubStepSummaryPath))
+            {
+                await AppendGithubSummaryAsync(request.GithubStepSummaryPath, markdown, cancellationToken);
+            }
+        }
+        catch (CommandException ex) when (ex.Message.StartsWith("ASCOV109", StringComparison.Ordinal))
+        {
+            throw new CommandException($"ASCOV019 Failed to securely acquire coverage gate output '{request.OutputDirectory}': {ex.Message}");
+        }
+        catch (CommandException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new CommandException($"ASCOV019 Failed to write coverage gate reports in '{request.OutputDirectory}': {ex.Message}");
         }
     }
 
@@ -1997,6 +2197,219 @@ internal static class CoverageGateReportWriter
 
         return builder.ToString();
     }
+
+    private static string RenderPatchTargetsJson(
+        PatchCoverageAnalysis analysis,
+        PatchTargetRenderModel targets)
+    {
+        var json = JsonSerializer.Serialize(
+            new
+            {
+                schemaVersion = PatchTargetsSchemaVersion,
+                patch = new
+                {
+                    lineMode = analysis.LineMode.ToString().ToLowerInvariant(),
+                    diffSource = new
+                    {
+                        kind = GetKindText(analysis.SourceReport.Kind),
+                        label = analysis.SourceReport.Label,
+                        sha256 = analysis.SourceReport.Sha256,
+                    },
+                },
+                summary = new
+                {
+                    changed = analysis.Metrics.LineCoverage.ChangedLines,
+                    measurable = analysis.Metrics.LineCoverage.MeasurableLines,
+                    targets = targets.Targets.Count,
+                    notMeasured = targets.NotMeasuredCount,
+                    notMeasuredSamplesTruncated = targets.NotMeasuredCount > targets.NotMeasuredSamples.Count,
+                },
+                targets = targets.Targets.Select(line => new
+                {
+                    path = line.Path,
+                    line = line.Line,
+                    reasons = GetReasons(line),
+                    lineCovered = line.LineCovered,
+                    conditions = line.ValidConditions is null
+                        ? null
+                        : new { covered = line.CoveredConditions, valid = line.ValidConditions },
+                    gateDimensions = GetGateDimensions(line, analysis.LineMode),
+                }),
+                notMeasuredSamples = targets.NotMeasuredSamples.Select(line => new
+                {
+                    path = line.Path,
+                    line = line.Line,
+                    reason = "not-reported-by-cobertura",
+                }),
+            },
+            JsonOptions);
+        return json;
+    }
+
+    private static string RenderPatchTargetsMarkdown(
+        PatchCoverageAnalysis analysis,
+        PatchTargetRenderModel targets)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("# Patch Coverage Targets");
+        builder.AppendLine();
+        builder.AppendLine($"Patch line mode: {analysis.LineMode.ToString().ToLowerInvariant()}");
+        builder.AppendLine($"Patch source: {EscapeMarkdownCell(GetKindText(analysis.SourceReport.Kind))}");
+        builder.AppendLine($"Patch label: {EscapeMarkdownCell(analysis.SourceReport.Label)}");
+        builder.AppendLine($"Patch diff SHA-256: {EscapeMarkdownCell(analysis.SourceReport.Sha256)}");
+        builder.AppendLine();
+        builder.AppendLine("| Changed | Measurable | Targets | Not measured |");
+        builder.AppendLine("| ---: | ---: | ---: | ---: |");
+        builder.AppendLine(FormattableString.Invariant(
+            $"| {analysis.Metrics.LineCoverage.ChangedLines} | {analysis.Metrics.LineCoverage.MeasurableLines} | {targets.Targets.Count} | {targets.NotMeasuredCount} |"));
+
+        if (targets.Targets.Count == 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("No actionable patch coverage targets. The measured patch lines are fully covered by the selected line mode.");
+        }
+
+        foreach (var group in targets.Targets.GroupBy(line => line.Path, StringComparer.Ordinal))
+        {
+            builder.AppendLine();
+            builder.AppendLine($"## {FormatMarkdownCodeSpan(group.Key)}");
+            builder.AppendLine();
+            builder.AppendLine("| Line | Reasons | Line covered | Conditions | Gate dimensions |");
+            builder.AppendLine("| ---: | --- | --- | --- | --- |");
+            foreach (var line in group)
+            {
+                var conditions = line.ValidConditions is null
+                    ? "—"
+                    : FormattableString.Invariant($"{line.CoveredConditions}/{line.ValidConditions}");
+                builder.AppendLine(FormattableString.Invariant(
+                    $"| {line.Line} | {string.Join(", ", GetReasons(line))} | {(line.LineCovered == true ? "yes" : "no")} | {conditions} | {string.Join(", ", GetGateDimensions(line, analysis.LineMode))} |"));
+            }
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("## Not measured by Cobertura");
+        builder.AppendLine();
+        builder.AppendLine($"{targets.NotMeasuredCount} changed line(s) were not reported by Cobertura and are not test targets.");
+        foreach (var line in targets.NotMeasuredSamples)
+        {
+            builder.AppendLine($"- {FormatMarkdownCodeSpan(line.Path)}:{line.Line} (not-reported-by-cobertura)");
+        }
+
+        if (targets.NotMeasuredCount > targets.NotMeasuredSamples.Count)
+        {
+            builder.AppendLine($"- {targets.NotMeasuredCount - targets.NotMeasuredSamples.Count} additional non-measured changed line(s) omitted.");
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("Read each named source location, add behavior-focused tests, validate with the relevant focused test project, then run the full coverage gate once.");
+        return builder.ToString();
+    }
+
+    private static PatchTargetRenderModel CreatePatchTargetRenderModel(PatchCoverageAnalysis analysis)
+    {
+        var targets = new List<PatchCoverageLine>();
+        var notMeasuredSamples = new List<PatchCoverageLine>(MaximumNotMeasuredSamples);
+        var notMeasuredCount = 0;
+        foreach (var line in analysis.Lines)
+        {
+            if (IsTarget(line))
+            {
+                targets.Add(line);
+            }
+
+            if (!line.IsMeasured)
+            {
+                notMeasuredCount++;
+                if (notMeasuredSamples.Count < MaximumNotMeasuredSamples)
+                {
+                    notMeasuredSamples.Add(line);
+                }
+            }
+        }
+
+        return new PatchTargetRenderModel(targets, notMeasuredCount, notMeasuredSamples);
+    }
+
+    private static bool IsTarget(PatchCoverageLine line) =>
+        line.IsMeasured
+        && (line.LineCovered == false || IsPartialCondition(line));
+
+    private static bool IsPartialCondition(PatchCoverageLine line) =>
+        line.CoveredConditions is { } covered
+        && line.ValidConditions is { } valid
+        && covered < valid;
+
+    private static string[] GetReasons(PatchCoverageLine line)
+    {
+        var reasons = new List<string>(2);
+        if (line.LineCovered == false)
+        {
+            reasons.Add("uncovered-line");
+        }
+
+        if (IsPartialCondition(line))
+        {
+            reasons.Add("partial-condition");
+        }
+
+        return [.. reasons];
+    }
+
+    private static string[] GetGateDimensions(PatchCoverageLine line, PatchLineMode lineMode)
+    {
+        var dimensions = new List<string>(2);
+        if (line.LineCovered == false || (lineMode == PatchLineMode.Codecov && IsPartialCondition(line)))
+        {
+            dimensions.Add("patchLine");
+        }
+
+        if (IsPartialCondition(line))
+        {
+            dimensions.Add("patchBranch");
+        }
+
+        return [.. dimensions];
+    }
+
+    private static Task WriteOwnedArtifactAsync(
+        CoverageRunOutputLease outputLease,
+        string artifactName,
+        string contents,
+        CancellationToken cancellationToken)
+        => outputLease.WriteOwnedGateArtifactAsync(artifactName, contents, cancellationToken);
+
+    private static string FormatMarkdownCodeSpan(string value)
+    {
+        var text = StripControls(value)
+            .Replace("\r", string.Empty, StringComparison.Ordinal)
+            .Replace("\n", string.Empty, StringComparison.Ordinal);
+        var longestBacktickRun = 0;
+        var currentBacktickRun = 0;
+        foreach (var character in text)
+        {
+            if (character == '`')
+            {
+                currentBacktickRun++;
+                continue;
+            }
+
+            longestBacktickRun = Math.Max(longestBacktickRun, currentBacktickRun);
+            currentBacktickRun = 0;
+        }
+
+        longestBacktickRun = Math.Max(longestBacktickRun, currentBacktickRun);
+        var delimiter = new string('`', longestBacktickRun + 1);
+        var requiresPadding = text.Length > 0
+            && (text[0] is '`' or ' ' || text[^1] is '`' or ' ');
+        return requiresPadding
+            ? $"{delimiter} {text} {delimiter}"
+            : $"{delimiter}{text}{delimiter}";
+    }
+
+    private sealed record PatchTargetRenderModel(
+        IReadOnlyList<PatchCoverageLine> Targets,
+        int NotMeasuredCount,
+        IReadOnlyList<PatchCoverageLine> NotMeasuredSamples);
 
     private static object ToJson(CoverageMetric metric) => new
     {
@@ -2127,6 +2540,9 @@ internal static class CoverageGateReportWriter
     private static string EscapeMarkdownCell(string value)
     {
         return StripControls(value)
+            .Replace("\r", string.Empty, StringComparison.Ordinal)
+            .Replace("\n", string.Empty, StringComparison.Ordinal)
+            .Replace("\t", " ", StringComparison.Ordinal)
             .Replace("|", "\\|", StringComparison.Ordinal)
             .Replace("`", "\\`", StringComparison.Ordinal);
     }
@@ -2155,8 +2571,8 @@ internal static class CoverageGateReportWriter
 /// Validates coverage report output paths before report writers create or replace files.
 /// </summary>
 /// <remarks>
-/// The coverage gate writes only two report files, but it still refuses unsafe destinations so
-/// future run/merge cleanup behavior can share the same conservative policy.
+/// The coverage gate writes a fixed set of named report files, but it still refuses unsafe
+/// destinations so future run/merge cleanup behavior can share the same conservative policy.
 /// </remarks>
 internal static class CoverageOutputPathPolicy
 {
@@ -2232,7 +2648,7 @@ internal static class CoverageOutputPathPolicy
             : path;
     }
 
-    private static StringComparison GetPathComparison()
+    internal static StringComparison GetPathComparison()
     {
         return OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
             ? StringComparison.OrdinalIgnoreCase
