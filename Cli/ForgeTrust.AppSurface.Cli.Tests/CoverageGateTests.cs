@@ -3671,10 +3671,29 @@ public sealed class CoverageGateTests
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             async () => await RunGitAsync(temp.Path, "commit", "-m", "empty"));
 
-        Assert.Contains(
-            "git -c commit.gpgsign=false -c maintenance.auto=false -c gc.auto=0 commit -m empty failed:",
-            exception.Message,
-            StringComparison.Ordinal);
+        Assert.Contains("git -c commit.gpgsign=false commit -m empty failed:", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TempDirectory_Dispose_RetriesWindowsFileLocks()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var path = temp.WriteCoverage("<coverage />");
+        using var lockHandle = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+        var dispose = Task.Run(temp.Dispose);
+
+        await Task.Delay(100);
+        Assert.False(dispose.IsCompleted);
+
+        lockHandle.Dispose();
+        await dispose.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(Directory.Exists(temp.Path));
     }
 
     private static async Task RunGitAsync(string workingDirectory, params string[] arguments)
@@ -3691,13 +3710,6 @@ public sealed class CoverageGateTests
         {
             executedArguments.Add("-c");
             executedArguments.Add("commit.gpgsign=false");
-            // Git for Windows can run automatic maintenance after a commit and retain handles
-            // under .git/objects after the commit process exits. Test repositories are temporary,
-            // so disable maintenance and automatic GC to keep their cleanup deterministic.
-            executedArguments.Add("-c");
-            executedArguments.Add("maintenance.auto=false");
-            executedArguments.Add("-c");
-            executedArguments.Add("gc.auto=0");
         }
 
         foreach (var argument in arguments)
@@ -3922,6 +3934,10 @@ public sealed class CoverageGateTests
 
     private sealed class TempDirectory : IDisposable
     {
+        private const int MaxDeleteAttempts = 100;
+
+        private const int DeleteRetryDelayMilliseconds = 50;
+
         private TempDirectory(string path)
         {
             Path = path;
@@ -3948,9 +3964,20 @@ public sealed class CoverageGateTests
 
         public void Dispose()
         {
-            if (Directory.Exists(Path))
+            for (var attempt = 0; Directory.Exists(Path); attempt++)
             {
-                Directory.Delete(Path, recursive: true);
+                try
+                {
+                    Directory.Delete(Path, recursive: true);
+                }
+                catch (IOException) when (attempt < MaxDeleteAttempts - 1)
+                {
+                    Thread.Sleep(DeleteRetryDelayMilliseconds);
+                }
+                catch (UnauthorizedAccessException) when (attempt < MaxDeleteAttempts - 1)
+                {
+                    Thread.Sleep(DeleteRetryDelayMilliseconds);
+                }
             }
         }
     }
