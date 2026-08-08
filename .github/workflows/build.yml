@@ -100,6 +100,8 @@ jobs:
           candidate_image_manifest_digest="unavailable"
           image_id="unavailable"
           port=""
+          builder_name="appsurface-keycloak-theme-evidence"
+          builder_created=false
 
           write_artifacts() {
             mkdir -p "$artifact_directory"
@@ -146,6 +148,9 @@ jobs:
             if [ -n "$container_id" ]; then
               docker rm --force "$container_id" >/dev/null 2>&1 || true
             fi
+            if [ "$builder_created" = true ]; then
+              docker buildx rm "$builder_name" >/dev/null 2>&1 || true
+            fi
             write_artifacts
             exit "$exit_code"
           }
@@ -163,6 +168,11 @@ jobs:
             status="not-run"
             fail ASKEYC019 docker "Docker Engine is unavailable; not-run cannot satisfy the release gate."
           }
+          docker buildx create --name "$builder_name" --driver docker-container --use >/dev/null \
+            || fail ASKEYC018 setup-builder "The OCI-export Buildx builder could not be created."
+          builder_created=true
+          docker buildx inspect --bootstrap >/dev/null \
+            || fail ASKEYC018 setup-builder "The OCI-export Buildx builder could not be started."
 
           mkdir -p "$context/themes/appsurface-sample"
           cp -R examples/auth-aspire-keycloak-apphost/themes/appsurface-sample/. "$source_directory/"
