@@ -19,7 +19,7 @@ PASS canary=lab.proof attempts=1 elapsed=...
 Named-canary lab 'pass' scenario verified safely.
 ```
 
-The verifier is a POSIX convenience path, not a new product surface. It builds the lab and source CLI before starting the local host, cleans up the local child process, and does not print credentials, markers, marker fingerprints, endpoint bodies, application payloads, or local logs. It supplies trigger headers through curl's standard input, so they are not expanded into curl process arguments.
+The verifier is a POSIX convenience path, not a new product surface. It builds the lab and source CLI before starting the local host, cleans up the local child process, and does not print credentials, markers, marker fingerprints, endpoint bodies, application payloads, or local logs. If the local host cannot start or bind, the trigger fails, or the CLI returns an unexpected terminal result, it preserves the local diagnostic log and prints only its path; inspect and remove that file locally, and do not share its contents. It supplies trigger headers through curl's standard input, so they are not expanded into curl process arguments.
 It allows up to two minutes for the loopback bind after that build, but stops earlier when the child process exits.
 
 ## What runs where
@@ -44,7 +44,7 @@ Use this path when you want to inspect the integration shape. It keeps every sec
 (
 set -eu
 set +x
-export NAMED_CANARY_LAB_OPERATOR_TOKEN="local-operator-$(date +%s)-$$"
+export NAMED_CANARY_LAB_OPERATOR_TOKEN="$(LC_ALL=C od -An -N 32 -tx1 /dev/urandom | tr -d '[:space:]')"
 export NAMED_CANARY_LAB_MARKER="local-marker-$(date +%s)-$$"
 export NAMED_CANARY_LAB_FRESH_SINCE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -176,6 +176,8 @@ For a quick local check, run `bash examples/named-canary-lab/verify.sh pending` 
 | Stale proof | `ASCAN403`, exit `3` | Create fresh proof after the caller boundary. | old proof content, marker fingerprint, correlation identifier |
 | Application-owned failure | `ASCAN403`, exit `3` | Investigate through your protected operations surface. | payload, exception text, unbounded logs |
 | Authorization or protocol problem | `ASCAN404`, exit `4` | Correct the host policy or request shape. | credential, authorization header, response body |
+| Local host does not start or bind | verifier exit `3` | Review and remove its retained local diagnostic log. | the log contents, credential, marker, request headers |
+| Trigger failure or unexpected CLI exit | verifier exit `4` | Review and remove its retained local diagnostic log. | the log contents, credential, marker, request headers |
 
 The existing CLI writes a bounded diagnostic, terminal result, next action, and documentation link. It does not render marker or credential values. Keep shell tracing disabled around secret-bearing commands and configure request logging so it does not capture the authorization or canary-marker headers.
 

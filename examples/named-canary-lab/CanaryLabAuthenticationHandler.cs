@@ -28,7 +28,7 @@ internal sealed class CanaryLabAuthenticationHandler : AuthenticationHandler<Aut
     {
         var authorization = Request.Headers.Authorization.ToString();
         const string prefix = "Bearer ";
-        if (!authorization.StartsWith(prefix, StringComparison.Ordinal)
+        if (!authorization.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
             || authorization.Length <= prefix.Length
             || authorization.Length > prefix.Length + MaximumOperatorTokenLength)
         {

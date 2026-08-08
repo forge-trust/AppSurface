@@ -14,7 +14,29 @@ base_url="http://127.0.0.1:$port"
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/named-canary-lab.XXXXXX")"
 app_log="$work_dir/app.log"
 app_pid=""
-operator_token="local-operator-$(date +%s)-$$"
+retain_diagnostics=false
+
+cleanup() {
+  if [[ -n "$app_pid" ]] && kill -0 "$app_pid" 2>/dev/null; then
+    kill "$app_pid" 2>/dev/null || true
+    wait "$app_pid" 2>/dev/null || true
+  fi
+
+  if [[ "$retain_diagnostics" != true ]]; then
+    rm -rf "$work_dir"
+  fi
+}
+trap cleanup EXIT INT TERM
+
+fail_with_diagnostics() {
+  local exit_code="$1"
+  local message="$2"
+  retain_diagnostics=true
+  echo "$message Local diagnostics remain at $app_log. Review and remove them locally; do not share their contents." >&2
+  exit "$exit_code"
+}
+
+operator_token="$(LC_ALL=C od -An -N 32 -tx1 /dev/urandom | tr -d '[:space:]')"
 marker="local-marker-$(date +%s)-$$"
 
 case "$scenario" in
@@ -26,15 +48,6 @@ case "$scenario" in
     exit 2
     ;;
 esac
-
-cleanup() {
-  if [[ -n "$app_pid" ]] && kill -0 "$app_pid" 2>/dev/null; then
-    kill "$app_pid" 2>/dev/null || true
-    wait "$app_pid" 2>/dev/null || true
-  fi
-  rm -rf "$work_dir"
-}
-trap cleanup EXIT INT TERM
 
 dotnet build "$lab_project" --nologo
 dotnet build "$cli_project" --nologo
@@ -53,20 +66,18 @@ for ((attempt = 0; attempt < 1200; attempt++)); do
   fi
 
   if ! kill -0 "$app_pid" 2>/dev/null; then
-    echo "The named-canary lab did not start. Inspect its local log before sharing it." >&2
-    exit 3
+    fail_with_diagnostics 3 "The named-canary lab did not start."
   fi
 
   sleep 0.1
 done
 
 if ! curl --silent --show-error --fail "$base_url/" >/dev/null 2>&1; then
-  echo "The named-canary lab did not become reachable before the local deadline." >&2
-  exit 3
+  fail_with_diagnostics 3 "The named-canary lab did not become reachable before the local deadline."
 fi
 
 fresh_since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-curl --silent --show-error --fail \
+if ! curl --silent --show-error --fail \
   --request POST \
   --config - \
   --output /dev/null \
@@ -74,6 +85,9 @@ curl --silent --show-error --fail \
 header = "Authorization: Bearer $operator_token"
 header = "X-AppSurface-Canary-Marker: $marker"
 EOF
+then
+  fail_with_diagnostics 4 "The named-canary lab trigger request failed."
+fi
 
 set +e
 APPSURFACE_CANARY_TOKEN="$operator_token" \
@@ -92,8 +106,7 @@ actual_exit=$?
 set -e
 
 if [[ "$actual_exit" -ne "$expected_exit" ]]; then
-  echo "The verifier received an unexpected terminal exit code." >&2
-  exit 4
+  fail_with_diagnostics 4 "The verifier received an unexpected terminal exit code."
 fi
 
 echo "Named-canary lab '$scenario' scenario verified safely."

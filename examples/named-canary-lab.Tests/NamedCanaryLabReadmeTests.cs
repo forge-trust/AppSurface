@@ -13,6 +13,7 @@ public sealed class NamedCanaryLabReadmeTests
         Assert.Contains("### PowerShell", readme, StringComparison.Ordinal);
         Assert.Contains("trap cleanup 0 INT TERM", readme, StringComparison.Ordinal);
         Assert.Contains("The named-canary lab did not become reachable before the local deadline.", readme, StringComparison.Ordinal);
+        Assert.Contains("it preserves the local diagnostic log and prints only its path", readme, StringComparison.Ordinal);
         Assert.Contains("allows up to two minutes for the loopback bind after that build", readme, StringComparison.Ordinal);
         Assert.Contains("## Deterministic local scenarios", readme, StringComparison.Ordinal);
         Assert.Contains("ASCAN406", readme, StringComparison.Ordinal);
@@ -30,6 +31,10 @@ public sealed class NamedCanaryLabReadmeTests
 
         var verifier = File.ReadAllText(Path.Join(FindRepositoryRoot(), "examples", "named-canary-lab", "verify.sh"));
         Assert.Contains("--config -", verifier, StringComparison.Ordinal);
+        Assert.Contains("od -An -N 32 -tx1 /dev/urandom", verifier, StringComparison.Ordinal);
+        Assert.Contains("fail_with_diagnostics", verifier, StringComparison.Ordinal);
+        Assert.Contains("Local diagnostics remain at $app_log.", verifier, StringComparison.Ordinal);
+        Assert.Contains("The verifier received an unexpected terminal exit code.", verifier, StringComparison.Ordinal);
         Assert.DoesNotContain("--header \"Authorization:", verifier, StringComparison.Ordinal);
     }
 

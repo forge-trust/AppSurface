@@ -150,20 +150,34 @@ public sealed class NamedCanaryLabEndpointTests
         Assert.False(NamedCanaryLabApp.IsValidMarker(new string('\ud800', 1)));
     }
 
-    [Theory]
-    [InlineData("Bearer ")]
-    [InlineData("bearer operator-token-sentinel")]
-    public async Task CanaryRoute_RejectsEmptyOrCaseMismatchedBearerCredentials(string authorization)
+    [Fact]
+    public async Task CanaryRoute_RejectsEmptyBearerCredentials()
     {
         await using var host = await CreateHostAsync(CanaryLabScenario.Pass);
         var client = host.Client;
         using var request = CanaryRequest(DateTimeOffset.UtcNow.AddMinutes(-1));
         request.Headers.Remove("Authorization");
-        request.Headers.TryAddWithoutValidation("Authorization", authorization);
+        request.Headers.TryAddWithoutValidation("Authorization", "Bearer ");
 
         using var response = await client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("bearer")]
+    [InlineData("BEARER")]
+    public async Task CanaryRoute_AcceptsCaseInsensitiveBearerSchemes(string scheme)
+    {
+        await using var host = await CreateHostAsync(CanaryLabScenario.Pass);
+        var client = host.Client;
+        using var request = CanaryRequest(DateTimeOffset.UtcNow.AddMinutes(-1));
+        request.Headers.Remove("Authorization");
+        request.Headers.TryAddWithoutValidation("Authorization", $"{scheme} {Token}");
+
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
     }
 
     [Fact]
