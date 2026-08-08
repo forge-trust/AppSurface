@@ -1415,11 +1415,11 @@ Environment variable spelling follows the normal double-underscore configuration
 
 Theme validation is part of the public contract. `Theme`, `Theme:Colors`, and `Theme:Layout` must not be null. Color values must be CSS hex colors, not CSS functions, variables, color names, or style declarations. Contrast failures name the config path, configured value, required ratio, tested preset background, and a fix hint so maintainers can correct the value without inspecting generated CSS.
 
-Use theme options when the host wants branded docs without owning views. `AppSurfaceDark` also becomes the bridge to a registered shared AppSurface theme pair; see [Theme pairs migration](#theme-pairs-migration). Do not use these options for arbitrary text or surface overrides, selector-level CSS compatibility, external theme packages, or a bespoke documentation template. Static exports and published release archives freeze the resolved theme variables in exported HTML, so host config changes do not rewrite already-exported archives.
+Use theme options when the host wants branded docs without owning views. `AppSurfaceDark` is the default Docs-local preset and also the bridge to a registered shared AppSurface theme pair; see [Theme pairs migration](#theme-pairs-migration). `GraphiteDark` remains a separate Docs-local fixed-dark preset. Do not use these options for arbitrary text or surface overrides, selector-level CSS compatibility, external theme packages, or a bespoke documentation template. Static exports and published release archives freeze the resolved theme variables in exported HTML, so host config changes do not rewrite already-exported archives.
 
 ### Theme pairs migration
 
-Docs is a first-class theme-pairs surface. Keep the existing `AppSurfaceDark` preset (the default), then register the shared pair and Web adapter before `AddAppSurfaceDocs()` runs:
+Docs is a first-class theme-pairs surface. Keep `AppSurfaceDark` as the Docs preset (it remains the default); do not configure the Docs-local `GraphiteDark` preset for this bridge. Register the evidence-gated shared Graphite pair, then the Web adapter, before `AddAppSurfaceDocs()` runs:
 
 ```csharp
 using ForgeTrust.AppSurface.Docs;
@@ -1428,31 +1428,34 @@ using ForgeTrust.AppSurface.Theming;
 
 services.AddAppSurfaceTheming(options =>
 {
-    options.DefaultTheme = new AppSurfaceThemeId("appsurface");
+    options.DefaultTheme = new AppSurfaceThemeId("graphite");
     options.DefaultMode = AppSurfaceThemeMode.System;
-    options.Pairs.Add(AppSurfaceThemePair.AppSurface());
+    options.Pairs.Add(AppSurfaceThemePair.Graphite());
 });
 services.AddAppSurfaceWebTheming();
 services.AddAppSurfaceDocs();
 ```
 
-To offer the browser-local appearance picker demonstrated by the Docs consumer fixture, replace the explicit Web call with the opt-in preference adapter before `AddAppSurfaceDocs()`:
+The shared Graphite pair supplies Light/Dark semantic tokens to the bridge; the Docs package keeps its `--docs-*` variables internal and maps them to those roles. The registration-time token validation covers the applicable WCAG contrast thresholds for both branches. If the host deliberately overrides the Docs layout or resolver and bypasses this ordering, it owns the resulting unsafe fallback and must restore the complete Web root/head plus Docs-critical theme mapping.
+
+To offer the browser-local appearance picker demonstrated by the Docs consumer fixture, replace the explicit Web call with the opt-in preference adapter before `AddAppSurfaceDocs()`. This browser-local choice is independent of the shared pair and never selects the Docs-local `GraphiteDark` preset:
 
 ```csharp
 services.AddAppSurfaceTheming(options =>
 {
-    options.DefaultTheme = new AppSurfaceThemeId("appsurface");
-    options.Pairs.Add(AppSurfaceThemePair.AppSurface());
+    options.DefaultTheme = new AppSurfaceThemeId("graphite");
+    options.DefaultMode = AppSurfaceThemeMode.System;
+    options.Pairs.Add(AppSurfaceThemePair.Graphite());
 });
 services.AddAppSurfaceWebThemePreferences(options => options.StorageKey = "docs-theme");
 services.AddAppSurfaceDocs();
 ```
 
-This keeps one canonical page and one static tree per Docs version. It is origin-scoped browser storage only: Light and Dark never change Docs routes, archive routes, canonical metadata, raw Markdown downloads, cookies, account state, cache keys, or server rendering. When Docs uses the shared `AppSurfaceDark` bridge, the layout includes a hidden native `System`/`Light`/`Dark` radio group that the opt-in bootstrap reveals after binding. The fixed `GraphiteDark` compatibility preset stays dark and deliberately omits that control; hosts that do not opt in also retain the legacy dark behavior. See the [Web preference guide](../ForgeTrust.AppSurface.Web/README.md#browser-local-theme-preferences) for the precedence, localizable status event, no-script behavior, privacy boundary, forced-colors guidance, and rollback.
+This keeps one canonical page and one static tree per Docs version. It is origin-scoped browser storage only: Light and Dark never change Docs routes, archive routes, canonical metadata, raw Markdown downloads, cookies, account state, cache keys, or server rendering. When Docs uses the shared pair through the default `AppSurfaceDark` bridge, the layout includes a hidden native `System`/`Light`/`Dark` radio group that the opt-in bootstrap reveals after binding. The fixed `GraphiteDark` compatibility preset stays dark and deliberately omits that control; hosts that do not opt in also retain the legacy dark behavior. See the [Web preference guide](../ForgeTrust.AppSurface.Web/README.md#browser-local-theme-preferences) for the precedence, localizable status event, no-script behavior, privacy boundary, forced-colors guidance, and rollback.
 
 | Before | After |
 | --- | --- |
-| `AppSurfaceDark` produced only the established dark Docs variable graph. | It maps Docs-owned surfaces, code tokens, search states, tables, archive/status pages, and focus treatment to the shared System/Light/Dark semantic branch while keeping Docs variables internal. |
+| `AppSurfaceDark` produced only the established dark Docs variable graph. | It remains the default Docs preset and maps Docs-owned surfaces, code tokens, search states, tables, archive/status pages, and focus treatment to the shared Graphite System/Light/Dark semantic branch while keeping Docs variables internal. |
 | `GraphiteDark` was a dark preset. | It remains a Docs-local dark compatibility preset; it is not a shared pair. |
 | `#rgb` color overrides were accepted. | They remain accepted and apply only to the supported Docs accent/link roles. Shared role values remain strict `#RRGGBB`. When a rendered branch cannot meet the documented contrast threshold, Docs keeps the safe semantic pair role instead of emitting the override; browser-local preferences therefore validate every Light and Dark branch, even if the host default is fixed. |
 
