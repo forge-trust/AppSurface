@@ -373,6 +373,14 @@ public sealed class PostgreSqlSchemaIntegrationTests
         Assert.True(
             accepted.ExitCode == 0,
             $"Role recipe failed with exit {accepted.ExitCode}. stdout: {accepted.Stdout} stderr: {accepted.Stderr}");
+        await using (var tracePointerPrivileges = dataSource.CreateCommand(
+            """
+            SELECT has_column_privilege('durable_runtime', 'appsurface_durable.flow_command', 'trace_context_id', 'UPDATE')
+                   AND has_column_privilege('durable_runtime', 'appsurface_durable.flow_history', 'trace_context_id', 'UPDATE');
+            """))
+        {
+            Assert.True((bool)(await tracePointerPrivileges.ExecuteScalarAsync())!);
+        }
         await using (var ownership = dataSource.CreateCommand(
             """
             SELECT count(*) = 0
@@ -600,6 +608,8 @@ public sealed class PostgreSqlSchemaIntegrationTests
                                         'suspension_descriptor', 'suspended_from_state', 'revision',
                                         'scope_generation', 'runtime_epoch', 'trace_context_id'
                                     )
+                                    OR column_value.relname IN ('flow_command', 'flow_history')
+                                    AND column_value.attname = 'trace_context_id'
                                     OR column_value.relname = 'flow_wait'
                                     AND column_value.attname IN
                                         ('state', 'resolved_revision', 'resolved_at', 'suspension_descriptor', 'updated_at',
