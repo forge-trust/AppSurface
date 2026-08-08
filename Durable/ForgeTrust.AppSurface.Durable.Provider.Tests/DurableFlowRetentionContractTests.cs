@@ -16,6 +16,39 @@ public sealed class DurableFlowRetentionContractTests
         "2222222222222222222222222222222222222222222222222222222222222222");
 
     [Fact]
+    public void Public_retention_enums_should_keep_stable_numeric_values()
+    {
+        Assert.Equal(0, (int)DurableRetentionAssessmentStatus.Safe);
+        Assert.Equal(1, (int)DurableRetentionAssessmentStatus.Blocked);
+        Assert.Equal(2, (int)DurableRetentionAssessmentStatus.Indeterminate);
+
+        Assert.Equal(0, (int)DurableRetentionAssessmentReason.Safe);
+        Assert.Equal(1, (int)DurableRetentionAssessmentReason.FlowNotFound);
+        Assert.Equal(2, (int)DurableRetentionAssessmentReason.FlowNotTerminal);
+        Assert.Equal(3, (int)DurableRetentionAssessmentReason.RepairRequired);
+        Assert.Equal(4, (int)DurableRetentionAssessmentReason.ActiveFlowDependency);
+        Assert.Equal(5, (int)DurableRetentionAssessmentReason.ActiveChildWork);
+        Assert.Equal(6, (int)DurableRetentionAssessmentReason.UnknownDependency);
+        Assert.Equal(7, (int)DurableRetentionAssessmentReason.ClosureLimitExceeded);
+        Assert.Equal(8, (int)DurableRetentionAssessmentReason.ArchiveLimitExceeded);
+        Assert.Equal(9, (int)DurableRetentionAssessmentReason.SourceChanged);
+        Assert.Equal(10, (int)DurableRetentionAssessmentReason.ProtocolUnsupported);
+
+        Assert.Equal(0, (int)DurableRetentionManifestState.Frozen);
+        Assert.Equal(1, (int)DurableRetentionManifestState.ArchiveReceiptRecorded);
+        Assert.Equal(2, (int)DurableRetentionManifestState.Verified);
+        Assert.Equal(3, (int)DurableRetentionManifestState.Held);
+        Assert.Equal(4, (int)DurableRetentionManifestState.Purged);
+
+        Assert.Equal(0, (int)DurableRetentionManifestCreateOutcome.Created);
+        Assert.Equal(1, (int)DurableRetentionManifestCreateOutcome.Duplicate);
+
+        Assert.Equal(0, (int)DurableRetentionMutationOutcome.Applied);
+        Assert.Equal(1, (int)DurableRetentionMutationOutcome.Duplicate);
+        Assert.Equal(2, (int)DurableRetentionMutationOutcome.AlreadyPurged);
+    }
+
+    [Fact]
     public void Assessment_and_manifest_requests_are_bounded_and_fingerprinted()
     {
         var assessment = CreateSafeAssessment();
