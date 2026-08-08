@@ -19,6 +19,18 @@ adopter package never depends on Provider. Production providers implement this p
 Ordinary applications and reusable modules should reference only `ForgeTrust.AppSurface.Durable`. This package does not
 provide PostgreSQL storage, migrations, polling, schedule execution, hosted services, endpoints, metrics, or tracing.
 
+## Slice 7 discovery boundary
+
+This SPI remains part of the source-only public preview; publication is held pending coordinated release evidence.
+Provider contracts describe activation and operator boundaries, but storage registration is passive and does not imply
+worker hosting. The PostgreSQL provider requires an explicit
+[`AddWorkerHost()` opt-in](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host) for continuous
+processing.
+
+An opted-in host validates schema compatibility and the active runtime epoch during startup, then fails closed when
+they are incompatible. Startup never applies DDL or rewrites migration history. The ordered schema and reconciliation
+flow is documented in the [Slice 7 Durable guide](../README.md#slice-7-discovery-and-reconciliation).
+
 ## Activation and broker evolution
 
 `IDurableRuntimePump` is the common bounded activation primitive for a continuously hosted loop, scheduled job,
@@ -78,7 +90,8 @@ PostgreSQL Work, and hosted-runtime codes.
 From the repository root, `./Durable/verify-packed-consumers.sh` packs both held packages and their local dependencies,
 then compiles and runs isolated adopter and provider consumers against only those packages.
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-Use the [package chooser](../../packages/README.md) for the machine-enforced publication hold. Versioned publication
-evidence and policy live in the [release hub](../../releases/README.md).
+This package has an explicitly experimental or publication-held contract. Do not treat it as a normal prerelease install; use the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for the current publication decision, proof requirements, and migration guidance.
+<!-- appsurface-release-guidance: end -->

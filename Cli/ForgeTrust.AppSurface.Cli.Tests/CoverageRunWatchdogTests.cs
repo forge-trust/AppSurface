@@ -653,6 +653,7 @@ public sealed class CoverageRunWatchdogTests
 
         output.ReleaseFirstWrite();
         await sink.WriteOutputAsync("queue-drained").WaitAsync(TimeSpan.FromSeconds(1));
+        await output.SecondWriteCompleted.WaitAsync(TimeSpan.FromSeconds(1));
 
         Assert.Contains("bounded-output", output.ReadString(), StringComparison.Ordinal);
         Assert.Contains("queue-drained", output.ReadString(), StringComparison.Ordinal);
@@ -1173,10 +1174,13 @@ public sealed class CoverageRunWatchdogTests
         private readonly MemoryStream _capture = new();
         private readonly TaskCompletionSource _firstWriteStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _releaseFirstWrite = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _secondWriteCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly object _sync = new();
         private int _writeCount;
 
         public Task FirstWriteStarted => _firstWriteStarted.Task;
+
+        public Task SecondWriteCompleted => _secondWriteCompleted.Task;
 
         public int WriteCount => Volatile.Read(ref _writeCount);
 
@@ -1229,6 +1233,11 @@ public sealed class CoverageRunWatchdogTests
             lock (_sync)
             {
                 _capture.Write(buffer.Span);
+            }
+
+            if (ordinal == 2)
+            {
+                _secondWriteCompleted.TrySetResult();
             }
         }
 

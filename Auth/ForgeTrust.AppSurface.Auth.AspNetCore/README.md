@@ -4,9 +4,11 @@
 
 Use this package when an ASP.NET Core app already owns authentication and authorization, but AppSurface modules need a shared request auth context or a named policy result expressed as `AppSurfaceAuthResult`.
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for current release risk, migration guidance, and readiness.
+<!-- appsurface-release-guidance: end -->
 
 Use the [AppSurface Auth adoption ladder](../../start-here/auth-adoption-ladder.md) when deciding whether this adapter, DevAuth, OIDC, Auth.Testing, or raw ASP.NET Core authentication is the right rung.
 

@@ -9,10 +9,11 @@ The Core library is designed to be lightweight and implementation-agnostic. It p
 - Manage **Dependency Graphs** between modules.
 - Provide a consistent **Startup Pipeline** (`AppSurfaceStartup`) that sits on top of the .NET Generic Host.
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../packages/README.md) and [release hub](../releases/README.md) for current release risk, migration guidance, and readiness.
-
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for current release risk, migration guidance, and readiness.
+<!-- appsurface-release-guidance: end -->
 ## Key Concepts
 
 - **`IAppSurfaceModule`**: The base interface for any unit of functionality that needs to register services or configure the application.

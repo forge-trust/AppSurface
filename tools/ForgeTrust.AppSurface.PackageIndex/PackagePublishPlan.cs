@@ -70,7 +70,8 @@ internal sealed class PackagePublishPlanResolver
                     entry.Manifest.ExpectedDependencyPackageIds.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
                     entry.Metadata.IsTool,
                     entry.Manifest.ToolCommandName ?? string.Empty,
-                    entry.Manifest.ReadinessBlocker ?? string.Empty))
+                    entry.Manifest.ReadinessBlocker ?? string.Empty,
+                    entry.Manifest.ReleaseGuidanceVariant ?? string.Empty))
                 .ToArray());
     }
 
@@ -207,6 +208,10 @@ internal sealed record PackagePublishPlan(IReadOnlyList<PackagePublishPlanEntry>
 /// Maintainer blocker that prevents publishing the coordinated artifact set while still allowing artifacts to be packed
 /// and validated.
 /// </param>
+/// <param name="ReleaseGuidanceVariant">
+/// Finite package README release-guidance variant whose canonical absolute links must survive package packing. It is
+/// empty for package entries without a managed release-guidance region.
+/// </param>
 internal sealed record PackagePublishPlanEntry(
     string ProjectPath,
     string PackageId,
@@ -214,4 +219,5 @@ internal sealed record PackagePublishPlanEntry(
     IReadOnlyList<string> ExpectedDependencyPackageIds,
     bool IsTool,
     string ToolCommandName = "",
-    string ReadinessBlocker = "");
+    string ReadinessBlocker = "",
+    string ReleaseGuidanceVariant = "");
