@@ -110,6 +110,8 @@ public sealed class CoverageRunOutputGuardSecurityTests
     [Theory]
     [InlineData(".appsurface-coverage-output", MarkerContents)]
     [InlineData("summary.txt", "external sentinel")]
+    [InlineData("coverage-patch-targets.json", "external sentinel")]
+    [InlineData("coverage-patch-targets.md", "external sentinel")]
     public void Prepare_ShouldRejectManagedFileLinkWithoutTouchingExternalFile(
         string managedFile,
         string externalContents)
@@ -223,6 +225,12 @@ public sealed class CoverageRunOutputGuardSecurityTests
             "coverage.json",
             "coverage-gate.json",
             "coverage-gate.md",
+            "coverage-patch-targets.json",
+            "coverage-patch-targets.md",
+            ".coverage-gate.json.0123456789abcdef0123456789abcdef.tmp",
+            ".coverage-gate.md.0123456789abcdef0123456789abcdef.tmp",
+            ".coverage-patch-targets.json.0123456789abcdef0123456789abcdef.tmp",
+            ".coverage-patch-targets.md.0123456789abcdef0123456789abcdef.tmp",
             "coverage-watchdog.json",
             "summary.txt",
             "timings.json",
@@ -239,6 +247,7 @@ public sealed class CoverageRunOutputGuardSecurityTests
 
         var wrongExtension = root.WriteFile("coverage/junit-old.txt", "must remain");
         var unrelated = root.WriteFile("coverage/unrelated.xml", "must remain");
+        var malformedGateTemporary = root.WriteFile("coverage/.coverage-gate.json.not-a-guid.tmp", "must remain");
         var patternedDirectory = root.CreateDirectory("coverage/test-results-directory.xml");
 
         CoverageRunOutputGuard.Prepare(output, root.Path, [], clean: true);
@@ -246,6 +255,7 @@ public sealed class CoverageRunOutputGuardSecurityTests
         Assert.All(knownFiles, file => Assert.False(File.Exists(TestPathUtils.PathUnder(output, file))));
         Assert.Equal("must remain", File.ReadAllText(wrongExtension));
         Assert.Equal("must remain", File.ReadAllText(unrelated));
+        Assert.Equal("must remain", File.ReadAllText(malformedGateTemporary));
         Assert.True(Directory.Exists(patternedDirectory));
     }
 

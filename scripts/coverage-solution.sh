@@ -90,6 +90,10 @@ if [[ "${BUILD_NO_RESTORE:-false}" == "true" ]]; then
   dotnet_run_args+=(--no-restore)
 fi
 
+if [[ "${COVERAGE_REQUIRE_NON_SANDBOX:-true}" == "true" ]]; then
+  dotnet_run_args+=(--require-non-sandbox)
+fi
+
 cd "$ROOT_DIR"
 dotnet "${dotnet_run_args[@]}"
 

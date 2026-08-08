@@ -99,6 +99,65 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         }
     }
 
+    /// <summary>
+    /// Validates that each named gate artifact is either absent or a regular file in the retained
+    /// output directory.
+    /// </summary>
+    /// <param name="artifactNames">Owned gate artifact filenames to validate.</param>
+    internal void ValidateOwnedGateArtifacts(IReadOnlyList<string> artifactNames)
+    {
+        ArgumentNullException.ThrowIfNull(artifactNames);
+        foreach (var artifactName in artifactNames)
+        {
+            ValidateOwnedGateArtifact(artifactName);
+        }
+    }
+
+    /// <summary>
+    /// Writes one owned gate artifact through the retained output directory.
+    /// </summary>
+    /// <param name="artifactName">Owned gate artifact filename.</param>
+    /// <param name="contents">Complete UTF-8 artifact content.</param>
+    /// <param name="cancellationToken">Cancellation token for the staged write.</param>
+    /// <returns>A task that completes after the staged artifact replaces the owned artifact.</returns>
+    internal Task WriteOwnedGateArtifactAsync(
+        string artifactName,
+        string contents,
+        CancellationToken cancellationToken)
+    {
+        ValidateOwnedGateArtifactName(artifactName);
+        ArgumentNullException.ThrowIfNull(contents);
+        return OperatingSystem.IsWindows()
+            ? WriteWindowsOwnedGateArtifactAsync(artifactName, contents, cancellationToken)
+            : WriteUnixOwnedGateArtifactAsync(artifactName, contents, cancellationToken);
+    }
+
+    /// <summary>
+    /// Removes one owned gate artifact through the retained output directory when it exists.
+    /// </summary>
+    /// <param name="artifactName">Owned gate artifact filename.</param>
+    internal void DeleteOwnedGateArtifact(string artifactName)
+    {
+        ValidateOwnedGateArtifactName(artifactName);
+        if (OperatingSystem.IsWindows())
+        {
+            var path = GetOwnedGateArtifactPath(artifactName);
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+
+            return;
+        }
+
+        var descriptor = _outputHandle!.DangerousGetHandle().ToInt32();
+        if (UnlinkAt(descriptor, artifactName, flags: 0) != 0
+            && Marshal.GetLastPInvokeError() != UnixNoEntry)
+        {
+            throw NativeIOException($"Unable to remove coverage gate artifact '{artifactName}'.");
+        }
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
@@ -675,6 +734,148 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
             ?? throw new IOException($"Output directory '{name}' was replaced while it was created.");
     }
 
+    private void ValidateOwnedGateArtifact(string artifactName)
+    {
+        ValidateOwnedGateArtifactName(artifactName);
+        if (OperatingSystem.IsWindows())
+        {
+            _ = GetOwnedGateArtifactPath(artifactName);
+            return;
+        }
+
+        using var artifact = OpenAt(_outputHandle!, artifactName, directory: false);
+        if (artifact is not null)
+        {
+            RejectUnixWrongKind(artifact, expectDirectory: false);
+        }
+    }
+
+    private async Task WriteUnixOwnedGateArtifactAsync(
+        string artifactName,
+        string contents,
+        CancellationToken cancellationToken)
+    {
+        var descriptor = _outputHandle!.DangerousGetHandle().ToInt32();
+        var temporaryName = $".{artifactName}.{Guid.NewGuid():N}.tmp";
+        var temporaryDescriptor = UnixOpenAt(
+            descriptor,
+            temporaryName,
+            UnixWriteOnly | UnixCreate | UnixExclusive | UnixNoFollow | UnixCloseOnExec,
+            Convert.ToUInt32("644", 8));
+        if (temporaryDescriptor < 0)
+        {
+            throw NativeIOException($"Unable to stage coverage gate artifact '{artifactName}'.");
+        }
+
+        using var temporaryHandle = new SafeFileHandle((nint)temporaryDescriptor, ownsHandle: true);
+        try
+        {
+            if (_unixFChmod(temporaryDescriptor, Convert.ToUInt32("644", 8)) != 0)
+            {
+                throw NativeIOException($"Unable to set permissions on staged coverage gate artifact '{artifactName}'.");
+            }
+
+            await using (var stream = new FileStream(
+                temporaryHandle,
+                FileAccess.Write,
+                bufferSize: 4096,
+                isAsync: false))
+            await using (var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+            {
+                await writer.WriteAsync(contents.AsMemory(), cancellationToken);
+            }
+
+            if (RenameAt(descriptor, temporaryName, descriptor, artifactName) != 0)
+            {
+                throw NativeIOException($"Unable to promote coverage gate artifact '{artifactName}'.");
+            }
+        }
+        finally
+        {
+            if (UnlinkAt(descriptor, temporaryName, flags: 0) != 0
+                && Marshal.GetLastPInvokeError() != UnixNoEntry)
+            {
+                throw NativeIOException($"Unable to clean up staged coverage gate artifact '{artifactName}'.");
+            }
+        }
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "Windows output leases deny competing directory writes; the Windows security lane exercises the platform-specific binding.")]
+    private async Task WriteWindowsOwnedGateArtifactAsync(
+        string artifactName,
+        string contents,
+        CancellationToken cancellationToken)
+    {
+        var path = GetOwnedGateArtifactPath(artifactName);
+        var temporaryPath = Path.Join(_outputPath, $".{artifactName}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await WriteTemporaryArtifactAsync(temporaryPath, contents, cancellationToken);
+            _ = GetOwnedGateArtifactPath(artifactName);
+            File.Move(temporaryPath, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "Windows output leases deny competing directory writes; the Windows security lane exercises the platform-specific binding.")]
+    private string GetOwnedGateArtifactPath(string artifactName)
+    {
+        var path = Path.GetFullPath(Path.Join(_outputPath, artifactName));
+        if (!string.Equals(Path.GetDirectoryName(path), _outputPath, CoverageOutputPathPolicy.GetPathComparison()))
+        {
+            throw new IOException($"Coverage report artifact '{artifactName}' is outside its output directory.");
+        }
+
+        if (Directory.Exists(path))
+        {
+            throw new IOException($"Coverage report artifact '{path}' must be a regular file, not a directory.");
+        }
+
+        if (new FileInfo(path).LinkTarget is not null)
+        {
+            throw new IOException($"Coverage report artifact '{path}' must not be a symbolic link.");
+        }
+
+        return path;
+    }
+
+    private static async Task WriteTemporaryArtifactAsync(
+        string temporaryPath,
+        string contents,
+        CancellationToken cancellationToken)
+    {
+        await using (var stream = new FileStream(
+            temporaryPath,
+            new FileStreamOptions
+            {
+                Mode = FileMode.CreateNew,
+                Access = FileAccess.Write,
+                Share = FileShare.None,
+                Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
+            }))
+        await using (var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+        {
+            await writer.WriteAsync(contents.AsMemory(), cancellationToken);
+        }
+    }
+
+    private static void ValidateOwnedGateArtifactName(string artifactName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(artifactName);
+        if (!string.Equals(Path.GetFileName(artifactName), artifactName, StringComparison.Ordinal)
+            || artifactName.Contains(Path.DirectorySeparatorChar)
+            || artifactName.Contains(Path.AltDirectorySeparatorChar))
+        {
+            throw new IOException($"Coverage report artifact '{artifactName}' is outside its output directory.");
+        }
+    }
+
     private static bool IsKnownOutputEntry(OutputEntry entry)
         => IsKnownOutputEntry(entry.Name, entry.IsDirectory);
 
@@ -684,7 +885,8 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     private static bool IsKnownOutputEntry(string name, bool isDirectory)
         => isDirectory
             ? name is "projects" or "reportgenerator"
-            : name is "coverage.cobertura.xml" or "coverage.json" or "coverage-gate.json" or "coverage-gate.md"
+            : name is "coverage.cobertura.xml" or "coverage.json" or CoverageGateArtifactNames.Json or CoverageGateArtifactNames.Markdown
+                or CoverageGateArtifactNames.PatchTargetsJson or CoverageGateArtifactNames.PatchTargetsMarkdown
                 or "coverage-watchdog.json" or "summary.txt" or "timings.json" or "reportgenerator-summary.txt"
                 or CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName or CoverageRunSlowTestDiagnosticsWriter.JsonFileName;
 
@@ -698,11 +900,32 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         => !isDirectory
             && ((name.StartsWith("junit-", StringComparison.Ordinal) || name.StartsWith("test-results-", StringComparison.Ordinal))
                 && name.EndsWith(".xml", StringComparison.Ordinal)
-                || IsSlowTestDiagnosticsTemporaryEntry(name));
+                || IsSlowTestDiagnosticsTemporaryEntry(name)
+                || IsCoverageGateTemporaryEntry(name));
 
     private static bool IsSlowTestDiagnosticsTemporaryEntry(string name)
         => IsSlowTestDiagnosticsTemporaryEntry(name, CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName)
             || IsSlowTestDiagnosticsTemporaryEntry(name, CoverageRunSlowTestDiagnosticsWriter.JsonFileName);
+
+    private static bool IsCoverageGateTemporaryEntry(string name)
+        => IsCoverageGateTemporaryEntry(name, CoverageGateArtifactNames.Json)
+            || IsCoverageGateTemporaryEntry(name, CoverageGateArtifactNames.Markdown)
+            || IsCoverageGateTemporaryEntry(name, CoverageGateArtifactNames.PatchTargetsJson)
+            || IsCoverageGateTemporaryEntry(name, CoverageGateArtifactNames.PatchTargetsMarkdown);
+
+    private static bool IsCoverageGateTemporaryEntry(string name, string artifactName)
+    {
+        var prefix = $".{artifactName}.";
+        const string suffix = ".tmp";
+        if (!name.StartsWith(prefix, StringComparison.Ordinal)
+            || !name.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var identifier = name[prefix.Length..^suffix.Length];
+        return Guid.TryParseExact(identifier, "N", out _);
+    }
 
     private static bool IsSlowTestDiagnosticsTemporaryEntry(string name, string artifactName)
     {

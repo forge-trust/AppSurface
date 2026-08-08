@@ -32,6 +32,65 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public void CoverageRunCommand_ShouldCreateRequestWithRequireNonSandbox()
+    {
+        var command = new CoverageRunCommand(CreateWorkflow(
+            new RecordingCoverageRunProcessRunner(),
+            new RecordingReportGenerator()))
+        {
+            RequireNonSandbox = true,
+        };
+
+        var request = command.CreateRequest();
+
+        Assert.True(request.RequireNonSandbox);
+    }
+
+    [Theory]
+    [InlineData("CODEX_SANDBOX")]
+    [InlineData("SANDBOX_MODE")]
+    [InlineData("IN_SANDBOX")]
+    [InlineData("IS_SANDBOX")]
+    public async Task RunAsync_RequireNonSandbox_ShouldFailBeforeDiscoveryOrOutputCleanup(string markerName)
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        var staleArtifact = repo.WriteFile("TestResults/coverage-merged/summary.txt", "stale summary");
+        repo.WriteFile("TestResults/coverage-merged/.appsurface-coverage-output", "AppSurface coverage output directory");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        var workflow = new CoverageRunWorkflow(
+            runner,
+            new RecordingReportGenerator(),
+            TimeProvider.System,
+            getEnvironmentVariable: name => name == markerName ? "seatbelt" : null);
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project], RequireNonSandbox: true),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("ASCOV116", exception.Message, StringComparison.Ordinal);
+        Assert.Contains(markerName, exception.Message, StringComparison.Ordinal);
+        Assert.Empty(runner.Commands);
+        Assert.Equal("stale summary", File.ReadAllText(staleArtifact));
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("false")]
+    [InlineData("off")]
+    [InlineData("no")]
+    public void CoverageRunSandboxGuard_ShouldIgnoreDisabledMarkerValues(string value)
+    {
+        var marker = CoverageRunSandboxGuard.GetMarkerName(
+            name => name == "CODEX_SANDBOX" ? value : null);
+
+        Assert.Null(marker);
+    }
+
+    [Fact]
     public async Task RunAsync_DryRun_ShouldListSlnxDiscoveryAndUniqueProjectSlugs()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
@@ -1155,6 +1214,8 @@ public sealed class CoverageRunTests
         repo.WriteFile("TestResults/coverage-merged/.appsurface-coverage-output", "AppSurface coverage output directory");
         var oldJunit = repo.WriteFile("TestResults/coverage-merged/junit-old.xml", "old junit");
         var oldProjectArtifact = repo.WriteFile("TestResults/coverage-merged/projects/old/coverage.cobertura.xml", "old project");
+        var oldPatchTargetsJson = repo.WriteFile("TestResults/coverage-merged/coverage-patch-targets.json", "old patch targets");
+        var oldPatchTargetsMarkdown = repo.WriteFile("TestResults/coverage-merged/coverage-patch-targets.md", "# Old patch targets");
         using var current = PushCurrentDirectory(repo.Path);
         var workflow = CreateWorkflow(new RecordingCoverageRunProcessRunner(), new RecordingReportGenerator());
         using var console = new FakeInMemoryConsole();
@@ -1165,6 +1226,8 @@ public sealed class CoverageRunTests
         Assert.True(result.Success);
         Assert.True(File.Exists(oldJunit));
         Assert.True(File.Exists(oldProjectArtifact));
+        Assert.True(File.Exists(oldPatchTargetsJson));
+        Assert.True(File.Exists(oldPatchTargetsMarkdown));
     }
 
     [Fact]
@@ -5029,7 +5092,8 @@ public sealed class CoverageRunTests
         TimeSpan? HeartbeatInterval = null,
         TimeSpan? NoProgressTimeout = null,
         CoverageRunWatchdogMode WatchdogMode = CoverageRunWatchdogMode.Off,
-        CoverageRunDriver CoverageDriver = CoverageRunDriver.Msbuild)
+        CoverageRunDriver CoverageDriver = CoverageRunDriver.Msbuild,
+        bool RequireNonSandbox = false)
         => new(
             SolutionPath,
             TestProjects ?? [],
@@ -5057,7 +5121,8 @@ public sealed class CoverageRunTests
             HeartbeatInterval ?? TimeSpan.Zero,
             NoProgressTimeout ?? TimeSpan.FromMinutes(10),
             WatchdogMode,
-            CoverageDriver);
+            CoverageDriver,
+            RequireNonSandbox);
 
     private static IDisposable PushCurrentDirectory(string path)
     {

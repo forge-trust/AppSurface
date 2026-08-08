@@ -196,6 +196,10 @@ overrides the comparison value with `HEAD^1` for its pull-request merge checkout
 evaluates exactly the tested merge tree. Set `COVERAGE_GATE_DIFF_BASE=` to run only the aggregate
 gate, as CI does for baseline builds.
 
+The repository lane requires a non-sandboxed host by default. Set
+`COVERAGE_REQUIRE_NON_SANDBOX=false` only when a restricted run is intentional. This marker check
+deliberately leaves ordinary CI and container hosts valid; see the [non-sandboxed runner reference](./Cli/ForgeTrust.AppSurface.Cli/README.md#require-a-non-sandboxed-runner).
+
 This command:
 - Runs each solution test project.
 - Leaves assembly scope to the public CLI and Coverlet defaults; the merged artifact
@@ -209,6 +213,9 @@ This command:
 - Writes slow-test diagnostics to `TestResults/coverage-merged/slow-test-diagnostics.md` and
   `TestResults/coverage-merged/slow-test-diagnostics.json`, including diagnostic aggregation
   overhead in seconds and as a percent of elapsed runner time at diagnostics generation.
+- When a patch source is configured, emits `coverage-patch-targets.json` and
+  `coverage-patch-targets.md` beside the other gate artifacts, even when no patch thresholds
+  are configured.
 - Uses the source AppSurface CLI and its package-owned ReportGenerator dependency for the default
   full-solution lane.
 - Gates at 95% line coverage and 85% branch coverage, plus 95% line and 85% branch coverage for
@@ -216,6 +223,20 @@ This command:
 - Keeps Codecov's patch status aligned with the repository's 95% patch-line gate through
   [`codecov.yml`](./codecov.yml) and `--patch-line-mode codecov`, with a 0.5-point tolerance; the
   local gate remains authoritative for patch branches.
+
+Patch target files are private local artifacts in `TestResults/coverage-merged`, which is already
+covered by the repository's existing [`TestResults` ignore rule](./.gitignore); they are
+intentionally not added as separate `.gitignore` entries. When the gate receives exactly one of
+`--diff-base`, `--diff-file`, or `--diff-stdin`, it refreshes both target files regardless of
+whether `--min-patch-line` or `--min-patch-branch` is present. An active patch comparison with an
+empty target queue means the patch is fully covered for the selected gate semantics; a nonpatch gate removes
+the two target files so an old queue cannot be mistaken for current work.
+
+For the local remediation loop, read the target brief, open each `path:line`, identify the
+relevant test project, run `dotnet test <project> --no-restore`, then run the full coverage lane
+and one final full `coverage gate`. The [CLI coverage-gate reference](./Cli/ForgeTrust.AppSurface.Cli/README.md#agent-actionable-patch-targets)
+documents the target semantics, `coverage run --no-clean` retention behavior, `ASCOV019`, and
+optional artifact-upload guidance.
 
 Private package-consuming repositories should use the public CLI runner instead of
 this repository's no-argument script. Start with this copy-pasteable path:
@@ -229,7 +250,7 @@ dotnet tool run appsurface coverage run --solution ./MyApp.slnx
 dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 85 --min-branch 75
 ```
 
-The `appsurface coverage run` command discovers `.sln`/`.slnx` test projects or accepts repeated `--test-project` values, runs Coverlet-instrumented projects, writes private local artifacts under `TestResults/coverage-merged`, and merges Cobertura through the CLI package's ReportGenerator dependency without reading the consumer repo's tool manifest. `--dry-run` performs the same collector capability preflight before tests or output cleanup, so it is the safe first command for a new repository. The default driver requires a direct `coverlet.collector` reference in every selected VSTest project and never falls back; native Microsoft Testing Platform projects are rejected, while `--coverage-driver msbuild` remains an explicit compatibility path. See [coverage driver selection](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection) for prerequisites, migration guidance, and pitfalls. Its [no-progress watchdog](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog) emits 30-second heartbeats by default, warns after 10 minutes without observable progress, and can perform bounded whole-process-tree cleanup with `--watchdog fail`. Solution-discovery consumers can use repeatable [`--exclude-test-project`](./Cli/ForgeTrust.AppSurface.Cli/README.md#exclude-discovered-test-projects) globs to omit selected test projects from coverage execution while leaving the solution build unchanged. Use explicit [`--include` and `--exclude` filters](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) only when a consumer owns that assembly-scope policy. No separate merge command is required for ordinary package consumers: `coverage run` produces `TestResults/coverage-merged/coverage.cobertura.xml` directly. Managed test results are opt-in with `--test-results junit`; this requires selected test projects to reference `JunitXml.TestLogger`. `--slow-test-diagnostics` implies managed JUnit results and writes `slow-test-diagnostics.md` and `.json` beside the merged coverage file. Use `appsurface coverage merge --source ./TestResults/coverage-shards --output ./TestResults/coverage-merged` when a matrix job or custom test workflow already produced shard files named `coverage.cobertura.xml`. The optional `appsurface coverage gate` command evaluates that merged Cobertura file locally, writes `coverage-gate.json` and `coverage-gate.md`, appends the Markdown report to `$GITHUB_STEP_SUMMARY` when GitHub Actions provides it, and fails with `ASCOV020` when line, branch, or configured patch coverage is below threshold. Patch coverage accepts exactly one source: `--diff-base` for local Git history, `--diff-file` for a CI-produced unified diff artifact, or `--diff-stdin` for piped unified diff text. External diff artifacts are private local inputs, are bounded at 20 MiB, and fail closed when non-empty content is not unified diff text. The coverage commands are intentionally private-by-default: they do not upload coverage, call GitHub APIs, or store trends.
+The `appsurface coverage run` command discovers `.sln`/`.slnx` test projects or accepts repeated `--test-project` values, runs Coverlet-instrumented projects, writes private local artifacts under `TestResults/coverage-merged`, and merges Cobertura through the CLI package's ReportGenerator dependency without reading the consumer repo's tool manifest. `--dry-run` performs the same collector capability preflight before tests or output cleanup, so it is the safe first command for a new repository. The default driver requires a direct `coverlet.collector` reference in every selected VSTest project and never falls back; native Microsoft Testing Platform projects are rejected, while `--coverage-driver msbuild` remains an explicit compatibility path. See [coverage driver selection](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection) for prerequisites, migration guidance, and pitfalls. Its [no-progress watchdog](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog) emits 30-second heartbeats by default, warns after 10 minutes without observable progress, and can perform bounded whole-process-tree cleanup with `--watchdog fail`. Solution-discovery consumers can use repeatable [`--exclude-test-project`](./Cli/ForgeTrust.AppSurface.Cli/README.md#exclude-discovered-test-projects) globs to omit selected test projects from coverage execution while leaving the solution build unchanged. Use explicit [`--include` and `--exclude` filters](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) only when a consumer owns that assembly-scope policy. No separate merge command is required for ordinary package consumers: `coverage run` produces `TestResults/coverage-merged/coverage.cobertura.xml` directly. Managed test results are opt-in with `--test-results junit`; this requires selected test projects to reference `JunitXml.TestLogger`. `--slow-test-diagnostics` implies managed JUnit results and writes `slow-test-diagnostics.md` and `.json` beside the merged coverage file. Use `appsurface coverage merge --source ./TestResults/coverage-shards --output ./TestResults/coverage-merged` when a matrix job or custom test workflow already produced shard files named `coverage.cobertura.xml`. The optional `appsurface coverage gate` command evaluates that merged Cobertura file locally, writes `coverage-gate.json` and `coverage-gate.md`, and, when one patch source is supplied, also writes both `coverage-patch-targets.json` and `coverage-patch-targets.md`. It appends the Markdown report to `$GITHUB_STEP_SUMMARY` when GitHub Actions provides it, and fails with `ASCOV020` when line, branch, or configured patch coverage is below threshold. Patch coverage accepts exactly one source: `--diff-base` for local Git history, `--diff-file` for a CI-produced unified diff artifact, or `--diff-stdin` for piped unified diff text. External diff artifacts are private local inputs, are bounded at 20 MiB, and fail closed when non-empty content is not unified diff text. The coverage commands are intentionally private-by-default: they do not upload coverage, call GitHub APIs, or store trends.
 
 ### Focused and sharded coverage
 
