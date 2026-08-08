@@ -330,11 +330,25 @@ internal static class ReleaseEvidenceV2
     {
         var content = new Dictionary<string, string>(StringComparer.Ordinal);
         await AddIfExistsAsync(content, workspace.DisplayPath(workspace.ReleaseNotePath(version)), workspace.ReleaseNotePath(version), cancellationToken);
-        await AddIfExistsAsync(content, workspace.DisplayPath(workspace.ReleaseSidecarPath(version)), workspace.ReleaseSidecarPath(version), cancellationToken);
+        var sidecarPath = workspace.ReleaseSidecarPath(version);
+        var sidecarDisplayPath = workspace.DisplayPath(sidecarPath);
+        await AddIfExistsAsync(content, sidecarDisplayPath, sidecarPath, cancellationToken);
         await AddIfExistsAsync(content, workspace.DisplayPath(workspace.ReleaseManifestPath(version)), workspace.ReleaseManifestPath(version), cancellationToken);
         await AddIfExistsAsync(content, workspace.DisplayPath(workspace.CurrentReleasePath), workspace.CurrentReleasePath, cancellationToken);
         await AddIfExistsAsync(content, workspace.DisplayPath(workspace.CurrentReleaseSidecarPath), workspace.CurrentReleaseSidecarPath, cancellationToken);
         ValidateArtifactDigests(bundle, content, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle");
+        if (content.TryGetValue(sidecarDisplayPath, out var sidecarContent))
+        {
+            try
+            {
+                ReleaseSidecar.Parse(sidecarContent, sidecarDisplayPath).EnsurePrepared(version, sidecarDisplayPath);
+            }
+            catch (ReleaseToolException ex)
+            {
+                diagnostics.Add(ex.Diagnostic);
+            }
+        }
+
         if (content.TryGetValue(PackageReleaseLink.CoordinatedReleaseNotesPath, out var current))
         {
             ValidateCurrentPointer(bundle, version, current, diagnostics, "tools/ForgeTrust.AppSurface.Release/README.md#release-evidence-bundle");
