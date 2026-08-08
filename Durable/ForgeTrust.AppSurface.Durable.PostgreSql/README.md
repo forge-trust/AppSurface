@@ -335,8 +335,8 @@ depend on internal PostgreSQL claim/store types.
 
 ## Repair an ASDUR211 child-effect suspension
 
-Apply the additive [`0007_flow_repair.sql`](Migrations/0007_flow_repair.sql) migration, rerun the
-[`configure-postgresql-roles.sql`](../configure-postgresql-roles.sql) recipe, and deploy a compatible source-preview
+Apply the additive [`0007_flow_repair.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/Migrations/0007_flow_repair.sql) migration, rerun the
+[`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) recipe, and deploy a compatible source-preview
 binary before enabling repair callers. Existing suspensions that lack the V1 descriptor identity intentionally return
 `ASDUR214`; the migration does not invent a digest from an incomplete legacy shape.
 
