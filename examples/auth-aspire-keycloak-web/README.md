@@ -10,6 +10,13 @@ aspire run --apphost examples/auth-aspire-keycloak-apphost/AuthAspireKeycloakApp
 
 Open `http://localhost:5059`, sign in with local Keycloak, and view `/auth/proof/result`.
 
+The exact local Keycloak authority and client id opt in to saved OIDC tokens so Keycloak receives the required
+`id_token_hint` when the user signs out. Any overridden provider defaults to no token persistence unless it explicitly
+sets `Authentication:Oidc:SaveTokens=true`. This is a local sample-specific tradeoff; production hosts should review
+the token-persistence guidance in
+[`ForgeTrust.AppSurface.Auth.AspNetCore.Oidc`](../../Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md) before
+enabling `SaveTokens`.
+
 Probe endpoints:
 
 - `/auth/proof/status` returns unauthenticated JSON before login and authenticated JSON after login.
