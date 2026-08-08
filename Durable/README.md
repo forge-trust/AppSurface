@@ -26,10 +26,11 @@ public, testable contracts without friend access to the application package. The
 
 The application package registers only passive registries. A provider is selected explicitly by the host. The PostgreSQL
 source preview adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`,
-`0004_schedule_protocol`, `0005_runtime_heartbeat`, and `0006_flow_trace_context`) plus one-operation-at-a-time Work,
-Flow, and Work-first Schedule persistence with versioned W3C causal evidence. PostgreSQL registration remains passive;
-an application explicitly adds one bounded polling host through [`AddWorkerHost()`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host)
-only where it intends continuous activation. It adds no public endpoint, dashboard, or automatic migration.
+`0004_schedule_protocol`, `0005_runtime_heartbeat`, `0006_flow_trace_context`, and `0007_flow_repair`) plus
+one-operation-at-a-time Work, Flow, and Work-first Schedule persistence with versioned W3C causal evidence and
+evidence-first Flow repair. PostgreSQL registration remains passive; an application explicitly adds one bounded polling
+host through [`AddWorkerHost()`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host) only where it
+intends continuous activation. It adds no public endpoint, dashboard, or automatic migration.
 
 ## Slice 7 discovery and reconciliation
 
@@ -50,7 +51,8 @@ The forward-only deployment order is:
 4. `0004_schedule_protocol.sql`
 5. `0005_runtime_heartbeat.sql`
 6. `0006_flow_trace_context.sql`
-7. [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
+7. `0007_flow_repair.sql`
+8. [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
 
 The preferred production flow is to generate and review the Durable schema script offline, apply the reviewed
 migrations in the order above, apply the canonical role recipe, and run schema status/preflight before enabling the

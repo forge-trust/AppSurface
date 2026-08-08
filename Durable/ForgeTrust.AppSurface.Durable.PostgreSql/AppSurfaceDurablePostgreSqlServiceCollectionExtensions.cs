@@ -105,6 +105,14 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
                 provider.GetRequiredService<IDurablePayloadCodecRegistry>(),
                 runtime.WorkOptions);
         });
+        services.TryAddSingleton<IFlowRepairOperatorClient>(static provider =>
+        {
+            var runtime = provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>();
+            return new PostgreSqlDurableFlowRepairOperatorClient(
+                runtime.RuntimeDataSource,
+                provider.GetRequiredService<IDurableWorkRegistry>(),
+                runtime.WorkOptions);
+        });
         services.TryAddSingleton<IDurableScheduleClient>(static provider =>
         {
             var runtime = provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>();

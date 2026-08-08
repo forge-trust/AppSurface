@@ -89,6 +89,25 @@ public sealed record DurableFlowActivityCommand
         string workVersion,
         DurableProviderSafety providerSafety,
         DurableEncodedPayload work)
+        : this(
+            callsiteId,
+            resultContractVersion,
+            workName,
+            workVersion,
+            providerSafety,
+            work,
+            resultExpectation: null)
+    {
+    }
+
+    internal DurableFlowActivityCommand(
+        string callsiteId,
+        int resultContractVersion,
+        string workName,
+        string workVersion,
+        DurableProviderSafety providerSafety,
+        DurableEncodedPayload work,
+        DurableActivityResultExpectation? resultExpectation)
     {
         if (resultContractVersion < 1)
         {
@@ -106,6 +125,7 @@ public sealed record DurableFlowActivityCommand
         WorkVersion = DurableIdentifier.Require(workVersion, nameof(workVersion), 100);
         ProviderSafety = providerSafety;
         Work = work ?? throw new ArgumentNullException(nameof(work));
+        ResultExpectation = resultExpectation;
     }
 
     /// <summary>Gets the stable Flow callsite.</summary>
@@ -125,6 +145,29 @@ public sealed record DurableFlowActivityCommand
 
     /// <summary>Gets the encoded activity work.</summary>
     public DurableEncodedPayload Work { get; }
+
+    /// <summary>Gets the exact registered result identity persisted with a new activity wait.</summary>
+    internal DurableActivityResultExpectation? ResultExpectation { get; }
+}
+
+/// <summary>Captures the exact immutable result identity expected by one persisted Flow activity wait.</summary>
+internal sealed record DurableActivityResultExpectation(
+    string ContractId,
+    string SchemaVersion,
+    string CodecId,
+    DurableDataClassification Classification,
+    string RetentionPolicyId)
+{
+    internal static DurableActivityResultExpectation From(IDurablePayloadCodec codec)
+    {
+        ArgumentNullException.ThrowIfNull(codec);
+        return new DurableActivityResultExpectation(
+            codec.ContractName,
+            codec.ContractVersion,
+            $"{codec.ContractName}@{codec.ContractVersion}",
+            codec.Classification,
+            codec.RetentionPolicyId);
+    }
 }
 
 /// <summary>
@@ -321,6 +364,10 @@ public abstract class DurableFlowActivityBinding<TContext>
 
     /// <summary>Gets the immutable activity result contract version.</summary>
     public abstract int ResultContractVersion { get; }
+
+    /// <summary>Gets the exact registered payload identity expected of the activity result.</summary>
+    internal DurableActivityResultExpectation ResultExpectation =>
+        DurableActivityResultExpectation.From(WorkRegistration.ResultCodec);
 
     /// <summary>Encodes work from one evaluated activity request.</summary>
     public abstract DurableEncodedPayload EncodeWork(IFlowActivityRequest<TContext> activity);
@@ -646,7 +693,8 @@ public sealed class DurableFlowRegistration<TContext> : DurableFlowRegistration
                 binding.WorkRegistration.WorkName,
                 binding.WorkRegistration.WorkVersion,
                 binding.WorkRegistration.ProviderSafety,
-                binding.EncodeWork(transition.Activity));
+                binding.EncodeWork(transition.Activity),
+                binding.ResultExpectation);
         }
 
         return new DurableFlowEvaluationResult(

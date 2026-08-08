@@ -26,7 +26,8 @@ start a worker, open a connection, or apply DDL. Continuous processing requires 
 applies DDL or advances migration history.
 
 The production migration order is `0001_work_shared.sql`, `0002_forced_rls.sql`, `0003_flow_protocol.sql`,
-`0004_schedule_protocol.sql`, `0005_runtime_heartbeat.sql`, and `0006_flow_trace_context.sql`, followed by the
+`0004_schedule_protocol.sql`, `0005_runtime_heartbeat.sql`, `0006_flow_trace_context.sql`, and
+`0007_flow_repair.sql`, followed by the
 canonical [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
 role recipe. Prefer generating the Durable schema script offline, reviewing it, applying the forward-only migrations,
 running the role recipe, and completing schema status/preflight before enabling the worker host. The
@@ -65,11 +66,12 @@ Runtime mutations take a shared, transaction-scoped advisory fence before valida
 and epoch rotation take the exclusive package lock, so they wait for in-flight runtime transactions and prevent an old
 epoch from committing new durable state after rotation.
 
-Runtime roles never own schema or apply DDL. Apply the six migrations in numeric order: Work/shared state
+Runtime roles never own schema or apply DDL. Apply the seven migrations in numeric order: Work/shared state
 (`0001_work_shared.sql`),
 forced RLS and privilege revocation (`0002_forced_rls.sql`), Flow protocol persistence (`0003_flow_protocol.sql`), the
 Work-first Schedule ledger (`0004_schedule_protocol.sql`), the payload-free runtime heartbeat
-(`0005_runtime_heartbeat.sql`), and value-free Flow trace context (`0006_flow_trace_context.sql`). Applied schema is
+(`0005_runtime_heartbeat.sql`), value-free Flow trace context (`0006_flow_trace_context.sql`), and evidence-first
+Flow repair (`0007_flow_repair.sql`). Applied schema is
 forward-only; rolling application code back does not authorize destructive schema rollback. Execute generated SQL with a
 client that stops on the first error; `psql` callers must pass `-v ON_ERROR_STOP=1`.
 
@@ -118,11 +120,11 @@ services.AddAppSurfaceDurablePostgreSql(
     .AddWorkerHost();
 ```
 
-`AddAppSurfaceDurablePostgreSql` resolves Work, Flow, Schedule, schema, pump, health, and drain services but installs
-no `IHostedService`, opens no connection, and applies no migration. `AddWorkerHost()` is the standard continuous
-activation path. On startup it validates schema compatibility and the active epoch, but never applies DDL or advances
-migration history. It also validates that `TimeBudgetPerPass + ShutdownReserve` fits inside
-`HostOptions.ShutdownTimeout`; an invalid store or host configuration fails closed.
+`AddAppSurfaceDurablePostgreSql` resolves Work, Flow, Schedule, schema, pump, health, drain, and
+`IFlowRepairOperatorClient` services but installs no `IHostedService`, opens no connection, and applies no migration.
+`AddWorkerHost()` is the standard continuous activation path. On startup it validates schema compatibility and the
+active epoch, but never applies DDL or advances migration history. It also validates that `TimeBudgetPerPass +
+ShutdownReserve` fits inside `HostOptions.ShutdownTimeout`; an invalid store or host configuration fails closed.
 
 The host calls the same [`IDurableRuntimePump`](../ForgeTrust.AppSurface.Durable.Provider/README.md#activation-and-broker-evolution)
 used by an external activator. A Pass runs at most `MaximumItemsPerPass` committed Turns and rotates Work, Flow, and
@@ -141,12 +143,10 @@ and `Incompatible` are intentionally not ready. Snapshots contain aggregate coun
 scope, aggregate, connection, or trace values. At shutdown, local admission closes synchronously before the host
 persists drain; already-permitted Work follows its ordinary cancellation/recovery path rather than inventing a result.
 
-For a cold path, apply `0005_runtime_heartbeat.sql` with the migration owner, rerun
+For a cold path, apply every pending forward-only migration through `0007_flow_repair.sql` with the migration owner, rerun
 [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql),
 verify the active epoch and StoreId, deploy with `AddWorkerHost()` disabled, then enable it. Roll back application code
-by disabling the worker host and deploying a previous compatible binary; never destructively roll back a migration. If
-Issue #685 supplies an intervening migration first, renumber this migration to the next contiguous number while preserving
-its content and rerun the role recipe.
+by disabling the worker host and deploying a previous compatible binary; never destructively roll back a migration.
 
 ### Role recipe contract
 
@@ -356,6 +356,25 @@ release rolls back so later proof remains possible.
 The runtime pump, health, drain, and host composition are now public through the Provider SPI and PostgreSQL
 registration extensions. Applications must still keep authorization around all operator/control APIs and must not
 depend on internal PostgreSQL claim/store types.
+
+## Repair an ASDUR211 child-effect suspension
+
+Apply the additive [`0007_flow_repair.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/Migrations/0007_flow_repair.sql) migration, rerun the
+[`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) recipe, and deploy a compatible source-preview
+binary before enabling repair callers. Existing suspensions that lack the V1 descriptor identity intentionally return
+`ASDUR214`; the migration does not invent a digest from an incomplete legacy shape.
+
+An authorized host resolves `IFlowRepairOperatorClient`, calls `GetAssessmentAsync` with its trusted scope and Flow
+id, chooses a current payload-free candidate, then submits its matching static request factory. A completed-effect
+candidate proves a retained typed Work result; a no-effect candidate proves a named `manual_resolve` command with
+`resolution_kind = proven_not_applied`. The repair transaction locks scoped evidence, records one terminal repair
+command, and returns a receipt for an applied or exact-duplicate request. It never calls a Work executor. A stale
+assessment returns a refusal or race result instead of guessing.
+
+`ReleaseSuspensionAsync` is not a repair shortcut: V1 child-effect descriptors fail with `ASDUR211`. If no candidate
+is offered, retain the suspension, follow the relevant `ASDUR214`–`ASDUR216` remediation, and do not use direct SQL
+to change Work, wait, or Flow state. Rollback is code-level: disable repair callers or return to a compatible binary
+while retaining the forward-only additive schema.
 
 Read the normative [`Work protocol v1`](../work-protocol-v1.md), [`Flow protocol v1`](../flow-protocol-v1.md), [Durable Flow trace context v1](../flow-trace-context-v1.md), the
 [`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md), the

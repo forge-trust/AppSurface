@@ -99,7 +99,7 @@ PostgreSQL storage registration remains passive as well; continuous processing r
 When a host starts the opted-in worker, startup validates schema compatibility and the active runtime epoch. It fails
 closed when those values are incompatible and never applies DDL or advances migration history. See the
 [Slice 7 discovery and reconciliation guide](../README.md#slice-7-discovery-and-reconciliation) for the ordered
-`0001`–`0006` migration flow, canonical role recipe, preferred preflight sequence, recovery posture, and the
+`0001`–`0007` migration flow, canonical role recipe, preferred preflight sequence, recovery posture, and the
 implemented [`durable schema` CLI commands](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands).
 
 ## Public API by audience
