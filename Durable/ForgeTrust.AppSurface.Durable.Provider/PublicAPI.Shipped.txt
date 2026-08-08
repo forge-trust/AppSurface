@@ -189,7 +189,7 @@ type public enum ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutation
   enum-member Applied = 0
   enum-member Duplicate = 1
 type public abstract class ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest>
-  constructor protected ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId manifestId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, System.String actorId, System.String reasonCode, System.Int64 expectedLifecycleSequence)
+  constructor protected ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId manifestId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, System.String actorId, System.String reasonCode, System.Int64 expectedLifecycleSequence, ForgeTrust.AppSurface.Durable.DurableCommandFingerprint fingerprint)
   constructor protected ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest original)
   method protected virtual System.Boolean PrintMembers(System.Text.StringBuilder builder)
   method public System.Boolean Equals(System.Object? obj)
@@ -200,7 +200,7 @@ type public abstract class ForgeTrust.AppSurface.Durable.Provider.DurableRetenti
   method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest? right)
   method public virtual System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest? other)
   property protected virtual System.Type EqualityContract { get: protected; }
-  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint Fingerprint { get: public; init: protected; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint Fingerprint { get: public; }
   property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
   property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
   property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId ManifestId { get: public; }

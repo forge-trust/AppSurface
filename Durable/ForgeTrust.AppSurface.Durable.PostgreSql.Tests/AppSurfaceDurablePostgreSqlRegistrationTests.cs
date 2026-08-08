@@ -62,8 +62,17 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
             new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
             new PostgreSqlDurableScheduleOptions("durable_runtime"));
 
-        Assert.Throws<ArgumentException>(() => services.AddAppSurfaceDurablePostgreSqlFlowRetention(dispatcher));
-        Assert.Throws<ArgumentException>(() => services.AddAppSurfaceDurablePostgreSqlFlowRetention(runtime));
+        var fromDispatcher = Assert.Throws<ArgumentException>(
+            () => services.AddAppSurfaceDurablePostgreSqlFlowRetention(dispatcher));
+        var fromRuntime = Assert.Throws<ArgumentException>(
+            () => services.AddAppSurfaceDurablePostgreSqlFlowRetention(runtime));
+
+        Assert.Equal("retentionOperatorDataSource", fromDispatcher.ParamName);
+        Assert.Equal("retentionOperatorDataSource", fromRuntime.ParamName);
+        Assert.Contains("must be distinct", fromRuntime.Message, StringComparison.Ordinal);
+        Assert.Throws<ArgumentNullException>(() => services.AddAppSurfaceDurablePostgreSqlFlowRetention(null!));
+        Assert.Throws<ArgumentNullException>(
+            () => ((IServiceCollection)null!).AddAppSurfaceDurablePostgreSqlFlowRetention(runtime));
     }
 
     [Fact]
@@ -72,6 +81,7 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
         using var dispatcher = CreateDataSource();
         using var runtime = CreateDataSource();
         using var retention = CreateDataSource();
+        using var anotherRetention = CreateDataSource();
         var services = new ServiceCollection();
         services.AddAppSurfaceDurablePostgreSql(
             dispatcher,
@@ -81,6 +91,7 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
 
         Assert.Same(services, services.AddAppSurfaceDurablePostgreSqlFlowRetention(retention));
         Assert.Same(services, services.AddAppSurfaceDurablePostgreSqlFlowRetention(retention));
+        Assert.Throws<InvalidOperationException>(() => services.AddAppSurfaceDurablePostgreSqlFlowRetention(anotherRetention));
 
         using var provider = services.BuildServiceProvider();
         var concrete = provider.GetRequiredService<PostgreSqlDurableFlowRetentionClient>();

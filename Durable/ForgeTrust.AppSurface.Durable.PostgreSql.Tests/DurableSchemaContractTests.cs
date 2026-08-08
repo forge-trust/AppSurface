@@ -513,6 +513,11 @@ public sealed class DurableSchemaContractTests
         {
             Assert.Contains($"`ASDUR{code}`", diagnostics, StringComparison.Ordinal);
         }
+
+        for (var code = 214; code <= 217; code++)
+        {
+            Assert.Contains($"`ASDUR{code}`", diagnostics, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

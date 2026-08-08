@@ -494,9 +494,17 @@ public sealed class PostgreSqlDurableFlowRetentionClient : IDurableFlowRetention
                 """
                 SELECT EXISTS
                 (
-                    SELECT 1 FROM appsurface_durable.flow_wait
-                    WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id
-                      AND state IN ('active', 'suspended')
+                    SELECT 1 FROM appsurface_durable.flow_wait AS active_wait
+                    WHERE active_wait.scope_id = @scope_id AND active_wait.flow_instance_id = @flow_instance_id
+                      AND active_wait.state IN ('active', 'suspended')
+                      AND NOT EXISTS
+                      (
+                          SELECT 1
+                          FROM appsurface_durable.work AS child_work
+                          WHERE child_work.scope_id = active_wait.scope_id
+                            AND child_work.work_id = active_wait.child_work_id
+                            AND child_work.state NOT IN ('succeeded', 'succeeded_after_cancel_requested', 'failed', 'canceled_before_effect')
+                      )
                     UNION ALL
                     SELECT 1 FROM appsurface_durable.flow_timer
                     WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND state = 'scheduled'
@@ -677,10 +685,11 @@ public sealed class PostgreSqlDurableFlowRetentionClient : IDurableFlowRetention
             WriteBytes(stream, item.CanonicalBytes);
         }
 
-        var body = stream.ToArray();
+        var bodyLength = checked((int)stream.Length);
+        var body = stream.GetBuffer().AsSpan(0, bodyLength);
         var bodyHash = SHA256.HashData(body);
         WriteInt32(stream, items.Count);
-        WriteInt64(stream, body.Length);
+        WriteInt64(stream, bodyLength);
         WriteBytes(stream, bodyHash);
         var bytes = stream.ToArray();
         return new EncodedArchivePackage(
@@ -1066,9 +1075,12 @@ public sealed class PostgreSqlDurableFlowRetentionClient : IDurableFlowRetention
         + sizeof(int)
         + EncodedBytesByteCount(item.CanonicalBytes.Length);
 
+    // DurableRetentionManifestId.New() uses Guid.ToString("N") and therefore emits exactly 32 characters.
+    private const int DurableRetentionManifestIdentifierLength = 32;
+
     private static long ArchivePackageFixedByteCount(DurableScopeId scopeId, DurableFlowInstanceId flowInstanceId) =>
         4L
-        + EncodedStringByteCount(new string('0', 32))
+        + EncodedStringByteCount(new string('0', DurableRetentionManifestIdentifierLength))
         + EncodedStringByteCount(scopeId.Value)
         + EncodedStringByteCount(flowInstanceId.Value)
         + EncodedStringByteCount("durable-flow-closure-v1")

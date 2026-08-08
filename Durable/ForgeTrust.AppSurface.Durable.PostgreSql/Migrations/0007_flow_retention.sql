@@ -162,7 +162,8 @@ STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog, appsurface_durable, pg_temp
 AS $$
-    SELECT p_scope_id = nullif(current_setting('appsurface_durable.scope_id', true), '');
+    SELECT p_scope_id IS NOT NULL
+       AND p_scope_id = COALESCE(nullif(current_setting('appsurface_durable.scope_id', true), ''), '');
 $$;
 
 CREATE FUNCTION appsurface_durable.flow_retention_source_is_safe(p_scope_id text, p_flow_instance_id text)
@@ -171,6 +172,10 @@ LANGUAGE sql
 STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog, appsurface_durable, pg_temp
+SET TimeZone = 'UTC'
+SET DateStyle = 'ISO, MDY'
+SET IntervalStyle = 'postgres'
+SET extra_float_digits = '3'
 AS $$
     SELECT EXISTS
     (
@@ -209,6 +214,10 @@ LANGUAGE sql
 STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog, appsurface_durable, pg_temp
+SET TimeZone = 'UTC'
+SET DateStyle = 'ISO, MDY'
+SET IntervalStyle = 'postgres'
+SET extra_float_digits = '3'
 AS $$
     SELECT 10::smallint, 'flow_instance'::text, instance.flow_instance_id,
            encode(public.digest(convert_to(to_jsonb(instance)::text, 'UTF8'), 'sha256'), 'hex')::char(64), true
@@ -260,6 +269,10 @@ LANGUAGE sql
 STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog, appsurface_durable, pg_temp
+SET TimeZone = 'UTC'
+SET DateStyle = 'ISO, MDY'
+SET IntervalStyle = 'postgres'
+SET extra_float_digits = '3'
 AS $$
     WITH supplied AS
     (
@@ -286,6 +299,10 @@ LANGUAGE sql
 STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog, appsurface_durable, pg_temp
+SET TimeZone = 'UTC'
+SET DateStyle = 'ISO, MDY'
+SET IntervalStyle = 'postgres'
+SET extra_float_digits = '3'
 AS $$
     SELECT appsurface_durable.flow_retention_source_is_safe(p_scope_id, p_flow_instance_id)
        AND appsurface_durable.flow_retention_source_matches_items(
@@ -425,8 +442,8 @@ BEGIN
         (scope_id, retention_manifest_id, lifecycle_state, lifecycle_sequence)
     VALUES (p_scope_id, p_retention_manifest_id, 'frozen', 1);
     INSERT INTO appsurface_durable.flow_retention_manifest_event
-        (scope_id, retention_manifest_id, lifecycle_sequence, event_type)
-    VALUES (p_scope_id, p_retention_manifest_id, 1, 'manifest_created');
+        (scope_id, retention_manifest_id, lifecycle_sequence, event_type, command_id)
+    VALUES (p_scope_id, p_retention_manifest_id, 1, 'manifest_created', p_command_id);
     INSERT INTO appsurface_durable.flow_retention_command
         (scope_id, command_id, retention_manifest_id, command_type, fingerprint_schema, fingerprint_sha256,
          outcome, resulting_state, resulting_lifecycle_sequence)
@@ -467,6 +484,11 @@ DECLARE
 BEGIN
     IF NOT appsurface_durable.flow_retention_scope_is_current(p_scope_id) THEN
         RETURN QUERY SELECT 'scope_rejected'::text, NULL::text, NULL::bigint;
+        RETURN;
+    END IF;
+
+    IF p_operation IS NULL OR p_operation NOT IN ('archive_receipt', 'verify', 'hold', 'purge') THEN
+        RETURN QUERY SELECT 'lifecycle_rejected'::text, NULL::text, NULL::bigint;
         RETURN;
     END IF;
 
@@ -518,6 +540,12 @@ BEGIN
 
     IF p_operation = 'archive_receipt' THEN
         IF manifest_value.lifecycle_state <> 'frozen'
+            OR p_receipt_id IS NULL
+            OR p_receipt_package_schema IS NULL
+            OR p_receipt_package_sha256 IS NULL
+            OR p_receipt_closure_schema IS NULL
+            OR p_receipt_closure_sha256 IS NULL
+            OR p_receipt_record_count IS NULL
             OR p_receipt_closure_schema <> manifest_value.closure_schema
             OR p_receipt_closure_sha256 <> manifest_value.closure_sha256
             OR p_receipt_record_count <> manifest_value.closure_item_count THEN

@@ -288,8 +288,9 @@ public sealed class PostgreSqlFlowRetentionTests
             verifyPackage.PackageDigest,
             verifyManifest.ClosureDigest,
             verifyManifest.ClosureItemCount);
-        await client.RecordArchiveReceiptAsync(new DurableRetentionRecordArchiveReceiptRequest(
+        var verifyRecorded = await client.RecordArchiveReceiptAsync(new DurableRetentionRecordArchiveReceiptRequest(
             scope, verifyManifest.ManifestId, new DurableCommandId("retention-source-change-verify-receipt"), "operator", "archive", 1, verifyReceipt));
+        Assert.Equal(DurableRetentionManifestState.ArchiveReceiptRecorded, verifyRecorded.Value!.State);
         await UpdateCurrentNodeAsync(database.DataSource, scope, beforeVerify, "changed-before-verify");
         var rejectedVerify = await client.VerifyArchiveAsync(new DurableRetentionVerifyArchiveRequest(
             scope, verifyManifest.ManifestId, new DurableCommandId("retention-source-change-verify"), "operator", "verify", 2));
@@ -431,6 +432,55 @@ public sealed class PostgreSqlFlowRetentionTests
         var dependency = await client.AssessAsync(new DurableRetentionAssessmentRequest(scope, flow));
         Assert.Equal(DurableRetentionAssessmentStatus.Blocked, dependency.Value!.Status);
         Assert.Equal(DurableRetentionAssessmentReason.ActiveFlowDependency, dependency.Value.Reason);
+
+        await using (var removeDispatch = database.DataSource.CreateCommand(
+            "DELETE FROM appsurface_durable.flow_dispatch WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id;"))
+        {
+            removeDispatch.Parameters.AddWithValue("scope_id", scope.Value);
+            removeDispatch.Parameters.AddWithValue("flow_instance_id", flow.Value);
+            Assert.Equal(1, await removeDispatch.ExecuteNonQueryAsync());
+        }
+
+        const string childWorkId = "retention-active-child-work";
+        await using (var insertWork = database.DataSource.CreateCommand(
+            """
+            INSERT INTO appsurface_durable.work
+                (scope_id, work_id, activity_id, command_id, idempotency_key, work_name, work_version,
+                 contract_id, payload_schema_version, codec_id, payload, payload_sha256, payload_classification,
+                 payload_retention, request_fingerprint_schema, request_fingerprint_sha256, state, provider_safety,
+                 due_at, scope_generation, runtime_epoch, maximum_attempts, maximum_elapsed, backoff_algorithm,
+                 initial_retry_delay, maximum_retry_delay, lease_duration, lease_renewal_cadence, maximum_lease_lifetime)
+            VALUES
+                (@scope_id, @work_id, 'retention-child-activity', 'retention-child-command', 'retention-child-key',
+                 'retention.child', 'v1', 'retention.child.contract', 'v1', 'tests', decode('00', 'hex'),
+                 decode(repeat('00', 32), 'hex'), 'internal', 'default', 'retention-child.v1', repeat('0', 64),
+                 'pending', 'idempotent', clock_timestamp(), 1, gen_random_uuid(), 2, interval '1 minute',
+                 'exponential-v1', interval '1 second', interval '1 second', interval '10 seconds',
+                 interval '5 seconds', interval '1 minute');
+            """))
+        {
+            insertWork.Parameters.AddWithValue("scope_id", scope.Value);
+            insertWork.Parameters.AddWithValue("work_id", childWorkId);
+            Assert.Equal(1, await insertWork.ExecuteNonQueryAsync());
+        }
+
+        await using (var insertWait = database.DataSource.CreateCommand(
+            """
+            INSERT INTO appsurface_durable.flow_wait
+                (wait_id, scope_id, flow_instance_id, kind, state, registered_revision, callsite_id, child_work_id, result_contract_version)
+            VALUES
+                (gen_random_uuid(), @scope_id, @flow_instance_id, 'activity', 'active', 1, 'retention-child-wait', @child_work_id, 'v1');
+            """))
+        {
+            insertWait.Parameters.AddWithValue("scope_id", scope.Value);
+            insertWait.Parameters.AddWithValue("flow_instance_id", flow.Value);
+            insertWait.Parameters.AddWithValue("child_work_id", childWorkId);
+            Assert.Equal(1, await insertWait.ExecuteNonQueryAsync());
+        }
+
+        var childWorkDependency = await client.AssessAsync(new DurableRetentionAssessmentRequest(scope, flow));
+        Assert.Equal(DurableRetentionAssessmentStatus.Blocked, childWorkDependency.Value!.Status);
+        Assert.Equal(DurableRetentionAssessmentReason.ActiveChildWork, childWorkDependency.Value.Reason);
     }
 
     [Fact]
@@ -542,7 +592,7 @@ public sealed class PostgreSqlFlowRetentionTests
             """);
         command.Parameters.AddWithValue("scope_id", scope.Value);
         command.Parameters.AddWithValue("flow_instance_id", flow.Value);
-        await command.ExecuteNonQueryAsync();
+        Assert.InRange(await command.ExecuteNonQueryAsync(), 1, 2);
     }
 
     private static async ValueTask UpdateCurrentNodeAsync(NpgsqlDataSource dataSource, DurableScopeId scope, DurableFlowInstanceId flow, string nodeId)

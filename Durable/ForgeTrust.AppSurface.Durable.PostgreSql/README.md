@@ -226,31 +226,55 @@ var manifestResult = await retention.CreateManifestAsync(
         new DurableCommandId("retention-manifest-command"),
         assessmentResult.Value),
     cancellationToken);
+if (!manifestResult.IsSuccess)
+{
+    return;
+}
+
 var manifest = manifestResult.Value.Manifest;
-var package = (await retention.BuildArchivePackageAsync(
+var packageResult = await retention.BuildArchivePackageAsync(
     scopeId,
     manifest.ManifestId,
-    cancellationToken)).Value;
+    cancellationToken);
+if (!packageResult.IsSuccess)
+{
+    return;
+}
 
+var package = packageResult.Value;
 await archiveStore.WriteAsync(package, cancellationToken);
 var receipt = await archiveStore.CreateReceiptAsync(package, cancellationToken);
 var sequence = manifest.LifecycleSequence;
 
-await retention.RecordArchiveReceiptAsync(
+var receiptResult = await retention.RecordArchiveReceiptAsync(
     new DurableRetentionRecordArchiveReceiptRequest(
         scopeId, manifest.ManifestId, new DurableCommandId("retention-receipt-command"),
         actorId, "verified-flow-retention", sequence, receipt),
     cancellationToken);
-await retention.VerifyArchiveAsync(
+if (!receiptResult.IsSuccess)
+{
+    return;
+}
+
+var verifyResult = await retention.VerifyArchiveAsync(
     new DurableRetentionVerifyArchiveRequest(
         scopeId, manifest.ManifestId, new DurableCommandId("retention-verify-command"),
         actorId, "verified-flow-retention", sequence + 1),
     cancellationToken);
-await retention.PurgeAsync(
+if (!verifyResult.IsSuccess)
+{
+    return;
+}
+
+var purgeResult = await retention.PurgeAsync(
     new DurableRetentionPurgeRequest(
         scopeId, manifest.ManifestId, new DurableCommandId("retention-purge-command"),
         actorId, "verified-flow-retention", sequence + 2),
     cancellationToken);
+if (!purgeResult.IsSuccess)
+{
+    return;
+}
 ```
 
 Treat each `DurableOperationResult` as a checked boundary: handle `IsSuccess == false`, preserve the returned

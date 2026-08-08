@@ -142,6 +142,8 @@ public sealed class DurableFlowRetentionContractTests
             Scope, manifest.ManifestId, new DurableCommandId("retention-replay"), "operator", "archive", 1, receipt);
         var hold = new DurableRetentionHoldRequest(
             Scope, manifest.ManifestId, new DurableCommandId("retention-hold"), "operator", "hold", 2, true);
+        var release = new DurableRetentionHoldRequest(
+            Scope, manifest.ManifestId, new DurableCommandId("retention-release"), "operator", "hold", 2, false);
         var purge = new DurableRetentionPurgeRequest(
             Scope, manifest.ManifestId, new DurableCommandId("retention-purge"), "operator", "purge", 3);
 
@@ -149,6 +151,8 @@ public sealed class DurableFlowRetentionContractTests
         Assert.Equal(packageDigest, package.PackageDigest);
         Assert.Equal(DurableCommandFingerprintMatch.Exact, record.Fingerprint.Compare(replay.Fingerprint));
         Assert.Equal("appsurface.durable.flow.retention.hold.v1", hold.Fingerprint.SchemaId);
+        Assert.False(hold.PlaceHold == release.PlaceHold);
+        Assert.Equal(DurableCommandFingerprintMatch.Conflict, hold.Fingerprint.Compare(release.Fingerprint));
         Assert.Equal("appsurface.durable.flow.retention.purge.v1", purge.Fingerprint.SchemaId);
         Assert.Throws<ArgumentException>(() => new DurableArchivePackageV1(
             manifest,

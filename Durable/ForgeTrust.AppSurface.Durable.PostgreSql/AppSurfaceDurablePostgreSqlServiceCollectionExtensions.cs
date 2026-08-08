@@ -245,6 +245,16 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
                 nameof(retentionOperatorDataSource));
         }
 
+        var existing = services.LastOrDefault(static descriptor =>
+            descriptor.ServiceType == typeof(PostgreSqlDurableFlowRetentionMarker))?.ImplementationInstance
+            as PostgreSqlDurableFlowRetentionMarker;
+        if (existing is not null && !ReferenceEquals(existing.DataSource, retentionOperatorDataSource))
+        {
+            throw new InvalidOperationException(
+                "Flow retention is already registered with a different retention-operator data source. A service provider has exactly one retention configuration.");
+        }
+
+        services.TryAddSingleton(new PostgreSqlDurableFlowRetentionMarker(retentionOperatorDataSource));
         services.TryAddSingleton<PostgreSqlDurableFlowRetentionClient>(provider => new PostgreSqlDurableFlowRetentionClient(
             retentionOperatorDataSource,
             provider.GetRequiredService<IDurableRuntimeSchemaManager>()));
@@ -271,3 +281,6 @@ internal sealed record PostgreSqlDurableRuntimeRegistration(
 
 /// <summary>Marks that worker-host registration has occurred so repeated composition stays idempotent.</summary>
 internal sealed class PostgreSqlDurableHostedServiceMarker;
+
+/// <summary>Captures the retention-operator data source for duplicate registration detection.</summary>
+internal sealed record PostgreSqlDurableFlowRetentionMarker(NpgsqlDataSource DataSource);

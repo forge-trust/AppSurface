@@ -443,13 +443,14 @@ public sealed record DurableArchivePackageV1
             throw new ArgumentException("The package record count must equal the frozen manifest inventory.", nameof(recordCount));
         }
 
-        var actual = Convert.ToHexStringLower(SHA256.HashData(bytes.Span));
+        var copy = bytes.ToArray();
+        var actual = Convert.ToHexStringLower(SHA256.HashData(copy));
         if (!string.Equals(actual, packageDigest.Sha256, StringComparison.Ordinal))
         {
             throw new ArgumentException("The archive package digest does not match its canonical bytes.", nameof(packageDigest));
         }
 
-        Bytes = bytes.ToArray();
+        Bytes = copy;
         RecordCount = recordCount;
     }
 
@@ -528,11 +529,13 @@ public abstract record DurableRetentionMutationRequest
         DurableCommandId commandId,
         string actorId,
         string reasonCode,
-        long expectedLifecycleSequence)
+        long expectedLifecycleSequence,
+        DurableCommandFingerprint fingerprint)
     {
         ProviderContractValidation.Require(scopeId, nameof(scopeId));
         ProviderContractValidation.Require(manifestId.Value, nameof(manifestId), 200);
         ProviderContractValidation.Require(commandId, nameof(commandId));
+        ArgumentNullException.ThrowIfNull(fingerprint);
         if (expectedLifecycleSequence < 1)
         {
             throw new ArgumentOutOfRangeException(nameof(expectedLifecycleSequence));
@@ -544,6 +547,7 @@ public abstract record DurableRetentionMutationRequest
         ActorId = ProviderContractValidation.Require(actorId, nameof(actorId), 200);
         ReasonCode = ProviderContractValidation.Require(reasonCode, nameof(reasonCode), 120);
         ExpectedLifecycleSequence = expectedLifecycleSequence;
+        Fingerprint = fingerprint;
     }
 
     /// <summary>Gets the application-authorized scope.</summary>
@@ -565,7 +569,7 @@ public abstract record DurableRetentionMutationRequest
     public long ExpectedLifecycleSequence { get; }
 
     /// <summary>Gets the versioned semantic fingerprint.</summary>
-    public DurableCommandFingerprint Fingerprint { get; protected init; } = null!;
+    public DurableCommandFingerprint Fingerprint { get; }
 }
 
 /// <summary>Records an adopter assertion that it stored one <c>DFA1</c> package externally.</summary>
@@ -580,10 +584,28 @@ public sealed record DurableRetentionRecordArchiveReceiptRequest : DurableRetent
         string reasonCode,
         long expectedLifecycleSequence,
         DurableArchiveReceiptV1 receipt)
-        : base(scopeId, manifestId, commandId, actorId, reasonCode, expectedLifecycleSequence)
+        : base(
+            scopeId,
+            manifestId,
+            commandId,
+            actorId,
+            reasonCode,
+            expectedLifecycleSequence,
+            CreateFingerprint(scopeId, manifestId, actorId, reasonCode, expectedLifecycleSequence, receipt))
     {
-        Receipt = receipt ?? throw new ArgumentNullException(nameof(receipt));
-        Fingerprint = RetentionCommandFingerprints.Create(
+        Receipt = receipt;
+    }
+
+    private static DurableCommandFingerprint CreateFingerprint(
+        DurableScopeId scopeId,
+        DurableRetentionManifestId manifestId,
+        string actorId,
+        string reasonCode,
+        long expectedLifecycleSequence,
+        DurableArchiveReceiptV1 receipt)
+    {
+        ArgumentNullException.ThrowIfNull(receipt);
+        return RetentionCommandFingerprints.Create(
             "appsurface.durable.flow.retention.archive-receipt.v1",
             scopeId.Value,
             manifestId.Value,
@@ -613,15 +635,21 @@ public sealed record DurableRetentionVerifyArchiveRequest : DurableRetentionMuta
         string actorId,
         string reasonCode,
         long expectedLifecycleSequence)
-        : base(scopeId, manifestId, commandId, actorId, reasonCode, expectedLifecycleSequence)
-    {
-        Fingerprint = RetentionCommandFingerprints.Create(
+        : base(
+            scopeId,
+            manifestId,
+            commandId,
+            actorId,
+            reasonCode,
+            expectedLifecycleSequence,
+            RetentionCommandFingerprints.Create(
             "appsurface.durable.flow.retention.verify.v1",
             scopeId.Value,
             manifestId.Value,
             actorId,
             reasonCode,
-            expectedLifecycleSequence.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            expectedLifecycleSequence.ToString(System.Globalization.CultureInfo.InvariantCulture)))
+    {
     }
 }
 
@@ -637,17 +665,23 @@ public sealed record DurableRetentionHoldRequest : DurableRetentionMutationReque
         string reasonCode,
         long expectedLifecycleSequence,
         bool placeHold)
-        : base(scopeId, manifestId, commandId, actorId, reasonCode, expectedLifecycleSequence)
-    {
-        PlaceHold = placeHold;
-        Fingerprint = RetentionCommandFingerprints.Create(
-            "appsurface.durable.flow.retention.hold.v1",
-            scopeId.Value,
-            manifestId.Value,
+        : base(
+            scopeId,
+            manifestId,
+            commandId,
             actorId,
             reasonCode,
-            expectedLifecycleSequence.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            placeHold ? "place" : "release");
+            expectedLifecycleSequence,
+            RetentionCommandFingerprints.Create(
+                "appsurface.durable.flow.retention.hold.v1",
+                scopeId.Value,
+                manifestId.Value,
+                actorId,
+                reasonCode,
+                expectedLifecycleSequence.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                placeHold ? "place" : "release"))
+    {
+        PlaceHold = placeHold;
     }
 
     /// <summary>Gets whether this command places rather than releases the hold.</summary>
@@ -665,15 +699,21 @@ public sealed record DurableRetentionPurgeRequest : DurableRetentionMutationRequ
         string actorId,
         string reasonCode,
         long expectedLifecycleSequence)
-        : base(scopeId, manifestId, commandId, actorId, reasonCode, expectedLifecycleSequence)
-    {
-        Fingerprint = RetentionCommandFingerprints.Create(
+        : base(
+            scopeId,
+            manifestId,
+            commandId,
+            actorId,
+            reasonCode,
+            expectedLifecycleSequence,
+            RetentionCommandFingerprints.Create(
             "appsurface.durable.flow.retention.purge.v1",
             scopeId.Value,
             manifestId.Value,
             actorId,
             reasonCode,
-            expectedLifecycleSequence.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            expectedLifecycleSequence.ToString(System.Globalization.CultureInfo.InvariantCulture)))
+    {
     }
 }
 
