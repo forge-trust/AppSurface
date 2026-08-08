@@ -5,7 +5,8 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 /// </summary>
 /// <remarks>
 /// This is a passive provider operation. Applications may call it from an external trigger or test, but must not loop
-/// it in an ASP.NET request or register hosted work; hosted activation belongs to Slice 6.
+/// it in an ASP.NET request or register hosted work; hosted activation requires the explicit <c>AddWorkerHost()</c>
+/// opt-in.
 /// </remarks>
 public sealed record PostgreSqlDurableScheduleProcessRequest
 {

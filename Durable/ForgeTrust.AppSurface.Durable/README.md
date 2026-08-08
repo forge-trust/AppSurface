@@ -89,6 +89,19 @@ dotnet test Durable/ForgeTrust.AppSurface.Durable.Tests/ForgeTrust.AppSurface.Du
 Expected result: the named proof passes; no runtime, network call, DDL, poller, or hosted service starts.
 The proof emits `contracts registered; no runtime installed`.
 
+## Slice 7 discovery boundary
+
+This package is a source-only public preview, and publication remains held pending coordinated release evidence.
+Registration is intentionally passive: it installs contract registries, not storage operations or worker hosting.
+PostgreSQL storage registration remains passive as well; continuous processing requires the explicit
+[`AddWorkerHost()` opt-in](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host).
+
+When a host starts the opted-in worker, startup validates schema compatibility and the active runtime epoch. It fails
+closed when those values are incompatible and never applies DDL or advances migration history. See the
+[Slice 7 discovery and reconciliation guide](../README.md#slice-7-discovery-and-reconciliation) for the ordered
+`0001`–`0006` migration flow, canonical role recipe, preferred preflight sequence, recovery posture, and the
+implemented [`durable schema` CLI commands](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands).
+
 ## Public API by audience
 
 Every public type in this package belongs to one of these adopter-facing families. The
