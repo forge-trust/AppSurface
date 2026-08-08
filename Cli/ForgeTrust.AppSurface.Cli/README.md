@@ -20,6 +20,34 @@ The CLI also includes public coverage commands for private-by-default CI coverag
 
 `appsurface canary poll` turns an existing protected named-canary evaluation into one bounded, read-only deployment decision. It owns the caller-visible poll cadence, deadline, response compatibility validation, and safe output; the application still owns authentication, proof evaluation, deployment actions, and traffic decisions.
 
+## Durable PostgreSQL schema commands
+
+The source-preview CLI ships the following explicit deployment command family:
+
+```bash
+appsurface durable schema status
+appsurface durable schema script --from-version <reviewed-version>
+appsurface durable schema preflight
+appsurface durable schema apply --apply
+```
+
+`script` is offline and deterministic from a reviewed installed version. The online `status`, `preflight`, and
+explicit `apply --apply` operations resolve only the named `APPSURFACE_DURABLE_CONNECTION` environment variable by
+default; deployments normally pass `--connection-env APPSURFACE_DURABLE_MIGRATION_CONNECTION`. None of these commands
+accepts a connection-string argument or prints a connection string, credential, or environment-secret value.
+`apply --apply` is the only database-mutating command in this family; it is an explicit migration-owner action and
+is never performed by application startup. `script --output` can atomically publish or replace the named local file,
+but it never opens a database connection. Write generated SQL only to an operator-controlled directory: atomic
+publication protects readers from partial content, but it cannot make a directory shared with an untrusted local
+principal safe from path replacement.
+
+The preferred production flow remains: generate and review the offline schema script, apply migrations `0001` through
+`0007` in order, apply the canonical role recipe, run status and preflight, then explicitly enable
+[`AddWorkerHost()`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host). For recovery,
+check status, correct and review the forward-only script, then retry; never delete migration history. The
+[`durable-postgresql` example](../../examples/durable-postgresql/README.md) is a local proof, not production
+operations guidance.
+
 Future CLI authentication is design-only today. The [authenticated command design](docs/authenticated-command-design.md) keeps auth centered on protected command execution, uses `appsurface docs publish --archive ./dist/docs --site <site>` as the first protected command wedge, and requires browser/loopback PKCE, RFC 8628 device flow, CI no-prompt behavior, secure token-cache boundaries, `ASCLI1xx` diagnostics, and packed-tool readiness proof before auth commands ship.
 
 ## Release Guidance

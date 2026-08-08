@@ -9,12 +9,23 @@ use_flow=false
 use_schedule=false
 evidence_mode=""
 evidence_output=""
+replace_evidence=false
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/appsurface-durable-postgresql.XXXXXX")"
 list_log="$work_dir/list-tests.log"
 test_log="$work_dir/test-output.log"
+recovery_list_log="$work_dir/recovery-list-tests.log"
+recovery_test_log="$work_dir/recovery-test-output.log"
+recovery_evidence_file=""
 v2_worktree=""
 
+usage() {
+  echo "Usage: $0 --quick|--ci [--flow|--schedule] [--evidence-mode cold|warm --evidence-output DIR [--replace-evidence]]" >&2
+}
+
 cleanup() {
+  if [[ -n "$recovery_evidence_file" && -f "$recovery_evidence_file" ]]; then
+    rm -f -- "$recovery_evidence_file"
+  fi
   if [[ -n "$v2_worktree" && -d "$v2_worktree" ]]; then
     git -C "$repo_root" worktree remove --force "$v2_worktree" >/dev/null 2>&1 || true
   fi
@@ -58,8 +69,12 @@ while [[ $# -gt 0 ]]; do
       evidence_output="$2"
       shift 2
       ;;
+    --replace-evidence)
+      replace_evidence=true
+      shift
+      ;;
     *)
-      echo "Usage: $0 --quick|--ci [--flow|--schedule] [--evidence-mode cold|warm --evidence-output DIR]" >&2
+      usage
       exit 2
       ;;
   esac
@@ -95,7 +110,10 @@ if [[ -n "$evidence_mode" || -n "$evidence_output" ]]; then
   [[ "$observed_mode" == "$evidence_mode" ]] \
     || fail "requested $evidence_mode evidence but the pinned image cache is $observed_mode"
   mkdir -p "$evidence_output"
-  evidence_output="$(cd "$evidence_output" && pwd)"
+  evidence_output="$(cd -P "$evidence_output" && pwd)"
+  if [[ -n "$(find "$evidence_output" -mindepth 1 -maxdepth 1 -print -quit)" && "$replace_evidence" != "true" ]]; then
+    fail "evidence output must be new or empty; pass --replace-evidence to replace AppSurface-owned evidence files"
+  fi
   run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
   export APPSURFACE_POSTGRES_REFERENCE_EVIDENCE_DIRECTORY="$evidence_output"
   export APPSURFACE_POSTGRES_REFERENCE_EVIDENCE_MODE="$evidence_mode"
@@ -113,9 +131,26 @@ if [[ -n "$evidence_mode" || -n "$evidence_output" ]]; then
     ! -path '*/bin/*' \
     ! -path '*/obj/*' \
     -print > "$source_file_list"
+  find "$repo_root/examples/durable-postgresql" \
+    -type f \
+    ! -path '*/bin/*' \
+    ! -path '*/obj/*' \
+    -print >> "$source_file_list"
+  find "$repo_root/examples/durable-postgresql.tests" \
+    -type f \
+    ! -path '*/bin/*' \
+    ! -path '*/obj/*' \
+    -print >> "$source_file_list"
   printf '%s\n' \
     "$repo_root/Durable/verify-postgresql.sh" \
     "$repo_root/Durable/packed-consumers/PostgreSqlProvider/PostgreSqlReadmeProof.cs" \
+    "$repo_root/Durable/configure-postgresql-roles.sql" \
+    "$repo_root/Cli/ForgeTrust.AppSurface.Cli/DurableSchemaCommand.cs" \
+    "$repo_root/Cli/ForgeTrust.AppSurface.Cli.Tests/DurableSchemaCommandTests.cs" \
+    "$repo_root/Cli/ForgeTrust.AppSurface.Cli/README.md" \
+    "$repo_root/Web/ForgeTrust.AppSurface.Docs.Tests/DurableSlice7AdoptionDocumentationContractTests.cs" \
+    "$repo_root/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md" \
+    "$repo_root/releases/unreleased.md" \
     >> "$source_file_list"
   LC_ALL=C sort -u -o "$source_file_list" "$source_file_list"
   while IFS= read -r source_file; do
@@ -138,6 +173,9 @@ if [[ -n "$evidence_mode" || -n "$evidence_output" ]]; then
   else
     scenario_names=("${work_scenarios[@]}")
   fi
+  if [[ "$use_flow" == "false" ]]; then
+    scenario_names+=(forward-migration-recovery)
+  fi
   output_names=("${scenario_names[@]}" run)
   for output_name in "${output_names[@]}"; do
     output_file="$evidence_output/$output_name.json"
@@ -146,6 +184,7 @@ if [[ -n "$evidence_mode" || -n "$evidence_output" ]]; then
       || fail "evidence output must be a regular file when it already exists: $output_name.json"
     rm -f -- "$output_file"
   done
+  recovery_evidence_file="$(mktemp "$evidence_output/.forward-migration-recovery.XXXXXX")"
 fi
 
 started_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -173,6 +212,60 @@ case "$mode" in
       dotnet test "$project" \
         --filter "$target_test_filter" \
         --logger 'console;verbosity=normal' | tee "$test_log"
+      recovery_test_class="ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlSchemaIntegrationTests"
+      recovery_test_method="FailedMigration_RollsBackPartialDdlAndRetriesFromLastCommittedVersion"
+      recovery_test_name="$recovery_test_class.$recovery_test_method"
+      recovery_test_filter="FullyQualifiedName~$recovery_test_method"
+      dotnet test "$project" --list-tests \
+        --filter "$recovery_test_filter" >"$recovery_list_log" \
+        || fail "forward-only migration recovery test discovery failed"
+      grep -Fq "$recovery_test_method" "$recovery_list_log" \
+        || fail "the forward-only migration recovery test selected zero cases"
+      recovery_started_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      recovery_started_epoch="$(date +%s)"
+      dotnet test "$project" \
+        --filter "$recovery_test_filter" \
+        --logger 'console;verbosity=normal' | tee "$recovery_test_log"
+      grep -Eq '^Total tests:[[:space:]]+1$' "$recovery_test_log" \
+        || fail "the evidence run did not execute exactly one forward-only migration recovery test"
+      grep -Eq '^[[:space:]]+Passed:[[:space:]]+1$' "$recovery_test_log" \
+        || fail "the evidence run did not pass the forward-only migration recovery test"
+      recovery_elapsed_milliseconds=$(( ($(date +%s) - recovery_started_epoch) * 1000 ))
+      printf '%s\n' \
+        '{' \
+        '  "SchemaVersion": 1,' \
+        "  \"RunId\": \"$run_id\"," \
+        "  \"DatabaseSource\": \"$postgres_image\"," \
+        "  \"StartedAtUtc\": \"$recovery_started_at_utc\"," \
+        "  \"ElapsedMilliseconds\": $recovery_elapsed_milliseconds," \
+        '  "Scenario": "forward-migration-recovery",' \
+        "  \"TestName\": \"$recovery_test_name\"," \
+        "  \"Mode\": \"$evidence_mode\"," \
+        "  \"SourceSha256\": \"$source_fingerprint\"," \
+        '  "FinalState": "retried-from-last-committed-version",' \
+        '  "Events": [' \
+        '    {' \
+        '      "Sequence": 1,' \
+        '      "Category": "schema",' \
+        '      "Operation": "migration-failure",' \
+        '      "Outcome": "rolled-back",' \
+        '      "TransactionBoundary": "migration-owner",' \
+        "      \"ElapsedMilliseconds\": $recovery_elapsed_milliseconds," \
+        '      "SourceElapsedMilliseconds": null' \
+        '    },' \
+        '    {' \
+        '      "Sequence": 2,' \
+        '      "Category": "schema",' \
+        '      "Operation": "migration-retry",' \
+        '      "Outcome": "committed",' \
+        '      "TransactionBoundary": "migration-owner",' \
+        "      \"ElapsedMilliseconds\": $recovery_elapsed_milliseconds," \
+        '      "SourceElapsedMilliseconds": null' \
+        '    }' \
+        '  ]' \
+        '}' > "$recovery_evidence_file"
+      mv -- "$recovery_evidence_file" "$evidence_output/forward-migration-recovery.json"
+      recovery_evidence_file=""
     elif [[ "$use_schedule" == "true" ]]; then
       dotnet test "$project" \
         --filter "$target_test_filter" \
@@ -242,7 +335,7 @@ case "$mode" in
     fi
     ;;
   *)
-    echo "Usage: $0 --quick|--ci [--flow|--schedule] [--evidence-mode cold|warm --evidence-output DIR]" >&2
+    usage
     exit 2
     ;;
 esac
@@ -257,13 +350,26 @@ if [[ -n "$evidence_output" ]]; then
   [[ "$elapsed_seconds" -le "$threshold_seconds" ]] \
     || fail "$evidence_mode workload took ${elapsed_seconds}s, exceeding the ${threshold_seconds}s readiness target"
   expected_test_count="${#scenario_names[@]}"
-  test_count="$(grep -c "$target_test_class" "$list_log" | tr -d ' ')"
+  primary_expected_test_count="$expected_test_count"
+  if [[ "$use_flow" == "false" ]]; then
+    primary_expected_test_count=$(( primary_expected_test_count - 1 ))
+  fi
+  primary_test_count="$(grep -c "$target_test_class" "$list_log" | tr -d ' ')"
+  [[ "$primary_test_count" == "$primary_expected_test_count" ]] \
+    || fail "expected exactly $primary_expected_test_count discovered reference workload cases, found $primary_test_count"
+  grep -Eq "^Total tests:[[:space:]]+$primary_expected_test_count$" "$test_log" \
+    || fail "the evidence run did not execute exactly $primary_expected_test_count reference workload tests"
+  grep -Eq "^[[:space:]]+Passed:[[:space:]]+$primary_expected_test_count$" "$test_log" \
+    || fail "the evidence run did not pass exactly $primary_expected_test_count reference workload tests"
+  test_count="$primary_test_count"
+  if [[ "$use_flow" == "false" ]]; then
+    recovery_test_count="$(grep -c "$recovery_test_method" "$recovery_list_log" | tr -d ' ')"
+    [[ "$recovery_test_count" == "1" ]] \
+      || fail "expected exactly one discovered forward-only migration recovery case, found $recovery_test_count"
+    test_count=$(( test_count + recovery_test_count ))
+  fi
   [[ "$test_count" == "$expected_test_count" ]] \
-    || fail "expected exactly $expected_test_count discovered reference workload cases, found $test_count"
-  grep -Eq "^Total tests:[[:space:]]+$expected_test_count$" "$test_log" \
-    || fail "the evidence run did not execute exactly $expected_test_count tests"
-  grep -Eq "^[[:space:]]+Passed:[[:space:]]+$expected_test_count$" "$test_log" \
-    || fail "the evidence run did not pass exactly $expected_test_count tests"
+    || fail "evidence test count $test_count did not match the expected $expected_test_count scenarios"
   scenario_hashes="$work_dir/scenario-hashes.txt"
   : > "$scenario_hashes"
   for scenario_name in "${scenario_names[@]}"; do
@@ -275,6 +381,16 @@ if [[ -n "$evidence_output" ]]; then
       || fail "scenario evidence has the wrong mode: $scenario_name.json"
     grep -Fq "\"DatabaseSource\": \"$postgres_image\"" "$scenario_file" \
       || fail "scenario evidence used a different PostgreSQL image: $scenario_name.json"
+    if [[ "$scenario_name" == "forward-migration-recovery" ]]; then
+      grep -Fq '"SchemaVersion": 1' "$scenario_file" \
+        || fail "forward recovery evidence has no schema version"
+      grep -Fq "\"TestName\": \"$recovery_test_name\"" "$scenario_file" \
+        || fail "forward recovery evidence has the wrong test identity"
+      grep -Fq "\"SourceSha256\": \"$source_fingerprint\"" "$scenario_file" \
+        || fail "forward recovery evidence is not bound to this source fingerprint"
+      grep -Fq '"FinalState": "retried-from-last-committed-version"' "$scenario_file" \
+        || fail "forward recovery evidence has the wrong final state"
+    fi
     scenario_hash="$(shasum -a 256 "$scenario_file" | awk '{print $1}')"
     printf '%s  %s.json\n' "$scenario_hash" "$scenario_name" >> "$scenario_hashes"
   done
@@ -285,7 +401,13 @@ if [[ -n "$evidence_output" ]]; then
   host_os="$(uname -s)"
   host_architecture="$(uname -m)"
   image_platform="$(docker image inspect "$postgres_image" --format '{{.Os}}/{{.Architecture}}')"
-  base_commit_sha="$(git -C "$repo_root" rev-parse HEAD)"
+  head_commit_sha="$(git -C "$repo_root" rev-parse HEAD)"
+  merge_base_sha="$(git -C "$repo_root" merge-base HEAD origin/main)"
+  if [[ -z "$(git -C "$repo_root" status --porcelain)" ]]; then
+    worktree_state="clean"
+  else
+    worktree_state="dirty"
+  fi
   manifest_file="$work_dir/run.json"
   printf '%s\n' \
     '{' \
@@ -298,7 +420,9 @@ if [[ -n "$evidence_output" ]]; then
     "  \"imagePlatform\": \"$image_platform\"," \
     "  \"hostOs\": \"$host_os\"," \
     "  \"hostArchitecture\": \"$host_architecture\"," \
-    "  \"baseCommitSha\": \"$base_commit_sha\"," \
+    "  \"headCommitSha\": \"$head_commit_sha\"," \
+    "  \"mergeBaseSha\": \"$merge_base_sha\"," \
+    "  \"worktreeState\": \"$worktree_state\"," \
     '  "sourceState": "working-tree-fingerprint",' \
     "  \"sourceSha256\": \"$source_fingerprint\"," \
     "  \"scenarioSetSha256\": \"$scenario_fingerprint\"," \

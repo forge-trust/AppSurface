@@ -601,6 +601,8 @@ SELECT NOT EXISTS
            'suspension_descriptor', 'suspended_from_state', 'suspension_descriptor_schema',
            'suspension_descriptor_sha256', 'revision', 'scope_generation', 'runtime_epoch'
          )
+         OR column_value.relname IN ('flow_command', 'flow_history')
+         AND column_value.attname = 'trace_context_id'
          OR column_value.relname = 'flow_wait'
          AND column_value.attname IN ('state', 'resolved_revision', 'resolved_at', 'suspension_descriptor', 'updated_at', 'trace_context_id')
          OR column_value.relname = 'flow_timer'
@@ -742,6 +744,9 @@ SELECT format(
     :'runtime_role') \gexec
 SELECT format(
     'GRANT UPDATE (state, current_node_id, context_contract_id, context_schema_version, context_codec_id, context_payload, context_sha256, context_classification, context_retention, resume_event_name, resume_event_is_timeout, resume_event_contract_id, resume_event_schema_version, resume_event_codec_id, resume_event_payload, resume_event_sha256, resume_event_classification, resume_event_retention, activity_callsite_id, activity_result_contract_id, activity_result_schema_version, activity_result_codec_id, activity_result_payload, activity_result_sha256, activity_result_classification, activity_result_retention, lease_generation, lease_owner, lease_started_at, lease_expires_at, updated_at, cancellation_requested_at, terminal_at, terminal_code, suspension_descriptor, suspended_from_state, suspension_descriptor_schema, suspension_descriptor_sha256, revision, scope_generation, runtime_epoch, trace_context_id) ON appsurface_durable.flow_instance TO %I',
+    :'runtime_role') \gexec
+SELECT format(
+    'GRANT UPDATE (trace_context_id) ON appsurface_durable.flow_command, appsurface_durable.flow_history TO %I',
     :'runtime_role') \gexec
 SELECT format(
     'GRANT UPDATE (state, resolved_revision, resolved_at, suspension_descriptor, updated_at, trace_context_id) ON appsurface_durable.flow_wait TO %I',

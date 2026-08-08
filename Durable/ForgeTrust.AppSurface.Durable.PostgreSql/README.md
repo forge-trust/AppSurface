@@ -17,6 +17,29 @@ The package references the adopter-facing
 [`ForgeTrust.AppSurface.Durable.Provider`](../ForgeTrust.AppSurface.Durable.Provider/README.md) SPI. Neither package
 depends on PostgreSQL.
 
+## Slice 7 discovery and reconciliation
+
+This provider is a source-only public preview and remains held from publication pending coordinated release
+evidence. Registration is passive: `AddAppSurfaceDurablePostgreSql` installs storage and runtime services but does not
+start a worker, open a connection, or apply DDL. Continuous processing requires the explicit
+[`AddWorkerHost()` opt-in](#run-a-worker-host). Startup validates the installed schema and active epoch and never
+applies DDL or advances migration history.
+
+The production migration order is `0001_work_shared.sql`, `0002_forced_rls.sql`, `0003_flow_protocol.sql`,
+`0004_schedule_protocol.sql`, `0005_runtime_heartbeat.sql`, `0006_flow_trace_context.sql`, and
+`0007_flow_repair.sql`, followed by the
+canonical [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
+role recipe. Prefer generating the Durable schema script offline, reviewing it, applying the forward-only migrations,
+running the role recipe, and completing schema status/preflight before enabling the worker host. The
+[`durable schema` command family](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands)
+keeps scripts offline while its online commands accept no connection-string argument and never print connection
+strings. Its explicit `apply --apply` path resolves only a named migration-owner environment variable, normally
+`--connection-env APPSURFACE_DURABLE_MIGRATION_CONNECTION`.
+
+For reconciliation, check status first, create a corrected and reviewed forward-only script, and retry. Never delete
+or rewrite migration history. The [`durable-postgresql` example](../../examples/durable-postgresql/README.md) is a
+local proof of these boundaries, not production operations guidance.
+
 ## First proof
 
 Run the source-evaluator [`slice 3 reference workload`](../slice3-reference-workload.md) and
@@ -43,7 +66,8 @@ Runtime mutations take a shared, transaction-scoped advisory fence before valida
 and epoch rotation take the exclusive package lock, so they wait for in-flight runtime transactions and prevent an old
 epoch from committing new durable state after rotation.
 
-Runtime roles never own schema or apply DDL. The package has seven migrations: Work/shared state (`0001_work_shared.sql`),
+Runtime roles never own schema or apply DDL. Apply the seven migrations in numeric order: Work/shared state
+(`0001_work_shared.sql`),
 forced RLS and privilege revocation (`0002_forced_rls.sql`), Flow protocol persistence (`0003_flow_protocol.sql`), the
 Work-first Schedule ledger (`0004_schedule_protocol.sql`), the payload-free runtime heartbeat
 (`0005_runtime_heartbeat.sql`), value-free Flow trace context (`0006_flow_trace_context.sql`), and evidence-first
@@ -98,9 +122,9 @@ services.AddAppSurfaceDurablePostgreSql(
 
 `AddAppSurfaceDurablePostgreSql` resolves Work, Flow, Schedule, schema, pump, health, drain, and
 `IFlowRepairOperatorClient` services but installs no `IHostedService`, opens no connection, and applies no migration.
-`AddWorkerHost()` is the standard continuous
-activation path. It validates schema compatibility, the active epoch, and that `TimeBudgetPerPass + ShutdownReserve`
-fits inside `HostOptions.ShutdownTimeout`; an invalid store or host configuration fails closed.
+`AddWorkerHost()` is the standard continuous activation path. On startup it validates schema compatibility and the
+active epoch, but never applies DDL or advances migration history. It also validates that `TimeBudgetPerPass +
+ShutdownReserve` fits inside `HostOptions.ShutdownTimeout`; an invalid store or host configuration fails closed.
 
 The host calls the same [`IDurableRuntimePump`](../ForgeTrust.AppSurface.Durable.Provider/README.md#activation-and-broker-evolution)
 used by an external activator. A Pass runs at most `MaximumItemsPerPass` committed Turns and rotates Work, Flow, and
