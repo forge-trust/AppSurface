@@ -160,6 +160,14 @@ public sealed class AppSurfaceDocsGraphiteThemePairPlaywrightTests
     [Fact]
     public async Task GraphiteDocs_ShouldMatchCommittedDesktopVisualBaselines()
     {
+        // The committed PNGs are reviewed macOS Chromium captures. Linux Chromium produces materially
+        // different pixels for the same page, while the contract tests above keep the browser behavior
+        // covered on every platform.
+        if (!OperatingSystem.IsMacOS())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip("Graphite visual baselines are authored on macOS Chromium.");
+        }
+
         foreach (var mode in GetVisualBaselineModes())
         {
             await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
@@ -361,11 +369,6 @@ public sealed class AppSurfaceDocsGraphitePlaywrightFixture : IAsyncLifetime
 
     private static async Task EnsurePlaywrightInstalledAsync()
     {
-        if (_playwrightInstalled)
-        {
-            return;
-        }
-
         await PlaywrightInstallLock.WaitAsync();
         try
         {
