@@ -321,6 +321,49 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestWithSourceAsync_ShouldSuppressComposedUnreleasedNoteDownload()
+    {
+        await WriteMarkdownAsync(
+            "releases/unreleased.md",
+            """
+            ---
+            download_markdown: true
+            ---
+            # Unreleased
+
+            ## What is taking shape
+
+            <!-- appsurface:unreleased-entries section="taking-shape" -->
+
+            ## Included in the next coordinated version
+
+            <!-- appsurface:unreleased-entries section="included" -->
+
+            ## Migration watch
+
+            <!-- appsurface:unreleased-entries section="migration-watch" -->
+            """);
+        var harvester = new MarkdownHarvester(
+            _loggerFake,
+            File.ReadAllTextAsync,
+            new AppSurfaceDocsOptions
+            {
+                MarkdownDownload = new AppSurfaceDocsMarkdownDownloadOptions
+                {
+                    Enabled = true,
+                    AuthorizationPolicy = "DocsReader"
+                }
+            });
+
+        var result = await harvester.HarvestWithSourceAsync(CreateContextWithDefaultPolicy());
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(harvester).GetHarvestDiagnostics();
+
+        Assert.Single(result.Nodes);
+        Assert.Empty(result.SourceByPath);
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == "unreleased-entry-composed-download-unavailable");
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldSkipOversizedMarkdownBeforeReadingOrParsing()
     {
         var markdownPath = CombineUnder(_testRoot, "Large.md");
