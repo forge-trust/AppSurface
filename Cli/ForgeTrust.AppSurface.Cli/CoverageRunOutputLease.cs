@@ -118,8 +118,8 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     /// </summary>
     /// <param name="artifactName">Owned gate artifact filename.</param>
     /// <param name="contents">Complete UTF-8 artifact content.</param>
-    /// <param name="cancellationToken">Cancellation token for the staged write.</param>
-    /// <returns>A task that completes after the staged artifact replaces the owned artifact.</returns>
+    /// <param name="cancellationToken">Cancellation token for the artifact content write.</param>
+    /// <returns>A task that completes after the complete artifact content is committed.</returns>
     internal Task WriteOwnedGateArtifactAsync(
         string artifactName,
         string contents,
@@ -807,20 +807,24 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         CancellationToken cancellationToken)
     {
         var path = GetOwnedGateArtifactPath(artifactName);
-        var temporaryPath = Path.Join(_outputPath, $".{artifactName}.{Guid.NewGuid():N}.tmp");
-        try
-        {
-            await WriteTemporaryArtifactAsync(temporaryPath, contents, cancellationToken);
-            _ = GetOwnedGateArtifactPath(artifactName);
-            File.Move(temporaryPath, path, overwrite: true);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath))
-            {
-                File.Delete(temporaryPath);
-            }
-        }
+        var exists = File.Exists(path);
+        using var handle = OpenWindowsFile(
+            path,
+            WindowsGenericWrite | WindowsGenericRead,
+            exists ? WindowsOpenExisting : WindowsCreateNew,
+            shareMode: WindowsShareRead);
+        VerifyWindowsPathIdentity(handle, path);
+        RejectWindowsWrongKind(handle, expectDirectory: false);
+        RejectWindowsHardLinkedArtifact(handle, artifactName);
+        await using var stream = new FileStream(
+            handle,
+            FileAccess.Write,
+            bufferSize: 4096,
+            isAsync: true);
+        stream.SetLength(0);
+        await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        await writer.WriteAsync(contents.AsMemory(), cancellationToken);
+        await writer.FlushAsync(cancellationToken);
     }
 
     [ExcludeFromCodeCoverage(Justification = "Windows output leases deny competing directory writes; the Windows security lane exercises the platform-specific binding.")]
@@ -845,28 +849,17 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         return path;
     }
 
-    private static async Task WriteTemporaryArtifactAsync(
-        string temporaryPath,
-        string contents,
-        CancellationToken cancellationToken)
+    [ExcludeFromCodeCoverage(Justification = "Windows-only hard-link inspection is exercised by the Windows security lane.")]
+    private static void RejectWindowsHardLinkedArtifact(SafeFileHandle handle, string artifactName)
     {
-        using (var stream = new FileStream(
-            temporaryPath,
-            new FileStreamOptions
-            {
-                Mode = FileMode.CreateNew,
-                Access = FileAccess.Write,
-                Share = FileShare.None,
-                Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
-            }))
-        using (var writer = new StreamWriter(
-            stream,
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-            bufferSize: 1024,
-            leaveOpen: true))
+        if (!WindowsGetFileInformationByHandle(handle, out var information))
         {
-            await writer.WriteAsync(contents.AsMemory(), cancellationToken);
-            await writer.FlushAsync(cancellationToken);
+            throw new IOException("Unable to inspect coverage report artifact links.", new Win32Exception(Marshal.GetLastPInvokeError()));
+        }
+
+        if (information.NumberOfLinks > 1)
+        {
+            throw new IOException($"Coverage report artifact '{artifactName}' must not be a hard link.");
         }
     }
 

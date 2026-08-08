@@ -4330,6 +4330,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [InlineData("appsurface coverage run msbuild", null)]
     [InlineData("appsurface coverage merge", null)]
     [InlineData("appsurface coverage gate", "passing")]
+    [InlineData("appsurface coverage gate patch targets", null)]
+    [InlineData("appsurface coverage gate patch-target cleanup", null)]
     public async Task CoverageCliConsumerProofWorkflow_StopsWhenRequiredCommandFails(
         string failedOperationName,
         string? failedTimeoutDescription)

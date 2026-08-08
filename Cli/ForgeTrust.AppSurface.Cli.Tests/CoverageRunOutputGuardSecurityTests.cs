@@ -600,6 +600,70 @@ public sealed class CoverageRunOutputGuardSecurityTests
     }
 
     [Fact]
+    public async Task OwnedGateArtifactOperations_ShouldWriteDeleteAndRejectUnsafeEntries()
+    {
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        using var lease = CoverageRunOutputLease.Acquire(output);
+
+        await lease.WriteOwnedGateArtifactAsync(CoverageGateArtifactNames.Json, "{}", CancellationToken.None);
+        lease.ValidateOwnedGateArtifacts([CoverageGateArtifactNames.Json]);
+        Assert.Equal("{}", File.ReadAllText(Path.Join(output, CoverageGateArtifactNames.Json)));
+
+        lease.DeleteOwnedGateArtifact(CoverageGateArtifactNames.Json);
+        lease.DeleteOwnedGateArtifact(CoverageGateArtifactNames.Json);
+        Assert.False(File.Exists(Path.Join(output, CoverageGateArtifactNames.Json)));
+
+        Assert.Throws<ArgumentNullException>(() => lease.DeleteOwnedGateArtifact(null!));
+        Assert.Throws<ArgumentException>(() => lease.DeleteOwnedGateArtifact(string.Empty));
+        Assert.Throws<IOException>(() => lease.DeleteOwnedGateArtifact("nested/coverage-gate.json"));
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => lease.WriteOwnedGateArtifactAsync(CoverageGateArtifactNames.Json, null!, CancellationToken.None));
+
+        Directory.CreateDirectory(Path.Join(output, CoverageGateArtifactNames.Markdown));
+        Assert.Throws<IOException>(() => lease.ValidateOwnedGateArtifacts([CoverageGateArtifactNames.Markdown]));
+        Assert.Throws<IOException>(() => lease.DeleteOwnedGateArtifact(CoverageGateArtifactNames.Markdown));
+    }
+
+    [Fact]
+    public async Task WriteOwnedGateArtifactAsync_Unix_ShouldCleanUpAfterPermissionOrPromotionFailure()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var root = TestDirectory.Create();
+        var permissionFailureOutput = root.CreateDirectory("permission-failure");
+        using (var permissionFailureLease = CoverageRunOutputLease.Acquire(
+                   permissionFailureOutput,
+                   unixFChmod: static (_, _) => -1))
+        {
+            var exception = await Assert.ThrowsAsync<IOException>(
+                () => permissionFailureLease.WriteOwnedGateArtifactAsync(
+                    CoverageGateArtifactNames.Json,
+                    "{}",
+                    CancellationToken.None));
+
+            Assert.Contains("Unable to set permissions", exception.Message, StringComparison.Ordinal);
+            Assert.Empty(Directory.EnumerateFiles(permissionFailureOutput, ".*.tmp"));
+        }
+
+        var promotionFailureOutput = root.CreateDirectory("promotion-failure");
+        using var promotionFailureLease = CoverageRunOutputLease.Acquire(promotionFailureOutput);
+        Directory.CreateDirectory(Path.Join(promotionFailureOutput, CoverageGateArtifactNames.Json));
+
+        var promotionException = await Assert.ThrowsAsync<IOException>(
+            () => promotionFailureLease.WriteOwnedGateArtifactAsync(
+                CoverageGateArtifactNames.Json,
+                "{}",
+                CancellationToken.None));
+
+        Assert.Contains("Unable to promote", promotionException.Message, StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFiles(promotionFailureOutput, ".*.tmp"));
+    }
+
+    [Fact]
     public void Prepare_ShouldFailClosedWhenValidMarkerIdentityChangesBeforeMutation()
     {
         using var root = TestDirectory.Create();

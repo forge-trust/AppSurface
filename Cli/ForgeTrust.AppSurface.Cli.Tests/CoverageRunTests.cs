@@ -91,6 +91,28 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public void CoverageRunSandboxGuard_Validate_ShouldBypassEnvironmentLookupWhenNotRequired()
+    {
+        var environmentWasRead = false;
+
+        CoverageRunSandboxGuard.Validate(
+            requireNonSandbox: false,
+            getEnvironmentVariable: _ =>
+            {
+                environmentWasRead = true;
+                return "1";
+            });
+
+        Assert.False(environmentWasRead);
+    }
+
+    [Fact]
+    public void CoverageRunSandboxGuard_Validate_ShouldAllowRequiredRunWithoutSandboxMarker()
+    {
+        CoverageRunSandboxGuard.Validate(requireNonSandbox: true, getEnvironmentVariable: static _ => null);
+    }
+
+    [Fact]
     public async Task RunAsync_DryRun_ShouldListSlnxDiscoveryAndUniqueProjectSlugs()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");

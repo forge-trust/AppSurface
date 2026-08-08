@@ -3218,7 +3218,10 @@ public sealed class CoverageGateTests
     [Theory]
     [InlineData("/etc/passwd")]
     [InlineData("C:\\\\outside\\\\Foo.cs")]
-    public void ParseChangedLinesDetailed_RejectsAbsoluteAndDriveQualifiedPaths(string path)
+    [InlineData("./")]
+    [InlineData("src/../Foo.cs")]
+    [InlineData("src/./Foo.cs")]
+    public void ParseChangedLinesDetailed_RejectsUnsafePaths(string path)
     {
         var result = PatchCoverageEvaluator.ParseChangedLinesDetailed($"""
             diff --git a/src/Foo.cs b/{path}
