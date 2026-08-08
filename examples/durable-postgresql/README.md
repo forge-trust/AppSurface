@@ -14,10 +14,10 @@ Install all of the following before starting:
 - .NET 10 SDK.
 - Docker Engine or Docker Desktop with Linux containers.
 - A free local TCP port. The transcript defaults to `54329` but uses one shell variable so a different free loopback port stays consistent.
-- A repository checkout. The transcript creates its three separate local PostgreSQL roles: migration owner,
-  payload-free dispatcher, and scoped runtime.
+- A repository checkout. The transcript creates its four separate local PostgreSQL roles: migration owner,
+  payload-free dispatcher, scoped runtime, and dedicated retention operator.
 
-The canonical [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) recipe owns the reviewed grants. Do not substitute ad-hoc grants or a copied role script. The dispatcher and runtime roles must be distinct non-owner login roles without `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION`, or `BYPASSRLS`.
+The canonical [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) recipe owns the reviewed grants. Do not substitute ad-hoc grants or a copied role script. The dispatcher, runtime, and retention-operator roles must be distinct non-owner login roles without `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION`, or `BYPASSRLS`.
 
 Only these configuration names are required. Values are placeholders and must never be committed or printed:
 
@@ -73,7 +73,7 @@ Create the local-only roles with the disposable container's bootstrap administra
 only to loopback and uses Docker's local `trust` bootstrap mode, so it has no bootstrap password. The password setup
 below reads each service password from the terminal without placing it in shell history, writes a mode-0600 temporary
 PostgreSQL passfile, and removes it when the terminal exits. Production creates and rotates credentials through its
-own secret system. The dispatcher and runtime roles are explicit restricted login leaves, while the migration owner
+own secret system. The dispatcher, runtime, and retention-operator roles are explicit restricted login leaves, while the migration owner
 receives only the database `CREATE` privilege required to create the package schema:
 
 ```console
@@ -82,11 +82,13 @@ docker exec appsurface-durable-postgres \
   -c "CREATE ROLE appsurface_durable_owner LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;" \
   -c "CREATE ROLE appsurface_durable_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;" \
   -c "CREATE ROLE appsurface_durable_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;" \
+  -c "CREATE ROLE appsurface_durable_retention LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;" \
   -c "GRANT CREATE ON DATABASE appsurface_durable_example TO appsurface_durable_owner;"
 
 read -r -s -p 'Migration-owner password: ' migration_owner_password; printf '\n'
 read -r -s -p 'Dispatcher password: ' dispatcher_password; printf '\n'
 read -r -s -p 'Runtime password: ' runtime_password; printf '\n'
+read -r -s -p 'Retention-operator password: ' retention_operator_password; printf '\n'
 case $- in *x*) appsurface_restore_xtrace=1; set +x ;; esac
 umask 077
 export APPSURFACE_DURABLE_PASSFILE="$(mktemp)"
@@ -98,16 +100,20 @@ escape_pgpass_field() {
 migration_owner_passfile_password="$(escape_pgpass_field "$migration_owner_password")" || { printf 'Password cannot contain a newline.\n' >&2; exit 1; }
 dispatcher_passfile_password="$(escape_pgpass_field "$dispatcher_password")" || { printf 'Password cannot contain a newline.\n' >&2; exit 1; }
 runtime_passfile_password="$(escape_pgpass_field "$runtime_password")" || { printf 'Password cannot contain a newline.\n' >&2; exit 1; }
+retention_operator_passfile_password="$(escape_pgpass_field "$retention_operator_password")" || { printf 'Password cannot contain a newline.\n' >&2; exit 1; }
 printf '127.0.0.1:%s:appsurface_durable_example:appsurface_durable_owner:%s\n' "$APPSURFACE_DURABLE_LOCAL_PORT" "$migration_owner_passfile_password" > "$APPSURFACE_DURABLE_PASSFILE"
 printf '127.0.0.1:%s:appsurface_durable_example:appsurface_durable_dispatcher:%s\n' "$APPSURFACE_DURABLE_LOCAL_PORT" "$dispatcher_passfile_password" >> "$APPSURFACE_DURABLE_PASSFILE"
 printf '127.0.0.1:%s:appsurface_durable_example:appsurface_durable_runtime:%s\n' "$APPSURFACE_DURABLE_LOCAL_PORT" "$runtime_passfile_password" >> "$APPSURFACE_DURABLE_PASSFILE"
+printf '127.0.0.1:%s:appsurface_durable_example:appsurface_durable_retention:%s\n' "$APPSURFACE_DURABLE_LOCAL_PORT" "$retention_operator_passfile_password" >> "$APPSURFACE_DURABLE_PASSFILE"
 printf '%s\n%s\n' "$migration_owner_password" "$migration_owner_password" | \
   docker exec -i appsurface-durable-postgres psql -U postgres -d appsurface_durable_example -c '\password appsurface_durable_owner'
 printf '%s\n%s\n' "$dispatcher_password" "$dispatcher_password" | \
   docker exec -i appsurface-durable-postgres psql -U postgres -d appsurface_durable_example -c '\password appsurface_durable_dispatcher'
 printf '%s\n%s\n' "$runtime_password" "$runtime_password" | \
   docker exec -i appsurface-durable-postgres psql -U postgres -d appsurface_durable_example -c '\password appsurface_durable_runtime'
-unset migration_owner_password dispatcher_password runtime_password migration_owner_passfile_password dispatcher_passfile_password runtime_passfile_password
+printf '%s\n%s\n' "$retention_operator_password" "$retention_operator_password" | \
+  docker exec -i appsurface-durable-postgres psql -U postgres -d appsurface_durable_example -c '\password appsurface_durable_retention'
+unset migration_owner_password dispatcher_password runtime_password retention_operator_password migration_owner_passfile_password dispatcher_passfile_password runtime_passfile_password retention_operator_passfile_password
 if [ "${appsurface_restore_xtrace:-0}" = 1 ]; then set -x; fi
 unset appsurface_restore_xtrace
 export PGPASSFILE="$APPSURFACE_DURABLE_PASSFILE"
@@ -130,7 +136,7 @@ the temporary passfile, never a password; `--connection-env` names a variable an
 export APPSURFACE_DURABLE_MIGRATION_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_owner;Passfile=$APPSURFACE_DURABLE_PASSFILE"
 dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
   durable schema apply --connection-env APPSURFACE_DURABLE_MIGRATION_CONNECTION --apply
-# Expected: Durable schema: 0 -> 6; applied: 0001, 0002, 0003, 0004, 0005, 0006.
+# Expected: Durable schema: 0 -> 7; applied: 0001, 0002, 0003, 0004, 0005, 0006, 0007.
 ```
 
 Apply the reviewed role recipe after migrations with the disposable container's bootstrap administrator, then configure
@@ -142,6 +148,7 @@ docker exec -i appsurface-durable-postgres \
   -v migration_owner_role=appsurface_durable_owner \
   -v dispatcher_role=appsurface_durable_dispatcher \
   -v runtime_role=appsurface_durable_runtime \
+  -v retention_operator_role=appsurface_durable_retention \
   -f - < Durable/configure-postgresql-roles.sql
 
 export APPSURFACE_DURABLE_DISPATCHER_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_dispatcher;Passfile=$APPSURFACE_DURABLE_PASSFILE"
@@ -173,6 +180,7 @@ DOTNET_ENVIRONMENT=Development APPSURFACE_DURABLE_LOCAL_PROOF=1 \
 | Migration owner | `APPSURFACE_DURABLE_MIGRATION_CONNECTION` | Review/apply migrations, rerun the role recipe, initialize or rotate epochs through the deployment workflow. | Run the hosted worker or application traffic. |
 | Dispatcher | `APPSURFACE_DURABLE_DISPATCHER_CONNECTION` | Payload-free discovery and narrow leasing. | Read payloads, apply DDL, or mutate runtime state. |
 | Runtime host | `APPSURFACE_DURABLE_RUNTIME_CONNECTION`, `APPSURFACE_DURABLE_RUNTIME_EPOCH` | Run the opted-in worker, bounded passes, health, and drain. | Apply DDL, own package objects, or change the active epoch. |
+| Retention operator | Application-authorized PostgreSQL connection | Create manifests, record receipts, verify source correspondence, place/release holds, and purge only through the reviewed retention lifecycle. | Apply DDL, run Work/Flow processing, or access payloads outside the retention boundary. |
 | Application operator | Application-owned identity and authorization | Expose deliberately authorized application controls. | Receive generic raw database or Durable CLI access. |
 
 `AddAppSurfaceDurablePostgreSql(...)` registration is passive. Call `.AddWorkerHost()` only in a continuously live worker process after schema, roles, and epoch have been verified. The example starts that host under the restricted tutorial roles, waits for one hosted pass, confirms it leaves the durable catalog and migration metadata unchanged, then stops it immediately.
