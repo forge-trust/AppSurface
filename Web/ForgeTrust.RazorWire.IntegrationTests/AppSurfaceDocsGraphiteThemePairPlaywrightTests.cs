@@ -50,7 +50,8 @@ public sealed class AppSurfaceDocsGraphiteThemePairPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync(_fixture.CanonicalDetailUrl);
+        var response = await page.GotoAsync(_fixture.CanonicalDetailUrl);
+        await AssertCanonicalDetailRouteAsync(page, response);
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             State = WaitForSelectorState.Visible,
@@ -249,6 +250,31 @@ public sealed class AppSurfaceDocsGraphiteThemePairPlaywrightTests
         yield return new GraphiteVisualBaselineRoute("detail", "/examples/razorwire-mvc", "#docs-page-outline");
         yield return new GraphiteVisualBaselineRoute("packages", "/packages", "main h1");
         yield return new GraphiteVisualBaselineRoute("release", "/releases/unreleased", ".docs-trust-bar");
+    }
+
+    private async Task AssertCanonicalDetailRouteAsync(IPage page, IResponse? response)
+    {
+        const string expectedPath = "/docs/examples/razorwire-mvc";
+        var actualPath = new Uri(page.Url).AbsolutePath;
+        if (response is { Ok: true }
+            && string.Equals(actualPath, expectedPath, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await page.GotoAsync(_fixture.DocsUrl);
+        await page.WaitForSelectorAsync("main", new PageWaitForSelectorOptions
+        {
+            State = WaitForSelectorState.Attached,
+            Timeout = 60_000
+        });
+        var routeInventory = await page.Locator("a[href]").EvaluateAllAsync<string[]>(
+            "anchors => [...new Set(anchors.map(anchor => new URL(anchor.href, document.baseURI).pathname).filter(path => path.startsWith('/docs/')))].sort()");
+
+        throw new InvalidOperationException(
+            $"Graphite's canonical Docs detail route must resolve to '{expectedPath}', but navigation returned status "
+            + $"'{response?.Status.ToString() ?? "no response"}' at '{actualPath}'. Docs route inventory: "
+            + $"{(routeInventory.Length == 0 ? "(no /docs/ links found)" : string.Join(", ", routeInventory))}.");
     }
 
     private sealed record GraphiteVisualBaselineMode(string Name, ColorScheme ColorScheme, string? StoredPreference);

@@ -52,6 +52,8 @@ Default rule:
 
 These tokens are not a public theming API yet. Hosts should not rely on overriding `--docs-*` names until a future theming feature explicitly documents that contract. Inside AppSurface Docs, though, shared package chrome and search-specific UI should consume the same root token layer so future theming can change the system deliberately. Search CSS may route through `--docs-search-*` aliases with fallbacks because exact published release trees can serve `search.css` without the generated package stylesheet.
 
+When a host uses a shared semantic pair such as Graphite through the [theme-pairs bridge](README.md#theme-pairs-migration), it may vary the rendered semantic colors without changing this editorial layout, information hierarchy, or Docs-owned `--docs-*` boundary. The `GraphiteDark` option remains the separate fixed-dark compatibility preset rather than an alternate layout or a shared pair selector.
+
 ### Surfaces
 
 - Prefer layered panels, separators, and subtle fills over heavy boxed cards

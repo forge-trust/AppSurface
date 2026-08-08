@@ -92,6 +92,9 @@ internal static class AppSurfaceDocsScreenshotBaseline
               style.id = id;
               style.textContent = '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important;}';
               document.head.append(style);
+              for (const time of document.querySelectorAll('time.docs-provenance-time')) {
+                time.textContent = 'Updated';
+              }
             }
             """);
 
