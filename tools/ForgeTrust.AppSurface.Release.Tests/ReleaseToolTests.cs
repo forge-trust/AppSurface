@@ -212,6 +212,26 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task CheckRejectsShortOverlappingAppendOnlyEntryDirective()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync(
+            "releases/unreleased.entries/2026-08-08-short-directive.md",
+            """
+            <!-- appsurface:unreleased-entry section=" -->
+            - This malformed directive shares its one quote between the prefix and suffix checks.
+            """);
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("release-unreleased-entry-invalid", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("must begin with", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CheckRejectsAppendOnlyEntryThatCreatesATopLevelSection()
     {
         await SeedRepositoryAsync();

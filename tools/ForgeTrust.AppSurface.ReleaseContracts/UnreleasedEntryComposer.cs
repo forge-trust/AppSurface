@@ -171,7 +171,8 @@ internal static class UnreleasedEntryComposer
     {
         var firstLineEnd = content.IndexOf('\n');
         var directive = (firstLineEnd >= 0 ? content[..firstLineEnd] : content).TrimEnd('\r');
-        if (!directive.StartsWith(EntryDirectivePrefix, StringComparison.Ordinal)
+        if (directive.Length < EntryDirectivePrefix.Length + EntryDirectiveSuffix.Length
+            || !directive.StartsWith(EntryDirectivePrefix, StringComparison.Ordinal)
             || !directive.EndsWith(EntryDirectiveSuffix, StringComparison.Ordinal))
         {
             throw new UnreleasedEntryException($"Unreleased entry '{Path.GetFileName(path)}' must begin with '{EntryDirectivePrefix}<section>{EntryDirectiveSuffix}'.");
