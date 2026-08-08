@@ -1,5 +1,6 @@
 packages:
   - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -12,6 +13,7 @@ packages:
     does_not_include: ASP.NET Core hosting, CliFx command hosting, Aspire app-model helpers, or optional integrations.
     start_here_path: ForgeTrust.AppSurface.Core/README.md
   - project: ForgeTrust.AppSurface.Theming/ForgeTrust.AppSurface.Theming.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -24,6 +26,7 @@ packages:
     does_not_include: Consumer component styling, a browser switcher, persisted preference, request or tenant selection, theme packs, remote loading, or Docs-specific CSS variables.
     start_here_path: ForgeTrust.AppSurface.Theming/README.md
   - project: Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -38,6 +41,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
   - project: Config/ForgeTrust.AppSurface.Config.LocalSecrets/ForgeTrust.AppSurface.Config.LocalSecrets.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -56,6 +60,7 @@ packages:
       - ForgeTrust.AppSurface.Core
       - ForgeTrust.AppSurface.Config
   - project: Config/ForgeTrust.AppSurface.Config.GoogleSecretManager/ForgeTrust.AppSurface.Config.GoogleSecretManager.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -74,6 +79,7 @@ packages:
       - ForgeTrust.AppSurface.Core
       - ForgeTrust.AppSurface.Config
   - project: Caching/ForgeTrust.AppSurface.Caching/ForgeTrust.AppSurface.Caching.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -88,6 +94,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
   - project: Auth/ForgeTrust.AppSurface.Auth/ForgeTrust.AppSurface.Auth.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -103,6 +110,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
   - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore/ForgeTrust.AppSurface.Auth.AspNetCore.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -118,6 +126,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth
   - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -133,6 +142,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth.AspNetCore
   - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -149,6 +159,7 @@ packages:
       - ForgeTrust.AppSurface.Auth.AspNetCore
       - ForgeTrust.AppSurface.Auth
   - project: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.csproj
+    release_guidance_variant: apphost
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -164,6 +175,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Aspire
   - project: Auth/ForgeTrust.AppSurface.Auth.Testing/ForgeTrust.AppSurface.Auth.Testing.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -180,6 +192,7 @@ packages:
       - ForgeTrust.AppSurface.Auth.AspNetCore
       - ForgeTrust.AppSurface.Auth
   - project: Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj
+    release_guidance_variant: experimental
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -195,6 +208,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
   - project: Observability/ForgeTrust.AppSurface.Observability/ForgeTrust.AppSurface.Observability.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -210,6 +224,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
   - project: Flow/ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -235,6 +250,7 @@ packages:
     order: 42
     note: Private source generator and diagnostics used by `ForgeTrust.AppSurface.Flow`; consume it only through the packed Flow package.
   - project: Flow/ForgeTrust.AppSurface.Flow.DurableTask/ForgeTrust.AppSurface.Flow.DurableTask.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -253,6 +269,7 @@ packages:
       - ForgeTrust.AppSurface.Core
       - ForgeTrust.AppSurface.Flow
   - project: Workers/ForgeTrust.AppSurface.Workers/ForgeTrust.AppSurface.Workers.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -268,6 +285,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
   - project: Workers/ForgeTrust.AppSurface.Workers.DurableTask/ForgeTrust.AppSurface.Workers.DurableTask.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -288,6 +306,7 @@ packages:
       - ForgeTrust.AppSurface.Workers
       - ForgeTrust.AppSurface.Flow.DurableTask
   - project: Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj
+    release_guidance_variant: experimental
     classification: public
     publish_decision: do_not_publish
     publish_reason: Public-preview source contract remains held after the PostgreSQL provider milestone until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, and coordinated operational conformance.
@@ -310,6 +329,7 @@ packages:
       - ForgeTrust.AppSurface.Flow
       - ForgeTrust.AppSurface.Workers
   - project: Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj
+    release_guidance_variant: experimental
     classification: public
     publish_decision: do_not_publish
     publish_reason: Public-preview Provider SPI remains held after the PostgreSQL provider milestone until slices 4-6 prove Flow, Schedule, hosted runtime, drain/recovery, verified-retention, and coordinated operational conformance.
@@ -329,6 +349,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Durable
   - project: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj
+    release_guidance_variant: experimental
     classification: public
     publish_decision: do_not_publish
     publish_reason: PostgreSQL Work, Flow, Schedule, explicit worker-host, and verified-retention source provider remains held while Durable preview publishing is coordinated.
@@ -371,6 +392,7 @@ packages:
     order: 48
     note: Internal mixed-version compatibility harness; it is not a package, hosted runtime, or adoption surface.
   - project: Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -386,6 +408,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
   - project: Dependency/ForgeTrust.AppSurface.Dependency.Autofac/ForgeTrust.AppSurface.Dependency.Autofac.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -403,6 +426,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
   - project: Deployment/ForgeTrust.AppSurface.Deployment/ForgeTrust.AppSurface.Deployment.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -416,6 +440,7 @@ packages:
     start_here_path: Deployment/ForgeTrust.AppSurface.Deployment/README.md
     recipe_summary: Add [`ForgeTrust.AppSurface.Deployment`](../Deployment/ForgeTrust.AppSurface.Deployment/README.md) directly only when authoring a deployment provider or inspecting portable deployment intent; normal Aspire consumers receive it transitively.
   - project: Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/ForgeTrust.AppSurface.Deployment.GcpCloudRun.csproj
+    release_guidance_variant: apphost
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -433,6 +458,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Deployment
   - project: Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj
+    release_guidance_variant: apphost
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -449,6 +475,7 @@ packages:
       - ForgeTrust.AppSurface.Console
       - ForgeTrust.AppSurface.Deployment
   - project: Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj
+    release_guidance_variant: apphost
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -466,6 +493,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Aspire
   - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -483,6 +511,7 @@ packages:
       - ForgeTrust.AppSurface.Core
       - ForgeTrust.AppSurface.Theming
   - project: Web/ForgeTrust.AppSurface.Web.Push/ForgeTrust.AppSurface.Web.Push.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -500,6 +529,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Web
   - project: Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -517,6 +547,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Web
   - project: Web/ForgeTrust.AppSurface.Web.Scalar/ForgeTrust.AppSurface.Web.Scalar.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -533,6 +564,7 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Web.OpenApi
   - project: Web/ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: razorwire
@@ -554,6 +586,7 @@ packages:
       - ForgeTrust.AppSurface.Intelligence
       - ForgeTrust.AppSurface.Web
   - project: Web/ForgeTrust.RazorWire.Auth.AspNetCore/ForgeTrust.RazorWire.Auth.AspNetCore.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: razorwire
@@ -573,6 +606,7 @@ packages:
       - ForgeTrust.AppSurface.Auth.AspNetCore
       - ForgeTrust.RazorWire
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface
@@ -693,6 +727,7 @@ packages:
     order: 340
     note: Tailwind standalone runtime for Windows x64 build hosts. Restore it transitively through `ForgeTrust.AppSurface.Web.Tailwind` instead of installing it directly.
   - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+    release_guidance_variant: default
     classification: public
     publish_decision: publish
     product_family: appsurface

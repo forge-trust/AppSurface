@@ -90,6 +90,7 @@ internal sealed class PackageIndexGenerator
     private readonly PackageProjectScanner _scanner;
     private readonly IProjectMetadataProvider _metadataProvider;
     private readonly PackageManifestLoader _manifestLoader;
+    private readonly ReleaseGuidanceRenderer _releaseGuidanceRenderer;
 
     /// <summary>
     /// Creates a generator that discovers candidate projects, loads package metadata, and reads the chooser manifest.
@@ -97,36 +98,65 @@ internal sealed class PackageIndexGenerator
     /// <param name="scanner">Project scanner used to discover direct candidate project files under the repository root.</param>
     /// <param name="metadataProvider">Metadata provider that evaluates candidate projects into package metadata.</param>
     /// <param name="manifestLoader">Manifest loader responsible for parsing the chooser manifest.</param>
+    /// <param name="releaseGuidanceRenderer">Renderer for the manifest-backed package README release-guidance regions.</param>
     internal PackageIndexGenerator(
         PackageProjectScanner scanner,
         IProjectMetadataProvider metadataProvider,
-        PackageManifestLoader manifestLoader)
+        PackageManifestLoader manifestLoader,
+        ReleaseGuidanceRenderer? releaseGuidanceRenderer = null)
     {
         _scanner = scanner;
         _metadataProvider = metadataProvider;
         _manifestLoader = manifestLoader;
+        _releaseGuidanceRenderer = releaseGuidanceRenderer ?? new ReleaseGuidanceRenderer();
     }
 
     /// <summary>
-    /// Generates package chooser and readiness dashboard markdown and writes both configured output paths.
+    /// Generates package chooser and readiness dashboard markdown, then reconciles the managed release-guidance region in
+    /// every qualifying package README.
     /// </summary>
     /// <param name="request">Generation request describing the repository root, manifest path, chooser output, and readiness output.</param>
     /// <param name="cancellationToken">Cancellation token used for manifest loading, metadata evaluation, and file writes.</param>
-    /// <returns>A task that completes when the generated files have been written.</returns>
+    /// <returns>A report describing the generated package-index documents and managed README reconciliation.</returns>
     /// <exception cref="PackageIndexException">
     /// Thrown when the repository layout is invalid, required docs are missing, or the manifest cannot be rendered safely.
     /// </exception>
     /// <remarks>
-    /// This method creates output directories when they do not already exist and overwrites the generated files from the
-    /// generated markdown payloads.
+    /// This method stages the generated markdown payloads and all managed README replacements before replacing any
+    /// target. An ordinary replacement failure rolls back every prior replacement, and a target that changed after its
+    /// initial read is rejected rather than overwritten. It creates output directories when they do not already exist.
     /// </remarks>
-    internal async Task GenerateToFileAsync(PackageIndexRequest request, CancellationToken cancellationToken = default)
+    internal async Task<PackageIndexGenerationReport> GenerateToFileAsync(
+        PackageIndexRequest request,
+        CancellationToken cancellationToken = default)
     {
-        var documents = await GenerateDocumentsAsync(request, cancellationToken);
-        Directory.CreateDirectory(Path.GetDirectoryName(request.ChooserOutputPath)!);
-        Directory.CreateDirectory(Path.GetDirectoryName(request.ReadinessOutputPath)!);
-        await File.WriteAllTextAsync(request.ChooserOutputPath, documents.ChooserMarkdown, cancellationToken);
-        await File.WriteAllTextAsync(request.ReadinessOutputPath, documents.ReadinessMarkdown, cancellationToken);
+        var entries = await ResolveGenerationEntriesAsync(request, cancellationToken);
+        var documents = GenerateDocuments(request, entries);
+        var releaseGuidanceUpdates = await _releaseGuidanceRenderer.CreateUpdatesAsync(
+            request.RepositoryRoot,
+            entries,
+            cancellationToken);
+        var generatedDocumentUpdates = new[]
+        {
+            await CreateGeneratedFileUpdateAsync(
+                request.RepositoryRoot,
+                request.ChooserOutputPath,
+                documents.ChooserMarkdown,
+                "package chooser",
+                cancellationToken),
+            await CreateGeneratedFileUpdateAsync(
+                request.RepositoryRoot,
+                request.ReadinessOutputPath,
+                documents.ReadinessMarkdown,
+                "package readiness dashboard",
+                cancellationToken)
+        };
+        var releaseGuidanceChangedCount = releaseGuidanceUpdates.Count(update =>
+            !string.Equals(update.CurrentContent, update.ExpectedContent, StringComparison.Ordinal));
+        await _releaseGuidanceRenderer.ApplyUpdatesAsync(
+            generatedDocumentUpdates.Concat(releaseGuidanceUpdates).ToArray(),
+            cancellationToken);
+        return new PackageIndexGenerationReport(releaseGuidanceUpdates.Count, releaseGuidanceChangedCount);
     }
 
     /// <summary>
@@ -155,6 +185,13 @@ internal sealed class PackageIndexGenerator
         CancellationToken cancellationToken = default)
     {
         var entries = await ResolveGenerationEntriesAsync(request, cancellationToken);
+        return GenerateDocuments(request, entries);
+    }
+
+    private static PackageIndexDocuments GenerateDocuments(
+        PackageIndexRequest request,
+        IReadOnlyList<ResolvedPackageEntry> entries)
+    {
         var readiness = PackageReadinessEvaluator.Evaluate(request.RepositoryRoot, entries);
         return new PackageIndexDocuments(
             RenderMarkdown(request, entries),
@@ -172,7 +209,12 @@ internal sealed class PackageIndexGenerator
     /// </exception>
     internal async Task VerifyAsync(PackageIndexRequest request, CancellationToken cancellationToken = default)
     {
-        var documents = await GenerateDocumentsAsync(request, cancellationToken);
+        var entries = await ResolveGenerationEntriesAsync(request, cancellationToken);
+        var documents = GenerateDocuments(request, entries);
+        var releaseGuidanceUpdates = await _releaseGuidanceRenderer.CreateUpdatesAsync(
+            request.RepositoryRoot,
+            entries,
+            cancellationToken);
         await VerifyGeneratedFileAsync(
             request.RepositoryRoot,
             request.ChooserOutputPath,
@@ -185,6 +227,7 @@ internal sealed class PackageIndexGenerator
             documents.ReadinessMarkdown,
             "package readiness dashboard",
             cancellationToken);
+        ReleaseGuidanceRenderer.VerifyUpdates(releaseGuidanceUpdates);
     }
 
     /// <summary>
@@ -201,6 +244,7 @@ internal sealed class PackageIndexGenerator
         CancellationToken cancellationToken = default)
     {
         var entries = await ResolveGenerationEntriesAsync(request, cancellationToken);
+        _ = await _releaseGuidanceRenderer.CreateUpdatesAsync(request.RepositoryRoot, entries, cancellationToken);
 
         return PackageGateValidator.Validate(request.RepositoryRoot, entries);
     }
@@ -239,6 +283,28 @@ internal sealed class PackageIndexGenerator
             throw new PackageIndexException(
                 $"Generated {documentLabel} '{displayPath}' is stale. Run the package index generator.");
         }
+    }
+
+    private static async Task<ReleaseGuidanceUpdate> CreateGeneratedFileUpdateAsync(
+        string repositoryRoot,
+        string outputPath,
+        string expectedContent,
+        string documentLabel,
+        CancellationToken cancellationToken)
+    {
+        var targetExists = File.Exists(outputPath);
+        var currentContent = targetExists
+            ? await File.ReadAllTextAsync(outputPath, cancellationToken)
+            : string.Empty;
+        var displayPath = Path.GetRelativePath(repositoryRoot, outputPath).Replace('\\', '/');
+        return new ReleaseGuidanceUpdate(
+            RepositoryRoot: null,
+            FullPath: outputPath,
+            DisplayPath: displayPath,
+            CurrentContent: currentContent,
+            ExpectedContent: expectedContent,
+            Variant: documentLabel,
+            TargetExisted: targetExists);
     }
 
     private static void ValidateRequest(PackageIndexRequest request)
@@ -821,12 +887,14 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine("## Maintainer notes");
         builder.AppendLine();
         builder.AppendLine($"- Edit `packages/package-index.yml` when the public package story changes.");
+        builder.AppendLine($"- Follow the {FormatMarkdownLink("PackageIndex release-guidance maintainer guide", GetRelativeRepositoryPath(request, ReleaseGuidanceRenderer.MaintainerGuideRelativePath))} when changing generated package README release policy, variants, or markers.");
         builder.AppendLine($"- Review {FormatMarkdownLink("package readiness evidence", GetRelativeOutputPath(request.ChooserOutputPath, request.ReadinessOutputPath))} when deciding whether the package manifest, release metadata, blockers, and dependency evidence are ready for release review.");
         builder.AppendLine("- Package readiness evidence is package-index review evidence. Per-version release consistency lives in `releases/v{version}.evidence.json` and is validated by the release cockpit.");
         builder.AppendLine($"- Follow the {FormatMarkdownLink("coordinated release-links guide", GetRelativeRepositoryPath(request, CoordinatedReleaseLinksGuidePath))}: use `release_track: coordinated` for the frozen tree-local current pointer, or `release_track: explicit` with `release_notes_path` for a package-specific historical story.");
         builder.AppendLine("- Keep `publish_decision` and `expected_dependency_package_ids` in `packages/package-index.yml` aligned with the package artifact workflow so the chooser and release contract share one package source of truth.");
         builder.AppendLine("- Keep `tool_command_name` aligned with each published .NET tool project's `ToolCommandName` so package validation, pre-publish coverage proof, and post-publish smoke tests run the command users will type. Tool smoke tests install the package, run `--help`, then require `--version` to match the package SemVer exactly, including stable or prerelease labels and excluding any leading `v` or build metadata. The command name value must be one file-name-safe command token, not a path: no whitespace, path separators, reserved `.`/`..` segments, trailing periods, Windows reserved device names or dotted aliases, control characters, or Windows-invalid file-name characters.");
-        builder.AppendLine($"- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications, package READMEs, product families, readiness blockers, or readiness notes.");
+        builder.AppendLine($"- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications, package READMEs, product families, release-guidance variants, readiness blockers, or readiness notes; it reports changed and managed README-region counts.");
+        builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify` before review to confirm package-index outputs and managed README guidance are current without writing files.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata, project references, Tailwind runtime payloads, or the packaged coverage CLI. This pre-publish workflow installs the packed `ForgeTrust.AppSurface.Cli` tool from local artifacts, runs `coverage run`, `coverage merge`, a passing `coverage gate`, and an intentionally failing `coverage gate`, then writes `coverage-cli-consumer-proof.md` and blocks the publish manifest when the consumer proof fails.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- gate` before publishing rebrand or release metadata changes.");
         builder.AppendLine("- Keep `packages/README.md.yml` hand-authored so AppSurface Docs metadata, trust-bar copy, and section placement stay intentional.");
@@ -987,6 +1055,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine("## Maintainer workflow");
         builder.AppendLine();
         builder.AppendLine("- Edit `packages/package-index.yml` for product family, publish decision, release metadata, dependency expectations, blockers, and notes.");
+        builder.AppendLine($"- Follow the {FormatMarkdownLink("PackageIndex release-guidance maintainer guide", GetRelativeRepositoryPath(request, ReleaseGuidanceRenderer.MaintainerGuideRelativePath, request.ReadinessOutputPath))} when changing generated package README policy; `verify` and `gate` do not write README files.");
         builder.AppendLine("- Use `readiness_blocker` only for same-repository ownership. When the underlying blocker is external, create a local tracking issue and put the external context in `readiness_note`.");
         builder.AppendLine($"- Use the {FormatMarkdownLink("coordinated release-links guide", GetRelativeRepositoryPath(request, CoordinatedReleaseLinksGuidePath, request.ReadinessOutputPath))} to select `release_track: coordinated` or an explicit historical release note.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` to refresh this dashboard and the adopter-facing package chooser.");
@@ -1506,6 +1575,15 @@ internal sealed record PackageIndexRequest(
 /// <param name="ChooserMarkdown">Generated adopter-facing package chooser markdown.</param>
 /// <param name="ReadinessMarkdown">Generated maintainer-facing package readiness evidence markdown.</param>
 internal sealed record PackageIndexDocuments(string ChooserMarkdown, string ReadinessMarkdown);
+
+/// <summary>
+/// Summarizes the managed package README work performed by <see cref="PackageIndexGenerator.GenerateToFileAsync"/>.
+/// </summary>
+/// <param name="ManagedReleaseGuidanceCount">Number of package READMEs that declare a managed release-guidance region.</param>
+/// <param name="ChangedReleaseGuidanceCount">Number of managed package READMEs whose region was rewritten.</param>
+internal sealed record PackageIndexGenerationReport(
+    int ManagedReleaseGuidanceCount,
+    int ChangedReleaseGuidanceCount);
 
 /// <summary>
 /// Couples one manifest row with the evaluated package metadata used to render the chooser.
@@ -2645,6 +2723,15 @@ internal sealed class PackageManifestEntry
     /// also retain this explicit-path meaning.
     /// </summary>
     public string? ReleaseNotesPath { get; init; }
+
+    /// <summary>
+    /// Gets the finite generated release-guidance variant for a package README that contains a managed release-policy region.
+    /// </summary>
+    /// <remarks>
+    /// Valid values are <c>default</c>, <c>apphost</c>, and <c>experimental</c>. This field is intentionally absent
+    /// for manifest entries whose documentation target has no managed release-guidance region.
+    /// </remarks>
+    public string? ReleaseGuidanceVariant { get; init; }
 }
 
 /// <summary>

@@ -66,6 +66,7 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 ## Maintainer workflow
 
 - Edit `packages/package-index.yml` for product family, publish decision, release metadata, dependency expectations, blockers, and notes.
+- Follow the [PackageIndex release-guidance maintainer guide](../tools/ForgeTrust.AppSurface.PackageIndex/README.md) when changing generated package README policy; `verify` and `gate` do not write README files.
 - Use `readiness_blocker` only for same-repository ownership. When the underlying blocker is external, create a local tracking issue and put the external context in `readiness_note`.
 - Use the [coordinated release-links guide](../releases/coordinated-release-links.md) to select `release_track: coordinated` or an explicit historical release note.
 - Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` to refresh this dashboard and the adopter-facing package chooser.

@@ -9,6 +9,9 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public sealed partial class RepositoryReadmePolicyTests
 {
+    private const string CanonicalPackageChooserUrl = "https://github.com/forge-trust/AppSurface/blob/main/packages/README.md";
+    private const string CanonicalReleaseHubUrl = "https://github.com/forge-trust/AppSurface/blob/main/releases/README.md";
+
     [Fact]
     public void AuthoredReadmes_ShouldNotStartWithYamlFrontMatter()
     {
@@ -151,18 +154,25 @@ public sealed partial class RepositoryReadmePolicyTests
 
             Assert.Contains("## Release Guidance", content, StringComparison.Ordinal);
 
-            var linkTargets = MarkdownLinkRegex()
+            var linkHrefs = MarkdownLinkRegex()
                 .Matches(content)
-                .Select(match => ResolveRelativeLinkTarget(
-                    Path.GetDirectoryName(fullReadmePath)!,
-                    match.Groups["href"].Value,
-                    readmePath))
+                .Select(match => match.Groups["href"].Value)
                 .ToArray();
 
             var expectedPackageChooserTarget = Path.GetFullPath(Path.Join("packages", "README.md"), repoRoot);
             var expectedReleaseHubTarget = Path.GetFullPath(Path.Join("releases", "README.md"), repoRoot);
-            var linksToPackageChooser = linkTargets.Any(target => string.Equals(target, expectedPackageChooserTarget, StringComparison.Ordinal));
-            var linksToReleaseHub = linkTargets.Any(target => string.Equals(target, expectedReleaseHubTarget, StringComparison.Ordinal));
+            var linksToPackageChooser = LinksToStableReleaseSurface(
+                linkHrefs,
+                CanonicalPackageChooserUrl,
+                expectedPackageChooserTarget,
+                Path.GetDirectoryName(fullReadmePath)!,
+                readmePath);
+            var linksToReleaseHub = LinksToStableReleaseSurface(
+                linkHrefs,
+                CanonicalReleaseHubUrl,
+                expectedReleaseHubTarget,
+                Path.GetDirectoryName(fullReadmePath)!,
+                readmePath);
 
             Assert.True(linksToPackageChooser, $"{readmePath} must link to the stable package chooser.");
             Assert.True(linksToReleaseHub, $"{readmePath} must link to the release hub.");
@@ -415,6 +425,22 @@ public sealed partial class RepositoryReadmePolicyTests
         Assert.False(Path.IsPathRooted(hrefPath), $"{readmePath} release guidance link must be relative.");
 
         return Path.GetFullPath(hrefPath, baseDirectory);
+    }
+
+    private static bool LinksToStableReleaseSurface(
+        IEnumerable<string> hrefs,
+        string canonicalUrl,
+        string expectedRepositoryTarget,
+        string baseDirectory,
+        string readmePath)
+    {
+        return hrefs.Any(href =>
+            string.Equals(href, canonicalUrl, StringComparison.Ordinal)
+            || (!Uri.IsWellFormedUriString(href, UriKind.Absolute)
+                && string.Equals(
+                    ResolveRelativeLinkTarget(baseDirectory, href, readmePath),
+                    expectedRepositoryTarget,
+                    StringComparison.Ordinal)));
     }
 
     [GeneratedRegex(@"\[[^\]]+\]\((?<href>[^)]+)\)", RegexOptions.CultureInvariant)]

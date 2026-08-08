@@ -10,10 +10,11 @@ When these helpers appear on routes exported by RazorWire, static export forces 
 fails with `RWEXPORT010` before protected allowed content or auth diagnostics are written. See
 [Static Auth Projection](../ForgeTrust.RazorWire/Docs/static-auth-projection.md).
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
-
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for current release risk, migration guidance, and readiness.
+<!-- appsurface-release-guidance: end -->
 ## Quickstart
 
 ```csharp
