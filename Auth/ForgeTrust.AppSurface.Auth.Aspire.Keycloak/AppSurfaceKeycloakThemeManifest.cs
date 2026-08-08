@@ -228,6 +228,11 @@ public sealed record AppSurfaceKeycloakThemeManifest(
     private static string NormalizeRelativePath(string sourceDirectory, string path)
     {
         var relativePath = Path.GetRelativePath(sourceDirectory, path).Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/');
+        if (relativePath.Any(char.IsControl))
+        {
+            throw SourceInvalid("a source file path contains control characters.");
+        }
+
         if (string.IsNullOrWhiteSpace(relativePath)
             || relativePath.StartsWith("../", StringComparison.Ordinal)
             || relativePath.Contains("//", StringComparison.Ordinal)

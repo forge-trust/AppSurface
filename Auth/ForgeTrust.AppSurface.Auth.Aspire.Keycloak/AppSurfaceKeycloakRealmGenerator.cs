@@ -15,6 +15,14 @@ public static class AppSurfaceKeycloakRealmGenerator
 
     private static readonly AsyncLocal<Action<string>?> BeforeMoveForTestingSlot = new();
 
+    /// <summary>
+    /// Gets or sets a test-only action invoked after temporary realm evidence is written and immediately before its
+    /// atomic replacement.
+    /// </summary>
+    /// <remarks>
+    /// The action is stored in <c>AsyncLocal&lt;Action&lt;string&gt;&gt;</c> so parallel test flows remain isolated. Tests must reset
+    /// this property to <see langword="null"/> after use.
+    /// </remarks>
     internal static Action<string>? BeforeMoveForTesting
     {
         get => BeforeMoveForTestingSlot.Value;
@@ -134,8 +142,8 @@ public static class AppSurfaceKeycloakRealmGenerator
             ["username"] = user.Username,
             ["enabled"] = true,
             ["firstName"] = user.DisplayName,
-            ["lastName"] = "Local User",
-            ["email"] = $"{user.Username}@appsurface.local",
+            ["lastName"] = AppSurfaceKeycloakDefaults.SeededUserLastName,
+            ["email"] = AppSurfaceKeycloakDefaults.SeededUserEmail(user.Username),
             ["emailVerified"] = true,
             ["attributes"] = CreateAttributes(user),
             ["credentials"] = new JsonArray(

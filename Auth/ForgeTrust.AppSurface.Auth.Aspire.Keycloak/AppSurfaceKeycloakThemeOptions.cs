@@ -118,7 +118,7 @@ public sealed class AppSurfaceKeycloakThemeOptions
             throw Invalid(nameof(Platform), "only linux/amd64 is eligible for the exact-image proof in version one.");
         }
 
-        var sourceDirectory = Path.GetFullPath(SourceDirectory, sourceBaseDirectory);
+        var sourceDirectory = ResolveDirectory(SourceDirectory, sourceBaseDirectory, nameof(SourceDirectory));
         var manifest = AppSurfaceKeycloakThemeManifest.Create(Name, sourceDirectory);
         var developmentOnlyResourcePaths = ValidateRequirements(manifest, sourceDirectory);
         var templateBaselineDigest = ValidateTemplateBaseline(manifest, sourceBaseDirectory);
@@ -173,7 +173,7 @@ public sealed class AppSurfaceKeycloakThemeOptions
             throw TemplateBaselineInvalid("copied .ftl files require TemplateBaselineDirectory.");
         }
 
-        var baselineDirectory = Path.GetFullPath(TemplateBaselineDirectory, sourceBaseDirectory);
+        var baselineDirectory = ResolveDirectory(TemplateBaselineDirectory, sourceBaseDirectory, nameof(TemplateBaselineDirectory));
         AppSurfaceKeycloakThemeManifest baseline;
         try
         {
@@ -232,9 +232,19 @@ public sealed class AppSurfaceKeycloakThemeOptions
         var propertiesEntry = manifest.Files.Single(file => string.Equals(file.RelativePath, "login/theme.properties", StringComparison.Ordinal));
         var properties = System.Text.Encoding.UTF8.GetString(AppSurfaceKeycloakThemeManifest.ReadVerifiedFile(sourceDirectory, propertiesEntry));
         var names = new HashSet<string>(StringComparer.Ordinal);
+        var continued = false;
         foreach (var line in properties.Split('\n'))
         {
-            var trimmed = line.Trim();
+            var physicalLine = line.TrimEnd('\r');
+            var continues = HasTrailingContinuation(physicalLine);
+            if (continued)
+            {
+                continued = continues;
+                continue;
+            }
+
+            continued = continues;
+            var trimmed = physicalLine.Trim();
             if (trimmed.Length == 0 || trimmed.StartsWith('#') || trimmed.StartsWith('!'))
             {
                 continue;
@@ -256,6 +266,18 @@ public sealed class AppSurfaceKeycloakThemeOptions
         }
 
         return developmentOnlyPaths;
+    }
+
+    private static string ResolveDirectory(string value, string baseDirectory, string optionName)
+    {
+        try
+        {
+            return Path.GetFullPath(value, baseDirectory);
+        }
+        catch (ArgumentException)
+        {
+            throw Invalid(optionName, "the path contains unsupported characters.");
+        }
     }
 
     private static string NormalizeDeclaredPath(string value, string optionName)
@@ -302,6 +324,17 @@ public sealed class AppSurfaceKeycloakThemeOptions
         }
 
         return line;
+    }
+
+    private static bool HasTrailingContinuation(string line)
+    {
+        var backslashes = 0;
+        for (var index = line.Length - 1; index >= 0 && line[index] == '\\'; index--)
+        {
+            backslashes++;
+        }
+
+        return backslashes % 2 == 1;
     }
 
     private static AppSurfaceKeycloakException Invalid(string optionName, string detail) =>

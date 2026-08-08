@@ -188,7 +188,7 @@ jobs:
             byte_count="$(wc -c < "$source_directory/$relative_path" | tr -d ' ' )"
             file_digest="$(sha256sum "$source_directory/$relative_path" | awk '{print $1}')"
             printf '%s\n%s\n%s' "$relative_path" "$byte_count" "$file_digest" >> "$manifest_lines"
-          done < <(cd "$source_directory" && find . -type f -print0 | sort -z)
+          done < <(cd "$source_directory" && find . -type f -print0 | LC_ALL=C sort -z)
           source_manifest_digest="$(sha256sum "$manifest_lines" | awk '{print $1}')"
           packaged_manifest_digest="$source_manifest_digest"
           build_contract_digest="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s' \
@@ -262,7 +262,7 @@ jobs:
             fi
             sleep 2
           done
-          [ "$ready" = true ] || fail ASKEYC019 start-runtime "The disposable Keycloak runtime did not become ready within 120 seconds."
+          [ "$ready" = true ] || fail ASKEYC019 start-runtime "The disposable Keycloak runtime did not become ready within 60 attempts (up to 240 seconds)."
           phase="readback"
           access_token="$(curl --fail --silent --show-error --max-time 10 --request POST "http://127.0.0.1:$port/realms/master/protocol/openid-connect/token" --data-urlencode grant_type=password --data-urlencode client_id=admin-cli --data-urlencode username=theme-evidence --data-urlencode password="$bootstrap_password" | jq -er '.access_token')" || fail ASKEYC020 readback "A disposable administrator token could not be acquired for readback."
           curl --fail --silent --show-error --max-time 10 --header "Authorization: Bearer $access_token" "http://127.0.0.1:$port/admin/realms/appsurface-theme-evidence" | jq -e '.loginTheme == "appsurface-sample"' >/dev/null || fail ASKEYC020 readback "Disposable realm readback did not select appsurface-sample."
@@ -292,11 +292,11 @@ jobs:
 
       - name: Upload secret-safe Keycloak theme evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ always() && !cancelled() }}
+        if: ${{ !cancelled() }}
         with:
           name: keycloak-theme-evidence
           path: ${{ runner.temp }}/keycloak-theme-evidence
-          if-no-files-found: error
+          if-no-files-found: warn
 
   build:
     runs-on: ubuntu-latest

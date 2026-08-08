@@ -38,7 +38,8 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
     [Theory]
     [InlineData(null)]
     [InlineData("other-theme")]
-    public async Task CheckOnceAsync_WhenConfiguredLoginThemeDoesNotMatchRealmEvidence_ThrowsRealmDiagnostic(string? realmTheme)
+    [InlineData(42)]
+    public async Task CheckOnceAsync_WhenConfiguredLoginThemeDoesNotMatchRealmEvidence_ThrowsRealmDiagnostic(object? realmTheme)
     {
         using var directory = new TempDirectory();
         var options = CreateOptionsWithTheme(directory.Path);
@@ -50,7 +51,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         }
         else
         {
-            realm["loginTheme"] = realmTheme;
+            realm["loginTheme"] = JsonValue.Create(realmTheme);
         }
 
         File.WriteAllText(realmImport, realm.ToJsonString());
@@ -99,6 +100,20 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
             AssertMetadataRequest(request);
             return Json("""{"issuer":"https://localhost:8080/realms/other"}""");
         }));
+        var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
+
+        var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.MetadataInvalid, exception.Code);
+    }
+
+    [Fact]
+    public async Task CheckOnceAsync_WhenIssuerHasUnexpectedValueKind_ThrowsMetadataDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var options = CreateOptions(directory.Path);
+        AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options);
+        using var client = new HttpClient(new StubHandler(_ => Json("""{"issuer":42}""")));
         var probe = new AppSurfaceKeycloakReadinessProbe(options, client);
 
         var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());

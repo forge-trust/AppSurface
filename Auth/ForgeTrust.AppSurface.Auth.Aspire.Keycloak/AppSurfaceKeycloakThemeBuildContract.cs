@@ -15,7 +15,11 @@ public sealed class AppSurfaceKeycloakThemeBuildContract
 {
     private const string ContainerfileName = "Containerfile";
     private const string ManifestName = "appsurface-keycloak-theme-manifest.json";
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = true,
+    };
 
     private readonly string _sourceDirectory;
 
@@ -51,8 +55,8 @@ public sealed class AppSurfaceKeycloakThemeBuildContract
     public AppSurfaceKeycloakThemeManifest PackagedManifest { get; }
 
     /// <summary>
-    /// Gets the deterministic digest that binds the registration, source manifest, packaged manifest, and
-    /// Containerfile contract.
+    /// Gets the deterministic digest that binds the registration, source manifest, packaged manifest, and inputs
+    /// used to derive the Containerfile.
     /// </summary>
     public string Digest { get; }
 
@@ -117,6 +121,10 @@ public sealed class AppSurfaceKeycloakThemeBuildContract
             VerifyPackagedTheme(themeDestination);
             Directory.Move(temporary, destination);
             return destination;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw BuildContractInvalid($"the build context could not be materialized safely ({exception.GetType().Name}).");
         }
         finally
         {

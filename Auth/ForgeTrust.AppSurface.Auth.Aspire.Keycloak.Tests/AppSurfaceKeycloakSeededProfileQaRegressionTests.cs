@@ -11,7 +11,9 @@ public sealed class AppSurfaceKeycloakSeededProfileQaRegressionTests
     public void RealmGenerator_SeedsProfileFieldsRequiredForDirectLogin()
     {
         using var document = JsonDocument.Parse(AppSurfaceKeycloakRealmGenerator.Generate(new AppSurfaceKeycloakOptions()));
-        var users = document.RootElement.GetProperty("users").EnumerateArray();
+        var users = document.RootElement.GetProperty("users").EnumerateArray().ToArray();
+
+        Assert.NotEmpty(users);
 
         foreach (var user in users)
         {

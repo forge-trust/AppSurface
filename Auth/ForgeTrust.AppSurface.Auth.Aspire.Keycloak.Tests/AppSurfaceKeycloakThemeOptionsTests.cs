@@ -84,6 +84,37 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
     }
 
     [Fact]
+    public void CreateRegistration_WhenSourceDirectoryContainsUnsupportedCharacters_ThrowsConfigurationDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var theme = CreateOptions(CreateTheme(directory.Path, "application"));
+        theme.SourceDirectory = "\0";
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => theme.CreateRegistration(directory.Path));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.InvalidThemeConfiguration, exception.Code);
+        Assert.Contains(nameof(AppSurfaceKeycloakThemeOptions.SourceDirectory), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CreateRegistration_WhenSourcePathContainsControlCharacters_ThrowsSourceDiagnostic()
+    {
+        if (Path.GetInvalidFileNameChars().Contains('\n'))
+        {
+            return;
+        }
+
+        using var directory = new TempDirectory();
+        var source = CreateTheme(directory.Path, "application");
+        File.WriteAllText(Path.Join(source, "login", "resources", "line\nbreak.css"), "body {}");
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => CreateOptions(source).CreateRegistration(directory.Path));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeSourceInvalid, exception.Code);
+        Assert.Contains("control characters", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void CreateRegistration_WhenSourceDirectoryIsASymbolicLink_ThrowsSourceDiagnostic()
     {
         using var directory = new TempDirectory();
@@ -248,6 +279,22 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
         theme.CreateRegistration(directory.Path);
     }
 
+    [Fact]
+    public void CreateRegistration_WhenRequiredPropertyAppearsOnlyInAPropertiesContinuation_ThrowsRequirementsDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var source = CreateTheme(directory.Path, "application");
+        File.WriteAllText(
+            Path.Join(source, "login", "theme.properties"),
+            "parent=keycloak\\\ncontinued-property=value\n");
+        var theme = CreateOptions(source);
+        theme.RequiredThemeProperties.Add("continued-property");
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => theme.CreateRegistration(directory.Path));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemePropertiesInvalid, exception.Code);
+    }
+
     [Theory]
     [InlineData("../outside.css")]
     [InlineData("/login/resources/site.css")]
@@ -372,7 +419,12 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
             containerfile,
             StringComparison.Ordinal);
         Assert.DoesNotContain("\\\"", containerfile, StringComparison.Ordinal);
-        Assert.True(File.Exists(Path.Join(destination, "appsurface-keycloak-theme-manifest.json")));
+        var manifestPath = Path.Join(destination, "appsurface-keycloak-theme-manifest.json");
+        Assert.True(File.Exists(manifestPath));
+        using var manifestJson = JsonDocument.Parse(File.ReadAllText(manifestPath));
+        Assert.Equal(
+            ["registration", "manifest", "packagedManifest"],
+            manifestJson.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
         contract.VerifyPackagedTheme(Path.Join(destination, "themes", "application"));
     }
 
@@ -406,6 +458,23 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
 
         Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeSourceChanged, exception.Code);
         Assert.Contains("changed after", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildContract_Write_WhenVerifiedSourceFileBecomesADirectory_ThrowsBuildDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var source = CreateTheme(directory.Path, "application");
+        var stylesheet = Path.Join(source, "login", "resources", "site.css");
+        File.WriteAllText(stylesheet, "body { color: black; }");
+        var contract = AppSurfaceKeycloakThemeBuildContract.Create(CreateOptions(source));
+        File.Delete(stylesheet);
+        Directory.CreateDirectory(stylesheet);
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => contract.Write(Path.Join(directory.Path, "build-context")));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.ThemeBuildContractInvalid, exception.Code);
+        Assert.DoesNotContain(stylesheet, exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

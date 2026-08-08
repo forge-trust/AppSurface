@@ -48,4 +48,48 @@ public sealed class AppSurfaceKeycloakWebSignoutQaRegressionTests
 
         Assert.False(oidc.SaveTokens);
     }
+
+    [Fact]
+    public void WebProofConfiguration_WhenOverriddenProviderOptsIn_PersistsTokens()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["Authentication:Oidc:Authority"] = "https://identity.example.test/realms/appsurface",
+                    ["Authentication:Oidc:ClientId"] = "production-web",
+                    ["Authentication:Oidc:SaveTokens"] = "true",
+                })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddAppSurfaceOidcAuth(options =>
+            AppSurfaceKeycloakWebOidcConfiguration.Configure(options, configuration));
+
+        using var provider = services.BuildServiceProvider();
+        var oidc = provider.GetRequiredService<IOptionsMonitor<OpenIdConnectOptions>>()
+            .Get(AppSurfaceOidcAuthOptions.DefaultOidcScheme);
+
+        Assert.True(oidc.SaveTokens);
+    }
+
+    [Fact]
+    public void WebProofConfiguration_WhenLocalKeycloakUsesANonDefaultPort_PersistsTokens()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["Authentication:Oidc:Authority"] = "https://localhost:5188/realms/appsurface-dev",
+                })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddAppSurfaceOidcAuth(options =>
+            AppSurfaceKeycloakWebOidcConfiguration.Configure(options, configuration));
+
+        using var provider = services.BuildServiceProvider();
+        var oidc = provider.GetRequiredService<IOptionsMonitor<OpenIdConnectOptions>>()
+            .Get(AppSurfaceOidcAuthOptions.DefaultOidcScheme);
+
+        Assert.True(oidc.SaveTokens);
+    }
 }

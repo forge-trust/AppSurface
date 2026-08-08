@@ -16,6 +16,14 @@ public sealed class AppSurfaceKeycloakThemeReleaseEvidence
 
     private static readonly AsyncLocal<Action<string>?> BeforeMoveForTestingSlot = new();
 
+    /// <summary>
+    /// Gets or sets a test-only action invoked after temporary evidence is written and immediately before its atomic
+    /// move into place.
+    /// </summary>
+    /// <remarks>
+    /// The action is stored in <c>AsyncLocal&lt;Action&lt;string&gt;&gt;</c> so parallel test flows remain isolated. Tests must reset
+    /// this property to <see langword="null"/> after use.
+    /// </remarks>
     internal static Action<string>? BeforeMoveForTesting
     {
         get => BeforeMoveForTestingSlot.Value;

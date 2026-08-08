@@ -97,9 +97,7 @@ public sealed class AppSurfaceKeycloakReadinessProbe
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
-            var issuer = document.RootElement.TryGetProperty("issuer", out var issuerProperty)
-                ? issuerProperty.GetString()
-                : null;
+            var issuer = GetOptionalString(document.RootElement, "issuer");
             if (!string.Equals(issuer, authority, StringComparison.Ordinal))
             {
                 throw new AppSurfaceKeycloakException(
@@ -140,7 +138,7 @@ public sealed class AppSurfaceKeycloakReadinessProbe
         using (document)
         {
             var root = document.RootElement;
-            if (!root.TryGetProperty("realm", out var realm) || !string.Equals(realm.GetString(), _options.Realm, StringComparison.Ordinal))
+            if (!string.Equals(GetOptionalString(root, "realm"), _options.Realm, StringComparison.Ordinal))
             {
                 throw RealmEvidence("realm import does not contain the expected realm id.");
             }
@@ -156,8 +154,7 @@ public sealed class AppSurfaceKeycloakReadinessProbe
             }
 
             if (_options.LoginTheme is not null
-                && (!root.TryGetProperty("loginTheme", out var loginTheme)
-                    || !string.Equals(loginTheme.GetString(), _options.LoginTheme.Name, StringComparison.Ordinal)))
+                && !string.Equals(GetOptionalString(root, "loginTheme"), _options.LoginTheme.Name, StringComparison.Ordinal))
             {
                 throw RealmEvidence("realm import does not contain the expected login theme.");
             }
@@ -195,12 +192,12 @@ public sealed class AppSurfaceKeycloakReadinessProbe
 
     private static void CheckSeededUserProfileEvidence(JsonElement user, string username)
     {
-        if (!string.Equals(GetOptionalString(user, "lastName"), "Local User", StringComparison.Ordinal))
+        if (!string.Equals(GetOptionalString(user, "lastName"), AppSurfaceKeycloakDefaults.SeededUserLastName, StringComparison.Ordinal))
         {
             throw RealmEvidence($"seeded user '{username}' does not contain the expected local profile surname.");
         }
 
-        if (!string.Equals(GetOptionalString(user, "email"), $"{username}@appsurface.local", StringComparison.Ordinal))
+        if (!string.Equals(GetOptionalString(user, "email"), AppSurfaceKeycloakDefaults.SeededUserEmail(username), StringComparison.Ordinal))
         {
             throw RealmEvidence($"seeded user '{username}' does not contain the expected local profile email.");
         }

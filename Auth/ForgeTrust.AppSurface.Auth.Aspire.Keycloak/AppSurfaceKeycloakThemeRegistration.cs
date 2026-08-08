@@ -15,6 +15,16 @@ public sealed record AppSurfaceKeycloakThemeRegistration(
     string ManifestDigest,
     string? TemplateBaselineDigest = null);
 
+/// <summary>
+/// Holds validated theme-registration state, including the resolved source directory and development-only paths that
+/// are excluded from immutable image evidence.
+/// </summary>
+/// <param name="SourceDirectory">The resolved application-owned theme source directory.</param>
+/// <param name="Manifest">The deterministic manifest of the complete validated source tree.</param>
+/// <param name="BaseImage">The immutable Keycloak base image used for the local proof.</param>
+/// <param name="TemplateBaselineDigest">The optional reviewed upstream template-baseline digest.</param>
+/// <param name="DevelopmentOnlyResourcePaths">Source-relative paths excluded from packaged image evidence.</param>
+/// <param name="Registration">The secret-safe public registration evidence.</param>
 internal sealed record AppSurfaceKeycloakThemeRegistrationState(
     string SourceDirectory,
     AppSurfaceKeycloakThemeManifest Manifest,

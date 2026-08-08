@@ -35,8 +35,16 @@ public static class AppSurfaceKeycloakWebOidcConfiguration
             oidc.RequireHttpsMetadata = true;
             oidc.SaveTokens = configuration.GetValue(
                 "Authentication:Oidc:SaveTokens",
-                string.Equals(oidc.Authority, LocalAuthority, StringComparison.Ordinal)
-                && string.Equals(oidc.ClientId, LocalClientId, StringComparison.Ordinal));
+                IsLocalKeycloakAuthority(oidc.Authority));
         });
     }
+
+    private static bool IsLocalKeycloakAuthority(string authority) =>
+        Uri.TryCreate(authority, UriKind.Absolute, out var uri)
+        && string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal)
+        && uri.IsLoopback
+        && string.IsNullOrEmpty(uri.Query)
+        && string.IsNullOrEmpty(uri.Fragment)
+        && uri.AbsolutePath.StartsWith("/realms/", StringComparison.Ordinal)
+        && uri.AbsolutePath.Length > "/realms/".Length;
 }

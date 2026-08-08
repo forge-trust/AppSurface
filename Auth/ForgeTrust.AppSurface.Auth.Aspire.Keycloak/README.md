@@ -107,10 +107,12 @@ For a mutable source, recreate the build contract immediately before packaging. 
 After an application-owned CI build produces its digest-pinned theme image, bind it to the validated source and
 packaged manifests before any realm selection:
 
-    var releaseEvidence = AppSurfaceKeycloakThemeReleaseEvidence.Create(
-        buildContract,
-        "registry.example/appsurface-keycloak-theme:1.0@sha256:<64-lowercase-hex-digest>");
-    releaseEvidence.Write("artifacts/keycloak-theme-evidence.json");
+```csharp
+var releaseEvidence = AppSurfaceKeycloakThemeReleaseEvidence.Create(
+    buildContract,
+    "registry.example/appsurface-keycloak-theme:1.0@sha256:<64-lowercase-hex-digest>");
+releaseEvidence.Write("artifacts/keycloak-theme-evidence.json");
+```
 
 The atomically written tuple records the theme name, source and packaged-manifest digests, build-contract digest,
 pinned Keycloak base image, final image, platform, and optional template-baseline digest. It excludes realm JSON,

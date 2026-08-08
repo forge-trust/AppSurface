@@ -60,6 +60,16 @@ public static class AppSurfaceKeycloakDefaults
     public const string AdminPasswordParameterName = "keycloak-admin-password";
 
     /// <summary>
+    /// Default surname assigned to locally seeded Keycloak proof users.
+    /// </summary>
+    public const string SeededUserLastName = "Local User";
+
+    /// <summary>
+    /// Default email domain assigned to locally seeded Keycloak proof users.
+    /// </summary>
+    public const string SeededUserEmailDomain = "appsurface.local";
+
+    /// <summary>
     /// Default bounded wait used by readiness probes.
     /// </summary>
     public static readonly TimeSpan ReadinessTimeout = TimeSpan.FromSeconds(120);
@@ -72,4 +82,11 @@ public static class AppSurfaceKeycloakDefaults
     /// <returns>The local HTTPS authority URL.</returns>
     public static string Authority(string realm = Realm, int port = KeycloakPort) =>
         $"https://localhost:{port}/realms/{realm}";
+
+    /// <summary>
+    /// Builds the default verified email address for a locally seeded Keycloak proof user.
+    /// </summary>
+    /// <param name="username">The seeded user's configured username.</param>
+    /// <returns>The local-only email address for the user.</returns>
+    public static string SeededUserEmail(string username) => $"{username}@{SeededUserEmailDomain}";
 }
