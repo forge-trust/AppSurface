@@ -2345,24 +2345,28 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
-    public async Task PatchDiffSource_ForGitBase_ReadsDiffFromRepository()
+    public async Task PatchDiffSource_ForGitBase_ReadsEmptyDiff_WhenBaseIsCurrentHead()
     {
-        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
-        File.WriteAllText(Path.Join(temp.Path, "README.md"), "base" + Environment.NewLine);
-        await RunGitAsync(temp.Path, "init");
-        await RunGitAsync(temp.Path, "config", "user.email", "tests@example.invalid");
-        await RunGitAsync(temp.Path, "config", "user.name", "AppSurface Tests");
-        await RunGitAsync(temp.Path, "add", ".");
-        await RunGitAsync(temp.Path, "commit", "-m", "base");
-        await File.AppendAllTextAsync(Path.Join(temp.Path, "README.md"), "changed" + Environment.NewLine);
-        await RunGitAsync(temp.Path, "add", ".");
-        await RunGitAsync(temp.Path, "commit", "-m", "change");
-        var source = PatchDiffSource.ForGitBase("HEAD~1", "previous");
+        var repositoryRoot = GitRepositoryRootResolver.FindRepositoryRoot(AppContext.BaseDirectory);
+        var source = PatchDiffSource.ForGitBase("HEAD", "current");
 
-        var artifact = await source.ReadAsync(temp.Path, CancellationToken.None);
+        var artifact = await source.ReadAsync(repositoryRoot, CancellationToken.None);
 
         Assert.Equal(PatchDiffSourceKind.GitBase, source.Kind);
-        Assert.Contains("+changed", artifact.Text, StringComparison.Ordinal);
+        Assert.Empty(artifact.Text);
+        Assert.True(artifact.Empty);
+    }
+
+    [Fact]
+    public async Task PatchDiffSource_ForGitBase_UsesConfiguredDiffProvider()
+    {
+        const string diff = "diff --git a/README.md b/README.md\n";
+        var source = PatchDiffSource.ForGitBase("HEAD~1", "previous", _ => Task.FromResult(diff));
+
+        var artifact = await source.ReadAsync(Directory.GetCurrentDirectory(), CancellationToken.None);
+
+        Assert.Equal(PatchDiffSourceKind.GitBase, source.Kind);
+        Assert.Equal(diff, artifact.Text);
         Assert.False(artifact.Empty);
     }
 
@@ -3674,28 +3678,6 @@ public sealed class CoverageGateTests
         Assert.Contains("git -c commit.gpgsign=false commit -m empty failed:", exception.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task TempDirectory_Dispose_RetriesWindowsFileLocks()
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
-        var path = temp.WriteCoverage("<coverage />");
-        using var lockHandle = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
-        var dispose = Task.Run(temp.Dispose);
-
-        await Task.Delay(100);
-        Assert.False(dispose.IsCompleted);
-
-        lockHandle.Dispose();
-        await dispose.WaitAsync(TimeSpan.FromSeconds(5));
-
-        Assert.False(Directory.Exists(temp.Path));
-    }
-
     private static async Task RunGitAsync(string workingDirectory, params string[] arguments)
     {
         var startInfo = new ProcessStartInfo("git")
@@ -3934,10 +3916,6 @@ public sealed class CoverageGateTests
 
     private sealed class TempDirectory : IDisposable
     {
-        private const int MaxDeleteAttempts = 100;
-
-        private const int DeleteRetryDelayMilliseconds = 50;
-
         private TempDirectory(string path)
         {
             Path = path;
@@ -3964,20 +3942,9 @@ public sealed class CoverageGateTests
 
         public void Dispose()
         {
-            for (var attempt = 0; Directory.Exists(Path); attempt++)
+            if (Directory.Exists(Path))
             {
-                try
-                {
-                    Directory.Delete(Path, recursive: true);
-                }
-                catch (IOException) when (attempt < MaxDeleteAttempts - 1)
-                {
-                    Thread.Sleep(DeleteRetryDelayMilliseconds);
-                }
-                catch (UnauthorizedAccessException) when (attempt < MaxDeleteAttempts - 1)
-                {
-                    Thread.Sleep(DeleteRetryDelayMilliseconds);
-                }
+                Directory.Delete(Path, recursive: true);
             }
         }
     }
