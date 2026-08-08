@@ -2218,12 +2218,49 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
         Assert.Equal(0, generateExitCode);
         Assert.Equal(0, verifyExitCode);
-        Assert.Contains("Generated packages/README.md and packages/readiness.md.", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Generated packages/README.md and packages/readiness.md. Reconciled 0 of 0 managed package README release-guidance region(s).", stdout.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain('\\', stdout.ToString());
-        Assert.Contains("Package chooser and readiness dashboard are up to date: packages/README.md, packages/readiness.md.", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Generated package-index documents and managed package README release guidance are up to date: packages/README.md, packages/readiness.md.", stdout.ToString(), StringComparison.Ordinal);
         Assert.Equal(string.Empty, stderr.ToString());
         Assert.True(File.Exists(Path.Join(_repositoryRoot, "packages", "README.md")));
         Assert.True(File.Exists(Path.Join(_repositoryRoot, "packages", "readiness.md")));
+    }
+
+    [Fact]
+    public async Task RunAsync_GenerateAndVerify_ReconcilesAndDetectsManagedReleaseGuidance()
+    {
+        await WriteProgramRepoAsync();
+        await WriteReleaseGuidanceTemplateAsync();
+        var manifestPath = TestPathUtils.PathUnder(_repositoryRoot, "packages", "package-index.yml");
+        var manifest = await File.ReadAllTextAsync(manifestPath);
+        await File.WriteAllTextAsync(
+            manifestPath,
+            manifest.Replace(
+                "classification: public",
+                "release_guidance_variant: default\n    classification: public",
+                StringComparison.Ordinal));
+        await WriteFileAsync(
+            "Web/ForgeTrust.AppSurface.Web/README.md",
+            "# Web\n\n<!-- appsurface-release-guidance: begin -->\n## Release Guidance\n\nstale\n<!-- appsurface-release-guidance: end -->\n");
+
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var generateExitCode = await Program.RunAsync(["generate"], stdout, stderr, _repositoryRoot);
+        var verifyExitCode = await Program.RunAsync(["verify"], stdout, stderr, _repositoryRoot);
+        var readmePath = TestPathUtils.PathUnder(_repositoryRoot, "Web", "ForgeTrust.AppSurface.Web", "README.md");
+        var reconciledReadme = await File.ReadAllTextAsync(readmePath);
+        await File.WriteAllTextAsync(
+            readmePath,
+            reconciledReadme.Replace(ReleaseGuidanceRenderer.PackageChooserUrl, "https://example.invalid/packages", StringComparison.Ordinal));
+        var staleVerifyExitCode = await Program.RunAsync(["verify"], stdout, stderr, _repositoryRoot);
+
+        Assert.Equal(0, generateExitCode);
+        Assert.Equal(0, verifyExitCode);
+        Assert.Equal(1, staleVerifyExitCode);
+        Assert.Contains("Reconciled 1 of 1 managed package README release-guidance region(s).", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains(ReleaseGuidanceRenderer.PackageChooserUrl, reconciledReadme, StringComparison.Ordinal);
+        Assert.Contains("README release guidance is stale", stderr.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3441,6 +3478,31 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             "rebrand/stale-brand-allowlist.txt",
             """
             # path|term|yyyy-mm-dd|reason
+            """);
+    }
+
+    private Task WriteReleaseGuidanceTemplateAsync()
+    {
+        return WriteFileAsync(
+            ReleaseGuidanceRenderer.TemplateRelativePath,
+            """
+            <!-- appsurface-release-guidance-template: default begin -->
+            ## Release Guidance
+
+            Default [chooser]({{PackageChooserUrl}}) and [hub]({{ReleaseHubUrl}}).
+            <!-- appsurface-release-guidance-template: default end -->
+
+            <!-- appsurface-release-guidance-template: apphost begin -->
+            ## Release Guidance
+
+            AppHost [chooser]({{PackageChooserUrl}}) and [hub]({{ReleaseHubUrl}}).
+            <!-- appsurface-release-guidance-template: apphost end -->
+
+            <!-- appsurface-release-guidance-template: experimental begin -->
+            ## Release Guidance
+
+            Experimental [chooser]({{PackageChooserUrl}}) and [hub]({{ReleaseHubUrl}}).
+            <!-- appsurface-release-guidance-template: experimental end -->
             """);
     }
 

@@ -361,7 +361,12 @@ Read the normative [`Work protocol v1`](../work-protocol-v1.md), [`Flow protocol
 [`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md), the
 [`slice 3 reconstruction ledger`](../slice3-reconstruction.md), and the [`slice 4 reconstruction ledger`](../slice4-reconstruction.md) for exact behavior, safe responses, and lineage.
 
+## Verification
+
+From the repository root, `./Durable/verify-postgresql.sh --quick` runs focused Work proof, `./Durable/verify-postgresql.sh --quick --flow` runs focused Flow proof, and `./Durable/verify-postgresql.sh --quick --schedule` runs the real PostgreSQL Work-first Schedule proof. `--ci` runs the complete strict real-PostgreSQL suite; `--ci --flow` performs its compatibility preflight before that suite, while `--ci --schedule` also runs the complete suite without a Schedule-specific filter.
+
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-From the repository root, `./Durable/verify-postgresql.sh --quick` runs focused Work proof, `./Durable/verify-postgresql.sh --quick --flow` runs focused Flow proof, and `./Durable/verify-postgresql.sh --quick --schedule` runs the real PostgreSQL Work-first Schedule proof. `--ci` runs the complete strict real-PostgreSQL suite; `--ci --flow` performs its compatibility preflight before that suite, while `--ci --schedule` also runs the complete suite without a Schedule-specific filter. The [`package chooser`](../../packages/README.md) is the generated adoption/publication source, and
-the [`release hub`](../../releases/README.md) owns coordinated release policy.
+This package has an explicitly experimental or publication-held contract. Do not treat it as a normal prerelease install; use the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for the current publication decision, proof requirements, and migration guidance.
+<!-- appsurface-release-guidance: end -->

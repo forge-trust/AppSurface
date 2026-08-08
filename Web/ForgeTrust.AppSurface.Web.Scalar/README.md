@@ -6,10 +6,11 @@ This package integrates the [Scalar](https://scalar.com/) API Reference UI into 
 
 The `AppSurfaceWebScalarModule` provides a modern, interactive API documentation interface. It depends on `ForgeTrust.AppSurface.Web.OpenApi` and maps the Scalar UI when Scalar exposure options and the AppSurface-owned OpenAPI endpoint exposure both allow the active environment.
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
-
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for current release risk, migration guidance, and readiness.
+<!-- appsurface-release-guidance: end -->
 ## Usage
 
 Simply add the `AppSurfaceWebScalarModule` to your module dependencies:

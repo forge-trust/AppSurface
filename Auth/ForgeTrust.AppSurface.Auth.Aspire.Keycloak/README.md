@@ -223,9 +223,12 @@ alternative runtimes may run deterministic source tests, but they cannot replace
 Production Keycloak, image publication, realm mutation, rollout, and rollback remain operator-owned and unsupported
 by this package.
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-Use the [stable package chooser](../../packages/README.md) to compare this AppHost-only package with the runtime Auth packages. Use the [release hub](../../releases/README.md) for coordinated AppSurface versioning and package publication evidence.
+This AppHost-oriented package follows the coordinated AppSurface release policy. Before using a prerelease build in an AppHost, development, or test environment, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for publication status, compatibility guidance, and readiness.
+<!-- appsurface-release-guidance: end -->
 
 ---
+
 [Back to Auth List](../README.md) | [Back to Root](../../README.md)
