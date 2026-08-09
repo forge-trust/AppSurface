@@ -9,6 +9,9 @@ public sealed class PackageIndexReleaseGuidanceLinkRegressionTests
     [InlineData(
         "releases/coordinated-release-links.md",
         "https://github.com/forge-trust/AppSurface/blob/main/releases/coordinated-release-links.md")]
+    [InlineData(
+        "tools\\ForgeTrust.AppSurface.PackageIndex\\README.md",
+        "https://github.com/forge-trust/AppSurface/blob/main/tools/ForgeTrust.AppSurface.PackageIndex/README.md")]
     public void GetCanonicalRepositoryUrl_UsesTheRepositoryPageInsteadOfADocsRelativeRoute(
         string repositoryRelativePath,
         string expectedUrl)
@@ -24,6 +27,9 @@ public sealed class PackageIndexReleaseGuidanceLinkRegressionTests
     [Theory]
     [InlineData("../tools/ForgeTrust.AppSurface.PackageIndex/README.md")]
     [InlineData("/tools/ForgeTrust.AppSurface.PackageIndex/README.md")]
+    [InlineData("C:\\tools\\ForgeTrust.AppSurface.PackageIndex\\README.md")]
+    [InlineData("C:tools/ForgeTrust.AppSurface.PackageIndex/README.md")]
+    [InlineData("tools/./ForgeTrust.AppSurface.PackageIndex/README.md")]
     [InlineData("tools//ForgeTrust.AppSurface.PackageIndex/README.md")]
     public void GetCanonicalRepositoryUrl_RejectsUnsafeRepositoryPaths(string repositoryRelativePath)
     {
@@ -31,5 +37,13 @@ public sealed class PackageIndexReleaseGuidanceLinkRegressionTests
             () => PackageIndexGenerator.GetCanonicalRepositoryUrl(repositoryRelativePath));
 
         Assert.Contains("must be a non-rooted path", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetCanonicalRepositoryUrl_RejectsNullOrWhitespaceRepositoryPaths()
+    {
+        Assert.Throws<ArgumentNullException>(() => PackageIndexGenerator.GetCanonicalRepositoryUrl(null!));
+        Assert.Throws<ArgumentException>(() => PackageIndexGenerator.GetCanonicalRepositoryUrl(string.Empty));
+        Assert.Throws<ArgumentException>(() => PackageIndexGenerator.GetCanonicalRepositoryUrl("   "));
     }
 }
