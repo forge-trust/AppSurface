@@ -15,7 +15,9 @@ It does not create Aspire resources, own dashboards, capture request bodies, def
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for current release risk, migration guidance, and readiness.
+AppSurface ships as a coordinated package family. Before installing this package
+from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md)
+for current release risk, migration guidance, and readiness.
 <!-- appsurface-release-guidance: end -->
 ## Installation
 

@@ -33,6 +33,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="../../examples/auth-aspire-keycloak-web/AppSurfaceKeycloakWebOidcConfiguration.cs" Link="AppSurfaceKeycloakWebOidcConfiguration.cs" />
     <Using Include="ForgeTrust.AppSurface.Testing" />
     <Using Include="Xunit" />
   </ItemGroup>

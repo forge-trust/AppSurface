@@ -11,17 +11,7 @@ builder.Services.AddAuthentication(options =>
     options.DefaultChallengeScheme = AppSurfaceOidcAuthOptions.DefaultOidcScheme;
 });
 builder.Services.AddAppSurfaceOidcAuth(options =>
-{
-    options.RequireClientSecret = builder.Configuration.GetValue("Authentication:Oidc:RequireClientSecret", false);
-    options.CallbackPath = builder.Configuration["Authentication:Oidc:CallbackPath"] ?? AppSurfaceOidcAuthOptions.DefaultCallbackPath;
-    options.SignedOutCallbackPath = builder.Configuration["Authentication:Oidc:SignedOutCallbackPath"] ?? AppSurfaceOidcAuthOptions.DefaultSignedOutCallbackPath;
-    options.ConfigureOpenIdConnect(oidc =>
-    {
-        oidc.Authority = builder.Configuration["Authentication:Oidc:Authority"] ?? "http://localhost:8080/realms/appsurface-dev";
-        oidc.ClientId = builder.Configuration["Authentication:Oidc:ClientId"] ?? "appsurface-web";
-        oidc.RequireHttpsMetadata = false;
-    });
-});
+    AuthAspireKeycloakWeb.AppSurfaceKeycloakWebOidcConfiguration.Configure(options, builder.Configuration));
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("AppSurfaceAdminProof", policy => policy.RequireClaim("appsurface_role", "admin"));

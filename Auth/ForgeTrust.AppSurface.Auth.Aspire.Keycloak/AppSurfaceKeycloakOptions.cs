@@ -61,6 +61,16 @@ public sealed class AppSurfaceKeycloakOptions
     public string RealmImportDirectory { get; set; } = CreateDefaultRealmImportDirectory();
 
     /// <summary>
+    /// Gets or sets the optional application-owned login theme used by the local Keycloak AppHost proof.
+    /// </summary>
+    /// <remarks>
+    /// When absent, Keycloak's existing behavior and the package's original five-minute proof remain unchanged.
+    /// When present, the package validates and read-only mounts the theme only for local AppHost use; it does not
+    /// publish an image or mutate a production realm.
+    /// </remarks>
+    public AppSurfaceKeycloakThemeOptions? LoginTheme { get; set; }
+
+    /// <summary>
     /// Gets mutable redirect URIs imported into the public OIDC client.
     /// </summary>
     public IList<Uri> RedirectUris { get; } = [];
@@ -90,6 +100,7 @@ public sealed class AppSurfaceKeycloakOptions
         ValidatePath(SignedOutCallbackPath, nameof(SignedOutCallbackPath));
         ValidatePort(KeycloakPort, nameof(KeycloakPort));
         ValidatePort(WebProofPort, nameof(WebProofPort));
+        LoginTheme?.Validate();
 
         if (string.IsNullOrWhiteSpace(RealmImportDirectory))
         {
@@ -135,6 +146,47 @@ public sealed class AppSurfaceKeycloakOptions
             CallbackPath,
             SignedOutCallbackPath,
             requireClientSecret: false);
+    }
+
+    internal AppSurfaceKeycloakThemeRegistrationState? CreateThemeRegistration(string sourceBaseDirectory) =>
+        LoginTheme?.CreateRegistration(sourceBaseDirectory);
+
+    internal AppSurfaceKeycloakOptions CreateValidatedSnapshot()
+    {
+        var snapshot = new AppSurfaceKeycloakOptions
+        {
+            Realm = Realm,
+            ClientId = ClientId,
+            ClientDisplayName = ClientDisplayName,
+            CallbackPath = CallbackPath,
+            SignedOutCallbackPath = SignedOutCallbackPath,
+            KeycloakPort = KeycloakPort,
+            WebProofPort = WebProofPort,
+            UsePersistentDataVolume = UsePersistentDataVolume,
+            RealmImportDirectory = RealmImportDirectory,
+            LoginTheme = LoginTheme?.CreateSnapshot(),
+        };
+
+        snapshot.RedirectUris.Clear();
+        foreach (var redirectUri in RedirectUris)
+        {
+            snapshot.RedirectUris.Add(redirectUri);
+        }
+
+        snapshot.PostLogoutRedirectUris.Clear();
+        foreach (var postLogoutRedirectUri in PostLogoutRedirectUris)
+        {
+            snapshot.PostLogoutRedirectUris.Add(postLogoutRedirectUri);
+        }
+
+        snapshot.SeededUsers.Clear();
+        foreach (var user in SeededUsers)
+        {
+            snapshot.SeededUsers.Add(CreateUserSnapshot(user));
+        }
+
+        snapshot.Validate();
+        return snapshot;
     }
 
     private void EnsureDefaultUris()
@@ -225,6 +277,18 @@ public sealed class AppSurfaceKeycloakOptions
         var user = new AppSurfaceKeycloakUserOptions(username, password, subject, displayName);
         user.Claims["appsurface_role"] = role;
         return user;
+    }
+
+    private static AppSurfaceKeycloakUserOptions CreateUserSnapshot(AppSurfaceKeycloakUserOptions user)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        var snapshot = new AppSurfaceKeycloakUserOptions(user.Username, user.Password, user.Subject, user.DisplayName);
+        foreach (var claim in user.Claims)
+        {
+            snapshot.Claims.Add(claim.Key, claim.Value);
+        }
+
+        return snapshot;
     }
 
     private static AppSurfaceKeycloakException Invalid(string optionName, string detail) =>
