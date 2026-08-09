@@ -290,6 +290,8 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("Feature pull requests must not edit releases/unreleased.md", workflow, StringComparison.Ordinal);
         Assert.Contains("appsurface:unreleased-entry directive", workflow, StringComparison.Ordinal);
         Assert.Contains("must not introduce a top-level # or ## heading", workflow, StringComparison.Ordinal);
+        Assert.Contains("hasTopLevelAtxHeading", workflow, StringComparison.Ordinal);
+        Assert.Contains("hasTopLevelSetextHeading", workflow, StringComparison.Ordinal);
         Assert.Contains("must contain exactly one", workflow, StringComparison.Ordinal);
         Assert.Contains("must not contain unsupported append-only entry markers", workflow, StringComparison.Ordinal);
     }

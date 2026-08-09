@@ -101,7 +101,9 @@ internal static class ReleaseManifestV2Validator
                 || resolutionProjects.Distinct(StringComparer.Ordinal).Count() != resolutionProjects.Length
                 || !consumedEntryPaths.SequenceEqual(consumedEntryPaths.OrderBy(path => path, StringComparer.Ordinal), StringComparer.Ordinal)
                 || consumedEntryPaths.Distinct(StringComparer.Ordinal).Count() != consumedEntryPaths.Length
-                || consumedEntryPaths.Any(path => string.IsNullOrWhiteSpace(path) || !UnreleasedEntryComposer.IsEntryPath(path))
+                || consumedEntryPaths.Any(path => string.IsNullOrWhiteSpace(path)
+                    || path.Contains('\\')
+                    || !UnreleasedEntryComposer.IsEntryPath(path))
                 || parsed.CoordinatedPackageReleaseNoteResolutions.Any(item =>
                     !string.Equals(item.Source, "coordinated", StringComparison.Ordinal)
                     || !string.Equals(item.AliasPath, PackageReleaseLink.CoordinatedReleaseNotesPath, StringComparison.Ordinal)

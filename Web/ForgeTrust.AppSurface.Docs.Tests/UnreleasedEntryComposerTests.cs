@@ -38,7 +38,7 @@ public sealed class UnreleasedEntryComposerTests : IDisposable
     {
         var entriesDirectory = EntriesDirectory();
         Directory.CreateDirectory(entriesDirectory);
-        await File.WriteAllTextAsync(Path.Combine(entriesDirectory, entryFileName), content);
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(entriesDirectory, entryFileName), content);
 
         var exception = await Assert.ThrowsAsync<UnreleasedEntryException>(
             () => UnreleasedEntryComposer.LoadAsync(entriesDirectory, CancellationToken.None));
@@ -124,7 +124,10 @@ public sealed class UnreleasedEntryComposerTests : IDisposable
         ["2026-08-08-unsupported-section.md", "<!-- appsurface:unreleased-entry section=\"future\" -->\n- Unsupported section.\n", "uses unsupported section"],
         ["2026-08-08-empty.md", "<!-- appsurface:unreleased-entry section=\"included\" -->\n", "must contain Markdown"],
         ["2026-08-08-marker.md", "<!-- appsurface:unreleased-entry section=\"included\" -->\n<!-- appsurface:unreleased-entries section=\"included\" -->\n", "must not contain an AppSurface"],
-        ["2026-08-08-top-level.md", "<!-- appsurface:unreleased-entry section=\"included\" -->\n# Invalid heading\n", "must not introduce a top-level"]
+        ["2026-08-08-top-level.md", "<!-- appsurface:unreleased-entry section=\"included\" -->\n# Invalid heading\n", "must not introduce a top-level"],
+        ["2026-08-08-setext-heading.md", "<!-- appsurface:unreleased-entry section=\"included\" -->\nInjected\n========\n", "must not introduce a top-level"],
+        ["2026-08-08-setext-crlf-heading.md", "<!-- appsurface:unreleased-entry section=\"included\" -->\r\nInjected\r\n========\r\n", "must not introduce a top-level"],
+        ["2026-08-08-indented-heading.md", "<!-- appsurface:unreleased-entry section=\"included\" -->\n  ## Injected\n", "must not introduce a top-level"]
     ];
 
     public void Dispose()

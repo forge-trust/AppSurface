@@ -138,6 +138,7 @@ public sealed class ReleaseManifestV2ValidatorCoverageTests
     [InlineData("releases/unreleased.entries/2026-08-08-zulu.md", "releases/unreleased.entries/2026-08-08-alpha.md")]
     [InlineData("releases/unreleased.entries/2026-08-08-alpha.md", "releases/unreleased.entries/2026-08-08-alpha.md")]
     [InlineData("releases/unreleased.entries/not-an-entry.md")]
+    [InlineData("releases\\unreleased.entries\\2026-08-08-backslash.md")]
     public void TryDeserializeRejectsInvalidOrUnorderedConsumedUnreleasedEntries(params string[] paths)
     {
         var json = ManifestJson();

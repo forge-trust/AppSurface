@@ -79,18 +79,14 @@ internal sealed class ReleasePreparation
         }
         catch (UnreleasedEntryException ex)
         {
-            throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                "release-unreleased-entry-invalid",
-                "The append-only unreleased entry set cannot be composed.",
-                ex.Message,
-                "Use one correctly named entry file with an exact supported section directive, and keep exactly one marker for every section in releases/unreleased.md.",
-                "releases/README.md#append-only-unreleased-entries"));
+            throw new ReleaseToolException(ReleaseDiagnostic.InvalidUnreleasedEntry(ex.Message));
         }
 
         var sidecar = await ReleaseSidecar.LoadAsync(_workspace.UnreleasedSidecarPath, cancellationToken);
         var currentReleaseSidecar = await File.ReadAllTextAsync(_workspace.CurrentReleaseSidecarPath, cancellationToken);
         var packageSummary = await PackageIndexSummary.LoadAsync(_workspace.PackageIndexPath, cancellationToken);
         var generatedPaths = new List<string>();
+        var archivedEntryPaths = new List<string>();
         var releaseNotePath = _workspace.ReleaseNotePath(options.Version);
         var releaseSidecarPath = _workspace.ReleaseSidecarPath(options.Version);
         var releaseManifestPath = _workspace.ReleaseManifestPath(options.Version);
@@ -189,7 +185,7 @@ internal sealed class ReleasePreparation
             foreach (var entrySnapshot in unreleasedEntries.Snapshots)
             {
                 await ArchiveUnreleasedEntryAsync(entrySnapshot, cancellationToken);
-                generatedPaths.Add(_workspace.DisplayPath(entrySnapshot.Path));
+                archivedEntryPaths.Add(_workspace.DisplayPath(entrySnapshot.Path));
             }
 
             var (currentPointerPath, currentPointerContent) = writes[^1];
@@ -200,10 +196,13 @@ internal sealed class ReleasePreparation
         else
         {
             generatedPaths.AddRange(writes.Select(write => _workspace.DisplayPath(write.Key)));
-            generatedPaths.AddRange(unreleasedEntries.Paths.Select(_workspace.DisplayPath));
+            archivedEntryPaths.AddRange(unreleasedEntries.Paths.Select(_workspace.DisplayPath));
         }
 
-        return new ReleasePreparationResult(check, generatedPaths, options.DryRun, evidence.ToSummary("draft evidence for release-prep review"));
+        return new ReleasePreparationResult(check, generatedPaths, options.DryRun, evidence.ToSummary("draft evidence for release-prep review"))
+        {
+            ArchivedUnreleasedEntryPaths = archivedEntryPaths
+        };
     }
 
     private void EnsureSafeWriteTarget(string path)
@@ -326,7 +325,7 @@ internal sealed class ReleasePreparation
         {
             File.Move(snapshot.Path, recoveryPath, overwrite: false);
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             throw ConcurrentUnreleasedEntryUpdate(snapshot, recoveryPath: null, $"The guarded archive handoff could not move the entry: {ex.Message}");
         }
@@ -383,7 +382,7 @@ internal sealed class ReleasePreparation
             File.Move(recoveryPath, entryPath, overwrite: false);
             return true;
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return false;
         }

@@ -43,7 +43,17 @@ internal sealed record ReleasePreparationResult(
     ReleaseCheckResult Check,
     IReadOnlyList<string> PlannedOrWrittenFiles,
     bool DryRun,
-    ReleaseEvidenceSummary? EvidenceSummary);
+    ReleaseEvidenceSummary? EvidenceSummary)
+{
+    /// <summary>
+    /// Gets the append-only unreleased entries that preparation plans to archive or archived during a real run.
+    /// </summary>
+    /// <remarks>
+    /// These paths are intentionally separate from generated artifacts: recovery must restore them to their pre-run state,
+    /// whereas generated files may be removed or restored before a retry.
+    /// </remarks>
+    internal IReadOnlyList<string> ArchivedUnreleasedEntryPaths { get; init; } = [];
+}
 
 /// <summary>
 /// Machine-readable release manifest.

@@ -28,6 +28,18 @@ internal sealed record ReleaseDiagnostic(
     }
 
     /// <summary>
+    /// Creates the diagnostic emitted when append-only unreleased entries cannot be composed.
+    /// </summary>
+    /// <param name="cause">Specific entry or template validation failure.</param>
+    /// <returns>Stable diagnostic for callers of release check and preparation.</returns>
+    internal static ReleaseDiagnostic InvalidUnreleasedEntry(string cause) => Error(
+        "release-unreleased-entry-invalid",
+        "The append-only unreleased entry set cannot be composed.",
+        cause,
+        "Use one correctly named entry file with an exact supported section directive, and keep exactly one marker for every section in releases/unreleased.md.",
+        "releases/README.md#append-only-unreleased-entries");
+
+    /// <summary>
     /// Renders the diagnostic envelope for CLI stderr.
     /// </summary>
     /// <returns>Human-readable diagnostic envelope.</returns>

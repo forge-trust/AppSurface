@@ -25,6 +25,9 @@ internal static class UnreleasedEntryComposer
     private static readonly Regex EntryFileNamePattern = new(
         "^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+(?:-[a-z0-9]+)*\\.md$",
         RegexOptions.CultureInvariant);
+    private static readonly Regex TopLevelHeadingPattern = new(
+        "^(?: {0,3}#{1,2}(?!#)[ \\t]| {0,3}\\S.*\\r?\\n {0,3}(?:=+|-+)[ \\t]*\\r?$)",
+        RegexOptions.Multiline | RegexOptions.CultureInvariant);
 
     /// <summary>
     /// Loads and validates every entry file in a flat entries directory.
@@ -197,7 +200,7 @@ internal static class UnreleasedEntryComposer
             throw new UnreleasedEntryException($"Unreleased entry '{Path.GetFileName(path)}' must not contain an AppSurface unreleased-entry composition marker.");
         }
 
-        if (Regex.IsMatch(markdown, "^#{1,2}(?!#)[ \\t]", RegexOptions.Multiline | RegexOptions.CultureInvariant))
+        if (TopLevelHeadingPattern.IsMatch(markdown))
         {
             throw new UnreleasedEntryException($"Unreleased entry '{Path.GetFileName(path)}' must not introduce a top-level '#' or '##' section; use the declared destination or a nested '###' heading.");
         }

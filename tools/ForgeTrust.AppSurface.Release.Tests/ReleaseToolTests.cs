@@ -183,6 +183,7 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Contains("### Release workflow", releaseNote, StringComparison.Ordinal);
         Assert.Contains("Parallel pull requests add independent release-note entries.", releaseNote, StringComparison.Ordinal);
         Assert.False(File.Exists(RepositoryPath(entryPath)));
+        Assert.Contains("## Archived unreleased entries", result.Stdout, StringComparison.Ordinal);
         Assert.Contains(entryPath, result.Stdout, StringComparison.Ordinal);
 
         using var manifest = JsonDocument.Parse(await ReadFileAsync("releases/v0.1.0-preview.1.release.json"));
@@ -416,17 +417,19 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Contains("must begin with", result.Stdout, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task CheckRejectsAppendOnlyEntryThatCreatesATopLevelSection()
+    [Theory]
+    [InlineData("## Competing section")]
+    [InlineData("  ## Indented competing section")]
+    [InlineData("Competing section\n=================")]
+    [InlineData("Competing section\r\n=================\r\n")]
+    public async Task CheckRejectsAppendOnlyEntryThatCreatesATopLevelSection(string heading)
     {
         await SeedRepositoryAsync();
         await WriteFileAsync(
             "releases/unreleased.entries/2026-08-08-top-level-heading.md",
-            """
+            $"""
             <!-- appsurface:unreleased-entry section="included" -->
-            ## Competing section
-
-            - This entry would alter the template hierarchy.
+            {heading}
             """);
 
         var result = await RunAsync(
@@ -3372,7 +3375,10 @@ public sealed class ReleaseToolTests : IDisposable
             check,
             ["releases/v0.1.0-preview.1.md", "releases/current.md", "CHANGELOG.md"],
             false,
-            null);
+            null)
+        {
+            ArchivedUnreleasedEntryPaths = ["releases/unreleased.entries/2026-08-08-release-workflow.md"]
+        };
 
         var report = ReleaseReportRenderer.RenderPreparation(result);
 
@@ -3381,8 +3387,10 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Contains("  - `releases/v0.1.0-preview.1.md`", report, StringComparison.Ordinal);
         Assert.Contains("  - `releases/current.md`", report, StringComparison.Ordinal);
         Assert.Contains("  - `CHANGELOG.md`", report, StringComparison.Ordinal);
+        Assert.Contains("## Archived unreleased entries", report, StringComparison.Ordinal);
+        Assert.Contains("  - `releases/unreleased.entries/2026-08-08-release-workflow.md`", report, StringComparison.Ordinal);
         Assert.Contains(
-            "- Safe rollback validation: run `git diff --check`, confirm the listed artifacts are absent or match the pre-run state, then rerun `./eng/release check --version 0.1.0-preview.1 --allow-existing-targets` before another prepare attempt.",
+            "- Safe rollback validation: run `git diff --check`, confirm generated artifacts are absent or match the pre-run state, confirm archived unreleased entries are restored to the pre-run state, then rerun `./eng/release check --version 0.1.0-preview.1 --allow-existing-targets` before another prepare attempt.",
             report,
             StringComparison.Ordinal);
     }

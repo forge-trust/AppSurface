@@ -128,12 +128,7 @@ internal sealed class ReleaseChecker
             }
             catch (UnreleasedEntryException ex)
             {
-                errors.Add(ReleaseDiagnostic.Error(
-                    "release-unreleased-entry-invalid",
-                    "The append-only unreleased entry set cannot be composed.",
-                    ex.Message,
-                    "Use one correctly named entry file with an exact supported section directive, and keep exactly one marker for every section in releases/unreleased.md.",
-                    "releases/README.md#append-only-unreleased-entries"));
+                errors.Add(ReleaseDiagnostic.InvalidUnreleasedEntry(ex.Message));
             }
         }
 
