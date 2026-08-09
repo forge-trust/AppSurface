@@ -1954,6 +1954,7 @@ internal static class GitDiffReader
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+        startInfo.ArgumentList.Add("--no-pager");
         startInfo.ArgumentList.Add("diff");
         startInfo.ArgumentList.Add("--unified=0");
         startInfo.ArgumentList.Add("--no-ext-diff");
@@ -1965,9 +1966,12 @@ internal static class GitDiffReader
         {
             using var process = Process.Start(startInfo)
                 ?? throw new CommandException("ASCOV010 Failed to start git diff.");
-            var standardOutput = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-            var standardError = await process.StandardError.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
+            var standardOutputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var standardErrorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            var waitForExitTask = process.WaitForExitAsync(cancellationToken);
+            await Task.WhenAll(standardOutputTask, standardErrorTask, waitForExitTask);
+            var standardOutput = await standardOutputTask;
+            var standardError = await standardErrorTask;
 
             if (process.ExitCode != 0)
             {
