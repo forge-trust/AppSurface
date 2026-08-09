@@ -352,4 +352,42 @@ public sealed class AppSurfaceKeycloakOptionsTests
         Assert.DoesNotContain(AppSurfaceKeycloakDefaults.AdminPasswordParameterName, json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("clientSecret", json, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void RealmGenerator_WhenImportParentIsAFile_ThrowsRedactedRealmEvidenceDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var occupiedParent = Path.Join(directory.Path, "occupied-parent");
+        File.WriteAllText(occupiedParent, "occupied");
+        var options = new AppSurfaceKeycloakOptions
+        {
+            RealmImportDirectory = Path.Join(occupiedParent, "realms"),
+        };
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.RealmEvidenceInvalid, exception.Code);
+        Assert.DoesNotContain(options.SeededUsers[0].Password, exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(occupiedParent, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RealmGenerator_WhenDestinationAppearsDuringAtomicMove_ThrowsRealmDiagnosticAndCleansTemporaryFile()
+    {
+        using var directory = new TempDirectory();
+        var options = new AppSurfaceKeycloakOptions { RealmImportDirectory = directory.Path };
+        var realmFile = AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath(directory.Path, options.Realm);
+        AppSurfaceKeycloakRealmGenerator.BeforeMoveForTesting = path => _ = Directory.CreateDirectory(path);
+        try
+        {
+            var exception = Assert.Throws<AppSurfaceKeycloakException>(() => AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options));
+
+            Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.RealmEvidenceInvalid, exception.Code);
+            Assert.Empty(Directory.EnumerateFiles(directory.Path, $".{Path.GetFileName(realmFile)}.*.tmp"));
+        }
+        finally
+        {
+            AppSurfaceKeycloakRealmGenerator.BeforeMoveForTesting = null;
+        }
+    }
 }
