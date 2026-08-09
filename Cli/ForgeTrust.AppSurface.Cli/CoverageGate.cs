@@ -2101,7 +2101,7 @@ internal static class CoverageGateReportWriter
             await WriteOwnedArtifactAsync(
                 outputLease,
                 CoverageGateArtifactNames.Markdown,
-                markdown,
+                NormalizeArtifactNewlines(markdown),
                 cancellationToken);
 
             if (result.PatchAnalysis is { } analysis)
@@ -2115,7 +2115,7 @@ internal static class CoverageGateReportWriter
                 await WriteOwnedArtifactAsync(
                     outputLease,
                     CoverageGateArtifactNames.PatchTargetsMarkdown,
-                    RenderPatchTargetsMarkdown(analysis, targets),
+                    NormalizeArtifactNewlines(RenderPatchTargetsMarkdown(analysis, targets)),
                     cancellationToken);
             }
             else

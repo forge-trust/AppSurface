@@ -14,7 +14,7 @@ namespace ForgeTrust.AppSurface.PackageIndex;
 /// </remarks>
 internal sealed class ReleaseGuidanceRenderer
 {
-    internal const string TemplateRelativePath = "tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.md";
+    internal const string TemplateRelativePath = "tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.md.template";
     internal const string MaintainerGuideRelativePath = "tools/ForgeTrust.AppSurface.PackageIndex/README.md";
     internal const string BeginMarker = "<!-- appsurface-release-guidance: begin -->";
     internal const string EndMarker = "<!-- appsurface-release-guidance: end -->";

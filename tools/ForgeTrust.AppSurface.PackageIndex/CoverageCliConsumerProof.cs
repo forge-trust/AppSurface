@@ -957,14 +957,70 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         var path = Path.Join(gateDirectory, "coverage-patch-targets.json");
         var exists = File.Exists(path);
         var contents = exists ? File.ReadAllText(path) : null;
-        var hasExpectedContents = exists
-            && contents!.Contains("\"schemaVersion\": 1", StringComparison.Ordinal)
-            && contents.Contains("\"path\": \"Smoke/Calculator.cs\"", StringComparison.Ordinal)
-            && contents.Contains("\"uncovered-line\"", StringComparison.Ordinal);
+        var hasExpectedContents = exists && HasExpectedPatchTargetContents(contents!);
         return new CoverageCliConsumerProofArtifactCheck(
             "patch-target gate JSON schema and uncovered target",
             path,
             hasExpectedContents);
+    }
+
+    private static bool HasExpectedPatchTargetContents(string contents)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(contents);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("schemaVersion", out var schemaVersion)
+                || !schemaVersion.TryGetInt32(out var version)
+                || version != 1
+                || !root.TryGetProperty("targets", out var targets)
+                || targets.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            return targets.EnumerateArray().Any(IsExpectedPatchTarget);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsExpectedPatchTarget(JsonElement target)
+    {
+        return target.ValueKind == JsonValueKind.Object
+            && target.TryGetProperty("path", out var path)
+            && path.ValueKind == JsonValueKind.String
+            && string.Equals(path.GetString(), "Smoke/Calculator.cs", StringComparison.Ordinal)
+            && target.TryGetProperty("line", out var line)
+            && line.TryGetInt32(out var lineNumber)
+            && lineNumber == 9
+            && target.TryGetProperty("lineCovered", out var lineCovered)
+            && lineCovered.ValueKind == JsonValueKind.False
+            && target.TryGetProperty("conditions", out var conditions)
+            && HasValidConditions(conditions)
+            && ContainsString(target, "reasons", "uncovered-line")
+            && ContainsString(target, "gateDimensions", "patchLine");
+    }
+
+    private static bool HasValidConditions(JsonElement conditions)
+    {
+        return conditions.ValueKind == JsonValueKind.Null
+            || (conditions.ValueKind == JsonValueKind.Object
+                && conditions.TryGetProperty("covered", out var covered)
+                && covered.TryGetInt32(out _)
+                && conditions.TryGetProperty("valid", out var valid)
+                && valid.TryGetInt32(out _));
+    }
+
+    private static bool ContainsString(JsonElement target, string propertyName, string expectedValue)
+    {
+        return target.TryGetProperty(propertyName, out var values)
+            && values.ValueKind == JsonValueKind.Array
+            && values.EnumerateArray().Any(value => value.ValueKind == JsonValueKind.String
+                && string.Equals(value.GetString(), expectedValue, StringComparison.Ordinal));
     }
 
     private static CoverageCliConsumerProofArtifactCheck CheckArtifact(string path, string description)

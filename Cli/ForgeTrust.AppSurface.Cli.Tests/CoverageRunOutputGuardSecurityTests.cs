@@ -664,6 +664,33 @@ public sealed class CoverageRunOutputGuardSecurityTests
     }
 
     [Fact]
+    public async Task WriteOwnedGateArtifactAsync_Unix_ShouldPreserveWriteFailureWhenTemporaryCleanupFails()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("cleanup-failure");
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        using var lease = CoverageRunOutputLease.Acquire(
+            output,
+            unixUnlinkAt: static (_, _, _) =>
+            {
+                Marshal.SetLastPInvokeError(5);
+                return -1;
+            });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => lease.WriteOwnedGateArtifactAsync(
+                CoverageGateArtifactNames.Json,
+                "{}",
+                cancellation.Token));
+    }
+
+    [Fact]
     public void Prepare_ShouldFailClosedWhenValidMarkerIdentityChangesBeforeMutation()
     {
         using var root = TestDirectory.Create();

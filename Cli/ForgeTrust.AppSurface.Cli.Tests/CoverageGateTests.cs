@@ -524,6 +524,7 @@ public sealed class CoverageGateTests
         Assert.Contains("\"tolerancePercent\": 0.5", json, StringComparison.Ordinal);
         Assert.Contains("\"thresholds\": {\n    \"line\": 100", json, StringComparison.Ordinal);
         Assert.Contains("\"effectiveThresholds\": {\n    \"line\": 99.5", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\r", markdown, StringComparison.Ordinal);
         Assert.DoesNotContain("\r", json, StringComparison.Ordinal);
     }
 
@@ -666,6 +667,7 @@ public sealed class CoverageGateTests
         Assert.Contains("\"reason\": \"not-reported-by-cobertura\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("zero hit", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\r", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\r", markdown, StringComparison.Ordinal);
         Assert.Contains("| Line | Reasons | Line covered | Conditions | Gate dimensions |", markdown, StringComparison.Ordinal);
         Assert.True(markdown.IndexOf("## `src/Alpha.cs`", StringComparison.Ordinal) < markdown.IndexOf("## `src/Zebra.cs`", StringComparison.Ordinal));
     }
@@ -963,6 +965,8 @@ public sealed class CoverageGateTests
             """);
         var request = new CoverageGateRequest(coverage, temp.Path, 0, 0, false, null);
         var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+        var report = Path.Join(temp.Path, CoverageGateArtifactNames.Json);
+        File.WriteAllText(report, "existing report");
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
 
@@ -970,6 +974,7 @@ public sealed class CoverageGateTests
             () => CoverageGateReportWriter.WriteAsync(result, request, cancellation.Token));
 
         Assert.Empty(Directory.EnumerateFiles(temp.Path, ".*.tmp"));
+        Assert.Equal("existing report", File.ReadAllText(report));
     }
 
     [Fact]

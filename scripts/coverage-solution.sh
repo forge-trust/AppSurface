@@ -90,7 +90,7 @@ if [[ "${BUILD_NO_RESTORE:-false}" == "true" ]]; then
   dotnet_run_args+=(--no-restore)
 fi
 
-if [[ "${COVERAGE_REQUIRE_NON_SANDBOX:-true}" == "true" ]]; then
+if [[ "${COVERAGE_REQUIRE_NON_SANDBOX:-true}" != "false" ]]; then
   dotnet_run_args+=(--require-non-sandbox)
 fi
 

@@ -4025,6 +4025,37 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains(report.Artifacts, artifact => artifact.Description == "nonpatch gate removes patch-target Markdown" && artifact.Exists);
     }
 
+    [Theory]
+    [InlineData("{\"schemaVersion\":1,\"targets\":[{\"path\":\"Smoke/Calculator.cs\",\"reasons\":[\"uncovered-line\"]}]}")]
+    [InlineData("{\"schemaVersion\":1,\"targets\":[{\"path\":false,\"line\":9,\"reasons\":[\"uncovered-line\"],\"lineCovered\":false,\"conditions\":null,\"gateDimensions\":[\"patchLine\"]}]}")]
+    public async Task CoverageCliConsumerProofWorkflow_FailsWhenPatchTargetArtifactViolatesTheTargetContract(string patchTargetJson)
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            patchTargetJson: patchTargetJson);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains(
+            report.Artifacts,
+            artifact => artifact.Description == "patch-target gate JSON schema and uncovered target" && !artifact.Exists);
+    }
+
     [Fact]
     public async Task CoverageCliConsumerProofWorkflow_FailsWhenCanaryHelpDoesNotDescribeBothEnvironmentOptions()
     {
@@ -7179,6 +7210,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         private readonly string _canaryPassError;
         private readonly string _canaryNonPassOutput;
         private readonly string _canaryNonPassError;
+        private readonly string? _patchTargetJson;
         private readonly bool _sendCanaryRequests;
 
         public CoverageProofRecordingCommandRunner(
@@ -7197,6 +7229,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             string? canaryPassError = null,
             string? canaryNonPassOutput = null,
             string? canaryNonPassError = null,
+            string? patchTargetJson = null,
             bool sendCanaryRequests = true)
         {
             _packageVersion = packageVersion;
@@ -7214,6 +7247,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             _canaryPassError = canaryPassError ?? string.Empty;
             _canaryNonPassOutput = canaryNonPassOutput ?? "{\"outcome\":\"stale\"}";
             _canaryNonPassError = canaryNonPassError ?? string.Empty;
+            _patchTargetJson = patchTargetJson;
             _sendCanaryRequests = sendCanaryRequests;
         }
 
@@ -7302,7 +7336,10 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 if ((isFailingGate && _createFailingGateReports)
                     || (!isFailingGate && _createPassingGateReports))
                 {
-                    CreateCoverageGateArtifacts(outputDirectory, request.Arguments.Contains("--diff-file", StringComparer.Ordinal));
+                    CreateCoverageGateArtifacts(
+                        outputDirectory,
+                        request.Arguments.Contains("--diff-file", StringComparer.Ordinal),
+                        _patchTargetJson);
                 }
 
                 return Task.FromResult(isFailingGate
@@ -7385,7 +7422,10 @@ public sealed class PackageArtifactValidationTests : IDisposable
             File.WriteAllText(CombineSafeChildPath(inputDirectory, "coverage.cobertura.xml"), "<coverage />", Encoding.UTF8);
         }
 
-        private static void CreateCoverageGateArtifacts(string outputDirectory, bool includesPatchTargets)
+        private static void CreateCoverageGateArtifacts(
+            string outputDirectory,
+            bool includesPatchTargets,
+            string? patchTargetJson)
         {
             Directory.CreateDirectory(outputDirectory);
             File.WriteAllText(CombineSafeChildPath(outputDirectory, "coverage-gate.json"), "{}", Encoding.UTF8);
@@ -7396,7 +7436,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             {
                 File.WriteAllText(
                     patchTargetsJson,
-                    "{\"schemaVersion\": 1, \"targets\": [{\"path\": \"Smoke/Calculator.cs\", \"reasons\": [\"uncovered-line\"]}]}",
+                    patchTargetJson ?? "{\"schemaVersion\":1,\"targets\":[{\"path\":\"Smoke/Calculator.cs\",\"line\":9,\"reasons\":[\"uncovered-line\"],\"lineCovered\":false,\"conditions\":null,\"gateDimensions\":[\"patchLine\"]}]}",
                     Encoding.UTF8);
                 File.WriteAllText(patchTargetsMarkdown, "# Patch Coverage Targets", Encoding.UTF8);
                 return;

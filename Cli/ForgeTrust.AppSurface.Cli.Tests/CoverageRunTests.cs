@@ -82,12 +82,25 @@ public sealed class CoverageRunTests
     [InlineData("false")]
     [InlineData("off")]
     [InlineData("no")]
+    [InlineData("   ")]
     public void CoverageRunSandboxGuard_ShouldIgnoreDisabledMarkerValues(string value)
     {
         var marker = CoverageRunSandboxGuard.GetMarkerName(
             name => name == "CODEX_SANDBOX" ? value : null);
 
         Assert.Null(marker);
+    }
+
+    [Theory]
+    [InlineData("1")]
+    [InlineData("true")]
+    [InlineData("seatbelt")]
+    public void CoverageRunSandboxGuard_ShouldReportEnabledMarkerValues(string value)
+    {
+        var marker = CoverageRunSandboxGuard.GetMarkerName(
+            name => name == "CODEX_SANDBOX" ? value : null);
+
+        Assert.Equal("CODEX_SANDBOX", marker);
     }
 
     [Fact]

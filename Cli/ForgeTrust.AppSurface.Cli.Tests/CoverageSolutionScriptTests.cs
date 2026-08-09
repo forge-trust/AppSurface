@@ -226,6 +226,11 @@ public sealed class CoverageSolutionScriptTests
     [Theory]
     [InlineData(null, true)]
     [InlineData("false", false)]
+    [InlineData("0", true)]
+    [InlineData("off", true)]
+    [InlineData("no", true)]
+    [InlineData("False", true)]
+    [InlineData("invalid", true)]
     public async Task Script_ShouldRequireNonSandboxByDefaultWithExplicitRestrictedRunEscapeHatch(
         string? requireNonSandbox,
         bool expectsRequirement)
