@@ -188,7 +188,9 @@ internal static class UnreleasedEntryComposer
             throw new UnreleasedEntryException($"Unreleased entry '{Path.GetFileName(path)}' uses unsupported section '{section}'. Supported sections: {string.Join(", ", Sections)}.");
         }
 
-        var markdown = (firstLineEnd >= 0 ? content[(firstLineEnd + 1)..] : string.Empty).Trim();
+        var markdown = (firstLineEnd >= 0 ? content[(firstLineEnd + 1)..] : string.Empty)
+            .TrimStart('\r', '\n')
+            .TrimEnd('\r', '\n');
         if (string.IsNullOrWhiteSpace(markdown))
         {
             throw new UnreleasedEntryException($"Unreleased entry '{Path.GetFileName(path)}' must contain Markdown after its section directive.");

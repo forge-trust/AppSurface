@@ -95,15 +95,21 @@ internal static class ReleaseManifestV2Validator
             var projects = parsed.PublishedPackageProjects.ToArray();
             var resolutionProjects = parsed.CoordinatedPackageReleaseNoteResolutions.Select(item => item.Project).ToArray();
             var consumedEntryPaths = parsed.ConsumedUnreleasedEntryPaths.ToArray();
+            if (!consumedEntryPaths.SequenceEqual(consumedEntryPaths.OrderBy(path => path, StringComparer.Ordinal), StringComparer.Ordinal)
+                || consumedEntryPaths.Distinct(StringComparer.Ordinal).Count() != consumedEntryPaths.Length
+                || consumedEntryPaths.Any(path => string.IsNullOrWhiteSpace(path)
+                    || path.Contains('\\')
+                    || !UnreleasedEntryComposer.IsEntryPath(path)))
+            {
+                issue = "Release manifest V2 consumed unreleased entry paths are invalid or not ordinally sorted.";
+                manifest = null;
+                return false;
+            }
+
             if (!projects.SequenceEqual(projects.OrderBy(project => project, StringComparer.Ordinal), StringComparer.Ordinal)
                 || projects.Distinct(StringComparer.Ordinal).Count() != projects.Length
                 || !resolutionProjects.SequenceEqual(resolutionProjects.OrderBy(project => project, StringComparer.Ordinal), StringComparer.Ordinal)
                 || resolutionProjects.Distinct(StringComparer.Ordinal).Count() != resolutionProjects.Length
-                || !consumedEntryPaths.SequenceEqual(consumedEntryPaths.OrderBy(path => path, StringComparer.Ordinal), StringComparer.Ordinal)
-                || consumedEntryPaths.Distinct(StringComparer.Ordinal).Count() != consumedEntryPaths.Length
-                || consumedEntryPaths.Any(path => string.IsNullOrWhiteSpace(path)
-                    || path.Contains('\\')
-                    || !UnreleasedEntryComposer.IsEntryPath(path))
                 || parsed.CoordinatedPackageReleaseNoteResolutions.Any(item =>
                     !string.Equals(item.Source, "coordinated", StringComparison.Ordinal)
                     || !string.Equals(item.AliasPath, PackageReleaseLink.CoordinatedReleaseNotesPath, StringComparison.Ordinal)

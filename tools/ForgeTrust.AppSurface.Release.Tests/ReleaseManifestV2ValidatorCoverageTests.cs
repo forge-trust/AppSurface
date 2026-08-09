@@ -144,7 +144,7 @@ public sealed class ReleaseManifestV2ValidatorCoverageTests
         var json = ManifestJson();
         json["consumedUnreleasedEntryPaths"] = new JsonArray(paths.Select(path => JsonValue.Create(path)).ToArray());
 
-        AssertInvalid(json, "Release manifest V2 package resolutions are invalid or not ordinally sorted.");
+        AssertInvalid(json, "Release manifest V2 consumed unreleased entry paths are invalid or not ordinally sorted.");
     }
 
     [Theory]

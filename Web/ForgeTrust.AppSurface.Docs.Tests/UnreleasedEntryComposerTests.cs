@@ -32,6 +32,20 @@ public sealed class UnreleasedEntryComposerTests : IDisposable
             () => UnreleasedEntryComposer.LoadAsync(entriesDirectory, cancellation.Token));
     }
 
+    [Fact]
+    public async Task LoadAsyncPreservesIndentationInEntryMarkdown()
+    {
+        var entriesDirectory = EntriesDirectory();
+        Directory.CreateDirectory(entriesDirectory);
+        await File.WriteAllTextAsync(
+            Path.Combine(entriesDirectory, "2026-08-08-indented-markdown.md"),
+            "<!-- appsurface:unreleased-entry section=\"included\" -->\n\n    Indented code content.\n\n    Still indented.\n");
+
+        var entries = await UnreleasedEntryComposer.LoadAsync(entriesDirectory, CancellationToken.None);
+
+        Assert.Equal("    Indented code content.\n\n    Still indented.", Assert.Single(entries.Entries).Markdown);
+    }
+
     [Theory]
     [MemberData(nameof(InvalidEntries))]
     public async Task LoadAsyncRejectsInvalidEntries(string entryFileName, string content, string expectedMessage)
