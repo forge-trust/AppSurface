@@ -4,10 +4,11 @@
 
 Use this package for direct standards-based Web Push when the app will own subscription storage and notification policy. Prefer a hosted provider for managed audiences, multi-channel orchestration, analytics, fan-out, or retry operations. Use an app-owned protocol implementation only when its extra control justifies owning encryption, VAPID, SSRF protection, and push-service failure semantics.
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
-
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for current release risk, migration guidance, and readiness.
+<!-- appsurface-release-guidance: end -->
 ## Five-minute local proof
 
 The canonical [web-pwa-install example](../../examples/web-pwa-install/README.md) contains an explicit example-only key generator. It never generates keys at startup and is not package API.

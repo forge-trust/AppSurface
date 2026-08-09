@@ -2,10 +2,11 @@
 
 `ForgeTrust.AppSurface.Workers` defines host-neutral contracts for durable worker chains and projection repair.
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
-
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for current release risk, migration guidance, and readiness.
+<!-- appsurface-release-guidance: end -->
 ## What It Includes
 
 - `AppSurfaceWorkersModule`, a passive module that declares no queue, storage, endpoint, or background worker infrastructure.

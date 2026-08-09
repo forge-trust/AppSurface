@@ -9,6 +9,8 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
     private const string PackageChooserCurrentReleasePath = "/docs/releases/current";
     private const string PackageChooserCurrentReleaseHeading = "Current coordinated release";
     private const string PackageChooserHeading = "AppSurface package chooser";
+    private const string CanonicalPackageChooserUrl = "https://github.com/forge-trust/AppSurface/blob/main/packages/README.md";
+    private const string CanonicalReleaseHubUrl = "https://github.com/forge-trust/AppSurface/blob/main/releases/README.md";
     private const string TaggedReleasePathPrefix = "/docs/releases/v";
     private const string WebPackageQuickstartPath = "/docs/start-here/first-success-path#package-first-path";
 
@@ -136,8 +138,12 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
             "() => document.querySelector('h1')?.textContent?.trim() === 'ForgeTrust.AppSurface.Core'",
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
-        Assert.Equal("/docs/packages", await page.GetAttributeAsync(".docs-content a[href='/docs/packages']", "href"));
-        Assert.Equal("/docs/releases", await page.GetAttributeAsync(".docs-content a[href='/docs/releases']", "href"));
+        Assert.Equal(
+            CanonicalPackageChooserUrl,
+            await page.GetAttributeAsync($".docs-content a[href='{CanonicalPackageChooserUrl}']", "href"));
+        Assert.Equal(
+            CanonicalReleaseHubUrl,
+            await page.GetAttributeAsync($".docs-content a[href='{CanonicalReleaseHubUrl}']", "href"));
 
         await page.GotoAsync($"{_fixture.DocsUrl}/web/forgetrust.appsurface.web.openapi");
         await page.WaitForFunctionAsync(
@@ -145,15 +151,12 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
 
-        Assert.Equal("/docs/packages", await page.GetAttributeAsync(".docs-content a[href='/docs/packages']", "href"));
-        Assert.Equal("/docs/releases", await page.GetAttributeAsync(".docs-content a[href='/docs/releases']", "href"));
-
-        await page.Locator(".docs-content a[href='/docs/packages']").First.ClickAsync();
-        await WaitForPathAndHeadingAsync(page, "/docs/packages", PackageChooserHeading);
-
-        await page.GotoAsync($"{_fixture.DocsUrl}/web/forgetrust.appsurface.web.openapi");
-        await page.Locator(".docs-content a[href='/docs/releases']").First.ClickAsync();
-        await WaitForPathAndHeadingAsync(page, "/docs/releases", "Releases");
+        Assert.Equal(
+            CanonicalPackageChooserUrl,
+            await page.GetAttributeAsync($".docs-content a[href='{CanonicalPackageChooserUrl}']", "href"));
+        Assert.Equal(
+            CanonicalReleaseHubUrl,
+            await page.GetAttributeAsync($".docs-content a[href='{CanonicalReleaseHubUrl}']", "href"));
     }
 
     [Fact]

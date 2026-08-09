@@ -14,10 +14,11 @@ Version 1 of this preview is compiled and tested against `Aspire.Hosting` and `A
 
 Aspire 13.4.4 does not expose or dispose the partial root service provider when host construction fails after provider creation. Immediately before building, this package decorates the verified singleton `IHost` factory so it can capture that provider and dispose it on a non-process-fatal build failure. A successful build transfers ownership unchanged to the returned `DistributedApplication`. If a consumer-selected Aspire version changes that registration shape, AppSurface emits a `System.Diagnostics.Trace` warning and continues through Aspire without the additional failed-build cleanup. This preserves potentially compatible builds while making the cleanup limitation explicit.
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for the current publication status, compatibility guidance, and readiness.
-
+This AppHost-oriented package follows the coordinated AppSurface release policy. Before using a prerelease build in an AppHost, development, or test environment, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for publication status, compatibility guidance, and readiness.
+<!-- appsurface-release-guidance: end -->
 ## Install
 
 Install the coordinated package with:

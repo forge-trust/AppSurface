@@ -14,6 +14,15 @@
         "resolved": "3.10.1",
         "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
       },
+      "Npgsql": {
+        "type": "Direct",
+        "requested": "[10.0.3, )",
+        "resolved": "10.0.3",
+        "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w==",
+        "dependencies": {
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
+        }
+      },
       "ReportGenerator": {
         "type": "Direct",
         "requested": "[5.5.10, )",
@@ -481,6 +490,38 @@
           "ForgeTrust.AppSurface.Docs": "[0.1.0, )"
         }
       },
+      "forgetrust.appsurface.durable": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Flow": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Workers": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.durable.postgresql": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Durable": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Durable.Provider": "[0.1.0, )",
+          "Microsoft.Extensions.DependencyInjection": "[10.0.8, )",
+          "Microsoft.Extensions.Hosting.Abstractions": "[10.0.8, )",
+          "Microsoft.Extensions.Options": "[10.0.8, )",
+          "Npgsql": "[10.0.3, )"
+        }
+      },
+      "forgetrust.appsurface.durable.provider": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Durable": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.flow": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "Microsoft.Extensions.Options": "[10.0.8, )"
+        }
+      },
       "forgetrust.appsurface.intelligence": {
         "type": "Project",
         "dependencies": {
@@ -528,6 +569,12 @@
       },
       "forgetrust.appsurface.web.tailwind.runtime.win-x64": {
         "type": "Project"
+      },
+      "forgetrust.appsurface.workers": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
+        }
       },
       "forgetrust.razorwire": {
         "type": "Project",

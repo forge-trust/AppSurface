@@ -572,6 +572,199 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Equal("ForgeTrust.AppSurface.Web", entry.PackageId);
     }
 
+    [Fact]
+    public void PackageArtifactValidator_RequiresCanonicalReleaseGuidanceInPackedReadme()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web",
+            PackageVersion,
+            EmptyDependencies,
+            readmeContent: $"{ReleaseGuidanceRenderer.BeginMarker}\n## Release Guidance\n[chooser]({ReleaseGuidanceRenderer.PackageChooserUrl}) [hub]({ReleaseGuidanceRenderer.ReleaseHubUrl})\n{ReleaseGuidanceRenderer.EndMarker}");
+
+        var plan = new PackagePublishPlan([
+            new PackagePublishPlanEntry(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web",
+                PackagePublishDecision.Publish,
+                [],
+                IsTool: false,
+                ReleaseGuidanceVariant: "default")
+        ]);
+
+        var report = new PackageArtifactValidator().Validate(plan, artifactDirectory, PackageVersion);
+
+        Assert.Single(report.Entries);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_RejectsPackagedReadmeWithoutCanonicalReleaseGuidance()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(artifactDirectory, "ForgeTrust.AppSurface.Web", PackageVersion, EmptyDependencies);
+
+        var plan = new PackagePublishPlan([
+            new PackagePublishPlanEntry(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web",
+                PackagePublishDecision.Publish,
+                [],
+                IsTool: false,
+                ReleaseGuidanceVariant: "default")
+        ]);
+
+        var error = Assert.Throws<PackageIndexException>(() => new PackageArtifactValidator().Validate(plan, artifactDirectory, PackageVersion));
+
+        Assert.Contains("ASPKG145", error.Message, StringComparison.Ordinal);
+        Assert.Contains("release-guidance contract", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_RejectsPackagedReadmeWithDuplicateReleaseGuidanceMarkers()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web",
+            PackageVersion,
+            EmptyDependencies,
+            readmeContent: $"{ReleaseGuidanceRenderer.BeginMarker}\n## Release Guidance\n[chooser]({ReleaseGuidanceRenderer.PackageChooserUrl}) [hub]({ReleaseGuidanceRenderer.ReleaseHubUrl})\n{ReleaseGuidanceRenderer.EndMarker}\n{ReleaseGuidanceRenderer.BeginMarker}\n{ReleaseGuidanceRenderer.EndMarker}");
+
+        var plan = new PackagePublishPlan([
+            new PackagePublishPlanEntry(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web",
+                PackagePublishDecision.Publish,
+                [],
+                IsTool: false,
+                ReleaseGuidanceVariant: "default")
+        ]);
+
+        var error = Assert.Throws<PackageIndexException>(() => new PackageArtifactValidator().Validate(plan, artifactDirectory, PackageVersion));
+
+        Assert.Contains("ASPKG145", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_RejectsCanonicalReleaseLinksOutsideManagedRegion()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web",
+            PackageVersion,
+            EmptyDependencies,
+            readmeContent: $"{ReleaseGuidanceRenderer.BeginMarker}\n## Release Guidance\n{ReleaseGuidanceRenderer.EndMarker}\n[chooser]({ReleaseGuidanceRenderer.PackageChooserUrl}) [hub]({ReleaseGuidanceRenderer.ReleaseHubUrl})");
+
+        var plan = new PackagePublishPlan([
+            new PackagePublishPlanEntry(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web",
+                PackagePublishDecision.Publish,
+                [],
+                IsTool: false,
+                ReleaseGuidanceVariant: "default")
+        ]);
+
+        var error = Assert.Throws<PackageIndexException>(() => new PackageArtifactValidator().Validate(plan, artifactDirectory, PackageVersion));
+
+        Assert.Contains("ASPKG145", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_RejectsReleaseGuidanceOnlyInsideMarkdownFence()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web",
+            PackageVersion,
+            EmptyDependencies,
+            readmeContent: $"```markdown\n{ReleaseGuidanceRenderer.BeginMarker}\n## Release Guidance\n[chooser]({ReleaseGuidanceRenderer.PackageChooserUrl}) [hub]({ReleaseGuidanceRenderer.ReleaseHubUrl})\n{ReleaseGuidanceRenderer.EndMarker}\n```");
+
+        var plan = new PackagePublishPlan([
+            new PackagePublishPlanEntry(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web",
+                PackagePublishDecision.Publish,
+                [],
+                IsTool: false,
+                ReleaseGuidanceVariant: "default")
+        ]);
+
+        var error = Assert.Throws<PackageIndexException>(() => new PackageArtifactValidator().Validate(plan, artifactDirectory, PackageVersion));
+
+        Assert.Contains("ASPKG145", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_RejectsCanonicalReleaseLinksOnlyInsideManagedRegionFence()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web",
+            PackageVersion,
+            EmptyDependencies,
+            readmeContent: $"{ReleaseGuidanceRenderer.BeginMarker}\n## Release Guidance\n```markdown\n[chooser]({ReleaseGuidanceRenderer.PackageChooserUrl}) [hub]({ReleaseGuidanceRenderer.ReleaseHubUrl})\n```\n{ReleaseGuidanceRenderer.EndMarker}");
+
+        var plan = new PackagePublishPlan([
+            new PackagePublishPlanEntry(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web",
+                PackagePublishDecision.Publish,
+                [],
+                IsTool: false,
+                ReleaseGuidanceVariant: "default")
+        ]);
+
+        var error = Assert.Throws<PackageIndexException>(() => new PackageArtifactValidator().Validate(plan, artifactDirectory, PackageVersion));
+
+        Assert.Contains("ASPKG145", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("chooser")]
+    [InlineData("release hub")]
+    public void PackageArtifactValidator_RejectsPackagedReadmeWithDuplicateCanonicalReleaseLink(string duplicateLink)
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var chooserLinks = string.Equals(duplicateLink, "chooser", StringComparison.Ordinal)
+            ? $"[chooser]({ReleaseGuidanceRenderer.PackageChooserUrl}) [chooser again]({ReleaseGuidanceRenderer.PackageChooserUrl})"
+            : $"[chooser]({ReleaseGuidanceRenderer.PackageChooserUrl})";
+        var releaseHubLinks = string.Equals(duplicateLink, "release hub", StringComparison.Ordinal)
+            ? $"[hub]({ReleaseGuidanceRenderer.ReleaseHubUrl}) [hub again]({ReleaseGuidanceRenderer.ReleaseHubUrl})"
+            : $"[hub]({ReleaseGuidanceRenderer.ReleaseHubUrl})";
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web",
+            PackageVersion,
+            EmptyDependencies,
+            readmeContent: $"{ReleaseGuidanceRenderer.BeginMarker}\n## Release Guidance\n{chooserLinks} {releaseHubLinks}\n{ReleaseGuidanceRenderer.EndMarker}");
+
+        var plan = new PackagePublishPlan([
+            new PackagePublishPlanEntry(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web",
+                PackagePublishDecision.Publish,
+                [],
+                IsTool: false,
+                ReleaseGuidanceVariant: "default")
+        ]);
+
+        var error = Assert.Throws<PackageIndexException>(() => new PackageArtifactValidator().Validate(plan, artifactDirectory, PackageVersion));
+
+        Assert.Contains("ASPKG145", error.Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("HtmlSanitizer", "[9.1.949-beta]")]
     [InlineData("AngleSharp.Css", "[1.0.0-beta.216]")]
@@ -6567,7 +6760,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
         IReadOnlyDictionary<string, byte[]>? rawEntries = null,
         string? dependencyXml = null,
         IReadOnlyList<string>? toolCommandNames = null,
-        string? projectUrl = RequiredPackageProjectUrl)
+        string? projectUrl = RequiredPackageProjectUrl,
+        string? readmeContent = null)
     {
         var packagePath = CombineSafeChildPath(artifactDirectory, $"{packageId}.{packageVersion}.nupkg");
         using var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create);
@@ -6594,7 +6788,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             var readmeEntry = archive.CreateEntry("README.md");
             using var readmeStream = readmeEntry.Open();
             using var readmeWriter = new StreamWriter(readmeStream, Encoding.UTF8);
-            readmeWriter.Write("# Package");
+            readmeWriter.Write(readmeContent ?? "# Package");
         }
 
         if (assemblyEntries is not null)

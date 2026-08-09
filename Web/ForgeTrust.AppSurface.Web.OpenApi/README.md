@@ -10,10 +10,11 @@ The `AppSurfaceWebOpenApiModule` simplifies the configuration of OpenAPI by:
 - Mapping the OpenAPI documentation endpoint when endpoint exposure options allow it.
 - Providing default document and operation transformers to clean up and brand the generated documentation based on the `StartupContext`.
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
-
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for current release risk, migration guidance, and readiness.
+<!-- appsurface-release-guidance: end -->
 ## OpenAPI.NET Dependency Floor
 
 This package directly requires `Microsoft.OpenApi` 2.7.5 or later on the 2.x line to move dependency resolution above the process-termination vulnerability described by [GHSA-v5pm-xwqc-g5wc](https://github.com/advisories/GHSA-v5pm-xwqc-g5wc). The direct dependency is intentional: `Microsoft.AspNetCore.OpenApi` 10.0.9 still declares a 2.0.0 minimum, which allows NuGet to select a vulnerable 2.x version unless the consuming package supplies a safer floor.
