@@ -72,17 +72,24 @@ public static class DurableProblemCodes
     /// <summary>The suspended Flow wait shape cannot safely restore its recorded state.</summary>
     public const string FlowReleaseStateMismatch = "ASDUR211";
 
-    /// <summary>The Flow repair suspension descriptor predates the V1 evidence contract and cannot be safely interpreted.</summary>
-    public const string FlowRepairDescriptorUpgradeRequired = "ASDUR214";
-    /// <summary>The retained Flow repair evidence does not match the locked Work, wait, or history truth.</summary>
-    public const string FlowRepairEvidenceMismatch = "ASDUR215";
-    /// <summary>The requested Flow repair action is outside the closed V1 repair state matrix.</summary>
-    public const string FlowRepairActionUnsupported = "ASDUR216";
-
     /// <summary>The W3C traceparent header version or structure is invalid.</summary>
     public const string TraceContextInvalid = "ASDUR212";
     /// <summary>The W3C tracestate header formatting or length is invalid and was rejected.</summary>
     public const string TraceStateRejected = "ASDUR213";
+    /// <summary>The requested retention manifest is absent from the authorized scope.</summary>
+    public const string RetentionManifestNotFound = "ASDUR214";
+    /// <summary>The Flow source no longer corresponds to a frozen retention manifest.</summary>
+    public const string RetentionSourceChanged = "ASDUR215";
+    /// <summary>The expected retention lifecycle sequence is stale.</summary>
+    public const string RetentionLifecycleConflict = "ASDUR216";
+    /// <summary>The requested retention lifecycle transition is not safe in the current state.</summary>
+    public const string RetentionLifecycleRejected = "ASDUR217";
+    /// <summary>The Flow repair suspension descriptor predates the V1 evidence contract and cannot be safely interpreted.</summary>
+    public const string FlowRepairDescriptorUpgradeRequired = "ASDUR218";
+    /// <summary>The retained Flow repair evidence does not match the locked Work, wait, or history truth.</summary>
+    public const string FlowRepairEvidenceMismatch = "ASDUR219";
+    /// <summary>The requested Flow repair action is outside the closed V1 repair state matrix.</summary>
+    public const string FlowRepairActionUnsupported = "ASDUR220";
     /// <summary>The durable provider schema is not installed.</summary>
     public const string SchemaMissing = "ASDUR400";
     /// <summary>The durable provider schema requires pending migrations.</summary>

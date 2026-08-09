@@ -39,9 +39,13 @@ context.
 | `ASDUR211` | Release state mismatch | Suspended state and wait/timer/child-work truth disagree | Use Flow repair for a V1 child-effect descriptor; otherwise reconcile before release |
 | `ASDUR212` | Trace context invalid | Persisted or ambient `traceparent` is malformed, unsupported, or unsafe | Drop context and continue the Flow without a causal link |
 | `ASDUR213` | Trace state rejected | A valid parent carried malformed or oversized opaque `tracestate` | Retain the parent link and drop only `tracestate` |
-| `ASDUR214` | Repair descriptor upgrade required | The suspension has no complete V1 child-effect descriptor identity | Deploy compatible writers, apply migration `0007`, and obtain a fresh assessment |
-| `ASDUR215` | Repair evidence mismatch | Locked Work, wait, result, history, or manual-resolution evidence differs | Reload the payload-free assessment; never substitute direct SQL evidence |
-| `ASDUR216` | Repair action unsupported | The retained state is outside the two-action repair matrix | Preserve the suspension and use a documented recovery path |
+| `ASDUR214` | Retention manifest not found | Manifest ID does not exist in the authorized scope | Verify the authorized scope and manifest ID, or assess and create a new manifest |
+| `ASDUR215` | Retention source changed | Flow source items or closure digest changed after assessment/manifest creation | Assess and create a new manifest; do not archive or purge stale source state |
+| `ASDUR216` | Retention lifecycle conflict | Expected lifecycle sequence is stale or another operation committed first | Read current manifest state and retry using its active lifecycle sequence |
+| `ASDUR217` | Retention lifecycle rejected | Manifest is not in the required state, or a legal hold / active child prevents transition | Read manifest state and follow the lifecycle order. Release a legal hold only after an explicitly authorized legal or compliance decision; otherwise keep the hold and do not purge. |
+| `ASDUR218` | Repair descriptor upgrade required | The suspension has no complete V1 child-effect descriptor identity | Deploy compatible writers, apply migration `0008`, and obtain a fresh assessment |
+| `ASDUR219` | Repair evidence mismatch | Locked Work, wait, result, history, or manual-resolution evidence differs | Reload the payload-free assessment; never substitute direct SQL evidence |
+| `ASDUR220` | Repair action unsupported | The retained state is outside the two-action repair matrix | Preserve the suspension and use a documented recovery path |
 
 ### ASDUR202
 
@@ -77,19 +81,35 @@ The persisted suspension descriptor, wait/timer lineage, or child-Work truth can
 Reconcile authoritative Work and Flow facts first; cancellation or an explicit evidence-backed repair is safer than a
 force-terminate shortcut.
 
-### ASDUR214–ASDUR216
+### ASDUR218–ASDUR220
 
-The Flow repair operator refuses rather than infers missing truth. `ASDUR214` means an older or mixed writer did not
-persist the V1 descriptor schema and digest. `ASDUR215` means a fresh request no longer matches locked Work, wait,
-result, history, or manual-resolution evidence. `ASDUR216` means neither supported assertion applies. Apply the
-forward-only migration and role recipe, call the payload-free repair assessment again, and submit only its current
-candidate. Do not use `ReleaseSuspensionAsync` or direct SQL as a workaround.
+The Flow repair operator refuses rather than infers missing truth. `ASDUR218` means an older or mixed writer did not
+persist the V1 descriptor schema and digest. `ASDUR219` means a fresh request no longer matches locked Work, wait,
+result, history, or manual-resolution evidence. `ASDUR220` means neither supported assertion applies. Apply
+`0008_flow_repair.sql` after `0007_flow_retention.sql` and the role recipe, call the payload-free repair assessment
+again, and submit only its current candidate. Do not use `ReleaseSuspensionAsync` or direct SQL as a workaround.
 
 ### ASDUR212 and ASDUR213
 
 Trace diagnostics are value-free. `ASDUR212` drops both W3C fields and continues without a link; `ASDUR213` keeps a
 valid W3C `traceparent` and drops only opaque `tracestate`. Neither diagnostic authorizes a retry, changes scope
 authorization, or permits logging raw trace headers. See the [Durable trace-context contract](../Durable/flow-trace-context-v1.md).
+
+### ASDUR214
+
+The specified retention manifest ID was not found in the authorized scope. Verify that the manifest ID belongs to the authorized scope, or invoke assessment and manifest creation to obtain a valid manifest.
+
+### ASDUR215
+
+The underlying Flow source closure or state changed after the retention assessment or manifest was frozen. The current source items no longer match the immutable watermark. Create a new retention assessment and manifest before archiving or purging.
+
+### ASDUR216
+
+The expected lifecycle sequence supplied with the retention command does not match the manifest's current persisted sequence because a concurrent or previous operation committed first. Read current manifest state and retry the operation with its updated lifecycle sequence.
+
+### ASDUR217
+
+The retention operation cannot proceed because the manifest is in an invalid state for the operation (such as attempting purge before verification or recording receipt after purge), or because an active legal hold or child Work blocks execution. Verify lifecycle ordering and the blocking condition. Release a legal hold only after an explicitly authorized legal or compliance decision; otherwise keep the hold and do not purge.
 
 Schedule contracts reserve `ASDUR301`-`ASDUR307` for invalid definition, missing schedule, revision conflict, command
 conflict, access denial, evaluation incompatibility, and recovery-state mismatch. A provider must map these codes to its
@@ -135,9 +155,13 @@ before any bounded retry.
 | `ASDUR209` | Event contract mismatch | Payload schema version or contract ID does not match active wait registration. |
 | `ASDUR210` | Release manifest mismatch | Recovery manifest registration disagrees with persisted history. |
 | `ASDUR211` | Release state mismatch | Suspended state and active wait/timer/work records disagree; V1 child-effect descriptors require repair, not release. |
-| `ASDUR214` | Repair descriptor upgrade required | V1 descriptor identity is absent or unsupported; apply `0007` and reload assessment. |
-| `ASDUR215` | Repair evidence mismatch | Locked evidence changed or is incompatible; submit only a fresh assessment candidate. |
-| `ASDUR216` | Repair action unsupported | The retained state is outside the two supported assertions; preserve evidence. |
+| `ASDUR214` | Retention manifest not found | Verify scope and manifest ID; recreate manifest if necessary. |
+| `ASDUR215` | Retention source changed | Re-assess Flow closure; do not purge with stale manifest. |
+| `ASDUR216` | Retention lifecycle conflict | Reload manifest sequence and retry command. |
+| `ASDUR217` | Retention lifecycle rejected | Verify lifecycle sequence and hold authorization. Release a legal hold only after an explicitly authorized decision; otherwise do not purge. |
+| `ASDUR218` | Repair descriptor upgrade required | V1 descriptor identity is absent or unsupported; apply `0008` and reload assessment. |
+| `ASDUR219` | Repair evidence mismatch | Locked evidence changed or is incompatible; submit only a fresh assessment candidate. |
+| `ASDUR220` | Repair action unsupported | The retained state is outside the two supported assertions; preserve evidence. |
 | `ASDUR400` | Durable schema is missing | Apply reviewed forward-only migrations with a migration-owner connection. |
 | `ASDUR401` | Durable schema upgrade is required | Apply every known pending migration before this reader/writer. |
 | `ASDUR402` | Durable schema version is too new or unsupported | Deploy compatible package code; do not bypass supported ranges. |

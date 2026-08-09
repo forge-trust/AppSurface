@@ -218,6 +218,58 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
         services.AddSingleton<IHostedService>(static provider => provider.GetRequiredService<PostgreSqlDurableHostedService>());
         return services;
     }
+
+    /// <summary>
+    /// Adds the separately authorized verified Flow-retention client after PostgreSQL durable storage registration.
+    /// </summary>
+    /// <param name="services">Application service registrations.</param>
+    /// <param name="retentionOperatorDataSource">Dedicated scope-bound retention-operator data source.</param>
+    /// <returns>The original service collection.</returns>
+    /// <remarks>
+    /// The retention operator is a fourth database role, distinct from migration owner, dispatcher, and runtime. It
+    /// must not share a data source with either existing service role. This method performs no network I/O or DDL; use
+    /// the schema manager to apply the explicit retention migration and authorize callers before invoking the client.
+    /// See the <see href="https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql">PostgreSQL role recipe</see>.
+    /// </remarks>
+    public static IServiceCollection AddAppSurfaceDurablePostgreSqlFlowRetention(
+        this IServiceCollection services,
+        NpgsqlDataSource retentionOperatorDataSource)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(retentionOperatorDataSource);
+        var registration = services.LastOrDefault(static descriptor => descriptor.ServiceType == typeof(PostgreSqlDurableRuntimeRegistration))?.ImplementationInstance
+            as PostgreSqlDurableRuntimeRegistration;
+        if (registration is null)
+        {
+            throw new InvalidOperationException(
+                "Register PostgreSQL durable storage with AddAppSurfaceDurablePostgreSql before adding Flow retention.");
+        }
+
+        if (ReferenceEquals(retentionOperatorDataSource, registration.DispatcherDataSource)
+            || ReferenceEquals(retentionOperatorDataSource, registration.RuntimeDataSource))
+        {
+            throw new ArgumentException(
+                "The retention operator data source must be distinct from dispatcher and runtime data sources.",
+                nameof(retentionOperatorDataSource));
+        }
+
+        var existing = services.LastOrDefault(static descriptor =>
+            descriptor.ServiceType == typeof(PostgreSqlDurableFlowRetentionMarker))?.ImplementationInstance
+            as PostgreSqlDurableFlowRetentionMarker;
+        if (existing is not null && !ReferenceEquals(existing.DataSource, retentionOperatorDataSource))
+        {
+            throw new InvalidOperationException(
+                "Flow retention is already registered with a different retention-operator data source. A service provider has exactly one retention configuration.");
+        }
+
+        services.TryAddSingleton(new PostgreSqlDurableFlowRetentionMarker(retentionOperatorDataSource));
+        services.TryAddSingleton<PostgreSqlDurableFlowRetentionClient>(provider => new PostgreSqlDurableFlowRetentionClient(
+            retentionOperatorDataSource,
+            provider.GetRequiredService<IDurableRuntimeSchemaManager>()));
+        services.TryAddSingleton<IDurableFlowRetentionClient>(static provider =>
+            provider.GetRequiredService<PostgreSqlDurableFlowRetentionClient>());
+        return services;
+    }
 }
 
 /// <summary>Captures the one immutable PostgreSQL durable runtime configuration for a service provider.</summary>
@@ -237,3 +289,6 @@ internal sealed record PostgreSqlDurableRuntimeRegistration(
 
 /// <summary>Marks that worker-host registration has occurred so repeated composition stays idempotent.</summary>
 internal sealed class PostgreSqlDurableHostedServiceMarker;
+
+/// <summary>Captures the retention-operator data source for duplicate registration detection.</summary>
+internal sealed record PostgreSqlDurableFlowRetentionMarker(NpgsqlDataSource DataSource);

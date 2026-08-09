@@ -198,7 +198,7 @@ public sealed class DurableSlice7AdoptionDocumentationContractTests
             Read(repoRoot, "releases/unreleased.md"));
 
         Assert.Contains("0006_flow_trace_context.sql", documentation, StringComparison.Ordinal);
-        Assert.Contains("0007_flow_repair.sql", documentation, StringComparison.Ordinal);
+        Assert.Contains("0008_flow_repair.sql", documentation, StringComparison.Ordinal);
         Assert.Contains("Never delete `appsurface_durable.schema_migration` rows", documentation, StringComparison.Ordinal);
         Assert.Contains("regenerate the correct forward script", documentation, StringComparison.Ordinal);
         Assert.Contains("rerun the canonical role recipe after migrations", documentation, StringComparison.Ordinal);

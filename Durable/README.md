@@ -26,11 +26,12 @@ public, testable contracts without friend access to the application package. The
 
 The application package registers only passive registries. A provider is selected explicitly by the host. The PostgreSQL
 source preview adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`,
-`0004_schedule_protocol`, `0005_runtime_heartbeat`, `0006_flow_trace_context`, and `0007_flow_repair`) plus
-one-operation-at-a-time Work, Flow, and Work-first Schedule persistence with versioned W3C causal evidence and
-evidence-first Flow repair. PostgreSQL registration remains passive; an application explicitly adds one bounded polling
-host through [`AddWorkerHost()`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host) only where it
-intends continuous activation. It adds no public endpoint, dashboard, or automatic migration.
+`0004_schedule_protocol`, `0005_runtime_heartbeat`, `0006_flow_trace_context`, `0007_flow_retention`, and
+`0008_flow_repair`) plus one-operation-at-a-time Work, Flow, and Work-first Schedule persistence with versioned W3C
+causal evidence, verified retention, and evidence-first Flow repair. PostgreSQL registration remains passive; an
+application explicitly adds one bounded polling host through
+[`AddWorkerHost()`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host) only where it intends
+continuous activation. It adds no public endpoint, dashboard, or automatic migration.
 
 ## Slice 7 discovery and reconciliation
 
@@ -51,8 +52,9 @@ The forward-only deployment order is:
 4. `0004_schedule_protocol.sql`
 5. `0005_runtime_heartbeat.sql`
 6. `0006_flow_trace_context.sql`
-7. `0007_flow_repair.sql`
-8. [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
+7. `0007_flow_retention.sql`
+8. `0008_flow_repair.sql`
+9. [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
 
 The preferred production flow is to generate and review the Durable schema script offline, apply the reviewed
 migrations in the order above, apply the canonical role recipe, and run schema status/preflight before enabling the
@@ -93,6 +95,8 @@ the fixed hosted-runtime liveness and worker-generation codes.
 For the PostgreSQL boundary, start with the [`slice 3 reference workload`](slice3-reference-workload.md), [`slice 4 reference workload`](slice4-reference-workload.md), [`Schedule protocol v1`](schedule-protocol-v1.md), and [Durable Flow trace context v1](flow-trace-context-v1.md), then use the
 normative [`Work protocol v1`](work-protocol-v1.md) and [`Flow protocol v1`](flow-protocol-v1.md). The
 [`slice 3 reconstruction ledger`](slice3-reconstruction.md) and [`slice 4 reconstruction ledger`](slice4-reconstruction.md) account for every artifact in the superseded branches.
+
+Terminal Flow evidence now has a [verified retention lifecycle](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#verified-flow-retention): a bounded per-Flow assessment, immutable manifest, reproducible archive package, receipt/source correspondence proof, optional hold, and separately authorized idempotent purge. It is intentionally not an age-based deletion feature. The application owns authorization, archive transport, encryption, availability, policy duration, and compliance.
 
 The [slice 2 API budget](api-budget.md) records which original public contracts were retained, moved, added,
 internalized, or removed. The package test projects enforce the corresponding member-level API snapshots.

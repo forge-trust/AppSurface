@@ -13,6 +13,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
     private const string RoleRecipeApplicationName = "durable-role-recipe";
     private const string DispatcherRoleTestPassword = "durable-dispatcher-test-password";
     private const string RuntimeRoleTestPassword = "durable-runtime-test-password";
+    private const string RetentionRoleTestPassword = "durable-retention-test-password";
 
     [Fact]
     public async Task ApplyStatusInitializeRotate_AreExplicitAndIdempotent()
@@ -45,7 +46,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missing.Compatibility);
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missingEpoch.Status.Compatibility);
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7], first.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8], first.AppliedVersions);
         Assert.Empty(second.AppliedVersions);
         Assert.True(compatible.IsCompatible);
         Assert.NotEqual(Guid.Empty, compatible.StoreId);
@@ -162,9 +163,9 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         var retry = await retryManager.ApplyAsync();
         var compatible = await retryManager.GetStatusAsync();
-        Assert.Equal([3, 4, 5, 6, 7], retry.AppliedVersions);
+        Assert.Equal([3, 4, 5, 6, 7, 8], retry.AppliedVersions);
         Assert.True(compatible.IsCompatible);
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7], compatible.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8], compatible.AppliedVersions);
     }
 
     [Fact]
@@ -187,6 +188,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             CREATE ROLE durable_owner NOLOGIN NOSUPERUSER NOBYPASSRLS;
             CREATE ROLE durable_dispatcher LOGIN PASSWORD '{DispatcherRoleTestPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE durable_runtime LOGIN PASSWORD '{RuntimeRoleTestPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE durable_retention LOGIN PASSWORD '{RetentionRoleTestPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE bypass_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
             CREATE ROLE createdb_dispatcher LOGIN NOSUPERUSER CREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE nologin_dispatcher NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
@@ -771,12 +773,12 @@ public sealed class PostgreSqlSchemaIntegrationTests
             (
                 'flow-rls-scope-a', 'flow-rls-repair-a', 'flow-rls-instance-a', 'assert_child_effect_completed',
                 'tests.flow-repair.v1', repeat('0', 64), 1, repeat('0', 64), 'flow-rls-child-a', 1, 1,
-                repeat('0', 64), 'operator', 'test', 'refused', 'ASDUR214'
+                repeat('0', 64), 'operator', 'test', 'refused', 'ASDUR218'
             ),
             (
                 'flow-rls-scope-b', 'flow-rls-repair-b', 'flow-rls-instance-b', 'assert_child_effect_completed',
                 'tests.flow-repair.v1', repeat('1', 64), 1, repeat('1', 64), 'flow-rls-child-b', 1, 1,
-                repeat('1', 64), 'operator', 'test', 'refused', 'ASDUR214'
+                repeat('1', 64), 'operator', 'test', 'refused', 'ASDUR218'
             );
 
             INSERT INTO appsurface_durable.flow_repair_collision
@@ -850,7 +852,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
                     ('flow-rls-scope-a', 'flow-rls-invalid-refusal', 'flow-rls-instance-a',
                      'assert_child_effect_completed', 'tests.flow-repair.v1', repeat('4', 64), 1,
                      repeat('4', 64), 'flow-rls-child-a', 1, 1, repeat('4', 64), 'operator', 'test',
-                     'refused', 'ASDUR214', 'ready', 2);
+                     'refused', 'ASDUR218', 'ready', 2);
                 """);
             await insert.ExecuteNonQueryAsync();
         });
@@ -971,6 +973,221 @@ public sealed class PostgreSqlSchemaIntegrationTests
         {
             unscopedRepairRead.CommandText = "SELECT count(*) FROM appsurface_durable.flow_repair_command;";
             Assert.Equal(0L, (long)(await unscopedRepairRead.ExecuteScalarAsync())!);
+        }
+
+        await ExecuteNonQueryAsync(
+            dataSource,
+            """
+            INSERT INTO appsurface_durable.scope (scope_id) VALUES ('retention-role-scope-a'), ('retention-role-scope-b');
+            INSERT INTO appsurface_durable.flow_instance
+                (scope_id, flow_instance_id, flow_id, flow_version, manifest_id, authoring_model,
+                 definition_fingerprint_schema, definition_fingerprint_sha256, current_node_id, state,
+                 terminal_at, terminal_code, scope_generation, runtime_epoch)
+            VALUES
+                ('retention-role-scope-a', 'retention-role-flow-a', 'retention.flow', 'v1', 'retention-manifest', 'tests',
+                 'retention-definition-v1', repeat('a', 64), 'terminal', 'completed',
+                 clock_timestamp(), 'completed', 1, gen_random_uuid()),
+                ('retention-role-scope-b', 'retention-role-flow-b', 'retention.flow', 'v1', 'retention-manifest', 'tests',
+                 'retention-definition-v1', repeat('a', 64), 'terminal', 'completed',
+                 clock_timestamp(), 'completed', 1, gen_random_uuid());
+            """);
+
+        var retentionConnectionString = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
+        {
+            Username = "durable_retention",
+            Password = RetentionRoleTestPassword,
+        }.ConnectionString;
+        await using var retentionDataSource = NpgsqlDataSource.Create(retentionConnectionString);
+        await using var retentionConnection = await retentionDataSource.OpenConnectionAsync();
+        await using (var retentionTransaction = await retentionConnection.BeginTransactionAsync())
+        {
+            await using (var setScope = new NpgsqlCommand(
+                "SELECT set_config('appsurface_durable.scope_id', 'retention-role-scope-a', true);",
+                retentionConnection,
+                retentionTransaction))
+            {
+                await setScope.ExecuteNonQueryAsync();
+            }
+
+            string sourceSha256;
+            await using (var sourceDigest = new NpgsqlCommand(
+                """
+                SELECT encode(public.digest(convert_to(to_jsonb(instance)::text, 'UTF8'), 'sha256'), 'hex')
+                FROM appsurface_durable.flow_instance AS instance
+                WHERE instance.scope_id = 'retention-role-scope-a' AND instance.flow_instance_id = 'retention-role-flow-a';
+                """,
+                retentionConnection,
+                retentionTransaction))
+            {
+                sourceSha256 = (string)(await sourceDigest.ExecuteScalarAsync())!;
+            }
+
+            await using (var createManifest = new NpgsqlCommand(
+                """
+                SELECT outcome
+                FROM appsurface_durable.create_flow_retention_manifest(
+                    'retention-role-scope-a', 'retention-role-manifest-a', 'retention-role-flow-a',
+                    'durable-flow-closure-v1', repeat('a', 64), 'durable-flow-source-watermark-v1', repeat('b', 64),
+                    1, 256,
+                    @items::jsonb,
+                    'retention-role-create', 'retention-command-v1', repeat('c', 64));
+                """,
+                retentionConnection,
+                retentionTransaction))
+            {
+                createManifest.Parameters.AddWithValue(
+                    "items",
+                    $"[{{\"rank\":10,\"kind\":\"flow_instance\",\"key\":\"retention-role-flow-a\",\"sha256\":\"{sourceSha256}\",\"archiveable\":true}}]");
+                Assert.Equal("created", (string)(await createManifest.ExecuteScalarAsync())!);
+            }
+
+            await using (var manifestAudit = new NpgsqlCommand(
+                "SELECT command_id FROM appsurface_durable.flow_retention_manifest_event WHERE scope_id = 'retention-role-scope-a' AND retention_manifest_id = 'retention-role-manifest-a' AND event_type = 'manifest_created';",
+                retentionConnection,
+                retentionTransaction))
+            {
+                Assert.Equal("retention-role-create", (string)(await manifestAudit.ExecuteScalarAsync())!);
+            }
+
+            await using (var scopedRead = new NpgsqlCommand(
+                "SELECT count(*) FROM appsurface_durable.flow_retention_manifest;",
+                retentionConnection,
+                retentionTransaction))
+            {
+                Assert.Equal(1L, (long)(await scopedRead.ExecuteScalarAsync())!);
+            }
+
+            await using (var crossScopeRead = new NpgsqlCommand(
+                "SELECT count(*) FROM appsurface_durable.flow_retention_manifest WHERE scope_id = 'retention-role-scope-b';",
+                retentionConnection,
+                retentionTransaction))
+            {
+                Assert.Equal(0L, (long)(await crossScopeRead.ExecuteScalarAsync())!);
+            }
+
+            await using (var crossScopeProcedure = new NpgsqlCommand(
+                """
+                SELECT outcome
+                FROM appsurface_durable.create_flow_retention_manifest(
+                    'retention-role-scope-b', 'retention-role-manifest-b', 'retention-role-flow-b',
+                    'durable-flow-closure-v1', repeat('a', 64), 'durable-flow-source-watermark-v1', repeat('b', 64),
+                    1, 256,
+                    '[{"rank":10,"kind":"flow_instance","key":"retention-role-flow-b","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","archiveable":true}]'::jsonb,
+                    'retention-role-create-b', 'retention-command-v1', repeat('c', 64));
+                """,
+                retentionConnection,
+                retentionTransaction))
+            {
+                Assert.Equal("scope_rejected", (string)(await crossScopeProcedure.ExecuteScalarAsync())!);
+            }
+
+            await using (var clearScope = new NpgsqlCommand(
+                "SELECT set_config('appsurface_durable.scope_id', '', true);",
+                retentionConnection,
+                retentionTransaction))
+            {
+                await clearScope.ExecuteNonQueryAsync();
+            }
+
+            await using (var unsetScopeProcedure = new NpgsqlCommand(
+                """
+                SELECT outcome
+                FROM appsurface_durable.create_flow_retention_manifest(
+                    'retention-role-scope-a', 'retention-role-manifest-unset', 'retention-role-flow-a',
+                    'durable-flow-closure-v1', repeat('a', 64), 'durable-flow-source-watermark-v1', repeat('b', 64),
+                    1, 256,
+                    '[]'::jsonb,
+                    'retention-role-create-unset', 'retention-command-v1', repeat('c', 64));
+                """,
+                retentionConnection,
+                retentionTransaction))
+            {
+                Assert.Equal("scope_rejected", (string)(await unsetScopeProcedure.ExecuteScalarAsync())!);
+            }
+
+            await using (var resetScope = new NpgsqlCommand(
+                "SELECT set_config('appsurface_durable.scope_id', 'retention-role-scope-a', true);",
+                retentionConnection,
+                retentionTransaction))
+            {
+                await resetScope.ExecuteNonQueryAsync();
+            }
+
+            await using (var malformedReceipt = new NpgsqlCommand(
+                """
+                SELECT outcome
+                FROM appsurface_durable.apply_flow_retention_lifecycle(
+                    'retention-role-scope-a', 'retention-role-manifest-a', 'archive_receipt', 'retention-role-malformed-receipt',
+                    'retention-command-v1', repeat('c', 64), 'operator', 'archive', 1,
+                    NULL::text, NULL::text, NULL::char(64), NULL::text, NULL::char(64), NULL::integer, NULL::boolean);
+                """,
+                retentionConnection,
+                retentionTransaction))
+            {
+                Assert.Equal("lifecycle_rejected", (string)(await malformedReceipt.ExecuteScalarAsync())!);
+            }
+
+            await using (var recordReceipt = new NpgsqlCommand(
+                """
+                SELECT outcome
+                FROM appsurface_durable.apply_flow_retention_lifecycle(
+                    'retention-role-scope-a', 'retention-role-manifest-a', 'archive_receipt', 'retention-role-receipt',
+                    'retention-command-v1', repeat('c', 64), 'operator', 'archive', 1,
+                    'retention-role-receipt', 'durable-flow-archive-v1', repeat('d', 64),
+                    'durable-flow-closure-v1', repeat('a', 64), 1, NULL::boolean);
+                """,
+                retentionConnection,
+                retentionTransaction))
+            {
+                Assert.Equal("applied", (string)(await recordReceipt.ExecuteScalarAsync())!);
+            }
+
+            await retentionTransaction.CommitAsync();
+        }
+
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "UPDATE appsurface_durable.flow_instance SET current_node_id = 'changed' WHERE scope_id = 'retention-role-scope-a' AND flow_instance_id = 'retention-role-flow-a';");
+        await using (var verificationTransaction = await retentionConnection.BeginTransactionAsync())
+        {
+            await using (var setScope = new NpgsqlCommand(
+                "SELECT set_config('appsurface_durable.scope_id', 'retention-role-scope-a', true);",
+                retentionConnection,
+                verificationTransaction))
+            {
+                await setScope.ExecuteNonQueryAsync();
+            }
+
+            await using (var verifyChangedSource = new NpgsqlCommand(
+                """
+                SELECT outcome
+                FROM appsurface_durable.apply_flow_retention_lifecycle(
+                    'retention-role-scope-a', 'retention-role-manifest-a', 'verify', 'retention-role-verify',
+                    'retention-command-v1', repeat('c', 64), 'operator', 'verify', 2,
+                    NULL::text, NULL::text, NULL::char(64), NULL::text, NULL::char(64), NULL::integer, NULL::boolean);
+                """,
+                retentionConnection,
+                verificationTransaction))
+            {
+                Assert.Equal("lifecycle_rejected", (string)(await verifyChangedSource.ExecuteScalarAsync())!);
+            }
+
+            await verificationTransaction.RollbackAsync();
+        }
+
+        foreach (var sql in new[]
+                 {
+                     "DELETE FROM appsurface_durable.flow_history WHERE scope_id = 'retention-role-scope-a';",
+                     "UPDATE appsurface_durable.flow_instance SET current_node_id = 'bypassed' WHERE scope_id = 'retention-role-scope-a';",
+                     "INSERT INTO appsurface_durable.flow_retention_manifest (scope_id, retention_manifest_id, flow_instance_id, closure_schema, closure_sha256, source_watermark_schema, source_watermark_sha256, closure_item_count, archive_byte_count) VALUES ('retention-role-scope-a', 'bypass', 'retention-role-flow-a', 'bypass', repeat('a', 64), 'bypass', repeat('b', 64), 1, 1);",
+                 })
+        {
+            var deniedMutation = await Assert.ThrowsAsync<PostgresException>(async () =>
+            {
+                await using var command = new NpgsqlCommand(sql, retentionConnection);
+                await command.ExecuteNonQueryAsync();
+            });
+            Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, deniedMutation.SqlState);
         }
 
         await using (var scopedTransaction = await runtimeConnection.BeginTransactionAsync())
@@ -1201,7 +1418,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             database.DataSource,
             """
            UPDATE appsurface_durable.store_metadata
-           SET schema_version = 7,
+           SET schema_version = 8,
                minimum_reader_version = 1,
                maximum_reader_version = 1,
                minimum_writer_version = 1,
@@ -1222,7 +1439,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await ExecuteNonQueryAsync(
             database.DataSource,
             """
-           DELETE FROM appsurface_durable.schema_migration WHERE version IN (3, 4, 5, 6, 7);
+           DELETE FROM appsurface_durable.schema_migration WHERE version IN (3, 4, 5, 6, 7, 8);
            UPDATE appsurface_durable.store_metadata
            SET schema_version = 2,
                minimum_reader_version = 1,
@@ -1234,7 +1451,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var upgrade = await manager.GetStatusAsync();
         Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgrade.Compatibility);
         Assert.Equal([1, 2], upgrade.AppliedVersions);
-        Assert.Equal([3, 4, 5, 6, 7], upgrade.PendingVersions);
+        Assert.Equal([3, 4, 5, 6, 7, 8], upgrade.PendingVersions);
         var upgradeValidation = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
             async () => await manager.ValidateAsync());
         Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgradeValidation.Status.Compatibility);
@@ -1255,12 +1472,12 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var results = await Task.WhenAll(first.ApplyAsync().AsTask(), second.ApplyAsync().AsTask())
             .WaitAsync(TimeSpan.FromSeconds(30));
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7], results.SelectMany(result => result.AppliedVersions).Order().ToArray());
-        Assert.Contains(results, result => result.AppliedVersions.SequenceEqual([1, 2, 3, 4, 5, 6, 7]));
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8], results.SelectMany(result => result.AppliedVersions).Order().ToArray());
+        Assert.Contains(results, result => result.AppliedVersions.SequenceEqual([1, 2, 3, 4, 5, 6, 7, 8]));
         Assert.Contains(results, result => result.AppliedVersions.Count == 0);
         await using var count = database.DataSource.CreateCommand(
             "SELECT count(*) FROM appsurface_durable.schema_migration;");
-        Assert.Equal(7, (long)(await count.ExecuteScalarAsync())!);
+        Assert.Equal(8, (long)(await count.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -1286,7 +1503,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8], applied.AppliedVersions);
     }
 
     [Fact]
@@ -1351,7 +1568,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8], applied.AppliedVersions);
     }
 
     [Fact]
@@ -1464,7 +1681,8 @@ public sealed class PostgreSqlSchemaIntegrationTests
         string recipePath,
         string owner,
         string dispatcher,
-        string runtime) =>
+        string runtime,
+        string retention = "durable_retention") =>
         container.ExecAsync(
             [
                 "env",
@@ -1475,6 +1693,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
                 "-v", $"migration_owner_role={owner}",
                 "-v", $"dispatcher_role={dispatcher}",
                 "-v", $"runtime_role={runtime}",
+                "-v", $"retention_operator_role={retention}",
                 "-f", recipePath,
             ]);
 
