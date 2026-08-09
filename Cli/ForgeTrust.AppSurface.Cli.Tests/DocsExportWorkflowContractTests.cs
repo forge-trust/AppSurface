@@ -91,13 +91,54 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Equal("${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", GetScalar(deployJob, "if"));
     }
 
+    [Fact]
+    public void ReleaseDocsExportWorkflows_ShouldExcludeRendererOnlyReleaseGuidanceTemplate()
+    {
+        const string exclusionPath = "tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.md";
+
+        var stablePublishRoot = (YamlMappingNode)LoadWorkflow("nuget-stable-publish.yml").Documents[0].RootNode;
+        var stablePublishJob = GetMapping(GetMapping(stablePublishRoot, "jobs"), "prove-docs-archive");
+        var stablePublishExport = FindStep(
+            GetSequence(stablePublishJob, "steps").Cast<YamlMappingNode>(),
+            "Export and verify stable docs archive before NuGet publish");
+        Assert.Equal(
+            exclusionPath,
+            GetScalar(GetMapping(stablePublishExport, "env"), "AppSurfaceDocs__Harvest__Markdown__ExcludeGlobs__0"));
+
+        var releasePublishRoot = (YamlMappingNode)LoadWorkflow("release-publish.yml").Documents[0].RootNode;
+        var releasePublishJob = GetMapping(GetMapping(releasePublishRoot, "jobs"), "publish-docs-archive");
+        var releasePublishExport = FindStep(
+            GetSequence(releasePublishJob, "steps").Cast<YamlMappingNode>(),
+            "Export current docs root and exact docs tree");
+        Assert.Equal(
+            exclusionPath,
+            GetScalar(GetMapping(releasePublishExport, "env"), "AppSurfaceDocs__Harvest__Markdown__ExcludeGlobs__0"));
+
+        var releasePrep = ReadWorkflowText("release-prep.yml");
+        Assert.Contains(
+            $"export AppSurfaceDocs__Harvest__Markdown__ExcludeGlobs__0=\"{exclusionPath}\"",
+            releasePrep,
+            StringComparison.Ordinal);
+    }
+
     private static YamlStream LoadBuildWorkflow()
     {
+        return LoadWorkflow("build.yml");
+    }
+
+    private static YamlStream LoadWorkflow(string fileName)
+    {
         var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
-        using var reader = File.OpenText(Path.Join(repoRoot, ".github", "workflows", "build.yml"));
+        using var reader = File.OpenText(Path.Join(repoRoot, ".github", "workflows", fileName));
         var workflow = new YamlStream();
         workflow.Load(reader);
         return workflow;
+    }
+
+    private static string ReadWorkflowText(string fileName)
+    {
+        var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
+        return File.ReadAllText(Path.Join(repoRoot, ".github", "workflows", fileName));
     }
 
     private static YamlMappingNode FindStep(IEnumerable<YamlMappingNode> steps, string name)

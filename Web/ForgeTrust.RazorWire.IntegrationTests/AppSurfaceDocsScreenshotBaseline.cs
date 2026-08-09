@@ -14,7 +14,7 @@ namespace ForgeTrust.RazorWire.IntegrationTests;
 /// deliberately updated only when <c>APPSURFACE_UPDATE_VISUAL_BASELINES=1</c> is set, so ordinary test runs cannot
 /// silently accept a visual regression.
 /// </remarks>
-internal static class AppSurfaceDocsScreenshotBaseline
+internal static partial class AppSurfaceDocsScreenshotBaseline
 {
     /// <summary>Gets the explicit opt-in environment variable for refreshing committed visual baselines.</summary>
     internal const string UpdateEnvironmentVariable = "APPSURFACE_UPDATE_VISUAL_BASELINES";

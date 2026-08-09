@@ -74,7 +74,8 @@ public sealed class AppSurfaceDocsThemePairTests
     {
         var repoRoot = ForgeTrust.AppSurface.Core.PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
         var stylesheet = File.ReadAllText(
-            Path.Join(repoRoot, "Web", "ForgeTrust.AppSurface.Docs", "wwwroot", "css", "app.css"));
+            Path.Join(repoRoot, "Web", "ForgeTrust.AppSurface.Docs", "wwwroot", "css", "app.css"))
+            .ReplaceLineEndings("\n");
 
         foreach (var (selector, token) in new[]
                  {

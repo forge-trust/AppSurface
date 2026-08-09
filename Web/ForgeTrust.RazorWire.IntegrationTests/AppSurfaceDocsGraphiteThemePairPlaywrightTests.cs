@@ -20,7 +20,7 @@ public sealed class AppSurfaceDocsGraphiteThemePairCollection : ICollectionFixtu
 [Trait("Category", "Integration")]
 public sealed class AppSurfaceDocsGraphiteThemePairPlaywrightTests
 {
-    private const string GraphitePreferenceStorageKey = "appsurface_graphite_docs_test_theme";
+    internal const string GraphitePreferenceStorageKey = "appsurface_graphite_docs_test_theme";
 
     private readonly AppSurfaceDocsGraphitePlaywrightFixture _fixture;
 
@@ -364,7 +364,8 @@ public sealed class AppSurfaceDocsGraphitePlaywrightFixture : IAsyncLifetime
             options.DefaultMode = AppSurfaceThemeMode.System;
             options.Pairs.Add(AppSurfaceThemePair.Graphite());
         });
-        services.AddAppSurfaceWebThemePreferences(options => options.StorageKey = "appsurface_graphite_docs_test_theme");
+        services.AddAppSurfaceWebThemePreferences(
+            options => options.StorageKey = AppSurfaceDocsGraphiteThemePairPlaywrightTests.GraphitePreferenceStorageKey);
     }
 
     private static async Task EnsurePlaywrightInstalledAsync()
