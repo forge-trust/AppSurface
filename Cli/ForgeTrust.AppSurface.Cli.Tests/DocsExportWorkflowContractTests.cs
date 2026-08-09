@@ -93,7 +93,7 @@ public sealed class DocsExportWorkflowContractTests
     private static YamlStream LoadWorkflow(string fileName)
     {
         var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
-        using var reader = File.OpenText(Path.Join(repoRoot, ".github", "workflows", fileName));
+        using var reader = File.OpenText(PathUtils.PathUnder(repoRoot, ".github", "workflows", fileName));
         var workflow = new YamlStream();
         workflow.Load(reader);
         return workflow;
