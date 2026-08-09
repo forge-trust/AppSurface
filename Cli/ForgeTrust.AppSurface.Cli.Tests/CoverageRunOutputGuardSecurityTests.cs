@@ -691,6 +691,25 @@ public sealed class CoverageRunOutputGuardSecurityTests
     }
 
     [Fact]
+    public async Task WriteOwnedGateArtifactAsync_Windows_ShouldPromoteStagedWritesWithinTheRetainedOutputDirectory()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        using var lease = CoverageRunOutputLease.Acquire(output);
+
+        await lease.WriteOwnedGateArtifactAsync(CoverageGateArtifactNames.Json, "first", CancellationToken.None);
+        await lease.WriteOwnedGateArtifactAsync(CoverageGateArtifactNames.Json, "second", CancellationToken.None);
+
+        Assert.Equal("second", File.ReadAllText(Path.Join(output, CoverageGateArtifactNames.Json)));
+        Assert.Empty(Directory.EnumerateFiles(output, ".*.tmp"));
+    }
+
+    [Fact]
     public void Prepare_ShouldFailClosedWhenValidMarkerIdentityChangesBeforeMutation()
     {
         using var root = TestDirectory.Create();

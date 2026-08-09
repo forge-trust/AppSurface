@@ -358,7 +358,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
             var isOutputDirectory = index == components.Length - 1;
             current = OpenWindowsDirectory(
                 currentPath,
-                access: isOutputDirectory ? WindowsGenericRead : 0,
+                access: isOutputDirectory ? WindowsGenericRead | WindowsGenericWrite : 0,
                 denyWriteSharing: isOutputDirectory);
             _windowsHandles.Add(current);
             VerifyWindowsPathIdentity(current, currentPath);
@@ -832,17 +832,17 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         Exception? writeFailure = null;
         try
         {
-            using (var temporaryHandle = OpenWindowsFile(
+            using (var writeHandle = OpenWindowsFile(
                        temporaryPath,
                        WindowsGenericWrite | WindowsGenericRead,
                        WindowsCreateNew,
                        shareMode: WindowsShareRead))
             {
-                VerifyWindowsPathIdentity(temporaryHandle, temporaryPath);
-                RejectWindowsWrongKind(temporaryHandle, expectDirectory: false);
-                RejectWindowsHardLinkedArtifact(temporaryHandle, artifactName);
+                VerifyWindowsPathIdentity(writeHandle, temporaryPath);
+                RejectWindowsWrongKind(writeHandle, expectDirectory: false);
+                RejectWindowsHardLinkedArtifact(writeHandle, artifactName);
                 await using var stream = new FileStream(
-                    temporaryHandle,
+                    writeHandle,
                     FileAccess.Write,
                     bufferSize: 4096,
                     isAsync: false);
@@ -859,7 +859,17 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
                 RejectWindowsHardLinkedArtifact(destinationHandle, artifactName);
             }
 
-            File.Move(temporaryPath, path, overwrite: true);
+            using (var promotionHandle = OpenWindowsFile(
+                       temporaryPath,
+                       WindowsGenericRead | WindowsDelete,
+                       shareMode: WindowsShareRead))
+            {
+                VerifyWindowsPathIdentity(promotionHandle, temporaryPath);
+                RejectWindowsWrongKind(promotionHandle, expectDirectory: false);
+                RejectWindowsHardLinkedArtifact(promotionHandle, artifactName);
+                PromoteWindowsOwnedGateArtifact(promotionHandle, artifactName);
+            }
+
             promoted = true;
         }
         catch (Exception ex)
@@ -883,6 +893,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         }
     }
 
+    [ExcludeFromCodeCoverage(Justification = "Windows output leases deny competing directory writes; the Windows security lane exercises the platform-specific binding.")]
     private string GetOwnedGateArtifactTemporaryPath(string artifactName)
     {
         var path = Path.GetFullPath(Path.Join(_outputPath, $".{artifactName}.{Guid.NewGuid():N}.tmp"));
@@ -892,6 +903,34 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         }
 
         return path;
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "Windows handle-relative promotion is exercised by the Windows security lane.")]
+    private void PromoteWindowsOwnedGateArtifact(SafeFileHandle sourceHandle, string artifactName)
+    {
+        var fileNameBytes = Encoding.Unicode.GetBytes(artifactName);
+        var rootDirectoryOffset = IntPtr.Size == sizeof(long) ? sizeof(int) * 2 : sizeof(int);
+        var fileNameLengthOffset = rootDirectoryOffset + IntPtr.Size;
+        var fileNameOffset = fileNameLengthOffset + sizeof(int);
+        var bufferSize = checked(fileNameOffset + fileNameBytes.Length);
+        var buffer = Marshal.AllocHGlobal(bufferSize);
+        try
+        {
+            Marshal.WriteInt32(buffer, 0, 1);
+            Marshal.WriteIntPtr(buffer, rootDirectoryOffset, _outputHandle!.DangerousGetHandle());
+            Marshal.WriteInt32(buffer, fileNameLengthOffset, fileNameBytes.Length);
+            Marshal.Copy(fileNameBytes, 0, IntPtr.Add(buffer, fileNameOffset), fileNameBytes.Length);
+            if (!SetFileInformationByHandle(sourceHandle, WindowsFileRenameInfo, buffer, (uint)bufferSize))
+            {
+                throw new IOException(
+                    $"Unable to promote coverage gate artifact '{artifactName}'.",
+                    new Win32Exception(Marshal.GetLastPInvokeError()));
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
     }
 
     [ExcludeFromCodeCoverage(Justification = "Windows output leases deny competing directory writes; the Windows security lane exercises the platform-specific binding.")]
@@ -940,9 +979,6 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
             throw new IOException($"Coverage report artifact '{artifactName}' is outside its output directory.");
         }
     }
-
-    private static bool IsKnownOutputEntry(OutputEntry entry)
-        => IsKnownOutputEntry(entry.Name, entry.IsDirectory);
 
     private static bool IsKnownOutputEntry(TreeEntry entry)
         => IsKnownOutputEntry(Path.GetFileName(entry.RelativePath), entry.IsDirectory);
@@ -1284,6 +1320,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     private const uint WindowsAttributeReparsePoint = 0x00000400;
     private const uint WindowsAttributeDirectory = 0x00000010;
     private const int WindowsFileAttributeTagInfo = 9;
+    private const int WindowsFileRenameInfo = 3;
     private const int WindowsFileDispositionInfo = 4;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -1338,5 +1375,14 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         SafeFileHandle handle,
         int fileInformationClass,
         ref WindowsFileDispositionInformation fileInformation,
+        uint bufferSize);
+
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [LibraryImport("kernel32.dll", EntryPoint = "SetFileInformationByHandle", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetFileInformationByHandle(
+        SafeFileHandle handle,
+        int fileInformationClass,
+        nint fileInformation,
         uint bufferSize);
 }
