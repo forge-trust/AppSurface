@@ -13,6 +13,22 @@ public static class AppSurfaceKeycloakRealmGenerator
         WriteIndented = true,
     };
 
+    private static readonly AsyncLocal<Action<string>?> BeforeMoveForTestingSlot = new();
+
+    /// <summary>
+    /// Gets or sets a test-only action invoked after temporary realm evidence is written and immediately before its
+    /// atomic replacement.
+    /// </summary>
+    /// <remarks>
+    /// The action is stored in <c>AsyncLocal&lt;Action&lt;string&gt;&gt;</c> so parallel test flows remain isolated. Tests must reset
+    /// this property to <see langword="null"/> after use.
+    /// </remarks>
+    internal static Action<string>? BeforeMoveForTesting
+    {
+        get => BeforeMoveForTestingSlot.Value;
+        set => BeforeMoveForTestingSlot.Value = value;
+    }
+
     /// <summary>
     /// Generates deterministic realm import JSON from validated options.
     /// </summary>
@@ -30,6 +46,10 @@ public static class AppSurfaceKeycloakRealmGenerator
             ["clients"] = new JsonArray(CreateClient(options)),
             ["users"] = new JsonArray(options.SeededUsers.Select(CreateUser).ToArray<JsonNode?>()),
         };
+        if (options.LoginTheme is not null)
+        {
+            realm["loginTheme"] = options.LoginTheme.Name;
+        }
 
         return realm.ToJsonString(SerializerOptions);
     }
@@ -44,9 +64,34 @@ public static class AppSurfaceKeycloakRealmGenerator
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
 
-        Directory.CreateDirectory(options.RealmImportDirectory);
         var path = AppSurfaceKeycloakRealmImportPaths.GetRealmImportFilePath(options.RealmImportDirectory, options.Realm);
-        File.WriteAllText(path, Generate(options));
+        var temporaryPath = Path.Join(options.RealmImportDirectory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            Directory.CreateDirectory(options.RealmImportDirectory);
+            File.WriteAllText(temporaryPath, Generate(options));
+            BeforeMoveForTesting?.Invoke(path);
+            File.Move(temporaryPath, path, overwrite: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw RealmEvidenceInvalid($"the realm import could not be materialized safely ({exception.GetType().Name}).");
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Preserve the primary write or replace failure; the next startup can remove the owned temporary file.
+            }
+        }
+
         return path;
     }
 
@@ -66,6 +111,11 @@ public static class AppSurfaceKeycloakRealmGenerator
             },
             ["protocolMappers"] = new JsonArray(CreateRoleMapper()),
         };
+
+    private static AppSurfaceKeycloakException RealmEvidenceInvalid(string detail) =>
+        new(
+            AppSurfaceKeycloakDiagnosticCodes.RealmEvidenceInvalid,
+            $"Problem: AppSurface Keycloak realm import evidence is invalid. Cause: {detail} Fix: use an application-owned writable local import directory and regenerate disposable proof data. Docs: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md#persistent-data-recovery. Code: {AppSurfaceKeycloakDiagnosticCodes.RealmEvidenceInvalid}.");
 
     private static JsonObject CreateRoleMapper() =>
         new()
@@ -92,6 +142,9 @@ public static class AppSurfaceKeycloakRealmGenerator
             ["username"] = user.Username,
             ["enabled"] = true,
             ["firstName"] = user.DisplayName,
+            ["lastName"] = AppSurfaceKeycloakDefaults.SeededUserLastName,
+            ["email"] = AppSurfaceKeycloakDefaults.SeededUserEmail(user.Username),
+            ["emailVerified"] = true,
             ["attributes"] = CreateAttributes(user),
             ["credentials"] = new JsonArray(
                 new JsonObject
