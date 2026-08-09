@@ -2,9 +2,13 @@
 
 This provider compiles AppSurface migration-job intent into reviewable Google Cloud Run v2 Job Terraform/OpenTofu JSON and verifies deployed configuration through read-only `gcloud` commands.
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
+This AppHost-oriented package follows the coordinated AppSurface release policy. Before using a prerelease build in an AppHost, development, or test environment, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for publication status, compatibility guidance, and readiness.
+<!-- appsurface-release-guidance: end -->
+
+## Operational boundary
 
 Publishing is pure artifact generation. It does not authenticate to Google Cloud, resolve secret values, apply infrastructure, execute a job, or change traffic. Foundations such as the VPC, subnet, service account, Cloud SQL instance, and Secret Manager secrets remain externally provisioned.
 

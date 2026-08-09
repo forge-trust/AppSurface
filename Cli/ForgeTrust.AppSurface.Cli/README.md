@@ -50,10 +50,11 @@ operations guidance.
 
 Future CLI authentication is design-only today. The [authenticated command design](docs/authenticated-command-design.md) keeps auth centered on protected command execution, uses `appsurface docs publish --archive ./dist/docs --site <site>` as the first protected command wedge, and requires browser/loopback PKCE, RFC 8628 device flow, CI no-prompt behavior, secure token-cache boundaries, `ASCLI1xx` diagnostics, and packed-tool readiness proof before auth commands ship.
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
-
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for current release risk, migration guidance, and readiness.
+<!-- appsurface-release-guidance: end -->
 ## Install
 
 Install the published tool from NuGet:

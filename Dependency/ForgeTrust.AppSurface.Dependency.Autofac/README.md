@@ -6,10 +6,11 @@ Autofac IoC container integration for AppSurface modules.
 
 This package allows modules to participate in Autofac service registration, enabling advanced DI features not available in the default .NET service collection.
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for current release risk, migration guidance, and readiness.
-
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for current release risk, migration guidance, and readiness.
+<!-- appsurface-release-guidance: end -->
 ## Usage
 
 Inherit from `AppSurfaceAutofacModule` instead of `IAppSurfaceModule` if you need to use Autofac-specific registrations.

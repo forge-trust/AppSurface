@@ -177,6 +177,11 @@ internal sealed class PackageArtifactValidator
                 $"Package '{expected.PackageId}' is missing required README entry '{inspected.Readme}'.");
         }
 
+        if (!string.IsNullOrWhiteSpace(expected.ReleaseGuidanceVariant))
+        {
+            ValidatePackagedReleaseGuidance(expected, inspected, readmePath);
+        }
+
         var isDotnetToolPackage = inspected.PackageTypes.Contains("DotnetTool", StringComparer.OrdinalIgnoreCase);
         if (expected.IsTool && !isDotnetToolPackage)
         {
@@ -413,6 +418,172 @@ internal sealed class PackageArtifactValidator
 
         var coveredSuspiciousEntryCount = suspiciousEntries.Count(entry => coveredPackageEntries.Contains(entry.EntryPath));
         return new PackagePayloadValidationSummary(results, suspiciousEntries.Length, coveredSuspiciousEntryCount);
+    }
+
+    private static void ValidatePackagedReleaseGuidance(
+        PackagePublishPlanEntry expected,
+        InspectedPackage inspected,
+        string readmePath)
+    {
+        var readme = ReadPackageTextEntry(inspected.PackagePath, readmePath, expected.PackageId, "release-guidance");
+        var hasManagedRegion = TryExtractManagedReleaseGuidanceRegion(readme, out var managedRegion);
+        var hasCanonicalLinks = CountMarkdownLinkDestinations(readme, ReleaseGuidanceRenderer.PackageChooserUrl) == 1
+            && CountMarkdownLinkDestinations(readme, ReleaseGuidanceRenderer.ReleaseHubUrl) == 1
+            && CountMarkdownLinkDestinations(managedRegion, ReleaseGuidanceRenderer.PackageChooserUrl) == 1
+            && CountMarkdownLinkDestinations(managedRegion, ReleaseGuidanceRenderer.ReleaseHubUrl) == 1;
+        if (!hasManagedRegion || !hasCanonicalLinks)
+        {
+            throw new PackageIndexException(
+                $"ASPKG145 {expected.PackageId}: packaged README '{readmePath}' does not preserve the generated release-guidance contract. Problem: a NuGet consumer must receive one marked policy region with canonical package chooser and release hub URLs. Cause: the source README was stale, manually edited, or packed from a different file. Fix: run 'dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate', run 'verify', repack, and inspect README.md. Docs: {ReleaseGuidanceRenderer.MaintainerGuideRelativePath}#release-guidance.");
+        }
+    }
+
+    private static bool TryExtractManagedReleaseGuidanceRegion(string content, out string region)
+    {
+        region = string.Empty;
+        int? beginContentStart = null;
+        int? endMarkerStart = null;
+        char? activeFence = null;
+        var lineStart = 0;
+        while (lineStart <= content.Length)
+        {
+            var lineEnd = content.IndexOf('\n', lineStart);
+            var nextLineStart = lineEnd < 0 ? content.Length : lineEnd + 1;
+            var effectiveLineEnd = lineEnd < 0 ? content.Length : lineEnd;
+            var line = content[lineStart..effectiveLineEnd].TrimEnd('\r');
+            if (lineStart == 0)
+            {
+                line = line.TrimStart('\uFEFF');
+            }
+            var trimmedStart = line.TrimStart();
+            if (activeFence is { } fence)
+            {
+                if (IsFenceLine(trimmedStart, fence))
+                {
+                    activeFence = null;
+                }
+            }
+            else if (TryGetFenceMarker(trimmedStart, out var openingFence))
+            {
+                activeFence = openingFence;
+            }
+            else if (string.Equals(line, ReleaseGuidanceRenderer.BeginMarker, StringComparison.Ordinal))
+            {
+                if (beginContentStart is not null)
+                {
+                    return false;
+                }
+
+                beginContentStart = nextLineStart;
+            }
+            else if (string.Equals(line, ReleaseGuidanceRenderer.EndMarker, StringComparison.Ordinal))
+            {
+                if (endMarkerStart is not null)
+                {
+                    return false;
+                }
+
+                endMarkerStart = lineStart;
+            }
+
+            if (lineEnd < 0)
+            {
+                break;
+            }
+
+            lineStart = nextLineStart;
+        }
+
+        if (beginContentStart is null || endMarkerStart is null || beginContentStart.Value > endMarkerStart.Value)
+        {
+            return false;
+        }
+
+        region = content[beginContentStart.Value..endMarkerStart.Value];
+        return true;
+    }
+
+    private static int CountMarkdownLinkDestinations(string content, string url)
+    {
+        var linkDestination = $"]({url})";
+        var count = 0;
+        char? activeFence = null;
+        var lineStart = 0;
+        while (lineStart <= content.Length)
+        {
+            var lineEnd = content.IndexOf('\n', lineStart);
+            var nextLineStart = lineEnd < 0 ? content.Length : lineEnd + 1;
+            var effectiveLineEnd = lineEnd < 0 ? content.Length : lineEnd;
+            var line = content[lineStart..effectiveLineEnd].TrimEnd('\r');
+            if (lineStart == 0)
+            {
+                line = line.TrimStart('\uFEFF');
+            }
+            var trimmedStart = line.TrimStart();
+            if (activeFence is { } fence)
+            {
+                if (IsFenceLine(trimmedStart, fence))
+                {
+                    activeFence = null;
+                }
+            }
+            else if (TryGetFenceMarker(trimmedStart, out var openingFence))
+            {
+                activeFence = openingFence;
+            }
+            else
+            {
+                count += CountOccurrences(line, linkDestination);
+            }
+
+            if (lineEnd < 0)
+            {
+                break;
+            }
+
+            lineStart = nextLineStart;
+        }
+
+        return count;
+    }
+
+    private static bool TryGetFenceMarker(string line, out char fence)
+    {
+        fence = default;
+        if (line.Length < 3 || (line[0] is not '`' and not '~'))
+        {
+            return false;
+        }
+
+        fence = line[0];
+        return IsFenceLine(line, fence);
+    }
+
+    private static bool IsFenceLine(string line, char fence)
+    {
+        return line.Length >= 3
+            && line[0] == fence
+            && line[1] == fence
+            && line[2] == fence;
+    }
+
+    private static int CountOccurrences(string content, string value)
+    {
+        var count = 0;
+        var offset = 0;
+        while (offset < content.Length)
+        {
+            var index = content.IndexOf(value, offset, StringComparison.Ordinal);
+            if (index < 0)
+            {
+                break;
+            }
+
+            count++;
+            offset = index + value.Length;
+        }
+
+        return count;
     }
 
     private static void ValidatePayloadInventoryPackageIds(
