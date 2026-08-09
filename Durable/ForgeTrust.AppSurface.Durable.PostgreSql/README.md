@@ -65,16 +65,17 @@ Runtime mutations take a shared, transaction-scoped advisory fence before valida
 and epoch rotation take the exclusive package lock, so they wait for in-flight runtime transactions and prevent an old
 epoch from committing new durable state after rotation.
 
-Runtime roles never own schema or apply DDL. Apply the six migrations in numeric order: Work/shared state
+Runtime roles never own schema or apply DDL. Apply the seven migrations in numeric order: Work/shared state
 (`0001_work_shared.sql`),
 forced RLS and privilege revocation (`0002_forced_rls.sql`), Flow protocol persistence (`0003_flow_protocol.sql`), the
 Work-first Schedule ledger (`0004_schedule_protocol.sql`), the payload-free runtime heartbeat
-(`0005_runtime_heartbeat.sql`), and value-free Flow trace context (`0006_flow_trace_context.sql`). Applied schema is
+(`0005_runtime_heartbeat.sql`), value-free Flow trace context (`0006_flow_trace_context.sql`), and verified one-Flow
+retention lifecycle evidence (`0007_flow_retention.sql`). Applied schema is
 forward-only; rolling application code back does not authorize destructive schema rollback. Execute generated SQL with a
 client that stops on the first error; `psql` callers must pass `-v ON_ERROR_STOP=1`.
 
 Create host principals outside migrations. Use [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) to
-grant the migration-owner, payload-free dispatcher, and scoped-runtime capabilities. Runtime roles must not receive
+grant the migration-owner, payload-free dispatcher, scoped-runtime, and scoped-retention-operator capabilities. Service roles must not receive
 ownership or `BYPASSRLS`. Transaction-local scope context is defense in depth, not a replacement for application
 authorization. The recipe fails before granting privileges when role names alias each other or a service role can
 inherit the migration owner, `SUPERUSER`, or `BYPASSRLS`. It also transfers every package table, sequence, and view to
@@ -157,11 +158,12 @@ psql -v ON_ERROR_STOP=1 \
   -v migration_owner_role=appsurface_durable_owner \
   -v dispatcher_role=appsurface_durable_dispatcher \
   -v runtime_role=appsurface_durable_runtime \
+  -v retention_operator_role=appsurface_durable_retention \
   -f Durable/configure-postgresql-roles.sql "$CONNECTION_STRING"
 ```
 
-The dispatcher and runtime values identify the exact non-human credentials used to connect, not reusable capability
-groups. Both must be distinct `LOGIN` leaf roles with no memberships in either direction and without `SUPERUSER`,
+The dispatcher, runtime, and retention-operator values identify exact non-human credentials used to connect, not reusable capability
+groups. All three must be distinct `LOGIN` leaf roles with no memberships in either direction and without `SUPERUSER`,
 `CREATEDB`, `CREATEROLE`, `REPLICATION`, or `BYPASSRLS`. Create and rotate their credentials through the deployment
 secret system; the recipe never accepts or changes passwords. Neither service credential may own any database or hold
 grant options on the `appsurface_durable` schema or its objects. The migration owner remains separate and may be
@@ -179,6 +181,7 @@ schema to the migration owner. Do not place application-owned objects there.
 | Runtime updates | Reviewed column-level `UPDATE` on mutable Work, Flow instance/wait/timer, Schedule definition/occurrence/dispatch, and dispatch fields; no table-wide update grant. |
 | Runtime sequences | `USAGE` and `SELECT` on every sequence in the package schema. |
 | Runtime heartbeat | Unscoped `SELECT` and `INSERT`, plus reviewed column-level `UPDATE`, on `runtime_heartbeat` for `IDurableRuntimeHealth`. Its forced RLS policy intentionally uses `USING (true)` and `WITH CHECK (true)`; keep this fully trusted runtime credential out of untrusted callers. |
+| Retention operator | Scope-filtered Flow/Work-reference and retention-evidence reads; `EXECUTE` only on the owner-run manifest and lifecycle capabilities. It has no direct lifecycle/source `INSERT`, `UPDATE`, `DELETE`, sequence, dispatcher-discovery, Schedule, worker-host, or migration access. |
 
 Neither service credential receives schema `CREATE`, table-wide `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`,
 `TRIGGER`, or `MAINTAIN`; the dispatcher receives no sequence privileges. Forced RLS remains an additional scope fence,
@@ -188,6 +191,125 @@ name, command, role target, permissiveness, `USING`, or `WITH CHECK` expression 
 Before the pre-created next month starts, a migration-owner operation must run
 `SELECT appsurface_durable.ensure_schedule_history_partitions();`. It retains the current and next Schedule-history
 partitions and reapplies their forced RLS policy. Runtime and dispatcher roles cannot execute this maintenance function.
+
+## Verified Flow retention
+
+Register retention only after the schema is current and the four-role recipe has completed. Supply a dedicated
+retention-operator data source; it must not be the dispatcher or runtime source:
+
+```csharp
+services.AddAppSurfaceDurablePostgreSql(
+    dispatcherDataSource,
+    runtimeDataSource,
+    workOptions,
+    scheduleOptions);
+services.AddAppSurfaceDurablePostgreSqlFlowRetention(retentionOperatorDataSource);
+```
+
+Migration `0007_flow_retention.sql` installs PostgreSQL's trusted [`pgcrypto`](https://www.postgresql.org/docs/current/pgcrypto.html) extension in `public` to recompute
+canonical SHA-256 source-item evidence inside the owner-run capabilities. The migration owner therefore needs database
+permission to install that extension on first use, or an operator must preinstall `pgcrypto` in `public` before applying
+the migration. A pre-existing installation in another schema is rejected with an explicit migration error; move it to
+`public` before retrying. The capabilities call the extension by schema-qualified identity; it is not resolved through a
+caller-owned search path.
+
+Resolve `IDurableFlowRetentionClient` only behind an application-authorized operator boundary. The lifecycle is
+`AssessAsync` → `CreateManifestAsync` → `BuildArchivePackageAsync` → external write → `RecordArchiveReceiptAsync` →
+`VerifyArchiveAsync` → optional `SetHoldAsync` → `PurgeAsync`. Assessment has no universal age policy: callers select
+one terminal Flow and supply a maximum of 10,000 closure items and 64 MiB package bytes. The owner-run PostgreSQL
+capabilities validate scope and lifecycle state, lock the source closure during verification and purge, retain the Flow
+identity and command ledger, clear terminal payload fields, and delete
+only manifest-covered Flow history, resolved waits, terminal timers, and terminal dispatch rows. A retry returns the
+persisted command outcome; a changed source, stale sequence, active child Work, repair-required Flow, or hold rejects
+the operation without a partial delete.
+
+The retention login receives no direct mutation grants. `CreateManifestAsync` calls
+`appsurface_durable.create_flow_retention_manifest`, while receipt, verify, hold, and purge call
+`appsurface_durable.apply_flow_retention_lifecycle`. Both capabilities require the transaction's scoped identity,
+serialize command replay, validate lifecycle sequencing, and compare every live source item's server-computed SHA-256
+against the immutable manifest before verification or deletion. The application still owns authorization and the opaque
+external-archive receipt: PostgreSQL proves source correspondence, not external storage availability or legal adequacy.
+
+The application supplies command identity, actor, reason, and the expected lifecycle sequence for every mutation. A
+minimal orchestration shape is:
+
+```csharp
+var assessmentResult = await retention.AssessAsync(
+    new DurableRetentionAssessmentRequest(scopeId, flowInstanceId),
+    cancellationToken);
+
+if (!assessmentResult.IsSuccess ||
+    assessmentResult.Value.Status != DurableRetentionAssessmentStatus.Safe)
+{
+    // Stop for Blocked or Indeterminate; do not create a manifest.
+    return;
+}
+
+var manifestResult = await retention.CreateManifestAsync(
+    new DurableRetentionManifestCreateRequest(
+        new DurableCommandId("retention-manifest-command"),
+        assessmentResult.Value),
+    cancellationToken);
+if (!manifestResult.IsSuccess)
+{
+    return;
+}
+
+var manifest = manifestResult.Value.Manifest;
+var packageResult = await retention.BuildArchivePackageAsync(
+    scopeId,
+    manifest.ManifestId,
+    cancellationToken);
+if (!packageResult.IsSuccess)
+{
+    return;
+}
+
+var package = packageResult.Value;
+await archiveStore.WriteAsync(package, cancellationToken);
+var receipt = await archiveStore.CreateReceiptAsync(package, cancellationToken);
+var sequence = manifest.LifecycleSequence;
+
+var receiptResult = await retention.RecordArchiveReceiptAsync(
+    new DurableRetentionRecordArchiveReceiptRequest(
+        scopeId, manifest.ManifestId, new DurableCommandId("retention-receipt-command"),
+        actorId, "verified-flow-retention", sequence, receipt),
+    cancellationToken);
+if (!receiptResult.IsSuccess)
+{
+    return;
+}
+
+var verifyResult = await retention.VerifyArchiveAsync(
+    new DurableRetentionVerifyArchiveRequest(
+        scopeId, manifest.ManifestId, new DurableCommandId("retention-verify-command"),
+        actorId, "verified-flow-retention", sequence + 1),
+    cancellationToken);
+if (!verifyResult.IsSuccess)
+{
+    return;
+}
+
+var purgeResult = await retention.PurgeAsync(
+    new DurableRetentionPurgeRequest(
+        scopeId, manifest.ManifestId, new DurableCommandId("retention-purge-command"),
+        actorId, "verified-flow-retention", sequence + 2),
+    cancellationToken);
+if (!purgeResult.IsSuccess)
+{
+    return;
+}
+```
+
+Treat each `DurableOperationResult` as a checked boundary: handle `IsSuccess == false`, preserve the returned
+command outcome for retries, and stop on `Blocked`, `Indeterminate`, source changes, stale lifecycle sequences, or
+holds. The archive write and receipt creation are external application steps; the provider never treats a receipt as
+proof that external bytes are durable or legally adequate.
+
+`DFA1` package bytes are returned before external I/O. The archive receipt is an opaque adopter assertion, not a URI,
+availability check, encryption proof, or compliance determination. Source-correspondence verification rebuilds the
+canonical package and compares its SHA-256 and frozen closure digest. Applications must document and operate their own
+archive store, key management, retention policy, legal holds, performance/WAL evidence, and recovery objectives.
 
 ## Options reuse across Work and Flow
 

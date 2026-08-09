@@ -70,7 +70,7 @@ public sealed class ProgramEntryPointTests
     [Fact]
     public async Task EntryPoint_Should_Generate_DurableSchemaScript_Offline_With_ParsedFromVersion()
     {
-        var result = await InvokeEntryPointAsync(["durable", "schema", "script", "--from-version", "6"]);
+        var result = await InvokeEntryPointAsync(["durable", "schema", "script", "--from-version", "7"]);
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(
