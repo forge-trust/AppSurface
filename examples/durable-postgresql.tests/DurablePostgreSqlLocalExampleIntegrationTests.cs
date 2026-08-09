@@ -14,9 +14,11 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
     private const string MigrationOwnerRole = "appsurface_durable_owner";
     private const string DispatcherRole = "appsurface_durable_dispatcher";
     private const string RuntimeRole = "appsurface_durable_runtime";
+    private const string RetentionOperatorRole = "appsurface_durable_retention";
     private const string MigrationOwnerPassword = "durable-owner-test-password";
     private const string DispatcherPassword = "durable-dispatcher-test-password";
     private const string RuntimePassword = "durable-runtime-test-password";
+    private const string RetentionOperatorPassword = "durable-retention-test-password";
     private const string RoleRecipeContainerPath = "/tmp/configure-postgresql-roles.sql";
     private const string PostgreSqlImage =
         "postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302";
@@ -65,6 +67,7 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
                 "-v", $"migration_owner_role={MigrationOwnerRole}",
                 "-v", $"dispatcher_role={DispatcherRole}",
                 "-v", $"runtime_role={RuntimeRole}",
+                "-v", $"retention_operator_role={RetentionOperatorRole}",
                 "-f", RoleRecipeContainerPath,
             ]);
         Assert.True(
@@ -244,6 +247,7 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
             CREATE ROLE {MigrationOwnerRole} LOGIN PASSWORD '{MigrationOwnerPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE {DispatcherRole} LOGIN PASSWORD '{DispatcherPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE {RuntimeRole} LOGIN PASSWORD '{RuntimePassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE {RetentionOperatorRole} LOGIN PASSWORD '{RetentionOperatorPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             """);
         await command.ExecuteNonQueryAsync();
     }
@@ -288,13 +292,13 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
             DurableRuntimeSchemaCompatibility.Compatible,
             storeId,
             runtimeEpoch,
-            installedVersion: 6,
-            requiredVersion: 6,
+            installedVersion: 7,
+            requiredVersion: 7,
             minimumReaderVersion: 1,
-            maximumReaderVersion: 6,
+            maximumReaderVersion: 7,
             minimumWriterVersion: 1,
-            maximumWriterVersion: 6,
-            appliedVersions: [1, 2, 3, 4, 5, 6],
+            maximumWriterVersion: 7,
+            appliedVersions: [1, 2, 3, 4, 5, 6, 7],
             pendingVersions: [],
             problem: null);
 

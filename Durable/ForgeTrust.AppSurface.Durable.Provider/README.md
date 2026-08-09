@@ -55,6 +55,7 @@ Every public type in this package belongs to one of these provider-facing famili
 | Work-store implementers | `DurableClaimedWork`, `DurablePreparedWorkInvocation`, `DurableProviderWorkAdapter` | Validate a claim, derive immutable execution identity, and invoke the adopter registry |
 | Application-authorized control implementers | Work get/cancel/list/snapshot types and `IDurableWorkControlClient`; scope disable types and `IDurableScopeControlClient` | Expose bounded, scoped, payload-free operational control |
 | Application-authorized operator implementers | Operator outcome/resolution/result/request types and `IDurableWorkOperatorClient` | Reconcile, resolve, safely retry, or recovery-release suspended Work |
+| Application-authorized retention implementers | `IDurableFlowRetentionClient`, bounded assessment/manifest/package/receipt/hold/purge types | Prove one exact terminal Flow source set before a separately authorized purge |
 
 The SPI accepts and returns public Durable identifiers and command fingerprints. Collection results defensively copy
 inputs, default identifiers are rejected, timestamps normalize to UTC, page sizes are bounded, and every mutation uses
@@ -77,12 +78,55 @@ Work reconcile, manual resolution, safe retry, and recovery release each use a d
 provider persists the schema id and digest with command outcome truth. A repeated command id with `UnsupportedSchema` or
 `Conflict` fails closed; it must never repeat reconciliation merely because the command id matches.
 
+## Verified Flow retention
+
+`IDurableFlowRetentionClient` is an evidence boundary, not a cleanup scheduler. An application first assesses exactly
+one Flow and receives `Safe`, `Blocked`, or `Indeterminate` with a typed reason. Only a still-matching safe assessment
+can create an immutable manifest. The provider then builds a reproducible `DFA1` package, records an adopter-supplied
+archive receipt, verifies source correspondence, permits an application-owned hold, and accepts a separate
+compare-and-swap purge command.
+
+### Canonical retention API reference
+
+| Operation | Request type | Result payload | Required state | Next sequence |
+|---|---|---|---|---|
+| `AssessAsync` | `DurableRetentionAssessmentRequest` | `DurableRetentionAssessment` | Terminal Flow | N/A |
+| `CreateManifestAsync` | `DurableRetentionManifestCreateRequest` | `DurableRetentionManifestCreateResult` | `Safe` assessment | 1 (`Frozen`) |
+| `BuildArchivePackageAsync` | `(scopeId, manifestId)` | `DurableArchivePackageV1` | Any active manifest | Unchanged |
+| `RecordArchiveReceiptAsync` | `DurableRetentionRecordArchiveReceiptRequest` | `DurableRetentionMutationResult` | `Frozen`, sequence 1 | 2 (`ArchiveReceiptRecorded`) |
+| `VerifyArchiveAsync` | `DurableRetentionVerifyArchiveRequest` | `DurableRetentionMutationResult` | `ArchiveReceiptRecorded`, sequence 2 | 3 (`Verified`) |
+| `SetHoldAsync` | `DurableRetentionHoldRequest` | `DurableRetentionMutationResult` | `Verified` or `Held` | Next monotonic sequence |
+| `PurgeAsync` | `DurableRetentionPurgeRequest` | `DurableRetentionMutationResult` | `Verified`, no active hold | Next monotonic sequence (`Purged`) |
+
+### Lifecycle state sequence and boundaries
+
+The retention lifecycle uses monotonic sequence checks to prevent out-of-order or duplicate execution:
+
+1. **Assessment & Manifest:** `AssessAsync` evaluates one Flow against boundary limits (maximum 10,000 closure items and 64 MiB package bytes). Non-safe outcomes (`Blocked` due to active child Work, nonterminal state, or repair required; `Indeterminate` due to unknown state) forbid manifest creation. `CreateManifestAsync` freezes source hashes and initializes `LifecycleSequence = 1` in `Frozen` state.
+2. **Archive & Receipt:** `BuildArchivePackageAsync` constructs the canonical `DFA1` archive byte array. The adopter writes the archive package to external storage and calls `RecordArchiveReceiptAsync` with sequence 1.
+3. **Verification:** `VerifyArchiveAsync` validates source SHA-256 correspondence against the frozen manifest, advances state to `Verified`, and increments `LifecycleSequence` to 3.
+4. **Hold & Purge:** `SetHoldAsync` can place or release a legal hold (`PlaceHold = true/false`) and increments the sequence for every applied transition. `PurgeAsync` requires state `Verified`, no active hold, and the current sequence. It transitions state to `Purged`, clears terminal payloads, and deletes manifest-covered history rows.
+
+### Common failures and pitfalls
+
+- `ASDUR102` (Command Conflict): Reusing a command identity with different request parameters fails closed.
+- `ASDUR214` (Manifest Not Found): Specified manifest ID does not exist in the authorized scope.
+- `ASDUR215` (Source Changed): Live Flow source items changed after assessment or manifest creation. Caller must create a new assessment and manifest.
+- `ASDUR216` (Sequence Conflict): Expected lifecycle sequence is stale. Reload manifest state before retrying.
+- `ASDUR217` (Lifecycle Rejected): Operation attempted out of order (e.g. purging before verification or while a legal hold is active).
+
+The application must authorize every call and owns archive transport, encryption, retention duration, availability,
+and legal/compliance requirements. Receipt verification proves the package corresponds to the frozen PostgreSQL source;
+it does not prove external bytes are present or adequate. No API accepts an archive URI, raw SQL, age-range deletion,
+continuation token, or multi-Flow manifest. See the [PostgreSQL retention deployment guidance](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md#verified-flow-retention).
+
 ## Operational prerequisites
 
 Before any provider can be published, it must supply storage and migration ownership, polling/schedule execution,
-restore fencing, graceful drain, privacy-bounded diagnostics and telemetry, packed-consumer proof, and conformance tests
-against this SPI. The source-preview PostgreSQL provider now supplies Work, Flow, Schedule, hosted activation, and
-drain/recovery conformance; coordinated release evidence remains the publication gate.
+restore fencing, graceful drain, privacy-bounded diagnostics and telemetry, packed-consumer proof, verified-retention
+evidence when the retention SPI is implemented, and conformance tests against this SPI. The source-preview PostgreSQL
+provider now supplies Work, Flow, Schedule, hosted activation, drain/recovery, and verified-retention conformance;
+coordinated release evidence remains the publication gate.
 
 See the [`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md) for currently available contract,
 PostgreSQL Work, and hosted-runtime codes.
