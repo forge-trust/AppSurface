@@ -895,14 +895,12 @@ public class DocAggregatorTests : IDisposable
     {
         var repositoryRoot = ForgeTrust.AppSurface.Core.PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
         var markdownLogger = A.Fake<ILogger<MarkdownHarvester>>();
-        var csharpLogger = A.Fake<ILogger<CSharpDocHarvester>>();
         var localEnv = A.Fake<IWebHostEnvironment>();
         A.CallTo(() => localEnv.ContentRootPath).Returns(repositoryRoot);
 
         var aggregator = new DocAggregator(
             [
-                new MarkdownHarvester(markdownLogger),
-                new CSharpDocHarvester(csharpLogger)
+                new MarkdownHarvester(markdownLogger)
             ],
             new AppSurfaceDocsOptions
             {

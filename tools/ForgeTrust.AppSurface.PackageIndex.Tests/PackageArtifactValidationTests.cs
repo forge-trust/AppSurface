@@ -412,11 +412,61 @@ public sealed class PackageArtifactValidationTests : IDisposable
             Assert.Contains("PostgreSQL provider milestone", entry.PublishReason, StringComparison.Ordinal);
         });
 
-        var plan = await new PackagePublishPlanResolver(
-            new PackageProjectScanner(),
-            new DotNetProjectMetadataProvider(),
-            new PackageManifestLoader()).ResolveAsync(repositoryRoot, manifestPath, CancellationToken.None);
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                order: 1
+                use_when: Host an AppSurface web application.
+                includes: Core web hosting contracts.
+                does_not_include: Durable runtime services.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: do_not_publish
+                publish_reason: PostgreSQL provider milestone is not yet sufficient for publication.
+                order: 10
+                use_when: Add durable work contracts.
+                includes: Durable authoring contracts.
+                does_not_include: A runtime implementation.
+                start_here_path: Durable/ForgeTrust.AppSurface.Durable/README.md
+              - project: Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: do_not_publish
+                publish_reason: PostgreSQL provider milestone is not yet sufficient for publication.
+                order: 20
+                use_when: Implement a durable provider.
+                includes: Provider contracts.
+                does_not_include: A storage implementation.
+                start_here_path: Durable/ForgeTrust.AppSurface.Durable.Provider/README.md
+            """);
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj", "<Project />");
+        await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable/README.md", "# Durable");
+        await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj", "<Project />");
+        await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable.Provider/README.md", "# Durable Provider");
 
+        var plan = await CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj"] = CreateMetadata(
+                "Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj",
+                "ForgeTrust.AppSurface.Durable"),
+            ["Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj"] = CreateMetadata(
+                "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj",
+                "ForgeTrust.AppSurface.Durable.Provider")
+        }).ResolveAsync(_repositoryRoot, ManifestPath, CancellationToken.None);
+
+        var publishedWebPackage = Assert.Single(plan.Entries);
+        Assert.Equal("ForgeTrust.AppSurface.Web", publishedWebPackage.PackageId);
         Assert.DoesNotContain(plan.Entries, entry =>
             entry.PackageId is "ForgeTrust.AppSurface.Durable" or "ForgeTrust.AppSurface.Durable.Provider");
     }

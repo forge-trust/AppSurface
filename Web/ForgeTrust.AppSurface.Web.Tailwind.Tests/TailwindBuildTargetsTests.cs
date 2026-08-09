@@ -11,7 +11,7 @@ using Microsoft.Build.Framework;
 
 namespace ForgeTrust.AppSurface.Web.Tailwind.Tests;
 
-public sealed class TailwindBuildTargetsTests : IDisposable
+public sealed class TailwindBuildTargetsTests : IDisposable, IClassFixture<TailwindBuildTargetsTests.PackedTailwindPackageFixture>
 {
 #if DEBUG
     private const string CurrentConfiguration = "Debug";
@@ -23,8 +23,11 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         Path.GetTempPath(),
         $"{nameof(TailwindBuildTargetsTests)}_{Guid.NewGuid():N}");
 
-    public TailwindBuildTargetsTests()
+    private readonly PackedTailwindPackageFixture _packedPackages;
+
+    public TailwindBuildTargetsTests(PackedTailwindPackageFixture packedPackages)
     {
+        _packedPackages = packedPackages;
         Directory.CreateDirectory(_tempRoot);
     }
 
@@ -1172,19 +1175,9 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     [Fact]
     public async Task PackedPackageConsumption_BuildAndPublish_LoadsTaskAndGeneratesStaticWebAsset()
     {
-        var feedDirectory = Path.Join(_tempRoot, "feed");
-        Directory.CreateDirectory(feedDirectory);
+        var feedDirectory = _packedPackages.FeedDirectory;
         var nugetPackagesDirectory = CreateNuGetPackageCacheDirectory("packed-consumer-nuget-packages");
-        var repoRoot = GetRepositoryRoot();
-        var packageVersion = CreateSmokePackageVersion();
-
-        foreach (var packageProjectPath in GetPackageProjectsForSmoke(repoRoot))
-        {
-            var packResult = await RunDotNetAsync(
-                ["pack", packageProjectPath, "-c", "Release", "--no-restore", "-o", feedDirectory, "-v:minimal", $"-p:Version={packageVersion}", $"-p:PackageVersion={packageVersion}"],
-                repoRoot);
-            Assert.Equal(0, packResult.ExitCode);
-        }
+        var packageVersion = _packedPackages.PackageVersion;
 
         var tailwindPackagePath = Path.Join(feedDirectory, $"ForgeTrust.AppSurface.Web.Tailwind.{packageVersion}.nupkg");
         Assert.True(File.Exists(tailwindPackagePath), "Expected the Tailwind package to be created.");
@@ -1256,19 +1249,9 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     [Fact]
     public async Task PackedPackageConsumption_DefaultRuntimePackageBuild_LoadsRuntimeCliWithoutExplicitPath()
     {
-        var feedDirectory = Path.Join(_tempRoot, "default-runtime-feed");
-        Directory.CreateDirectory(feedDirectory);
+        var feedDirectory = _packedPackages.FeedDirectory;
         var nugetPackagesDirectory = CreateNuGetPackageCacheDirectory("packed-default-runtime-consumer-nuget-packages");
-        var repoRoot = GetRepositoryRoot();
-        var packageVersion = CreateSmokePackageVersion();
-
-        foreach (var packageProjectPath in GetPackageProjectsForSmoke(repoRoot))
-        {
-            var packResult = await RunDotNetAsync(
-                ["pack", packageProjectPath, "-c", "Release", "--no-restore", "-o", feedDirectory, "-v:minimal", $"-p:Version={packageVersion}", $"-p:PackageVersion={packageVersion}"],
-                repoRoot);
-            Assert.Equal(0, packResult.ExitCode);
-        }
+        var packageVersion = _packedPackages.PackageVersion;
 
         var projectDirectory = Path.Join(_tempRoot, "packed-default-runtime-consumer");
         Directory.CreateDirectory(Path.Join(projectDirectory, "wwwroot", "css"));
@@ -1767,6 +1750,63 @@ exit 0
     }
 
     private sealed record DotNetCommandResult(int ExitCode, string Stdout, string Stderr);
+
+    /// <summary>
+    /// Produces one immutable local package feed for the package-consumption tests in this class.
+    /// </summary>
+    /// <remarks>
+    /// Both tests exercise distinct consumer behaviors against the same package surface. Building each package once
+    /// keeps those behaviors covered while avoiding duplicate compilation of every runtime package.
+    /// </remarks>
+    public sealed class PackedTailwindPackageFixture : IAsyncLifetime
+    {
+        private string? _rootDirectory;
+
+        /// <summary>
+        /// Gets the read-only local feed containing the package set under test.
+        /// </summary>
+        public string FeedDirectory { get; private set; } = null!;
+
+        /// <summary>
+        /// Gets the shared prerelease version assigned to every package in <see cref="FeedDirectory"/>.
+        /// </summary>
+        public string PackageVersion { get; private set; } = null!;
+
+        /// <inheritdoc />
+        public async Task InitializeAsync()
+        {
+            _rootDirectory = Path.Join(Path.GetTempPath(), nameof(PackedTailwindPackageFixture), Guid.NewGuid().ToString("N"));
+            FeedDirectory = Path.Join(_rootDirectory, "feed");
+            Directory.CreateDirectory(FeedDirectory);
+
+            var repositoryRoot = GetRepositoryRoot();
+            PackageVersion = CreateSmokePackageVersion();
+            var tailwindProjectPath = GetTailwindProjectPath();
+            var buildResult = await RunDotNetAsync(
+                ["build", tailwindProjectPath, "-c", "Release", "--no-restore", "-v:minimal"],
+                repositoryRoot);
+            Assert.Equal(0, buildResult.ExitCode);
+
+            foreach (var packageProjectPath in GetPackageProjectsForSmoke(repositoryRoot))
+            {
+                var packResult = await RunDotNetAsync(
+                    ["pack", packageProjectPath, "-c", "Release", "--no-build", "--no-restore", "-o", FeedDirectory, "-v:minimal", $"-p:Version={PackageVersion}", $"-p:PackageVersion={PackageVersion}"],
+                    repositoryRoot);
+                Assert.Equal(0, packResult.ExitCode);
+            }
+        }
+
+        /// <inheritdoc />
+        public Task DisposeAsync()
+        {
+            if (_rootDirectory is not null && Directory.Exists(_rootDirectory))
+            {
+                Directory.Delete(_rootDirectory, recursive: true);
+            }
+
+            return Task.CompletedTask;
+        }
+    }
 
     private sealed class RecordingBuildEngine : IBuildEngine
     {
