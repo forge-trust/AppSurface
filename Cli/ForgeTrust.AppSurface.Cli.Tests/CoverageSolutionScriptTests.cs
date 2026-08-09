@@ -80,6 +80,40 @@ public sealed class CoverageSolutionScriptTests
     }
 
     [Fact]
+    public void BuildWorkflow_ShouldCaptureCoverageSecurityHangDiagnosticsBeforeTheJobTimeout()
+    {
+        var workflow = ReadWorkflow();
+
+        Assert.Contains(
+            """
+              coverage-security-platform:
+                name: Coverage security contracts (${{ matrix.os }})
+                runs-on: ${{ matrix.os }}
+                timeout-minutes: 10
+            """,
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            """
+                      --logger "console;verbosity=detailed"
+                      --blame-hang
+                      --blame-hang-timeout 2m
+                      --blame-hang-dump-type mini
+
+                  - name: Upload coverage security diagnostics
+                    if: ${{ always() }}
+                    uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+                    with:
+                      name: coverage-security-diagnostics-${{ matrix.os }}
+                      path: TestResults
+                      if-no-files-found: warn
+                      retention-days: 7
+            """,
+            workflow,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RazorWireCoverageProofSources_ShouldContainExistingProductionSources()
     {
         Assert.True(RazorWireCoverageProofSources.All.Count >= 2);
