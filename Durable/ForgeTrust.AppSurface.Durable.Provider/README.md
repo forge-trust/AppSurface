@@ -93,5 +93,8 @@ then compiles and runs isolated adopter and provider consumers against only thos
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-This package has an explicitly experimental or publication-held contract. Do not treat it as a normal prerelease install; use the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for the current publication decision, proof requirements, and migration guidance.
+This package has an explicitly experimental or publication-held contract. Do not
+treat it as a normal prerelease install; use the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and
+[release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for the current publication decision, proof requirements, and
+migration guidance.
 <!-- appsurface-release-guidance: end -->
