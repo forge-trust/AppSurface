@@ -1494,7 +1494,7 @@ body {
 
 @media (min-width: 80rem) {
     .docs-detail-layout--with-outline {
-        grid-template-columns: minmax(0, 80ch) minmax(14rem, 16rem);
+        grid-template-columns: minmax(0, 1fr) minmax(14rem, 16rem);
         gap: 3rem;
         align-items: start;
     }

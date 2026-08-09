@@ -39,6 +39,10 @@ context.
 | `ASDUR211` | Release state mismatch | Suspended state and wait/timer/child-work truth disagree | Reconcile authoritative truth before release |
 | `ASDUR212` | Trace context invalid | Persisted or ambient `traceparent` is malformed, unsupported, or unsafe | Drop context and continue the Flow without a causal link |
 | `ASDUR213` | Trace state rejected | A valid parent carried malformed or oversized opaque `tracestate` | Retain the parent link and drop only `tracestate` |
+| `ASDUR214` | Retention manifest not found | Manifest ID does not exist in the authorized scope | Verify the authorized scope and manifest ID, or assess and create a new manifest |
+| `ASDUR215` | Retention source changed | Flow source items or closure digest changed after assessment/manifest creation | Assess and create a new manifest; do not archive or purge stale source state |
+| `ASDUR216` | Retention lifecycle conflict | Expected lifecycle sequence is stale or another operation committed first | Read current manifest state and retry using its active lifecycle sequence |
+| `ASDUR217` | Retention lifecycle rejected | Manifest is not in the required state, or a legal hold / active child prevents transition | Read manifest state and follow the lifecycle order. Release a legal hold only after an explicitly authorized legal or compliance decision; otherwise keep the hold and do not purge. |
 
 ### ASDUR202
 
@@ -79,6 +83,22 @@ force-terminate shortcut.
 Trace diagnostics are value-free. `ASDUR212` drops both W3C fields and continues without a link; `ASDUR213` keeps a
 valid W3C `traceparent` and drops only opaque `tracestate`. Neither diagnostic authorizes a retry, changes scope
 authorization, or permits logging raw trace headers. See the [Durable trace-context contract](../Durable/flow-trace-context-v1.md).
+
+### ASDUR214
+
+The specified retention manifest ID was not found in the authorized scope. Verify that the manifest ID belongs to the authorized scope, or invoke assessment and manifest creation to obtain a valid manifest.
+
+### ASDUR215
+
+The underlying Flow source closure or state changed after the retention assessment or manifest was frozen. The current source items no longer match the immutable watermark. Create a new retention assessment and manifest before archiving or purging.
+
+### ASDUR216
+
+The expected lifecycle sequence supplied with the retention command does not match the manifest's current persisted sequence because a concurrent or previous operation committed first. Read current manifest state and retry the operation with its updated lifecycle sequence.
+
+### ASDUR217
+
+The retention operation cannot proceed because the manifest is in an invalid state for the operation (such as attempting purge before verification or recording receipt after purge), or because an active legal hold or child Work blocks execution. Verify lifecycle ordering and the blocking condition. Release a legal hold only after an explicitly authorized legal or compliance decision; otherwise keep the hold and do not purge.
 
 Schedule contracts reserve `ASDUR301`-`ASDUR307` for invalid definition, missing schedule, revision conflict, command
 conflict, access denial, evaluation incompatibility, and recovery-state mismatch. A provider must map these codes to its
@@ -124,6 +144,10 @@ before any bounded retry.
 | `ASDUR209` | Event contract mismatch | Payload schema version or contract ID does not match active wait registration. |
 | `ASDUR210` | Release manifest mismatch | Recovery manifest registration disagrees with persisted history. |
 | `ASDUR211` | Release state mismatch | Suspended state and active wait/timer/work records disagree; reconcile before release. |
+| `ASDUR214` | Retention manifest not found | Verify scope and manifest ID; recreate manifest if necessary. |
+| `ASDUR215` | Retention source changed | Re-assess Flow closure; do not purge with stale manifest. |
+| `ASDUR216` | Retention lifecycle conflict | Reload manifest sequence and retry command. |
+| `ASDUR217` | Retention lifecycle rejected | Verify lifecycle sequence and hold authorization. Release a legal hold only after an explicitly authorized decision; otherwise do not purge. |
 | `ASDUR400` | Durable schema is missing | Apply reviewed forward-only migrations with a migration-owner connection. |
 | `ASDUR401` | Durable schema upgrade is required | Apply every known pending migration before this reader/writer. |
 | `ASDUR402` | Durable schema version is too new or unsupported | Deploy compatible package code; do not bypass supported ranges. |
