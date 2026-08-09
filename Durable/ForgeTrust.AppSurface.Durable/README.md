@@ -173,7 +173,8 @@ Diagnostics available now cover contract validation, semantic conflicts, and Pos
 activation, and restore failures. Heartbeat, drain, and hosted-runtime diagnostics are provider-owned. See the
 [`ASDURxxx` catalog](../../troubleshooting/durable-diagnostics.md).
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-Use the [package chooser](../../packages/README.md) for the machine-enforced publication hold. Versioned publication
-evidence and policy live in the [release hub](../../releases/README.md).
+This package has an explicitly experimental or publication-held contract. Do not treat it as a normal prerelease install; use the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for the current publication decision, proof requirements, and migration guidance.
+<!-- appsurface-release-guidance: end -->

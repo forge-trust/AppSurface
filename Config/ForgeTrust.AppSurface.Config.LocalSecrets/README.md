@@ -189,10 +189,11 @@ stores implement it directly:
 Use `IAppSurfaceLocalSecretStore.Get(...)` only when the caller is intentionally materializing the value, such as
 `appsurface secrets transfer apply --apply`.
 
+<!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-Use the [package chooser](../../packages/README.md) and [release hub](../../releases/README.md) for the current package-facing prerelease story, risk notes, and migration guidance.
-
+AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for current release risk, migration guidance, and readiness.
+<!-- appsurface-release-guidance: end -->
 ## Structured Statuses
 
 `AppSurfaceLocalSecretProvider.GetValue<T>` adapts LocalSecrets into the normal AppSurface config provider contract.

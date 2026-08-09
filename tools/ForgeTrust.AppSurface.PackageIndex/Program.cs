@@ -24,8 +24,8 @@ internal static class Program
           dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- <command> [options]
 
         Commands:
-          generate    Rewrites packages/README.md and packages/readiness.md from packages/package-index.yml and project metadata.
-          verify      Check that packages/README.md and packages/readiness.md are already up to date.
+          generate    Rewrites packages/README.md and packages/readiness.md, then reconciles managed package README release guidance.
+          verify      Check that generated package-index documents and managed package README release guidance are already up to date; does not write files.
           verify-packages
                       Pack and validate stable or prerelease .nupkg artifacts without SemVer build metadata, without publishing them.
           publish-prerelease
@@ -34,7 +34,7 @@ internal static class Program
                       Publish validated stable package artifacts to NuGet from a protected workflow job.
           smoke-install
                       Restore published packages from a clean NuGet configuration.
-          gate        Validate release metadata, package class rules, and stale brand strings.
+          gate        Validate release metadata, package class rules, stale brand strings, and managed release-guidance policy; does not write files.
 
         Options:
           --repo-root <path>    Repository root. Defaults to the current directory.
@@ -150,9 +150,9 @@ internal static class Program
 
             if (normalizedCommand == GenerateCommand)
             {
-                await generator.GenerateToFileAsync(options.Request, cancellationToken);
+                var generationReport = await generator.GenerateToFileAsync(options.Request, cancellationToken);
                 await standardOut.WriteLineAsync(
-                    $"Generated {FormatDisplayPath(options.Request.RepositoryRoot, options.Request.ChooserOutputPath)} and {FormatDisplayPath(options.Request.RepositoryRoot, options.Request.ReadinessOutputPath)}.");
+                    $"Generated {FormatDisplayPath(options.Request.RepositoryRoot, options.Request.ChooserOutputPath)} and {FormatDisplayPath(options.Request.RepositoryRoot, options.Request.ReadinessOutputPath)}. Reconciled {generationReport.ChangedReleaseGuidanceCount} of {generationReport.ManagedReleaseGuidanceCount} managed package README release-guidance region(s).");
                 return 0;
             }
 
@@ -204,7 +204,7 @@ internal static class Program
             {
                 await generator.VerifyAsync(options.Request, cancellationToken);
                 await standardOut.WriteLineAsync(
-                    $"Package chooser and readiness dashboard are up to date: {FormatDisplayPath(options.Request.RepositoryRoot, options.Request.ChooserOutputPath)}, {FormatDisplayPath(options.Request.RepositoryRoot, options.Request.ReadinessOutputPath)}.");
+                    $"Generated package-index documents and managed package README release guidance are up to date: {FormatDisplayPath(options.Request.RepositoryRoot, options.Request.ChooserOutputPath)}, {FormatDisplayPath(options.Request.RepositoryRoot, options.Request.ReadinessOutputPath)}.");
                 return 0;
             }
 
