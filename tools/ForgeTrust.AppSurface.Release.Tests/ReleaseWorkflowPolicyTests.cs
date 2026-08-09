@@ -249,7 +249,7 @@ public sealed class ReleaseWorkflowPolicyTests
         var error = await errorTask;
         Assert.True(process.ExitCode == 0, error);
 
-        var manifestPath = Path.Combine(repositoryRoot, "releases", $"v{version}.release.json");
+        var manifestPath = TestPathUtils.PathUnder(repositoryRoot!, "releases", $"v{version}.release.json");
         var manifestJson = await File.ReadAllTextAsync(manifestPath);
         Assert.True(ReleaseManifestV2Validator.TryDeserialize(manifestJson, out var manifest, out var manifestIssue), manifestIssue);
         Assert.Equal(version, manifest!.Version);
