@@ -2094,7 +2094,7 @@ internal static class CoverageGateReportWriter
             await WriteOwnedArtifactAsync(
                 outputLease,
                 CoverageGateArtifactNames.Json,
-                json + Environment.NewLine,
+                NormalizeArtifactNewlines(json) + "\n",
                 cancellationToken);
 
             var markdown = RenderMarkdown(result);
@@ -2110,7 +2110,7 @@ internal static class CoverageGateReportWriter
                 await WriteOwnedArtifactAsync(
                     outputLease,
                     CoverageGateArtifactNames.PatchTargetsJson,
-                    RenderPatchTargetsJson(analysis, targets) + Environment.NewLine,
+                    NormalizeArtifactNewlines(RenderPatchTargetsJson(analysis, targets)) + "\n",
                     cancellationToken);
                 await WriteOwnedArtifactAsync(
                     outputLease,
@@ -2249,6 +2249,8 @@ internal static class CoverageGateReportWriter
             JsonOptions);
         return json;
     }
+
+    private static string NormalizeArtifactNewlines(string value) => value.ReplaceLineEndings("\n");
 
     private static string RenderPatchTargetsMarkdown(
         PatchCoverageAnalysis analysis,

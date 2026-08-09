@@ -524,6 +524,7 @@ public sealed class CoverageGateTests
         Assert.Contains("\"tolerancePercent\": 0.5", json, StringComparison.Ordinal);
         Assert.Contains("\"thresholds\": {\n    \"line\": 100", json, StringComparison.Ordinal);
         Assert.Contains("\"effectiveThresholds\": {\n    \"line\": 99.5", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\r", json, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -664,6 +665,7 @@ public sealed class CoverageGateTests
         Assert.Contains("\"patchBranch\"", json, StringComparison.Ordinal);
         Assert.Contains("\"reason\": \"not-reported-by-cobertura\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("zero hit", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\r", json, StringComparison.Ordinal);
         Assert.Contains("| Line | Reasons | Line covered | Conditions | Gate dimensions |", markdown, StringComparison.Ordinal);
         Assert.True(markdown.IndexOf("## `src/Alpha.cs`", StringComparison.Ordinal) < markdown.IndexOf("## `src/Zebra.cs`", StringComparison.Ordinal));
     }
@@ -3675,7 +3677,51 @@ public sealed class CoverageGateTests
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             async () => await RunGitAsync(temp.Path, "commit", "-m", "empty"));
 
-        Assert.Contains("git -c commit.gpgsign=false commit -m empty failed:", exception.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            "git -c commit.gpgsign=false -c maintenance.auto=false -c gc.auto=0 commit -m empty failed:",
+            exception.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TempDirectory_Dispose_RetriesWindowsFileLocks()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var path = temp.WriteCoverage("<coverage />");
+        using var lockHandle = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+        var dispose = Task.Run(temp.Dispose);
+
+        await Task.Delay(100);
+        Assert.False(dispose.IsCompleted);
+
+        lockHandle.Dispose();
+        await dispose.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(Directory.Exists(temp.Path));
+    }
+
+    [Fact]
+    public void TempDirectory_Dispose_ClearsReadOnlyGitObjectAttributes_OnWindows()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var gitObjectsDirectory = Directory.CreateDirectory(Path.Join(temp.Path, ".git", "objects"));
+        var gitObject = Path.Join(gitObjectsDirectory.FullName, "object");
+        File.WriteAllText(gitObject, "object");
+        File.SetAttributes(gitObject, FileAttributes.ReadOnly);
+
+        temp.Dispose();
+
+        Assert.False(Directory.Exists(temp.Path));
     }
 
     private static async Task RunGitAsync(string workingDirectory, params string[] arguments)
@@ -3692,6 +3738,13 @@ public sealed class CoverageGateTests
         {
             executedArguments.Add("-c");
             executedArguments.Add("commit.gpgsign=false");
+            // Git for Windows can run automatic maintenance after a commit and retain handles
+            // under .git/objects after the commit process exits. Test repositories are temporary,
+            // so disable maintenance and automatic GC to keep their cleanup deterministic.
+            executedArguments.Add("-c");
+            executedArguments.Add("maintenance.auto=false");
+            executedArguments.Add("-c");
+            executedArguments.Add("gc.auto=0");
         }
 
         foreach (var argument in arguments)
@@ -3916,6 +3969,10 @@ public sealed class CoverageGateTests
 
     private sealed class TempDirectory : IDisposable
     {
+        private const int MaxDeleteAttempts = 100;
+
+        private const int DeleteRetryDelayMilliseconds = 50;
+
         private TempDirectory(string path)
         {
             Path = path;
@@ -3942,9 +3999,35 @@ public sealed class CoverageGateTests
 
         public void Dispose()
         {
-            if (Directory.Exists(Path))
+            for (var attempt = 0; Directory.Exists(Path); attempt++)
             {
-                Directory.Delete(Path, recursive: true);
+                try
+                {
+                    ClearReadOnlyGitObjectAttributes();
+                    Directory.Delete(Path, recursive: true);
+                }
+                catch (IOException) when (attempt < MaxDeleteAttempts - 1)
+                {
+                    Thread.Sleep(DeleteRetryDelayMilliseconds);
+                }
+                catch (UnauthorizedAccessException) when (attempt < MaxDeleteAttempts - 1)
+                {
+                    Thread.Sleep(DeleteRetryDelayMilliseconds);
+                }
+            }
+        }
+
+        private void ClearReadOnlyGitObjectAttributes()
+        {
+            var gitObjectsDirectory = System.IO.Path.Join(Path, ".git", "objects");
+            if (!Directory.Exists(gitObjectsDirectory))
+            {
+                return;
+            }
+
+            foreach (var gitObject in Directory.EnumerateFiles(gitObjectsDirectory, "*", SearchOption.AllDirectories))
+            {
+                File.SetAttributes(gitObject, File.GetAttributes(gitObject) & ~FileAttributes.ReadOnly);
             }
         }
     }
