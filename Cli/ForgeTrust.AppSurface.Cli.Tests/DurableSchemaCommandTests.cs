@@ -285,7 +285,7 @@ public sealed class DurableSchemaCommandTests
 
     [Theory]
     [InlineData(-1)]
-    [InlineData(7)]
+    [InlineData(8)]
     public async Task Script_rejects_versions_outside_the_current_catalog(int fromVersion)
     {
         var command = new DurableSchemaScriptCommand(new DurableSchemaCommandService()) { FromVersion = fromVersion };
@@ -300,7 +300,7 @@ public sealed class DurableSchemaCommandTests
     public async Task Script_at_the_current_version_contains_only_the_deterministic_advisory_lock_boundary()
     {
         var service = new DurableSchemaCommandService();
-        var command = new DurableSchemaScriptCommand(service) { FromVersion = 6 };
+        var command = new DurableSchemaScriptCommand(service) { FromVersion = 7 };
         using var console = new FakeInMemoryConsole();
 
         await command.ExecuteAsync(console);
@@ -617,7 +617,7 @@ public sealed class DurableSchemaCommandTests
         var compatible = await service.GetStatusAsync(connectionString, CancellationToken.None);
 
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missing.Compatibility);
-        Assert.Equal([1, 2, 3, 4, 5, 6], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7], applied.AppliedVersions);
         Assert.Equal(DurableRuntimeSchemaCompatibility.Compatible, compatible.Compatibility);
     }
 
@@ -660,7 +660,7 @@ public sealed class DurableSchemaCommandTests
 
         Assert.Equal(first, second);
         Assert.Contains("0001", first, StringComparison.Ordinal);
-        Assert.Contains("0006", first, StringComparison.Ordinal);
+        Assert.Contains("0007", first, StringComparison.Ordinal);
     }
 
     private sealed class FakeDurableSchemaCommandService : IDurableSchemaCommandService
