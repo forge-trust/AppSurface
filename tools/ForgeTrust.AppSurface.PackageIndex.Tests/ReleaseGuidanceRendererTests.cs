@@ -31,6 +31,8 @@ public sealed class ReleaseGuidanceRendererTests : IDisposable
         Assert.Equal("default", update.Variant);
         Assert.Contains(ReleaseGuidanceRenderer.PackageChooserUrl, update.ExpectedContent, StringComparison.Ordinal);
         Assert.Contains(ReleaseGuidanceRenderer.ReleaseHubUrl, update.ExpectedContent, StringComparison.Ordinal);
+        Assert.Contains($"[package chooser]({ReleaseGuidanceRenderer.PackageChooserUrl})", update.ExpectedContent, StringComparison.Ordinal);
+        Assert.Contains($"[release hub]({ReleaseGuidanceRenderer.ReleaseHubUrl})", update.ExpectedContent, StringComparison.Ordinal);
         Assert.DoesNotContain("../../packages/README.md", update.ExpectedContent, StringComparison.Ordinal);
         Assert.Contains(ReleaseGuidanceRenderer.BeginMarker, update.ExpectedContent, StringComparison.Ordinal);
         Assert.Contains(ReleaseGuidanceRenderer.EndMarker, update.ExpectedContent, StringComparison.Ordinal);
@@ -232,7 +234,7 @@ public sealed class ReleaseGuidanceRendererTests : IDisposable
         var template = await File.ReadAllTextAsync(templatePath);
         var invalidTemplate = mutation switch
         {
-            "missing" => template.Replace(" and [hub]({{ReleaseHubUrl}}).", ".", StringComparison.Ordinal),
+            "missing" => template.Replace(" and {{ReleaseHubUrl}}.", ".", StringComparison.Ordinal),
             "duplicate" => template.Replace(
                 "<!-- appsurface-release-guidance-template: default end -->",
                 "[again]({{ReleaseHubUrl}})\n<!-- appsurface-release-guidance-template: default end -->",
@@ -394,19 +396,19 @@ public sealed class ReleaseGuidanceRendererTests : IDisposable
             <!-- appsurface-release-guidance-template: default begin -->
             ## Release Guidance
 
-            Default [chooser]({{PackageChooserUrl}}) and [hub]({{ReleaseHubUrl}}).
+            Default {{PackageChooserUrl}} and {{ReleaseHubUrl}}.
             <!-- appsurface-release-guidance-template: default end -->
 
             <!-- appsurface-release-guidance-template: apphost begin -->
             ## Release Guidance
 
-            This AppHost-oriented package uses [chooser]({{PackageChooserUrl}}) and [hub]({{ReleaseHubUrl}}).
+            This AppHost-oriented package uses {{PackageChooserUrl}} and {{ReleaseHubUrl}}.
             <!-- appsurface-release-guidance-template: apphost end -->
 
             <!-- appsurface-release-guidance-template: experimental begin -->
             ## Release Guidance
 
-            Experimental [chooser]({{PackageChooserUrl}}) and [hub]({{ReleaseHubUrl}}).
+            Experimental {{PackageChooserUrl}} and {{ReleaseHubUrl}}.
             <!-- appsurface-release-guidance-template: experimental end -->
             """);
     }

@@ -68,8 +68,7 @@ public sealed record AppSurfaceKeycloakThemeManifest(
         var rootPrefix = Path.EndsInDirectorySeparator(root) ? root : $"{root}{Path.DirectorySeparatorChar}";
         var path = Path.GetFullPath(Path.Join(root, expectedFile.RelativePath.Replace('/', Path.DirectorySeparatorChar)));
         if (!path.StartsWith(rootPrefix, StringComparison.Ordinal)
-            || IsReparsePoint(root)
-            || IsReparsePoint(path))
+            || HasReparsePointInSourcePath(root, expectedFile.RelativePath))
         {
             throw SourceInvalid($"file '{expectedFile.RelativePath}' is no longer a safe source entry.");
         }
@@ -224,6 +223,26 @@ public sealed record AppSurfaceKeycloakThemeManifest(
 
     private static bool IsReparsePoint(string path) =>
         (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
+
+    private static bool HasReparsePointInSourcePath(string root, string relativePath)
+    {
+        if (IsReparsePoint(root))
+        {
+            return true;
+        }
+
+        var candidate = root;
+        foreach (var segment in relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            candidate = Path.Join(candidate, segment);
+            if (IsReparsePoint(candidate))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static string NormalizeRelativePath(string sourceDirectory, string path)
     {
