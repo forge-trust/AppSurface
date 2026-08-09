@@ -119,9 +119,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
                 && string.Equals(reader.IsDBNull(4) ? null : reader.GetString(4), "waiting_activity", StringComparison.Ordinal)
                 && string.Equals(descriptorSchema, "appsurface.durable.flow.child-suspension.v1", StringComparison.Ordinal)
                 && descriptorSha256 is not null
-                && waitId is not null
-                && childWorkId is not null
-                && childWorkRevision is not null
+                && hasCompleteChildWorkIdentity
                 && string.Equals(reader.IsDBNull(9) ? null : reader.GetString(9), "suspended", StringComparison.Ordinal)
                 && string.Equals(reader.IsDBNull(5) ? null : reader.GetString(5), "flow.child_work_requires_attention", StringComparison.Ordinal)
                 && string.Equals(reader.IsDBNull(6) ? null : reader.GetString(6), "child_work", StringComparison.Ordinal);
