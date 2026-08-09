@@ -163,11 +163,36 @@ public sealed class ReleaseWorkflowPolicyTests
             "1.2.3",
             requiredChanges[..^1],
             ["releases/unreleased.entries/2026-08-08-archived.md"]);
+        var duplicateDeletion = ReleasePreparationChangePolicy.Validate(
+            "1.2.3",
+            [.. requiredChanges, requiredChanges[^1]],
+            ["releases/unreleased.entries/2026-08-08-archived.md"]);
 
         Assert.False(unprovenDeletion.IsValid);
         Assert.Contains(unprovenDeletion.Errors, error => error.Contains("may delete only", StringComparison.Ordinal));
         Assert.False(missingDeletion.IsValid);
         Assert.Contains(missingDeletion.Errors, error => error.Contains("does not delete", StringComparison.Ordinal));
+        Assert.False(duplicateDeletion.IsValid);
+        Assert.Contains(duplicateDeletion.Errors, error => error.Contains("appears more than once", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ReleasePreparationChangePolicyRejectsInvalidDuplicateAndUnorderedManifestEntryPaths()
+    {
+        var result = ReleasePreparationChangePolicy.Validate(
+            "1.2.3",
+            [],
+            [
+                "releases/unreleased.entries/2026-08-08-zulu.md",
+                "releases/unreleased.entries/2026-08-08-alpha.md",
+                "releases/unreleased.entries/2026-08-08-alpha.md",
+                "not-an-unreleased-entry.md"
+            ]);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => error.Contains("invalid consumed unreleased entry path", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, error => error.Contains("same consumed unreleased entry path", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, error => error.Contains("must be ordinally sorted", StringComparison.Ordinal));
     }
 
     [Fact]

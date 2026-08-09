@@ -12,6 +12,8 @@ internal sealed class FakeCommandRunner : ICommandRunner
 
     internal IReadOnlyList<string> Calls => _calls;
 
+    internal Action<CommandInvocation>? BeforeRun { get; set; }
+
     internal static FakeCommandRunner WithSourceCommit(string sourceCommit)
     {
         var runner = new FakeCommandRunner();
@@ -32,6 +34,7 @@ internal sealed class FakeCommandRunner : ICommandRunner
 
     public Task<CommandResult> RunAsync(CommandInvocation invocation, CancellationToken cancellationToken)
     {
+        BeforeRun?.Invoke(invocation);
         var command = invocation.Executable + " " + string.Join(' ', invocation.Arguments);
         _calls.Add(command);
         if (_sequences.TryGetValue(command, out var sequence) && sequence.Count > 0)
