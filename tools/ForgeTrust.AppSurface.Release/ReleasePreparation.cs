@@ -357,7 +357,8 @@ internal sealed class ReleasePreparation
     private string CreateUnreleasedEntryRecoveryPath(string entryPath)
     {
         var recoveryDirectory = _workspace.PathFor("releases/.release-prep-recovery");
-        return Path.Combine(recoveryDirectory, $"{Guid.NewGuid():N}-{Path.GetFileName(entryPath)}.recovery");
+        var recoveryFileName = $"{Guid.NewGuid():N}-{Path.GetFileName(entryPath)}.recovery";
+        return Path.Join(recoveryDirectory, recoveryFileName);
     }
 
     private void EnsureSafeRecoveryDirectory(string recoveryDirectory)
