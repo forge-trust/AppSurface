@@ -35,6 +35,9 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Equal(
             "Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js",
             GetScalar(verifyEnv, "AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0"));
+        Assert.Equal(
+            "tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.md",
+            GetScalar(verifyEnv, "AppSurfaceDocs__Harvest__Markdown__ExcludeGlobs__0"));
         var verifyRun = GetScalar(verifyStep, "run");
         Assert.Contains("--no-build", verifyRun, StringComparison.Ordinal);
         Assert.Contains("docs verify-health", verifyRun, StringComparison.Ordinal);
@@ -63,6 +66,9 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Equal(
             GetScalar(exportEnv, "AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0"),
             GetScalar(verifyEnv, "AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0"));
+        Assert.Equal(
+            GetScalar(exportEnv, "AppSurfaceDocs__Harvest__Markdown__ExcludeGlobs__0"),
+            GetScalar(verifyEnv, "AppSurfaceDocs__Harvest__Markdown__ExcludeGlobs__0"));
 
         var exportRun = GetScalar(exportStep, "run");
         Assert.Contains("printf '%s\\n' '/' '/docs' > \"$RUNNER_TEMP/appsurface-docs-seeds.txt\"", exportRun, StringComparison.Ordinal);

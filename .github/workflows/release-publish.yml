@@ -170,6 +170,7 @@ jobs:
           AppSurfaceDocs__Identity__Logo__Path: /branding/appsurface-site-icon.svg
           AppSurfaceDocs__Identity__Favicon__SvgPath: /branding/appsurface-site-icon.svg
           AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0: Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js
+          AppSurfaceDocs__Harvest__Markdown__ExcludeGlobs__0: tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.md
         run: |
           set -euo pipefail
           exact_tree="${RUNNER_TEMP}/appsurface-docs-exact/releases/${VERSION}"
