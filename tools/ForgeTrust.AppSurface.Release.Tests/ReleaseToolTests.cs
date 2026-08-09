@@ -338,7 +338,7 @@ public sealed class ReleaseToolTests : IDisposable
     {
         var entriesDirectory = RepositoryPath("releases/unreleased.entries");
         Directory.CreateDirectory(entriesDirectory);
-        var entryPath = Path.Combine(entriesDirectory, "2026-08-08-bom-entry.md");
+        var entryPath = TestPathUtils.PathUnder(entriesDirectory, "2026-08-08-bom-entry.md");
         await File.WriteAllTextAsync(
             entryPath,
             "<!-- appsurface:unreleased-entry section=\"included\" -->\n- BOM entry.\n",
@@ -383,7 +383,7 @@ public sealed class ReleaseToolTests : IDisposable
         await File.WriteAllTextAsync(
             externalEntry,
             "<!-- appsurface:unreleased-entry section=\"included\" -->\n- Linked entry.\n");
-        var linkedEntry = Path.Combine(entriesDirectory, "2026-08-08-linked-entry.md");
+        var linkedEntry = TestPathUtils.PathUnder(entriesDirectory, "2026-08-08-linked-entry.md");
         if (!TryCreateSymbolicLink(linkedEntry, externalEntry, isDirectory: false))
         {
             return;
