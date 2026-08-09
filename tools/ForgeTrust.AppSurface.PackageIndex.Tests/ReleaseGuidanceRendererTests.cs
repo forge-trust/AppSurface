@@ -10,6 +10,12 @@ public sealed class ReleaseGuidanceRendererTests : IDisposable
     }
 
     [Fact]
+    public void TemplateRelativePath_ShouldUseNonMarkdownExtension()
+    {
+        Assert.EndsWith(".template", ReleaseGuidanceRenderer.TemplateRelativePath, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CreateUpdatesAsync_RendersFiniteVariantWithCanonicalAbsoluteUrls()
     {
         await WriteTemplateAsync();

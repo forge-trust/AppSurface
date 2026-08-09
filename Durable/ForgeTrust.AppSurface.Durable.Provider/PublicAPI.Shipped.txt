@@ -1,3 +1,29 @@
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableArchivePackageV1 : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableArchivePackageV1>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableArchivePackageV1(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifest manifest, System.ReadOnlyMemory<System.Byte> bytes, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest packageDigest, System.Int32 recordCount)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableArchivePackageV1 <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableArchivePackageV1? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableArchivePackageV1? left, ForgeTrust.AppSurface.Durable.Provider.DurableArchivePackageV1? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableArchivePackageV1? left, ForgeTrust.AppSurface.Durable.Provider.DurableArchivePackageV1? right)
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest PackageDigest { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifest Manifest { get: public; }
+  property public System.Int32 RecordCount { get: public; }
+  property public System.ReadOnlyMemory<System.Byte> Bytes { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableArchiveReceiptV1 : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableArchiveReceiptV1>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableArchiveReceiptV1(System.String receiptId, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest packageDigest, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest closureDigest, System.Int32 recordCount)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableArchiveReceiptV1 <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableArchiveReceiptV1? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableArchiveReceiptV1? left, ForgeTrust.AppSurface.Durable.Provider.DurableArchiveReceiptV1? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableArchiveReceiptV1? left, ForgeTrust.AppSurface.Durable.Provider.DurableArchiveReceiptV1? right)
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest ClosureDigest { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest PackageDigest { get: public; }
+  property public System.Int32 RecordCount { get: public; }
+  property public System.String ReceiptId { get: public; }
 type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork>
   constructor public ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableWorkId workId, System.String activityId, System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.DurableEncodedPayload payload, ForgeTrust.AppSurface.Durable.DurableProviderSafety providerSafety, System.Int32 attemptNumber, System.Int64 leaseGeneration, System.Int64 scopeGeneration, System.String runtimeEpoch)
   method public ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext ToExecutionContext()
@@ -27,6 +53,210 @@ type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurablePreparedW
 type public static class ForgeTrust.AppSurface.Durable.Provider.DurableProviderWorkAdapter
   method public static ForgeTrust.AppSurface.Durable.Provider.DurablePreparedWorkInvocation Prepare(ForgeTrust.AppSurface.Durable.DurableWorkRegistration registration, System.IServiceProvider services, ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork claim)
   method public static System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableEncodedEffectReconciliation> ReconcileAsync(ForgeTrust.AppSurface.Durable.DurableWorkRegistration registration, System.IServiceProvider services, ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork claim, System.Threading.CancellationToken cancellationToken = default)
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessment : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessment>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessment(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableFlowInstanceId flowInstanceId, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessmentStatus status, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessmentReason reason, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest? closureDigest, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest? sourceWatermark, System.Int32 closureItemCount, System.Int64 archiveByteCount)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessment <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessment? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessment? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessment? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessment? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessment? right)
+  property public ForgeTrust.AppSurface.Durable.DurableFlowInstanceId FlowInstanceId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessmentReason Reason { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessmentStatus Status { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest? ClosureDigest { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest? SourceWatermark { get: public; }
+  property public System.Int32 ClosureItemCount { get: public; }
+  property public System.Int64 ArchiveByteCount { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessmentReason : System.Int32
+  enum-member ActiveChildWork = 5
+  enum-member ActiveFlowDependency = 4
+  enum-member ArchiveLimitExceeded = 8
+  enum-member ClosureLimitExceeded = 7
+  enum-member FlowNotFound = 1
+  enum-member FlowNotTerminal = 2
+  enum-member ProtocolUnsupported = 10
+  enum-member RepairRequired = 3
+  enum-member Safe = 0
+  enum-member SourceChanged = 9
+  enum-member UnknownDependency = 6
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessmentRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessmentRequest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessmentRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableFlowInstanceId flowInstanceId, System.Int32 maximumClosureItems = 10000, System.Int32 maximumArchiveBytes = 67108864)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessmentRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessmentRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessmentRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessmentRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessmentRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessmentRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableFlowInstanceId FlowInstanceId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public System.Int32 MaximumArchiveBytes { get: public; }
+  property public System.Int32 MaximumClosureItems { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessmentStatus : System.Int32
+  enum-member Blocked = 1
+  enum-member Indeterminate = 2
+  enum-member Safe = 0
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest(System.String schemaId, System.String sha256)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest? right)
+  property public System.String SchemaId { get: public; }
+  property public System.String Sha256 { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRetentionHoldRequest : ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest, System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionHoldRequest>, System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionHoldRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId manifestId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, System.String actorId, System.String reasonCode, System.Int64 expectedLifecycleSequence, System.Boolean placeHold)
+  method protected System.Boolean PrintMembers(System.Text.StringBuilder builder)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionHoldRequest? other)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionHoldRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionHoldRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionHoldRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionHoldRequest? right)
+  method public virtual ForgeTrust.AppSurface.Durable.Provider.DurableRetentionHoldRequest <Clone>$()
+  property protected System.Type EqualityContract { get: protected; }
+  property public System.Boolean PlaceHold { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifest(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId manifestId, ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableFlowInstanceId flowInstanceId, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest closureDigest, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest sourceWatermark, System.Int32 closureItemCount, System.Int64 archiveByteCount, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestState state, System.Int64 lifecycleSequence, System.DateTimeOffset createdAtUtc)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableFlowInstanceId FlowInstanceId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest ClosureDigest { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionDigest SourceWatermark { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId ManifestId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestState State { get: public; }
+  property public System.DateTimeOffset CreatedAtUtc { get: public; }
+  property public System.Int32 ClosureItemCount { get: public; }
+  property public System.Int64 ArchiveByteCount { get: public; }
+  property public System.Int64 LifecycleSequence { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateOutcome : System.Int32
+  enum-member Created = 0
+  enum-member Duplicate = 1
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateRequest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateRequest(ForgeTrust.AppSurface.Durable.DurableCommandId commandId, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessment assessment)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint Fingerprint { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessment Assessment { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateResult : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateResult>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateResult(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateOutcome outcome, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifest manifest)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateResult? right)
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifest Manifest { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateOutcome Outcome { get: public; }
+type public readonly struct ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId(System.String value)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId other)
+  method public System.Boolean Equals(System.Object obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId New()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId right)
+  property public System.String Value { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestState : System.Int32
+  enum-member ArchiveReceiptRecorded = 1
+  enum-member Frozen = 0
+  enum-member Held = 3
+  enum-member Purged = 4
+  enum-member Verified = 2
+type public enum ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationOutcome : System.Int32
+  enum-member AlreadyPurged = 2
+  enum-member Applied = 0
+  enum-member Duplicate = 1
+type public abstract class ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest>
+  constructor protected ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId manifestId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, System.String actorId, System.String reasonCode, System.Int64 expectedLifecycleSequence, ForgeTrust.AppSurface.Durable.DurableCommandFingerprint fingerprint)
+  constructor protected ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest original)
+  method protected virtual System.Boolean PrintMembers(System.Text.StringBuilder builder)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public abstract ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest <Clone>$()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest? right)
+  method public virtual System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest? other)
+  property protected virtual System.Type EqualityContract { get: protected; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint Fingerprint { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId ManifestId { get: public; }
+  property public System.Int64 ExpectedLifecycleSequence { get: public; }
+  property public System.String ActorId { get: public; }
+  property public System.String ReasonCode { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationResult : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationResult>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationResult(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId manifestId, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationOutcome outcome, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestState state, System.Int64 lifecycleSequence)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationResult? right)
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId ManifestId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestState State { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationOutcome Outcome { get: public; }
+  property public System.Int64 LifecycleSequence { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRetentionPurgeRequest : ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest, System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest>, System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionPurgeRequest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionPurgeRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId manifestId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, System.String actorId, System.String reasonCode, System.Int64 expectedLifecycleSequence)
+  method protected System.Boolean PrintMembers(System.Text.StringBuilder builder)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest? other)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionPurgeRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionPurgeRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionPurgeRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionPurgeRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionPurgeRequest? right)
+  method public virtual ForgeTrust.AppSurface.Durable.Provider.DurableRetentionPurgeRequest <Clone>$()
+  property protected System.Type EqualityContract { get: protected; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRetentionRecordArchiveReceiptRequest : ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest, System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest>, System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionRecordArchiveReceiptRequest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionRecordArchiveReceiptRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId manifestId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, System.String actorId, System.String reasonCode, System.Int64 expectedLifecycleSequence, ForgeTrust.AppSurface.Durable.Provider.DurableArchiveReceiptV1 receipt)
+  method protected System.Boolean PrintMembers(System.Text.StringBuilder builder)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest? other)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionRecordArchiveReceiptRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionRecordArchiveReceiptRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionRecordArchiveReceiptRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionRecordArchiveReceiptRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionRecordArchiveReceiptRequest? right)
+  method public virtual ForgeTrust.AppSurface.Durable.Provider.DurableRetentionRecordArchiveReceiptRequest <Clone>$()
+  property protected System.Type EqualityContract { get: protected; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableArchiveReceiptV1 Receipt { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRetentionVerifyArchiveRequest : ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest, System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest>, System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionVerifyArchiveRequest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRetentionVerifyArchiveRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId manifestId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, System.String actorId, System.String reasonCode, System.Int64 expectedLifecycleSequence)
+  method protected System.Boolean PrintMembers(System.Text.StringBuilder builder)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationRequest? other)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionVerifyArchiveRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionVerifyArchiveRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionVerifyArchiveRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionVerifyArchiveRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionVerifyArchiveRequest? right)
+  method public virtual ForgeTrust.AppSurface.Durable.Provider.DurableRetentionVerifyArchiveRequest <Clone>$()
+  property protected System.Type EqualityContract { get: protected; }
 type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot>
   constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthState state, System.String? problemCode, System.Boolean schemaCompatible, System.Boolean epochCompatible, System.Int32 installedSchemaVersion, System.Int32 requiredSchemaVersion, System.Guid configuredRuntimeEpoch, System.Nullable<System.Guid> activeRuntimeEpoch, System.String workerId, System.Nullable<System.Guid> workerInstanceId, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface hostedSurfaces, System.DateTimeOffset observedAtUtc, System.Nullable<System.DateTimeOffset> startedAtUtc, System.Nullable<System.DateTimeOffset> lastHeartbeatAtUtc, System.Nullable<System.DateTimeOffset> lastSuccessfulSweepAtUtc, System.Boolean isDraining, System.Boolean isPassActive, System.Int64 dueDispatchCount, System.Nullable<System.DateTimeOffset> oldestDueAtUtc, System.Nullable<System.TimeSpan> oldestDueAge)
   method public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot <Clone>$()
@@ -324,6 +554,15 @@ type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnaps
   property public System.String WorkName { get: public; }
   property public System.String WorkVersion { get: public; }
   property public System.String? TerminalCode { get: public; }
+type public interface ForgeTrust.AppSurface.Durable.Provider.IDurableFlowRetentionClient
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableArchivePackageV1>> BuildArchivePackageAsync(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId manifestId, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessment>> AssessAsync(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessmentRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifest>> GetManifestAsync(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId manifestId, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateResult>> CreateManifestAsync(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestCreateRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationResult>> PurgeAsync(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionPurgeRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationResult>> RecordArchiveReceiptAsync(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionRecordArchiveReceiptRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationResult>> SetHoldAsync(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionHoldRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionMutationResult>> VerifyArchiveAsync(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionVerifyArchiveRequest request, System.Threading.CancellationToken cancellationToken = default)
 type public interface ForgeTrust.AppSurface.Durable.Provider.IDurableRuntimeDrainControl
   method public abstract System.Threading.Tasks.ValueTask BeginDrainAsync(System.Threading.CancellationToken cancellationToken = default)
   method public abstract System.Threading.Tasks.ValueTask ResumeAsync(System.Threading.CancellationToken cancellationToken = default)

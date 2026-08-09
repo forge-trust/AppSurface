@@ -239,7 +239,6 @@ jobs:
             export AppSurfaceDocs__Identity__Logo__Path="/branding/appsurface-site-icon.svg"
             export AppSurfaceDocs__Identity__Favicon__SvgPath="/branding/appsurface-site-icon.svg"
             export AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0="Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js"
-            export AppSurfaceDocs__Harvest__Markdown__ExcludeGlobs__0="tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.md"
             printf '%s\n' '/' '/docs' > "${RUNNER_TEMP}/appsurface-docs-seeds.txt"
 
             docs_export_repo="."

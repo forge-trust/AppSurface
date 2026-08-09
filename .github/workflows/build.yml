@@ -57,7 +57,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       CODECOV_TOKEN_PRESENT: ${{ secrets.CODECOV_TOKEN != '' }}
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
@@ -242,7 +242,6 @@ jobs:
       - name: Verify AppSurface Docs harvest health
         env:
           AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0: Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js
-          AppSurfaceDocs__Harvest__Markdown__ExcludeGlobs__0: tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.md
         run: |
           dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-build --no-restore -- \
             docs verify-health \
@@ -267,7 +266,6 @@ jobs:
           AppSurfaceDocs__Identity__Logo__Path: /branding/appsurface-site-icon.svg
           AppSurfaceDocs__Identity__Favicon__SvgPath: /branding/appsurface-site-icon.svg
           AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0: Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js
-          AppSurfaceDocs__Harvest__Markdown__ExcludeGlobs__0: tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.md
         run: |
           printf '%s\n' '/' '/docs' > "$RUNNER_TEMP/appsurface-docs-seeds.txt"
           # CI docs export can spend just over 10s in cold host startup while generating the first harvest snapshot.
