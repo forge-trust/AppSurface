@@ -118,17 +118,8 @@ internal static partial class AppSurfaceDocsScreenshotBaseline
         }
 
         var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
-        var baselineRoot = Path.GetFullPath(Path.Join(repoRoot, BaselineDirectory));
-        var baselinePath = Path.GetFullPath(Path.Join(baselineRoot, baselineFileName));
-        var allowedPrefix = baselineRoot + Path.DirectorySeparatorChar;
-        if (!baselinePath.StartsWith(allowedPrefix, StringComparison.Ordinal))
-        {
-            throw new ArgumentException(
-                "Graphite visual baseline names must resolve below the dedicated baseline directory.",
-                nameof(baselineFileName));
-        }
-
-        return baselinePath;
+        var baselineRoot = PathUtils.PathUnder(repoRoot, BaselineDirectory);
+        return PathUtils.PathUnder(baselineRoot, baselineFileName);
     }
 
     private static bool IsUpdateRequested() =>
