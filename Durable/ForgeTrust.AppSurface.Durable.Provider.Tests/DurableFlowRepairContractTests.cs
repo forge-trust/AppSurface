@@ -56,6 +56,32 @@ public sealed class DurableFlowRepairContractTests
         Assert.Throws<ArgumentException>(() => new DurableFlowRepairCandidate(
             DurableFlowRepairAction.AssertChildEffectCompleted,
             noEffectEvidence));
+        Assert.Throws<ArgumentException>(() => new DurableFlowRepairReceipt(
+            Scope,
+            Flow,
+            Command,
+            DurableFlowRepairAction.AssertChildEffectNotApplied,
+            new DurableCommandFingerprint("appsurface.durable.flow.repair.not-applied.v1", Digest),
+            Digest,
+            DurableFlowRepairEvidenceReference.Completed(Work, 1, 1, Digest),
+            "operator",
+            "repair",
+            DurableFlowState.Suspended,
+            1,
+            DurableFlowState.WaitingForActivity,
+            2,
+            3,
+            DateTimeOffset.UtcNow));
+        Assert.Throws<ArgumentException>(() => new DurableFlowRepairAssessment(
+            Flow,
+            DurableFlowState.Suspended,
+            1,
+            null,
+            null,
+            null,
+            null,
+            null,
+            [null!]));
         Assert.Throws<ArgumentException>(() => new DurableFlowRepairResult(
             DurableFlowRepairOutcome.Refused,
             null,
@@ -153,6 +179,22 @@ public sealed class DurableFlowRepairContractTests
             5,
             19,
             timestamp);
+        var sameMicrosecondReceipt = new DurableFlowRepairReceipt(
+            Scope,
+            Flow,
+            Command,
+            request.Action,
+            request.Fingerprint,
+            Digest,
+            request.Evidence,
+            request.ActorId,
+            request.ReasonCode,
+            DurableFlowState.Suspended,
+            4,
+            DurableFlowState.Ready,
+            5,
+            19,
+            timestamp.AddTicks(2));
         var changedEvidence = DurableFlowRepairRequest.AssertChildEffectCompleted(
             Scope, Flow, Command, 4, Digest, Work, 7, 11,
             "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210", "operator", "repair");
@@ -175,6 +217,8 @@ public sealed class DurableFlowRepairContractTests
 
         Assert.Equal(TimeSpan.Zero, receipt.AcceptedAtUtc.Offset);
         Assert.Equal(0, receipt.AcceptedAtUtc.Ticks % 10);
+        Assert.Equal(receipt.AcceptedAtUtc, sameMicrosecondReceipt.AcceptedAtUtc);
+        Assert.Equal(receipt.ReceiptSha256, sameMicrosecondReceipt.ReceiptSha256);
         Assert.Equal(64, receipt.ReceiptSha256.Length);
         Assert.NotEqual(receipt.ReceiptSha256, changedReceipt.ReceiptSha256);
         Assert.Equal(DurableFlowRepairOutcome.Applied, new DurableFlowRepairResult(

@@ -161,12 +161,20 @@ internal sealed record DurableActivityResultExpectation(
     internal static DurableActivityResultExpectation From(IDurablePayloadCodec codec)
     {
         ArgumentNullException.ThrowIfNull(codec);
+        var contractName = DurableIdentifier.Require(codec.ContractName, "codec.ContractName", 200);
+        var contractVersion = DurableIdentifier.Require(codec.ContractVersion, "codec.ContractVersion", 100);
+        if (!Enum.IsDefined(codec.Classification))
+        {
+            throw new ArgumentOutOfRangeException(nameof(codec.Classification));
+        }
+
+        var retentionPolicyId = DurableIdentifier.Require(codec.RetentionPolicyId, "codec.RetentionPolicyId", 128);
         return new DurableActivityResultExpectation(
-            codec.ContractName,
-            codec.ContractVersion,
-            $"{codec.ContractName}@{codec.ContractVersion}",
+            contractName,
+            contractVersion,
+            $"{contractName}@{contractVersion}",
             codec.Classification,
-            codec.RetentionPolicyId);
+            retentionPolicyId);
     }
 }
 

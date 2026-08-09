@@ -118,7 +118,7 @@ CREATE TABLE appsurface_durable.flow_repair_command
     receipt_sha256 char(64) CHECK (receipt_sha256 IS NULL OR receipt_sha256 ~ '^[0-9a-f]{64}$'),
     accepted_at timestamp with time zone NOT NULL DEFAULT clock_timestamp(),
     PRIMARY KEY (scope_id, command_id),
-    CHECK
+    CONSTRAINT ck_flow_repair_command_action_evidence CHECK
     (
         (action = 'assert_child_effect_completed'
             AND expected_child_result_sha256 IS NOT NULL AND required_work_operator_command_id IS NULL)
@@ -126,13 +126,14 @@ CREATE TABLE appsurface_durable.flow_repair_command
         (action = 'assert_child_effect_not_applied'
             AND expected_child_result_sha256 IS NULL AND required_work_operator_command_id IS NOT NULL)
     ),
-    CHECK
+    CONSTRAINT ck_flow_repair_command_outcome_receipt CHECK
     (
         (outcome = 'applied'
             AND resulting_state IS NOT NULL AND resulting_revision IS NOT NULL
             AND resulting_flow_history_event_id IS NOT NULL AND receipt_sha256 IS NOT NULL AND problem_code IS NULL)
         OR
         (outcome IN ('refused', 'race_lost')
+            AND resulting_state IS NULL AND resulting_revision IS NULL
             AND receipt_sha256 IS NULL AND resulting_flow_history_event_id IS NULL)
     )
 );

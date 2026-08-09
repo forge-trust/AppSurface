@@ -552,6 +552,11 @@ public sealed record DurableFlowRepairAssessment
         }
 
         ArgumentNullException.ThrowIfNull(candidates);
+        if (candidates.Any(static candidate => candidate is null))
+        {
+            throw new ArgumentException("Flow repair assessment candidates must not contain null entries.", nameof(candidates));
+        }
+
         InstanceId = instanceId;
         State = state;
         Revision = revision;

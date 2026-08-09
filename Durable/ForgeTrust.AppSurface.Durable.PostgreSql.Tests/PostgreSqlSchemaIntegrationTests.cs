@@ -837,6 +837,26 @@ public sealed class PostgreSqlSchemaIntegrationTests
             Assert.Equal(17, await seedFlowDispatch.ExecuteNonQueryAsync());
         }
 
+        var invalidRejectedRepair = await Assert.ThrowsAsync<PostgresException>(async () =>
+        {
+            await using var insert = dataSource.CreateCommand(
+                """
+                INSERT INTO appsurface_durable.flow_repair_command
+                    (scope_id, command_id, flow_instance_id, action, request_schema, request_sha256,
+                     expected_flow_revision, suspension_descriptor_sha256, child_work_id,
+                     expected_child_work_revision, child_work_history_event_id, expected_child_result_sha256,
+                     actor_id, reason_code, outcome, problem_code, resulting_state, resulting_revision)
+                VALUES
+                    ('flow-rls-scope-a', 'flow-rls-invalid-refusal', 'flow-rls-instance-a',
+                     'assert_child_effect_completed', 'tests.flow-repair.v1', repeat('4', 64), 1,
+                     repeat('4', 64), 'flow-rls-child-a', 1, 1, repeat('4', 64), 'operator', 'test',
+                     'refused', 'ASDUR214', 'ready', 2);
+                """);
+            await insert.ExecuteNonQueryAsync();
+        });
+        Assert.Equal(PostgresErrorCodes.CheckViolation, invalidRejectedRepair.SqlState);
+        Assert.Equal("ck_flow_repair_command_outcome_receipt", invalidRejectedRepair.ConstraintName);
+
         var dispatcherConnectionString = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
         {
             Username = "durable_dispatcher",
@@ -998,6 +1018,19 @@ public sealed class PostgreSqlSchemaIntegrationTests
                 Assert.False(await reader.ReadAsync());
             }
 
+            await using (var scopedRepairCollisionRead = new NpgsqlCommand(
+                "SELECT scope_id, command_id, conflicting_request_sha256 FROM appsurface_durable.flow_repair_collision ORDER BY scope_id, command_id;",
+                runtimeConnection,
+                scopedTransaction))
+            await using (var reader = await scopedRepairCollisionRead.ExecuteReaderAsync())
+            {
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal("flow-rls-scope-a", reader.GetString(0));
+                Assert.Equal("flow-rls-repair-a", reader.GetString(1));
+                Assert.Equal(new string('2', 64), reader.GetString(2));
+                Assert.False(await reader.ReadAsync());
+            }
+
             await using (var scopedTraceInsert = new NpgsqlCommand(
                 """
                 INSERT INTO appsurface_durable.flow_trace_context
@@ -1058,6 +1091,39 @@ public sealed class PostgreSqlSchemaIntegrationTests
             });
             Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, crossScopeRepair.SqlState);
             await rejectedRepairTransaction.RollbackAsync();
+        }
+
+        await using (var rejectedRepairCommandTransaction = await runtimeConnection.BeginTransactionAsync())
+        {
+            await using (var setScope = new NpgsqlCommand(
+                "SELECT set_config('appsurface_durable.scope_id', @scope_id, true);",
+                runtimeConnection,
+                rejectedRepairCommandTransaction))
+            {
+                setScope.Parameters.AddWithValue("scope_id", "flow-rls-scope-a");
+                await setScope.ExecuteNonQueryAsync();
+            }
+
+            var crossScopeRepairCommand = await Assert.ThrowsAsync<PostgresException>(async () =>
+            {
+                await using var insert = new NpgsqlCommand(
+                    """
+                    INSERT INTO appsurface_durable.flow_repair_command
+                        (scope_id, command_id, flow_instance_id, action, request_schema, request_sha256,
+                         expected_flow_revision, suspension_descriptor_sha256, child_work_id,
+                         expected_child_work_revision, child_work_history_event_id, expected_child_result_sha256,
+                         actor_id, reason_code, outcome)
+                    VALUES
+                        ('flow-rls-scope-b', 'flow-rls-repair-command-rejected', 'flow-rls-instance-b',
+                         'assert_child_effect_completed', 'tests.flow-repair.v1', repeat('5', 64), 1,
+                         repeat('5', 64), 'flow-rls-child-b', 1, 1, repeat('5', 64), 'operator', 'test', 'refused');
+                    """,
+                    runtimeConnection,
+                    rejectedRepairCommandTransaction);
+                await insert.ExecuteNonQueryAsync();
+            });
+            Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, crossScopeRepairCommand.SqlState);
+            await rejectedRepairCommandTransaction.RollbackAsync();
         }
 
         var denied = await Assert.ThrowsAsync<PostgresException>(async () =>

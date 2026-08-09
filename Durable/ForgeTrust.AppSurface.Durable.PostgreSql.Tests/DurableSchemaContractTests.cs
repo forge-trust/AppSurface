@@ -119,6 +119,8 @@ public sealed class DurableSchemaContractTests
                 Assert.Equal(64, seventh.Sha256.Length);
                 Assert.Contains("flow_repair_command", seventh.Sql, StringComparison.Ordinal);
                 Assert.Contains("flow_repair_collision", seventh.Sql, StringComparison.Ordinal);
+                Assert.Contains("ck_flow_repair_command_action_evidence", seventh.Sql, StringComparison.Ordinal);
+                Assert.Contains("ck_flow_repair_command_outcome_receipt", seventh.Sql, StringComparison.Ordinal);
                 Assert.Contains("suspension_descriptor_schema", seventh.Sql, StringComparison.Ordinal);
                 Assert.Contains("result_contract_id", seventh.Sql, StringComparison.Ordinal);
                 Assert.Contains("resolution_kind", seventh.Sql, StringComparison.Ordinal);

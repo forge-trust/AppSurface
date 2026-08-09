@@ -38,6 +38,8 @@ internal static class ProviderContractValidation
     /// <param name="value">Digest to validate.</param>
     /// <param name="parameterName">Parameter name used by validation exceptions.</param>
     /// <returns>The original validated digest.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="value"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when the digest is not exactly 64 lowercase hexadecimal characters.</exception>
     internal static string RequireSha256(string value, string parameterName)
     {
         ArgumentNullException.ThrowIfNull(value);

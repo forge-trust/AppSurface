@@ -553,7 +553,10 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
                 DurableManualResolutionKind.Applied => "applied",
                 DurableManualResolutionKind.ProvenNotApplied => "proven_not_applied",
                 null => DBNull.Value,
-                _ => throw new ArgumentOutOfRangeException(nameof(command)),
+                _ => throw new ArgumentOutOfRangeException(
+                    nameof(command.Resolution),
+                    command.Resolution,
+                    "The manual resolution kind is not supported."),
             },
         });
         sql.Parameters.Add(new NpgsqlParameter("permit_status", NpgsqlDbType.Text)

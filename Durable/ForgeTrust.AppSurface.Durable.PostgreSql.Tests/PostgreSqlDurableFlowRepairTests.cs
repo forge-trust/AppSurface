@@ -142,6 +142,19 @@ public sealed class PostgreSqlDurableFlowRepairTests
         var oldShapeAssessment = await repairs.GetAssessmentAsync(new DurableFlowRepairAssessmentRequest(scope, instance));
         Assert.True(oldShapeAssessment.IsSuccess);
         Assert.NotNull(oldShapeAssessment.Value!.SuspensionDescriptorSha256);
+        await DropActivityWaitChildWorkForeignKeyAsync(database.DataSource);
+        await SetActivityWaitChildWorkIdAsync(
+            database.DataSource,
+            scope,
+            instance,
+            new DurableWorkId($"flow-repair-missing-child-{scenario}"));
+        var missingChildAssessment = await repairs.GetAssessmentAsync(new DurableFlowRepairAssessmentRequest(scope, instance));
+        Assert.True(missingChildAssessment.IsSuccess);
+        Assert.Null(missingChildAssessment.Value!.ActivityWaitId);
+        Assert.Null(missingChildAssessment.Value.ChildWorkId);
+        Assert.Null(missingChildAssessment.Value.ChildWorkRevision);
+        Assert.Empty(missingChildAssessment.Value.Candidates);
+        await SetActivityWaitChildWorkIdAsync(database.DataSource, scope, instance, childWorkId);
         await SetFlowRepairDescriptorAsync(database.DataSource, scope, instance, null);
         var legacyAssessment = await repairs.GetAssessmentAsync(new DurableFlowRepairAssessmentRequest(scope, instance));
         Assert.True(legacyAssessment.IsSuccess);
@@ -540,6 +553,7 @@ public sealed class PostgreSqlDurableFlowRepairTests
         Assert.True(staleReplay.IsSuccess);
         Assert.Equal(DurableFlowRepairOutcome.RaceLost, staleReplay.Value!.Outcome);
         Assert.Equal(DurableProblemCodes.FlowRaceLost, staleReplay.Value.Problem!.Code);
+        Assert.Equal(staleRequest.CommandId.Value, staleReplay.Value.Problem.CorrelationId);
         Assert.Equal(
             effectApplied ? DurableFlowState.Ready : DurableFlowState.WaitingForActivity,
             (await flows.GetAsync(new DurableFlowGetRequest(scope, instance))).Value!.State);
@@ -766,6 +780,27 @@ public sealed class PostgreSqlDurableFlowRepairTests
         Assert.Equal(1, await command.ExecuteNonQueryAsync());
     }
 
+    private static async ValueTask SetActivityWaitChildWorkIdAsync(
+        Npgsql.NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableFlowInstanceId instance,
+        DurableWorkId childWorkId)
+    {
+        await using var command = dataSource.CreateCommand(
+            "UPDATE appsurface_durable.flow_wait SET child_work_id = @child_work_id WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND kind = 'activity' AND state = 'suspended';");
+        command.Parameters.AddWithValue("child_work_id", childWorkId.Value);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("flow_instance_id", instance.Value);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+    }
+
+    private static async ValueTask DropActivityWaitChildWorkForeignKeyAsync(Npgsql.NpgsqlDataSource dataSource)
+    {
+        await using var command = dataSource.CreateCommand(
+            "ALTER TABLE appsurface_durable.flow_wait DROP CONSTRAINT flow_wait_scope_id_child_work_id_fkey;");
+        await command.ExecuteNonQueryAsync();
+    }
+
     private static async ValueTask UpdateRepairReceiptSha256Async(
         Npgsql.NpgsqlDataSource dataSource,
         DurableScopeId scope,
@@ -804,22 +839,6 @@ public sealed class PostgreSqlDurableFlowRepairTests
         command.Parameters.AddWithValue("scope_id", scope.Value);
         command.Parameters.AddWithValue("flow_instance_id", instance.Value);
         Assert.Equal(1, await command.ExecuteNonQueryAsync());
-    }
-
-    private static async ValueTask SetResultContractIdAsync(
-        Npgsql.NpgsqlDataSource dataSource,
-        DurableScopeId scope,
-        DurableFlowInstanceId instance,
-        DurableWorkId workId,
-        string contractId)
-    {
-        await using var command = dataSource.CreateCommand(
-            "UPDATE appsurface_durable.work SET result_contract_id = @contract_id WHERE scope_id = @scope_id AND work_id = @work_id; UPDATE appsurface_durable.flow_wait SET result_contract_id = @contract_id WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND child_work_id = @work_id;");
-        command.Parameters.AddWithValue("contract_id", contractId);
-        command.Parameters.AddWithValue("scope_id", scope.Value);
-        command.Parameters.AddWithValue("flow_instance_id", instance.Value);
-        command.Parameters.AddWithValue("work_id", workId.Value);
-        Assert.Equal(2, await command.ExecuteNonQueryAsync());
     }
 
     private static async ValueTask SetWorkLeaseOwnerAsync(

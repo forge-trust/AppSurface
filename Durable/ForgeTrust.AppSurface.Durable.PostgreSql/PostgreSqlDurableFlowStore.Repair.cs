@@ -106,9 +106,14 @@ internal sealed partial class PostgreSqlDurableFlowStore
             var revision = reader.GetInt64(1);
             var descriptorSchema = reader.IsDBNull(2) ? null : reader.GetString(2);
             var descriptorSha256 = reader.IsDBNull(3) ? null : reader.GetString(3);
-            var waitId = reader.IsDBNull(8) ? (Guid?)null : reader.GetGuid(8);
-            var childWorkId = reader.IsDBNull(11) ? (DurableWorkId?)null : new DurableWorkId(reader.GetString(11));
-            var childWorkRevision = reader.IsDBNull(17) ? (long?)null : reader.GetInt64(17);
+            var hasCompleteChildWorkIdentity = !reader.IsDBNull(8)
+                && !reader.IsDBNull(11)
+                && !reader.IsDBNull(17);
+            var waitId = hasCompleteChildWorkIdentity ? reader.GetGuid(8) : (Guid?)null;
+            var childWorkId = hasCompleteChildWorkIdentity
+                ? new DurableWorkId(reader.GetString(11))
+                : (DurableWorkId?)null;
+            var childWorkRevision = hasCompleteChildWorkIdentity ? reader.GetInt64(17) : (long?)null;
             var candidates = new List<DurableFlowRepairCandidate>(2);
             var repairableShape = state == DurableFlowState.Suspended
                 && string.Equals(reader.IsDBNull(4) ? null : reader.GetString(4), "waiting_activity", StringComparison.Ordinal)
@@ -1342,7 +1347,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
                 Outcome,
                 null,
                 CreateRepairProblem(
-                    "repair-replay",
+                    CommandId.Value,
                     ProblemCode ?? DurableProblemCodes.FlowRaceLost,
                     "The prior Flow repair terminal result was returned.",
                     "The command identity already has a retained terminal outcome.",
