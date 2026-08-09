@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
@@ -233,9 +234,8 @@ public sealed class AppSurfaceKeycloakThemeOptions
         var properties = System.Text.Encoding.UTF8.GetString(AppSurfaceKeycloakThemeManifest.ReadVerifiedFile(sourceDirectory, propertiesEntry));
         var names = new HashSet<string>(StringComparer.Ordinal);
         var continued = false;
-        foreach (var line in properties.Split('\n'))
+        foreach (var physicalLine in properties.Split('\n').Select(line => line.TrimEnd('\r')))
         {
-            var physicalLine = line.TrimEnd('\r');
             var continues = HasTrailingContinuation(physicalLine);
             if (continued)
             {
