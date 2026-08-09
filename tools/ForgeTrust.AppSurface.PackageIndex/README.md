@@ -16,7 +16,7 @@ Every managed package README declares one `release_guidance_variant` in
 | `apphost` | The package is primarily an AppHost, development, or test integration surface. | A runtime package merely happens to have an Aspire example. |
 | `experimental` | The package has an explicitly experimental or publication-held contract. | A package needs extra product-specific release prose; keep that prose authored outside the region. |
 
-The canonical bodies live in [`release-guidance.md`](https://github.com/forge-trust/AppSurface/blob/main/tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.md). Each body expands the package chooser and
+The canonical bodies live in the generator-only [`release-guidance.template`](https://github.com/forge-trust/AppSurface/blob/main/tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.template). Each body expands the package chooser and
 release-hub links to canonical absolute GitHub URLs. This is deliberate: the package root `README.md` is included in a
 NuGet package, but repository-relative targets are not package contents. The package artifact validator confirms that
 the marked region and both URLs survive packing.
@@ -61,7 +61,7 @@ remains authored content; after that, retain the markers exactly.
    ```
 
    `verify` compares all generated documents and managed README regions; `gate` validates manifest, template, and
-   marker policy without writing files. [Package-gate CI](https://github.com/forge-trust/AppSurface/actions/workflows/package-gate.yml) runs both commands.
+   marker policy without writing files. [Package-gate CI](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/package-gate.yml) runs both commands.
 
 5. When a change affects package payloads or published documentation, run the existing package artifact proof:
 
@@ -85,6 +85,6 @@ its own exact artifact set while PackageIndex remains the owner of checked-in pa
 ## Adding a variant
 
 Adding a variant is a policy change, not a per-package escape hatch. Document why the existing three variants cannot
-express the reader-facing posture, add one exact template pair in [`release-guidance.md`](./release-guidance.md), extend
+express the reader-facing posture, add one exact template pair in [`release-guidance.template`](https://github.com/forge-trust/AppSurface/blob/main/tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.template), extend
 the renderer's finite allowlist and tests, update this table with a non-example, and add the package artifact proof.
 Otherwise, use an existing variant and preserve the package-specific explanation outside the marker pair.

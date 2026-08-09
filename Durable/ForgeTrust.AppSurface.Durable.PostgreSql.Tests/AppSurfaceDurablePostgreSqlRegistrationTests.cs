@@ -47,6 +47,59 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
     }
 
     [Fact]
+    public void FlowRetentionRegistration_RequiresPassiveStorageAndAThirdDataSource()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = CreateDataSource();
+
+        Assert.Throws<InvalidOperationException>(() =>
+            new ServiceCollection().AddAppSurfaceDurablePostgreSqlFlowRetention(dispatcher));
+
+        var services = new ServiceCollection();
+        services.AddAppSurfaceDurablePostgreSql(
+            dispatcher,
+            runtime,
+            new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+            new PostgreSqlDurableScheduleOptions("durable_runtime"));
+
+        var fromDispatcher = Assert.Throws<ArgumentException>(
+            () => services.AddAppSurfaceDurablePostgreSqlFlowRetention(dispatcher));
+        var fromRuntime = Assert.Throws<ArgumentException>(
+            () => services.AddAppSurfaceDurablePostgreSqlFlowRetention(runtime));
+
+        Assert.Equal("retentionOperatorDataSource", fromDispatcher.ParamName);
+        Assert.Equal("retentionOperatorDataSource", fromRuntime.ParamName);
+        Assert.Contains("must be distinct", fromRuntime.Message, StringComparison.Ordinal);
+        Assert.Throws<ArgumentNullException>(() => services.AddAppSurfaceDurablePostgreSqlFlowRetention(null!));
+        Assert.Throws<ArgumentNullException>(
+            () => ((IServiceCollection)null!).AddAppSurfaceDurablePostgreSqlFlowRetention(runtime));
+    }
+
+    [Fact]
+    public void FlowRetentionRegistration_IsIdempotentAndResolvesTheDedicatedClient()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = CreateDataSource();
+        using var retention = CreateDataSource();
+        using var anotherRetention = CreateDataSource();
+        var services = new ServiceCollection();
+        services.AddAppSurfaceDurablePostgreSql(
+            dispatcher,
+            runtime,
+            new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+            new PostgreSqlDurableScheduleOptions("durable_runtime"));
+
+        Assert.Same(services, services.AddAppSurfaceDurablePostgreSqlFlowRetention(retention));
+        Assert.Same(services, services.AddAppSurfaceDurablePostgreSqlFlowRetention(retention));
+        Assert.Throws<InvalidOperationException>(() => services.AddAppSurfaceDurablePostgreSqlFlowRetention(anotherRetention));
+
+        using var provider = services.BuildServiceProvider();
+        var concrete = provider.GetRequiredService<PostgreSqlDurableFlowRetentionClient>();
+
+        Assert.Same(concrete, provider.GetRequiredService<IDurableFlowRetentionClient>());
+    }
+
+    [Fact]
     public void WorkerHost_IsExplicitIdempotentAndRequiresPassiveStorage()
     {
         Assert.Throws<InvalidOperationException>(() => new ServiceCollection().AddAppSurfaceDurableWorkerHost());

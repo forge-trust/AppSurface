@@ -12,6 +12,8 @@
   <ItemGroup>
     <Compile Include="../PublicApiSnapshot.cs" Link="PublicApiSnapshot.cs" />
     <Content Include="../ForgeTrust.AppSurface.Durable.PostgreSql/PublicAPI.Shipped.txt" Link="PostgreSql.PublicAPI.Shipped.txt" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Bounds concurrent Testcontainers databases to keep integration runs below local and CI capacity. -->
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
