@@ -1223,7 +1223,6 @@ internal sealed class PackageIndexGenerator
         var platformPath = normalizedPath.Replace('/', Path.DirectorySeparatorChar);
         if (Path.IsPathRooted(platformPath)
             || (normalizedPath.Length >= 2 && normalizedPath[1] == ':' && char.IsLetter(normalizedPath[0]))
-            || normalizedPath.StartsWith("/", StringComparison.Ordinal)
             || normalizedPath.Split('/', StringSplitOptions.None).Any(segment => string.IsNullOrWhiteSpace(segment) || segment is "." or ".."))
         {
             throw new PackageIndexException($"Repository guidance link '{repositoryRelativePath}' must be a non-rooted path without a drive prefix or empty, '.' or '..' segments.");

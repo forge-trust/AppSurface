@@ -12,6 +12,8 @@ public sealed class PackageIndexReleaseGuidanceLinkRegressionTests
     [InlineData(
         "tools\\ForgeTrust.AppSurface.PackageIndex\\README.md",
         "https://github.com/forge-trust/AppSurface/blob/main/tools/ForgeTrust.AppSurface.PackageIndex/README.md")]
+    [InlineData("x", "https://github.com/forge-trust/AppSurface/blob/main/x")]
+    [InlineData("1:guide.md", "https://github.com/forge-trust/AppSurface/blob/main/1:guide.md")]
     public void GetCanonicalRepositoryUrl_UsesTheRepositoryPageInsteadOfADocsRelativeRoute(
         string repositoryRelativePath,
         string expectedUrl)
