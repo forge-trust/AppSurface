@@ -38,7 +38,7 @@ public sealed class UnreleasedEntryComposerTests : IDisposable
         var entriesDirectory = EntriesDirectory();
         Directory.CreateDirectory(entriesDirectory);
         await File.WriteAllTextAsync(
-            Path.Combine(entriesDirectory, "2026-08-08-indented-markdown.md"),
+            TestPathUtils.PathUnder(entriesDirectory, "2026-08-08-indented-markdown.md"),
             "<!-- appsurface:unreleased-entry section=\"included\" -->\n\n    Indented code content.\n\n    Still indented.\n");
 
         var entries = await UnreleasedEntryComposer.LoadAsync(entriesDirectory, CancellationToken.None);
