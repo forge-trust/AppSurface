@@ -45,6 +45,130 @@ type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWo
   property public System.String RuntimeEpoch { get: public; }
   property public System.String WorkName { get: public; }
   property public System.String WorkVersion { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAction : System.Int32
+  enum-member AssertChildEffectCompleted = 0
+  enum-member AssertChildEffectNotApplied = 1
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessment : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessment>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessment(ForgeTrust.AppSurface.Durable.DurableFlowInstanceId instanceId, ForgeTrust.AppSurface.Durable.DurableFlowState state, System.Int64 revision, System.String? suspensionDescriptorSchema, System.String? suspensionDescriptorSha256, System.Nullable<System.Guid> activityWaitId, System.Nullable<ForgeTrust.AppSurface.Durable.DurableWorkId> childWorkId, System.Nullable<System.Int64> childWorkRevision, System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairCandidate?> candidates)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessment <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessment? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessment? left, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessment? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessment? left, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessment? right)
+  property public ForgeTrust.AppSurface.Durable.DurableFlowInstanceId InstanceId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableFlowState State { get: public; }
+  property public System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairCandidate?> Candidates { get: public; }
+  property public System.Int64 Revision { get: public; }
+  property public System.Nullable<ForgeTrust.AppSurface.Durable.DurableWorkId> ChildWorkId { get: public; }
+  property public System.Nullable<System.Guid> ActivityWaitId { get: public; }
+  property public System.Nullable<System.Int64> ChildWorkRevision { get: public; }
+  property public System.String? SuspensionDescriptorSchema { get: public; }
+  property public System.String? SuspensionDescriptorSha256 { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessmentRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessmentRequest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessmentRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableFlowInstanceId instanceId)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessmentRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessmentRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessmentRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessmentRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessmentRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessmentRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableFlowInstanceId InstanceId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairCandidate : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairCandidate>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairCandidate(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAction action, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairEvidenceReference evidence, ForgeTrust.AppSurface.Durable.DurableProblem? refusalProblem = null)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairCandidate <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairCandidate? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairCandidate? left, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairCandidate? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairCandidate? left, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairCandidate? right)
+  property public ForgeTrust.AppSurface.Durable.DurableProblem? RefusalProblem { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAction Action { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairEvidenceReference Evidence { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairEvidenceReference : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairEvidenceReference>
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairEvidenceReference <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairEvidenceReference? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairEvidenceReference Completed(ForgeTrust.AppSurface.Durable.DurableWorkId childWorkId, System.Int64 expectedChildWorkRevision, System.Int64 childWorkHistoryEventId, System.String expectedChildResultSha256)
+  method public static ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairEvidenceReference ProvenNotApplied(ForgeTrust.AppSurface.Durable.DurableWorkId childWorkId, System.Int64 expectedChildWorkRevision, System.Int64 childWorkHistoryEventId, ForgeTrust.AppSurface.Durable.DurableCommandId requiredWorkOperatorCommandId)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairEvidenceReference? left, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairEvidenceReference? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairEvidenceReference? left, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairEvidenceReference? right)
+  property public ForgeTrust.AppSurface.Durable.DurableWorkId ChildWorkId { get: public; }
+  property public System.Int64 ChildWorkHistoryEventId { get: public; }
+  property public System.Int64 ExpectedChildWorkRevision { get: public; }
+  property public System.Nullable<ForgeTrust.AppSurface.Durable.DurableCommandId> RequiredWorkOperatorCommandId { get: public; }
+  property public System.String? ExpectedChildResultSha256 { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairOutcome : System.Int32
+  enum-member Applied = 0
+  enum-member Conflict = 4
+  enum-member Duplicate = 1
+  enum-member RaceLost = 2
+  enum-member Refused = 3
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairReceipt : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairReceipt>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairReceipt(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableFlowInstanceId instanceId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAction action, ForgeTrust.AppSurface.Durable.DurableCommandFingerprint requestFingerprint, System.String suspensionDescriptorSha256, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairEvidenceReference evidence, System.String actorId, System.String reasonCode, ForgeTrust.AppSurface.Durable.DurableFlowState priorState, System.Int64 priorRevision, ForgeTrust.AppSurface.Durable.DurableFlowState resultingState, System.Int64 resultingRevision, System.Int64 resultingFlowHistoryEventId, System.DateTimeOffset acceptedAtUtc)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairReceipt <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairReceipt? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairReceipt? left, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairReceipt? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairReceipt? left, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairReceipt? right)
+  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint RequestFingerprint { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableFlowInstanceId InstanceId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableFlowState PriorState { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableFlowState ResultingState { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAction Action { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairEvidenceReference Evidence { get: public; }
+  property public System.DateTimeOffset AcceptedAtUtc { get: public; }
+  property public System.Int64 PriorRevision { get: public; }
+  property public System.Int64 ResultingFlowHistoryEventId { get: public; }
+  property public System.Int64 ResultingRevision { get: public; }
+  property public System.String ActorId { get: public; }
+  property public System.String ReasonCode { get: public; }
+  property public System.String ReceiptSha256 { get: public; }
+  property public System.String SuspensionDescriptorSha256 { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairRequest>
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairRequest AssertChildEffectCompleted(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableFlowInstanceId instanceId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, System.Int64 expectedFlowRevision, System.String expectedSuspensionDescriptorSha256, ForgeTrust.AppSurface.Durable.DurableWorkId childWorkId, System.Int64 expectedChildWorkRevision, System.Int64 childWorkHistoryEventId, System.String expectedChildResultSha256, System.String actorId, System.String reasonCode)
+  method public static ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairRequest AssertChildEffectNotApplied(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableFlowInstanceId instanceId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, System.Int64 expectedFlowRevision, System.String expectedSuspensionDescriptorSha256, ForgeTrust.AppSurface.Durable.DurableWorkId childWorkId, System.Int64 expectedChildWorkRevision, System.Int64 childWorkHistoryEventId, ForgeTrust.AppSurface.Durable.DurableCommandId requiredWorkOperatorCommandId, System.String actorId, System.String reasonCode)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairRequest? right)
+  property public ForgeTrust.AppSurface.Durable.DurableCommandFingerprint Fingerprint { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableCommandId CommandId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableFlowInstanceId InstanceId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAction Action { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairEvidenceReference Evidence { get: public; }
+  property public System.Int64 ExpectedFlowRevision { get: public; }
+  property public System.String ActorId { get: public; }
+  property public System.String ExpectedSuspensionDescriptorSha256 { get: public; }
+  property public System.String ReasonCode { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairResult : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairResult>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairResult(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairOutcome outcome, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairReceipt? receipt, ForgeTrust.AppSurface.Durable.DurableProblem? problem, System.Nullable<ForgeTrust.AppSurface.Durable.DurableFlowState> observedFlowState, System.Nullable<System.Int64> observedFlowRevision)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairResult? right)
+  property public ForgeTrust.AppSurface.Durable.DurableProblem? Problem { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairOutcome Outcome { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairReceipt? Receipt { get: public; }
+  property public System.Nullable<ForgeTrust.AppSurface.Durable.DurableFlowState> ObservedFlowState { get: public; }
+  property public System.Nullable<System.Int64> ObservedFlowRevision { get: public; }
 type public enum ForgeTrust.AppSurface.Durable.Provider.DurableManualResolutionKind : System.Int32
   enum-member Applied = 0
   enum-member ProvenNotApplied = 1
@@ -581,3 +705,6 @@ type public interface ForgeTrust.AppSurface.Durable.Provider.IDurableWorkOperato
   method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorResult>> ReleaseAfterRecoveryAsync(ForgeTrust.AppSurface.Durable.Provider.DurableWorkRecoveryReleaseRequest request, System.Threading.CancellationToken cancellationToken = default)
   method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorResult>> ResolveAsync(ForgeTrust.AppSurface.Durable.Provider.DurableWorkManualResolutionRequest request, System.Threading.CancellationToken cancellationToken = default)
   method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableWorkOperatorResult>> RetrySafeAsync(ForgeTrust.AppSurface.Durable.Provider.DurableWorkRetrySafeRequest request, System.Threading.CancellationToken cancellationToken = default)
+type public interface ForgeTrust.AppSurface.Durable.Provider.IFlowRepairOperatorClient
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessment>> GetAssessmentAsync(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAssessmentRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairResult>> RepairAsync(ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairRequest request, System.Threading.CancellationToken cancellationToken = default)

@@ -39,7 +39,7 @@ The release evidence bundle is not a signature or hosted-build attestation. It i
 ## Durable publication hold
 
 The Durable packages are source-only public previews and remain held from publication until coordinated evidence covers
-schema ownership, migrations `0001` through `0006`, the canonical PostgreSQL role recipe, passive storage registration,
+schema ownership, migrations `0001` through `0007`, the canonical PostgreSQL role recipe, passive storage registration,
 explicit `AddWorkerHost()` hosting, startup schema/epoch validation without DDL, and recovery procedures. The package
 chooser is the machine-facing install map; the [Durable discovery guide](../Durable/README.md#slice-7-discovery-and-reconciliation)
 is the reader-facing operational boundary. The `durable schema` commands do not change this hold: scripts are offline,

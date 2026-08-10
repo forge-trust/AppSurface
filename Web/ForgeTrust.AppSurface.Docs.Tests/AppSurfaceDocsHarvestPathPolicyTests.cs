@@ -173,6 +173,18 @@ public sealed class AppSurfaceDocsHarvestPathPolicyTests
     }
 
     [Fact]
+    public void Evaluate_WhenReleaseGuidanceTemplateIsNotMarkdown_ExcludesAsBaseCandidate()
+    {
+        var decision = AppSurfaceDocsHarvestPathPolicy.CreateDefault()
+            .Evaluate(
+                "tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.template",
+                AppSurfaceDocsHarvestSourceKind.Markdown);
+
+        Assert.False(decision.Included);
+        Assert.Equal(AppSurfaceDocsHarvestPathDecisionCode.ExcludedByBaseCandidate, decision.Code);
+    }
+
+    [Fact]
     public void Evaluate_AppliesGlobalAndSourceIncludesAsNestedBoundaries()
     {
         var policy = CreatePolicy(

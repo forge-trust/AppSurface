@@ -173,6 +173,7 @@ internal static class PostgreSqlDurableFlowActivityProjector
             transaction,
             scopeId,
             instanceId.Value,
+            workId,
             waitId,
             revision,
             canceledParent,
@@ -261,6 +262,7 @@ internal static class PostgreSqlDurableFlowActivityProjector
         NpgsqlTransaction transaction,
         DurableScopeId scopeId,
         DurableFlowInstanceId instanceId,
+        DurableWorkId workId,
         Guid waitId,
         long revision,
         bool canceledParent,
@@ -272,6 +274,16 @@ internal static class PostgreSqlDurableFlowActivityProjector
         var nextState = canceledParent ? "canceled" : "suspended";
         var waitState = canceledParent ? "canceled" : "suspended";
         var code = canceledParent ? "canceled_before_effect" : "flow.child_work_requires_attention";
+        var workStateText = workState.ToString();
+        var descriptorDigest = canceledParent
+            ? null
+            : PostgreSqlDurableFlowRepairDescriptor.CreateDigest(
+                suspendedFromState,
+                code,
+                "child_work",
+                workStateText,
+                waitId,
+                workId);
         const string sql = """
             WITH projected_flow AS
             (
@@ -280,6 +292,8 @@ internal static class PostgreSqlDurableFlowActivityProjector
                     terminal_at = CASE WHEN @next_state = 'canceled' THEN clock_timestamp() ELSE NULL END,
                     terminal_code = CASE WHEN @next_state = 'canceled' THEN @problem_code ELSE NULL END,
                     suspended_from_state = CASE WHEN @next_state = 'suspended' THEN @suspended_from_state ELSE NULL END,
+                    suspension_descriptor_schema = CASE WHEN @next_state = 'suspended' THEN @descriptor_schema ELSE NULL END,
+                    suspension_descriptor_sha256 = CASE WHEN @next_state = 'suspended' THEN @descriptor_sha256 ELSE NULL END,
                     suspension_descriptor = CASE WHEN @next_state = 'suspended'
                         THEN jsonb_build_object('code', @problem_code, 'source', 'child_work', 'work_state', @work_state)
                         ELSE NULL END,
@@ -324,7 +338,12 @@ internal static class PostgreSqlDurableFlowActivityProjector
         command.Parameters.AddWithValue("wait_state", waitState);
         command.Parameters.AddWithValue("suspended_from_state", suspendedFromState);
         command.Parameters.AddWithValue("problem_code", code);
-        command.Parameters.AddWithValue("work_state", workState.ToString());
+        command.Parameters.AddWithValue("work_state", workStateText);
+        command.Parameters.AddWithValue("descriptor_schema", PostgreSqlDurableFlowRepairDescriptor.SchemaId);
+        command.Parameters.Add(new NpgsqlParameter("descriptor_sha256", NpgsqlTypes.NpgsqlDbType.Text)
+        {
+            Value = descriptorDigest ?? (object)DBNull.Value,
+        });
         if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
         {
             throw new InvalidOperationException(

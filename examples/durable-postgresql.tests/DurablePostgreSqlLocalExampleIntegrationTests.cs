@@ -292,13 +292,13 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
             DurableRuntimeSchemaCompatibility.Compatible,
             storeId,
             runtimeEpoch,
-            installedVersion: 7,
-            requiredVersion: 7,
+            installedVersion: 8,
+            requiredVersion: 8,
             minimumReaderVersion: 1,
-            maximumReaderVersion: 7,
+            maximumReaderVersion: 8,
             minimumWriterVersion: 1,
-            maximumWriterVersion: 7,
-            appliedVersions: [1, 2, 3, 4, 5, 6, 7],
+            maximumWriterVersion: 8,
+            appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8],
             pendingVersions: [],
             problem: null);
 

@@ -883,6 +883,27 @@ public sealed class DurableContractTests
     }
 
     [Fact]
+    public void Durable_activity_result_expectation_validates_registered_codec_metadata()
+    {
+        var expectation = DurableActivityResultExpectation.From(
+            new UnvalidatedPayloadCodec("test.result", "v1", "test-retention", DurableDataClassification.ApprovedApplication));
+
+        Assert.Equal("test.result", expectation.ContractId);
+        Assert.Equal("v1", expectation.SchemaVersion);
+        Assert.Equal("test.result@v1", expectation.CodecId);
+        Assert.Equal(DurableDataClassification.ApprovedApplication, expectation.Classification);
+        Assert.Equal("test-retention", expectation.RetentionPolicyId);
+        Assert.Throws<ArgumentException>(() => DurableActivityResultExpectation.From(
+            new UnvalidatedPayloadCodec(new string('x', 201), "v1")));
+        Assert.Throws<ArgumentException>(() => DurableActivityResultExpectation.From(
+            new UnvalidatedPayloadCodec("test.result", "invalid version")));
+        Assert.Throws<ArgumentException>(() => DurableActivityResultExpectation.From(
+            new UnvalidatedPayloadCodec("test.result", "v1", "invalid retention")));
+        Assert.Throws<ArgumentOutOfRangeException>(() => DurableActivityResultExpectation.From(
+            new UnvalidatedPayloadCodec("test.result", "v1", classification: (DurableDataClassification)99)));
+    }
+
+    [Fact]
     public void Durable_flow_evaluation_input_rejects_ambiguous_or_partial_resume_shapes()
     {
         var context = CreateFlowContextCodec().Encode(new FlowTestContext(1));
@@ -1277,6 +1298,21 @@ public sealed class DurableContractTests
         "Apply the test fix",
         new Uri("https://appsurface.dev/docs/durable/test"),
         "correlation");
+
+    private sealed class UnvalidatedPayloadCodec(
+        string contractName,
+        string contractVersion,
+        string retentionPolicyId = DurableEncodedPayload.DefaultRetentionPolicyId,
+        DurableDataClassification classification = DurableDataClassification.Operational) : IDurablePayloadCodec
+    {
+        public Type PayloadType => typeof(TestResult);
+        public string ContractName => contractName;
+        public string ContractVersion => contractVersion;
+        public DurableDataClassification Classification => classification;
+        public string RetentionPolicyId => retentionPolicyId;
+        public DurableEncodedPayload EncodeObject(object value) => throw new NotSupportedException();
+        public object DecodeObject(DurableEncodedPayload payload) => throw new NotSupportedException();
+    }
 }
 
 internal sealed record TestPayload(string SafeCode);

@@ -42,7 +42,7 @@ publication protects readers from partial content, but it cannot make a director
 principal safe from path replacement.
 
 The preferred production flow remains: generate and review the offline schema script, apply migrations `0001` through
-`0006` in order, apply the canonical role recipe, run status and preflight, then explicitly enable
+`0007` in order, apply the canonical role recipe, run status and preflight, then explicitly enable
 [`AddWorkerHost()`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host). For recovery,
 check status, correct and review the forward-only script, then retry; never delete migration history. The
 [`durable-postgresql` example](../../examples/durable-postgresql/README.md) is a local proof, not production
