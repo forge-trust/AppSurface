@@ -36,10 +36,12 @@ internal static class ReleasePreparationChangePolicy
     /// </summary>
     /// <param name="version">Release version without a leading <c>v</c>.</param>
     /// <param name="changes">Complete Git name-status diff.</param>
+    /// <param name="consumedUnreleasedEntryPaths">The exact entry paths the versioned release manifest declares as composed and archived.</param>
     /// <returns>Validation errors, or an empty result when the diff is valid.</returns>
     internal static ReleasePreparationChangePolicyResult Validate(
         string version,
-        IEnumerable<ReleasePreparationChange> changes)
+        IEnumerable<ReleasePreparationChange> changes,
+        IEnumerable<string>? consumedUnreleasedEntryPaths = null)
     {
         ArgumentNullException.ThrowIfNull(changes);
 
@@ -62,6 +64,26 @@ internal static class ReleasePreparationChangePolicy
             "releases/unreleased.md.yml"
         };
         var actualChanges = changes.ToArray();
+        var declaredEntryPaths = (consumedUnreleasedEntryPaths ?? []).ToArray();
+        var declaredEntryPathSet = new HashSet<string>(declaredEntryPaths, StringComparer.Ordinal);
+        foreach (var entryPath in declaredEntryPaths)
+        {
+            if (string.IsNullOrWhiteSpace(entryPath) || !UnreleasedEntryComposer.IsEntryPath(entryPath))
+            {
+                errors.Add($"Release manifest declares an invalid consumed unreleased entry path: {entryPath}.");
+            }
+        }
+
+        if (declaredEntryPathSet.Count != declaredEntryPaths.Length)
+        {
+            errors.Add("Release manifest declares the same consumed unreleased entry path more than once.");
+        }
+
+        if (!declaredEntryPaths.SequenceEqual(declaredEntryPaths.Order(StringComparer.Ordinal), StringComparer.Ordinal))
+        {
+            errors.Add("Release manifest consumed unreleased entry paths must be ordinally sorted.");
+        }
+
         if (actualChanges.Length == 0)
         {
             errors.Add($"The release-preparation diff is empty; expected exactly: {string.Join(", ", expectedPaths.Order(StringComparer.Ordinal))}.");
@@ -69,6 +91,7 @@ internal static class ReleasePreparationChangePolicy
         }
 
         var seenPaths = new HashSet<string>(StringComparer.Ordinal);
+        var seenEntryPaths = new HashSet<string>(StringComparer.Ordinal);
         foreach (var change in actualChanges)
         {
             if (string.Equals(change.Path, PackageReleaseLink.CoordinatedReleaseSidecarPath, StringComparison.Ordinal)
@@ -86,7 +109,17 @@ internal static class ReleasePreparationChangePolicy
 
             if (change.Status.StartsWith('D'))
             {
-                errors.Add($"Deletes are not allowed in release preparation: {change.Path}.");
+                if (declaredEntryPathSet.Contains(change.Path))
+                {
+                    if (!seenEntryPaths.Add(change.Path))
+                    {
+                        errors.Add($"Unreleased entry path appears more than once: {change.Path}.");
+                    }
+
+                    continue;
+                }
+
+                errors.Add($"Release preparation may delete only an unreleased entry recorded by the versioned release manifest: {change.Path}.");
                 continue;
             }
 
@@ -114,6 +147,14 @@ internal static class ReleasePreparationChangePolicy
             if (!seenPaths.Contains(expectedPath))
             {
                 errors.Add($"Required release-preparation path is missing: {expectedPath}.");
+            }
+        }
+
+        foreach (var declaredEntryPath in declaredEntryPaths)
+        {
+            if (!seenEntryPaths.Contains(declaredEntryPath))
+            {
+                errors.Add($"Release manifest records a consumed unreleased entry that the release-preparation diff does not delete: {declaredEntryPath}.");
             }
         }
 

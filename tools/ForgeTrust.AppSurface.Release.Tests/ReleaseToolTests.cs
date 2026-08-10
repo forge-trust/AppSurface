@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Release;
+using ForgeTrust.AppSurface.ReleaseContracts;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -160,6 +161,336 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task PrepareComposesAndArchivesAppendOnlyUnreleasedEntries()
+    {
+        await SeedRepositoryAsync();
+        const string entryPath = "releases/unreleased.entries/2026-08-08-release-workflow.md";
+        await WriteFileAsync(
+            entryPath,
+            """
+            <!-- appsurface:unreleased-entry section="included" -->
+            ### Release workflow
+
+            - Parallel pull requests add independent release-note entries.
+            """);
+
+        var result = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(0, result.ExitCode);
+        var releaseNote = await ReadFileAsync("releases/v0.1.0-preview.1.md");
+        Assert.Contains("### Release workflow", releaseNote, StringComparison.Ordinal);
+        Assert.Contains("Parallel pull requests add independent release-note entries.", releaseNote, StringComparison.Ordinal);
+        Assert.False(File.Exists(RepositoryPath(entryPath)));
+        Assert.Contains("## Archived unreleased entries", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains(entryPath, result.Stdout, StringComparison.Ordinal);
+
+        using var manifest = JsonDocument.Parse(await ReadFileAsync("releases/v0.1.0-preview.1.release.json"));
+        Assert.Equal(
+            [entryPath],
+            manifest.RootElement.GetProperty("consumedUnreleasedEntryPaths").EnumerateArray().Select(path => path.GetString()));
+
+        var nextUnreleased = await ReadFileAsync("releases/unreleased.md");
+        Assert.Contains("<!-- appsurface:unreleased-entries section=\"included\" -->", nextUnreleased, StringComparison.Ordinal);
+        Assert.DoesNotContain("Parallel pull requests add independent release-note entries.", nextUnreleased, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckRejectsMalformedAppendOnlyUnreleasedEntry()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync(
+            "releases/unreleased.entries/not-an-entry.md",
+            "- Missing the required directive.\n");
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("release-unreleased-entry-invalid", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("YYYY-MM-DD-topic.md", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckRejectsNestedAppendOnlyEntryDirectory()
+    {
+        await SeedRepositoryAsync();
+        Directory.CreateDirectory(RepositoryPath("releases/unreleased.entries/nested"));
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("must be flat", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckRejectsAppendOnlyEntryWithUnsupportedSection()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync(
+            "releases/unreleased.entries/2026-08-08-unsupported-section.md",
+            """
+            <!-- appsurface:unreleased-entry section="unknown" -->
+            - This section is not part of the living-note template.
+            """);
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("uses unsupported section", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckRejectsAppendOnlyEntryWithoutMarkdown()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync(
+            "releases/unreleased.entries/2026-08-08-empty.md",
+            "<!-- appsurface:unreleased-entry section=\"included\" -->\n");
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("must contain Markdown", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckRejectsTemplateWithDuplicateAppendOnlyMarker()
+    {
+        await SeedRepositoryAsync();
+        var template = await ReadFileAsync("releases/unreleased.md");
+        await WriteFileAsync(
+            "releases/unreleased.md",
+            template.Replace(
+                "<!-- appsurface:unreleased-entries section=\"included\" -->",
+                "<!-- appsurface:unreleased-entries section=\"included\" -->\n<!-- appsurface:unreleased-entries section=\"included\" -->",
+                StringComparison.Ordinal));
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("must contain exactly one", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnreleasedEntryComposerComposesEntriesAtSectionBottomInFilenameOrder()
+    {
+        var template = """
+            # Unreleased
+
+            ## Taking shape
+            <!-- appsurface:unreleased-entries section="taking-shape" -->
+
+            ## Included
+            - Existing note.
+            <!-- appsurface:unreleased-entries section="included" -->
+
+            ## Migration watch
+            <!-- appsurface:unreleased-entries section="migration-watch" -->
+            """;
+
+        var composed = UnreleasedEntryComposer.Compose(
+            template,
+            [
+                new UnreleasedEntry("/entries/2026-08-08-zulu.md", "included", "- Zulu entry."),
+                new UnreleasedEntry("/entries/2026-08-08-alpha.md", "included", "- Alpha entry."),
+                new UnreleasedEntry("/entries/2026-08-08-taking-shape.md", "taking-shape", "- Shaping entry.")
+            ]);
+
+        Assert.Contains("- Existing note.\n- Alpha entry.\n\n- Zulu entry.", composed, StringComparison.Ordinal);
+        Assert.Contains("## Taking shape\n- Shaping entry.", composed, StringComparison.Ordinal);
+        Assert.DoesNotContain("<!-- appsurface:unreleased-entries", composed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnreleasedEntryComposerRejectsUnsupportedTemplateMarkerAndPaths()
+    {
+        var unsupportedMarker = """
+            # Unreleased
+            <!-- appsurface:unreleased-entries section="taking-shape" -->
+            <!-- appsurface:unreleased-entries section="included" -->
+            <!-- appsurface:unreleased-entries section="migration-watch" -->
+            <!-- appsurface:unreleased-entries section="future" -->
+            """;
+
+        var templateException = Assert.Throws<UnreleasedEntryException>(
+            () => UnreleasedEntryComposer.Compose(unsupportedMarker, []));
+        Assert.Contains("no unsupported entry markers", templateException.Message, StringComparison.Ordinal);
+        Assert.Throws<ArgumentOutOfRangeException>(() => UnreleasedEntryComposer.MarkerFor("future"));
+        Assert.True(UnreleasedEntryComposer.IsEntryPath("releases\\unreleased.entries\\2026-08-08-valid-entry.md"));
+        Assert.False(UnreleasedEntryComposer.IsEntryPath("releases/unreleased.entries/nested/2026-08-08-valid-entry.md"));
+        Assert.False(UnreleasedEntryComposer.IsEntryPath("releases/unreleased.entries/not-an-entry.md"));
+        Assert.Throws<ArgumentException>(() => UnreleasedEntryComposer.IsEntryPath(" "));
+    }
+
+    [Fact]
+    public async Task UnreleasedEntryComposerAcceptsUtf8BomAndHonorsCancellation()
+    {
+        var entriesDirectory = RepositoryPath("releases/unreleased.entries");
+        Directory.CreateDirectory(entriesDirectory);
+        var entryPath = TestPathUtils.PathUnder(entriesDirectory, "2026-08-08-bom-entry.md");
+        await File.WriteAllTextAsync(
+            entryPath,
+            "<!-- appsurface:unreleased-entry section=\"included\" -->\n- BOM entry.\n",
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
+        var entries = await UnreleasedEntryComposer.LoadAsync(entriesDirectory, CancellationToken.None);
+
+        var entry = Assert.Single(entries.Entries);
+        Assert.Equal("included", entry.Section);
+        Assert.Equal("- BOM entry.", entry.Markdown);
+
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => UnreleasedEntryComposer.LoadAsync(entriesDirectory, cancellation.Token));
+    }
+
+    [Fact]
+    public async Task CheckRejectsSymlinkedAppendOnlyEntrySources()
+    {
+        await SeedRepositoryAsync();
+        var entriesDirectory = RepositoryPath("releases/unreleased.entries");
+        var externalEntriesDirectory = ExternalPath("unreleased.entries");
+        Directory.CreateDirectory(Path.GetDirectoryName(entriesDirectory)!);
+        Directory.CreateDirectory(externalEntriesDirectory);
+        if (!TryCreateSymbolicLink(entriesDirectory, externalEntriesDirectory, isDirectory: true))
+        {
+            return;
+        }
+
+        var directoryResult = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, directoryResult.ExitCode);
+        Assert.Contains("must not be a symlink", directoryResult.Stdout, StringComparison.Ordinal);
+
+        Directory.Delete(entriesDirectory);
+        Directory.CreateDirectory(entriesDirectory);
+        var externalEntry = ExternalPath("linked-entry.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(externalEntry)!);
+        await File.WriteAllTextAsync(
+            externalEntry,
+            "<!-- appsurface:unreleased-entry section=\"included\" -->\n- Linked entry.\n");
+        var linkedEntry = TestPathUtils.PathUnder(entriesDirectory, "2026-08-08-linked-entry.md");
+        if (!TryCreateSymbolicLink(linkedEntry, externalEntry, isDirectory: false))
+        {
+            return;
+        }
+
+        var entryResult = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, entryResult.ExitCode);
+        Assert.Contains("must not be a symlink", entryResult.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckRejectsShortOverlappingAppendOnlyEntryDirective()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync(
+            "releases/unreleased.entries/2026-08-08-short-directive.md",
+            """
+            <!-- appsurface:unreleased-entry section=" -->
+            - This malformed directive shares its one quote between the prefix and suffix checks.
+            """);
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("release-unreleased-entry-invalid", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("must begin with", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("## Competing section")]
+    [InlineData("  ## Indented competing section")]
+    [InlineData("Competing section\n=================")]
+    [InlineData("Competing section\r\n=================\r\n")]
+    public async Task CheckRejectsAppendOnlyEntryThatCreatesATopLevelSection(string heading)
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync(
+            "releases/unreleased.entries/2026-08-08-top-level-heading.md",
+            $"""
+            <!-- appsurface:unreleased-entry section="included" -->
+            {heading}
+            """);
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("must not introduce a top-level '#' or '##' section", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckRejectsAppendOnlyEntryThatContainsACompositionMarker()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync(
+            "releases/unreleased.entries/2026-08-08-composition-marker.md",
+            """
+            <!-- appsurface:unreleased-entry section="included" -->
+            <!-- appsurface:unreleased-entries section="included" -->
+
+            - This marker would corrupt composition.
+            """);
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("must not contain an AppSurface unreleased-entry composition marker", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckRejectsTemplateThatLacksAMarkerEvenWhenNoEntriesExist()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync(
+            "releases/unreleased.md",
+            """
+            # Unreleased
+
+            ## What is taking shape
+
+            - Missing the taking-shape marker.
+
+            ## Included in the next coordinated version
+
+            <!-- appsurface:unreleased-entries section="included" -->
+
+            <!-- appsurface:unreleased-entries section="migration-watch" -->
+            """);
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("release-unreleased-entry-invalid", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("taking-shape", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PrepareWritesExternalReportDuringDryRun()
     {
         await SeedRepositoryAsync();
@@ -228,6 +559,7 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Contains(
             manifest.RootElement.GetProperty("generatedFiles").EnumerateArray(),
             path => string.Equals(path.GetString(), "releases/v0.1.0-preview.1.evidence.json", StringComparison.Ordinal));
+        Assert.Empty(manifest.RootElement.GetProperty("consumedUnreleasedEntryPaths").EnumerateArray());
 
         var evidenceJson = await ReadFileAsync("releases/v0.1.0-preview.1.evidence.json");
         using var evidence = JsonDocument.Parse(evidenceJson);
@@ -1225,6 +1557,317 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task PrepareRejectsConcurrentUnreleasedEntryChangeBeforeWritingAnyReleaseArtifacts()
+    {
+        await SeedRepositoryAsync();
+        const string entryPath = "releases/unreleased.entries/2026-08-08-concurrent-entry.md";
+        await WriteFileAsync(
+            entryPath,
+            """
+            <!-- appsurface:unreleased-entry section="included" -->
+            - Original entry.
+            """);
+        var workspace = new ReleaseWorkspace(_repositoryRoot);
+        var checker = new ReleaseChecker(workspace, FakeCommandRunner.WithSourceCommit("abc123"));
+        var preparation = new ReleasePreparation(
+            workspace,
+            checker,
+            new SystemReleaseClock(),
+            _ => WriteFileAsync(
+                entryPath,
+                """
+                <!-- appsurface:unreleased-entry section="included" -->
+                - Concurrent entry.
+                """));
+        var options = new ReleaseOptions(
+            "prepare",
+            _repositoryRoot,
+            SemVer.Parse("0.1.0-preview.1"),
+            Tag: null,
+            Date: new DateOnly(2026, 5, 25),
+            DryRun: false,
+            ReportPath: null,
+            GitHubOutputPath: null,
+            FailOnWarnings: false,
+            AllowExistingTargets: false);
+
+        var error = await Assert.ThrowsAsync<ReleaseToolException>(
+            () => preparation.PrepareAsync(options, CancellationToken.None));
+
+        Assert.Equal("release-unreleased-entry-concurrent-update", error.Diagnostic.Code);
+        Assert.False(File.Exists(RepositoryPath("releases/v0.1.0-preview.1.md")));
+        Assert.Contains("Concurrent entry.", await ReadFileAsync(entryPath), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PrepareRestoresEntryChangedDuringGuardedArchiveHandoff()
+    {
+        await SeedRepositoryAsync();
+        const string entryPath = "releases/unreleased.entries/2026-08-08-archive-handoff.md";
+        await WriteFileAsync(
+            entryPath,
+            """
+            <!-- appsurface:unreleased-entry section="included" -->
+            - Original entry.
+            """);
+        var workspace = new ReleaseWorkspace(_repositoryRoot);
+        var checker = new ReleaseChecker(workspace, FakeCommandRunner.WithSourceCommit("abc123"));
+        var preparation = new ReleasePreparation(
+            workspace,
+            checker,
+            new SystemReleaseClock(),
+            beforeArchiveEntryAsync: (_, _) => WriteFileAsync(
+                entryPath,
+                """
+                <!-- appsurface:unreleased-entry section="included" -->
+                - Concurrent entry.
+                """));
+        var options = new ReleaseOptions(
+            "prepare",
+            _repositoryRoot,
+            SemVer.Parse("0.1.0-preview.1"),
+            Tag: null,
+            Date: new DateOnly(2026, 5, 25),
+            DryRun: false,
+            ReportPath: null,
+            GitHubOutputPath: null,
+            FailOnWarnings: false,
+            AllowExistingTargets: false);
+
+        var error = await Assert.ThrowsAsync<ReleaseToolException>(
+            () => preparation.PrepareAsync(options, CancellationToken.None));
+
+        Assert.Equal("release-unreleased-entry-concurrent-update", error.Diagnostic.Code);
+        Assert.Contains("restored without deletion", error.Diagnostic.Cause, StringComparison.Ordinal);
+        Assert.Contains("Concurrent entry.", await ReadFileAsync(entryPath), StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFiles(RepositoryPath("releases/.release-prep-recovery")));
+        Assert.Equal(ReleaseCurrentPointer.BuildNone(), await ReadFileAsync("releases/current.md"));
+    }
+
+    [Fact]
+    public async Task PrepareRetainsChangedArchiveCandidateWhenAnotherWriterRecreatesTheEntryPath()
+    {
+        await SeedRepositoryAsync();
+        const string entryPath = "releases/unreleased.entries/2026-08-08-archive-recovery.md";
+        await WriteFileAsync(
+            entryPath,
+            """
+            <!-- appsurface:unreleased-entry section="included" -->
+            - Original entry.
+            """);
+        var workspace = new ReleaseWorkspace(_repositoryRoot);
+        var checker = new ReleaseChecker(workspace, FakeCommandRunner.WithSourceCommit("abc123"));
+        var preparation = new ReleasePreparation(
+            workspace,
+            checker,
+            new SystemReleaseClock(),
+            beforeArchiveEntryAsync: (_, _) => WriteFileAsync(
+                entryPath,
+                """
+                <!-- appsurface:unreleased-entry section="included" -->
+                - Changed candidate.
+                """),
+            afterArchiveEntryHandoffAsync: (_, _, _) => WriteFileAsync(
+                entryPath,
+                """
+                <!-- appsurface:unreleased-entry section="included" -->
+                - Later entry.
+                """));
+        var options = new ReleaseOptions(
+            "prepare",
+            _repositoryRoot,
+            SemVer.Parse("0.1.0-preview.1"),
+            Tag: null,
+            Date: new DateOnly(2026, 5, 25),
+            DryRun: false,
+            ReportPath: null,
+            GitHubOutputPath: null,
+            FailOnWarnings: false,
+            AllowExistingTargets: false);
+
+        var error = await Assert.ThrowsAsync<ReleaseToolException>(
+            () => preparation.PrepareAsync(options, CancellationToken.None));
+
+        Assert.Equal("release-unreleased-entry-concurrent-update", error.Diagnostic.Code);
+        Assert.Contains("preserved at 'releases/.release-prep-recovery/", error.Diagnostic.Cause, StringComparison.Ordinal);
+        Assert.Contains("Later entry.", await ReadFileAsync(entryPath), StringComparison.Ordinal);
+        var recoveryPath = Assert.Single(Directory.EnumerateFiles(RepositoryPath("releases/.release-prep-recovery")));
+        Assert.EndsWith(".recovery", recoveryPath, StringComparison.Ordinal);
+        Assert.Contains("Changed candidate.", await File.ReadAllTextAsync(recoveryPath), StringComparison.Ordinal);
+        Assert.Equal(ReleaseCurrentPointer.BuildNone(), await ReadFileAsync("releases/current.md"));
+    }
+
+    [Fact]
+    public async Task PrepareKeepsNewEntryCreatedAfterGuardedArchiveHandoff()
+    {
+        await SeedRepositoryAsync();
+        const string entryPath = "releases/unreleased.entries/2026-08-08-later-entry.md";
+        await WriteFileAsync(
+            entryPath,
+            """
+            <!-- appsurface:unreleased-entry section="included" -->
+            - Original entry.
+            """);
+        var workspace = new ReleaseWorkspace(_repositoryRoot);
+        var checker = new ReleaseChecker(workspace, FakeCommandRunner.WithSourceCommit("abc123"));
+        var preparation = new ReleasePreparation(
+            workspace,
+            checker,
+            new SystemReleaseClock(),
+            afterArchiveEntryHandoffAsync: (_, _, _) => WriteFileAsync(
+                entryPath,
+                """
+                <!-- appsurface:unreleased-entry section="included" -->
+                - Later entry.
+                """));
+        var options = new ReleaseOptions(
+            "prepare",
+            _repositoryRoot,
+            SemVer.Parse("0.1.0-preview.1"),
+            Tag: null,
+            Date: new DateOnly(2026, 5, 25),
+            DryRun: false,
+            ReportPath: null,
+            GitHubOutputPath: null,
+            FailOnWarnings: false,
+            AllowExistingTargets: false);
+
+        var result = await preparation.PrepareAsync(options, CancellationToken.None);
+
+        Assert.False(result.Check.HasErrors);
+        Assert.Contains("Original entry.", await ReadFileAsync("releases/v0.1.0-preview.1.md"), StringComparison.Ordinal);
+        Assert.Contains("Later entry.", await ReadFileAsync(entryPath), StringComparison.Ordinal);
+        Assert.Equal(ReleaseCurrentPointer.Build(SemVer.Parse("0.1.0-preview.1")), await ReadFileAsync("releases/current.md"));
+        Assert.Empty(Directory.EnumerateFiles(RepositoryPath("releases/.release-prep-recovery")));
+    }
+
+    [Fact]
+    public async Task PrepareReportsAnEntryRemovedBeforeGuardedArchiveHandoff()
+    {
+        await SeedRepositoryAsync();
+        const string entryPath = "releases/unreleased.entries/2026-08-08-removed-before-handoff.md";
+        await WriteFileAsync(
+            entryPath,
+            """
+            <!-- appsurface:unreleased-entry section="included" -->
+            - Original entry.
+            """);
+        var workspace = new ReleaseWorkspace(_repositoryRoot);
+        var checker = new ReleaseChecker(workspace, FakeCommandRunner.WithSourceCommit("abc123"));
+        var preparation = new ReleasePreparation(
+            workspace,
+            checker,
+            new SystemReleaseClock(),
+            beforeArchiveEntryAsync: (_, _) =>
+            {
+                File.Delete(RepositoryPath(entryPath));
+                return Task.CompletedTask;
+            });
+        var options = new ReleaseOptions(
+            "prepare",
+            _repositoryRoot,
+            SemVer.Parse("0.1.0-preview.1"),
+            Tag: null,
+            Date: new DateOnly(2026, 5, 25),
+            DryRun: false,
+            ReportPath: null,
+            GitHubOutputPath: null,
+            FailOnWarnings: false,
+            AllowExistingTargets: false);
+
+        var error = await Assert.ThrowsAsync<ReleaseToolException>(
+            () => preparation.PrepareAsync(options, CancellationToken.None));
+
+        Assert.Equal("release-unreleased-entry-concurrent-update", error.Diagnostic.Code);
+        Assert.Contains("could not move the entry", error.Diagnostic.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PrepareConvertsEntryValidationFailureAfterReadinessCheckToDiagnostic()
+    {
+        await SeedRepositoryAsync();
+        const string entryPath = "releases/unreleased.entries/2026-08-08-validation-race.md";
+        await WriteFileAsync(
+            entryPath,
+            "<!-- appsurface:unreleased-entry section=\"included\" -->\n- Original entry.\n");
+        var runner = FakeCommandRunner.WithSourceCommit("abc123");
+        var replacedEntryAfterReadinessCheck = false;
+        runner.BeforeRun = invocation =>
+        {
+            if (replacedEntryAfterReadinessCheck
+                || !string.Equals(invocation.Executable, "git", StringComparison.Ordinal)
+                || invocation.Arguments.Count != 2
+                || !string.Equals(invocation.Arguments[0], "rev-parse", StringComparison.Ordinal)
+                || !string.Equals(invocation.Arguments[1], "HEAD", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            File.WriteAllText(RepositoryPath(entryPath), "- Entry no longer has a directive.\n");
+            replacedEntryAfterReadinessCheck = true;
+        };
+        var workspace = new ReleaseWorkspace(_repositoryRoot);
+        var preparation = new ReleasePreparation(workspace, new ReleaseChecker(workspace, runner), new SystemReleaseClock());
+        var options = new ReleaseOptions(
+            "prepare",
+            _repositoryRoot,
+            SemVer.Parse("0.1.0-preview.1"),
+            Tag: null,
+            Date: new DateOnly(2026, 5, 25),
+            DryRun: false,
+            ReportPath: null,
+            GitHubOutputPath: null,
+            FailOnWarnings: false,
+            AllowExistingTargets: false);
+
+        var error = await Assert.ThrowsAsync<ReleaseToolException>(
+            () => preparation.PrepareAsync(options, CancellationToken.None));
+
+        Assert.True(replacedEntryAfterReadinessCheck);
+        Assert.Equal("release-unreleased-entry-invalid", error.Diagnostic.Code);
+        Assert.Contains("must begin with", error.Diagnostic.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PrepareRejectsSymlinkedEntryRecoveryDirectory()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync(
+            "releases/unreleased.entries/2026-08-08-recovery-directory.md",
+            "<!-- appsurface:unreleased-entry section=\"included\" -->\n- Original entry.\n");
+        var recoveryDirectory = RepositoryPath("releases/.release-prep-recovery");
+        var externalRecoveryDirectory = ExternalPath("recovery-directory");
+        Directory.CreateDirectory(externalRecoveryDirectory);
+        if (!TryCreateSymbolicLink(recoveryDirectory, externalRecoveryDirectory, isDirectory: true))
+        {
+            return;
+        }
+
+        var workspace = new ReleaseWorkspace(_repositoryRoot);
+        var preparation = new ReleasePreparation(
+            workspace,
+            new ReleaseChecker(workspace, FakeCommandRunner.WithSourceCommit("abc123")),
+            new SystemReleaseClock());
+        var options = new ReleaseOptions(
+            "prepare",
+            _repositoryRoot,
+            SemVer.Parse("0.1.0-preview.1"),
+            Tag: null,
+            Date: new DateOnly(2026, 5, 25),
+            DryRun: false,
+            ReportPath: null,
+            GitHubOutputPath: null,
+            FailOnWarnings: false,
+            AllowExistingTargets: false);
+
+        var error = await Assert.ThrowsAsync<ReleaseToolException>(
+            () => preparation.PrepareAsync(options, CancellationToken.None));
+
+        Assert.Equal("release-preparation-output-path-unsafe", error.Diagnostic.Code);
+        Assert.Contains("Directory segment", error.Diagnostic.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void CurrentPointerRequiresAnExactCanonicalTemplate()
     {
         Assert.True(ReleaseCurrentPointer.TryParse(ReleaseCurrentPointer.BuildNone(), out var initial));
@@ -1432,7 +2075,7 @@ public sealed class ReleaseToolTests : IDisposable
     public void ReleaseManifestV2Validator_RejectsMalformedUnknownAndIncompleteContracts()
     {
         const string validManifest = """
-            {"schema":"appsurface-release-manifest-v2","version":"0.1.0-preview.1","tag":"v0.1.0-preview.1","date":"2026-05-25","preparationBaseCommit":"abc123","releaseClassification":"prerelease","generatedFiles":[],"publishedPackageProjects":[],"coordinatedPackageReleaseNoteResolutions":[],"diagnostics":[],"warningIds":[]}
+            {"schema":"appsurface-release-manifest-v2","version":"0.1.0-preview.1","tag":"v0.1.0-preview.1","date":"2026-05-25","preparationBaseCommit":"abc123","releaseClassification":"prerelease","generatedFiles":[],"publishedPackageProjects":[],"coordinatedPackageReleaseNoteResolutions":[],"diagnostics":[],"warningIds":[],"consumedUnreleasedEntryPaths":[]}
             """;
 
         Assert.False(ReleaseManifestV2Validator.TryDeserialize("{", out var malformedManifest, out var malformedIssue));
@@ -1623,7 +2266,17 @@ public sealed class ReleaseToolTests : IDisposable
             """
             # Unreleased
 
+            ## What is taking shape
+
+            <!-- appsurface:unreleased-entries section="taking-shape" -->
+
+            ## Included in the next coordinated version
+
             TODO: replace this placeholder before release.
+
+            <!-- appsurface:unreleased-entries section="included" -->
+
+            <!-- appsurface:unreleased-entries section="migration-watch" -->
             """);
 
         var result = await RunAsync(
@@ -2722,7 +3375,10 @@ public sealed class ReleaseToolTests : IDisposable
             check,
             ["releases/v0.1.0-preview.1.md", "releases/current.md", "CHANGELOG.md"],
             false,
-            null);
+            null)
+        {
+            ArchivedUnreleasedEntryPaths = ["releases/unreleased.entries/2026-08-08-release-workflow.md"]
+        };
 
         var report = ReleaseReportRenderer.RenderPreparation(result);
 
@@ -2731,8 +3387,10 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Contains("  - `releases/v0.1.0-preview.1.md`", report, StringComparison.Ordinal);
         Assert.Contains("  - `releases/current.md`", report, StringComparison.Ordinal);
         Assert.Contains("  - `CHANGELOG.md`", report, StringComparison.Ordinal);
+        Assert.Contains("## Archived unreleased entries", report, StringComparison.Ordinal);
+        Assert.Contains("  - `releases/unreleased.entries/2026-08-08-release-workflow.md`", report, StringComparison.Ordinal);
         Assert.Contains(
-            "- Safe rollback validation: run `git diff --check`, confirm the listed artifacts are absent or match the pre-run state, then rerun `./eng/release check --version 0.1.0-preview.1 --allow-existing-targets` before another prepare attempt.",
+            "- Safe rollback validation: run `git diff --check`, confirm generated artifacts are absent or match the pre-run state, confirm archived unreleased entries are restored to the pre-run state, then rerun `./eng/release check --version 0.1.0-preview.1 --allow-existing-targets` before another prepare attempt.",
             report,
             StringComparison.Ordinal);
     }
@@ -6686,16 +7344,19 @@ public sealed class ReleaseToolTests : IDisposable
             ## What is taking shape
 
             - The release story is almost ready.
+            <!-- appsurface:unreleased-entries section="taking-shape" -->
 
             ## Included in the next coordinated version
 
             ### Release and docs surface
 
             - The release cockpit prepares release pull requests.
+            <!-- appsurface:unreleased-entries section="included" -->
 
             ## Migration watch
 
             - No migration steps are required.
+            <!-- appsurface:unreleased-entries section="migration-watch" -->
             """);
         await WriteFileAsync(
             "releases/unreleased.md.yml",

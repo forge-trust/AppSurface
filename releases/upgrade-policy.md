@@ -10,7 +10,7 @@ AppSurface is still before `v1.0.0`, so rapid change is expected. That does not 
 
 ## Where migration notes live
 
-- Before a version is tagged: put provisional guidance in [`unreleased.md`](./unreleased.md).
+- Before a version is tagged: put provisional guidance in release-note files under `releases/unreleased.entries/` using the required `appsurface:unreleased-entry` directive; release preparation composes those entries into [`unreleased.md`](./unreleased.md).
 - When a version is tagged: move the finalized guidance into the versioned release note under `releases/`.
 - Keep [`CHANGELOG.md`](../CHANGELOG.md) concise and link readers to the full release note when more detail is needed.
 
