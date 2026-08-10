@@ -918,7 +918,9 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         try
         {
             Marshal.WriteInt32(buffer, 0, 1);
-            Marshal.WriteIntPtr(buffer, rootDirectoryOffset, _outputHandle!.DangerousGetHandle());
+            // The staged source and final artifact are siblings, so the simple target name must retain
+            // the source handle's parent directory instead of supplying a relocation root.
+            Marshal.WriteIntPtr(buffer, rootDirectoryOffset, IntPtr.Zero);
             Marshal.WriteInt32(buffer, fileNameLengthOffset, fileNameBytes.Length);
             Marshal.Copy(fileNameBytes, 0, IntPtr.Add(buffer, fileNameOffset), fileNameBytes.Length);
             Marshal.WriteInt16(buffer, fileNameOffset + fileNameBytes.Length, 0);
