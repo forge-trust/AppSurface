@@ -5,7 +5,7 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 ## Before the release branch or tag
 
 - run `./eng/release check --version x.y.z` to validate the release inputs, package policy, generated targets, and warning IDs
-- make sure the pull request queue has updated [`unreleased.md`](./unreleased.md)
+- make sure the pull request queue has added the expected `releases/unreleased.entries/*.md` files and that [`unreleased.md`](./unreleased.md) reflects the composed draft produced by release preparation
 - regroup the story so the opening narrative explains what changed and why it matters
 - rewrite maintainer-led bullets into consumer-led entries for every prerelease, release-candidate, and stable note: outcome first, affected package or app shape second, maintainer evidence last
 - replace opaque shorthand with a plain-language explanation before the label, especially for cross-package concepts such as [auth projection](../Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md), [static export safety](../Web/ForgeTrust.RazorWire/README.md), or [release evidence](./README.md)

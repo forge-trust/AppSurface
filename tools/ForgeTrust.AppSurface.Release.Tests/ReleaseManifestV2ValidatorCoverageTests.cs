@@ -37,6 +37,15 @@ public sealed class ReleaseManifestV2ValidatorCoverageTests
     }
 
     [Fact]
+    public void TryDeserializeRejectsMissingConsumedUnreleasedEntryPaths()
+    {
+        var json = ManifestJson();
+        json.Remove("consumedUnreleasedEntryPaths");
+
+        AssertInvalid(json, "Release manifest has missing, unknown, or V1-only properties.");
+    }
+
+    [Fact]
     public void TryDeserializeRejectsUnknownProperty()
     {
         var json = ManifestJson();
@@ -123,6 +132,19 @@ public sealed class ReleaseManifestV2ValidatorCoverageTests
             ]);
 
         AssertInvalid(json, "Release manifest V2 package resolutions are invalid or not ordinally sorted.");
+    }
+
+    [Theory]
+    [InlineData("releases/unreleased.entries/2026-08-08-zulu.md", "releases/unreleased.entries/2026-08-08-alpha.md")]
+    [InlineData("releases/unreleased.entries/2026-08-08-alpha.md", "releases/unreleased.entries/2026-08-08-alpha.md")]
+    [InlineData("releases/unreleased.entries/not-an-entry.md")]
+    [InlineData("releases\\unreleased.entries\\2026-08-08-backslash.md")]
+    public void TryDeserializeRejectsInvalidOrUnorderedConsumedUnreleasedEntries(params string[] paths)
+    {
+        var json = ManifestJson();
+        json["consumedUnreleasedEntryPaths"] = new JsonArray(paths.Select(path => JsonValue.Create(path)).ToArray());
+
+        AssertInvalid(json, "Release manifest V2 consumed unreleased entry paths are invalid or not ordinally sorted.");
     }
 
     [Theory]
@@ -259,7 +281,8 @@ public sealed class ReleaseManifestV2ValidatorCoverageTests
             ["publishedPackageProjects"] = new JsonArray((publishedProjects ?? []).Select(project => JsonValue.Create(project)).ToArray()),
             ["coordinatedPackageReleaseNoteResolutions"] = new JsonArray((resolutions ?? []).Cast<JsonNode?>().ToArray()),
             ["diagnostics"] = new JsonArray(),
-            ["warningIds"] = new JsonArray()
+            ["warningIds"] = new JsonArray(),
+            ["consumedUnreleasedEntryPaths"] = new JsonArray()
         };
     }
 

@@ -47,26 +47,140 @@ jobs:
                 per_page: 100
               });
             const changedFiles = files.map(file => file.filename);
-            const touchesUnreleased = changedFiles.includes("releases/unreleased.md");
+            const touchesUnreleasedTemplate = changedFiles.includes("releases/unreleased.md");
+            const updatesReleaseContract = changedFiles.includes(".github/workflows/release-contract.yml");
+            const unreleasedEntryFiles = files.filter(file =>
+              file.filename.startsWith("releases/unreleased.entries/"));
+            const addedUnreleasedEntries = unreleasedEntryFiles.filter(file => file.status === "added");
+            const addsUnreleasedEntry = addedUnreleasedEntries.length > 0;
+            const changesReleaseManifest = files.some(file =>
+              /^releases\/v[^/]+\.release\.json$/.test(file.filename)
+              && (file.status === "added" || file.status === "modified"));
+            const supportedSections = new Set(["taking-shape", "included", "migration-watch"]);
+            const entryPathPattern = /^releases\/unreleased\.entries\/\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/;
+            const templateMarkers = [...supportedSections].map(section =>
+              `<!-- appsurface:unreleased-entries section="${section}" -->`);
 
             const failures = [];
+
+            async function readRepositoryText(path) {
+              const response = await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path,
+                ref: pr.head.sha
+              });
+              if (Array.isArray(response.data) || typeof response.data.content !== "string") {
+                throw new Error(`${path} is not a text file.`);
+              }
+
+              return Buffer.from(response.data.content, response.data.encoding || "base64")
+                .toString("utf8")
+                .replace(/^\uFEFF/, "");
+            }
+
+            function countOccurrences(content, value) {
+              return content.split(value).length - 1;
+            }
+
+            function hasValidEntryDate(path) {
+              const dateText = path.slice("releases/unreleased.entries/".length, "releases/unreleased.entries/".length + 10);
+              if (dateText.startsWith("0000")) {
+                return false;
+              }
+
+              const parsed = new Date(`${dateText}T00:00:00.000Z`);
+              return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === dateText;
+            }
+
+            async function validateUnreleasedTemplate() {
+              try {
+                const template = await readRepositoryText("releases/unreleased.md");
+                for (const marker of templateMarkers) {
+                  if (countOccurrences(template, marker) !== 1) {
+                    failures.push(
+                      `releases/unreleased.md must contain exactly one ${marker} marker.`);
+                  }
+                }
+
+                const allMarkers = template.match(/<!-- appsurface:unreleased-entries section="[^"]+" -->/g) || [];
+                if (countOccurrences(template, "<!-- appsurface:unreleased-entries") !== templateMarkers.length
+                  || allMarkers.length !== templateMarkers.length) {
+                  failures.push(
+                    "releases/unreleased.md must not contain unsupported append-only entry markers.");
+                }
+              } catch (error) {
+                failures.push(`Could not validate releases/unreleased.md at the pull request head: ${error.message}`);
+              }
+            }
+
+            async function validateAddedUnreleasedEntries() {
+              for (const file of addedUnreleasedEntries) {
+                if (!entryPathPattern.test(file.filename) || !hasValidEntryDate(file.filename)) {
+                  failures.push(
+                    `${file.filename} must use the direct releases/unreleased.entries/YYYY-MM-DD-topic.md path shape.`);
+                  continue;
+                }
+
+                try {
+                  const content = await readRepositoryText(file.filename);
+                  const firstLineEnd = content.indexOf("\n");
+                  const directive = (firstLineEnd >= 0 ? content.slice(0, firstLineEnd) : content).replace(/\r$/, "");
+                  const match = /^<!-- appsurface:unreleased-entry section="([^"]+)" -->$/.exec(directive);
+                  const markdown = (firstLineEnd >= 0 ? content.slice(firstLineEnd + 1) : "").trim();
+                  if (!match || !supportedSections.has(match[1])) {
+                    failures.push(
+                      `${file.filename} must begin with an exact supported appsurface:unreleased-entry directive.`);
+                  }
+                  if (!markdown) {
+                    failures.push(`${file.filename} must contain Markdown after its directive.`);
+                  }
+                  if (/<!-- appsurface:unreleased-(?:entries|entry)/.test(markdown)) {
+                    failures.push(`${file.filename} must not contain an AppSurface unreleased-entry composition marker.`);
+                  }
+                  const hasTopLevelAtxHeading = /^(?: {0,3})#{1,2}(?!#)[ \t]/m.test(markdown);
+                  const hasTopLevelSetextHeading = /^(?: {0,3})\S.*\r?\n(?: {0,3})(?:=+|-+)[ \t]*\r?$/m.test(markdown);
+                  if (hasTopLevelAtxHeading || hasTopLevelSetextHeading) {
+                    failures.push(`${file.filename} must not introduce a top-level # or ## heading.`);
+                  }
+                } catch (error) {
+                  failures.push(`Could not validate ${file.filename} at the pull request head: ${error.message}`);
+                }
+              }
+            }
 
             if (!conventionalCommitTitle.test(title)) {
               failures.push(
                 "PR titles must follow Conventional Commits, for example `feat(web): add streamed sidebar`.");
             }
 
-            if (!skipUnreleasedEntry && !touchesUnreleased) {
+            if (!skipUnreleasedEntry && !changesReleaseManifest && !addsUnreleasedEntry) {
               failures.push(
-                "PRs must update `releases/unreleased.md` unless a maintainer applies the `no-unreleased-entry` label.");
+                "PRs must add a new Markdown file under `releases/unreleased.entries/` unless a maintainer applies the `no-unreleased-entry` label.");
             }
+
+            if (!changesReleaseManifest && unreleasedEntryFiles.some(file => file.status !== "added")) {
+              failures.push(
+                "Feature pull requests must add a new unreleased entry instead of modifying or removing an existing entry; only release preparation may remove archived entries.");
+            }
+
+            if (!changesReleaseManifest && touchesUnreleasedTemplate && !updatesReleaseContract) {
+              failures.push(
+                "Feature pull requests must not edit releases/unreleased.md; add an append-only entry instead. Only release preparation or a release-contract policy update may change the shared template.");
+            }
+
+            await validateUnreleasedTemplate();
+            await validateAddedUnreleasedEntries();
 
             await core.summary
               .addHeading("Release contract check")
               .addTable([
                 [{data: "PR title", header: true}, title || "(empty)"],
                 [{data: "Conventional title", header: true}, conventionalCommitTitle.test(title) ? "yes" : "no"],
-                [{data: "Touched unreleased note", header: true}, touchesUnreleased ? "yes" : "no"],
+                [{data: "Touched unreleased template", header: true}, touchesUnreleasedTemplate ? "yes" : "no"],
+                [{data: "Release contract changed", header: true}, updatesReleaseContract ? "yes" : "no"],
+                [{data: "Added unreleased entry", header: true}, addsUnreleasedEntry ? "yes" : "no"],
+                [{data: "Release manifest changed", header: true}, changesReleaseManifest ? "yes" : "no"],
                 [{data: "Skip label present", header: true}, skipUnreleasedEntry ? "yes" : "no"]
               ])
               .write();
