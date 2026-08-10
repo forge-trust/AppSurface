@@ -206,6 +206,30 @@ public sealed class NamedCanaryLabEndpointTests
     }
 
     [Fact]
+    public async Task CanaryRoute_AcceptsBearerCredentialsAtTheExactUtf8ByteLimit()
+    {
+        var token = new string('é', 8 * 1024);
+        await using var host = await CreateHostAsync(CanaryLabScenario.Pending, token);
+        using var request = CanaryRequest(DateTimeOffset.UtcNow.AddMinutes(-1), token);
+
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CanaryRoute_RejectsBearerCredentialsAboveTheUtf8ByteLimit()
+    {
+        var token = new string('é', 8 * 1024) + "x";
+        await using var host = await CreateHostAsync(CanaryLabScenario.Pending, token);
+        using var request = CanaryRequest(DateTimeOffset.UtcNow.AddMinutes(-1), token);
+
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Trigger_RejectsNewMarkersWhenTheBoundedStoreIsFullWithoutLeakingValues()
     {
         await using var host = await CreateHostAsync(CanaryLabScenario.Pass);

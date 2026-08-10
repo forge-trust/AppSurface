@@ -65,18 +65,19 @@ NamedCanaryLab__Scenario="Pass" \
 dotnet run --project examples/named-canary-lab/NamedCanaryLab.csproj -- --port 61260 &
 lab_pid=$!
 
-attempt=0
-while [ "$attempt" -lt 1200 ]; do
-  if curl --silent --show-error --fail http://127.0.0.1:61260/ >/dev/null 2>&1; then
-    break
+startup_deadline=$((SECONDS + 120))
+while ! curl --disable --noproxy '*' --connect-timeout 1 --max-time 1 \
+  --silent --show-error --fail http://127.0.0.1:61260/ >/dev/null 2>&1; do
+  if [ "$SECONDS" -ge "$startup_deadline" ]; then
+    echo "The named-canary lab did not become reachable before the local deadline." >&2
+    exit 1
   fi
 
-  attempt=$((attempt + 1))
   sleep 0.1
 done
-curl --silent --show-error --fail http://127.0.0.1:61260/ >/dev/null
 
-curl --silent --show-error --fail \
+curl --disable --noproxy '*' --connect-timeout 1 --max-time 5 \
+  --silent --show-error --fail \
   --request POST \
   --config - \
   --output /dev/null \

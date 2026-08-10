@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text;
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
@@ -10,7 +11,7 @@ internal sealed class CanaryLabAuthenticationHandler : AuthenticationHandler<Aut
 {
     /// <summary>Names the Development-only bearer scheme registered by <see cref="NamedCanaryLabApp"/>.</summary>
     public const string SchemeName = "NamedCanaryLabOperator";
-    private const int MaximumOperatorTokenLength = 16 * 1024;
+    private const int MaximumOperatorTokenUtf8Bytes = 16 * 1024;
 
     private readonly CanaryLabSettings _settings;
 
@@ -29,13 +30,17 @@ internal sealed class CanaryLabAuthenticationHandler : AuthenticationHandler<Aut
         var authorization = Request.Headers.Authorization.ToString();
         const string prefix = "Bearer ";
         if (!authorization.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-            || authorization.Length <= prefix.Length
-            || authorization.Length > prefix.Length + MaximumOperatorTokenLength)
+            || authorization.Length <= prefix.Length)
         {
             return Task.FromResult(AuthenticateResult.NoResult());
         }
 
         var token = authorization[prefix.Length..];
+        if (Encoding.UTF8.GetByteCount(token) > MaximumOperatorTokenUtf8Bytes)
+        {
+            return Task.FromResult(AuthenticateResult.NoResult());
+        }
+
         if (!_settings.MatchesOperatorToken(token))
         {
             return Task.FromResult(AuthenticateResult.NoResult());

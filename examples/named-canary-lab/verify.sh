@@ -59,9 +59,11 @@ NamedCanaryLab__Environment="development" \
 NamedCanaryLab__Scenario="$configured_scenario" \
 dotnet run --project "$lab_project" --no-build --no-launch-profile -- --port "$port" >"$app_log" 2>&1 &
 app_pid="$!"
+startup_deadline=$((SECONDS + 120))
 
-for ((attempt = 0; attempt < 1200; attempt++)); do
-  if curl --silent --show-error --fail "$base_url/" >/dev/null 2>&1; then
+while true; do
+  if curl --disable --noproxy '*' --connect-timeout 1 --max-time 1 \
+    --silent --show-error --fail "$base_url/" >/dev/null 2>&1; then
     break
   fi
 
@@ -69,15 +71,16 @@ for ((attempt = 0; attempt < 1200; attempt++)); do
     fail_with_diagnostics 3 "The named-canary lab did not start."
   fi
 
+  if (( SECONDS >= startup_deadline )); then
+    fail_with_diagnostics 3 "The named-canary lab did not become reachable before the local deadline."
+  fi
+
   sleep 0.1
 done
 
-if ! curl --silent --show-error --fail "$base_url/" >/dev/null 2>&1; then
-  fail_with_diagnostics 3 "The named-canary lab did not become reachable before the local deadline."
-fi
-
 fresh_since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-if ! curl --silent --show-error --fail \
+if ! curl --disable --noproxy '*' --connect-timeout 1 --max-time 5 \
+  --silent --show-error --fail \
   --request POST \
   --config - \
   --output /dev/null \

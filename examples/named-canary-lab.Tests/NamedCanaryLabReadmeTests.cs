@@ -22,6 +22,8 @@ public sealed class NamedCanaryLabReadmeTests
         Assert.Contains("## Copy the pattern, not the lab", readme, StringComparison.Ordinal);
         Assert.Contains("not health, readiness, traffic rollout analysis", readme, StringComparison.Ordinal);
         Assert.Contains("set +x", readme, StringComparison.Ordinal);
+        Assert.Contains("curl --disable", readme, StringComparison.Ordinal);
+        Assert.Contains("--noproxy '*'", readme, StringComparison.Ordinal);
         Assert.DoesNotContain("${{", readme, StringComparison.Ordinal);
         Assert.DoesNotContain("runs-on:", readme, StringComparison.Ordinal);
         Assert.DoesNotContain("markerFingerprint", readme, StringComparison.Ordinal);
@@ -31,6 +33,13 @@ public sealed class NamedCanaryLabReadmeTests
 
         var verifier = File.ReadAllText(Path.Join(FindRepositoryRoot(), "examples", "named-canary-lab", "verify.sh"));
         Assert.Contains("--config -", verifier, StringComparison.Ordinal);
+        Assert.Contains("curl --disable", verifier, StringComparison.Ordinal);
+        Assert.Contains("--noproxy '*'", verifier, StringComparison.Ordinal);
+        Assert.Contains("--max-time", verifier, StringComparison.Ordinal);
+        Assert.True(
+            verifier.IndexOf("app_pid=\"$!\"", StringComparison.Ordinal)
+                < verifier.IndexOf("startup_deadline=$((SECONDS + 120))", StringComparison.Ordinal),
+            "The verifier must begin its two-minute bind deadline only after it starts the local host.");
         Assert.Contains("od -An -N 32 -tx1 /dev/urandom", verifier, StringComparison.Ordinal);
         Assert.Contains("fail_with_diagnostics", verifier, StringComparison.Ordinal);
         Assert.Contains("Local diagnostics remain at $app_log.", verifier, StringComparison.Ordinal);
