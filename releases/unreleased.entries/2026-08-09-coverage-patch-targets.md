@@ -1,0 +1,5 @@
+<!-- appsurface:unreleased-entry section="included" -->
+### Coverage workflow
+
+- [`appsurface coverage gate`](../Cli/ForgeTrust.AppSurface.Cli/README.md#agent-actionable-patch-targets) now writes threshold-independent `coverage-patch-targets.json` and `coverage-patch-targets.md` whenever a patch source is supplied. Contributors can use the local, untracked queue to find the exact uncovered or partially conditioned changed locations from the normalized Cobertura evidence, distinguish branch-only work from patch-line work, and remove stale targets by running a nonpatch gate.
+- [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#require-a-non-sandboxed-runner) now supports opt-in `--require-non-sandbox`; the repository coverage wrapper enables it by default, with `COVERAGE_REQUIRE_NON_SANDBOX=false` as the explicit restricted-run escape hatch. The preflight recognizes only explicit sandbox markers, fails with `ASCOV116` before discovery, cleanup, build, or tests, never renders marker values, and deliberately does not classify generic container or CI hosts as sandboxes.
