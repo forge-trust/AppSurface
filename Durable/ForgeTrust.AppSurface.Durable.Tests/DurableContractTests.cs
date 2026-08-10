@@ -885,11 +885,14 @@ public sealed class DurableContractTests
     [Fact]
     public void Durable_activity_result_expectation_validates_registered_codec_metadata()
     {
-        var expectation = DurableActivityResultExpectation.From(new UnvalidatedPayloadCodec("test.result", "v1"));
+        var expectation = DurableActivityResultExpectation.From(
+            new UnvalidatedPayloadCodec("test.result", "v1", "test-retention", DurableDataClassification.ApprovedApplication));
 
         Assert.Equal("test.result", expectation.ContractId);
         Assert.Equal("v1", expectation.SchemaVersion);
         Assert.Equal("test.result@v1", expectation.CodecId);
+        Assert.Equal(DurableDataClassification.ApprovedApplication, expectation.Classification);
+        Assert.Equal("test-retention", expectation.RetentionPolicyId);
         Assert.Throws<ArgumentException>(() => DurableActivityResultExpectation.From(
             new UnvalidatedPayloadCodec(new string('x', 201), "v1")));
         Assert.Throws<ArgumentException>(() => DurableActivityResultExpectation.From(

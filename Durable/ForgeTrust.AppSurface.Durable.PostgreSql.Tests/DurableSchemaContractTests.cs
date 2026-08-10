@@ -9,7 +9,7 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 public sealed class DurableSchemaContractTests
 {
     [Fact]
-    public void MigrationCatalog_IsExactlySevenOrderedChecksummedResources()
+    public void MigrationCatalog_IsExactlyEightOrderedChecksummedResources()
     {
         var migrations = DurablePostgreSqlMigrationCatalog.Load();
 

@@ -43,7 +43,7 @@ context.
 | `ASDUR215` | Retention source changed | Flow source items or closure digest changed after assessment/manifest creation | Assess and create a new manifest; do not archive or purge stale source state |
 | `ASDUR216` | Retention lifecycle conflict | Expected lifecycle sequence is stale or another operation committed first | Read current manifest state and retry using its active lifecycle sequence |
 | `ASDUR217` | Retention lifecycle rejected | Manifest is not in the required state, or a legal hold / active child prevents transition | Read manifest state and follow the lifecycle order. Release a legal hold only after an explicitly authorized legal or compliance decision; otherwise keep the hold and do not purge. |
-| `ASDUR218` | Repair descriptor upgrade required | The suspension has no complete V1 child-effect descriptor identity | Deploy compatible writers, apply migration `0008`, and obtain a fresh assessment |
+| `ASDUR218` | Repair descriptor upgrade required | The suspension has no complete V1 child-effect descriptor identity | Existing suspensions remain unsupported; apply `0008` and compatible writers only for future V1 descriptors, then use the application-authorized recovery process |
 | `ASDUR219` | Repair evidence mismatch | Locked Work, wait, result, history, or manual-resolution evidence differs | Reload the payload-free assessment; never substitute direct SQL evidence |
 | `ASDUR220` | Repair action unsupported | The retained state is outside the two-action repair matrix | Preserve the suspension and use a documented recovery path |
 
@@ -84,10 +84,14 @@ force-terminate shortcut.
 ### ASDUR218–ASDUR220
 
 The Flow repair operator refuses rather than infers missing truth. `ASDUR218` means an older or mixed writer did not
-persist the V1 descriptor schema and digest. `ASDUR219` means a fresh request no longer matches locked Work, wait,
-result, history, or manual-resolution evidence. `ASDUR220` means neither supported assertion applies. Apply
-`0008_flow_repair.sql` after `0007_flow_retention.sql` and the role recipe, call the payload-free repair assessment
-again, and submit only its current candidate. Do not use `ReleaseSuspensionAsync` or direct SQL as a workaround.
+persist the V1 descriptor schema and digest; existing suspensions without that identity remain unsupported because
+`0008_flow_repair.sql` does not invent or backfill the missing evidence, and a fresh assessment cannot create it.
+Apply `0008_flow_repair.sql` after
+`0007_flow_retention.sql` and the role recipe, then deploy compatible writers for future V1 suspensions. Only assess
+later suspensions that contain the V1 identity; retain pre-V1 suspensions and use the application-authorized recovery
+process. `ASDUR219` means a fresh request no longer matches locked Work, wait, result, history, or manual-resolution
+evidence. `ASDUR220` means neither supported assertion applies. Do not use `ReleaseSuspensionAsync` or direct SQL as
+a workaround.
 
 ### ASDUR212 and ASDUR213
 
@@ -159,7 +163,7 @@ before any bounded retry.
 | `ASDUR215` | Retention source changed | Re-assess Flow closure; do not purge with stale manifest. |
 | `ASDUR216` | Retention lifecycle conflict | Reload manifest sequence and retry command. |
 | `ASDUR217` | Retention lifecycle rejected | Verify lifecycle sequence and hold authorization. Release a legal hold only after an explicitly authorized decision; otherwise do not purge. |
-| `ASDUR218` | Repair descriptor upgrade required | V1 descriptor identity is absent or unsupported; apply `0008` and reload assessment. |
+| `ASDUR218` | Repair descriptor upgrade required | Existing suspensions without V1 identity remain unsupported; `0008` and compatible writers support only future descriptors. |
 | `ASDUR219` | Repair evidence mismatch | Locked evidence changed or is incompatible; submit only a fresh assessment candidate. |
 | `ASDUR220` | Repair action unsupported | The retained state is outside the two supported assertions; preserve evidence. |
 | `ASDUR400` | Durable schema is missing | Apply reviewed forward-only migrations with a migration-owner connection. |
