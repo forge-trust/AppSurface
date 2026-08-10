@@ -710,6 +710,29 @@ public sealed class CoverageRunOutputGuardSecurityTests
     }
 
     [Fact]
+    public void WindowsRetainedLease_ShouldAllowFileMovePromotionOfStagedSibling()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        var artifactPath = Path.Join(output, CoverageGateArtifactNames.Json);
+        var stagedPath = Path.Join(output, ".coverage-gate.json.probe.tmp");
+        using var lease = CoverageRunOutputLease.Acquire(output);
+
+        File.WriteAllText(artifactPath, "first");
+        File.WriteAllText(stagedPath, "second");
+
+        File.Move(stagedPath, artifactPath, overwrite: true);
+
+        Assert.Equal("second", File.ReadAllText(artifactPath));
+        Assert.False(File.Exists(stagedPath));
+    }
+
+    [Fact]
     public void Prepare_ShouldFailClosedWhenValidMarkerIdentityChangesBeforeMutation()
     {
         using var root = TestDirectory.Create();
