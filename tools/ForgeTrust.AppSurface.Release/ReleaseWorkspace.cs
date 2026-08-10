@@ -37,6 +37,15 @@ internal sealed class ReleaseWorkspace
     internal string UnreleasedPath => PathFor("releases/unreleased.md");
 
     /// <summary>
+    /// Gets the absolute append-only unreleased-entry directory.
+    /// </summary>
+    /// <remarks>
+    /// Feature pull requests add independently named Markdown entries here instead of editing the living-note template.
+    /// Release preparation composes and archives the entries, then removes only the entries it consumed.
+    /// </remarks>
+    internal string UnreleasedEntriesDirectory => PathFor($"releases/{UnreleasedEntryComposer.EntriesDirectoryName}");
+
+    /// <summary>
     /// Gets the absolute unreleased sidecar path.
     /// </summary>
     internal string UnreleasedSidecarPath => PathFor("releases/unreleased.md.yml");

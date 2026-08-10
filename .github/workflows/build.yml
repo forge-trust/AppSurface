@@ -68,6 +68,249 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  keycloak-theme-evidence:
+    name: Keycloak theme evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      KEYCLOAK_THEME_BASE_IMAGE: quay.io/keycloak/keycloak:26.6@sha256:22c8cf9e79af88d320499c93994bb2c319ca255092d8ae7c7a45dd46d68192e2
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: |
+            Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/packages.lock.json
+            Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/packages.lock.json
+
+      - name: Restore focused Keycloak proof (locked)
+        run: dotnet restore Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj --locked-mode
+
+      - name: Verify theme lifecycle contracts
+        run: dotnet test Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj --configuration Release --no-restore
+
+      - name: Prove the pinned sample theme image and disposable realm
+        run: |
+          set -euo pipefail
+          artifact_directory="$RUNNER_TEMP/keycloak-theme-evidence"
+          context="$RUNNER_TEMP/keycloak-theme-context"
+          source_directory="$context/themes/appsurface-sample"
+          container_id=""
+          status="fail"
+          phase="setup"
+          diagnostic="ASKEYC019"
+          source_manifest_digest="unavailable"
+          packaged_manifest_digest="unavailable"
+          build_contract_digest="unavailable"
+          candidate_image_manifest_digest="unavailable"
+          image_id="unavailable"
+          port=""
+          builder_name="appsurface-keycloak-theme-evidence"
+          builder_created=false
+
+          write_artifacts() {
+            mkdir -p "$artifact_directory"
+            cat > "$artifact_directory/keycloak-theme-evidence.json" <<EOF
+          {
+            "schema": "appsurface-keycloak-theme-evidence-v1",
+            "status": "$status",
+            "phase": "$phase",
+            "diagnostic": "$diagnostic",
+            "themeName": "appsurface-sample",
+            "platform": "linux/amd64",
+            "keycloakBaseImage": "$KEYCLOAK_THEME_BASE_IMAGE",
+            "sourceManifestDigest": "$source_manifest_digest",
+            "packagedManifestDigest": "$packaged_manifest_digest",
+            "buildContractDigest": "$build_contract_digest",
+            "candidateImageManifestDigest": "$candidate_image_manifest_digest",
+            "candidateImageId": "$image_id"
+          }
+          EOF
+            {
+              echo "## Keycloak theme evidence"
+              echo
+              echo "- Status: $status"
+              echo "- Phase: $phase"
+              echo "- Diagnostic: $diagnostic"
+              echo "- Theme: appsurface-sample"
+              echo "- Platform: linux/amd64"
+              echo "- Base image: $KEYCLOAK_THEME_BASE_IMAGE"
+              echo "- Source manifest SHA-256: $source_manifest_digest"
+              echo "- Packaged manifest SHA-256: $packaged_manifest_digest"
+              echo "- Build contract SHA-256: $build_contract_digest"
+              echo "- Candidate image manifest digest: $candidate_image_manifest_digest"
+              echo "- Candidate image ID: $image_id"
+            } > "$artifact_directory/keycloak-theme-evidence.md"
+            {
+              echo "status=$status"
+              echo "phase=$phase"
+              echo "diagnostic=$diagnostic"
+            } > "$artifact_directory/keycloak-theme-evidence.log"
+          }
+
+          cleanup() {
+            exit_code=$?
+            if [ -n "$container_id" ]; then
+              docker rm --force "$container_id" >/dev/null 2>&1 || true
+            fi
+            if [ "$builder_created" = true ]; then
+              docker buildx rm "$builder_name" >/dev/null 2>&1 || true
+            fi
+            write_artifacts
+            exit "$exit_code"
+          }
+
+          fail() {
+            diagnostic="$1"
+            phase="$2"
+            printf '%s: %s\n' "$diagnostic" "$3" >&2
+            exit 1
+          }
+
+          trap cleanup EXIT
+          mkdir -p "$artifact_directory" "$source_directory"
+          docker version --format '{{.Server.Version}}' >/dev/null 2>&1 || {
+            status="not-run"
+            fail ASKEYC019 docker "Docker Engine is unavailable; not-run cannot satisfy the release gate."
+          }
+          docker buildx create --name "$builder_name" --driver docker-container --use >/dev/null \
+            || fail ASKEYC018 setup-builder "The OCI-export Buildx builder could not be created."
+          builder_created=true
+          docker buildx inspect --bootstrap >/dev/null \
+            || fail ASKEYC018 setup-builder "The OCI-export Buildx builder could not be started."
+
+          mkdir -p "$context/themes/appsurface-sample"
+          cp -R examples/auth-aspire-keycloak-apphost/themes/appsurface-sample/. "$source_directory/"
+          manifest_lines="$context/manifest-lines"
+          first_entry=true
+          while IFS= read -r -d '' source_path; do
+            relative_path="${source_path#./}"
+            if [ "$first_entry" = true ]; then
+              first_entry=false
+            else
+              printf '\n' >> "$manifest_lines"
+            fi
+            byte_count="$(wc -c < "$source_directory/$relative_path" | tr -d ' ' )"
+            file_digest="$(sha256sum "$source_directory/$relative_path" | awk '{print $1}')"
+            printf '%s\n%s\n%s' "$relative_path" "$byte_count" "$file_digest" >> "$manifest_lines"
+          done < <(cd "$source_directory" && find . -type f -print0 | LC_ALL=C sort -z)
+          source_manifest_digest="$(sha256sum "$manifest_lines" | awk '{print $1}')"
+          packaged_manifest_digest="$source_manifest_digest"
+          build_contract_digest="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+            appsurface-keycloak-theme-build-contract-v1 \
+            appsurface-sample \
+            "$KEYCLOAK_THEME_BASE_IMAGE" \
+            linux/amd64 \
+            "$source_manifest_digest" \
+            "$packaged_manifest_digest" \
+            '' | sha256sum | awk '{print $1}')"
+          cat > "$context/Containerfile" <<EOF
+          FROM $KEYCLOAK_THEME_BASE_IMAGE
+          COPY --chown=keycloak:keycloak themes/appsurface-sample/ /opt/keycloak/themes/appsurface-sample/
+          LABEL org.appsurface.keycloak.theme.name="appsurface-sample"
+          LABEL org.appsurface.keycloak.theme.source-manifest-digest="$source_manifest_digest"
+          LABEL org.appsurface.keycloak.theme.manifest-digest="$packaged_manifest_digest"
+          LABEL org.appsurface.keycloak.theme.build-contract-digest="$build_contract_digest"
+          LABEL org.appsurface.keycloak.theme.base-image="$KEYCLOAK_THEME_BASE_IMAGE"
+          LABEL org.appsurface.keycloak.theme.platform="linux/amd64"
+          EOF
+          phase="build-image"
+          docker build --platform linux/amd64 --file "$context/Containerfile" --tag appsurface-keycloak-theme-evidence:ci "$context" || fail ASKEYC018 build-image "The pinned theme image could not be built."
+          image_id="$(docker image inspect --format '{{.Id}}' appsurface-keycloak-theme-evidence:ci)"
+          for label in \
+            "org.appsurface.keycloak.theme.name=appsurface-sample" \
+            "org.appsurface.keycloak.theme.source-manifest-digest=$source_manifest_digest" \
+            "org.appsurface.keycloak.theme.manifest-digest=$packaged_manifest_digest" \
+            "org.appsurface.keycloak.theme.build-contract-digest=$build_contract_digest" \
+            "org.appsurface.keycloak.theme.base-image=$KEYCLOAK_THEME_BASE_IMAGE" \
+            "org.appsurface.keycloak.theme.platform=linux/amd64"; do
+            label_key="${label%%=*}"
+            label_value="${label#*=}"
+            actual_label="$(docker image inspect --format '{{index .Config.Labels "'"$label_key"'"}}' appsurface-keycloak-theme-evidence:ci)"
+            [ "$actual_label" = "$label_value" ] || fail ASKEYC018 inspect-label "The built image label '$label_key' does not match evidence."
+          done
+          docker run --rm --entrypoint /bin/sh appsurface-keycloak-theme-evidence:ci -c 'test -f /opt/keycloak/themes/appsurface-sample/login/theme.properties && test -f /opt/keycloak/themes/appsurface-sample/login/resources/css/appsurface-sample.css' || fail ASKEYC018 inspect-subtree "The built image does not contain the expected theme subtree."
+          docker run --rm --entrypoint /bin/sh appsurface-keycloak-theme-evidence:ci -c 'find /opt/keycloak -type f -name "*keycloak-themes*.jar" -print -quit | grep -q .' || fail ASKEYC015 inspect-archive "The pinned Keycloak image does not expose the supported theme archive layout."
+          oci_layout="$context/appsurface-keycloak-theme.oci.tar"
+          docker buildx build --platform linux/amd64 --file "$context/Containerfile" --output "type=oci,dest=$oci_layout" "$context" || fail ASKEYC018 export-image "The OCI candidate image could not be exported."
+          candidate_image_manifest_digest="$(tar -xOf "$oci_layout" index.json | jq -er '.manifests | select(length == 1) | .[0].digest')" || fail ASKEYC018 inspect-image "The OCI candidate image manifest digest is unavailable."
+          rm "$oci_layout"
+
+          mkdir -p "$context/realm-import"
+          cat > "$context/realm-import/appsurface-theme-evidence-realm.json" <<'EOF'
+          {
+            "realm": "appsurface-theme-evidence",
+            "enabled": true,
+            "loginTheme": "appsurface-sample",
+            "clients": [
+              {
+                "clientId": "appsurface-theme-evidence",
+                "enabled": true,
+                "publicClient": true,
+                "standardFlowEnabled": true,
+                "redirectUris": ["http://localhost/*"]
+              }
+            ]
+          }
+          EOF
+          bootstrap_password="$(openssl rand -hex 24)"
+          phase="start-runtime"
+          container_id="$(docker run --detach --platform linux/amd64 --publish 127.0.0.1::8080 --volume "$context/realm-import:/opt/keycloak/data/import:ro" --env KC_BOOTSTRAP_ADMIN_USERNAME=theme-evidence --env KC_BOOTSTRAP_ADMIN_PASSWORD="$bootstrap_password" appsurface-keycloak-theme-evidence:ci start-dev --import-realm)" || fail ASKEYC019 start-runtime "The Linux/amd64 disposable Keycloak runtime could not start."
+          port="$(docker port "$container_id" 8080/tcp | sed -n 's/.*:\([0-9][0-9]*\)$/\1/p' | head -n 1)"
+          [ -n "$port" ] || fail ASKEYC019 start-runtime "The disposable Keycloak runtime did not publish its HTTP port."
+          metadata_url="http://127.0.0.1:$port/realms/appsurface-theme-evidence/.well-known/openid-configuration"
+          ready=false
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error --max-time 2 "$metadata_url" >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          [ "$ready" = true ] || fail ASKEYC019 start-runtime "The disposable Keycloak runtime did not become ready within 60 attempts (up to 240 seconds)."
+          phase="readback"
+          access_token="$(curl --fail --silent --show-error --max-time 10 --request POST "http://127.0.0.1:$port/realms/master/protocol/openid-connect/token" --data-urlencode grant_type=password --data-urlencode client_id=admin-cli --data-urlencode username=theme-evidence --data-urlencode password="$bootstrap_password" | jq -er '.access_token')" || fail ASKEYC020 readback "A disposable administrator token could not be acquired for readback."
+          curl --fail --silent --show-error --max-time 10 --header "Authorization: Bearer $access_token" "http://127.0.0.1:$port/admin/realms/appsurface-theme-evidence" | jq -e '.loginTheme == "appsurface-sample"' >/dev/null || fail ASKEYC020 readback "Disposable realm readback did not select appsurface-sample."
+          phase="verify-resource"
+          login_page="$(curl --fail --silent --show-error --max-time 10 --get "http://127.0.0.1:$port/realms/appsurface-theme-evidence/protocol/openid-connect/auth" --data-urlencode client_id=appsurface-theme-evidence --data-urlencode redirect_uri=http://localhost/callback --data-urlencode response_type=code --data-urlencode scope=openid)" || fail ASKEYC021 verify-resource "The disposable authorization challenge could not render the login page."
+          resource_url="$(printf '%s' "$login_page" | sed -n 's/.*href="\([^\"]*appsurface-sample\.css[^\"]*\)".*/\1/p' | head -n 1)"
+          same_origin="http://127.0.0.1:$port"
+          case "$resource_url" in
+            "$same_origin"/*) resource_path="${resource_url#"$same_origin"}" ;;
+            /*) resource_path="$resource_url" ;;
+            *) fail ASKEYC021 verify-resource "The declared stylesheet is missing or not same-origin." ;;
+          esac
+          resource_path="${resource_path%%\?*}"
+          case "$resource_path" in
+            *'//'*|*'..'*|*'%2f'*|*'%2F'*) fail ASKEYC021 verify-resource "The declared stylesheet path is unsafe." ;;
+          esac
+          case "$resource_path" in
+            */login/appsurface-sample/*) ;;
+            *) fail ASKEYC021 verify-resource "The declared stylesheet path is not an appsurface-sample theme resource." ;;
+          esac
+          actual_resource_digest="$(curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:$port$resource_path" | sha256sum | awk '{print $1}')" || fail ASKEYC021 verify-resource "The declared stylesheet could not be fetched."
+          expected_resource_digest="$(sha256sum "$source_directory/login/resources/css/appsurface-sample.css" | awk '{print $1}')"
+          [ "$actual_resource_digest" = "$expected_resource_digest" ] || fail ASKEYC021 verify-resource "The declared stylesheet digest does not match the packaged source."
+          status="pass"
+          phase="complete"
+          diagnostic="pass"
+
+      - name: Upload secret-safe Keycloak theme evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: keycloak-theme-evidence
+          path: ${{ runner.temp }}/keycloak-theme-evidence
+          if-no-files-found: warn
+
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30

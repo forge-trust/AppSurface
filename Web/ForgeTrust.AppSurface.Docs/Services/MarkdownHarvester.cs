@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using ForgeTrust.AppSurface.Docs.Models;
+using ForgeTrust.AppSurface.ReleaseContracts;
 using Markdig;
 using Markdig.Renderers.Html;
 using Markdig.Syntax;
@@ -17,6 +18,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
 {
     private const string HarvesterType = nameof(MarkdownHarvester);
     private const string UnsafeTrustMigrationHrefMetadataDiagnosticCode = "unsafe-trust-migration-href";
+    private const string ComposedUnreleasedDownloadUnavailableDiagnosticCode = "unreleased-entry-composed-download-unavailable";
     private static readonly string[] SidecarExtensions = [".yml", ".yaml"];
     private const int MinOutlineHeadingLevel = 2;
     private const int MaxOutlineHeadingLevel = 3;
@@ -274,7 +276,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     /// <param name="cancellationToken">An optional token to observe for cancellation requests.</param>
     /// <returns>A collection of DocNode objects representing each processed Markdown source file, including the display title, path relative to <paramref name="rootPath"/>, generated HTML, metadata, and <see cref="DocNode.Outline"/> entries when outline headings are available.</returns>
     /// <remarks>
-    /// Skips files in excluded directories (for example "node_modules", "bin", "obj", and "Tests") and hidden dot-prefixed directories unless explicitly allowlisted. Dot-prefixed files are included. File and directory reparse points are skipped so symlinks and junctions cannot point the built-in harvester outside <paramref name="rootPath"/>. The root <c>LICENSE</c> file is also included when present and not a reparse point so repository-relative license links can resolve in static exports. If a file's name is "README" (case-insensitive), its title is set to the parent directory name or "Home" for a repository root README. The Markdown body is parsed once with <c>Markdown.Parse(markdownBody, _pipeline)</c>; HTML is rendered from that AST and <see cref="DocNode.Outline"/> is populated from the same AST with <see cref="ExtractOutline"/>, then filtered through the resolved Markdown outline policy so callers can rely on display outline data being present when eligible headings are available. Files that fail to process are skipped and an error is logged.
+    /// Skips files in excluded directories (for example "node_modules", "bin", "obj", and "Tests") and hidden dot-prefixed directories unless explicitly allowlisted. Dot-prefixed files are included. File and directory reparse points are skipped so symlinks and junctions cannot point the built-in harvester outside <paramref name="rootPath"/>. The root <c>LICENSE</c> file is also included when present and not a reparse point so repository-relative license links can resolve in static exports. The special <c>releases/unreleased.md</c> path loads and composes validated append-only entries from <c>releases/unreleased.entries</c> before parsing and rendering. Because that rendered note is not byte-for-byte checked-in source, it is never retained for protected Markdown download. If a file's name is "README" (case-insensitive), its title is set to the parent directory name or "Home" for a repository root README. The Markdown body is parsed once with <c>Markdown.Parse(markdownBody, _pipeline)</c>; HTML is rendered from that AST and <see cref="DocNode.Outline"/> is populated from the same AST with <see cref="ExtractOutline"/>, then filtered through the resolved Markdown outline policy so callers can rely on display outline data being present when eligible headings are available. Files that fail to process are skipped and an error is logged.
     /// </remarks>
     public async Task<IReadOnlyList<DocNode>> HarvestAsync(string rootPath, CancellationToken cancellationToken = default)
     {
@@ -310,7 +312,9 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     /// </summary>
     /// <remarks>
     /// This internal result is intentionally separate from <see cref="DocNode"/> so raw source never enters rendered
-    /// HTML, search indexes, or the public harvester contract. The byte-reader seam is used only for Markdown source
+    /// HTML, search indexes, or the public harvester contract. The special <c>releases/unreleased.md</c> source is
+    /// composed with validated append-only entries before parsing and rendering, so it cannot expose a source-faithful
+    /// download even when protected source capture is enabled. The byte-reader seam is used only for Markdown source
     /// capture; metadata sidecars and disabled downloads continue through the configured text reader.
     /// </remarks>
     internal async Task<MarkdownHarvestResult> HarvestWithSourceAsync(
@@ -386,6 +390,15 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                         content = await _readAllTextAsync(file, cancellationToken);
                     }
 
+                    var isComposedUnreleasedNote = relativePath.Equals("releases/unreleased.md", StringComparison.Ordinal);
+                    if (isComposedUnreleasedNote)
+                    {
+                        var entries = await UnreleasedEntryComposer.LoadAsync(
+                            Path.Combine(rootPath, "releases", UnreleasedEntryComposer.EntriesDirectoryName),
+                            cancellationToken);
+                        content = UnreleasedEntryComposer.Compose(content, entries.Entries);
+                    }
+
                     var (markdownBody, frontMatterResult) = MarkdownFrontMatterParser.ExtractWithDiagnostics(content);
                     ReportMetadataDiagnostics(relativePath, frontMatterResult.Diagnostics, diagnostics);
                     var sidecarMetadata = await ReadMetadataSidecarAsync(file, relativePath, cancellationToken, diagnostics);
@@ -416,7 +429,18 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                     if (sourceBytes is not null)
                     {
                         var eligibility = frontMatterResult.DownloadEligibility;
-                        if (eligibility == MarkdownDownloadEligibility.Eligible)
+                        if (eligibility == MarkdownDownloadEligibility.Eligible && isComposedUnreleasedNote)
+                        {
+                            sourceBytes = null;
+                            diagnostics.Add(new DocHarvestDiagnostic(
+                                ComposedUnreleasedDownloadUnavailableDiagnosticCode,
+                                DocHarvestDiagnosticSeverity.Warning,
+                                HarvesterType,
+                                $"Markdown download was unavailable for '{relativePath}' because the rendered note is composed from append-only unreleased entries.",
+                                "Protected Markdown download serves exact checked-in source bytes, while the living release note is assembled at harvest time.",
+                                "Remove download_markdown: true from the living unreleased note; use the rendered page or archive the composed tagged release note instead."));
+                        }
+                        else if (eligibility == MarkdownDownloadEligibility.Eligible)
                         {
                             eligibleSourceBytes = checked(eligibleSourceBytes + sourceBytes.LongLength);
                             if (!sourceCaptureExceededBudget

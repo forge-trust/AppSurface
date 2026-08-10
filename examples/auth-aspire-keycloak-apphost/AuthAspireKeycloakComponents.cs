@@ -10,6 +10,7 @@ namespace AuthAspireKeycloakAppHost;
 /// </summary>
 public sealed class AuthAspireKeycloakComponent : IAspireComponent<KeycloakResource>
 {
+    private const string SampleThemeImageEnvironmentVariable = "AUTH_ASPIRE_KEYCLOAK_THEME_IMAGE";
     private AppSurfaceKeycloakResource? _resolved;
 
     /// <summary>
@@ -24,8 +25,20 @@ public sealed class AuthAspireKeycloakComponent : IAspireComponent<KeycloakResou
         IDistributedApplicationBuilder appBuilder)
     {
         _ = context;
-        _resolved = appBuilder.AddAppSurfaceKeycloak();
+        var theme = CreateSampleThemeFromEnvironment();
+        _resolved = appBuilder.AddAppSurfaceKeycloak(configure: options => options.LoginTheme = theme);
         return _resolved.Resource;
+    }
+
+    private static AppSurfaceKeycloakThemeOptions? CreateSampleThemeFromEnvironment()
+    {
+        var image = Environment.GetEnvironmentVariable(SampleThemeImageEnvironmentVariable);
+        return string.IsNullOrWhiteSpace(image)
+            ? null
+            : AppSurfaceKeycloakThemeOptions.Login(
+                "appsurface-sample",
+                "themes/appsurface-sample",
+                AppSurfaceKeycloakImageReference.Parse(image));
     }
 }
 

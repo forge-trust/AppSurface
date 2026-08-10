@@ -20,6 +20,10 @@
     <ProjectReference Include="..\..\ForgeTrust.AppSurface.Theming\ForgeTrust.AppSurface.Theming.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\..\tools\ForgeTrust.AppSurface.ReleaseContracts\UnreleasedEntryComposer.cs" Link="Services\UnreleasedEntryComposer.cs" />
+  </ItemGroup>
+
   <Import Project="..\ForgeTrust.AppSurface.Web.Tailwind\build\ForgeTrust.AppSurface.Web.Tailwind.targets" Condition="Exists('..\ForgeTrust.AppSurface.Web.Tailwind\build\ForgeTrust.AppSurface.Web.Tailwind.targets')" />
 
   <ItemGroup>

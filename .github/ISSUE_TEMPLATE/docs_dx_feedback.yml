@@ -47,6 +47,21 @@ body:
         - Other docs friction
     validations:
       required: true
+  - type: dropdown
+    id: lifecycle-stage
+    attributes:
+      label: Lifecycle stage
+      description: For a Keycloak theme or another guided integration, identify the point where the supported path became unclear.
+      options:
+        - Discover or choose a package
+        - Install or configure prerequisites
+        - Run the first local proof
+        - Apply a theme or customization
+        - Diagnose or recover from a failure
+        - Upgrade, rollback, or release evidence
+        - Not tied to a lifecycle stage
+    validations:
+      required: true
   - type: textarea
     id: expected
     attributes:
