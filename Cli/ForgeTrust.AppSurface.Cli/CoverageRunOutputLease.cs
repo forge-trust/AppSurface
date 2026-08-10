@@ -867,7 +867,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
                 VerifyWindowsPathIdentity(promotionHandle, temporaryPath);
                 RejectWindowsWrongKind(promotionHandle, expectDirectory: false);
                 RejectWindowsHardLinkedArtifact(promotionHandle, artifactName);
-                PromoteWindowsOwnedGateArtifact(promotionHandle, artifactName);
+                PromoteWindowsOwnedGateArtifact(promotionHandle, path, artifactName);
             }
 
             promoted = true;
@@ -906,10 +906,13 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         return path;
     }
 
-    [ExcludeFromCodeCoverage(Justification = "Windows handle-relative promotion is exercised by the Windows security lane.")]
-    private void PromoteWindowsOwnedGateArtifact(SafeFileHandle sourceHandle, string artifactName)
+    [ExcludeFromCodeCoverage(Justification = "Windows native artifact promotion is exercised by the Windows security lane.")]
+    private static void PromoteWindowsOwnedGateArtifact(
+        SafeFileHandle sourceHandle,
+        string destinationPath,
+        string artifactName)
     {
-        var fileNameBytes = Encoding.Unicode.GetBytes(artifactName);
+        var fileNameBytes = Encoding.Unicode.GetBytes(destinationPath);
         var rootDirectoryOffset = Marshal.OffsetOf<WindowsFileRenameInformation>(nameof(WindowsFileRenameInformation.RootDirectory)).ToInt32();
         var fileNameLengthOffset = Marshal.OffsetOf<WindowsFileRenameInformation>(nameof(WindowsFileRenameInformation.FileNameLength)).ToInt32();
         var fileNameOffset = Marshal.OffsetOf<WindowsFileRenameInformation>(nameof(WindowsFileRenameInformation.FileName)).ToInt32();
@@ -918,8 +921,8 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         try
         {
             Marshal.WriteInt32(buffer, 0, 1);
-            // The staged source and final artifact are siblings, so the simple target name must retain
-            // the source handle's parent directory instead of supplying a relocation root.
+            // A null root directory requires a fully qualified target path. destinationPath has already
+            // passed containment and reparse-point validation while the output directory lease is held.
             Marshal.WriteIntPtr(buffer, rootDirectoryOffset, IntPtr.Zero);
             Marshal.WriteInt32(buffer, fileNameLengthOffset, fileNameBytes.Length);
             Marshal.Copy(fileNameBytes, 0, IntPtr.Add(buffer, fileNameOffset), fileNameBytes.Length);
