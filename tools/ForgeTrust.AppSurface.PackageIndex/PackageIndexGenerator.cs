@@ -1208,27 +1208,43 @@ internal sealed class PackageIndexGenerator
     /// <summary>
     /// Builds a canonical GitHub URL for repository-owned maintainer documentation that is not served by AppSurface Docs.
     /// </summary>
-    /// <param name="repositoryRelativePath">A non-empty, repository-relative documentation path.</param>
-    /// <returns>The canonical <c>main</c>-branch GitHub URL for the documentation path.</returns>
+    /// <param name="repositoryRelativePath">A non-empty, slash-separated GitHub repository path whose segments do not contain direct or percent-encoded dot traversal or path separators.</param>
+    /// <returns>The canonical <c>main</c>-branch GitHub URL with each documentation-path segment URI-escaped.</returns>
     /// <remarks>
     /// Generated package documents are also harvested by AppSurface Docs. Repository-relative paths that escape the
-    /// generated document's directory can be interpreted as Docs routes and produce a reader-facing 404. Use this
-    /// helper for maintainer guides that intentionally remain repository-owned rather than Docs-hosted.
+    /// generated document's directory can be interpreted as Docs routes and produce a reader-facing 404. This helper
+    /// validates GitHub URI path semantics independently of the build host and escapes URI-significant characters so a
+    /// path segment cannot alter the target URL. Use it for maintainer guides that intentionally remain repository-owned
+    /// rather than Docs-hosted.
     /// </remarks>
     internal static string GetCanonicalRepositoryUrl(string repositoryRelativePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRelativePath);
 
         var normalizedPath = repositoryRelativePath.Replace('\\', '/');
-        var platformPath = normalizedPath.Replace('/', Path.DirectorySeparatorChar);
-        if (Path.IsPathRooted(platformPath)
+        var normalizedSegments = normalizedPath.Split('/', StringSplitOptions.None);
+        if (normalizedPath.StartsWith("/", StringComparison.Ordinal)
             || (normalizedPath.Length >= 2 && normalizedPath[1] == ':' && char.IsLetter(normalizedPath[0]))
-            || normalizedPath.Split('/', StringSplitOptions.None).Any(segment => string.IsNullOrWhiteSpace(segment) || segment is "." or ".."))
+            || normalizedSegments.Any(IsUnsafeRepositoryGuidancePathSegment))
         {
-            throw new PackageIndexException($"Repository guidance link '{repositoryRelativePath}' must be a non-rooted path without a drive prefix or empty, '.' or '..' segments.");
+            throw new PackageIndexException($"Repository guidance link '{repositoryRelativePath}' must be a non-rooted path without a drive prefix, empty or dot segments, percent-encoded traversal, or percent-encoded path separators.");
         }
 
-        return $"https://github.com/forge-trust/AppSurface/blob/main/{normalizedPath}";
+        return $"https://github.com/forge-trust/AppSurface/blob/main/{string.Join('/', normalizedSegments.Select(Uri.EscapeDataString))}";
+    }
+
+    private static bool IsUnsafeRepositoryGuidancePathSegment(string segment)
+    {
+        if (string.IsNullOrWhiteSpace(segment) || segment is "." or "..")
+        {
+            return true;
+        }
+
+        var decodedSegment = Uri.UnescapeDataString(segment);
+        return string.IsNullOrWhiteSpace(decodedSegment)
+            || decodedSegment is "." or ".."
+            || decodedSegment.Contains('/')
+            || decodedSegment.Contains('\\');
     }
 
     private static string GetRelativeOutputPath(string fromOutputPath, string toOutputPath)

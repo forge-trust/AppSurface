@@ -13,7 +13,8 @@ public sealed class PackageIndexReleaseGuidanceLinkRegressionTests
         "tools\\ForgeTrust.AppSurface.PackageIndex\\README.md",
         "https://github.com/forge-trust/AppSurface/blob/main/tools/ForgeTrust.AppSurface.PackageIndex/README.md")]
     [InlineData("x", "https://github.com/forge-trust/AppSurface/blob/main/x")]
-    [InlineData("1:guide.md", "https://github.com/forge-trust/AppSurface/blob/main/1:guide.md")]
+    [InlineData("1:guide.md", "https://github.com/forge-trust/AppSurface/blob/main/1%3Aguide.md")]
+    [InlineData("guides/#overview?.md", "https://github.com/forge-trust/AppSurface/blob/main/guides/%23overview%3F.md")]
     public void GetCanonicalRepositoryUrl_UsesTheRepositoryPageInsteadOfADocsRelativeRoute(
         string repositoryRelativePath,
         string expectedUrl)
@@ -33,6 +34,10 @@ public sealed class PackageIndexReleaseGuidanceLinkRegressionTests
     [InlineData("C:tools/ForgeTrust.AppSurface.PackageIndex/README.md")]
     [InlineData("tools/./ForgeTrust.AppSurface.PackageIndex/README.md")]
     [InlineData("tools//ForgeTrust.AppSurface.PackageIndex/README.md")]
+    [InlineData("%2e%2e")]
+    [InlineData(".%2e")]
+    [InlineData("tools/%2fREADME.md")]
+    [InlineData("tools/%5cREADME.md")]
     public void GetCanonicalRepositoryUrl_RejectsUnsafeRepositoryPaths(string repositoryRelativePath)
     {
         var error = Assert.Throws<PackageIndexException>(
