@@ -445,16 +445,67 @@ public sealed class CoverageRunOutputGuardSecurityTests
             beforeMutation: () => Directory.Move(output, parked)));
 
         Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
-        if (OperatingSystem.IsWindows())
+        Assert.True(Directory.Exists(parked));
+        Assert.False(Directory.Exists(output));
+    }
+
+    [Fact]
+    public void Prepare_ShouldFailClosedWithoutTouchingOutputReplacementBeforeMutation()
+    {
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        root.WriteFile("coverage/.appsurface-coverage-output", MarkerContents + Environment.NewLine);
+        var originalSummary = root.WriteFile("coverage/summary.txt", "original output");
+        var replacement = root.CreateDirectory("replacement-coverage");
+        var replacementSentinel = root.WriteFile("replacement-coverage/sentinel.txt", "must remain");
+        var parked = Path.Join(root.Path, "parked-coverage");
+
+        var exception = Assert.Throws<CommandException>(() => CoverageRunOutputGuard.Prepare(
+            output,
+            root.Path,
+            [],
+            clean: true,
+            beforeMutation: () =>
+            {
+                Directory.Move(output, parked);
+                Directory.Move(replacement, output);
+            }));
+
+        Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("original output", File.ReadAllText(Path.Join(parked, Path.GetFileName(originalSummary))));
+        Assert.Equal("must remain", File.ReadAllText(Path.Join(output, Path.GetFileName(replacementSentinel))));
+    }
+
+    [Fact]
+    public void PrepareWindows_ShouldFailClosedWithoutTouchingOutputReplacementBeforeCleanup()
+    {
+        if (!OperatingSystem.IsWindows())
         {
-            Assert.True(Directory.Exists(output));
-            Assert.False(Directory.Exists(parked));
+            return;
         }
-        else
-        {
-            Assert.True(Directory.Exists(parked));
-            Assert.False(Directory.Exists(output));
-        }
+
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        root.WriteFile("coverage/.appsurface-coverage-output", MarkerContents + Environment.NewLine);
+        var originalSummary = root.WriteFile("coverage/summary.txt", "original output");
+        var replacement = root.CreateDirectory("replacement-coverage");
+        var replacementSentinel = root.WriteFile("replacement-coverage/sentinel.txt", "must remain");
+        var parked = Path.Join(root.Path, "parked-coverage");
+
+        var exception = Assert.Throws<CommandException>(() => CoverageRunOutputGuard.Prepare(
+            output,
+            root.Path,
+            [],
+            clean: true,
+            beforeCleanup: () =>
+            {
+                Directory.Move(output, parked);
+                Directory.Move(replacement, output);
+            }));
+
+        Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("original output", File.ReadAllText(Path.Join(parked, Path.GetFileName(originalSummary))));
+        Assert.Equal("must remain", File.ReadAllText(Path.Join(output, Path.GetFileName(replacementSentinel))));
     }
 
     [Fact]
@@ -533,8 +584,7 @@ public sealed class CoverageRunOutputGuardSecurityTests
 
         Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
         Assert.Equal("original output", File.ReadAllText(Path.Join(parkedProjects, Path.GetFileName(original))));
-        var replacementLocation = OperatingSystem.IsWindows() ? replacement : projects;
-        Assert.Equal("must remain", File.ReadAllText(Path.Join(replacementLocation, Path.GetFileName(replacementSentinel))));
+        Assert.Equal("must remain", File.ReadAllText(Path.Join(projects, Path.GetFileName(replacementSentinel))));
     }
 
     [Fact]
@@ -710,7 +760,7 @@ public sealed class CoverageRunOutputGuardSecurityTests
     }
 
     [Fact]
-    public void WindowsRetainedLease_ShouldAllowFileMovePromotionOfStagedSibling()
+    public void WindowsRetainedLease_ShouldAllowStagedSiblingPromotion()
     {
         if (!OperatingSystem.IsWindows())
         {

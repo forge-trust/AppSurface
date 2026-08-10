@@ -566,7 +566,7 @@ Artifacts are local and private by default:
 - `coverage-watchdog.json`: Latest classified watchdog warning or termination, when one occurs.
 - `.appsurface-coverage-output`: Ownership marker containing `AppSurface coverage output directory`; it allows future runs to clean only known AppSurface-owned artifacts.
 
-`coverage run` rejects unsafe output paths such as filesystem roots, the current working directory, the user home directory, the solution directory, test project directories, files, symbolic links or reparse points in any existing path component or artifact descendant, invalid ownership markers, and populated directories that do not carry the AppSurface ownership marker. An output tree created by an older version without the marker is not inferred to be owned from generic names such as `projects` or `summary.txt`; choose a fresh directory instead of adding a marker to an arbitrary populated tree. Validation is repeated through retained filesystem handles before cleanup so an ancestor replacement fails closed instead of redirecting deletion. This retained-handle guarantee covers output preparation and cleanup; later build, test, and report writes use the prepared path normally, so the output directory and its ancestors must remain trusted for the rest of the invocation. Use a dedicated artifact directory for CI, for example `TestResults/coverage-merged`, and do not replace or relink it while the command is running.
+`coverage run` rejects unsafe output paths such as filesystem roots, the current working directory, the user home directory, the solution directory, test project directories, files, symbolic links or reparse points in any existing path component or artifact descendant, invalid ownership markers, and populated directories that do not carry the AppSurface ownership marker. An output tree created by an older version without the marker is not inferred to be owned from generic names such as `projects` or `summary.txt`; choose a fresh directory instead of adding a marker to an arbitrary populated tree. Validation is repeated through retained filesystem handles before cleanup so an ancestor replacement fails closed instead of redirecting deletion. This retained-handle guarantee covers output preparation and cleanup; later build, test, and report writes use the prepared path normally, so the output directory and its ancestors must remain trusted for the rest of the invocation. On Windows, staged report promotion requires delete sharing on the output directory; the lease still rejects competing direct write handles, but it cannot protect an output directory shared with an untrusted local principal from rename or replacement. Use a dedicated artifact directory for CI, for example `TestResults/coverage-merged`, and do not replace or relink it while the command is running.
 
 `coverage run`, `coverage merge`, and `coverage gate` are the supported CLI coverage surfaces. The package artifact verifier installs the packed `ForgeTrust.AppSurface.Cli` tool in a clean fixture and proves all three coverage commands, including patch-target creation and stale-target removal plus a deliberately failing gate that must still write reports, before publication. Grouped CLI execution and TRX/TUnit result parsing remain separate follow-up work.
 
@@ -805,9 +805,11 @@ selected gate semantics. A nonpatch gate intentionally removes the two target fi
 validated output directory, so their absence after a nonpatch run is expected and prevents stale
 work from being consumed. A report-file create, replace, or delete failure is an artifact I/O
 failure reported as `ASCOV019`; check the named path and use a writable dedicated output directory.
-The gate rejects symbolic-link or reparse-point output components and retains the validated output
-directory while it writes or removes reports, so do not relink, replace, or run a second gate
-against that directory until the first command finishes.
+The gate rejects symbolic-link or reparse-point output components, stages each report before
+promotion, and retains the validated output directory while it removes reports. On Windows the
+directory lease denies competing direct writes but permits the delete sharing needed for staged
+promotion, so a shared output directory remains a trusted-local-principal boundary. Do not relink,
+replace, or run a second gate against that directory until the first command finishes.
 
 The local agent loop is:
 
