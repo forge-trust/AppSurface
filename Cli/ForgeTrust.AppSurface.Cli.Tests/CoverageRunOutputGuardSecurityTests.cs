@@ -760,7 +760,7 @@ public sealed class CoverageRunOutputGuardSecurityTests
     }
 
     [Fact]
-    public void WindowsRetainedLease_ShouldAllowStagedSiblingPromotion()
+    public void WindowsRetainedLease_ShouldBlockCompetingStagedSiblingPromotion()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -776,10 +776,10 @@ public sealed class CoverageRunOutputGuardSecurityTests
         File.WriteAllText(artifactPath, "first");
         File.WriteAllText(stagedPath, "second");
 
-        File.Move(stagedPath, artifactPath, overwrite: true);
+        Assert.Throws<IOException>(() => File.Move(stagedPath, artifactPath, overwrite: true));
 
-        Assert.Equal("second", File.ReadAllText(artifactPath));
-        Assert.False(File.Exists(stagedPath));
+        Assert.Equal("first", File.ReadAllText(artifactPath));
+        Assert.True(File.Exists(stagedPath));
     }
 
     [Fact]

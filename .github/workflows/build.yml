@@ -429,8 +429,19 @@ jobs:
         if: ${{ always() && !cancelled() }}
         run: |
           diagnostics_markdown="TestResults/coverage-merged/slow-test-diagnostics.md"
+          summary_preview_maximum_bytes=65536
           if [[ -f "$diagnostics_markdown" ]]; then
-            cat "$diagnostics_markdown" >> "$GITHUB_STEP_SUMMARY"
+            diagnostics_bytes="$(wc -c < "$diagnostics_markdown")"
+            if (( diagnostics_bytes <= summary_preview_maximum_bytes )); then
+              cat "$diagnostics_markdown" >> "$GITHUB_STEP_SUMMARY"
+            else
+              head -c "$summary_preview_maximum_bytes" "$diagnostics_markdown" >> "$GITHUB_STEP_SUMMARY"
+              {
+                echo
+                echo
+                echo "> Slow-test diagnostics were truncated in this summary (${diagnostics_bytes} bytes total). Download the \`slow-test-diagnostics\` artifact for the complete report."
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
           else
             {
               echo "## Slow-test diagnostics"

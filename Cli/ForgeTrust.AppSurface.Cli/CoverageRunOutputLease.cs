@@ -868,7 +868,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
                 VerifyWindowsPathIdentity(promotionHandle, temporaryPath);
                 RejectWindowsWrongKind(promotionHandle, expectDirectory: false);
                 RejectWindowsHardLinkedArtifact(promotionHandle, artifactName);
-                PromoteWindowsOwnedGateArtifact(promotionHandle, path, artifactName);
+                PromoteWindowsOwnedGateArtifact(promotionHandle, _outputHandle!, artifactName);
             }
 
             promoted = true;
@@ -910,10 +910,10 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     [ExcludeFromCodeCoverage(Justification = "Windows native artifact promotion is exercised by the Windows security lane.")]
     private static void PromoteWindowsOwnedGateArtifact(
         SafeFileHandle sourceHandle,
-        string destinationPath,
+        SafeFileHandle destinationDirectory,
         string artifactName)
     {
-        var fileNameBytes = Encoding.Unicode.GetBytes(destinationPath);
+        var fileNameBytes = Encoding.Unicode.GetBytes(artifactName);
         var rootDirectoryOffset = Marshal.OffsetOf<WindowsFileRenameInformation>(nameof(WindowsFileRenameInformation.RootDirectory)).ToInt32();
         var fileNameLengthOffset = Marshal.OffsetOf<WindowsFileRenameInformation>(nameof(WindowsFileRenameInformation.FileNameLength)).ToInt32();
         var fileNameOffset = Marshal.OffsetOf<WindowsFileRenameInformation>(nameof(WindowsFileRenameInformation.FileName)).ToInt32();
@@ -922,9 +922,10 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         try
         {
             Marshal.WriteInt32(buffer, 0, 1);
-            // A null root directory requires a fully qualified target path. destinationPath has already
-            // passed containment and reparse-point validation while the output directory lease is held.
-            Marshal.WriteIntPtr(buffer, rootDirectoryOffset, IntPtr.Zero);
+            // Rename relative to the retained output-directory handle. Supplying an absolute destination
+            // causes Windows to reopen the directory for the rename, which conflicts with this lease's
+            // deliberate denial of competing directory-write access.
+            Marshal.WriteIntPtr(buffer, rootDirectoryOffset, destinationDirectory.DangerousGetHandle());
             Marshal.WriteInt32(buffer, fileNameLengthOffset, fileNameBytes.Length);
             Marshal.Copy(fileNameBytes, 0, IntPtr.Add(buffer, fileNameOffset), fileNameBytes.Length);
             Marshal.WriteInt16(buffer, fileNameOffset + fileNameBytes.Length, 0);

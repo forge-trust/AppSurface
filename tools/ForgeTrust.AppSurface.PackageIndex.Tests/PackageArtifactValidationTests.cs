@@ -4027,6 +4027,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Theory]
+    [InlineData("{}")]
+    [InlineData("{")]
     [InlineData("{\"schemaVersion\":1,\"targets\":[{\"path\":\"Smoke/Calculator.cs\",\"reasons\":[\"uncovered-line\"]}]}")]
     [InlineData("{\"schemaVersion\":1,\"targets\":[{\"path\":false,\"line\":9,\"reasons\":[\"uncovered-line\"],\"lineCovered\":false,\"conditions\":null,\"gateDimensions\":[\"patchLine\"]}]}")]
     public async Task CoverageCliConsumerProofWorkflow_FailsWhenPatchTargetArtifactViolatesTheTargetContract(string patchTargetJson)
