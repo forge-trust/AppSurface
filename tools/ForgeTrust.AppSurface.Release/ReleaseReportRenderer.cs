@@ -46,9 +46,9 @@ internal static class ReleaseReportRenderer
     /// <returns>Markdown report.</returns>
     /// <remarks>
     /// Preparation reports begin with the check report contract, then append a manual review gate, optional evidence summary, either
-    /// <c>## Dry-run plan</c> or <c>## Files written</c> based on <see cref="ReleasePreparationResult.DryRun"/>, and structured recovery guidance.
-    /// Paths are repository-relative bullets. This distinction is the only dry-run marker in the report, so callers that publish the report
-    /// should preserve that heading.
+    /// <c>## Dry-run plan</c> or <c>## Files written</c> based on <see cref="ReleasePreparationResult.DryRun"/>, a separate
+    /// append-only entry archive section, and structured recovery guidance. Paths are repository-relative bullets. This distinction is the
+    /// only dry-run marker in the report, so callers that publish the report should preserve that heading.
     /// </remarks>
     internal static string RenderPreparation(ReleasePreparationResult result)
     {
@@ -65,8 +65,25 @@ internal static class ReleaseReportRenderer
             builder.AppendLine($"- `{path}`");
         }
 
+        AppendArchivedUnreleasedEntries(builder, result);
         AppendPreparationRecovery(builder, result);
         return builder.ToString();
+    }
+
+    private static void AppendArchivedUnreleasedEntries(StringBuilder builder, ReleasePreparationResult result)
+    {
+        builder.AppendLine();
+        builder.AppendLine(result.DryRun ? "## Planned unreleased entry archives" : "## Archived unreleased entries");
+        if (result.ArchivedUnreleasedEntryPaths.Count == 0)
+        {
+            builder.AppendLine("- None");
+            return;
+        }
+
+        foreach (var path in result.ArchivedUnreleasedEntryPaths)
+        {
+            builder.AppendLine($"- `{path}`");
+        }
     }
 
     private static void AppendPreparationRecovery(StringBuilder builder, ReleasePreparationResult result)
@@ -88,8 +105,21 @@ internal static class ReleaseReportRenderer
             builder.AppendLine($"  - `{path}`");
         }
 
-        builder.AppendLine("- Recovery: stop, inspect `git status --short`, and preserve unrelated work. Remove or restore only the generated artifacts listed above before retrying.");
-        builder.AppendLine("- Safe rollback validation: run `git diff --check`, confirm the listed artifacts are absent or match the pre-run state, then rerun `./eng/release check --version " + result.Check.Version + " --allow-existing-targets` before another prepare attempt.");
+        builder.AppendLine("- Archived unreleased entries:");
+        if (result.ArchivedUnreleasedEntryPaths.Count == 0)
+        {
+            builder.AppendLine("  - None");
+        }
+        else
+        {
+            foreach (var path in result.ArchivedUnreleasedEntryPaths)
+            {
+                builder.AppendLine($"  - `{path}`");
+            }
+        }
+
+        builder.AppendLine("- Recovery: stop, inspect `git status --short`, and preserve unrelated work. Remove or restore only the generated artifacts listed above, and restore each archived unreleased entry, before retrying.");
+        builder.AppendLine("- Safe rollback validation: run `git diff --check`, confirm generated artifacts are absent or match the pre-run state, confirm archived unreleased entries are restored to the pre-run state, then rerun `./eng/release check --version " + result.Check.Version + " --allow-existing-targets` before another prepare attempt.");
     }
 
     private static void AppendEvidenceSummary(StringBuilder builder, ReleaseEvidenceSummary? summary)

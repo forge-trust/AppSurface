@@ -18,6 +18,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\ForgeTrust.AppSurface.ReleaseContracts\UnreleasedEntryComposer.cs" Link="UnreleasedEntryComposer.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="CliFx" />
     <PackageReference Include="Markdig" />
     <PackageReference Include="YamlDotNet" />

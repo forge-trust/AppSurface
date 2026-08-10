@@ -74,6 +74,19 @@ Every release note should make upgrade risk obvious near the top. Call out wheth
 
 Once AppSurface starts cutting tags, the long-form release note will live in this folder and the compact summary will live in [`CHANGELOG.md`](../CHANGELOG.md). Tagged notes become the durable archive for migration details and release narrative.
 
+## Append-only unreleased entries
+
+The checked-in [`unreleased.md`](./unreleased.md) page is a stable release-note template. Feature pull requests add one Markdown file to `releases/unreleased.entries/` instead of editing that shared page, so independently merged work does not repeatedly contend for the same line range. Name each file `YYYY-MM-DD-topic.md`, begin it with one exact directive, and put its consumer-facing Markdown below the directive:
+
+```md
+<!-- appsurface:unreleased-entry section="included" -->
+### Package and docs surface
+
+- Describe the consumer outcome, link the package or guide, and state an important boundary.
+```
+
+The supported sections are `taking-shape`, `included`, and `migration-watch`. Entries are filename-sorted and inserted at the bottom of that section, after its placeholder bullet. Do not add a `#` or `##` heading inside an entry because it would create a competing top-level section; `###` headings are appropriate for grouping related items. [Release preparation](../tools/ForgeTrust.AppSurface.Release/README.md#append-only-unreleased-entries) composes the page into the tagged release note, records the exact archived paths in its evidence-digested release manifest, then removes only those entries. A concurrently merged new entry therefore remains in the next cycle rather than being silently folded into, or lost during, the release reset.
+
 ## What belongs in the release surface
 
 - Package behavior changes

@@ -19,6 +19,8 @@ This is the living release note for the next coordinated AppSurface version afte
 - `ForgeTrust.AppSurface.Theming` and the explicit `ForgeTrust.AppSurface.Web` Razor adapter now provide immutable semantic theme pairs with native System/Light/Dark browser output. The Web opt-in can retain a presentation-only Light/Dark choice in browser-local storage while preserving one canonical URL and HTML tree: it has deterministic first paint, nonce/hash CSP support, session-only fallback when storage is blocked, no cookie/account/cache/SEO behavior, and a headless native-radio contract. Docs consumer proof and versioned published trees share that origin-scoped behavior; protected Markdown downloads remain raw private `text/markdown` attachments. Docs still preserves its default `AppSurfaceDark` path, public density, chrome, Graphite compatibility, short-hex overrides, static published-tree output, and internal token ownership. RazorWire styling remains limited to generated form-error nodes and uses the nonce-bearing critical stylesheet under strict CSP. Package discovery, quickstart, diagnostics, Docs migration, test commands, and deliberate non-goals ship with the feature; tenant selection, shared Graphite, remote packs, and adoption telemetry remain separate policy work.
 - Add merged public changes here as they land.
 
+<!-- appsurface:unreleased-entries section="taking-shape" -->
+
 ## Included in the next coordinated version
 
 ### Release and docs surface
@@ -100,6 +102,8 @@ This is the living release note for the next coordinated AppSurface version afte
 - Coordinated package documentation now follows the release that was current when that documentation tree was published: current docs use the stable [`releases/current.md`](./current.md) pointer, while historical trees retain their original versioned release notes. The [release tool](../tools/ForgeTrust.AppSurface.Release/README.md) records and validates that contract through [versioned manifest and evidence V2 artifacts](./README.md#release-evidence-bundle), preserving V1 evidence compatibility and rejecting incomplete, conflicting, or unknown package release-link declarations.
 - Add release-facing changes here.
 
+<!-- appsurface:unreleased-entries section="included" -->
+
 ## Migration watch
 
 - Apply `0004_schedule_protocol.sql` with the migration-owner workflow before constructing Schedule clients or processors. Runtime credentials must remain distinct non-owner, non-`BYPASSRLS` dispatcher and scoped-runtime roles; use [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) rather than granting table access directly.
@@ -110,3 +114,5 @@ This is the living release note for the next coordinated AppSurface version afte
 - Schedule history partitions cover the current and following UTC months. Before the boundary is crossed, an operator must run `appsurface_durable.ensure_schedule_history_partitions()` as the migration owner; a missing partition fails writes visibly rather than routing data elsewhere.
 - The repository-only `scripts/coverage-solution.sh` wrapper now has one no-argument run-and-gate path over the public [`appsurface coverage` commands](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run). Its former group, filter, build, output, and merge compatibility inputs now fail before work starts with an exit-2 command-specific migration message; select projects, own assembly filters, or merge shards through the package-consumer CLI instead. The legacy `ForgeTrust.AppSurface.CoverageRunner` implementation and test project have been removed.
 - Record-breaking or behavior-changing guidance here before it moves into the tagged release note.
+
+<!-- appsurface:unreleased-entries section="migration-watch" -->

@@ -106,6 +106,9 @@ jobs:
             CHANGELOG.md \
             releases/unreleased.md \
             releases/unreleased.md.yml
+          if git ls-files --deleted -- releases/unreleased.entries | grep -q .; then
+            git add -u -- releases/unreleased.entries
+          fi
           git commit -m "chore(release): prepare v${VERSION}"
           git push --force-with-lease origin "${branch}"
           existing_pr="$(gh pr list --head "${branch}" --json number --jq '.[0].number // ""')"
@@ -150,6 +153,7 @@ jobs:
             releases/current.md.yml \
             releases/unreleased.md \
             releases/unreleased.md.yml \
+            releases/unreleased.entries \
             ':(glob)releases/v*.md' \
             ':(glob)releases/v*.md.yml' \
             ':(glob)releases/v*.release.json' \
@@ -173,6 +177,7 @@ jobs:
               [[ -z "${status}" ]] && continue
               case "${status}:${path}" in
                 M:releases/unreleased.md) ;;
+                A:releases/unreleased.entries/*.md) ;;
                 A:releases/current.md) current_pointer_markdown_added=true ;;
                 A:releases/current.md.yml) current_pointer_sidecar_added=true ;;
                 *) requires_release_manifest=true ;;
