@@ -888,6 +888,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
                 catch (Exception ex) when (writeFailure is not null
                     && ex is IOException or UnauthorizedAccessException)
                 {
+                    // Preserve the primary artifact-write failure when best-effort staging cleanup also fails.
                 }
             }
         }
@@ -909,10 +910,10 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     private void PromoteWindowsOwnedGateArtifact(SafeFileHandle sourceHandle, string artifactName)
     {
         var fileNameBytes = Encoding.Unicode.GetBytes(artifactName);
-        var rootDirectoryOffset = IntPtr.Size == sizeof(long) ? sizeof(int) * 2 : sizeof(int);
-        var fileNameLengthOffset = rootDirectoryOffset + IntPtr.Size;
-        var fileNameOffset = fileNameLengthOffset + sizeof(int);
-        var bufferSize = checked(fileNameOffset + fileNameBytes.Length);
+        var rootDirectoryOffset = Marshal.OffsetOf<WindowsFileRenameInformation>(nameof(WindowsFileRenameInformation.RootDirectory)).ToInt32();
+        var fileNameLengthOffset = Marshal.OffsetOf<WindowsFileRenameInformation>(nameof(WindowsFileRenameInformation.FileNameLength)).ToInt32();
+        var fileNameOffset = Marshal.OffsetOf<WindowsFileRenameInformation>(nameof(WindowsFileRenameInformation.FileName)).ToInt32();
+        var bufferSize = checked(Marshal.SizeOf<WindowsFileRenameInformation>() + fileNameBytes.Length);
         var buffer = Marshal.AllocHGlobal(bufferSize);
         try
         {
@@ -920,6 +921,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
             Marshal.WriteIntPtr(buffer, rootDirectoryOffset, _outputHandle!.DangerousGetHandle());
             Marshal.WriteInt32(buffer, fileNameLengthOffset, fileNameBytes.Length);
             Marshal.Copy(fileNameBytes, 0, IntPtr.Add(buffer, fileNameOffset), fileNameBytes.Length);
+            Marshal.WriteInt16(buffer, fileNameOffset + fileNameBytes.Length, 0);
             if (!SetFileInformationByHandle(sourceHandle, WindowsFileRenameInfo, buffer, (uint)bufferSize))
             {
                 throw new IOException(
@@ -1327,6 +1329,15 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     private struct WindowsFileDispositionInformation
     {
         public int DeleteFile;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct WindowsFileRenameInformation
+    {
+        public int ReplaceIfExists;
+        public nint RootDirectory;
+        public int FileNameLength;
+        public char FileName;
     }
 
     private sealed record OutputEntry(string Name, bool IsDirectory, FileObjectIdentity Identity);
