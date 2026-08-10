@@ -408,8 +408,8 @@ internal sealed class ReleaseGuidanceRenderer
         var end = FindExactMarkerLines(current, EndMarker, documentationPath);
         var lineEnding = current.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
         var rendered = template
-            .Replace(PackageChooserToken, PackageChooserUrl, StringComparison.Ordinal)
-            .Replace(ReleaseHubToken, ReleaseHubUrl, StringComparison.Ordinal)
+            .Replace(PackageChooserToken, $"[package chooser]({PackageChooserUrl})", StringComparison.Ordinal)
+            .Replace(ReleaseHubToken, $"[release hub]({ReleaseHubUrl})", StringComparison.Ordinal)
             .Replace("\n", lineEnding, StringComparison.Ordinal);
 
         if (begin.Count != 0 || end.Count != 0)

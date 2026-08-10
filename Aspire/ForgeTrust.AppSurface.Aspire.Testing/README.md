@@ -17,7 +17,10 @@ Aspire 13.4.4 does not expose or dispose the partial root service provider when 
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-This AppHost-oriented package follows the coordinated AppSurface release policy. Before using a prerelease build in an AppHost, development, or test environment, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for publication status, compatibility guidance, and readiness.
+This AppHost-oriented package follows the coordinated AppSurface release policy.
+Before using a prerelease build in an AppHost, development, or test environment,
+check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for publication status,
+compatibility guidance, and readiness.
 <!-- appsurface-release-guidance: end -->
 ## Install
 

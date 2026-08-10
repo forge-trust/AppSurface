@@ -887,10 +887,10 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine("## Maintainer notes");
         builder.AppendLine();
         builder.AppendLine($"- Edit `packages/package-index.yml` when the public package story changes.");
-        builder.AppendLine($"- Follow the {FormatMarkdownLink("PackageIndex release-guidance maintainer guide", GetRelativeRepositoryPath(request, ReleaseGuidanceRenderer.MaintainerGuideRelativePath))} when changing generated package README release policy, variants, or markers.");
+        builder.AppendLine($"- Follow the {FormatMarkdownLink("PackageIndex release-guidance maintainer guide", GetCanonicalRepositoryUrl(ReleaseGuidanceRenderer.MaintainerGuideRelativePath) + "#release-guidance")} when changing generated package README release policy, variants, or markers.");
         builder.AppendLine($"- Review {FormatMarkdownLink("package readiness evidence", GetRelativeOutputPath(request.ChooserOutputPath, request.ReadinessOutputPath))} when deciding whether the package manifest, release metadata, blockers, and dependency evidence are ready for release review.");
         builder.AppendLine("- Package readiness evidence is package-index review evidence. Per-version release consistency lives in `releases/v{version}.evidence.json` and is validated by the release cockpit.");
-        builder.AppendLine($"- Follow the {FormatMarkdownLink("coordinated release-links guide", GetRelativeRepositoryPath(request, CoordinatedReleaseLinksGuidePath))}: use `release_track: coordinated` for the frozen tree-local current pointer, or `release_track: explicit` with `release_notes_path` for a package-specific historical story.");
+        builder.AppendLine($"- Follow the {FormatMarkdownLink("coordinated release-links guide", GetCanonicalRepositoryUrl(CoordinatedReleaseLinksGuidePath))}: use `release_track: coordinated` for the frozen tree-local current pointer, or `release_track: explicit` with `release_notes_path` for a package-specific historical story.");
         builder.AppendLine("- Keep `publish_decision` and `expected_dependency_package_ids` in `packages/package-index.yml` aligned with the package artifact workflow so the chooser and release contract share one package source of truth.");
         builder.AppendLine("- Keep `tool_command_name` aligned with each published .NET tool project's `ToolCommandName` so package validation, pre-publish coverage proof, and post-publish smoke tests run the command users will type. Tool smoke tests install the package, run `--help`, then require `--version` to match the package SemVer exactly, including stable or prerelease labels and excluding any leading `v` or build metadata. The command name value must be one file-name-safe command token, not a path: no whitespace, path separators, reserved `.`/`..` segments, trailing periods, Windows reserved device names or dotted aliases, control characters, or Windows-invalid file-name characters.");
         builder.AppendLine($"- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications, package READMEs, product families, release-guidance variants, readiness blockers, or readiness notes; it reports changed and managed README-region counts.");
@@ -1055,9 +1055,9 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine("## Maintainer workflow");
         builder.AppendLine();
         builder.AppendLine("- Edit `packages/package-index.yml` for product family, publish decision, release metadata, dependency expectations, blockers, and notes.");
-        builder.AppendLine($"- Follow the {FormatMarkdownLink("PackageIndex release-guidance maintainer guide", GetRelativeRepositoryPath(request, ReleaseGuidanceRenderer.MaintainerGuideRelativePath, request.ReadinessOutputPath))} when changing generated package README policy; `verify` and `gate` do not write README files.");
+        builder.AppendLine($"- Follow the {FormatMarkdownLink("PackageIndex release-guidance maintainer guide", GetCanonicalRepositoryUrl(ReleaseGuidanceRenderer.MaintainerGuideRelativePath) + "#release-guidance")} when changing generated package README policy; `verify` and `gate` do not write README files.");
         builder.AppendLine("- Use `readiness_blocker` only for same-repository ownership. When the underlying blocker is external, create a local tracking issue and put the external context in `readiness_note`.");
-        builder.AppendLine($"- Use the {FormatMarkdownLink("coordinated release-links guide", GetRelativeRepositoryPath(request, CoordinatedReleaseLinksGuidePath, request.ReadinessOutputPath))} to select `release_track: coordinated` or an explicit historical release note.");
+        builder.AppendLine($"- Use the {FormatMarkdownLink("coordinated release-links guide", GetCanonicalRepositoryUrl(CoordinatedReleaseLinksGuidePath))} to select `release_track: coordinated` or an explicit historical release note.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` to refresh this dashboard and the adopter-facing package chooser.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify` before review to confirm both generated files are current.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` for package artifact proof; this dashboard does not replace that workflow.");
@@ -1203,6 +1203,48 @@ internal sealed class PackageIndexGenerator
         var outputDirectory = Path.GetDirectoryName(effectiveOutputPath)
             ?? throw new PackageIndexException($"Output path '{effectiveOutputPath}' does not have a parent directory.");
         return Path.GetRelativePath(outputDirectory, targetPath).Replace('\\', '/');
+    }
+
+    /// <summary>
+    /// Builds a canonical GitHub URL for repository-owned maintainer documentation that is not served by AppSurface Docs.
+    /// </summary>
+    /// <param name="repositoryRelativePath">A non-empty, slash-separated GitHub repository path whose segments do not contain direct or percent-encoded dot traversal or path separators.</param>
+    /// <returns>The canonical <c>main</c>-branch GitHub URL with each documentation-path segment URI-escaped.</returns>
+    /// <remarks>
+    /// Generated package documents are also harvested by AppSurface Docs. Repository-relative paths that escape the
+    /// generated document's directory can be interpreted as Docs routes and produce a reader-facing 404. This helper
+    /// validates GitHub URI path semantics independently of the build host and escapes URI-significant characters so a
+    /// path segment cannot alter the target URL. Use it for maintainer guides that intentionally remain repository-owned
+    /// rather than Docs-hosted.
+    /// </remarks>
+    internal static string GetCanonicalRepositoryUrl(string repositoryRelativePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRelativePath);
+
+        var normalizedPath = repositoryRelativePath.Replace('\\', '/');
+        var normalizedSegments = normalizedPath.Split('/', StringSplitOptions.None);
+        if (normalizedPath.StartsWith("/", StringComparison.Ordinal)
+            || (normalizedPath.Length >= 2 && normalizedPath[1] == ':' && char.IsLetter(normalizedPath[0]))
+            || normalizedSegments.Any(IsUnsafeRepositoryGuidancePathSegment))
+        {
+            throw new PackageIndexException($"Repository guidance link '{repositoryRelativePath}' must be a non-rooted path without a drive prefix, empty or dot segments, percent-encoded traversal, or percent-encoded path separators.");
+        }
+
+        return $"https://github.com/forge-trust/AppSurface/blob/main/{string.Join('/', normalizedSegments.Select(Uri.EscapeDataString))}";
+    }
+
+    private static bool IsUnsafeRepositoryGuidancePathSegment(string segment)
+    {
+        if (string.IsNullOrWhiteSpace(segment) || segment is "." or "..")
+        {
+            return true;
+        }
+
+        var decodedSegment = Uri.UnescapeDataString(segment);
+        return string.IsNullOrWhiteSpace(decodedSegment)
+            || decodedSegment is "." or ".."
+            || decodedSegment.Contains('/')
+            || decodedSegment.Contains('\\');
     }
 
     private static string GetRelativeOutputPath(string fromOutputPath, string toOutputPath)

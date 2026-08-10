@@ -5,7 +5,7 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 ## Before the release branch or tag
 
 - run `./eng/release check --version x.y.z` to validate the release inputs, package policy, generated targets, and warning IDs
-- make sure the pull request queue has updated [`unreleased.md`](./unreleased.md)
+- make sure the pull request queue has added the expected `releases/unreleased.entries/*.md` files and that [`unreleased.md`](./unreleased.md) reflects the composed draft produced by release preparation
 - regroup the story so the opening narrative explains what changed and why it matters
 - rewrite maintainer-led bullets into consumer-led entries for every prerelease, release-candidate, and stable note: outcome first, affected package or app shape second, maintainer evidence last
 - replace opaque shorthand with a plain-language explanation before the label, especially for cross-package concepts such as [auth projection](../Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md), [static export safety](../Web/ForgeTrust.RazorWire/README.md), or [release evidence](./README.md)
@@ -23,6 +23,7 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 - for stable releases, confirm `releases/vx.y.z.evidence.json` records `docsArchive.exactTreePath`, `docsArchive.releaseManifestSha256`, and matching `docsArchive.catalogEntry` fields from the staged docs catalog
 - confirm the generated current pointer targets the tagged note and the [package registry](../packages/README.md) keeps every `classification: public` plus `publish_decision: publish` package on `release_track: coordinated`; release prep must not rewrite those package rows
 - review the generated [package readiness evidence](../packages/readiness.md) and resolve or explicitly track package-index blockers before asking maintainers to approve package artifacts; this package-index evidence is separate from the per-version release evidence bundle
+- when a release includes a Keycloak login theme, retain the matching `keycloak-theme-evidence` CI artifact and compatible tuple before selecting a realm theme; see the [theme upgrade and rollback procedure](../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/docs/theme-upgrade.md)
 - check that the tagged note gives adopters direct paths to related guides, examples, package docs, and command references instead of only naming the capability
 - when a tagged or release-candidate note supersedes a preview page, remove the preview source file and carry its browser routes as `redirect_aliases` on the new canonical note
 - keep the trust bar accurate for the release state and archive location

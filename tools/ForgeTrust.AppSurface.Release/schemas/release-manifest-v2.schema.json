@@ -4,7 +4,7 @@
   "title": "AppSurface release manifest v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "version", "tag", "date", "preparationBaseCommit", "releaseClassification", "generatedFiles", "publishedPackageProjects", "coordinatedPackageReleaseNoteResolutions", "diagnostics", "warningIds"],
+  "required": ["schema", "version", "tag", "date", "preparationBaseCommit", "releaseClassification", "generatedFiles", "publishedPackageProjects", "coordinatedPackageReleaseNoteResolutions", "diagnostics", "warningIds", "consumedUnreleasedEntryPaths"],
   "properties": {
     "schema": { "const": "appsurface-release-manifest-v2" },
     "version": { "$ref": "#/$defs/version" },
@@ -16,7 +16,12 @@
     "publishedPackageProjects": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
     "coordinatedPackageReleaseNoteResolutions": { "type": "array", "items": { "$ref": "#/$defs/resolution" }, "uniqueItems": true },
     "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } },
-    "warningIds": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+    "warningIds": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "consumedUnreleasedEntryPaths": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^releases/unreleased\\.entries/[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+(?:-[a-z0-9]+)*\\.md$" },
+      "uniqueItems": true
+    }
   },
   "$defs": {
     "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" },

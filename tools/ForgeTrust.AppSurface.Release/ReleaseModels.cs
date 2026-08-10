@@ -43,7 +43,17 @@ internal sealed record ReleasePreparationResult(
     ReleaseCheckResult Check,
     IReadOnlyList<string> PlannedOrWrittenFiles,
     bool DryRun,
-    ReleaseEvidenceSummary? EvidenceSummary);
+    ReleaseEvidenceSummary? EvidenceSummary)
+{
+    /// <summary>
+    /// Gets the append-only unreleased entries that preparation plans to archive or archived during a real run.
+    /// </summary>
+    /// <remarks>
+    /// These paths are intentionally separate from generated artifacts: recovery must restore them to their pre-run state,
+    /// whereas generated files may be removed or restored before a retry.
+    /// </remarks>
+    internal IReadOnlyList<string> ArchivedUnreleasedEntryPaths { get; init; } = [];
+}
 
 /// <summary>
 /// Machine-readable release manifest.
@@ -79,7 +89,17 @@ internal sealed record ReleaseManifestV2(
     IReadOnlyList<string> PublishedPackageProjects,
     IReadOnlyList<CoordinatedPackageReleaseNoteResolution> CoordinatedPackageReleaseNoteResolutions,
     IReadOnlyList<ReleaseDiagnosticRecord> Diagnostics,
-    IReadOnlyList<string> WarningIds);
+    IReadOnlyList<string> WarningIds)
+{
+    /// <summary>
+    /// Gets the append-only unreleased-entry paths composed into this release and removed during preparation.
+    /// </summary>
+    /// <remarks>
+    /// The V2 evidence bundle digests this manifest, so this ordered list is the proof that a release-preparation
+    /// pull request may delete precisely these source entries and no others.
+    /// </remarks>
+    public IReadOnlyList<string> ConsumedUnreleasedEntryPaths { get; init; } = [];
+}
 
 /// <summary>
 /// Records how a public package's coordinated release alias resolves in the prepared documentation tree.

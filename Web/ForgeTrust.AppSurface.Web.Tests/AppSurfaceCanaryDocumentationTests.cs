@@ -21,6 +21,8 @@ public sealed class AppSurfaceCanaryDocumentationTests
         Assert.Contains("AppSurfaceCanaryCompletedResponseMode.AlwaysOk", readme, StringComparison.Ordinal);
         Assert.Contains("caller triggers synthetic work", readme, StringComparison.Ordinal);
         Assert.Contains("issues/645", readme, StringComparison.Ordinal);
+        Assert.Contains("[named-canary adoption lab](../../examples/named-canary-lab/README.md)", readme, StringComparison.Ordinal);
+        Assert.Contains("without claiming rollout health or production approval", readme, StringComparison.Ordinal);
         Assert.Contains("compile-only evaluator skeleton", readme, StringComparison.Ordinal);
         Assert.Contains("The placeholder always returns `Pending`", readme, StringComparison.Ordinal);
         Assert.Contains("Budget **under 5 minutes**", readme, StringComparison.Ordinal);

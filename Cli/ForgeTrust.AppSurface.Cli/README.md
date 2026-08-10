@@ -53,7 +53,9 @@ Future CLI authentication is design-only today. The [authenticated command desig
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-AppSurface ships as a coordinated package family. Before installing this package from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for current release risk, migration guidance, and readiness.
+AppSurface ships as a coordinated package family. Before installing this package
+from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md)
+for current release risk, migration guidance, and readiness.
 <!-- appsurface-release-guidance: end -->
 ## Install
 
@@ -101,6 +103,8 @@ dotnet tool run appsurface --version
 ### `appsurface canary poll`
 
 Use this command after an application has registered and protected a [named canary](../../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints). It is not a liveness or readiness probe, does not trigger synthetic work, and never changes deployment state.
+
+For a hands-on protected-trigger → proof → poll example, start with the [named-canary adoption lab](../../examples/named-canary-lab/README.md). It demonstrates how a caller can gate on the CLI exit code while the application keeps ownership of the workflow, evidence, and release decision.
 
 AppSurface is open source: this CLI is a reusable deployment-proof client, while each application remains responsible for its protected endpoint, authorization policy, and deployment decision.
 
