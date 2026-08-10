@@ -859,10 +859,11 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
                 RejectWindowsHardLinkedArtifact(destinationHandle, artifactName);
             }
 
+            // SetFileInformationByHandle renames while this source handle remains open, so allow delete sharing.
             using (var promotionHandle = OpenWindowsFile(
                        temporaryPath,
                        WindowsGenericRead | WindowsDelete,
-                       shareMode: WindowsShareRead))
+                       shareMode: WindowsShareRead | WindowsShareDelete))
             {
                 VerifyWindowsPathIdentity(promotionHandle, temporaryPath);
                 RejectWindowsWrongKind(promotionHandle, expectDirectory: false);
@@ -1320,6 +1321,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     private const uint WindowsDelete = 0x00010000;
     private const uint WindowsShareRead = 0x00000001;
     private const uint WindowsShareWrite = 0x00000002;
+    private const uint WindowsShareDelete = 0x00000004;
     private const uint WindowsOpenExisting = 3;
     private const uint WindowsCreateNew = 1;
     private const uint WindowsBackupSemantics = 0x02000000;
