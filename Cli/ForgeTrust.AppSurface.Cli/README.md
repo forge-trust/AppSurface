@@ -566,7 +566,7 @@ Artifacts are local and private by default:
 - `coverage-watchdog.json`: Latest classified watchdog warning or termination, when one occurs.
 - `.appsurface-coverage-output`: Ownership marker containing `AppSurface coverage output directory`; it allows future runs to clean only known AppSurface-owned artifacts.
 
-`coverage run` rejects unsafe output paths such as filesystem roots, the current working directory, the user home directory, the solution directory, test project directories, files, symbolic links or reparse points in any existing path component or artifact descendant, invalid ownership markers, and populated directories that do not carry the AppSurface ownership marker. An output tree created by an older version without the marker is not inferred to be owned from generic names such as `projects` or `summary.txt`; choose a fresh directory instead of adding a marker to an arbitrary populated tree. Validation is repeated through retained filesystem handles before cleanup so an ancestor replacement fails closed instead of redirecting deletion. This retained-handle guarantee covers output preparation and cleanup; later build, test, and report writes use the prepared path normally, so the output directory and its ancestors must remain trusted for the rest of the invocation. On Windows, staged report promotion requires delete sharing on the output directory; the lease still rejects competing direct write handles, but it cannot protect an output directory shared with an untrusted local principal from rename or replacement. Use a dedicated artifact directory for CI, for example `TestResults/coverage-merged`, and do not replace or relink it while the command is running.
+`coverage run` rejects unsafe output paths such as filesystem roots, the current working directory, the user home directory, the solution directory, test project directories, files, symbolic links or reparse points in any existing path component or artifact descendant, invalid ownership markers, and populated directories that do not carry the AppSurface ownership marker. An output tree created by an older version without the marker is not inferred to be owned from generic names such as `projects` or `summary.txt`; choose a fresh directory instead of adding a marker to an arbitrary populated tree. Validation is repeated through retained filesystem handles before cleanup so an ancestor replacement fails closed instead of redirecting deletion. This retained-handle guarantee covers output preparation and cleanup; later build, test, and report writes use the prepared path normally, so the output directory and its ancestors must remain trusted for the rest of the invocation. On Windows, staged report promotion requires delete sharing across the retained output path; the lease still rejects competing direct write handles on the output directory, but it cannot protect an output path shared with an untrusted local principal from rename or replacement. Use a dedicated artifact directory for CI, for example `TestResults/coverage-merged`, and do not replace or relink it while the command is running.
 
 `coverage run`, `coverage merge`, and `coverage gate` are the supported CLI coverage surfaces. The package artifact verifier installs the packed `ForgeTrust.AppSurface.Cli` tool in a clean fixture and proves all three coverage commands, including patch-target creation and stale-target removal plus a deliberately failing gate that must still write reports, before publication. Grouped CLI execution and TRX/TUnit result parsing remain separate follow-up work.
 
@@ -807,9 +807,10 @@ work from being consumed. A report-file create, replace, or delete failure is an
 failure reported as `ASCOV019`; check the named path and use a writable dedicated output directory.
 The gate rejects symbolic-link or reparse-point output components, stages each report before
 promotion, and retains the validated output directory while it removes reports. On Windows the
-directory lease denies competing direct writes but permits the delete sharing needed for staged
-promotion, so a shared output directory remains a trusted-local-principal boundary. Do not relink,
-replace, or run a second gate against that directory until the first command finishes.
+lease denies competing direct writes on the output directory but permits delete sharing across the
+retained output path for staged promotion, so a shared output directory remains a
+trusted-local-principal boundary. Do not relink, replace, or run a second gate against that
+directory until the first command finishes.
 
 The local agent loop is:
 
@@ -944,7 +945,7 @@ Diagnostics use `ASCOV###` codes so CI logs are searchable:
 | `ASCOV007` | A threshold or tolerance is outside the `0` through `100` range. | Correct `--min-line`, `--min-branch`, `--min-patch-line`, `--min-patch-branch`, or `--tolerance`. |
 | `ASCOV008` | GitHub step summary could not be written. | Check `$GITHUB_STEP_SUMMARY` permissions or add `--no-github-summary`. |
 | `ASCOV009` | The report output path is unsafe. | Use a dedicated artifact directory, not a filesystem root or working directory. |
-| `ASCOV010` | The command could not run or read `git diff` for changed-line coverage. | Fetch the diff base or pass a valid local commit/ref to `--diff-base`. In GitHub pull request workflows using `--diff-base HEAD^1`, set `actions/checkout` to `fetch-depth: 2`; the default depth is `1` and does not include `HEAD^1`. |
+| `ASCOV010` | The command could not run or read `git diff` for changed-line coverage, or the diff exceeded 20 MiB. | Fetch the diff base, pass a valid local commit/ref to `--diff-base`, or reduce the comparison size. In GitHub pull request workflows using `--diff-base HEAD^1`, set `actions/checkout` to `fetch-depth: 2`; the default depth is `1` and does not include `HEAD^1`. |
 | `ASCOV011` | A patch threshold was set without a patch diff source. | Pass exactly one of `--diff-base`, `--diff-file`, or `--diff-stdin`. |
 | `ASCOV012` | Multiple patch diff sources were set. | Keep only one of `--diff-base`, `--diff-file`, or `--diff-stdin`. |
 | `ASCOV013` | An external diff file/stdin artifact is missing, unreadable, or larger than 20 MiB. | Regenerate the unified diff artifact or pass a smaller diff. |

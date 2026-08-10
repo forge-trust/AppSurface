@@ -26,7 +26,7 @@ namespace ForgeTrust.AppSurface.Cli;
 [Command("coverage gate", Description = "Enforce line and branch thresholds from a Cobertura coverage file.")]
 internal sealed partial class CoverageGateCommand : ICommand
 {
-    private const long DefaultExternalDiffSizeLimitBytes = 20 * 1024 * 1024;
+    private const long DefaultExternalDiffSizeLimitBytes = GitDiffReader.DefaultMaximumDiffBytes;
     private const int MaxDiffLabelLength = 200;
 
     /// <summary>
@@ -303,7 +303,7 @@ internal sealed partial class CoverageGateCommand : ICommand
         if (!string.IsNullOrWhiteSpace(DiffBase))
         {
             var diffBase = DiffBase.Trim();
-            return PatchDiffSource.ForGitBase(diffBase, label ?? diffBase);
+            return PatchDiffSource.ForGitBase(diffBase, label ?? diffBase, maxBytes: ExternalDiffSizeLimitBytes);
         }
 
         if (!string.IsNullOrWhiteSpace(DiffFile))
@@ -520,7 +520,8 @@ internal sealed record PatchDiffSource(
     public static PatchDiffSource ForGitBase(
         string diffBase,
         string label,
-        Func<CancellationToken, Task<string>>? diffProvider = null) =>
+        Func<CancellationToken, Task<string>>? diffProvider = null,
+        long maxBytes = GitDiffReader.DefaultMaximumDiffBytes) =>
         new(
             PatchDiffSourceKind.GitBase,
             label,
@@ -530,9 +531,15 @@ internal sealed record PatchDiffSource(
             async (repositoryRoot, cancellationToken) =>
             {
                 var text = diffProvider is null
-                    ? await GitDiffReader.ReadDiffAsync(repositoryRoot, diffBase, cancellationToken)
+                    ? await GitDiffReader.ReadDiffAsync(repositoryRoot, diffBase, cancellationToken, maxBytes)
                     : await diffProvider(cancellationToken);
-                return PatchDiffArtifact.FromText(text);
+                var artifact = PatchDiffArtifact.FromText(text);
+                if (artifact.Bytes > maxBytes)
+                {
+                    throw new CommandException($"ASCOV010 Git diff output is too large. Limit is {maxBytes} bytes.");
+                }
+
+                return artifact;
             });
 
     public static PatchDiffSource ForFile(string path, string label, long maxBytes) =>
@@ -1215,13 +1222,12 @@ internal static class PatchCoverageEvaluator
             artifact.Sha256,
             artifact.Empty,
             request.DiffSource.IsExternalArtifact);
-        var metrics = CreateMetrics(sourceReport, request.DiffSource.DiffBase, request.LineMode, lines);
+        var metrics = CreateMetrics(sourceReport, request.LineMode, lines);
         return new PatchCoverageAnalysis(sourceReport, request.LineMode, lines, metrics);
     }
 
     private static PatchCoverageMetrics CreateMetrics(
         PatchDiffSourceReport sourceReport,
-        string? diffBase,
         PatchLineMode lineMode,
         IReadOnlyList<PatchCoverageLine> lines)
     {
@@ -1259,13 +1265,13 @@ internal static class PatchCoverageEvaluator
         return new PatchCoverageMetrics(
             sourceReport,
             new PatchLineCoverageMetric(
-                diffBase,
+                sourceReport.DiffBase,
                 changedLineCount,
                 measurableLineCount,
                 coveredLineCount,
                 linePercent),
             new PatchBranchCoverageMetric(
-                diffBase,
+                sourceReport.DiffBase,
                 changedLineCount,
                 measurableBranchCount,
                 coveredBranchCount,
@@ -1935,18 +1941,24 @@ internal static class PatchCoverageEvaluator
 /// </summary>
 internal static class GitDiffReader
 {
+    /// <summary>Maximum UTF-8 byte length accepted from a patch diff source.</summary>
+    internal const long DefaultMaximumDiffBytes = 20 * 1024 * 1024;
+
     /// <summary>
     /// Reads a zero-context diff between <paramref name="diffBase"/> and <c>HEAD</c>.
     /// </summary>
     /// <param name="repositoryRoot">Repository root where git should run.</param>
     /// <param name="diffBase">Git ref or commit compared with HEAD.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="maxBytes">Maximum UTF-8 byte length accepted from git.</param>
     /// <returns>Unified diff text.</returns>
     public static async Task<string> ReadDiffAsync(
         string repositoryRoot,
         string diffBase,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long maxBytes = DefaultMaximumDiffBytes)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
         var startInfo = new ProcessStartInfo("git")
         {
             WorkingDirectory = repositoryRoot,
@@ -1966,7 +1978,7 @@ internal static class GitDiffReader
         {
             using var process = Process.Start(startInfo)
                 ?? throw new CommandException("ASCOV010 Failed to start git diff.");
-            var standardOutputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var standardOutputTask = ReadBoundedUtf8Async(process.StandardOutput.BaseStream, maxBytes, cancellationToken);
             var standardErrorTask = process.StandardError.ReadToEndAsync(cancellationToken);
             var waitForExitTask = process.WaitForExitAsync(cancellationToken);
             await Task.WhenAll(standardOutputTask, standardErrorTask, waitForExitTask);
@@ -1975,18 +1987,58 @@ internal static class GitDiffReader
 
             if (process.ExitCode != 0)
             {
-                var details = string.IsNullOrWhiteSpace(standardError) ? standardOutput.Trim() : standardError.Trim();
+                var details = string.IsNullOrWhiteSpace(standardError) ? standardOutput.Text.Trim() : standardError.Trim();
                 throw new CommandException(
                     $"ASCOV010 Failed to read git diff from '{diffBase}' to HEAD: {details}");
             }
 
-            return standardOutput;
+            if (standardOutput.ExceededLimit)
+            {
+                throw new CommandException($"ASCOV010 Git diff output is too large. Limit is {maxBytes} bytes.");
+            }
+
+            return standardOutput.Text;
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
         {
             throw new CommandException($"ASCOV010 Failed to run git diff: {ex.Message}");
         }
     }
+
+    private static async Task<BoundedText> ReadBoundedUtf8Async(
+        Stream stream,
+        long maxBytes,
+        CancellationToken cancellationToken)
+    {
+        var buffer = new byte[81920];
+        using var captured = new MemoryStream();
+        long byteCount = 0;
+        var exceededLimit = false;
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(), cancellationToken);
+            if (read == 0)
+            {
+                break;
+            }
+
+            var previousByteCount = byteCount;
+            byteCount += read;
+            if (previousByteCount < maxBytes)
+            {
+                var remainingCapacity = checked((int)Math.Min(maxBytes - previousByteCount, read));
+                captured.Write(buffer, 0, remainingCapacity);
+            }
+
+            exceededLimit |= byteCount > maxBytes;
+        }
+
+        return new BoundedText(
+            Encoding.UTF8.GetString(captured.GetBuffer(), 0, checked((int)captured.Length)),
+            exceededLimit);
+    }
+
+    private sealed record BoundedText(string Text, bool ExceededLimit);
 }
 
 internal static class GitRepositoryRootResolver

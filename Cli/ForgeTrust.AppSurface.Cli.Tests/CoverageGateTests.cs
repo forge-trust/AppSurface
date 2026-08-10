@@ -3290,6 +3290,43 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
+    public async Task ReadDiffAsync_ThrowsDiagnostic_WhenDiffExceedsConfiguredLimit()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        File.WriteAllText(Path.Join(temp.Path, "README.md"), "base" + Environment.NewLine);
+        await RunGitAsync(temp.Path, "init");
+        await RunGitAsync(temp.Path, "config", "user.email", "tests@example.invalid");
+        await RunGitAsync(temp.Path, "config", "user.name", "AppSurface Tests");
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "initial");
+        await File.WriteAllTextAsync(Path.Join(temp.Path, "README.md"), new string('x', 128));
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "change");
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => GitDiffReader.ReadDiffAsync(temp.Path, "HEAD^1", CancellationToken.None, maxBytes: 4));
+
+        Assert.Contains("ASCOV010", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("too large", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PatchDiffSource_ForGitBase_ShouldRejectOversizedTestProviderOutput()
+    {
+        var source = PatchDiffSource.ForGitBase(
+            "HEAD",
+            "current",
+            _ => Task.FromResult("too large"),
+            maxBytes: 4);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => source.ReadAsync("unused", CancellationToken.None));
+
+        Assert.Contains("ASCOV010", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("too large", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FindRepositoryRoot_ReturnsNearestGitDirectoryOrStartDirectory()
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-");

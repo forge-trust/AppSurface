@@ -1163,10 +1163,12 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
             access,
             WindowsOpenExisting,
             WindowsBackupSemantics | WindowsOpenReparsePoint,
-            // Windows requires delete sharing on the parent directory to rename a staged child into
-            // place. Retain the write-sharing denial so another process cannot open the output
-            // directory for direct mutation while this lease is active.
-            denyWriteSharing ? WindowsShareRead | WindowsShareDelete : WindowsShareRead | WindowsShareWrite);
+            // Windows evaluates delete sharing across every retained ancestor while resolving a
+            // staged-child rename. Retain the write-sharing denial only on the output directory so
+            // another process cannot open that directory for direct mutation while this lease is active.
+            denyWriteSharing
+                ? WindowsShareRead | WindowsShareDelete
+                : WindowsShareRead | WindowsShareWrite | WindowsShareDelete);
 
     [ExcludeFromCodeCoverage(Justification = "Windows-only handle opening is exercised by the Windows test lane.")]
     private static SafeFileHandle OpenWindowsFile(

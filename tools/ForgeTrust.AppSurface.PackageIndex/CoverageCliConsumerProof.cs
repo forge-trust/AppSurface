@@ -419,6 +419,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         artifacts.AddRange(CheckCoverageGateArtifacts(patchGateDirectory, "patch-target gate"));
         artifacts.AddRange(CheckPatchTargetArtifacts(patchGateDirectory, "patch-target gate"));
         artifacts.Add(CheckPatchTargetContents(patchGateDirectory));
+        artifacts.Add(CheckPatchTargetMarkdownContents(patchGateDirectory));
         if (artifacts.Any(artifact => !artifact.Exists))
         {
             return BuildReport(context, commands, artifacts);
@@ -964,6 +965,18 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             hasExpectedContents);
     }
 
+    private static CoverageCliConsumerProofArtifactCheck CheckPatchTargetMarkdownContents(string gateDirectory)
+    {
+        var path = Path.Join(gateDirectory, "coverage-patch-targets.md");
+        var exists = File.Exists(path);
+        var contents = exists ? File.ReadAllText(path) : null;
+        var hasExpectedContents = exists && HasExpectedPatchTargetMarkdownContents(contents!);
+        return new CoverageCliConsumerProofArtifactCheck(
+            "patch-target gate Markdown structure and uncovered target",
+            path,
+            hasExpectedContents);
+    }
+
     private static bool HasExpectedPatchTargetContents(string contents)
     {
         try
@@ -987,6 +1000,13 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             return false;
         }
     }
+
+    private static bool HasExpectedPatchTargetMarkdownContents(string contents) =>
+        !contents.Contains('\r', StringComparison.Ordinal)
+        && contents.Contains("# Patch Coverage Targets\n", StringComparison.Ordinal)
+        && contents.Contains("## `Smoke/Calculator.cs`\n", StringComparison.Ordinal)
+        && contents.Contains("| Line | Reasons | Line covered | Conditions | Gate dimensions |\n", StringComparison.Ordinal)
+        && contents.Contains("| 9 | uncovered-line | no | — | patchLine |", StringComparison.Ordinal);
 
     private static bool IsExpectedPatchTarget(JsonElement target)
     {
