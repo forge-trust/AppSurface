@@ -145,6 +145,64 @@ The adapter stores only one non-sensitive string in browser local storage and se
 
 To roll back, remove `AddAppSurfaceWebThemePreferences()` and keep the existing root/head markup. The ordinary fixed Web provider resumes; old local values are inert and can be cleared by host policy if necessary. There are no routes, cookies, cache entries, or server records to migrate.
 
+### Host-owned theme selection
+
+Use `AddAppSurfaceWebThemeSelection()` when the application has already authenticated and authorized a request context and needs that context to select one of several registered theme pairs before the layout renders. It is a small presentation-policy seam, not a multitenancy system: the application owns identity normalization, authentication, authorization, mapping storage, fallback decisions, cache partitioning, and mapping invalidation. The neutral [theme contract](../../ForgeTrust.AppSurface.Theming/README.md#contract) continues to contain no request, tenant, or authorization APIs.
+
+Register every selectable pair, a **scoped** policy that consumes only already-validated host context, and the Web adapter. This example deliberately uses exact ordinal tenant identifiers and maps two tenants to the same pair. Replace `AuthorizedTenantContext` with the application's own post-authorization context rather than reading a claim, route value, or header inside the policy.
+
+```csharp
+using ForgeTrust.AppSurface.Theming;
+using ForgeTrust.AppSurface.Web;
+using ForgeTrust.AppSurface.Web.Theming;
+
+services.AddAppSurfaceTheming(options =>
+{
+    var basePair = AppSurfaceThemePair.AppSurface();
+    options.DefaultTheme = basePair.Id;
+    options.DefaultMode = AppSurfaceThemeMode.System;
+    options.Pairs.Add(basePair);
+    options.Pairs.Add(new AppSurfaceThemePair(new AppSurfaceThemeId("shared-blue"), basePair.Light, basePair.Dark));
+});
+
+services.AddScoped<IAppSurfaceWebThemeSelectionPolicy, TenantThemeSelectionPolicy>();
+services.AddAppSurfaceWebThemeSelection();
+
+sealed class TenantThemeSelectionPolicy(AuthorizedTenantContext context)
+    : IAppSurfaceWebThemeSelectionPolicy
+{
+    private static readonly IReadOnlyDictionary<string, AppSurfaceThemeId> Pairs =
+        new Dictionary<string, AppSurfaceThemeId>(StringComparer.Ordinal)
+        {
+            ["tenant-a"] = new("shared-blue"),
+            ["tenant-b"] = new("shared-blue")
+        };
+
+    public bool TrySelect(out AppSurfaceThemeId themeId) =>
+        context.TenantId is { } tenantId && Pairs.TryGetValue(tenantId, out themeId);
+}
+```
+
+`false` is an intentional deterministic fallback: the adapter renders the configured default document. A policy that returns `true` must return a registered non-empty pair id. An empty, default, or unknown id fails closed with `ASWEBTHEME008`; a non-cancellation policy exception becomes sanitized `ASWEBTHEME009` without its inner exception, tenant value, or host exception text. If a missing or unauthorized tenant must fail the request, make that decision in authentication/authorization or in the application policy before it returns; AppSurface never treats a theme choice as permission.
+
+#### Registration and provider boundary
+
+`AddAppSurfaceWebThemeSelection()` requires the neutral `IAppSurfaceThemeRegistry` and `IAppSurfaceThemeResolver`, plus the scoped policy. It replaces only the exact built-in ordinary `AppSurfaceThemeDocumentProvider` with one scoped provider. The host can call `AddAppSurfaceWebTheming()` before or after selection; it is a no-op once the selection provider exists. Selection cannot compose with browser-local preferences in v1, and it never silently wins over a custom provider or a later decorator.
+
+| Diagnostic | Problem | Cause | Fix | Docs |
+| --- | --- | --- | --- | --- |
+| `ASWEBTHEME003` | Required neutral services are absent. | Selection was registered before the sealed registry/resolver. | Call `AddAppSurfaceTheming()` first. | [Guide](#host-owned-theme-selection) |
+| `ASWEBTHEME004` | The host policy is absent or not scoped. | No scoped `IAppSurfaceWebThemeSelectionPolicy` was registered. | Register one scoped policy before selection. | [Guide](#host-owned-theme-selection) |
+| `ASWEBTHEME005` | Two incompatible Web adapters were selected. | Browser-local preferences and request-aware selection were both added. | Choose one adapter; a combined tenant-and-browser-mode contract is deferred. | [Guide](#host-owned-theme-selection) |
+| `ASWEBTHEME006` | A consumer-owned document provider would bypass selection. | A custom/factory/instance/decorator provider was present, or replaced selection later. | Keep the built-in provider for this opt-in, or own the complete custom provider instead. | [Guide](#host-owned-theme-selection) |
+| `ASWEBTHEME007` | Selection was registered twice. | More than one module attempted the opt-in. | Register selection once in the host composition root. | [Guide](#host-owned-theme-selection) |
+| `ASWEBTHEME008` | The selected pair is unsafe. | The policy returned a default, empty, or unregistered id. | Return `false` for the default, or return one id from the sealed registry. | [Guide](#host-owned-theme-selection) |
+| `ASWEBTHEME009` | The policy failed before selection. | Host policy threw a non-cancellation exception. | Diagnose safely inside the host policy and return a deliberate result. | [Guide](#host-owned-theme-selection) |
+
+Each selected pair's package-owned document is pre-rendered once from the sealed registry and cached by **pair id**. That cache does not make an enclosing HTTP response shareable. Pair ids are not response-cache keys: `tenant-a` and `tenant-b` may intentionally share `shared-blue` while their content, authorization, or cache eligibility differs. For tenant-rendered pages, the conservative host policy is `Cache-Control: private, no-store`. If a host uses an output cache, it must do so after authentication and authorization, vary by its stable tenant security partition (for example `tenant:A` versus `tenant:B`), and evict or version that partition whenever its mapping, authorization, or content changes. AppSurface sets no cache headers, `Vary` values, partition keys, or invalidation rules.
+
+The selection adapter emits the same root metadata and critical style as ordinary Web theming. It reads no cookie or browser storage, emits no script, creates no static tenant variants, and adds no first-paint or CSP requirement beyond the existing critical-style CSP guidance. Requestless/static paths should return `false` and use the configured default, or omit this opt-in entirely. To roll back, remove `AddAppSurfaceWebThemeSelection()` and the scoped policy, then retain or add `AddAppSurfaceWebTheming()`; no package-owned tenant data, response-cache state, or browser state exists to migrate.
+
 ### PWA application badging
 
 AppSurface Web includes a default-off, privacy-safe browser rail for application-icon badge requests:

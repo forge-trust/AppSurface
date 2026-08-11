@@ -36,6 +36,7 @@
     <ProjectReference Include="../ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Web.Tests.CanaryConsumerFixture/ForgeTrust.AppSurface.Web.Tests.CanaryConsumerFixture.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Web.Tests.SharedErrorPagesFixture/ForgeTrust.AppSurface.Web.Tests.SharedErrorPagesFixture.csproj" />
+    <ProjectReference Include="../../examples/tenant-theme-selection/TenantThemeSelectionExample.csproj" />
   </ItemGroup>
 
 </Project>
