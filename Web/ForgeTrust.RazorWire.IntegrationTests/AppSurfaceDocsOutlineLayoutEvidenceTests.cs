@@ -57,12 +57,12 @@ public sealed class AppSurfaceDocsOutlineLayoutEvidenceTests
     [Fact]
     public void ResolveArtifactRoot_UsesNamespacedTempFallback_WhenConfigurationIsUnset()
     {
-        var temp = Path.Combine(Path.GetTempPath(), "docs-outline-layout-tests");
+        var temp = Path.Join(Path.GetTempPath(), "docs-outline-layout-tests");
 
         var root = AppSurfaceDocsOutlineLayoutEvidence.ResolveArtifactRoot(null, temp);
 
         Assert.Equal(
-            Path.GetFullPath(Path.Combine(temp, "appsurface-docs-outline-layout-evidence")),
+            Path.GetFullPath(Path.Join(temp, "appsurface-docs-outline-layout-evidence")),
             root);
     }
 
@@ -80,13 +80,13 @@ public sealed class AppSurfaceDocsOutlineLayoutEvidenceTests
     [Fact]
     public void ResolveArtifactPath_RejectsEscapeAndSiblingPrefixPaths()
     {
-        var root = Path.Combine(Path.GetTempPath(), "docs-outline-layout-tests", "evidence");
+        var root = Path.Join(Path.GetTempPath(), "docs-outline-layout-tests", "evidence");
         var sibling = root + "-sibling";
 
         Assert.Throws<ArgumentException>(() =>
-            AppSurfaceDocsOutlineLayoutEvidence.ResolveArtifactPath(root, Path.Combine("..", "outside", "trace.zip")));
+            AppSurfaceDocsOutlineLayoutEvidence.ResolveArtifactPath(root, Path.Join("..", "outside", "trace.zip")));
         Assert.Throws<ArgumentException>(() =>
-            AppSurfaceDocsOutlineLayoutEvidence.ResolveArtifactPath(root, Path.Combine(sibling, "trace.zip")));
+            AppSurfaceDocsOutlineLayoutEvidence.ResolveArtifactPath(root, Path.Join(sibling, "trace.zip")));
     }
 
     [Fact]
@@ -115,7 +115,7 @@ public sealed class AppSurfaceDocsOutlineLayoutEvidenceTests
     [Fact]
     public async Task CaptureIfFailedAsync_DoesNotCreateEvidenceOrStopTrace_WhenInvariantsPass()
     {
-        var root = Path.Combine(CreateTemporaryDirectory(), "evidence");
+        var root = Path.Join(CreateTemporaryDirectory(), "evidence");
         try
         {
             var writer = new AppSurfaceDocsOutlineLayoutEvidence(
@@ -180,7 +180,7 @@ public sealed class AppSurfaceDocsOutlineLayoutEvidenceTests
             Assert.Equal(["outline-layout.json", "viewport.png", "trace.zip"], capture.Stages.Select(stage => stage.Name));
             Assert.All(capture.Stages, stage => Assert.Null(stage.Error));
             Assert.True(capture.TraceStopAttempted);
-            var snapshotPath = Path.Combine(capture.Directory!, "outline-layout.json");
+            var snapshotPath = Path.Join(capture.Directory!, "outline-layout.json");
             Assert.True(File.Exists(snapshotPath));
             using var document = JsonDocument.Parse(await File.ReadAllTextAsync(snapshotPath));
             Assert.Equal(AppSurfaceDocsOutlineLayoutEvidence.SchemaVersion, document.RootElement.GetProperty("SchemaVersion").GetInt32());
@@ -211,8 +211,8 @@ public sealed class AppSurfaceDocsOutlineLayoutEvidenceTests
             Assert.Equal(
                 new[] { "Bottom", "Height", "Left", "Right", "Top", "Width" }.OrderBy(name => name),
                 document.RootElement.GetProperty("Primary").GetProperty("Bounds").EnumerateObject().Select(property => property.Name).OrderBy(name => name));
-            Assert.True(File.Exists(Path.Combine(capture.Directory!, "viewport.png")));
-            Assert.True(File.Exists(Path.Combine(capture.Directory!, "trace.zip")));
+            Assert.True(File.Exists(Path.Join(capture.Directory!, "viewport.png")));
+            Assert.True(File.Exists(Path.Join(capture.Directory!, "trace.zip")));
         }
         finally
         {
@@ -239,7 +239,7 @@ public sealed class AppSurfaceDocsOutlineLayoutEvidenceTests
                 (_, _) => Task.FromException(new IOException("trace unavailable")));
             var message = AppSurfaceDocsOutlineLayoutEvidence.FormatFailureMessage(evaluation, capture);
 
-            Assert.True(File.Exists(Path.Combine(capture.Directory!, "outline-layout.json")));
+            Assert.True(File.Exists(Path.Join(capture.Directory!, "outline-layout.json")));
             Assert.Equal("outline-layout.json", capture.Stages[0].Name);
             Assert.Null(capture.Stages[0].Error);
             Assert.Equal("viewport.png", capture.Stages[1].Name);
@@ -251,6 +251,50 @@ public sealed class AppSurfaceDocsOutlineLayoutEvidenceTests
             Assert.Contains("desktop-toggle-visible (expected=false, observed=true", message, StringComparison.Ordinal);
             Assert.Contains("viewport.png capture failed (screenshot unavailable)", message, StringComparison.Ordinal);
             Assert.Contains("trace.zip capture failed (trace unavailable)", message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CaptureAsync_PropagatesCancellationAndCriticalRuntimeFailures()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var writer = new AppSurfaceDocsOutlineLayoutEvidence(artifactDirectory: () => root);
+            var screenshotCalls = 0;
+            var traceStops = 0;
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                writer.CaptureAsync(
+                    CreateSnapshot(toggleDisplay: "block"),
+                    (_, _) =>
+                    {
+                        screenshotCalls++;
+                        return Task.CompletedTask;
+                    },
+                    (_, _) =>
+                    {
+                        traceStops++;
+                        return Task.CompletedTask;
+                    },
+                    new CancellationToken(canceled: true)));
+            Assert.Equal(0, screenshotCalls);
+            Assert.Equal(0, traceStops);
+
+            await Assert.ThrowsAsync<OutOfMemoryException>(() =>
+                writer.CaptureAsync(
+                    CreateSnapshot(toggleDisplay: "block"),
+                    (_, _) => Task.FromException(new OutOfMemoryException("critical runtime failure")),
+                    (_, _) =>
+                    {
+                        traceStops++;
+                        return Task.CompletedTask;
+                    }));
+            Assert.Equal(0, traceStops);
         }
         finally
         {
@@ -343,7 +387,7 @@ public sealed class AppSurfaceDocsOutlineLayoutEvidenceTests
 
     private static string CreateTemporaryDirectory()
     {
-        var directory = Path.Combine(Path.GetTempPath(), "docs-outline-layout-tests", Guid.NewGuid().ToString("N"));
+        var directory = Path.Join(Path.GetTempPath(), "docs-outline-layout-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         return directory;
     }

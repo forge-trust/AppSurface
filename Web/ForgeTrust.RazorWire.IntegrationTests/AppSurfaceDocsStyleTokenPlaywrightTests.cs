@@ -513,7 +513,7 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
                     {
                         await context.Tracing.StopAsync();
                     }
-                    catch (Exception)
+                    catch (PlaywrightException)
                     {
                         // Preserve the pre-existing assertion or browser failure; trace cleanup is secondary evidence.
                     }

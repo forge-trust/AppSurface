@@ -144,7 +144,7 @@ internal sealed class AppSurfaceDocsOutlineLayoutEvidence
         {
             directory = CreateCaptureDirectory(ResolveArtifactRoot(_artifactDirectory(), _tempDirectory()), _utcNow(), _newGuid());
         }
-        catch (Exception exception)
+        catch (Exception exception) when (!MustPropagate(exception))
         {
             return DocsOutlineLayoutCapture.WithFailure("evidence-directory", null, exception);
         }
@@ -188,7 +188,7 @@ internal sealed class AppSurfaceDocsOutlineLayoutEvidence
 
         if (configuredRoot is null || configuredRoot.Length == 0)
         {
-            return Path.GetFullPath(Path.Combine(tempDirectory, TempDirectoryName));
+            return Path.GetFullPath(Path.Join(tempDirectory, TempDirectoryName));
         }
 
         if (string.IsNullOrWhiteSpace(configuredRoot) || !Path.IsPathFullyQualified(configuredRoot))
@@ -209,7 +209,7 @@ internal sealed class AppSurfaceDocsOutlineLayoutEvidence
         var directoryName = string.Create(
             CultureInfo.InvariantCulture,
             $"{timestamp.UtcDateTime:yyyyMMddTHHmmssfffZ}-initial-{identifier:N}");
-        var directory = ResolveArtifactPath(artifactRoot, Path.Combine(ArtifactDirectoryName, directoryName));
+        var directory = ResolveArtifactPath(artifactRoot, Path.Join(ArtifactDirectoryName, directoryName));
         Directory.CreateDirectory(directory);
         return directory;
     }
@@ -260,7 +260,7 @@ internal sealed class AppSurfaceDocsOutlineLayoutEvidence
             await operation();
             capture.RecordSuccess(name, path);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (!MustPropagate(exception))
         {
             // Diagnostics must never replace the actionable layout assertion that triggered this capture.
             capture.RecordFailure(name, path, exception);
@@ -270,6 +270,12 @@ internal sealed class AppSurfaceDocsOutlineLayoutEvidence
     private static string FormatObserved(bool? value, string detail) => value is null
         ? detail
         : $"{value.Value.ToString().ToLowerInvariant()} ({detail})";
+
+    private static bool MustPropagate(Exception exception) => exception is
+        OperationCanceledException
+        or OutOfMemoryException
+        or StackOverflowException
+        or AccessViolationException;
 }
 
 /// <summary>
