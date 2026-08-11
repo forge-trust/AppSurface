@@ -6,7 +6,6 @@ var builder = WebApplication.CreateBuilder(args);
 TenantThemeProofHostEnvironment.ThrowUnlessDevelopment(builder.Environment.EnvironmentName);
 
 builder.Services.AddRazorPages();
-builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddAppSurfaceTheming(options =>
 {
