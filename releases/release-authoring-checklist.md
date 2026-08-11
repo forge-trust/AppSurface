@@ -28,6 +28,7 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 - when a tagged or release-candidate note supersedes a preview page, remove the preview source file and carry its browser routes as `redirect_aliases` on the new canonical note
 - keep the trust bar accurate for the release state and archive location
 - link the tagged note from [`CHANGELOG.md`](../CHANGELOG.md)
+- before requesting review, run `./eng/release verify-prep-diff --base-ref main --report /tmp/appsurface-release-prep-diff.md`; it classifies the complete base-to-HEAD diff, allows package chooser/readiness and managed README churn only when [PackageIndex](../tools/ForgeTrust.AppSurface.PackageIndex/README.md) proves the matching manifest or template input, and leaves the repository unchanged
 - open the release preparation pull request and stop for manual maintainer review; automation and coding agents must not merge release PRs or create release tags without an explicit post-review instruction
 
 ## When creating and pushing the tag

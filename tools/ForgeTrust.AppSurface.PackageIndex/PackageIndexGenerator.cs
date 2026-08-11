@@ -249,7 +249,14 @@ internal sealed class PackageIndexGenerator
         return PackageGateValidator.Validate(request.RepositoryRoot, entries);
     }
 
-    private async Task<IReadOnlyList<ResolvedPackageEntry>> ResolveGenerationEntriesAsync(
+    /// <summary>
+    /// Resolves the validated package entries used by every canonical package-index rendering path.
+    /// </summary>
+    /// <remarks>
+    /// This is exposed internally so read-only provenance consumers can reuse the exact renderer inputs instead of
+    /// reconstructing manifest or project metadata rules.
+    /// </remarks>
+    internal async Task<IReadOnlyList<ResolvedPackageEntry>> ResolveGenerationEntriesAsync(
         PackageIndexRequest request,
         CancellationToken cancellationToken)
     {

@@ -272,10 +272,10 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("release-prep-review:", workflow, StringComparison.Ordinal);
         Assert.Contains("contents: read", workflow, StringComparison.Ordinal);
         Assert.Contains("pull-requests: read", workflow, StringComparison.Ordinal);
-        Assert.Contains("--fail-on-warnings", workflow, StringComparison.Ordinal);
-        Assert.Contains("--allow-existing-targets", workflow, StringComparison.Ordinal);
-        Assert.Contains("RELEASE_PREP_POLICY_VERSION", workflow, StringComparison.Ordinal);
-        Assert.DoesNotContain("--filter FullyQualifiedName~ReleasePreparationChangePolicyValidatesPullRequestDiff", workflow, StringComparison.Ordinal);
+        Assert.Contains("ref: ${{ github.event.pull_request.head.sha }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("./eng/release verify-prep-diff", workflow, StringComparison.Ordinal);
+        Assert.Contains("--base-ref \"${GITHUB_BASE_REF}\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("Publish release-preparation diff report", workflow, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -316,30 +316,23 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("--base \"${BASE_REF}\"", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("expected_main=\"$(git rev-parse origin/main)\"", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("merge-base --is-ancestor HEAD origin/main", prep, StringComparison.Ordinal);
-        Assert.Contains("dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj", prep, StringComparison.Ordinal);
-        Assert.Contains("RELEASE_PREP_POLICY_BASE_REF", prep, StringComparison.Ordinal);
-        Assert.Contains("RELEASE_PREP_POLICY_VERSION", prep, StringComparison.Ordinal);
-        Assert.DoesNotContain("--filter FullyQualifiedName~ReleasePreparationChangePolicyValidatesPullRequestDiff", prep, StringComparison.Ordinal);
-        Assert.Contains("No versioned release manifest changed; validating the complete release test suite without applying the release-artifact diff gate.", prep, StringComparison.Ordinal);
-        Assert.DoesNotContain("--filter FullyQualifiedName~ReleaseWorkflowPolicyTests", prep, StringComparison.Ordinal);
-        Assert.Contains("release_prep_changes", prep, StringComparison.Ordinal);
-        Assert.Contains("git diff --no-renames --name-status", prep, StringComparison.Ordinal);
-        Assert.Contains("current_pointer_markdown_added", prep, StringComparison.Ordinal);
-        Assert.Contains("current_pointer_sidecar_added", prep, StringComparison.Ordinal);
-        Assert.Contains("M:releases/unreleased.md", prep, StringComparison.Ordinal);
-        Assert.Contains("releases/unreleased.entries", prep, StringComparison.Ordinal);
+        Assert.Contains("./eng/release verify-prep-diff", prep, StringComparison.Ordinal);
+        Assert.Contains("--base-ref \"${GITHUB_BASE_REF}\"", prep, StringComparison.Ordinal);
+        Assert.Contains("RELEASE_PREP_REPORT", prep, StringComparison.Ordinal);
+        Assert.Contains("GITHUB_STEP_SUMMARY", prep, StringComparison.Ordinal);
+        Assert.DoesNotContain("Legacy release warning recomputation", prep, StringComparison.Ordinal);
+        Assert.DoesNotContain("release_prep_changes", prep, StringComparison.Ordinal);
+        Assert.DoesNotContain("git diff --no-renames --name-status", prep, StringComparison.Ordinal);
         Assert.Contains("git add -u -- releases/unreleased.entries", prep, StringComparison.Ordinal);
-        Assert.Contains("bootstrap both releases/current.md and releases/current.md.yml together", prep, StringComparison.Ordinal);
-        Assert.Contains("without exactly one added or modified versioned release manifest", prep, StringComparison.Ordinal);
         Assert.Contains("releases/v${VERSION}.release.json", prep, StringComparison.Ordinal);
         Assert.Contains("git add", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("git add CHANGELOG.md releases", prep, StringComparison.Ordinal);
-        Assert.Contains("docs export", prep, StringComparison.Ordinal);
-        Assert.Contains("docs verify-archive", prep, StringComparison.Ordinal);
-        Assert.Contains("--docs-catalog", prep, StringComparison.Ordinal);
-        Assert.Contains("--docs-trusted-release-root", prep, StringComparison.Ordinal);
-        Assert.Contains("git worktree add --detach", prep, StringComparison.Ordinal);
-        Assert.Contains("refs/tags/v${version}^{commit}", prep, StringComparison.Ordinal);
+        Assert.DoesNotContain("docs export", prep, StringComparison.Ordinal);
+        Assert.DoesNotContain("docs verify-archive", prep, StringComparison.Ordinal);
+        Assert.DoesNotContain("--docs-catalog", prep, StringComparison.Ordinal);
+        Assert.DoesNotContain("--docs-trusted-release-root", prep, StringComparison.Ordinal);
+        Assert.DoesNotContain("git worktree add --detach", prep, StringComparison.Ordinal);
+        Assert.DoesNotContain("refs/tags/v${version}^{commit}", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("Allowing superseded release sidecar", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("find releases -maxdepth 1 -name 'v*.release.json'", prep, StringComparison.Ordinal);
         Assert.Contains("--github-output", publish, StringComparison.Ordinal);
