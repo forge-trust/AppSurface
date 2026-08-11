@@ -23,8 +23,14 @@ internal sealed class ReleasePreparationDiffVerifier
     private const string ReadinessPath = "packages/readiness.md";
     private const string ManagedBeginMarker = "<!-- appsurface-release-guidance: begin -->";
     private const string ManagedEndMarker = "<!-- appsurface-release-guidance: end -->";
+    private const string ChangeLogPath = "CHANGELOG.md";
+    private const string CurrentReleasePath = "releases/current.md";
+    private const string CurrentReleaseSidecarPath = "releases/current.md.yml";
+    private const string UnreleasedPath = "releases/unreleased.md";
+    private const string UnreleasedEntriesPathPrefix = "releases/unreleased.entries/";
     private const string Documentation = "tools/ForgeTrust.AppSurface.Release/README.md#verify-prep-diff";
     private static readonly Regex ReleaseManifestPath = new("^releases/v(?<version>[^/]+)\\.release\\.json$", RegexOptions.CultureInvariant);
+    private static readonly Regex VersionedReleaseArtifactPath = new("^releases/v[^/]+\\.(?:md|md\\.yml|release\\.json|evidence\\.json)$", RegexOptions.CultureInvariant);
     private static readonly Regex Sha256 = new("^[0-9a-f]{64}$", RegexOptions.CultureInvariant);
     private static readonly Regex GitCommit = new("^[0-9a-f]{40,64}$", RegexOptions.CultureInvariant);
     private readonly ICommandRunner _commandRunner;
@@ -244,6 +250,8 @@ internal sealed class ReleasePreparationDiffVerifier
         List<ReleaseDiagnostic> diagnostics,
         CancellationToken cancellationToken)
     {
+        var manifests = changes.Where(change => ReleaseManifestPath.IsMatch(change.Path)).ToArray();
+        var allowsCurrentPointerBootstrap = manifests.Length == 0 && IsCurrentPointerBootstrap(changes);
         var seenPaths = new HashSet<string>(StringComparer.Ordinal);
         foreach (var change in changes)
         {
@@ -274,17 +282,18 @@ internal sealed class ReleasePreparationDiffVerifier
                 continue;
             }
 
-            if (string.Equals(change.Path, "releases/current.md.yml", StringComparison.Ordinal)
-                || string.Equals(change.OriginalPath, "releases/current.md.yml", StringComparison.Ordinal))
+            if (!allowsCurrentPointerBootstrap
+                && (string.Equals(change.Path, CurrentReleaseSidecarPath, StringComparison.Ordinal)
+                    || string.Equals(change.OriginalPath, CurrentReleaseSidecarPath, StringComparison.Ordinal)))
             {
                 Add(diagnostics, "release-prep-permanent-sidecar-changed", "The permanent current-release sidecar must not change.",
                     "releases/current.md.yml is version-independent metadata.", "Remove the sidecar edit from the release-preparation pull request.");
             }
         }
 
-        var manifests = changes.Where(change => ReleaseManifestPath.IsMatch(change.Path)).ToArray();
         if (manifests.Length == 0)
         {
+            ValidateNonReleaseArtifactChanges(changes, allowsCurrentPointerBootstrap, diagnostics);
             return;
         }
 
@@ -320,7 +329,7 @@ internal sealed class ReleasePreparationDiffVerifier
         }
     }
 
-    private static void ValidateReleaseArtifactChanges(
+    internal static void ValidateReleaseArtifactChanges(
         string version,
         IReadOnlyList<ReleasePreparationChange> changes,
         IReadOnlyList<string> consumedEntryPaths,
@@ -390,7 +399,45 @@ internal sealed class ReleasePreparationDiffVerifier
         }
     }
 
-    private async Task ValidateWitnessAsync(
+    private static void ValidateNonReleaseArtifactChanges(
+        IReadOnlyList<ReleasePreparationChange> changes,
+        bool allowsCurrentPointerBootstrap,
+        List<ReleaseDiagnostic> diagnostics)
+    {
+        foreach (var change in changes.Where(change => IsReleasePreparationOwnedPath(change.Path)))
+        {
+            if (IsAllowedNonReleaseArtifactChange(change, allowsCurrentPointerBootstrap))
+            {
+                continue;
+            }
+
+            Add(diagnostics, "release-prep-release-manifest-required", "A release-preparation artifact changed without an added versioned release manifest.",
+                $"'{change.Path}' with status {change.Status} is not one of the allowed unreleased-entry updates.", "Generate a versioned release manifest with ./eng/release prepare, or limit the change to releases/unreleased.md and added unreleased entry files.");
+        }
+    }
+
+    private static bool IsCurrentPointerBootstrap(IReadOnlyList<ReleasePreparationChange> changes) =>
+        changes.Any(change => change.Status == "A" && string.Equals(change.Path, CurrentReleasePath, StringComparison.Ordinal))
+        && changes.Any(change => change.Status == "A" && string.Equals(change.Path, CurrentReleaseSidecarPath, StringComparison.Ordinal));
+
+    private static bool IsAllowedNonReleaseArtifactChange(ReleasePreparationChange change, bool allowsCurrentPointerBootstrap) =>
+        (change.Status == "M" && string.Equals(change.Path, UnreleasedPath, StringComparison.Ordinal))
+        || (change.Status == "A" && change.Path.StartsWith(UnreleasedEntriesPathPrefix, StringComparison.Ordinal) && change.Path.EndsWith(".md", StringComparison.Ordinal))
+        || (allowsCurrentPointerBootstrap
+            && change.Status == "A"
+            && (string.Equals(change.Path, CurrentReleasePath, StringComparison.Ordinal)
+                || string.Equals(change.Path, CurrentReleaseSidecarPath, StringComparison.Ordinal)));
+
+    private static bool IsReleasePreparationOwnedPath(string path) =>
+        string.Equals(path, ChangeLogPath, StringComparison.Ordinal)
+        || string.Equals(path, CurrentReleasePath, StringComparison.Ordinal)
+        || string.Equals(path, CurrentReleaseSidecarPath, StringComparison.Ordinal)
+        || string.Equals(path, UnreleasedPath, StringComparison.Ordinal)
+        || string.Equals(path, "releases/unreleased.md.yml", StringComparison.Ordinal)
+        || path.StartsWith(UnreleasedEntriesPathPrefix, StringComparison.Ordinal)
+        || VersionedReleaseArtifactPath.IsMatch(path);
+
+    internal async Task ValidateWitnessAsync(
         ReleasePreparationWitnessDocument witness,
         IReadOnlyList<ReleasePreparationChange> changes,
         string repositoryRoot,
@@ -425,6 +472,29 @@ internal sealed class ReleasePreparationDiffVerifier
         }
 
         var surfaces = witness.Surfaces.ToDictionary(surface => surface.Path, StringComparer.Ordinal);
+        foreach (var surface in surfaces.Values)
+        {
+            var authorizingInputs = witness.ChangedInputs.Where(input => input.Surfaces.Contains(surface.Path, StringComparer.Ordinal)).ToArray();
+            if (authorizingInputs.Length == 0)
+            {
+                continue;
+            }
+
+            var baseHash = await ReadBaseSurfaceHashAsync(repositoryRoot, mergeBase, surface, cancellationToken);
+            if (baseHash is null)
+            {
+                Add(diagnostics, "release-prep-package-witness-mismatch", "A generated package surface could not be compared with its merge-base version.",
+                    $"Could not read a valid base version of '{surface.Path}'.", "Restore the generated package surface from the merge base, regenerate it, and rerun verify-prep-diff.");
+                continue;
+            }
+
+            if (!string.Equals(baseHash, surface.Sha256, StringComparison.Ordinal) && !changedOutputs.Contains(surface.Path))
+            {
+                Add(diagnostics, "release-prep-package-surface-missing", "A changed package input did not commit every generated surface it affects.",
+                    $"'{surface.Path}' differs from the witness at the merge base but is absent from the complete diff.", "Run PackageIndex generation and commit every generated package document changed by the manifest or release-guidance template.");
+            }
+        }
+
         foreach (var output in changedOutputs)
         {
             if (!surfaces.TryGetValue(output, out var surface))
@@ -471,6 +541,28 @@ internal sealed class ReleasePreparationDiffVerifier
                     $"'{input.Path}' authorizes no changed package output in this diff.", "Remove the unrelated source edit or regenerate and commit each affected package surface.");
             }
         }
+    }
+
+    private async Task<string?> ReadBaseSurfaceHashAsync(
+        string repositoryRoot,
+        string mergeBase,
+        ReleasePreparationWitnessSurfaceDocument surface,
+        CancellationToken cancellationToken)
+    {
+        var baseContent = await ReadGitFileAsync(repositoryRoot, mergeBase, surface.Path, cancellationToken);
+        if (baseContent is null)
+        {
+            return null;
+        }
+
+        if (surface.Kind != "managed-readme")
+        {
+            return ComputeSha256(baseContent);
+        }
+
+        return TryGetManagedBody(baseContent, out _, out _, out var body)
+            ? ComputeSha256(body)
+            : null;
     }
 
     internal static bool TryParseWitness(string json, out ReleasePreparationWitnessDocument? witness, out string issue)

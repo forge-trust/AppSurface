@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using ForgeTrust.AppSurface.Release;
 
 namespace ForgeTrust.AppSurface.Release.Tests;
@@ -195,4 +197,170 @@ public sealed class ReleasePreparationDiffVerifierTests
         Assert.Empty(result.Diagnostics);
         Assert.DoesNotContain(runner.Calls, call => call.StartsWith("dotnet ", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public async Task VerifyPrepDiffRejectsReleaseArtifactsWithoutAReleaseManifest()
+    {
+        var runner = CreateRunnerForNoFetchDiff("M\0CHANGELOG.md\0");
+
+        var result = await new ReleasePreparationDiffVerifier(runner).VerifyAsync(
+            Directory.GetCurrentDirectory(),
+            "main",
+            noFetch: true,
+            witnessPath: null,
+            CancellationToken.None);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-prep-release-manifest-required");
+        Assert.DoesNotContain(runner.Calls, call => call.StartsWith("dotnet ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task VerifyPrepDiffAllowsTheNonReleaseUnreleasedEntryWorkflow()
+    {
+        var runner = CreateRunnerForNoFetchDiff("M\0releases/unreleased.md\0A\0releases/unreleased.entries/2026-08-11.md\0");
+
+        var result = await new ReleasePreparationDiffVerifier(runner).VerifyAsync(
+            Directory.GetCurrentDirectory(),
+            "main",
+            noFetch: true,
+            witnessPath: null,
+            CancellationToken.None);
+
+        Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public async Task VerifyPrepDiffDoesNotClassifyReleaseDocumentationAsAnArtifactChange()
+    {
+        var runner = CreateRunnerForNoFetchDiff("M\0releases/release-authoring-checklist.md\0");
+
+        var result = await new ReleasePreparationDiffVerifier(runner).VerifyAsync(
+            Directory.GetCurrentDirectory(),
+            "main",
+            noFetch: true,
+            witnessPath: null,
+            CancellationToken.None);
+
+        Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public async Task VerifyPrepDiffReportsABaseFetchFailure()
+    {
+        var runner = new FakeCommandRunner();
+        runner.Add("git fetch origin main:refs/remotes/origin/main", new CommandResult(1, string.Empty, "network unavailable"));
+
+        var result = await new ReleasePreparationDiffVerifier(runner).VerifyAsync(
+            Directory.GetCurrentDirectory(),
+            "main",
+            noFetch: false,
+            witnessPath: null,
+            CancellationToken.None);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-prep-base-fetch-failed");
+    }
+
+    [Fact]
+    public async Task VerifyPrepDiffReportsAMalformedGitNameStatusStream()
+    {
+        var runner = CreateRunnerForNoFetchDiff("M\0README.md");
+
+        var result = await new ReleasePreparationDiffVerifier(runner).VerifyAsync(
+            Directory.GetCurrentDirectory(),
+            "main",
+            noFetch: true,
+            witnessPath: null,
+            CancellationToken.None);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-prep-unsupported-status");
+    }
+
+    [Fact]
+    public void ReleaseArtifactValidationRequiresEveryExpectedArtifact()
+    {
+        var diagnostics = new List<ReleaseDiagnostic>();
+
+        ReleasePreparationDiffVerifier.ValidateReleaseArtifactChanges(
+            "1.2.3",
+            [new ReleasePreparationChange("A", "releases/v1.2.3.release.json")],
+            [],
+            diagnostics);
+
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == "release-prep-unexpected-path"
+            && diagnostic.Problem == "A required release-preparation artifact is missing.");
+    }
+
+    [Fact]
+    public async Task WitnessValidationRequiresEveryGeneratedSurfaceWhoseDigestChanged()
+    {
+        const string baseCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        const string headCommit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        var repositoryRoot = Path.Join(Path.GetTempPath(), "ReleasePreparationDiffVerifierTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Join(repositoryRoot, "packages"));
+        await File.WriteAllTextAsync(Path.Join(repositoryRoot, "packages", "README.md"), "new chooser");
+        await File.WriteAllTextAsync(Path.Join(repositoryRoot, "packages", "readiness.md"), "old readiness");
+        try
+        {
+            var runner = new FakeCommandRunner();
+            runner.Add($"git show {baseCommit}:packages/README.md", new CommandResult(0, "old chooser", string.Empty));
+            runner.Add($"git show {baseCommit}:packages/readiness.md", new CommandResult(0, "old readiness", string.Empty));
+            var witness = new ReleasePreparationWitnessDocument(
+                "forge-trust.appsurface.release-prep-witness/v1",
+                baseCommit,
+                baseCommit,
+                baseCommit,
+                headCommit,
+                "verified",
+                [new ReleasePreparationWitnessInputDocument(
+                    "package-index-manifest",
+                    "packages/package-index.yml",
+                    ["packages/README.md", "packages/readiness.md"])],
+                [
+                    new ReleasePreparationWitnessSurfaceDocument("chooser", "packages/README.md", ComputeSha256("new chooser")),
+                    new ReleasePreparationWitnessSurfaceDocument("readiness", "packages/readiness.md", ComputeSha256("new readiness"))
+                ]);
+            var diagnostics = new List<ReleaseDiagnostic>();
+
+            await new ReleasePreparationDiffVerifier(runner).ValidateWitnessAsync(
+                witness,
+                [
+                    new ReleasePreparationChange("M", "packages/package-index.yml"),
+                    new ReleasePreparationChange("M", "packages/README.md")
+                ],
+                repositoryRoot,
+                "origin/main",
+                baseCommit,
+                baseCommit,
+                headCommit,
+                diagnostics,
+                CancellationToken.None);
+
+            Assert.Contains(diagnostics, diagnostic => diagnostic.Code == "release-prep-package-surface-missing"
+                && diagnostic.Cause.Contains("packages/readiness.md", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    private static FakeCommandRunner CreateRunnerForNoFetchDiff(string diff)
+    {
+        var baseCommit = new string('a', 40);
+        var headCommit = new string('b', 40);
+        var runner = new FakeCommandRunner();
+        runner.Add($"git rev-parse --verify origin/main", new CommandResult(0, baseCommit + "\n", string.Empty));
+        runner.Add("git rev-parse HEAD", new CommandResult(0, headCommit + "\n", string.Empty));
+        runner.Add($"git merge-base --all {baseCommit} {headCommit}", new CommandResult(0, baseCommit + "\n", string.Empty));
+        runner.Add($"git diff --name-status -z --find-renames {baseCommit}..{headCommit}", new CommandResult(0, diff, string.Empty));
+        return runner;
+    }
+
+    private static string ComputeSha256(string content) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();
 }

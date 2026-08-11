@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ForgeTrust.AppSurface.PackageIndex;
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests;
@@ -41,5 +42,34 @@ public sealed class ReleasePreparationWitnessTests
         Assert.Throws<PackageIndexException>(() => ReleaseGuidanceRenderer.ExtractManagedRegionBody(
             content + "<!-- appsurface-release-guidance: begin -->\n",
             "src/Package/README.md"));
+    }
+
+    [Fact]
+    public async Task WitnessWriterEmitsTheExactReadOnlyJsonContract()
+    {
+        var directory = Path.Join(Path.GetTempPath(), "ReleasePreparationWitnessTests", Guid.NewGuid().ToString("N"));
+        var path = Path.Join(directory, "witness.json");
+        var witness = new ReleasePreparationWitness(
+            ReleasePreparationWitnessBuilder.Schema,
+            "origin/main",
+            new string('a', 40),
+            new string('b', 40),
+            new string('c', 40),
+            "verified",
+            [new ReleasePreparationWitnessInput("package-index-manifest", "packages/package-index.yml", ["packages/README.md"])],
+            [new ReleasePreparationWitnessSurface("chooser", "packages/README.md", new string('d', 64))]);
+
+        try
+        {
+            await ReleasePreparationWitnessBuilder.WriteAsync(witness, path);
+
+            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(path));
+            Assert.Equal(ReleasePreparationWitnessBuilder.Schema, document.RootElement.GetProperty("schema").GetString());
+            Assert.Equal("packages/README.md", document.RootElement.GetProperty("surfaces")[0].GetProperty("path").GetString());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 }

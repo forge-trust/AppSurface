@@ -318,6 +318,9 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.DoesNotContain("merge-base --is-ancestor HEAD origin/main", prep, StringComparison.Ordinal);
         Assert.Contains("./eng/release verify-prep-diff", prep, StringComparison.Ordinal);
         Assert.Contains("--base-ref \"${GITHUB_BASE_REF}\"", prep, StringComparison.Ordinal);
+        Assert.Contains("Validate release semantics", prep, StringComparison.Ordinal);
+        Assert.Contains("dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj", prep, StringComparison.Ordinal);
+        Assert.Contains("./eng/release check --version \"${version}\" --fail-on-warnings --allow-existing-targets", prep, StringComparison.Ordinal);
         Assert.Contains("RELEASE_PREP_REPORT", prep, StringComparison.Ordinal);
         Assert.Contains("GITHUB_STEP_SUMMARY", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("Legacy release warning recomputation", prep, StringComparison.Ordinal);

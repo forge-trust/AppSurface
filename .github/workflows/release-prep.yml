@@ -153,6 +153,25 @@ jobs:
             --base-ref "${GITHUB_BASE_REF}" \
             --report "${RELEASE_PREP_REPORT}"
 
+      - name: Validate release semantics
+        if: ${{ success() }}
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj
+          manifest_paths="$(git diff --name-only --diff-filter=A "origin/${BASE_REF}...HEAD" -- ':(glob)releases/v*.release.json')"
+          if [[ -z "${manifest_paths}" ]]; then
+            exit 0
+          fi
+          if [[ "$(printf '%s\n' "${manifest_paths}" | sed '/^$/d' | wc -l | tr -d ' ')" != "1" ]]; then
+            echo "verify-prep-diff accepted an invalid release manifest set." >&2
+            exit 1
+          fi
+          version="${manifest_paths#releases/v}"
+          version="${version%.release.json}"
+          ./eng/release check --version "${version}" --fail-on-warnings --allow-existing-targets
+
       - name: Publish release-preparation diff report
         if: ${{ always() }}
         env:
