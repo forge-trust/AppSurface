@@ -296,6 +296,30 @@ public sealed class ReleasePreparationDiffVerifierTests
     }
 
     [Fact]
+    public void ReleaseArtifactValidationAcceptsTheCompleteExactArtifactSet()
+    {
+        var diagnostics = new List<ReleaseDiagnostic>();
+
+        ReleasePreparationDiffVerifier.ValidateReleaseArtifactChanges(
+            "1.2.3",
+            [
+                new ReleasePreparationChange("A", "releases/v1.2.3.md"),
+                new ReleasePreparationChange("A", "releases/v1.2.3.md.yml"),
+                new ReleasePreparationChange("A", "releases/v1.2.3.release.json"),
+                new ReleasePreparationChange("A", "releases/v1.2.3.evidence.json"),
+                new ReleasePreparationChange("M", "releases/current.md"),
+                new ReleasePreparationChange("M", "CHANGELOG.md"),
+                new ReleasePreparationChange("M", "releases/unreleased.md"),
+                new ReleasePreparationChange("M", "releases/unreleased.md.yml"),
+                new ReleasePreparationChange("D", "releases/unreleased.entries/2026-08-11.md")
+            ],
+            ["releases/unreleased.entries/2026-08-11.md"],
+            diagnostics);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
     public async Task WitnessValidationRequiresEveryGeneratedSurfaceWhoseDigestChanged()
     {
         const string baseCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -349,6 +373,100 @@ public sealed class ReleasePreparationDiffVerifierTests
         }
     }
 
+    [Fact]
+    public async Task WitnessValidationAcceptsEveryRegeneratedSurface()
+    {
+        const string baseCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        const string headCommit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        var repositoryRoot = Path.Join(Path.GetTempPath(), "ReleasePreparationDiffVerifierTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Join(repositoryRoot, "packages"));
+        await File.WriteAllTextAsync(Path.Join(repositoryRoot, "packages", "README.md"), "new chooser");
+        await File.WriteAllTextAsync(Path.Join(repositoryRoot, "packages", "readiness.md"), "new readiness");
+        try
+        {
+            var runner = new FakeCommandRunner();
+            runner.Add($"git show {baseCommit}:packages/README.md", new CommandResult(0, "old chooser", string.Empty));
+            runner.Add($"git show {baseCommit}:packages/readiness.md", new CommandResult(0, "old readiness", string.Empty));
+            var diagnostics = new List<ReleaseDiagnostic>();
+
+            await new ReleasePreparationDiffVerifier(runner).ValidateWitnessAsync(
+                CreateManifestWitness(baseCommit, headCommit,
+                    [
+                        new ReleasePreparationWitnessSurfaceDocument("chooser", "packages/README.md", ComputeSha256("new chooser")),
+                        new ReleasePreparationWitnessSurfaceDocument("readiness", "packages/readiness.md", ComputeSha256("new readiness"))
+                    ],
+                    ["packages/README.md", "packages/readiness.md"]),
+                [
+                    new ReleasePreparationChange("M", "packages/package-index.yml"),
+                    new ReleasePreparationChange("M", "packages/README.md"),
+                    new ReleasePreparationChange("M", "packages/readiness.md")
+                ],
+                repositoryRoot,
+                "origin/main",
+                baseCommit,
+                baseCommit,
+                headCommit,
+                diagnostics,
+                CancellationToken.None);
+
+            Assert.Empty(diagnostics);
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task WitnessValidationAcceptsAManagedReadmeWithOnlyItsGuidanceBodyChanged()
+    {
+        const string baseCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        const string headCommit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        const string path = "src/Package/README.md";
+        var baseContent = "before\n<!-- appsurface-release-guidance: begin -->\nold body\n<!-- appsurface-release-guidance: end -->\nafter\n";
+        var headContent = "before\n<!-- appsurface-release-guidance: begin -->\nnew body\n<!-- appsurface-release-guidance: end -->\nafter\n";
+        var repositoryRoot = Path.Join(Path.GetTempPath(), "ReleasePreparationDiffVerifierTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Join(repositoryRoot, "src", "Package"));
+        await File.WriteAllTextAsync(Path.Join(repositoryRoot, "src", "Package", "README.md"), headContent);
+        try
+        {
+            var runner = new FakeCommandRunner();
+            runner.Add($"git show {baseCommit}:{path}", new CommandResult(0, baseContent, string.Empty));
+            var diagnostics = new List<ReleaseDiagnostic>();
+
+            await new ReleasePreparationDiffVerifier(runner).ValidateWitnessAsync(
+                new ReleasePreparationWitnessDocument(
+                    "forge-trust.appsurface.release-prep-witness/v1",
+                    baseCommit,
+                    baseCommit,
+                    baseCommit,
+                    headCommit,
+                    "verified",
+                    [new ReleasePreparationWitnessInputDocument(
+                        "release-guidance-template",
+                        "tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.template",
+                        [path])],
+                    [new ReleasePreparationWitnessSurfaceDocument("managed-readme", path, ComputeSha256("new body\n"))]),
+                [
+                    new ReleasePreparationChange("M", "tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.template"),
+                    new ReleasePreparationChange("M", path)
+                ],
+                repositoryRoot,
+                "origin/main",
+                baseCommit,
+                baseCommit,
+                headCommit,
+                diagnostics,
+                CancellationToken.None);
+
+            Assert.Empty(diagnostics);
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
     private static FakeCommandRunner CreateRunnerForNoFetchDiff(string diff)
     {
         var baseCommit = new string('a', 40);
@@ -360,6 +478,21 @@ public sealed class ReleasePreparationDiffVerifierTests
         runner.Add($"git diff --name-status -z --find-renames {baseCommit}..{headCommit}", new CommandResult(0, diff, string.Empty));
         return runner;
     }
+
+    private static ReleasePreparationWitnessDocument CreateManifestWitness(
+        string baseCommit,
+        string headCommit,
+        IReadOnlyList<ReleasePreparationWitnessSurfaceDocument> surfaces,
+        IReadOnlyList<string> generatedPaths) =>
+        new(
+            "forge-trust.appsurface.release-prep-witness/v1",
+            baseCommit,
+            baseCommit,
+            baseCommit,
+            headCommit,
+            "verified",
+            [new ReleasePreparationWitnessInputDocument("package-index-manifest", "packages/package-index.yml", generatedPaths)],
+            surfaces);
 
     private static string ComputeSha256(string content) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();

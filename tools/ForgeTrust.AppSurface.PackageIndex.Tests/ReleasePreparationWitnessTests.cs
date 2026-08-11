@@ -72,4 +72,53 @@ public sealed class ReleasePreparationWitnessTests
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task WitnessCommandBuildsAReadOnlySnapshotForTheCurrentCheckout()
+    {
+        var path = Path.Join(Path.GetTempPath(), "ReleasePreparationWitnessTests", Guid.NewGuid().ToString("N"), "witness.json");
+        var repositoryRoot = GetRepositoryRoot();
+        await using var output = new StringWriter();
+        await using var error = new StringWriter();
+
+        try
+        {
+            var exitCode = await Program.RunAsync(
+                ["release-prep-witness", "--repo-root", repositoryRoot, "--base-ref", "HEAD", "--witness", path],
+                output,
+                error,
+                repositoryRoot);
+
+            Assert.True(exitCode == 0, error.ToString());
+            Assert.True(File.Exists(path), error.ToString());
+            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(path));
+            Assert.Equal("verified", document.RootElement.GetProperty("verification").GetString());
+            Assert.Empty(document.RootElement.GetProperty("changedInputs").EnumerateArray());
+        }
+        finally
+        {
+            var directory = Path.GetDirectoryName(path);
+            if (directory is not null && Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    private static string GetRepositoryRoot(
+        [System.Runtime.CompilerServices.CallerFilePath] string sourcePath = "")
+    {
+        var current = new DirectoryInfo(sourcePath);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Join(current.FullName, "ForgeTrust.AppSurface.slnx")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new InvalidOperationException("Could not locate the repository root from this test source file.");
+    }
 }
