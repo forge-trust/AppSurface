@@ -895,14 +895,12 @@ public class DocAggregatorTests : IDisposable
     {
         var repositoryRoot = ForgeTrust.AppSurface.Core.PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
         var markdownLogger = A.Fake<ILogger<MarkdownHarvester>>();
-        var csharpLogger = A.Fake<ILogger<CSharpDocHarvester>>();
         var localEnv = A.Fake<IWebHostEnvironment>();
         A.CallTo(() => localEnv.ContentRootPath).Returns(repositoryRoot);
 
         var aggregator = new DocAggregator(
             [
-                new MarkdownHarvester(markdownLogger),
-                new CSharpDocHarvester(csharpLogger)
+                new MarkdownHarvester(markdownLogger)
             ],
             new AppSurfaceDocsOptions
             {
@@ -925,6 +923,46 @@ public class DocAggregatorTests : IDisposable
         Assert.Contains(
             "href=\"/docs/intelligence/forgetrust.appsurface.intelligence\"",
             chooser.Content);
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task GetDocsAsync_ShouldKeepPackageIndexMaintainerSourcesOutOfStaticExportLinks()
+    {
+        var repositoryRoot = ForgeTrust.AppSurface.Core.PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
+        var markdownLogger = A.Fake<ILogger<MarkdownHarvester>>();
+        var csharpLogger = A.Fake<ILogger<CSharpDocHarvester>>();
+        var localEnv = A.Fake<IWebHostEnvironment>();
+        A.CallTo(() => localEnv.ContentRootPath).Returns(repositoryRoot);
+
+        var aggregator = new DocAggregator(
+            [
+                new MarkdownHarvester(markdownLogger),
+                new CSharpDocHarvester(csharpLogger)
+            ],
+            new AppSurfaceDocsOptions
+            {
+                Source = new AppSurfaceDocsSourceOptions
+                {
+                    RepositoryRoot = repositoryRoot
+                }
+            },
+            localEnv,
+            _memo,
+            new AppSurfaceDocsHtmlSanitizer(),
+            _loggerFake);
+
+        var docs = await aggregator.GetDocsAsync();
+        var guide = Assert.Single(docs, document => document.Path == "tools/ForgeTrust.AppSurface.PackageIndex/README.md");
+
+        Assert.DoesNotContain("href=\"../../packages/package-index.yml\"", guide.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("href=\"../../.github/workflows/package-gate.yml\"", guide.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            docs,
+            document => string.Equals(
+                document.Path,
+                "tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.md",
+                StringComparison.Ordinal));
     }
 
     [Fact]

@@ -95,3 +95,19 @@ coverage with `origin/main`; set `COVERAGE_GATE_DIFF_BASE=` when only aggregate 
 It deliberately accepts no project-selection, filter, output, or merge arguments. Use the public
 [`appsurface coverage` commands](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run)
 when a contributor needs a focused run or a shard merge.
+
+The wrapper requires a non-sandboxed host by default and fails before discovery, cleanup, build,
+or tests when an explicit sandbox marker is enabled. Set `COVERAGE_REQUIRE_NON_SANDBOX=false` only
+when a restricted run is intentional. The check does not classify generic CI or container hosts as sandboxes; see the
+[non-sandboxed runner reference](./Cli/ForgeTrust.AppSurface.Cli/README.md#require-a-non-sandboxed-runner).
+
+When `COVERAGE_GATE_DIFF_BASE` selects a patch comparison, the gate also writes
+`TestResults/coverage-merged/coverage-patch-targets.json` and
+`TestResults/coverage-merged/coverage-patch-targets.md`, even without patch thresholds. Read the
+brief, open each `path:line`, identify the relevant test project, run
+`dotnet test <project> --no-restore`, then run the full coverage lane and one final full gate.
+An empty active queue means the patch is fully covered for the selected gate semantics. Clearing
+`COVERAGE_GATE_DIFF_BASE` intentionally runs a nonpatch gate and removes those two target files.
+The output stays untracked through the existing `TestResults` ignore rule; do not add target
+filenames to `.gitignore`. See the [CLI target-artifact guidance](./Cli/ForgeTrust.AppSurface.Cli/README.md#agent-actionable-patch-targets)
+for `--no-clean`, `ASCOV019`, and optional retention in an existing CI artifact upload.

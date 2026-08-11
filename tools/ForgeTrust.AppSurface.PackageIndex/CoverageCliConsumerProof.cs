@@ -33,13 +33,13 @@ internal interface ICoverageCliConsumerProofWorkflow
 /// <para>
 /// The proof runs before package publication. It selects the already validated CLI <c>.nupkg</c>, installs it with a
 /// local-first NuGet configuration, creates a clean xUnit fixture plus an excluded failing sentinel, and executes <c>coverage run</c>,
-/// <c>coverage merge</c>, a passing <c>coverage gate</c>, an intentionally failing <c>coverage gate</c>, and
+/// <c>coverage merge</c>, a passing <c>coverage gate</c>, a patch-target gate plus nonpatch stale-target cleanup, an intentionally failing <c>coverage gate</c>, and
 /// <c>canary poll --help</c>, then runs the packed command against a local protected fixture for one <c>pass</c> and one
 /// <c>stale</c> result to prove its environment-only credential and operator-result paths are packed.
 /// </para>
 /// <para>
 /// Pitfall: the failing gate is considered successful only when the command exits non-zero and still writes
-/// <c>coverage-gate.json</c> and <c>coverage-gate.md</c>. This preserves the CLI contract that failures are visible in
+/// <c>coverage-gate.json</c> and <c>coverage-gate.md</c>. The patch-target gate separately proves the target JSON and Markdown contract. This preserves the CLI contract that failures are visible in
 /// local diagnostics rather than only in the process exit code.
 /// </para>
 /// </remarks>
@@ -389,6 +389,52 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         }
 
         artifacts.AddRange(CheckCoverageGateArtifacts(passingGateDirectory, "passing gate"));
+        if (artifacts.Any(artifact => !artifact.Exists))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        var patchDiffPath = Path.Join(fixtureDirectory, "coverage-patch-targets.diff");
+        await File.WriteAllTextAsync(
+            patchDiffPath,
+            """
+            diff --git a/Smoke/Calculator.cs b/Smoke/Calculator.cs
+            index 0000000..1111111 100644
+            --- a/Smoke/Calculator.cs
+            +++ b/Smoke/Calculator.cs
+            @@ -8,0 +9,1 @@
+            +    public static int Untested(int value) => value * 2;
+            """,
+            cancellationToken);
+        var patchGateDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-gate-patch-targets");
+        if (!await RunRequiredAsync(ToolCommand(
+            context,
+            ["coverage", "gate", "--coverage", mergedCoveragePath, "--output", patchGateDirectory, "--min-line", "1", "--min-branch", "0", "--diff-file", patchDiffPath, "--diff-label", "package consumer proof", "--no-github-summary"],
+            "appsurface coverage gate patch targets",
+            "running packaged patch-target coverage gate")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        artifacts.AddRange(CheckCoverageGateArtifacts(patchGateDirectory, "patch-target gate"));
+        artifacts.AddRange(CheckPatchTargetArtifacts(patchGateDirectory, "patch-target gate"));
+        artifacts.Add(CheckPatchTargetContents(patchGateDirectory));
+        artifacts.Add(CheckPatchTargetMarkdownContents(patchGateDirectory));
+        if (artifacts.Any(artifact => !artifact.Exists))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        if (!await RunRequiredAsync(ToolCommand(
+            context,
+            ["coverage", "gate", "--coverage", mergedCoveragePath, "--output", patchGateDirectory, "--min-line", "1", "--min-branch", "0", "--no-github-summary"],
+            "appsurface coverage gate patch-target cleanup",
+            "proving packaged nonpatch gate removes stale patch targets")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        artifacts.AddRange(CheckAbsentPatchTargetArtifacts(patchGateDirectory, "nonpatch gate"));
         if (artifacts.Any(artifact => !artifact.Exists))
         {
             return BuildReport(context, commands, artifacts);
@@ -885,10 +931,125 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         ];
     }
 
+    private static IReadOnlyList<CoverageCliConsumerProofArtifactCheck> CheckPatchTargetArtifacts(
+        string gateDirectory,
+        string label)
+    {
+        return
+        [
+            CheckArtifact(Path.Join(gateDirectory, "coverage-patch-targets.json"), $"{label} patch-target JSON"),
+            CheckArtifact(Path.Join(gateDirectory, "coverage-patch-targets.md"), $"{label} patch-target Markdown")
+        ];
+    }
+
+    private static IReadOnlyList<CoverageCliConsumerProofArtifactCheck> CheckAbsentPatchTargetArtifacts(
+        string gateDirectory,
+        string label)
+    {
+        return
+        [
+            CheckAbsentArtifact(Path.Join(gateDirectory, "coverage-patch-targets.json"), $"{label} removes patch-target JSON"),
+            CheckAbsentArtifact(Path.Join(gateDirectory, "coverage-patch-targets.md"), $"{label} removes patch-target Markdown")
+        ];
+    }
+
+    private static CoverageCliConsumerProofArtifactCheck CheckPatchTargetContents(string gateDirectory)
+    {
+        var path = Path.Join(gateDirectory, "coverage-patch-targets.json");
+        var exists = File.Exists(path);
+        var contents = exists ? File.ReadAllText(path) : null;
+        var hasExpectedContents = exists && HasExpectedPatchTargetContents(contents!);
+        return new CoverageCliConsumerProofArtifactCheck(
+            "patch-target gate JSON schema and uncovered target",
+            path,
+            hasExpectedContents);
+    }
+
+    private static CoverageCliConsumerProofArtifactCheck CheckPatchTargetMarkdownContents(string gateDirectory)
+    {
+        var path = Path.Join(gateDirectory, "coverage-patch-targets.md");
+        var exists = File.Exists(path);
+        var contents = exists ? File.ReadAllText(path) : null;
+        var hasExpectedContents = exists && HasExpectedPatchTargetMarkdownContents(contents!);
+        return new CoverageCliConsumerProofArtifactCheck(
+            "patch-target gate Markdown structure and uncovered target",
+            path,
+            hasExpectedContents);
+    }
+
+    private static bool HasExpectedPatchTargetContents(string contents)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(contents);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("schemaVersion", out var schemaVersion)
+                || !schemaVersion.TryGetInt32(out var version)
+                || version != 1
+                || !root.TryGetProperty("targets", out var targets)
+                || targets.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            return targets.EnumerateArray().Any(IsExpectedPatchTarget);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool HasExpectedPatchTargetMarkdownContents(string contents) =>
+        !contents.Contains('\r', StringComparison.Ordinal)
+        && contents.Contains("# Patch Coverage Targets\n", StringComparison.Ordinal)
+        && contents.Contains("## `Smoke/Calculator.cs`\n", StringComparison.Ordinal)
+        && contents.Contains("| Line | Reasons | Line covered | Conditions | Gate dimensions |\n", StringComparison.Ordinal)
+        && contents.Contains("| 9 | uncovered-line | no | — | patchLine |", StringComparison.Ordinal);
+
+    private static bool IsExpectedPatchTarget(JsonElement target)
+    {
+        return target.ValueKind == JsonValueKind.Object
+            && target.TryGetProperty("path", out var path)
+            && path.ValueKind == JsonValueKind.String
+            && string.Equals(path.GetString(), "Smoke/Calculator.cs", StringComparison.Ordinal)
+            && target.TryGetProperty("line", out var line)
+            && line.TryGetInt32(out var lineNumber)
+            && lineNumber == 9
+            && target.TryGetProperty("lineCovered", out var lineCovered)
+            && lineCovered.ValueKind == JsonValueKind.False
+            && target.TryGetProperty("conditions", out var conditions)
+            && HasValidConditions(conditions)
+            && ContainsString(target, "reasons", "uncovered-line")
+            && ContainsString(target, "gateDimensions", "patchLine");
+    }
+
+    private static bool HasValidConditions(JsonElement conditions)
+    {
+        return conditions.ValueKind == JsonValueKind.Null
+            || (conditions.ValueKind == JsonValueKind.Object
+                && conditions.TryGetProperty("covered", out var covered)
+                && covered.TryGetInt32(out _)
+                && conditions.TryGetProperty("valid", out var valid)
+                && valid.TryGetInt32(out _));
+    }
+
+    private static bool ContainsString(JsonElement target, string propertyName, string expectedValue)
+    {
+        return target.TryGetProperty(propertyName, out var values)
+            && values.ValueKind == JsonValueKind.Array
+            && values.EnumerateArray().Any(value => value.ValueKind == JsonValueKind.String
+                && string.Equals(value.GetString(), expectedValue, StringComparison.Ordinal));
+    }
+
     private static CoverageCliConsumerProofArtifactCheck CheckArtifact(string path, string description)
     {
         return new CoverageCliConsumerProofArtifactCheck(description, path, File.Exists(path));
     }
+
+    private static CoverageCliConsumerProofArtifactCheck CheckAbsentArtifact(string path, string description)
+        => new(description, path, !File.Exists(path) && !Directory.Exists(path));
 
     private static CoverageCliConsumerProofArtifactCheck CheckGlob(
         string directory,

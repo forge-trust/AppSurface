@@ -5,6 +5,7 @@ using System.Text;
 using ForgeTrust.AppSurface.Flow;
 using Npgsql;
 using NpgsqlTypes;
+using static ForgeTrust.AppSurface.Durable.PostgreSql.PostgreSqlDurableProtocolCodec;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 
@@ -764,6 +765,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
                 claim,
                 decision,
                 childWorkId,
+                workRegistry,
                 activityIdentity,
                 executionTraceContext,
                 cancellationToken).ConfigureAwait(false);
@@ -781,6 +783,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
         PostgreSqlFlowClaim claim,
         DurableFlowEvaluationResult decision,
         DurableWorkId? childWorkId,
+        IDurableWorkRegistry workRegistry,
         string? activityIdentity,
         DurableTraceContext? executionTraceContext,
         CancellationToken cancellationToken)
@@ -877,6 +880,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
                 revision,
                 waitId!.Value,
                 childWorkId!.Value,
+                workRegistry,
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -1021,7 +1025,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
         }
     }
 
-    private static async ValueTask InsertActivityWaitAsync(
+    private async ValueTask InsertActivityWaitAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         PostgreSqlFlowClaim claim,
@@ -1029,20 +1033,28 @@ internal sealed partial class PostgreSqlDurableFlowStore
         long revision,
         Guid waitId,
         DurableWorkId childWorkId,
+        IDurableWorkRegistry workRegistry,
         CancellationToken cancellationToken)
     {
         var activity = decision.Activity
             ?? throw new InvalidOperationException("An activity transition did not contain an activity command.");
+        var resultExpectation = activity.ResultExpectation
+            ?? DurableActivityResultExpectation.From(
+                workRegistry.GetRequired(activity.WorkName, activity.WorkVersion).ResultCodec);
         const string sql = """
             INSERT INTO appsurface_durable.flow_wait
             (
                 wait_id, scope_id, flow_instance_id, kind, state, registered_revision,
-                callsite_id, child_work_id, result_contract_version
+                callsite_id, child_work_id, result_contract_version,
+                result_contract_id, result_schema_version, result_codec_id,
+                result_classification, result_retention
             )
             VALUES
             (
                 @wait_id, @scope_id, @flow_instance_id, 'activity', 'active', @revision,
-                @callsite_id, @child_work_id, @result_contract_version
+                @callsite_id, @child_work_id, @result_contract_version,
+                @result_contract_id, @result_schema_version, @result_codec_id,
+                @result_classification, @result_retention
             );
             """;
         await using var command = new NpgsqlCommand(sql, connection, transaction);
@@ -1055,6 +1067,11 @@ internal sealed partial class PostgreSqlDurableFlowStore
         command.Parameters.AddWithValue(
             "result_contract_version",
             activity.ResultContractVersion.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("result_contract_id", resultExpectation.ContractId);
+        command.Parameters.AddWithValue("result_schema_version", resultExpectation.SchemaVersion);
+        command.Parameters.AddWithValue("result_codec_id", resultExpectation.CodecId);
+        command.Parameters.AddWithValue("result_classification", FormatClassification(resultExpectation.Classification));
+        command.Parameters.AddWithValue("result_retention", resultExpectation.RetentionPolicyId);
         if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
         {
             throw new InvalidOperationException("Flow activity wait was not inserted exactly once.");

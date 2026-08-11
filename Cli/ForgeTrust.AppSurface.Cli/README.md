@@ -42,7 +42,7 @@ publication protects readers from partial content, but it cannot make a director
 principal safe from path replacement.
 
 The preferred production flow remains: generate and review the offline schema script, apply migrations `0001` through
-`0006` in order, apply the canonical role recipe, run status and preflight, then explicitly enable
+`0007` in order, apply the canonical role recipe, run status and preflight, then explicitly enable
 [`AddWorkerHost()`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host). For recovery,
 check status, correct and review the forward-only script, then retry; never delete migration history. The
 [`durable-postgresql` example](../../examples/durable-postgresql/README.md) is a local proof, not production
@@ -103,6 +103,8 @@ dotnet tool run appsurface --version
 ### `appsurface canary poll`
 
 Use this command after an application has registered and protected a [named canary](../../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints). It is not a liveness or readiness probe, does not trigger synthetic work, and never changes deployment state.
+
+For a hands-on protected-trigger → proof → poll example, start with the [named-canary adoption lab](../../examples/named-canary-lab/README.md). It demonstrates how a caller can gate on the CLI exit code while the application keeps ownership of the workflow, evidence, and release decision.
 
 AppSurface is open source: this CLI is a reusable deployment-proof client, while each application remains responsible for its protected endpoint, authorization policy, and deployment decision.
 
@@ -423,7 +425,7 @@ appsurface coverage run \
   --output ./TestResults/coverage-merged
 ```
 
-`coverage run` is the public package-consumer coverage orchestrator for private .NET repositories. It supports `.sln` and `.slnx` discovery, repeated `--test-project` selection, a default output directory that matches `coverage gate`, bounded parallel scheduling, per-project logs, stable per-project artifact directories, safe cleanup of AppSurface-owned outputs, managed JUnit test-result artifacts, optional slow-test diagnostics, and a package-owned ReportGenerator merge. Package consumers do not need a separate merge step: the command finishes by writing the merged `coverage.cobertura.xml` artifact. It does not mutate consumer projects, install tools into the consumer repo, read the consumer `.config/dotnet-tools.json`, upload coverage, call GitHub APIs, or store trends.
+`coverage run` is the public package-consumer coverage orchestrator for private .NET repositories. It supports `.sln` and `.slnx` discovery, repeated `--test-project` selection, a default output directory that matches `coverage gate`, bounded parallel scheduling, per-project logs, stable per-project artifact directories, safe cleanup of AppSurface-owned outputs, managed JUnit test-result artifacts, optional slow-test diagnostics, and a package-owned ReportGenerator merge. Package consumers do not need a separate merge step: the command finishes by writing the merged `coverage.cobertura.xml` artifact. Cleanup also removes the UUID-named temporary files from an interrupted `coverage gate`, but leaves arbitrary dotfiles untouched. `--no-clean` preserves existing owned artifacts, including patch-target files produced by an earlier gate, so it is an explicit retention escape hatch and may leave stale targets until a later gate refreshes or removes them. It does not mutate consumer projects, install tools into the consumer repo, read the consumer `.config/dotnet-tools.json`, upload coverage, call GitHub APIs, or store trends.
 
 Per-project `coverage-normalization.log` files are the extended diagnostic channel for secondary cleanup warnings. They are deliberately separate from `dotnet-test.log`, which failed runs replay to the console. The same warning appears as `coverageCleanupDiagnostic`, with its `coverageCleanupLog` path, in `timings.json`; `coverageCleanupLog` is `null` when AppSurface could not append the warning. Treat a warning as evidence that a temporary `.coverage.*.tmp` file may remain; the primary normalization outcome and the test result keep their original outcome.
 
@@ -469,6 +471,16 @@ Every discovery, capability preflight, build, test, merge, diagnostics, and arti
 
 `--watchdog warn` is the default: it writes a classified warning and attempts to commit `coverage-watchdog.json`, then lets the run continue. `--watchdog fail` cancels the run, requests whole-process-tree termination through supervisor-owned process leases, applies one bounded cleanup budget, attempts the incident artifact, and exits `124` with `ASCOV121`. The terminal diagnostic reports the artifact path only after atomic commit; `Artifact: unavailable` with `ASCOV122` means termination remains authoritative but no incident artifact was committed. `--watchdog off` disables stall classification but leaves explicitly configured heartbeats available. Watchdog artifacts contain normalized operation metadata, byte counts, safe switch names, and relative project/log paths—not raw output, argument values, environment values, or secrets.
 
+#### Require a non-sandboxed runner
+
+`--require-non-sandbox` is an opt-in preflight for coverage workflows that must use an unrestricted host. It fails with `ASCOV116` before discovery, output cleanup, build, or test execution when an explicit sandbox marker is enabled: `CODEX_SANDBOX`, `SANDBOX_MODE`, `IN_SANDBOX`, or `IS_SANDBOX`. Values `0`, `false`, `off`, and `no` disable a marker. The diagnostic names the marker but never renders its value.
+
+The guard does not infer a sandbox from generic Docker, container, or CI signals: those are valid coverage hosts and would create false positives. It also cannot prove that an unmarked environment is unrestricted. Use the option as a fail-fast policy for known agent sandboxes, not as an isolation detector or a sandbox escape mechanism. The repository wrapper enables the check by default; set `COVERAGE_REQUIRE_NON_SANDBOX=false` only when the restriction is intentional:
+
+```bash
+COVERAGE_REQUIRE_NON_SANDBOX=false ./scripts/coverage-solution.sh
+```
+
 Options:
 
 - `--solution`: Solution file used for discovery. Supports `.sln` and `.slnx`. When omitted, the current directory must contain exactly one `.sln` or `.slnx`.
@@ -494,11 +506,12 @@ Options:
 - `--test-argument`: Repeatable extra argument token appended to every `dotnet test` invocation.
 - `--test-results`: Managed test-result format. Use `junit` to write AppSurface-owned top-level JUnit files. Other values fail before tests run.
 - `--slow-test-diagnostics`: Writes `slow-test-diagnostics.md` and `.json` from managed JUnit results. This implies `--test-results junit`.
-- `--no-clean`: Preserves existing AppSurface-owned output instead of cleaning known coverage artifacts first.
+- `--no-clean`: Preserves existing AppSurface-owned output instead of cleaning known coverage artifacts first. Existing patch-target files therefore remain until a later gate refreshes them or runs without a patch source.
 - `--verbosity`: `dotnet test` verbosity. Defaults to `minimal`.
 - `--heartbeat-interval`: Heartbeat interval. Defaults to `30s`; exact `0` disables heartbeats.
 - `--no-progress-timeout`: Positive per-operation progress timeout. Defaults to `10m`.
 - `--watchdog`: Stall response, `warn`, `fail`, or `off`. Defaults to `warn`.
+- `--require-non-sandbox`: Fails before discovery or mutation when a known sandbox environment marker is enabled. Disabled by default.
 
 Duration-aware scheduling keeps exclusive projects as barriers. If discovery returns `A.Tests`, `Browser.IntegrationTests`, and `B.Tests`, `B.Tests` never jumps ahead of the exclusive browser project even when it was slower in the previous run. AppSurface sorts only the non-exclusive segment before each barrier and only the non-exclusive segment after it.
 
@@ -555,9 +568,9 @@ Artifacts are local and private by default:
 - `coverage-watchdog.json`: Latest classified watchdog warning or termination, when one occurs.
 - `.appsurface-coverage-output`: Ownership marker containing `AppSurface coverage output directory`; it allows future runs to clean only known AppSurface-owned artifacts.
 
-`coverage run` rejects unsafe output paths such as filesystem roots, the current working directory, the user home directory, the solution directory, test project directories, files, symbolic links or reparse points in any existing path component or artifact descendant, invalid ownership markers, and populated directories that do not carry the AppSurface ownership marker. An output tree created by an older version without the marker is not inferred to be owned from generic names such as `projects` or `summary.txt`; choose a fresh directory instead of adding a marker to an arbitrary populated tree. Validation is repeated through retained filesystem handles before cleanup so an ancestor replacement fails closed instead of redirecting deletion. This retained-handle guarantee covers output preparation and cleanup; later build, test, and report writes use the prepared path normally, so the output directory and its ancestors must remain trusted for the rest of the invocation. Use a dedicated artifact directory for CI, for example `TestResults/coverage-merged`, and do not replace or relink it while the command is running.
+`coverage run` rejects unsafe output paths such as filesystem roots, the current working directory, the user home directory, the solution directory, test project directories, files, symbolic links or reparse points in any existing path component or artifact descendant, invalid ownership markers, and populated directories that do not carry the AppSurface ownership marker. An output tree created by an older version without the marker is not inferred to be owned from generic names such as `projects` or `summary.txt`; choose a fresh directory instead of adding a marker to an arbitrary populated tree. Validation is repeated through retained filesystem handles before cleanup so an ancestor replacement fails closed instead of redirecting deletion. This retained-handle guarantee covers output preparation and cleanup; later build, test, and report writes use the prepared path normally, so the output directory and its ancestors must remain trusted for the rest of the invocation. On Windows, staged report promotion requires delete sharing across the retained output path; the lease still rejects competing direct write handles on the output directory, but it cannot protect an output path shared with an untrusted local principal from rename or replacement. Use a dedicated artifact directory for CI, for example `TestResults/coverage-merged`, and do not replace or relink it while the command is running.
 
-`coverage run`, `coverage merge`, and `coverage gate` are the supported CLI coverage surfaces. The package artifact verifier installs the packed `ForgeTrust.AppSurface.Cli` tool in a clean fixture and proves all three coverage commands, including a deliberately failing gate that must still write reports, before publication. Grouped CLI execution and TRX/TUnit result parsing remain separate follow-up work.
+`coverage run`, `coverage merge`, and `coverage gate` are the supported CLI coverage surfaces. The package artifact verifier installs the packed `ForgeTrust.AppSurface.Cli` tool in a clean fixture and proves all three coverage commands, including patch-target creation and stale-target removal plus a deliberately failing gate that must still write reports, before publication. Grouped CLI execution and TRX/TUnit result parsing remain separate follow-up work.
 
 Use this GitHub Actions shape for a private pull request workflow that already has Coverlet instrumentation. GitHub's checkout action fetches one commit by default; `fetch-depth: 2` is enough to keep the default pull request merge checkout and let the patch gate compare against the merge commit's base parent without fetching full history:
 
@@ -596,6 +609,8 @@ Use this GitHub Actions shape for a private pull request workflow that already h
       TestResults/coverage-merged/coverage-watchdog.json
       TestResults/coverage-merged/coverage-gate.json
       TestResults/coverage-merged/coverage-gate.md
+      TestResults/coverage-merged/coverage-patch-targets.json
+      TestResults/coverage-merged/coverage-patch-targets.md
       TestResults/coverage-merged/projects/**/dotnet-test.log
       TestResults/coverage-merged/projects/**/coverage-normalization.log
 ```
@@ -681,6 +696,8 @@ jobs:
             TestResults/coverage-merged/timings.json
             TestResults/coverage-merged/coverage-gate.json
             TestResults/coverage-merged/coverage-gate.md
+            TestResults/coverage-merged/coverage-patch-targets.json
+            TestResults/coverage-merged/coverage-patch-targets.md
 ```
 
 #### Coverage Merge Diagnostics
@@ -719,6 +736,7 @@ Every `ASCOV###` diagnostic includes the problem, likely cause, exact fix, docs 
 | `ASCOV113` | The runner or evaluated direct package references are incompatible with the selected driver. | Use VSTest and add `coverlet.collector`, or explicitly select `msbuild` with `coverlet.msbuild`. |
 | `ASCOV114` | The package-owned ReportGenerator dependency was not found. | Restore or reinstall `ForgeTrust.AppSurface.Cli` so its package dependencies are present. |
 | `ASCOV115` | Collector output was missing, multiple, malformed, or escaped its invocation directory. | Inspect the project log and raw collector results, fix the producer, and rerun. |
+| `ASCOV116` | `--require-non-sandbox` found an enabled sandbox marker. | Run coverage outside the sandbox or omit the option when the restriction is intentional. |
 | `ASCOV120` | One or more test, merge, or artifact steps failed. | Open `timings.json` and per-project logs listed above, fix failing tests, then rerun. |
 | `ASCOV121` | Fail-mode watchdog termination claimed the run. | Inspect the reported watchdog artifact path and project logs; if the path is unavailable, use the ASCOV122 detail, then fix the stall or tune the timeout and rerun. |
 | `ASCOV122` | A bounded watchdog artifact write or promotion failed. | Use a writable dedicated output directory; the process cancellation outcome remains authoritative. |
@@ -738,7 +756,7 @@ appsurface coverage gate \
   --min-patch-branch 85
 ```
 
-`coverage gate` is the stable v1 coverage API. It does not run tests, merge shards, upload coverage, call GitHub APIs, or store trends. It reads one Cobertura file, evaluates line and branch percentages, optionally estimates changed-line and changed-branch coverage from exactly one patch diff source, writes `coverage-gate.json` and `coverage-gate.md`, prints the result, and exits nonzero when any configured threshold fails. When `$GITHUB_STEP_SUMMARY` is set, the Markdown report is appended by default so GitHub Actions logs show the gate result without requiring Codecov or another hosted dashboard. Use `--no-github-summary` when a workflow wants only file artifacts.
+`coverage gate` is the stable v1 coverage API. It does not run tests, merge shards, upload coverage, call GitHub APIs, or store trends. It reads one Cobertura file, evaluates line and branch percentages, optionally estimates changed-line and changed-branch coverage from exactly one patch diff source, writes `coverage-gate.json` and `coverage-gate.md`, prints the result, and exits nonzero when any configured threshold fails. When `$GITHUB_STEP_SUMMARY` is set, the Markdown report is appended by default so GitHub Actions logs show the gate result without requiring Codecov or another hosted dashboard. Use `--no-github-summary` when a workflow wants only file artifacts. When exactly one of `--diff-base`, `--diff-file`, or `--diff-stdin` is supplied, the gate also writes `coverage-patch-targets.json` and `coverage-patch-targets.md` in the selected output directory, regardless of whether patch thresholds were configured.
 
 Options:
 
@@ -754,7 +772,7 @@ Options:
 - `--min-patch-line`: Minimum changed-line coverage percentage from `0` through `100`. Requires exactly one patch source: `--diff-base`, `--diff-file`, or `--diff-stdin`. Omit it to report changed-line coverage without gating on it.
 - `--patch-line-mode`: Changed-line calculation mode, either `measurable` (the backwards-compatible default) or `codecov`, case-insensitive. Requires exactly one patch source.
 - `--min-patch-branch`: Minimum changed-branch coverage percentage from `0` through `100`. Requires exactly one patch source. Omit it to report changed-branch coverage without gating on it.
-- `--output`: Directory for `coverage-gate.json` and `coverage-gate.md`. Defaults to the coverage file directory.
+- `--output`: Directory for `coverage-gate.json`, `coverage-gate.md`, and, when patch evaluation is active, both patch-target files. Defaults to the coverage file directory; the standard `coverage run` output is `TestResults/coverage-merged`.
 - `--github-summary`: Append Markdown to `$GITHUB_STEP_SUMMARY` when it is set. Enabled by default.
 - `--no-github-summary`: Suppress GitHub step summary output.
 
@@ -763,6 +781,51 @@ Use the default tolerance to absorb insignificant coverage-report rounding diffe
 The command accepts Cobertura root attributes such as `line-rate`, `branch-rate`, `lines-covered`, `lines-valid`, `branches-covered`, and `branches-valid`. XML parsing disables DTD processing and external resolution. Coverage counts must be non-negative, covered counts cannot exceed valid counts, rates must be from `0` through `1`, and zero valid line or branch counts fail with `ASCOV006` because a quality gate with no measurable denominator is misleading.
 
 Patch coverage counts added or modified diff lines, intersects those lines with Cobertura `<class filename>` and `<line number hits>` entries, and reports covered/measurable lines. The default `measurable` mode counts a Cobertura line as covered when `hits > 0`, preserving the original local gate behavior. `codecov` mode retains only changed lines present in Cobertura and counts a line as covered when `hits > 0` and it has no branch data or full condition coverage (`covered == valid`); partial condition coverage therefore counts as an uncovered line, matching Codecov's patch-line calculation. Lines absent from Cobertura remain excluded in both modes, including test-only or otherwise non-instrumented modules that Codecov excludes. The patch-line mode affects only the patch line metric; `--min-patch-branch` remains a separate branch-condition metric and still counts changed Cobertura conditions. When a diff has no measurable changed lines or no measurable changed branches, the corresponding patch metric reports `100%` and says so explicitly in Markdown. Empty external diff files or stdin are valid empty patches. Non-empty malformed external artifacts, such as HTML login pages or JSON API errors, fail before coverage is evaluated.
+
+#### Agent-actionable patch targets
+
+The target artifacts are a compact local remediation queue derived from the same diff and
+Cobertura evidence as the gate. They are written beside the existing reports in the selected
+gate output directory; the default `coverage run` location is `TestResults/coverage-merged`.
+The directory is already ignored by the repository's existing
+[`TestResults` rule](https://github.com/forge-trust/AppSurface/blob/main/.gitignore), so target files are intentionally not added as separate
+`.gitignore` entries and should remain private local artifacts.
+
+Target extraction is threshold-independent: supplying exactly one of `--diff-base`, `--diff-file`,
+or `--diff-stdin` writes both `coverage-patch-targets.json` and `coverage-patch-targets.md`, even
+when `--min-patch-line` and `--min-patch-branch` are omitted. The JSON is schema version 1 with
+repository-relative `path`, one-based `line`, `reasons`, `lineCovered`, optional condition counts,
+and `gateDimensions`. Reasons are limited to `uncovered-line` and `partial-condition`; the
+report does not infer a missing Boolean outcome, test project, test name, or source excerpt.
+Lines not reported by Cobertura appear only as bounded `notMeasuredSamples` context, never as
+targets. In `codecov` mode a partial condition contributes to the patch-line target semantics;
+in `measurable` mode a covered line with a partial condition is branch-only, while an unexecuted
+line remains a line target.
+
+For an active patch comparison, an empty `targets` queue means the patch is fully covered for the
+selected gate semantics. A nonpatch gate intentionally removes the two target files from the
+validated output directory, so their absence after a nonpatch run is expected and prevents stale
+work from being consumed. A report-file create, replace, or delete failure is an artifact I/O
+failure reported as `ASCOV019`; check the named path and use a writable dedicated output directory.
+The gate rejects symbolic-link or reparse-point output components, stages each report before
+promotion, and retains the validated output directory while it removes reports. On Windows the
+lease denies competing direct writes on the output directory but permits delete sharing across the
+retained output path for staged promotion, so a shared output directory remains a
+trusted-local-principal boundary. Do not relink, replace, or run a second gate against that
+directory until the first command finishes.
+
+The local agent loop is:
+
+1. Read `coverage-patch-targets.md` (or inspect the JSON).
+2. Open each named source `path:line`.
+3. Identify the relevant test project from the source and repository structure.
+4. Run `dotnet test <project> --no-restore` to validate the focused behavior.
+5. Run the full coverage workflow and one final full `coverage gate` to refresh the queue and prove
+   the result.
+
+`coverage run --no-clean` preserves owned target files exactly like other owned artifacts. Use it
+only when that retention is intentional; the preserved queue can be stale until the next gate
+refreshes it with a patch source or removes it with a nonpatch gate.
 
 Reports are private local artifacts:
 
@@ -854,9 +917,15 @@ Use `coverage gate` after `coverage run`, or after any other private coverage wo
       TestResults/coverage-merged/timings.json
       TestResults/coverage-merged/coverage-gate.json
       TestResults/coverage-merged/coverage-gate.md
+      TestResults/coverage-merged/coverage-patch-targets.json
+      TestResults/coverage-merged/coverage-patch-targets.md
       TestResults/coverage-merged/projects/**/dotnet-test.log
       TestResults/coverage-merged/projects/**/coverage-normalization.log
 ```
+
+CI upload is optional and is not part of the local remediation workflow. If an existing workflow
+already uploads `TestResults/coverage-merged`, include both target files above in that same
+artifact list; do not add a workflow, hosted consumer, or code-writing agent just to retain them.
 
 For repositories with an existing coverage producer, replace the `coverage run` step and the `--coverage` path with the command and Cobertura file path your test setup actually produces.
 
@@ -878,7 +947,7 @@ Diagnostics use `ASCOV###` codes so CI logs are searchable:
 | `ASCOV007` | A threshold or tolerance is outside the `0` through `100` range. | Correct `--min-line`, `--min-branch`, `--min-patch-line`, `--min-patch-branch`, or `--tolerance`. |
 | `ASCOV008` | GitHub step summary could not be written. | Check `$GITHUB_STEP_SUMMARY` permissions or add `--no-github-summary`. |
 | `ASCOV009` | The report output path is unsafe. | Use a dedicated artifact directory, not a filesystem root or working directory. |
-| `ASCOV010` | The command could not run or read `git diff` for changed-line coverage. | Fetch the diff base or pass a valid local commit/ref to `--diff-base`. In GitHub pull request workflows using `--diff-base HEAD^1`, set `actions/checkout` to `fetch-depth: 2`; the default depth is `1` and does not include `HEAD^1`. |
+| `ASCOV010` | The command could not run or read `git diff` for changed-line coverage, or the diff exceeded 20 MiB. | Fetch the diff base, pass a valid local commit/ref to `--diff-base`, or reduce the comparison size. In GitHub pull request workflows using `--diff-base HEAD^1`, set `actions/checkout` to `fetch-depth: 2`; the default depth is `1` and does not include `HEAD^1`. |
 | `ASCOV011` | A patch threshold was set without a patch diff source. | Pass exactly one of `--diff-base`, `--diff-file`, or `--diff-stdin`. |
 | `ASCOV012` | Multiple patch diff sources were set. | Keep only one of `--diff-base`, `--diff-file`, or `--diff-stdin`. |
 | `ASCOV013` | An external diff file/stdin artifact is missing, unreadable, or larger than 20 MiB. | Regenerate the unified diff artifact or pass a smaller diff. |
@@ -887,6 +956,7 @@ Diagnostics use `ASCOV###` codes so CI logs are searchable:
 | `ASCOV016` | Patch source metadata is invalid. | Correct `--diff-label` or `--repository-root`. |
 | `ASCOV017` | `--patch-line-mode` is not `measurable` or `codecov`. | Use `measurable` or `codecov`. |
 | `ASCOV018` | `--patch-line-mode` was supplied without a patch source. | Pass exactly one patch source or remove `--patch-line-mode`. |
+| `ASCOV019` | A coverage-gate report artifact could not be created, replaced, or removed. | Check the named artifact path, permissions, and dedicated output directory, then rerun the gate. |
 | `ASCOV020` | The gate ran successfully and coverage is below threshold. | Raise coverage or lower the threshold intentionally in source control. |
 
 ### `appsurface export`

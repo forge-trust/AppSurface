@@ -1,8 +1,7 @@
 # ForgeTrust.AppSurface.Durable
 
-> **Source-only public preview:** the [PostgreSQL source provider](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md)
-> supplies the current source-preview conformance path; publication remains held pending coordinated release evidence.
-> This package installs no runtime and starts no hosted service.
+> **Public preview:** the [PostgreSQL provider](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md) supplies the
+> current conformance path. This package installs no runtime and starts no hosted service.
 
 `ForgeTrust.AppSurface.Durable` is the adopter-facing contract package for durable Work, resumable
 [AppSurface Flow](../../Flow/ForgeTrust.AppSurface.Flow/README.md), schedules, serialization, registration, and clients.
@@ -91,15 +90,15 @@ The proof emits `contracts registered; no runtime installed`.
 
 ## Slice 7 discovery boundary
 
-This package is a source-only public preview, and publication remains held pending coordinated release evidence.
-Registration is intentionally passive: it installs contract registries, not storage operations or worker hosting.
+This package is a public preview. Registration is intentionally passive: it installs contract registries, not storage
+operations or worker hosting.
 PostgreSQL storage registration remains passive as well; continuous processing requires the explicit
 [`AddWorkerHost()` opt-in](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host).
 
 When a host starts the opted-in worker, startup validates schema compatibility and the active runtime epoch. It fails
 closed when those values are incompatible and never applies DDL or advances migration history. See the
 [Slice 7 discovery and reconciliation guide](../README.md#slice-7-discovery-and-reconciliation) for the ordered
-`0001`–`0006` migration flow, canonical role recipe, preferred preflight sequence, recovery posture, and the
+`0001`–`0008` migration flow, canonical role recipe, preferred preflight sequence, recovery posture, and the
 implemented [`durable schema` CLI commands](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands).
 
 ## Public API by audience
@@ -163,7 +162,7 @@ validation before persistence.
 | Change | Preview policy |
 |---|---|
 | Additive request/result member | Allowed only with a documented default and fingerprint review |
-| Mutation semantics or canonical bytes | Before the first supported publication or persisted deployment, v1 may be corrected in place with updated test vectors; afterward, requires a new fingerprint schema id |
+| Mutation semantics or canonical bytes | Before either independent boundary—the first supported publication or any persisted deployment—v1 may be corrected in place with updated test vectors; after either, requires a new fingerprint schema id |
 | Payload bytes | Requires a new application contract version |
 | Flow executable behavior | Requires a new implementation version or explicit migration |
 | Schedule dialect semantics | Requires a new dialect/version, never reinterpret persisted occurrences |
@@ -176,8 +175,7 @@ activation, and restore failures. Heartbeat, drain, and hosted-runtime diagnosti
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-This package has an explicitly experimental or publication-held contract. Do not
-treat it as a normal prerelease install; use the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and
-[release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for the current publication decision, proof requirements, and
-migration guidance.
+AppSurface ships as a coordinated package family. Before installing this package
+from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md)
+for current release risk, migration guidance, and readiness.
 <!-- appsurface-release-guidance: end -->

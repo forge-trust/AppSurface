@@ -19,14 +19,19 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     private const int MaximumMarkerBytes = 128;
     private readonly string _outputPath;
     private readonly Func<int, uint, int> _unixFChmod;
+    private readonly Func<int, string, int, int> _unixUnlinkAt;
     private readonly List<SafeFileHandle> _windowsHandles = [];
     private readonly List<SafeFileHandle> _unixHandles = [];
     private SafeFileHandle? _outputHandle;
 
-    private CoverageRunOutputLease(string outputPath, Func<int, uint, int>? unixFChmod = null)
+    private CoverageRunOutputLease(
+        string outputPath,
+        Func<int, uint, int>? unixFChmod = null,
+        Func<int, string, int, int>? unixUnlinkAt = null)
     {
         _outputPath = outputPath;
         _unixFChmod = unixFChmod ?? UnixFChmod;
+        _unixUnlinkAt = unixUnlinkAt ?? UnlinkAt;
     }
 
     /// <summary>
@@ -34,10 +39,14 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     /// </summary>
     /// <param name="outputPath">Absolute output directory path.</param>
     /// <param name="unixFChmod">Optional Unix permission operation used to verify marker-creation failures.</param>
+    /// <param name="unixUnlinkAt">Optional Unix unlink operation used to verify staged-artifact cleanup failures.</param>
     /// <returns>A lease retaining every opened component until disposal.</returns>
-    internal static CoverageRunOutputLease Acquire(string outputPath, Func<int, uint, int>? unixFChmod = null)
+    internal static CoverageRunOutputLease Acquire(
+        string outputPath,
+        Func<int, uint, int>? unixFChmod = null,
+        Func<int, string, int, int>? unixUnlinkAt = null)
     {
-        var lease = new CoverageRunOutputLease(NormalizePlatformPath(outputPath), unixFChmod);
+        var lease = new CoverageRunOutputLease(NormalizePlatformPath(outputPath), unixFChmod, unixUnlinkAt);
         try
         {
             if (OperatingSystem.IsWindows())
@@ -96,6 +105,69 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         else
         {
             PrepareUnix(clean, state);
+        }
+    }
+
+    /// <summary>
+    /// Validates that each named gate artifact is either absent or a regular file in the retained
+    /// output directory.
+    /// </summary>
+    /// <param name="artifactNames">Owned gate artifact filenames to validate.</param>
+    internal void ValidateOwnedGateArtifacts(IReadOnlyList<string> artifactNames)
+    {
+        ArgumentNullException.ThrowIfNull(artifactNames);
+        foreach (var artifactName in artifactNames)
+        {
+            ValidateOwnedGateArtifact(artifactName);
+        }
+    }
+
+    /// <summary>
+    /// Writes one owned gate artifact through the retained output directory.
+    /// </summary>
+    /// <param name="artifactName">Owned gate artifact filename.</param>
+    /// <param name="contents">Complete UTF-8 artifact content.</param>
+    /// <param name="cancellationToken">Cancellation token for the artifact content write.</param>
+    /// <returns>A task that completes after the complete artifact content is committed.</returns>
+    /// <remarks>
+    /// The content is staged privately before promotion so cancellation or a write failure leaves a
+    /// pre-existing report intact.
+    /// </remarks>
+    internal Task WriteOwnedGateArtifactAsync(
+        string artifactName,
+        string contents,
+        CancellationToken cancellationToken)
+    {
+        ValidateOwnedGateArtifactName(artifactName);
+        ArgumentNullException.ThrowIfNull(contents);
+        return OperatingSystem.IsWindows()
+            ? WriteWindowsOwnedGateArtifactAsync(artifactName, contents, cancellationToken)
+            : WriteUnixOwnedGateArtifactAsync(artifactName, contents, cancellationToken);
+    }
+
+    /// <summary>
+    /// Removes one owned gate artifact through the retained output directory when it exists.
+    /// </summary>
+    /// <param name="artifactName">Owned gate artifact filename.</param>
+    internal void DeleteOwnedGateArtifact(string artifactName)
+    {
+        ValidateOwnedGateArtifactName(artifactName);
+        if (OperatingSystem.IsWindows())
+        {
+            var path = GetOwnedGateArtifactPath(artifactName);
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+
+            return;
+        }
+
+        var descriptor = _outputHandle!.DangerousGetHandle().ToInt32();
+        if (UnlinkAt(descriptor, artifactName, flags: 0) != 0
+            && Marshal.GetLastPInvokeError() != UnixNoEntry)
+        {
+            throw NativeIOException($"Unable to remove coverage gate artifact '{artifactName}'.");
         }
     }
 
@@ -286,7 +358,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
             var isOutputDirectory = index == components.Length - 1;
             current = OpenWindowsDirectory(
                 currentPath,
-                access: isOutputDirectory ? WindowsGenericRead : 0,
+                access: isOutputDirectory ? WindowsGenericRead | WindowsGenericWrite : 0,
                 denyWriteSharing: isOutputDirectory);
             _windowsHandles.Add(current);
             VerifyWindowsPathIdentity(current, currentPath);
@@ -675,8 +747,252 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
             ?? throw new IOException($"Output directory '{name}' was replaced while it was created.");
     }
 
-    private static bool IsKnownOutputEntry(OutputEntry entry)
-        => IsKnownOutputEntry(entry.Name, entry.IsDirectory);
+    private void ValidateOwnedGateArtifact(string artifactName)
+    {
+        ValidateOwnedGateArtifactName(artifactName);
+        if (OperatingSystem.IsWindows())
+        {
+            _ = GetOwnedGateArtifactPath(artifactName);
+            return;
+        }
+
+        using var artifact = OpenAt(_outputHandle!, artifactName, directory: false);
+        if (artifact is not null)
+        {
+            RejectUnixWrongKind(artifact, expectDirectory: false);
+        }
+    }
+
+    private async Task WriteUnixOwnedGateArtifactAsync(
+        string artifactName,
+        string contents,
+        CancellationToken cancellationToken)
+    {
+        var descriptor = _outputHandle!.DangerousGetHandle().ToInt32();
+        var temporaryName = $".{artifactName}.{Guid.NewGuid():N}.tmp";
+        var temporaryDescriptor = UnixOpenAt(
+            descriptor,
+            temporaryName,
+            UnixWriteOnly | UnixCreate | UnixExclusive | UnixNoFollow | UnixCloseOnExec,
+            Convert.ToUInt32("644", 8));
+        if (temporaryDescriptor < 0)
+        {
+            throw NativeIOException($"Unable to stage coverage gate artifact '{artifactName}'.");
+        }
+
+        using var temporaryHandle = new SafeFileHandle((nint)temporaryDescriptor, ownsHandle: true);
+        Exception? writeFailure = null;
+        try
+        {
+            if (_unixFChmod(temporaryDescriptor, Convert.ToUInt32("644", 8)) != 0)
+            {
+                throw NativeIOException($"Unable to set permissions on staged coverage gate artifact '{artifactName}'.");
+            }
+
+            await using (var stream = new FileStream(
+                temporaryHandle,
+                FileAccess.Write,
+                bufferSize: 4096,
+                isAsync: false))
+            await using (var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+            {
+                await writer.WriteAsync(contents.AsMemory(), cancellationToken);
+            }
+
+            if (RenameAt(descriptor, temporaryName, descriptor, artifactName) != 0)
+            {
+                throw NativeIOException($"Unable to promote coverage gate artifact '{artifactName}'.");
+            }
+        }
+        catch (Exception ex)
+        {
+            writeFailure = ex;
+            throw;
+        }
+        finally
+        {
+            if (_unixUnlinkAt(descriptor, temporaryName, 0) != 0
+                && Marshal.GetLastPInvokeError() != UnixNoEntry
+                && writeFailure is null)
+            {
+                throw NativeIOException($"Unable to clean up staged coverage gate artifact '{artifactName}'.");
+            }
+        }
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "Windows output leases deny competing directory writes while permitting staged-file promotion; the Windows security lane exercises the platform-specific binding.")]
+    private async Task WriteWindowsOwnedGateArtifactAsync(
+        string artifactName,
+        string contents,
+        CancellationToken cancellationToken)
+    {
+        var path = GetOwnedGateArtifactPath(artifactName);
+        var temporaryPath = GetOwnedGateArtifactTemporaryPath(artifactName);
+        var promoted = false;
+        Exception? writeFailure = null;
+        try
+        {
+            using (var writeHandle = OpenWindowsFile(
+                       temporaryPath,
+                       WindowsGenericWrite | WindowsGenericRead,
+                       WindowsCreateNew,
+                       shareMode: WindowsShareRead))
+            {
+                VerifyWindowsPathIdentity(writeHandle, temporaryPath);
+                RejectWindowsWrongKind(writeHandle, expectDirectory: false);
+                RejectWindowsHardLinkedArtifact(writeHandle, artifactName);
+                await using var stream = new FileStream(
+                    writeHandle,
+                    FileAccess.Write,
+                    bufferSize: 4096,
+                    isAsync: false);
+                await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                await writer.WriteAsync(contents.AsMemory(), cancellationToken);
+                await writer.FlushAsync(cancellationToken);
+            }
+
+            if (File.Exists(path))
+            {
+                using var destinationHandle = OpenWindowsFile(path, WindowsGenericRead, shareMode: WindowsShareRead);
+                VerifyWindowsPathIdentity(destinationHandle, path);
+                RejectWindowsWrongKind(destinationHandle, expectDirectory: false);
+                RejectWindowsHardLinkedArtifact(destinationHandle, artifactName);
+            }
+
+            // The native rename operates on this source handle, so allow delete sharing until promotion completes.
+            using (var promotionHandle = OpenWindowsFile(
+                       temporaryPath,
+                       WindowsGenericRead | WindowsDelete,
+                       shareMode: WindowsShareRead | WindowsShareDelete))
+            {
+                VerifyWindowsPathIdentity(promotionHandle, temporaryPath);
+                RejectWindowsWrongKind(promotionHandle, expectDirectory: false);
+                RejectWindowsHardLinkedArtifact(promotionHandle, artifactName);
+                PromoteWindowsOwnedGateArtifact(promotionHandle, artifactName);
+            }
+
+            promoted = true;
+        }
+        catch (Exception ex)
+        {
+            writeFailure = ex;
+            throw;
+        }
+        finally
+        {
+            if (!promoted && File.Exists(temporaryPath))
+            {
+                try
+                {
+                    File.Delete(temporaryPath);
+                }
+                catch (Exception ex) when (writeFailure is not null
+                    && ex is IOException or UnauthorizedAccessException)
+                {
+                    // Preserve the primary artifact-write failure when best-effort staging cleanup also fails.
+                }
+            }
+        }
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "Windows output leases deny competing directory writes while permitting staged-file promotion; the Windows security lane exercises the platform-specific binding.")]
+    private string GetOwnedGateArtifactTemporaryPath(string artifactName)
+    {
+        var path = Path.GetFullPath(Path.Join(_outputPath, $".{artifactName}.{Guid.NewGuid():N}.tmp"));
+        if (!string.Equals(Path.GetDirectoryName(path), _outputPath, CoverageOutputPathPolicy.GetPathComparison()))
+        {
+            throw new IOException($"Coverage report artifact '{artifactName}' is outside its output directory.");
+        }
+
+        return path;
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "Windows native artifact promotion is exercised by the Windows security lane.")]
+    private static void PromoteWindowsOwnedGateArtifact(
+        SafeFileHandle sourceHandle,
+        string artifactName)
+    {
+        var fileNameBytes = Encoding.Unicode.GetBytes(artifactName);
+        var rootDirectoryOffset = Marshal.OffsetOf<WindowsFileRenameInformation>(nameof(WindowsFileRenameInformation.RootDirectory)).ToInt32();
+        var fileNameLengthOffset = Marshal.OffsetOf<WindowsFileRenameInformation>(nameof(WindowsFileRenameInformation.FileNameLength)).ToInt32();
+        var fileNameOffset = Marshal.OffsetOf<WindowsFileRenameInformation>(nameof(WindowsFileRenameInformation.FileName)).ToInt32();
+        var bufferSize = checked(Marshal.SizeOf<WindowsFileRenameInformation>() + fileNameBytes.Length);
+        var buffer = Marshal.AllocHGlobal(bufferSize);
+        try
+        {
+            Marshal.WriteInt32(buffer, 0, 1);
+            // With a simple name and null RootDirectory, NtSetInformationFile renames within the
+            // source file's existing directory. The retained output lease continues to deny
+            // competing directory-write access during the promotion.
+            Marshal.WriteIntPtr(buffer, rootDirectoryOffset, IntPtr.Zero);
+            Marshal.WriteInt32(buffer, fileNameLengthOffset, fileNameBytes.Length);
+            Marshal.Copy(fileNameBytes, 0, IntPtr.Add(buffer, fileNameOffset), fileNameBytes.Length);
+            Marshal.WriteInt16(buffer, fileNameOffset + fileNameBytes.Length, 0);
+            var status = NtSetInformationFile(
+                sourceHandle,
+                out _,
+                buffer,
+                (uint)bufferSize,
+                WindowsFileRenameInformationClass);
+            if (status != WindowsStatusSuccess)
+            {
+                throw new IOException(
+                    $"Unable to promote coverage gate artifact '{artifactName}'.",
+                    new Win32Exception(unchecked((int)RtlNtStatusToDosError(status))));
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "Windows output leases deny competing directory writes; the Windows security lane exercises the platform-specific binding.")]
+    private string GetOwnedGateArtifactPath(string artifactName)
+    {
+        var path = Path.GetFullPath(Path.Join(_outputPath, artifactName));
+        if (!string.Equals(Path.GetDirectoryName(path), _outputPath, CoverageOutputPathPolicy.GetPathComparison()))
+        {
+            throw new IOException($"Coverage report artifact '{artifactName}' is outside its output directory.");
+        }
+
+        if (Directory.Exists(path))
+        {
+            throw new IOException($"Coverage report artifact '{path}' must be a regular file, not a directory.");
+        }
+
+        if (new FileInfo(path).LinkTarget is not null)
+        {
+            throw new IOException($"Coverage report artifact '{path}' must not be a symbolic link.");
+        }
+
+        return path;
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "Windows-only hard-link inspection is exercised by the Windows security lane.")]
+    private static void RejectWindowsHardLinkedArtifact(SafeFileHandle handle, string artifactName)
+    {
+        if (!WindowsGetFileInformationByHandle(handle, out var information))
+        {
+            throw new IOException("Unable to inspect coverage report artifact links.", new Win32Exception(Marshal.GetLastPInvokeError()));
+        }
+
+        if (information.NumberOfLinks > 1)
+        {
+            throw new IOException($"Coverage report artifact '{artifactName}' must not be a hard link.");
+        }
+    }
+
+    private static void ValidateOwnedGateArtifactName(string artifactName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(artifactName);
+        if (!string.Equals(Path.GetFileName(artifactName), artifactName, StringComparison.Ordinal)
+            || artifactName.Contains(Path.DirectorySeparatorChar)
+            || artifactName.Contains(Path.AltDirectorySeparatorChar))
+        {
+            throw new IOException($"Coverage report artifact '{artifactName}' is outside its output directory.");
+        }
+    }
 
     private static bool IsKnownOutputEntry(TreeEntry entry)
         => IsKnownOutputEntry(Path.GetFileName(entry.RelativePath), entry.IsDirectory);
@@ -684,7 +1000,8 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     private static bool IsKnownOutputEntry(string name, bool isDirectory)
         => isDirectory
             ? name is "projects" or "reportgenerator"
-            : name is "coverage.cobertura.xml" or "coverage.json" or "coverage-gate.json" or "coverage-gate.md"
+            : name is "coverage.cobertura.xml" or "coverage.json" or CoverageGateArtifactNames.Json or CoverageGateArtifactNames.Markdown
+                or CoverageGateArtifactNames.PatchTargetsJson or CoverageGateArtifactNames.PatchTargetsMarkdown
                 or "coverage-watchdog.json" or "summary.txt" or "timings.json" or "reportgenerator-summary.txt"
                 or CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName or CoverageRunSlowTestDiagnosticsWriter.JsonFileName;
 
@@ -698,11 +1015,32 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         => !isDirectory
             && ((name.StartsWith("junit-", StringComparison.Ordinal) || name.StartsWith("test-results-", StringComparison.Ordinal))
                 && name.EndsWith(".xml", StringComparison.Ordinal)
-                || IsSlowTestDiagnosticsTemporaryEntry(name));
+                || IsSlowTestDiagnosticsTemporaryEntry(name)
+                || IsCoverageGateTemporaryEntry(name));
 
     private static bool IsSlowTestDiagnosticsTemporaryEntry(string name)
         => IsSlowTestDiagnosticsTemporaryEntry(name, CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName)
             || IsSlowTestDiagnosticsTemporaryEntry(name, CoverageRunSlowTestDiagnosticsWriter.JsonFileName);
+
+    private static bool IsCoverageGateTemporaryEntry(string name)
+        => IsCoverageGateTemporaryEntry(name, CoverageGateArtifactNames.Json)
+            || IsCoverageGateTemporaryEntry(name, CoverageGateArtifactNames.Markdown)
+            || IsCoverageGateTemporaryEntry(name, CoverageGateArtifactNames.PatchTargetsJson)
+            || IsCoverageGateTemporaryEntry(name, CoverageGateArtifactNames.PatchTargetsMarkdown);
+
+    private static bool IsCoverageGateTemporaryEntry(string name, string artifactName)
+    {
+        var prefix = $".{artifactName}.";
+        const string suffix = ".tmp";
+        if (!name.StartsWith(prefix, StringComparison.Ordinal)
+            || !name.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var identifier = name[prefix.Length..^suffix.Length];
+        return Guid.TryParseExact(identifier, "N", out _);
+    }
 
     private static bool IsSlowTestDiagnosticsTemporaryEntry(string name, string artifactName)
     {
@@ -831,7 +1169,12 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
             access,
             WindowsOpenExisting,
             WindowsBackupSemantics | WindowsOpenReparsePoint,
-            denyWriteSharing ? WindowsShareRead : WindowsShareRead | WindowsShareWrite);
+            // Windows evaluates delete sharing across every retained ancestor while resolving a
+            // staged-child rename. Retain the write-sharing denial only on the output directory so
+            // another process cannot open that directory for direct mutation while this lease is active.
+            denyWriteSharing
+                ? WindowsShareRead | WindowsShareDelete
+                : WindowsShareRead | WindowsShareWrite | WindowsShareDelete);
 
     [ExcludeFromCodeCoverage(Justification = "Windows-only handle opening is exercised by the Windows test lane.")]
     private static SafeFileHandle OpenWindowsFile(
@@ -989,6 +1332,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     private const uint WindowsDelete = 0x00010000;
     private const uint WindowsShareRead = 0x00000001;
     private const uint WindowsShareWrite = 0x00000002;
+    private const uint WindowsShareDelete = 0x00000004;
     private const uint WindowsOpenExisting = 3;
     private const uint WindowsCreateNew = 1;
     private const uint WindowsBackupSemantics = 0x02000000;
@@ -996,12 +1340,30 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     private const uint WindowsAttributeReparsePoint = 0x00000400;
     private const uint WindowsAttributeDirectory = 0x00000010;
     private const int WindowsFileAttributeTagInfo = 9;
+    private const int WindowsFileRenameInformationClass = 10;
     private const int WindowsFileDispositionInfo = 4;
+    private const int WindowsStatusSuccess = 0;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct WindowsFileDispositionInformation
     {
         public int DeleteFile;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct WindowsFileRenameInformation
+    {
+        public int ReplaceIfExists;
+        public nint RootDirectory;
+        public int FileNameLength;
+        public char FileName;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowsIoStatusBlock
+    {
+        public int Status;
+        public nuint Information;
     }
 
     private sealed record OutputEntry(string Name, bool IsDirectory, FileObjectIdentity Identity);
@@ -1051,4 +1413,17 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         int fileInformationClass,
         ref WindowsFileDispositionInformation fileInformation,
         uint bufferSize);
+
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [LibraryImport("ntdll.dll", EntryPoint = "NtSetInformationFile")]
+    private static partial int NtSetInformationFile(
+        SafeFileHandle handle,
+        out WindowsIoStatusBlock ioStatusBlock,
+        nint fileInformation,
+        uint length,
+        int fileInformationClass);
+
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [LibraryImport("ntdll.dll", EntryPoint = "RtlNtStatusToDosError")]
+    private static partial uint RtlNtStatusToDosError(int status);
 }

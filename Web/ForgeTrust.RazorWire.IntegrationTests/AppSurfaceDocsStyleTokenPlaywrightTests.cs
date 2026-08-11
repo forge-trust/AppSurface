@@ -385,6 +385,27 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
 
         // Stay above the 80rem desktop breakpoint when CI reserves space for a vertical scrollbar.
         await page.SetViewportSizeAsync(1366, 900);
+        // Playwright can report the resize before Chromium paints the desktop grid. Wait for
+        // the user-visible desktop contract instead of sampling that transient compact layout.
+        await page.WaitForFunctionAsync(
+            """
+            () => {
+              const outline = document.getElementById('docs-page-outline');
+              const toggle = outline?.querySelector("[data-doc-outline-toggle='true']");
+              const primary = document.querySelector('.docs-detail-primary');
+              if (!outline || !toggle || !primary) {
+                return false;
+              }
+
+              const outlineBox = outline.getBoundingClientRect();
+              const primaryBox = primary.getBoundingClientRect();
+              return getComputedStyle(toggle).display === 'none'
+                && primaryBox.right <= outlineBox.left
+                && document.documentElement.scrollWidth <= window.innerWidth;
+            }
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
         var wide = await page.EvaluateAsync<bool[]>(
             """
             () => {

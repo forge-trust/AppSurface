@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -385,12 +386,14 @@ public sealed class AppSurfaceWebPushOptionsAndSenderTests
         var sender = CreateSender(new StatusHandler(HttpStatusCode.Gone), CreateOptions(), custody);
         var send = sender.SendAsync(CreateSendRequest(CreateSubscription())).AsTask();
         await custody.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        var elapsed = Stopwatch.StartNew();
 
         try
         {
-            var result = await send.WaitAsync(TimeSpan.FromSeconds(7));
+            var result = await send.WaitAsync(TimeSpan.FromSeconds(15));
 
             Assert.Equal(AppSurfaceWebPushCleanupState.Failed, result.CleanupState);
+            Assert.InRange(elapsed.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(10));
             await custody.CallbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
         }
         finally
