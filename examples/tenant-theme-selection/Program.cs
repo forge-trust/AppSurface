@@ -130,3 +130,5 @@ public sealed class TenantThemeSelectionPolicy(TenantThemeContext context, Tenan
         return context.TenantId is { } tenantId && map.TryGet(tenantId, out themeId);
     }
 }
+
+public partial class Program;

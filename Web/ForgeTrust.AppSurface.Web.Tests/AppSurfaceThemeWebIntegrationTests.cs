@@ -1,14 +1,18 @@
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using ForgeTrust.AppSurface.Theming;
 using ForgeTrust.AppSurface.Web.TagHelpers;
 using ForgeTrust.AppSurface.Web.Tests.CanaryConsumerFixture;
 using ForgeTrust.AppSurface.Web.Theming;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Razor.TagHelpers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace ForgeTrust.AppSurface.Web.Tests;
 
@@ -720,6 +724,18 @@ public sealed class AppSurfaceThemeWebIntegrationTests
         Assert.Contains("only in Development", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task TenantThemeProofHost_ShouldRenderSelectedAndDefaultThemes()
+    {
+        await using var factory = new WebApplicationFactory<global::Program>()
+            .WithWebHostBuilder(builder => builder.UseEnvironment(Environments.Development));
+        using var client = factory.CreateClient();
+
+        await AssertTenantResponseAsync(client, "tenant-a", "shared-blue", "A");
+        await AssertTenantResponseAsync(client, "tenant-b", "shared-blue", "B");
+        await AssertTenantResponseAsync(client, "unknown", "appsurface", "default");
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -872,6 +888,24 @@ public sealed class AppSurfaceThemeWebIntegrationTests
     {
         var pair = AppSurfaceThemePair.AppSurface();
         return new AppSurfaceThemeResolution(pair.Id, mode, pair.Light, pair.Dark);
+    }
+
+    private static async Task AssertTenantResponseAsync(
+        HttpClient client,
+        string requestedTenant,
+        string expectedThemeId,
+        string expectedVariant)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/");
+        request.Headers.Add("X-Proof-Authorized-Tenant", requestedTenant);
+        using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.Headers.CacheControl!.Private);
+        Assert.True(response.Headers.CacheControl.NoStore);
+        Assert.Contains($"data-as-theme=\"{expectedThemeId}\"", body, StringComparison.Ordinal);
+        Assert.Contains($"data-tenant-variant=\"{expectedVariant}\"", body, StringComparison.Ordinal);
     }
 
     private static TagHelperContext CreateContext(TagHelperAttributeList? attributes = null) =>
