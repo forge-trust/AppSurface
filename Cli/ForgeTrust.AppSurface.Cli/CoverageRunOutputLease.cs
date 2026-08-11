@@ -868,7 +868,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
                 VerifyWindowsPathIdentity(promotionHandle, temporaryPath);
                 RejectWindowsWrongKind(promotionHandle, expectDirectory: false);
                 RejectWindowsHardLinkedArtifact(promotionHandle, artifactName);
-                PromoteWindowsOwnedGateArtifact(promotionHandle, _outputHandle!, artifactName);
+                PromoteWindowsOwnedGateArtifact(promotionHandle, artifactName);
             }
 
             promoted = true;
@@ -910,7 +910,6 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     [ExcludeFromCodeCoverage(Justification = "Windows native artifact promotion is exercised by the Windows security lane.")]
     private static void PromoteWindowsOwnedGateArtifact(
         SafeFileHandle sourceHandle,
-        SafeFileHandle destinationDirectory,
         string artifactName)
     {
         var fileNameBytes = Encoding.Unicode.GetBytes(artifactName);
@@ -922,10 +921,10 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         try
         {
             Marshal.WriteInt32(buffer, 0, 1);
-            // Rename relative to the retained output-directory handle. Supplying an absolute destination
-            // causes Windows to reopen the directory for the rename, which conflicts with this lease's
+            // A simple name with a null RootDirectory renames within the source file's existing
+            // directory. It avoids reopening the destination directory and preserves this lease's
             // deliberate denial of competing directory-write access.
-            Marshal.WriteIntPtr(buffer, rootDirectoryOffset, destinationDirectory.DangerousGetHandle());
+            Marshal.WriteIntPtr(buffer, rootDirectoryOffset, IntPtr.Zero);
             Marshal.WriteInt32(buffer, fileNameLengthOffset, fileNameBytes.Length);
             Marshal.Copy(fileNameBytes, 0, IntPtr.Add(buffer, fileNameOffset), fileNameBytes.Length);
             Marshal.WriteInt16(buffer, fileNameOffset + fileNameBytes.Length, 0);
