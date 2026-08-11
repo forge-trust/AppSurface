@@ -1,6 +1,6 @@
 # Durable slice 3 reference workload
 
-This is the first-success and conformance workload for the source-only PostgreSQL Work provider. It proves atomic
+This is the first-success and conformance workload for the PostgreSQL Work provider. It proves atomic
 acceptance, process-loss recovery, exact effect permission, stable provider identity, and safety-class handling.
 
 > Slice 3 starts no worker, polling loop, scheduler, hosted service, or automatic migration. The test harness manually

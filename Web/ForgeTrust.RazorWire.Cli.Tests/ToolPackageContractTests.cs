@@ -15,6 +15,12 @@ public sealed class ToolPackageContractTests
     private const string ToolCommandName = "razorwire";
     private const string PackageDescription = "Command-line export tooling for RazorWire applications.";
 
+#if DEBUG
+    private const string CurrentBuildConfiguration = "Debug";
+#else
+    private const string CurrentBuildConfiguration = "Release";
+#endif
+
     [Fact]
     [Trait("Category", "PackageVerification")]
     public async Task PackagedTool_Should_Run_Through_Dnx_ToolInstall_And_InstalledExport()
@@ -57,7 +63,8 @@ public sealed class ToolPackageContractTests
             "pack",
             Path.Combine("Web", "ForgeTrust.RazorWire.Cli", "ForgeTrust.RazorWire.Cli.csproj"),
             "--configuration",
-            "Release",
+            CurrentBuildConfiguration,
+            "--no-build",
             "--no-restore",
             "--output",
             packageDirectory.Path,
