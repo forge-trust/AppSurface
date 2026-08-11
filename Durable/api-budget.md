@@ -37,8 +37,9 @@ seam was removed. No public type was deleted outright.
 All three packages are public previews in the coordinated prerelease publish plan. The PostgreSQL provider supplies
 Work, Flow, Schedule, hosted runtime, drain/recovery, retention, repair, and restore-fencing conformance. Every public
 member change must update the appropriate deterministic API snapshot and this ledger when it changes a type's audience,
-package, or visibility. Once the first preview is published, every canonical-byte change is incompatible unless it uses a
-new schema id.
+package, or visibility. The first supported publication and any persisted deployment are independent compatibility
+boundaries: whichever happens first freezes canonical bytes, and every later canonical-byte change requires a new schema
+id.
 
 ## Slice 3 PostgreSQL API
 
