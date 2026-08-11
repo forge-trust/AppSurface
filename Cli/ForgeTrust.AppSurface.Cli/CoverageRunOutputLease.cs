@@ -859,7 +859,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
                 RejectWindowsHardLinkedArtifact(destinationHandle, artifactName);
             }
 
-            // SetFileInformationByHandle renames while this source handle remains open, so allow delete sharing.
+            // The native rename operates on this source handle, so allow delete sharing until promotion completes.
             using (var promotionHandle = OpenWindowsFile(
                        temporaryPath,
                        WindowsGenericRead | WindowsDelete,
@@ -921,18 +921,24 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         try
         {
             Marshal.WriteInt32(buffer, 0, 1);
-            // A simple name with a null RootDirectory renames within the source file's existing
-            // directory. It avoids reopening the destination directory and preserves this lease's
-            // deliberate denial of competing directory-write access.
+            // NtSetInformationFile preserves the native simple-name semantics: a null RootDirectory
+            // renames within the source file's existing directory. It avoids reopening the destination
+            // directory and preserves this lease's deliberate denial of competing directory-write access.
             Marshal.WriteIntPtr(buffer, rootDirectoryOffset, IntPtr.Zero);
             Marshal.WriteInt32(buffer, fileNameLengthOffset, fileNameBytes.Length);
             Marshal.Copy(fileNameBytes, 0, IntPtr.Add(buffer, fileNameOffset), fileNameBytes.Length);
             Marshal.WriteInt16(buffer, fileNameOffset + fileNameBytes.Length, 0);
-            if (!SetFileInformationByHandle(sourceHandle, WindowsFileRenameInfo, buffer, (uint)bufferSize))
+            var status = NtSetInformationFile(
+                sourceHandle,
+                out _,
+                buffer,
+                (uint)bufferSize,
+                WindowsFileRenameInformationClass);
+            if (status != WindowsStatusSuccess)
             {
                 throw new IOException(
                     $"Unable to promote coverage gate artifact '{artifactName}'.",
-                    new Win32Exception(Marshal.GetLastPInvokeError()));
+                    new Win32Exception(unchecked((int)RtlNtStatusToDosError(status))));
             }
         }
         finally
@@ -1334,8 +1340,9 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     private const uint WindowsAttributeReparsePoint = 0x00000400;
     private const uint WindowsAttributeDirectory = 0x00000010;
     private const int WindowsFileAttributeTagInfo = 9;
-    private const int WindowsFileRenameInfo = 3;
+    private const int WindowsFileRenameInformationClass = 10;
     private const int WindowsFileDispositionInfo = 4;
+    private const int WindowsStatusSuccess = 0;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct WindowsFileDispositionInformation
@@ -1350,6 +1357,13 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         public nint RootDirectory;
         public int FileNameLength;
         public char FileName;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowsIoStatusBlock
+    {
+        public int Status;
+        public nuint Information;
     }
 
     private sealed record OutputEntry(string Name, bool IsDirectory, FileObjectIdentity Identity);
@@ -1401,11 +1415,15 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         uint bufferSize);
 
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [LibraryImport("kernel32.dll", EntryPoint = "SetFileInformationByHandle", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool SetFileInformationByHandle(
+    [LibraryImport("ntdll.dll", EntryPoint = "NtSetInformationFile")]
+    private static partial int NtSetInformationFile(
         SafeFileHandle handle,
-        int fileInformationClass,
+        out WindowsIoStatusBlock ioStatusBlock,
         nint fileInformation,
-        uint bufferSize);
+        uint length,
+        int fileInformationClass);
+
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [LibraryImport("ntdll.dll", EntryPoint = "RtlNtStatusToDosError")]
+    private static partial uint RtlNtStatusToDosError(int status);
 }

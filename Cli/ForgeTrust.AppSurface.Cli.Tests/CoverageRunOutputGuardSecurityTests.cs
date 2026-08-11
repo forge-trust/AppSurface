@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using CliFx;
 using ForgeTrust.AppSurface.Cli;
@@ -756,6 +757,35 @@ public sealed class CoverageRunOutputGuardSecurityTests
         await lease.WriteOwnedGateArtifactAsync(CoverageGateArtifactNames.Json, "second", CancellationToken.None);
 
         Assert.Equal("second", File.ReadAllText(Path.Join(output, CoverageGateArtifactNames.Json)));
+        Assert.Empty(Directory.EnumerateFiles(output, ".*.tmp"));
+    }
+
+    [Fact]
+    public async Task WriteOwnedGateArtifactAsync_Windows_ShouldReportNativePromotionSharingFailure()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        var artifactPath = Path.Join(output, CoverageGateArtifactNames.Json);
+        using var lease = CoverageRunOutputLease.Acquire(output);
+        await lease.WriteOwnedGateArtifactAsync(CoverageGateArtifactNames.Json, "first", CancellationToken.None);
+        using var competing = new FileStream(
+            artifactPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read | FileShare.Write);
+
+        var exception = await Assert.ThrowsAsync<IOException>(
+            () => lease.WriteOwnedGateArtifactAsync(CoverageGateArtifactNames.Json, "second", CancellationToken.None));
+
+        Assert.Contains("Unable to promote", exception.Message, StringComparison.Ordinal);
+        var nativeException = Assert.IsType<Win32Exception>(exception.InnerException);
+        Assert.Equal(WindowsSharingViolation, nativeException.NativeErrorCode);
+        Assert.Equal("first", File.ReadAllText(artifactPath));
         Assert.Empty(Directory.EnumerateFiles(output, ".*.tmp"));
     }
 
