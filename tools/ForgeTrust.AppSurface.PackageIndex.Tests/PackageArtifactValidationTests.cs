@@ -394,7 +394,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task DurablePublicationHold_CheckedInManifestAndFocusedResolverHoldBothPackages()
+    public async Task DurablePublicPreview_CheckedInManifestIncludesAllDurablePackagesInActualPublishPlan()
     {
         var repositoryRoot = GetRepositoryRoot();
         var manifestPath = CombineSafeChildPath(repositoryRoot, "packages/package-index.yml");
@@ -402,18 +402,31 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var durableEntries = manifest.Packages
             .Where(entry => entry.Project is
                 "Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj" or
-                "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj")
+                "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj" or
+                "Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj")
             .ToArray();
 
-        Assert.Equal(2, durableEntries.Length);
+        Assert.Equal(3, durableEntries.Length);
         Assert.All(durableEntries, entry =>
         {
-            Assert.Equal(PackagePublishDecision.DoNotPublish, entry.PublishDecision);
-            Assert.Contains("PostgreSQL provider milestone", entry.PublishReason, StringComparison.Ordinal);
+            Assert.Equal(PackagePublishDecision.Publish, entry.PublishDecision);
+            Assert.Null(entry.PublishReason);
         });
-        var durableProviderEntry = Assert.Single(durableEntries, entry => entry.Project ==
-            "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj");
-        Assert.Equal(["ForgeTrust.AppSurface.Durable"], durableProviderEntry.ExpectedDependencyPackageIds);
+
+        var plan = await new PackagePublishPlanResolver(
+            new PackageProjectScanner(),
+            new DotNetProjectMetadataProvider(),
+            new PackageManifestLoader()).ResolveAsync(repositoryRoot, manifestPath, CancellationToken.None);
+
+        Assert.Contains(plan.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Durable");
+        Assert.Contains(plan.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Durable.Provider");
+        Assert.Contains(plan.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Durable.PostgreSql");
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task DurablePublicationHold_FocusedResolverOmitsHeldPackages()
+    {
 
         await WriteFileAsync("packages/package-index.yml",
             """
@@ -482,7 +495,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task DurablePublicationHold_CheckedInProjectsExposePackableMetadata()
+    public async Task DurablePublicPreview_CheckedInProjectsExposePackableMetadata()
     {
         var repositoryRoot = GetRepositoryRoot();
         var metadataProvider = new DotNetProjectMetadataProvider();
@@ -495,6 +508,10 @@ public sealed class PackageArtifactValidationTests : IDisposable
             metadataProvider.GetMetadataAsync(
                 repositoryRoot,
                 "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj",
+                CancellationToken.None),
+            metadataProvider.GetMetadataAsync(
+                repositoryRoot,
+                "Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj",
                 CancellationToken.None));
 
         var durableMetadata = metadata[0];
@@ -515,6 +532,20 @@ public sealed class PackageArtifactValidationTests : IDisposable
             "Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj");
         Assert.Contains(providerMetadata.ProjectReferences, path =>
             string.Equals(path, durableProjectPath, StringComparison.OrdinalIgnoreCase));
+
+        var postgreSqlMetadata = metadata[2];
+        Assert.Equal("ForgeTrust.AppSurface.Durable.PostgreSql", postgreSqlMetadata.PackageId);
+        Assert.Equal("net10.0", postgreSqlMetadata.TargetFramework);
+        Assert.True(postgreSqlMetadata.IsPackable);
+        Assert.False(postgreSqlMetadata.IsTool);
+        Assert.Equal("Library", postgreSqlMetadata.OutputType);
+        Assert.Contains(postgreSqlMetadata.ProjectReferences, path =>
+            string.Equals(path, durableProjectPath, StringComparison.OrdinalIgnoreCase));
+        var durableProviderProjectPath = CombineSafeChildPath(
+            repositoryRoot,
+            "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj");
+        Assert.Contains(postgreSqlMetadata.ProjectReferences, path =>
+            string.Equals(path, durableProviderProjectPath, StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
