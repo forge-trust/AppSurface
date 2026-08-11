@@ -326,104 +326,200 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
             ColorScheme = ColorScheme.Light,
             ViewportSize = new ViewportSize { Width = 1279, Height = 900 }
         });
-        var page = await context.NewPageAsync();
-        var stylesheetRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseStylesheets = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        await page.RouteAsync("**/*.css*", async route =>
-        {
-            stylesheetRequested.TrySetResult();
-            await releaseStylesheets.Task;
-            await route.ContinueAsync();
-        });
-
-        var navigation = page.GotoAsync($"{_fixture.DocsUrl}/search", new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
+        var tracingStarted = false;
+        Exception? primaryFailure = null;
         try
         {
-            await stylesheetRequested.Task.WaitAsync(TimeSpan.FromSeconds(30));
-            await page.WaitForFunctionAsync(
-                "() => document.documentElement?.getAttribute('data-as-theme') === 'appsurface'",
-                null,
-                new PageWaitForFunctionOptions { Timeout = 15_000 });
-            var preCss = await page.EvaluateAsync<string[]>(
+            await context.Tracing.StartAsync(new TracingStartOptions
+            {
+                Screenshots = true,
+                Snapshots = true
+            });
+            tracingStarted = true;
+
+            var page = await context.NewPageAsync();
+            var stylesheetRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseStylesheets = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            await page.RouteAsync("**/*.css*", async route =>
+            {
+                stylesheetRequested.TrySetResult();
+                await releaseStylesheets.Task;
+                await route.ContinueAsync();
+            });
+
+            var navigation = page.GotoAsync($"{_fixture.DocsUrl}/search", new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
+            try
+            {
+                await stylesheetRequested.Task.WaitAsync(TimeSpan.FromSeconds(30));
+                await page.WaitForFunctionAsync(
+                    "() => document.documentElement?.getAttribute('data-as-theme') === 'appsurface'",
+                    null,
+                    new PageWaitForFunctionOptions { Timeout = 15_000 });
+                var preCss = await page.EvaluateAsync<string[]>(
+                    """
+                    () => {
+                      const style = getComputedStyle(document.documentElement);
+                      return [style.getPropertyValue('--as-canvas').trim(), style.backgroundColor, style.color];
+                    }
+                    """);
+                Assert.Equal("#0f172a", preCss[0]);
+                AssertCssColor(preCss[1], "15, 23, 42");
+                AssertCssColor(preCss[2], "248, 250, 252");
+            }
+            finally
+            {
+                releaseStylesheets.TrySetResult();
+            }
+
+            await navigation;
+            await AppSurfaceDocsRouteHelper.GotoFirstAvailableAsync(
+                page,
+                _fixture.DocsUrl,
+                "/examples/razorwire-mvc",
+                "/examples/razorwire-mvc/README.md.html");
+            await page.WaitForSelectorAsync(".docs-detail-layout", new PageWaitForSelectorOptions
+            {
+                State = WaitForSelectorState.Visible,
+                Timeout = 30_000
+            });
+
+            var compact = await page.EvaluateAsync<bool[]>(
                 """
                 () => {
-                  const style = getComputedStyle(document.documentElement);
-                  return [style.getPropertyValue('--as-canvas').trim(), style.backgroundColor, style.color];
+                  const outline = document.getElementById('docs-page-outline');
+                  const toggle = outline?.querySelector("[data-doc-outline-toggle='true']");
+                  return [Boolean(toggle) && getComputedStyle(toggle).display !== 'none', document.documentElement.scrollWidth <= window.innerWidth];
                 }
                 """);
-            Assert.Equal("#0f172a", preCss[0]);
-            AssertCssColor(preCss[1], "15, 23, 42");
-            AssertCssColor(preCss[2], "248, 250, 252");
+            Assert.True(compact[0]);
+            Assert.True(compact[1]);
+
+            // Stay above the 80rem desktop breakpoint when CI reserves space for a vertical scrollbar.
+            await page.SetViewportSizeAsync(1366, 900);
+            // Let Chromium paint the resized grid without pre-asserting the layout contract: a regression must reach
+            // the typed snapshot below so its diagnostics are captured instead of timing out first.
+            await page.EvaluateAsync(
+                """
+                () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+                """);
+
+            var wide = await page.EvaluateAsync<DocsOutlineLayoutSnapshot>(
+                """
+                () => {
+                  const outline = document.getElementById('docs-page-outline');
+                  const primary = document.querySelector('.docs-detail-primary');
+                  const toggle = outline?.querySelector("[data-doc-outline-toggle='true']");
+                  const visualViewport = window.visualViewport;
+                  const describe = element => {
+                    if (!element) {
+                      return {
+                        Exists: false,
+                        Bounds: null,
+                        Display: null,
+                        Position: null,
+                        GridColumn: null,
+                        Width: null,
+                        MinWidth: null,
+                        MaxWidth: null,
+                        OverflowX: null
+                      };
+                    }
+
+                    const bounds = element.getBoundingClientRect();
+                    const style = getComputedStyle(element);
+                    return {
+                      Exists: true,
+                      Bounds: {
+                        Left: bounds.left,
+                        Top: bounds.top,
+                        Right: bounds.right,
+                        Bottom: bounds.bottom,
+                        Width: bounds.width,
+                        Height: bounds.height
+                      },
+                      Display: style.display,
+                      Position: style.position,
+                      GridColumn: style.gridColumn,
+                      Width: style.width,
+                      MinWidth: style.minWidth,
+                      MaxWidth: style.maxWidth,
+                      OverflowX: style.overflowX
+                    };
+                  };
+
+                  return {
+                    SchemaVersion: 1,
+                    WindowInnerWidth: window.innerWidth,
+                    WindowInnerHeight: window.innerHeight,
+                    BodyScrollWidth: document.body?.scrollWidth ?? null,
+                    BodyClientWidth: document.body?.clientWidth ?? null,
+                    DocumentElementScrollWidth: document.documentElement?.scrollWidth ?? null,
+                    DocumentElementClientWidth: document.documentElement?.clientWidth ?? null,
+                    VisualViewportWidth: visualViewport?.width ?? null,
+                    VisualViewportHeight: visualViewport?.height ?? null,
+                    OutlineExists: Boolean(outline),
+                    PrimaryExists: Boolean(primary),
+                    ToggleExists: Boolean(toggle),
+                    OutlineEnhanced: outline?.dataset.outlineEnhanced ?? null,
+                    ToggleAriaExpanded: toggle?.getAttribute('aria-expanded') ?? null,
+                    ToggleDisplay: toggle ? getComputedStyle(toggle).display : null,
+                    Primary: describe(primary),
+                    Outline: describe(outline)
+                  };
+                }
+                """);
+            var evaluation = AppSurfaceDocsOutlineLayoutEvidence.Evaluate(wide);
+            if (!evaluation.Passed)
+            {
+                var evidence = new AppSurfaceDocsOutlineLayoutEvidence();
+                var capture = await evidence.CaptureIfFailedAsync(
+                    evaluation,
+                    wide,
+                    async (path, _) =>
+                    {
+                        await page.ScreenshotAsync(new PageScreenshotOptions
+                        {
+                            Path = path,
+                            Timeout = 30_000
+                        });
+                    },
+                    async (path, _) =>
+                    {
+                        await context.Tracing.StopAsync(new TracingStopOptions { Path = path });
+                    });
+
+                Assert.NotNull(capture);
+                // When evidence setup fails before its trace stage, finally performs the one no-path stop instead.
+                tracingStarted = !capture.TraceStopAttempted;
+                Assert.True(evaluation.Passed, AppSurfaceDocsOutlineLayoutEvidence.FormatFailureMessage(evaluation, capture));
+            }
+        }
+        catch (Exception exception)
+        {
+            primaryFailure = exception;
+            throw;
         }
         finally
         {
-            releaseStylesheets.TrySetResult();
+            if (tracingStarted)
+            {
+                if (primaryFailure is null)
+                {
+                    await context.Tracing.StopAsync();
+                }
+                else
+                {
+                    try
+                    {
+                        await context.Tracing.StopAsync();
+                    }
+                    catch (Exception)
+                    {
+                        // Preserve the pre-existing assertion or browser failure; trace cleanup is secondary evidence.
+                    }
+                }
+            }
         }
-
-        await navigation;
-        await AppSurfaceDocsRouteHelper.GotoFirstAvailableAsync(
-            page,
-            _fixture.DocsUrl,
-            "/examples/razorwire-mvc",
-            "/examples/razorwire-mvc/README.md.html");
-        await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
-        {
-            State = WaitForSelectorState.Visible,
-            Timeout = 30_000
-        });
-
-        var compact = await page.EvaluateAsync<bool[]>(
-            """
-            () => {
-              const outline = document.getElementById('docs-page-outline');
-              const toggle = outline.querySelector("[data-doc-outline-toggle='true']");
-              return [getComputedStyle(toggle).display !== 'none', document.documentElement.scrollWidth <= window.innerWidth];
-            }
-            """);
-        Assert.True(compact[0]);
-        Assert.True(compact[1]);
-
-        // Stay above the 80rem desktop breakpoint when CI reserves space for a vertical scrollbar.
-        await page.SetViewportSizeAsync(1366, 900);
-        // Playwright can report the resize before Chromium paints the desktop grid. Wait for
-        // the user-visible desktop contract instead of sampling that transient compact layout.
-        await page.WaitForFunctionAsync(
-            """
-            () => {
-              const outline = document.getElementById('docs-page-outline');
-              const toggle = outline?.querySelector("[data-doc-outline-toggle='true']");
-              const primary = document.querySelector('.docs-detail-primary');
-              if (!outline || !toggle || !primary) {
-                return false;
-              }
-
-              const outlineBox = outline.getBoundingClientRect();
-              const primaryBox = primary.getBoundingClientRect();
-              return getComputedStyle(toggle).display === 'none'
-                && primaryBox.right <= outlineBox.left
-                && document.documentElement.scrollWidth <= window.innerWidth;
-            }
-            """,
-            null,
-            new PageWaitForFunctionOptions { Timeout = 15_000 });
-        var wide = await page.EvaluateAsync<bool[]>(
-            """
-            () => {
-              const outline = document.getElementById('docs-page-outline');
-              const toggle = outline.querySelector("[data-doc-outline-toggle='true']");
-              const primary = document.querySelector('.docs-detail-primary');
-              const outlineBox = outline.getBoundingClientRect();
-              const primaryBox = primary.getBoundingClientRect();
-              return [
-                getComputedStyle(toggle).display === 'none',
-                primaryBox.right <= outlineBox.left,
-                document.documentElement.scrollWidth <= window.innerWidth
-              ];
-            }
-            """);
-        Assert.True(wide[0]);
-        Assert.True(wide[1]);
-        Assert.True(wide[2]);
     }
 
     private async Task AssertDocsThemeAsync(ColorScheme colorScheme)

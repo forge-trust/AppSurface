@@ -41,6 +41,30 @@ The fixture passes the same runtime settings that the standalone smoke path need
 
 When adding AppSurface Docs browser coverage, use the shared fixture or `AppSurfaceDocsInProcessHost`. Avoid starting the standalone app as a child process from tests; that can rebuild unrelated projects during fixture startup and can hide stale output bugs during focused local test runs.
 
+### Docs outline layout evidence triage
+
+Failure triage flow:
+
+`failure message -> outline-layout.json -> viewport.png -> trace.zip`
+
+- Artifact name: `docs-outline-layout-evidence`
+- The artifact should not exist on green runs.
+- Download artifacts for a failed run:
+
+  ```bash
+  gh run download <run-id> -n docs-outline-layout-evidence
+  ```
+
+- Reproduce locally with absolute evidence output path:
+
+  ```bash
+  APP_SURFACE_TEST_ARTIFACTS_DIR=/absolute/path \
+    dotnet test Web/ForgeTrust.RazorWire.IntegrationTests/ForgeTrust.RazorWire.IntegrationTests.csproj \
+    --filter FullyQualifiedName~ThemeCriticalCss_ShouldRenderBeforeExternalStylesAndKeepTheOutlineResponsive
+  ```
+
+- Repository retention policy governs CI artifact retention; local temp evidence stays on disk until manually removed after triage.
+
 ## Run
 
 ```bash
