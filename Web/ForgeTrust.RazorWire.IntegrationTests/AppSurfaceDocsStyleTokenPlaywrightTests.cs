@@ -385,24 +385,28 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
 
         // Stay above the 80rem desktop breakpoint when CI reserves space for a vertical scrollbar.
         await page.SetViewportSizeAsync(1366, 900);
+        // Playwright can report the resize before Chromium paints the desktop grid. Wait for
+        // the user-visible desktop contract instead of sampling that transient compact layout.
         await page.WaitForFunctionAsync(
             """
             () => {
               const outline = document.getElementById('docs-page-outline');
               const toggle = outline?.querySelector("[data-doc-outline-toggle='true']");
               const primary = document.querySelector('.docs-detail-primary');
-              if (!outline || !toggle || !primary || getComputedStyle(toggle).display !== 'none') {
+              if (!outline || !toggle || !primary) {
                 return false;
               }
 
               const outlineBox = outline.getBoundingClientRect();
               const primaryBox = primary.getBoundingClientRect();
-              return primaryBox.right <= outlineBox.left && document.documentElement.scrollWidth <= window.innerWidth;
+              return getComputedStyle(toggle).display === 'none'
+                && primaryBox.right <= outlineBox.left
+                && document.documentElement.scrollWidth <= window.innerWidth;
             }
             """,
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
-        var wide = await page.EvaluateAsync<double[]>(
+        var wide = await page.EvaluateAsync<bool[]>(
             """
             () => {
               const outline = document.getElementById('docs-page-outline');
@@ -411,17 +415,15 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
               const outlineBox = outline.getBoundingClientRect();
               const primaryBox = primary.getBoundingClientRect();
               return [
-                getComputedStyle(toggle).display === 'none' ? 1 : 0,
-                primaryBox.right,
-                outlineBox.left,
-                document.documentElement.scrollWidth,
-                window.innerWidth
+                getComputedStyle(toggle).display === 'none',
+                primaryBox.right <= outlineBox.left,
+                document.documentElement.scrollWidth <= window.innerWidth
               ];
             }
             """);
-        Assert.Equal(1, wide[0]);
-        Assert.True(wide[1] <= wide[2], $"The primary content extends to {wide[1]}, overlapping the outline starting at {wide[2]}.");
-        Assert.True(wide[3] <= wide[4], $"The document width {wide[3]} exceeds the viewport width {wide[4]}.");
+        Assert.True(wide[0]);
+        Assert.True(wide[1]);
+        Assert.True(wide[2]);
     }
 
     private async Task AssertDocsThemeAsync(ColorScheme colorScheme)

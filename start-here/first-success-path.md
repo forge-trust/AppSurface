@@ -81,7 +81,7 @@ That proves the package-consumer path: a fresh ASP.NET Core app can install `For
 
 After the package-first path runs, add package-owned light/dark support without restyling the application UI. The Web package carries the neutral theming dependency.
 
-In your module's `ConfigureServices`, register the built-in pair and the explicit Web adapter:
+In your module's `ConfigureServices`, register the shared Graphite pair and the explicit Web adapter:
 
 ```csharp
 using ForgeTrust.AppSurface.Theming;
@@ -91,9 +91,9 @@ public void ConfigureServices(StartupContext context, IServiceCollection service
 {
     services.AddAppSurfaceTheming(options =>
     {
-        options.DefaultTheme = new AppSurfaceThemeId("appsurface");
+        options.DefaultTheme = new AppSurfaceThemeId("graphite");
         options.DefaultMode = AppSurfaceThemeMode.System;
-        options.Pairs.Add(AppSurfaceThemePair.AppSurface());
+        options.Pairs.Add(AppSurfaceThemePair.Graphite());
     });
     services.AddAppSurfaceWebTheming();
 }

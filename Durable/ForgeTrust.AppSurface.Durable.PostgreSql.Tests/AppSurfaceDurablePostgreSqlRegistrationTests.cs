@@ -40,6 +40,7 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
         Assert.IsAssignableFrom<IDurableWorkControlClient>(provider.GetRequiredService<IDurableWorkControlClient>());
         Assert.IsAssignableFrom<IDurableScopeControlClient>(provider.GetRequiredService<IDurableScopeControlClient>());
         Assert.IsAssignableFrom<IDurableWorkOperatorClient>(provider.GetRequiredService<IDurableWorkOperatorClient>());
+        Assert.IsAssignableFrom<IFlowRepairOperatorClient>(provider.GetRequiredService<IFlowRepairOperatorClient>());
         Assert.Same(services, builder.Services);
         Assert.Equal(
             PostgreSqlDurableWakeNotificationMode.Disabled,

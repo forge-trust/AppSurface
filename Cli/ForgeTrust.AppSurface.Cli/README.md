@@ -42,7 +42,7 @@ publication protects readers from partial content, but it cannot make a director
 principal safe from path replacement.
 
 The preferred production flow remains: generate and review the offline schema script, apply migrations `0001` through
-`0006` in order, apply the canonical role recipe, run status and preflight, then explicitly enable
+`0007` in order, apply the canonical role recipe, run status and preflight, then explicitly enable
 [`AddWorkerHost()`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host). For recovery,
 check status, correct and review the forward-only script, then retry; never delete migration history. The
 [`durable-postgresql` example](../../examples/durable-postgresql/README.md) is a local proof, not production
@@ -103,6 +103,8 @@ dotnet tool run appsurface --version
 ### `appsurface canary poll`
 
 Use this command after an application has registered and protected a [named canary](../../Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints). It is not a liveness or readiness probe, does not trigger synthetic work, and never changes deployment state.
+
+For a hands-on protected-trigger → proof → poll example, start with the [named-canary adoption lab](../../examples/named-canary-lab/README.md). It demonstrates how a caller can gate on the CLI exit code while the application keeps ownership of the workflow, evidence, and release decision.
 
 AppSurface is open source: this CLI is a reusable deployment-proof client, while each application remains responsible for its protected endpoint, authorization policy, and deployment decision.
 

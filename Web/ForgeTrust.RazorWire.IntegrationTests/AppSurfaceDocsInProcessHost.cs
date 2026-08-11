@@ -54,12 +54,32 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
     /// <returns>A started host wrapper whose <see cref="BaseUrl"/> contains the resolved listener address.</returns>
     public static async Task<AppSurfaceDocsInProcessHost> StartAsync(string requestedBaseUrl)
     {
+        return await StartAsync(requestedBaseUrl, configureServices: null);
+    }
+
+    /// <summary>
+    /// Builds and starts the AppSurface Docs standalone host with a test-only service-registration seam.
+    /// </summary>
+    /// <param name="requestedBaseUrl">
+    /// The URL passed to Kestrel, typically <c>http://127.0.0.1:0</c> so tests keep a real HTTP listener while
+    /// allowing the OS to allocate the port.
+    /// </param>
+    /// <param name="configureServices">
+    /// Optional service registration callback applied after the standalone host registers its production modules.
+    /// Use only from integration tests that need an independently configured host; it does not alter the shared
+    /// default fixture.
+    /// </param>
+    /// <returns>A started host wrapper whose <see cref="BaseUrl"/> contains the resolved listener address.</returns>
+    internal static async Task<AppSurfaceDocsInProcessHost> StartAsync(
+        string requestedBaseUrl,
+        Action<IServiceCollection>? configureServices)
+    {
         var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
         var builder = AppSurfaceDocsStandaloneHost.CreateBuilder(
             CreateHostArgs(requestedBaseUrl, repoRoot),
             DevelopmentEnvironmentProvider.Instance);
 
-        return await StartAsync(ConfigureHostBuilder(builder, repoRoot, requestedBaseUrl).Build());
+        return await StartAsync(ConfigureHostBuilder(builder, repoRoot, requestedBaseUrl, configureServices).Build());
     }
 
     /// <summary>
@@ -79,7 +99,11 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
         return await StartAsync(ConfigureHostBuilder(builder, repoRoot, requestedBaseUrl).Build());
     }
 
-    private static IHostBuilder ConfigureHostBuilder(IHostBuilder builder, string repoRoot, string requestedBaseUrl)
+    private static IHostBuilder ConfigureHostBuilder(
+        IHostBuilder builder,
+        string repoRoot,
+        string requestedBaseUrl,
+        Action<IServiceCollection>? configureServices = null)
     {
         builder.UseContentRoot(repoRoot);
         builder.ConfigureWebHost(webHost =>
@@ -87,6 +111,10 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
             webHost.UseEnvironment(Environments.Development);
             webHost.UseUrls(requestedBaseUrl);
         });
+        if (configureServices is not null)
+        {
+            builder.ConfigureServices(configureServices);
+        }
 
         return builder;
     }

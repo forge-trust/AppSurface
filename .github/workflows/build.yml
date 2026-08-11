@@ -313,7 +313,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       CODECOV_TOKEN_PRESENT: ${{ secrets.CODECOV_TOKEN != '' }}
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages

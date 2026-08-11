@@ -65,6 +65,7 @@ public sealed class CoverageSolutionScriptTests
     {
         var workflow = ReadWorkflow();
 
+        Assert.Contains("timeout-minutes: 45", workflow, StringComparison.Ordinal);
         Assert.Contains("BUILD_CONFIGURATION: Release", workflow, StringComparison.Ordinal);
         Assert.Contains("BUILD_NO_RESTORE: true", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_PARALLELISM: 2", workflow, StringComparison.Ordinal);

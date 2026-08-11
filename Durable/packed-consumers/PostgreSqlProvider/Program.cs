@@ -1,4 +1,5 @@
 using ForgeTrust.AppSurface.Durable;
+using ForgeTrust.AppSurface.Durable.Provider;
 using ForgeTrust.AppSurface.Durable.PostgreSql;
 using Npgsql;
 
@@ -14,10 +15,11 @@ IDurableWorkTransactionWriter writer = new PostgreSqlDurableWorkTransactionWrite
     registry,
     options);
 IDurableWorkClient client = new PostgreSqlDurableWorkClient(dataSource, registry, options);
+IFlowRepairOperatorClient repair = new PostgreSqlDurableFlowRepairOperatorClient(dataSource, registry, options);
 
 if (options.WakeNotificationMode != PostgreSqlDurableWakeNotificationMode.Disabled)
 {
     throw new InvalidOperationException("PostgreSQL wake notifications must remain explicit and default off.");
 }
 
-Console.WriteLine($"{writer.GetType().Name}|{client.GetType().Name}|{options.WakeNotificationMode}");
+Console.WriteLine($"{writer.GetType().Name}|{client.GetType().Name}|{repair.GetType().Name}|{options.WakeNotificationMode}");

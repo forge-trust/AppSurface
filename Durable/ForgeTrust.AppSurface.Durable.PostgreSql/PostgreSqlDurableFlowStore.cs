@@ -818,6 +818,25 @@ internal sealed partial class PostgreSqlDurableFlowStore
             string? terminalCode;
             if (isRelease)
             {
+                if (current.State == "suspended"
+                    && await HasV1ChildRepairDescriptorAsync(
+                        connection,
+                        transaction,
+                        scopeId,
+                        instanceId,
+                        cancellationToken).ConfigureAwait(false))
+                {
+                    return await CommitFailureAsync(
+                        transaction,
+                        Failure<DurableFlowCommandResult>(
+                            commandId.Value,
+                            DurableProblemCodes.FlowReleaseStateMismatch,
+                            "The suspended Flow requires an evidence-backed child-effect repair rather than a lifecycle release.",
+                            "Its V1 child-work suspension descriptor is owned by the Flow repair protocol.",
+                            "Use IFlowRepairOperatorClient with retained child Work evidence; do not use ReleaseSuspensionAsync as a repair fallback."),
+                        cancellationToken).ConfigureAwait(false);
+                }
+
                 var registration = registry!.GetRequired(current.FlowId, current.FlowVersion);
                 if (!string.Equals(registration.ImplementationVersion, current.ManifestId, StringComparison.Ordinal)
                     || !string.Equals(registration.DefinitionFingerprint, current.DefinitionFingerprint, StringComparison.Ordinal)
@@ -904,6 +923,7 @@ internal sealed partial class PostgreSqlDurableFlowStore
                     terminal_at = CASE WHEN @terminal THEN clock_timestamp() ELSE NULL END,
                     terminal_code = @terminal_code,
                     suspended_from_state = NULL, suspension_descriptor = NULL,
+                    suspension_descriptor_schema = NULL, suspension_descriptor_sha256 = NULL,
                     lease_owner = NULL, lease_started_at = NULL, lease_expires_at = NULL,
                     updated_at = clock_timestamp()
                 WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id AND revision = @prior_revision
@@ -1087,6 +1107,26 @@ internal sealed partial class PostgreSqlDurableFlowStore
             : null;
     }
 
+    private static async ValueTask<bool> HasV1ChildRepairDescriptorAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        DurableScopeId scopeId,
+        DurableFlowInstanceId instanceId,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT suspension_descriptor_schema = 'appsurface.durable.flow.child-suspension.v1'
+                   AND suspension_descriptor ->> 'code' = 'flow.child_work_requires_attention'
+                   AND suspension_descriptor ->> 'source' = 'child_work'
+            FROM appsurface_durable.flow_instance
+            WHERE scope_id = @scope_id AND flow_instance_id = @flow_instance_id;
+            """;
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        command.Parameters.AddWithValue("scope_id", scopeId.Value);
+        command.Parameters.AddWithValue("flow_instance_id", instanceId.Value);
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is true;
+    }
+
     private static async ValueTask<string> RequestLinkedChildCancellationAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
@@ -1195,10 +1235,10 @@ internal sealed partial class PostgreSqlDurableFlowStore
         var epoch = reader.IsDBNull(1) ? (Guid?)null : reader.GetGuid(1);
         var version = reader.GetInt32(2);
         await reader.DisposeAsync().ConfigureAwait(false);
-        if (version < 3)
+        if (version < PostgreSqlDurableWorkStore.RequiredSchemaVersion)
         {
             throw new InvalidOperationException(
-                $"{DurableProblemCodes.SchemaUpgradeRequired}: PostgreSQL durable Flow requires schema version 3.");
+                $"{DurableProblemCodes.SchemaUpgradeRequired}: PostgreSQL durable Flow requires schema version {PostgreSqlDurableWorkStore.RequiredSchemaVersion}.");
         }
 
         if (storeId != _expectedStoreId)

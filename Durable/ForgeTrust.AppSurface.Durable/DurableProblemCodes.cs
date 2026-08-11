@@ -84,6 +84,12 @@ public static class DurableProblemCodes
     public const string RetentionLifecycleConflict = "ASDUR216";
     /// <summary>The requested retention lifecycle transition is not safe in the current state.</summary>
     public const string RetentionLifecycleRejected = "ASDUR217";
+    /// <summary>The Flow repair suspension descriptor predates the V1 evidence contract and cannot be safely interpreted.</summary>
+    public const string FlowRepairDescriptorUpgradeRequired = "ASDUR218";
+    /// <summary>The retained Flow repair evidence does not match the locked Work, wait, or history truth.</summary>
+    public const string FlowRepairEvidenceMismatch = "ASDUR219";
+    /// <summary>The requested Flow repair action is outside the closed V1 repair state matrix.</summary>
+    public const string FlowRepairActionUnsupported = "ASDUR220";
     /// <summary>The durable provider schema is not installed.</summary>
     public const string SchemaMissing = "ASDUR400";
     /// <summary>The durable provider schema requires pending migrations.</summary>
