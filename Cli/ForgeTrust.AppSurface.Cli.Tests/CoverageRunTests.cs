@@ -2474,12 +2474,13 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
-    public async Task RunAsync_ShouldScheduleExclusiveProjectsBetweenParallelBatches()
+    public async Task RunAsync_ShouldScheduleExclusiveProjectsBeforeParallelBatches()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
         var first = repo.WriteFile("tests/First.Tests/First.Tests.csproj", "<Project />");
         var second = repo.WriteFile("tests/Second.Tests/Second.Tests.csproj", "<Project />");
         var browser = repo.WriteFile("tests/Browser.Tests/Browser.Tests.csproj", "<Project><PackageReference Include=\"Microsoft.Playwright\" /></Project>");
+        var secondBrowser = repo.WriteFile("tests/SecondBrowser.Tests/SecondBrowser.Tests.csproj", "<Project><PackageReference Include=\"Microsoft.Playwright\" /></Project>");
         using var current = PushCurrentDirectory(repo.Path);
         var runner = new RecordingCoverageRunProcessRunner
         {
@@ -2491,18 +2492,20 @@ public sealed class CoverageRunTests
         };
         var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
         using var console = new FakeInMemoryConsole();
-        var request = CreateRequest(TestProjects: [first, second, browser], Parallelism: 2);
+        var request = CreateRequest(TestProjects: [first, second, browser, secondBrowser], Parallelism: 2);
 
         var result = await workflow.RunAsync(request, console, CancellationToken.None);
 
         Assert.True(result.Success);
         var tests = runner.Commands.Where(command => command.Arguments.FirstOrDefault() == "test").ToArray();
-        Assert.Equal(3, tests.Length);
-        var browserTest = Assert.Single(tests, command => command.Arguments[1] == browser);
-        var parallelTests = tests.Where(command => command.Arguments[1] != browser).ToArray();
+        Assert.Equal(4, tests.Length);
+        var exclusiveTests = tests.Where(command => command.Arguments[1] == browser || command.Arguments[1] == secondBrowser).ToArray();
+        var parallelTests = tests.Where(command => command.Arguments[1] != browser && command.Arguments[1] != secondBrowser).ToArray();
+        Assert.Equal([browser, secondBrowser], exclusiveTests.Select(command => command.Arguments[1]).ToArray());
         Assert.Equal([first, second], parallelTests.Select(command => command.Arguments[1]).OrderBy(path => path));
+        Assert.True(exclusiveTests[0].FinishedTick <= exclusiveTests[1].StartedTick);
+        Assert.All(exclusiveTests, command => Assert.True(command.FinishedTick <= parallelTests.Min(parallel => parallel.StartedTick)));
         Assert.True(parallelTests.Max(command => command.StartedTick) < parallelTests.Min(command => command.FinishedTick));
-        Assert.All(parallelTests, command => Assert.True(browserTest.StartedTick >= command.FinishedTick));
         Assert.Contains("(exclusive)", console.ReadOutputString(), StringComparison.Ordinal);
     }
 
@@ -2533,7 +2536,7 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
-    public async Task RunAsync_LongestFirst_ShouldRunMeasuredProjectsFirstWithinExclusiveSegments()
+    public async Task RunAsync_LongestFirst_ShouldRunExclusiveProjectsBeforeMeasuredNonExclusiveProjects()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
         repo.WriteFile("tests/First.Tests/First.Tests.csproj", "<Project />");
@@ -2570,12 +2573,12 @@ public sealed class CoverageRunTests
 
         Assert.True(result.Success);
         var tests = runner.Commands.Where(command => command.Arguments.FirstOrDefault() == "test").ToArray();
-        Assert.Equal(["Slow.Tests", "First.Tests", "Browser.Tests", "After.Tests"], tests.Select(command => Path.GetFileNameWithoutExtension(command.Arguments[1])).ToArray());
+        Assert.Equal(["Browser.Tests", "After.Tests", "Slow.Tests", "First.Tests"], tests.Select(command => Path.GetFileNameWithoutExtension(command.Arguments[1])).ToArray());
         var timings = File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json"));
         Assert.Contains("\"mode\": \"longest-first\"", timings, StringComparison.Ordinal);
-        Assert.Contains("\"originalIndex\": 1", timings, StringComparison.Ordinal);
+        Assert.Contains("\"originalIndex\": 2", timings, StringComparison.Ordinal);
         Assert.Contains("\"executionIndex\": 0", timings, StringComparison.Ordinal);
-        Assert.Contains("\"scheduleReason\": \"prior-timing\"", timings, StringComparison.Ordinal);
+        Assert.Contains("\"scheduleReason\": \"exclusive-first\"", timings, StringComparison.Ordinal);
     }
 
     [Fact]

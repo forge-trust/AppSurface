@@ -4,6 +4,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
+- [`appsurface coverage run`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) now starts exclusive projects before ordinary parallel batches. This prevents resource-sensitive suites from waiting for unrelated work to drain; `--schedule longest-first` continues to order only the remaining non-exclusive projects.
 - The [named-canary adoption lab](../examples/named-canary-lab/README.md) now gives application teams a hands-on Development-only trigger → proof → poll runbook for checking a consumer-defined release workflow before production. It includes deterministic pass, pending, and stale paths; candidate/environment-bound, capped local proof evidence; protected trigger and evaluation routes; safe CLI troubleshooting; and clear boundaries: the example neither proves rollout health nor selects a deployment decision. Its shell verifier keeps credentials out of command-line arguments, and its marker profile matches the protected canary route so accepted evidence remains pollable.
 - [`ForgeTrust.AppSurface.Auth.Aspire.Keycloak`](../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md) now
   carries the optional login-theme path through an immutable release-evidence tuple: deterministic source and

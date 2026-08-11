@@ -81,7 +81,7 @@ internal sealed partial class CoverageRunCommand : ICommand
     /// <summary>
     /// Gets or sets the project scheduling mode.
     /// </summary>
-    [CommandOption("schedule", Description = "Project scheduling mode: input-order or longest-first. Defaults to input-order.")]
+    [CommandOption("schedule", Description = "Non-exclusive project scheduling mode after exclusive projects run first: input-order or longest-first. Defaults to input-order.")]
     public string Schedule { get; set; } = "input-order";
 
     /// <summary>
@@ -508,12 +508,12 @@ internal sealed record CoverageRunRequest(
 internal enum CoverageRunScheduleMode
 {
     /// <summary>
-    /// Preserve the discovered or explicitly supplied project order.
+    /// Run exclusive projects first, then preserve the discovered or explicitly supplied non-exclusive project order.
     /// </summary>
     InputOrder,
 
     /// <summary>
-    /// Use prior timings to start longer non-exclusive projects first within each exclusive barrier segment.
+    /// Use prior timings to start longer non-exclusive projects first after exclusive projects complete.
     /// </summary>
     LongestFirst,
 }
@@ -1240,16 +1240,29 @@ internal sealed class CoverageRunWorkflow
         string currentDirectory,
         CancellationToken cancellationToken)
     {
+        var projects = resolution.Projects
+            .Select((project, originalIndex) => new CoverageRunIndexedProject(originalIndex, project))
+            .ToArray();
+        var exclusiveProjects = projects.Where(item => item.Project.IsExclusive).ToArray();
+        var nonExclusiveProjects = projects.Where(item => !item.Project.IsExclusive).ToArray();
+
         if (request.ScheduleMode == CoverageRunScheduleMode.InputOrder)
         {
-            var inputEntries = resolution.Projects
-                .Select((project, index) => new CoverageRunScheduleEntry(
-                    OriginalIndex: index,
-                    ExecutionIndex: index,
-                    project,
+            var inputEntries = exclusiveProjects
+                .Select((item, executionIndex) => new CoverageRunScheduleEntry(
+                    item.OriginalIndex,
+                    executionIndex,
+                    item.Project,
                     ScheduledSeconds: null,
                     DurationSource: "none",
-                    ScheduleReason: "input-order"))
+                    ScheduleReason: "exclusive-first"))
+                .Concat(nonExclusiveProjects.Select((item, index) => new CoverageRunScheduleEntry(
+                    item.OriginalIndex,
+                    exclusiveProjects.Length + index,
+                    item.Project,
+                    ScheduledSeconds: null,
+                    DurationSource: "none",
+                    ScheduleReason: "input-order")))
                 .ToArray();
             return new CoverageRunSchedulePlan(
                 Mode: "input-order",
@@ -1262,42 +1275,28 @@ internal sealed class CoverageRunWorkflow
         var timingSource = await LoadPriorTimingsAsync(request, outputDirectory, currentDirectory, cancellationToken);
         var entries = new List<CoverageRunScheduleEntry>(resolution.Projects.Count);
         var executionIndex = 0;
-        var index = 0;
-        while (index < resolution.Projects.Count)
+        foreach (var item in exclusiveProjects)
         {
-            var project = resolution.Projects[index];
-            if (project.IsExclusive)
-            {
-                entries.Add(new CoverageRunScheduleEntry(
-                    OriginalIndex: index,
-                    ExecutionIndex: executionIndex++,
-                    project,
-                    ScheduledSeconds: null,
-                    DurationSource: "none",
-                    ScheduleReason: "exclusive-barrier"));
-                index++;
-                continue;
-            }
+            entries.Add(new CoverageRunScheduleEntry(
+                item.OriginalIndex,
+                executionIndex++,
+                item.Project,
+                ScheduledSeconds: null,
+                DurationSource: "none",
+                ScheduleReason: "exclusive-first"));
+        }
 
-            var segment = new List<CoverageRunIndexedProject>();
-            while (index < resolution.Projects.Count && !resolution.Projects[index].IsExclusive)
-            {
-                segment.Add(new CoverageRunIndexedProject(index, resolution.Projects[index]));
-                index++;
-            }
-
-            foreach (var item in SortScheduleSegment(segment, timingSource.TimingsByProject, priorityRanks))
-            {
-                var hasTiming = timingSource.TimingsByProject.TryGetValue(NormalizeProjectKey(item.Project.RelativePath), out var scheduledSeconds);
-                var isPriority = priorityRanks.ContainsKey(item.OriginalIndex);
-                entries.Add(new CoverageRunScheduleEntry(
-                    item.OriginalIndex,
-                    executionIndex++,
-                    item.Project,
-                    hasTiming ? scheduledSeconds : null,
-                    hasTiming ? timingSource.DurationSource : "none",
-                    isPriority ? "priority" : hasTiming ? "prior-timing" : "unknown-timing"));
-            }
+        foreach (var item in SortScheduleSegment(nonExclusiveProjects, timingSource.TimingsByProject, priorityRanks))
+        {
+            var hasTiming = timingSource.TimingsByProject.TryGetValue(NormalizeProjectKey(item.Project.RelativePath), out var scheduledSeconds);
+            var isPriority = priorityRanks.ContainsKey(item.OriginalIndex);
+            entries.Add(new CoverageRunScheduleEntry(
+                item.OriginalIndex,
+                executionIndex++,
+                item.Project,
+                hasTiming ? scheduledSeconds : null,
+                hasTiming ? timingSource.DurationSource : "none",
+                isPriority ? "priority" : hasTiming ? "prior-timing" : "unknown-timing"));
         }
 
         return new CoverageRunSchedulePlan(
