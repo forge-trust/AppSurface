@@ -4,7 +4,7 @@ AppSurface Durable uses append-only `ASDURxxx` codes. Messages and operator hist
 Fix, and Docs guidance and must never include credentials, provider response bodies, tokenized URLs, email content, or
 child-sensitive data.
 
-The Durable contract and PostgreSQL source-preview packages emit the codes below. Hosted-runtime diagnostics use only
+The Durable contract and PostgreSQL public-preview packages emit the codes below. Hosted-runtime diagnostics use only
 fixed, low-cardinality codes and never expose connection targets, notification payloads, scopes, aggregates, or trace
 context.
 

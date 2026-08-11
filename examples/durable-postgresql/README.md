@@ -1,6 +1,6 @@
 # Durable PostgreSQL local tutorial
 
-This source-preview tutorial proves the current public [`ForgeTrust.AppSurface.Durable.PostgreSql`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) adoption path on a disposable PostgreSQL 17 database. It is a local composition reference, not production operations guidance. Application startup never applies DDL.
+This public-preview tutorial proves the current [`ForgeTrust.AppSurface.Durable.PostgreSql`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) adoption path on a disposable PostgreSQL 17 database. It is a local composition reference, not production operations guidance. Application startup never applies DDL.
 
 The [AppSurface CLI](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands) owns migration status, reviewed scripts, preflight, and guarded apply. This example owns only two local-proof commands:
 
