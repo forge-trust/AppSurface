@@ -19,7 +19,7 @@ It also acts as a concrete AppSurface Docs example for teams that want stronger 
 - [Pre-1.0 upgrade policy](./upgrade-policy.md) explains the stability contract before `v1.0.0`.
 - [Release authoring checklist](./release-authoring-checklist.md) is the maintainer workflow for turning the unreleased page into a tagged release.
 - [Coordinated release links](./coordinated-release-links.md) explains when package rows use the frozen tree-local current pointer, an explicit historical note, a held release, or a proof-host note.
-- The [Durable discovery and reconciliation guide](../Durable/README.md#slice-7-discovery-and-reconciliation) explains the source-preview publication hold, schema ownership, and explicit worker-host boundary.
+- The [Durable discovery and reconciliation guide](../Durable/README.md#slice-7-discovery-and-reconciliation) explains the public-preview release gate, schema ownership, and explicit worker-host boundary.
 
 Older preview routes redirect to their canonical release notes so each release line has one live package-facing story.
 
@@ -36,16 +36,16 @@ Each generated tagged release owns four immutable versioned artifacts, one overw
 
 The release evidence bundle is not a signature or hosted-build attestation. It is the reviewable consistency proof used by release-prep and publish validation.
 
-## Durable publication hold
+## Durable public-preview release gate
 
-The Durable packages are source-only public previews and remain held from publication until coordinated evidence covers
-schema ownership, migrations `0001` through `0007`, the canonical PostgreSQL role recipe, passive storage registration,
-explicit `AddWorkerHost()` hosting, startup schema/epoch validation without DDL, and recovery procedures. The package
-chooser is the machine-facing install map; the [Durable discovery guide](../Durable/README.md#slice-7-discovery-and-reconciliation)
-is the reader-facing operational boundary. The `durable schema` commands do not change this hold: scripts are offline,
-status and preflight resolve a named connection environment variable, and apply requires a named migration-owner
-environment variable. No command accepts or prints connection strings; the least-privilege role guidance still applies
-to each online operation. The example is local proof rather than production operations guidance.
+The Durable packages are eligible for coordinated prerelease publication only when release review confirms schema
+ownership, migrations `0001` through `0008`, the canonical PostgreSQL role recipe, passive storage registration,
+explicit `AddWorkerHost()` hosting, startup schema/epoch validation without DDL, recovery procedures, and the real
+PostgreSQL conformance evidence. The package chooser is the machine-facing install map; the [Durable discovery guide](../Durable/README.md#slice-7-discovery-and-reconciliation)
+is the reader-facing operational boundary. The `durable schema` commands do not replace this release review: scripts
+are offline, status and preflight resolve a named connection environment variable, and apply requires a named
+migration-owner environment variable. No command accepts or prints connection strings; the least-privilege role
+guidance still applies to each online operation. The example is local proof rather than production operations guidance.
 
 ## Release format
 
