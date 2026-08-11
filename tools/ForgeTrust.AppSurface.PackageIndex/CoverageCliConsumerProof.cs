@@ -1049,7 +1049,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
     }
 
     private static CoverageCliConsumerProofArtifactCheck CheckAbsentArtifact(string path, string description)
-        => new(description, path, !File.Exists(path));
+        => new(description, path, !File.Exists(path) && !Directory.Exists(path));
 
     private static CoverageCliConsumerProofArtifactCheck CheckGlob(
         string directory,
