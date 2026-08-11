@@ -27,6 +27,30 @@ internal static class ProviderContractValidation
     internal static void Require(DurableCommandId value, string parameterName) =>
         _ = Require(value.Value, parameterName, 200);
 
+    /// <summary>Requires a non-default Flow instance identifier.</summary>
+    /// <param name="value">Flow instance identifier to validate.</param>
+    /// <param name="parameterName">Parameter name used by validation exceptions.</param>
+    /// <exception cref="ArgumentException">Thrown when the identifier is default or invalid.</exception>
+    internal static void Require(DurableFlowInstanceId value, string parameterName) =>
+        _ = Require(value.Value, parameterName, 200);
+
+    /// <summary>Requires exactly 64 lowercase hexadecimal SHA-256 characters.</summary>
+    /// <param name="value">Digest to validate.</param>
+    /// <param name="parameterName">Parameter name used by validation exceptions.</param>
+    /// <returns>The original validated digest.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="value"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when the digest is not exactly 64 lowercase hexadecimal characters.</exception>
+    internal static string RequireSha256(string value, string parameterName)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        if (value.Length != 64 || value.Any(static character => character is not (>= '0' and <= '9') and not (>= 'a' and <= 'f')))
+        {
+            throw new ArgumentException("Durable provider SHA-256 values require exactly 64 lowercase hexadecimal characters.", parameterName);
+        }
+
+        return value;
+    }
+
     /// <summary>Requires bounded portable identifier text.</summary>
     /// <param name="value">Identifier text to validate.</param>
     /// <param name="parameterName">Parameter name used by validation exceptions.</param>

@@ -22,7 +22,7 @@ dispositions are `retained`, `adapted`, `replaced-by-landed-contract`, `deferred
 | Reconstruction base | current `main` |
 | Old semantic delta | 9 paths, about 8,300 added lines |
 | Package | `ForgeTrust.AppSurface.Durable.PostgreSql` |
-| Publication posture | source-only public preview; no hosted worker; machine-held from publish plans |
+| Publication posture | Public preview; worker hosting was intentionally outside this slice |
 
 ## Requirements-first inventory
 

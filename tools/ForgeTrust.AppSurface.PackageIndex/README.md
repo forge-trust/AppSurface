@@ -16,10 +16,12 @@ Every managed package README declares one `release_guidance_variant` in
 | `apphost` | The package is primarily an AppHost, development, or test integration surface. | A runtime package merely happens to have an Aspire example. |
 | `experimental` | The package has an explicitly experimental or publication-held contract. | A package needs extra product-specific release prose; keep that prose authored outside the region. |
 
-The canonical bodies live in the generator-only [`release-guidance.template`](https://github.com/forge-trust/AppSurface/blob/main/tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.template). Each body expands the package chooser and
-release-hub links to canonical absolute GitHub URLs. This is deliberate: the package root `README.md` is included in a
-NuGet package, but repository-relative targets are not package contents. The package artifact validator confirms that
-the marked region and both URLs survive packing.
+The canonical bodies live in the generator-only
+[`release-guidance.template`](https://github.com/forge-trust/AppSurface/blob/main/tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.template).
+The non-Markdown extension keeps its required unexpanded URL tokens out of the published Docs graph. Each body expands
+the package chooser and release-hub links to canonical absolute GitHub URLs. This is deliberate: the package root
+`README.md` is included in a NuGet package, but repository-relative targets are not package contents. The package
+artifact validator confirms that the marked region and both URLs survive packing.
 
 Do not add a fourth variant for package-specific instructions. Keep those instructions outside the managed marker pair:
 

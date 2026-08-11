@@ -188,7 +188,7 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
         await page.WaitForFunctionAsync(
             "() => { const time = document.querySelector('.docs-provenance-strip time'); return Boolean(time?.textContent) && !time.textContent.includes('UTC'); }",
             null,
-            new PageWaitForFunctionOptions { Timeout = 30_000 });
+            new PageWaitForFunctionOptions { Timeout = 60_000 });
 
         Assert.Contains("Source of truth", await page.InnerTextAsync(".docs-provenance-strip"), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(

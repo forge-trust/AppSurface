@@ -1,9 +1,7 @@
 # ForgeTrust.AppSurface.Durable.Provider
 
-> **Source-only public preview:** the
-> [`PostgreSQL source provider`](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md) supplies the current source-preview
-> conformance path, but publication remains held pending coordinated release evidence. This package contains SPI
-> contracts, not a runtime.
+> **Public preview:** the [`PostgreSQL provider`](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md) supplies the
+> current conformance path. This package contains SPI contracts, not a runtime.
 
 `ForgeTrust.AppSurface.Durable.Provider` is the runtime-provider and operator SPI for
 [`ForgeTrust.AppSurface.Durable`](../ForgeTrust.AppSurface.Durable/README.md). It depends on that adopter package; the
@@ -21,8 +19,8 @@ provide PostgreSQL storage, migrations, polling, schedule execution, hosted serv
 
 ## Slice 7 discovery boundary
 
-This SPI remains part of the source-only public preview; publication is held pending coordinated release evidence.
-Provider contracts describe activation and operator boundaries, but storage registration is passive and does not imply
+This SPI remains a public preview. Provider contracts describe activation and operator boundaries, but storage
+registration is passive and does not imply
 worker hosting. The PostgreSQL provider requires an explicit
 [`AddWorkerHost()` opt-in](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host) for continuous
 processing.
@@ -56,6 +54,7 @@ Every public type in this package belongs to one of these provider-facing famili
 | Application-authorized control implementers | Work get/cancel/list/snapshot types and `IDurableWorkControlClient`; scope disable types and `IDurableScopeControlClient` | Expose bounded, scoped, payload-free operational control |
 | Application-authorized operator implementers | Operator outcome/resolution/result/request types and `IDurableWorkOperatorClient` | Reconcile, resolve, safely retry, or recovery-release suspended Work |
 | Application-authorized retention implementers | `IDurableFlowRetentionClient`, bounded assessment/manifest/package/receipt/hold/purge types | Prove one exact terminal Flow source set before a separately authorized purge |
+| Flow-repair operator implementers | `IFlowRepairOperatorClient`, repair request/evidence/assessment/result/receipt types | Inspect and repair only the two evidence-backed child-effect assertions |
 
 The SPI accepts and returns public Durable identifiers and command fingerprints. Collection results defensively copy
 inputs, default identifiers are rejected, timestamps normalize to UTC, page sizes are bounded, and every mutation uses
@@ -77,6 +76,26 @@ lease turnover cannot create a new external idempotency identity.
 Work reconcile, manual resolution, safe retry, and recovery release each use a distinct v1 fingerprint schema. A
 provider persists the schema id and digest with command outcome truth. A repeated command id with `UnsupportedSchema` or
 `Conflict` fails closed; it must never repeat reconciliation merely because the command id matches.
+
+## Flow repair operator preview
+
+`IFlowRepairOperatorClient` is a separate application-authorized boundary for an
+[`ASDUR211` child-effect suspension](../../troubleshooting/durable-diagnostics.md#asdur211). It intentionally exposes
+only `AssertChildEffectCompleted` and `AssertChildEffectNotApplied`. The first binds a retained terminal Work result;
+the second binds a named completed manual-resolution command whose persisted `resolution_kind` is
+`proven_not_applied`. Neither action can release an arbitrary suspension, mutate the child Work, invoke an executor,
+or force terminate an ambiguous effect.
+
+Call `GetAssessmentAsync` with a trusted scope and Flow id to obtain an advisory, payload-free candidate. The
+assessment can go stale; submit the selected action through a fresh revision- and descriptor-digest-fenced request.
+`RepairAsync` returns an immutable receipt only for `Applied` and `Duplicate`; `Refused`, `RaceLost`, and `Conflict`
+carry no receipt. The receipt digest binds the request schema/digest, descriptor, action-specific Work history fact,
+audit actor/reason, transition states, and accepted timestamp. It is integrity evidence, not a signature or a claim
+that `ActorId` authorized the caller.
+
+Do not call `IDurableFlowClient.ReleaseSuspensionAsync` as a fallback for this descriptor. The PostgreSQL provider
+rejects that broad lifecycle command with `ASDUR211`; follow the normative
+[Flow repair protocol](../flow-protocol-v1.md#repair-an-asdur211-child-effect-suspension) instead.
 
 ## Verified Flow retention
 
@@ -122,23 +141,22 @@ continuation token, or multi-Flow manifest. See the [PostgreSQL retention deploy
 
 ## Operational prerequisites
 
-Before any provider can be published, it must supply storage and migration ownership, polling/schedule execution,
-restore fencing, graceful drain, privacy-bounded diagnostics and telemetry, packed-consumer proof, verified-retention
-evidence when the retention SPI is implemented, and conformance tests against this SPI. The source-preview PostgreSQL
-provider now supplies Work, Flow, Schedule, hosted activation, drain/recovery, and verified-retention conformance;
-coordinated release evidence remains the publication gate.
+Before a provider is included in a coordinated prerelease, release review must verify storage and migration ownership,
+polling/schedule execution, restore fencing, graceful drain, privacy-bounded diagnostics and telemetry, packed-consumer
+proof, verified-retention evidence when the retention SPI is implemented, and conformance tests against this SPI. The
+PostgreSQL provider supplies Work, Flow, Schedule, hosted activation, drain/recovery, retention, and repair
+conformance; the review checklist remains the prerelease publication gate.
 
 See the [`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md) for currently available contract,
 PostgreSQL Work, and hosted-runtime codes.
 
-From the repository root, `./Durable/verify-packed-consumers.sh` packs both held packages and their local dependencies,
-then compiles and runs isolated adopter and provider consumers against only those packages.
+From the repository root, `./Durable/verify-packed-consumers.sh` packs the three public-preview packages and their local
+dependencies, then compiles and runs isolated adopter and provider consumers against only those packages.
 
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-This package has an explicitly experimental or publication-held contract. Do not
-treat it as a normal prerelease install; use the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and
-[release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for the current publication decision, proof requirements, and
-migration guidance.
+AppSurface ships as a coordinated package family. Before installing this package
+from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md)
+for current release risk, migration guidance, and readiness.
 <!-- appsurface-release-guidance: end -->

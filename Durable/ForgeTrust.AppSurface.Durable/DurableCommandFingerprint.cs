@@ -76,9 +76,9 @@ internal static class DurableCommandFingerprints
     /// <returns>A fingerprint containing the schema identity and canonical SHA-256 digest.</returns>
     /// <remarks>
     /// Ordering is significant. Supported values use the closed canonical encodings below rather than culture-sensitive
-    /// text conversion. Before the first supported publication or persisted deployment, an unpublished preview schema
-    /// may receive a one-time compatibility correction. After either boundary, any change to value ordering, null
-    /// markers, supported types, or their byte encodings must use a new <paramref name="schemaId"/> so persisted
+    /// text conversion. Before either independent compatibility boundary—the first supported publication or any persisted
+    /// deployment—an unpublished preview schema may receive a one-time compatibility correction. After either boundary,
+    /// any change to value ordering, null markers, supported types, or their byte encodings must use a new <paramref name="schemaId"/> so persisted
     /// fingerprints are never compared under incompatible semantics.
     /// </remarks>
     /// <exception cref="ArgumentException">Thrown when <paramref name="schemaId"/> is invalid.</exception>

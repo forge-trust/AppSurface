@@ -1816,19 +1816,19 @@ body {
 }
 
 .docs-content .doc-signature .sig-generic {
-    color: #86efac;
+    color: var(--docs-color-syntax-inserted);
 }
 
 .docs-content .doc-signature .sig-type {
-    color: #a5b4fc;
+    color: var(--docs-color-syntax-type);
 }
 
 .docs-content .doc-signature .sig-parameter {
-    color: #fcd34d;
+    color: var(--docs-color-syntax-parameter);
 }
 
 .docs-content .doc-signature .sig-modifier {
-    color: #f9a8d4;
+    color: var(--docs-color-syntax-keyword);
 }
 
 .docs-content .doc-signature .sig-operator {
@@ -1836,7 +1836,7 @@ body {
 }
 
 .docs-content .doc-signature .sig-literal {
-    color: #fca5a5;
+    color: var(--docs-color-syntax-number);
 }
 
 .docs-content .doc-overload-body {

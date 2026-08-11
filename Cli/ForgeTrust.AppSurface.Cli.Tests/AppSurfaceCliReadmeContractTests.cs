@@ -19,6 +19,8 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.Contains("ASCAN401", readme, StringComparison.Ordinal);
         Assert.Contains("ASCAN408", readme, StringComparison.Ordinal);
         Assert.Contains("must never be put directly on the command line", readme, StringComparison.Ordinal);
+        Assert.Contains("[named-canary adoption lab](../../examples/named-canary-lab/README.md)", readme, StringComparison.Ordinal);
+        Assert.Contains("application keeps ownership of the workflow, evidence, and release decision", readme, StringComparison.Ordinal);
         Assert.Contains("capped at `300` scheduled attempts", readme, StringComparison.Ordinal);
         Assert.Contains("Bearer and identity values are limited to 16 KiB", readme, StringComparison.Ordinal);
         Assert.Contains("APPSURFACE_CANARY_TOKEN: ${{ secrets.DEPLOY_OPERATOR_TOKEN }}", readme, StringComparison.Ordinal);
@@ -141,6 +143,9 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.Contains("#### Coverage Driver Selection", readme, StringComparison.Ordinal);
         Assert.Contains("#### Coverage Run Watchdog", readme, StringComparison.Ordinal);
         Assert.Contains("--coverage-driver collector|msbuild", readme, StringComparison.Ordinal);
+        Assert.Contains("#### Require a non-sandboxed runner", readme, StringComparison.Ordinal);
+        Assert.Contains("`--require-non-sandbox`", readme, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_REQUIRE_NON_SANDBOX=false", readme, StringComparison.Ordinal);
         Assert.Contains("never silently falls back", readme, StringComparison.Ordinal);
         Assert.Contains("`ASCOV121`", readme, StringComparison.Ordinal);
         Assert.Contains("package-owned ReportGenerator", readme, StringComparison.Ordinal);
@@ -159,6 +164,7 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.Contains("Every merge diagnostic uses the `ASCOV130` through `ASCOV139` range", readme, StringComparison.Ordinal);
         Assert.Contains("| `ASCOV103` | No Coverlet Cobertura files were produced.", readme, StringComparison.Ordinal);
         Assert.Contains("| `ASCOV112` | An exclusion pattern matched no discovered test project.", readme, StringComparison.Ordinal);
+        Assert.Contains("| `ASCOV116` | `--require-non-sandbox` found an enabled sandbox marker.", readme, StringComparison.Ordinal);
         Assert.Contains("| `ASCOV131` | No `coverage.cobertura.xml` files were found.", readme, StringComparison.Ordinal);
         Assert.Contains("- run: dotnet restore ./MyApp.slnx", readme, StringComparison.Ordinal);
         Assert.Contains("dotnet tool run appsurface coverage run --solution ./MyApp.slnx --configuration Release --no-restore", readme, StringComparison.Ordinal);
