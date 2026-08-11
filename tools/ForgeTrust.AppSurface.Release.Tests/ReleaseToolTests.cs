@@ -6002,6 +6002,20 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public void ReleaseNoteBuilderExcludesUnreleasedTemplatePlaceholders()
+    {
+        var releaseNote = ReleaseNoteBuilder.Build(
+            SemVer.Parse("0.1.0-preview.1"),
+            new DateOnly(2026, 5, 25),
+            ReleaseNoteBuilder.ResetUnreleased(SemVer.Parse("0.1.0-preview.0")));
+
+        Assert.DoesNotContain("Add merged public changes here as they land.", releaseNote, StringComparison.Ordinal);
+        Assert.DoesNotContain("Add release-facing changes here as they land.", releaseNote, StringComparison.Ordinal);
+        Assert.DoesNotContain("Record-breaking or behavior-changing guidance here before it moves into the tagged release note.", releaseNote, StringComparison.Ordinal);
+        Assert.Contains("## Migration watch", releaseNote, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ModuleRegistersReleaseServicesAndNoOpHooks()
     {
         var module = new ReleaseCliModule();
