@@ -1,6 +1,6 @@
 # Tenant theme selection proof
 
-This runnable host demonstrates the [AppSurface Web host-owned theme-selection adapter](../../Web/ForgeTrust.AppSurface.Web/README.md#host-owned-theme-selection). It intentionally maps two authorized tenant identities to the same sealed `shared-blue` pair while rendering tenant-distinct body content. That proves why a theme-pair id is not a safe response-cache key.
+This development-only host demonstrates the [AppSurface Web host-owned theme-selection adapter](../../Web/ForgeTrust.AppSurface.Web/README.md#host-owned-theme-selection). It intentionally maps two authorized tenant identities to the same sealed `shared-blue` pair while rendering tenant-distinct body content. That proves why a theme-pair id is not a safe response-cache key.
 
 Run the host from the repository root:
 
