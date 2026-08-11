@@ -394,7 +394,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task DurablePublicationHold_CheckedInManifestHoldsBothPackagesOutOfActualPublishPlan()
+    public async Task DurablePublicationHold_CheckedInManifestAndFocusedResolverHoldBothPackages()
     {
         var repositoryRoot = GetRepositoryRoot();
         var manifestPath = CombineSafeChildPath(repositoryRoot, "packages/package-index.yml");
@@ -469,6 +469,43 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Equal("ForgeTrust.AppSurface.Web", publishedWebPackage.PackageId);
         Assert.DoesNotContain(plan.Entries, entry =>
             entry.PackageId is "ForgeTrust.AppSurface.Durable" or "ForgeTrust.AppSurface.Durable.Provider");
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task DurablePublicationHold_CheckedInProjectsExposePackableMetadata()
+    {
+        var repositoryRoot = GetRepositoryRoot();
+        var metadataProvider = new DotNetProjectMetadataProvider();
+
+        var metadata = await Task.WhenAll(
+            metadataProvider.GetMetadataAsync(
+                repositoryRoot,
+                "Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj",
+                CancellationToken.None),
+            metadataProvider.GetMetadataAsync(
+                repositoryRoot,
+                "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj",
+                CancellationToken.None));
+
+        var durableMetadata = metadata[0];
+        Assert.Equal("ForgeTrust.AppSurface.Durable", durableMetadata.PackageId);
+        Assert.Equal("net10.0", durableMetadata.TargetFramework);
+        Assert.True(durableMetadata.IsPackable);
+        Assert.False(durableMetadata.IsTool);
+        Assert.Equal("Library", durableMetadata.OutputType);
+
+        var providerMetadata = metadata[1];
+        Assert.Equal("ForgeTrust.AppSurface.Durable.Provider", providerMetadata.PackageId);
+        Assert.Equal("net10.0", providerMetadata.TargetFramework);
+        Assert.True(providerMetadata.IsPackable);
+        Assert.False(providerMetadata.IsTool);
+        Assert.Equal("Library", providerMetadata.OutputType);
+        var durableProjectPath = CombineSafeChildPath(
+            repositoryRoot,
+            "Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj");
+        Assert.Contains(providerMetadata.ProjectReferences, path =>
+            string.Equals(path, durableProjectPath, StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
