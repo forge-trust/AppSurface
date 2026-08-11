@@ -70,23 +70,31 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
     private static async Task<PostgreSqlIntegrationTestDatabase> CreateDatabaseAsync(PostgreSqlTestServer server)
     {
         var databaseName = $"appsurface_durable_{Guid.NewGuid():N}";
-        await using (var maintenance = new NpgsqlConnection(server.MaintenanceConnectionString))
+        try
         {
-            await maintenance.OpenAsync();
-            await using var create = new NpgsqlCommand($"CREATE DATABASE \"{databaseName}\";", maintenance);
-            await create.ExecuteNonQueryAsync();
-        }
+            await using (var maintenance = new NpgsqlConnection(server.MaintenanceConnectionString))
+            {
+                await maintenance.OpenAsync();
+                await using var create = new NpgsqlCommand($"CREATE DATABASE \"{databaseName}\";", maintenance);
+                await create.ExecuteNonQueryAsync();
+            }
 
-        var sourceBuilder = new NpgsqlConnectionStringBuilder(server.ConnectionString)
+            var sourceBuilder = new NpgsqlConnectionStringBuilder(server.ConnectionString)
+            {
+                Database = databaseName,
+            };
+            var dataSource = NpgsqlDataSource.Create(sourceBuilder.ConnectionString);
+            return new PostgreSqlIntegrationTestDatabase(
+                databaseName,
+                server.MaintenanceConnectionString,
+                sourceBuilder.ConnectionString,
+                dataSource);
+        }
+        catch (NpgsqlException) when (server.Container is not null)
         {
-            Database = databaseName,
-        };
-        var dataSource = NpgsqlDataSource.Create(sourceBuilder.ConnectionString);
-        return new PostgreSqlIntegrationTestDatabase(
-            databaseName,
-            server.MaintenanceConnectionString,
-            sourceBuilder.ConnectionString,
-            dataSource);
+            await InvalidateSharedContainerServerAsync(server);
+            throw;
+        }
     }
 
     private static async Task<PostgreSqlTestServer> GetSharedContainerServerAsync()
@@ -127,6 +135,25 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
             }
 
             throw;
+        }
+    }
+
+    private static async Task InvalidateSharedContainerServerAsync(PostgreSqlTestServer server)
+    {
+        await SharedContainerServerGate.WaitAsync();
+        try
+        {
+            if (_sharedContainerServer is { IsCompletedSuccessfully: true } sharedServer
+                && ReferenceEquals(sharedServer.Result, server))
+            {
+                // Do not stop this container: other concurrently running databases may still use it.
+                // A later caller instead starts a replacement server; the resource reaper cleans the old server at exit.
+                _sharedContainerServer = null;
+            }
+        }
+        finally
+        {
+            SharedContainerServerGate.Release();
         }
     }
 

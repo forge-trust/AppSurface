@@ -4,6 +4,16 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 
 public sealed class PostgreSqlIntegrationTestDatabaseTests
 {
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task CreateFromConnectionStringAsync_RejectsMissingConnectionStrings(string? connectionString)
+    {
+        await Assert.ThrowsAnyAsync<ArgumentException>(async () =>
+            await PostgreSqlIntegrationTestDatabase.CreateFromConnectionStringAsync(connectionString!));
+    }
+
     [Fact]
     public async Task TryCreateAsync_UsesOneServerAndCreatesIsolatedDatabasesConcurrently()
     {
