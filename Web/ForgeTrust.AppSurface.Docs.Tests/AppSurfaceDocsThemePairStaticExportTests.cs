@@ -93,6 +93,30 @@ public sealed class AppSurfaceDocsThemePairStaticExportTests
     }
 
     [Fact]
+    public void PublishedTreeRewrite_ShouldPreserveTheGraphiteWebRootAndDocsCompatibilityMetadata()
+    {
+        var pair = AppSurfaceThemePair.Graphite();
+        var resolution = new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.System, pair.Light, pair.Dark);
+        var themeDocument = AppSurfaceThemeDocumentSerializer.Serialize(resolution);
+        var docsTheme = new AppSurfaceDocsThemeResolver(
+            new AppSurfaceDocsOptions(),
+            new StubThemeResolver(resolution)).Theme;
+        var liveHtml = $"""
+            <!DOCTYPE html><html {themeDocument.RootAttributes} data-docs-theme-preset="{docsTheme.PresetAttribute}" style="{themeDocument.RootStyle}"><head>{themeDocument.HeadContent}<style data-docs-theme-critical>{docsTheme.CriticalCss}</style></head><body></body></html>
+            """;
+
+        var rewritten = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(liveHtml, "/docs/v/1.2.3");
+        var document = new HtmlParser().ParseDocument(rewritten);
+
+        Assert.Equal("graphite", document.DocumentElement?.GetAttribute("data-as-theme"));
+        Assert.Equal("system", document.DocumentElement?.GetAttribute("data-as-theme-mode"));
+        Assert.Equal("appsurface-dark", document.DocumentElement?.GetAttribute("data-docs-theme-preset"));
+        Assert.Contains("--as-canvas: #f7f7f8;", rewritten, StringComparison.Ordinal);
+        Assert.Contains("--as-canvas: #080a0d;", rewritten, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-surface-canvas:var(--as-canvas);", rewritten, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PublishedTreeRewrite_ShouldKeepTheVerifiedPreferenceBootstrapAndRemoveItsRequestNonce()
     {
         var services = new ServiceCollection();

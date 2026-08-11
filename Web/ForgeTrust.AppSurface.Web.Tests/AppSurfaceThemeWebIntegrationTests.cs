@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using ForgeTrust.AppSurface.Theming;
 using ForgeTrust.AppSurface.Web.TagHelpers;
+using ForgeTrust.AppSurface.Web.Tests.CanaryConsumerFixture;
 using ForgeTrust.AppSurface.Web.Theming;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Rendering;
@@ -12,6 +13,23 @@ namespace ForgeTrust.AppSurface.Web.Tests;
 
 public sealed class AppSurfaceThemeWebIntegrationTests
 {
+    [Fact]
+    public void GraphiteConsumerFixture_ShouldRegisterGraphiteSystemWebDocument()
+    {
+        var services = new ServiceCollection();
+        services.AddGraphiteThemeWebConsumer();
+        using var provider = services.BuildServiceProvider();
+
+        var resolution = provider.GetRequiredService<IAppSurfaceThemeResolver>().ResolveDefault();
+        Assert.Equal(new AppSurfaceThemeId("graphite"), resolution.Id);
+        Assert.Equal(AppSurfaceThemeMode.System, resolution.Mode);
+
+        var document = provider.GetRequiredService<IAppSurfaceThemeDocumentProvider>().GetDocument();
+        Assert.True(document.IsRenderable);
+        Assert.Equal("graphite", document.RootThemeId);
+        Assert.Equal("system", document.RootThemeMode);
+    }
+
     [Fact]
     public void Serializer_SystemEmitsLightDefaultsAndDarkMediaBranch()
     {

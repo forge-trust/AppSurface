@@ -61,6 +61,35 @@ public sealed class AppSurfaceThemeRegistryTests
     }
 
     [Fact]
+    public void Graphite_ShouldExposeTheValidatedSemanticPair()
+    {
+        var graphite = AppSurfaceThemePair.Graphite();
+        var options = new AppSurfaceThemeRegistryOptions
+        {
+            DefaultTheme = graphite.Id,
+            DefaultMode = AppSurfaceThemeMode.System
+        };
+        options.Pairs.Add(graphite);
+
+        var registry = new AppSurfaceThemeRegistry(options);
+        var resolution = registry.ResolveDefault();
+
+        Assert.Equal("graphite", resolution.Id.Value);
+        Assert.Equal(AppSurfaceThemeMode.System, resolution.Mode);
+        Assert.Equal(
+            new AppSurfaceThemeRoles(
+                "#f7f7f8", "#ffffff", "#eef0f2", "#17212b", "#52606d", "#6b7280",
+                "#0369a1", "#075985", "#075985", "#6b21a8", "#b42318", "#0369a1"),
+            resolution.Light);
+        Assert.Equal(
+            new AppSurfaceThemeRoles(
+                "#080a0d", "#101216", "#151820", "#f8fafc", "#c9ced8", "#647085",
+                "#38bdf8", "#818cf8", "#93c5fd", "#c4b5fd", "#fda4af", "#facc15"),
+            resolution.Dark);
+        Assert.Empty(AppSurfaceThemeRegistry.Validate(options));
+    }
+
+    [Fact]
     public void Registry_ShouldResolveTheConfiguredCustomDefaultPair()
     {
         var options = CreateOptions();

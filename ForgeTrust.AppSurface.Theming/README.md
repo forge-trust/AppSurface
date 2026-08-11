@@ -22,20 +22,22 @@ A pair has one canonical lowercase identifier (letter-led, 63 characters or fewe
 | `Accent`, `AccentStrong`, `Focus` | Active states, emphasis, and visible keyboard focus. |
 | `Link`, `VisitedLink`, `Danger` | Links and recoverable/destructive error treatment. |
 
-Shared role values must be opaque `#RRGGBB` colors. Configuration seals them at registration time and checks text-role contrast at 4.5:1 plus non-text affordances at 3:1 against every shared surface. The built-in `AppSurfaceThemePair.AppSurface()` pair is the default example.
+Shared role values must be opaque `#RRGGBB` colors. Configuration seals them at registration time and checks [WCAG 2.2 text contrast](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html) at 4.5:1 plus [non-text contrast](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html) at 3:1 against every shared surface. These checks apply to the shared semantic tokens; they do not certify application-authored CSS. `AppSurfaceThemePair.Graphite()` is an evidence-gated shared Light/Dark pair: use it when the host has evidence for both branches, and let registration fail closed when the pair is incomplete or unsafe. It is distinct from the Docs-local fixed-dark `GraphiteDark` preset.
 
 ```csharp
 using ForgeTrust.AppSurface.Theming;
 
 services.AddAppSurfaceTheming(options =>
 {
-    options.DefaultTheme = new AppSurfaceThemeId("appsurface");
+    options.DefaultTheme = new AppSurfaceThemeId("graphite");
     options.DefaultMode = AppSurfaceThemeMode.System;
-    options.Pairs.Add(AppSurfaceThemePair.AppSurface());
+    options.Pairs.Add(AppSurfaceThemePair.Graphite());
 });
 ```
 
 `System` emits both branches and lets browser CSS select `prefers-color-scheme`. `Light` and `Dark` emit only the selected branch. This is host configuration, not per-user policy.
+
+`Graphite` is the shared pair identifier and carries both semantic Light and Dark role sets through the Web and Docs bridge. `GraphiteDark` is not that pair: it is a Docs-local fixed-dark compatibility preset. Browser-local preferences are a separate Web opt-in that stores only a presentation choice in the browser; they do not change the registered pair or make Docs' local preset a shared theme.
 
 For a presentation-only browser choice, use the Web-layer [browser-local preference adapter](../Web/ForgeTrust.AppSurface.Web/README.md#browser-local-theme-preferences). It is an explicit opt-in that preserves one canonical HTML document, stores only `light` or `dark` in browser-local storage, and falls back to this package's System CSS. Account synchronization, tenant selection, request-aware content, consent decisions, and content-varying themes remain application policy and do not belong in this neutral package.
 

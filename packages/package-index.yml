@@ -22,7 +22,7 @@ packages:
     release_notes_path: releases/unreleased.md
     order: 15
     use_when: Add this directly only when authoring a package-owned theme adapter; ASP.NET Core applications normally install ForgeTrust.AppSurface.Web, which carries the neutral contract and Razor integration.
-    includes: Immutable semantic light/dark pair contracts, strict opaque color and contrast validation, deterministic default resolution, and an opaque typed application-settings seam.
+    includes: Immutable semantic light/dark pair contracts, the validated shared Graphite pair, strict opaque color and contrast validation, deterministic default resolution, and an opaque typed application-settings seam.
     does_not_include: Consumer component styling, a browser switcher, persisted preference, request or tenant selection, theme packs, remote loading, or Docs-specific CSS variables.
     start_here_path: ForgeTrust.AppSurface.Theming/README.md
   - project: Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj
