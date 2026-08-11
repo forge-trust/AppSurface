@@ -330,12 +330,12 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("releases/v${VERSION}.release.json", prep, StringComparison.Ordinal);
         Assert.Contains("git add", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("git add CHANGELOG.md releases", prep, StringComparison.Ordinal);
-        Assert.DoesNotContain("docs export", prep, StringComparison.Ordinal);
-        Assert.DoesNotContain("docs verify-archive", prep, StringComparison.Ordinal);
-        Assert.DoesNotContain("--docs-catalog", prep, StringComparison.Ordinal);
-        Assert.DoesNotContain("--docs-trusted-release-root", prep, StringComparison.Ordinal);
-        Assert.DoesNotContain("git worktree add --detach", prep, StringComparison.Ordinal);
-        Assert.DoesNotContain("refs/tags/v${version}^{commit}", prep, StringComparison.Ordinal);
+        Assert.Contains("docs export", prep, StringComparison.Ordinal);
+        Assert.Contains("docs verify-archive", prep, StringComparison.Ordinal);
+        Assert.Contains("--docs-catalog", prep, StringComparison.Ordinal);
+        Assert.Contains("--docs-trusted-release-root", prep, StringComparison.Ordinal);
+        Assert.Contains("git worktree add --detach", prep, StringComparison.Ordinal);
+        Assert.Contains("refs/tags/v${version}^{commit}", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("Allowing superseded release sidecar", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("find releases -maxdepth 1 -name 'v*.release.json'", prep, StringComparison.Ordinal);
         Assert.Contains("--github-output", publish, StringComparison.Ordinal);
