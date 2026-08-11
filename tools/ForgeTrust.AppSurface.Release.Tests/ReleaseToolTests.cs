@@ -6002,6 +6002,58 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public void ReleaseNoteBuilderExcludesUnreleasedTemplatePlaceholders()
+    {
+        var releaseNote = ReleaseNoteBuilder.Build(
+            SemVer.Parse("0.1.0-preview.1"),
+            new DateOnly(2026, 5, 25),
+            ReleaseNoteBuilder.ResetUnreleased(SemVer.Parse("0.1.0-preview.0"))
+                .Replace("\n", "\r\n", StringComparison.Ordinal));
+
+        foreach (var placeholder in ReleaseNoteBuilder.UnreleasedTemplatePlaceholders)
+        {
+            Assert.DoesNotContain(placeholder, releaseNote, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("## Migration watch", releaseNote, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReleaseNoteBuilderPreservesPlaceholderTextOutsideTemplateSections()
+    {
+        var placeholder = ReleaseNoteBuilder.UnreleasedTemplatePlaceholders[0];
+        var unreleased = ReleaseNoteBuilder.ResetUnreleased(SemVer.Parse("0.1.0-preview.0"))
+            .Replace(
+                "## Migration watch",
+                $"""
+                ## Supporting examples
+
+                This paragraph cites {placeholder} without making it a template bullet.
+
+                    {placeholder}
+
+                ```text
+                {placeholder}
+                ```
+
+                {placeholder}
+
+                ## Migration watch
+                """,
+                StringComparison.Ordinal);
+
+        var releaseNote = ReleaseNoteBuilder.Build(
+            SemVer.Parse("0.1.0-preview.1"),
+            new DateOnly(2026, 5, 25),
+            unreleased);
+
+        Assert.Contains($"This paragraph cites {placeholder}", releaseNote, StringComparison.Ordinal);
+        Assert.Contains($"    {placeholder}", releaseNote, StringComparison.Ordinal);
+        Assert.Contains($"```text\n{placeholder}\n```", releaseNote, StringComparison.Ordinal);
+        Assert.Contains($"\n{placeholder}\n\n## Migration watch", releaseNote, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ModuleRegistersReleaseServicesAndNoOpHooks()
     {
         var module = new ReleaseCliModule();

@@ -5,6 +5,32 @@ namespace ForgeTrust.AppSurface.Release;
 
 internal static class ReleaseNoteBuilder
 {
+    private sealed record UnreleasedTemplatePlaceholder(string Text, string Section);
+
+    private const string TakingShapePlaceholder = "- Add merged public changes here as they land.";
+
+    private const string IncludedChangesPlaceholder = "- Add release-facing changes here as they land.";
+
+    private const string MigrationWatchPlaceholder =
+        "- Record-breaking or behavior-changing guidance here before it moves into the tagged release note.";
+
+    private static readonly UnreleasedTemplatePlaceholder[] UnreleasedTemplatePlaceholderDefinitions =
+    [
+        new(TakingShapePlaceholder, "taking-shape"),
+        new(IncludedChangesPlaceholder, "included"),
+        new(MigrationWatchPlaceholder, "migration-watch")
+    ];
+
+    /// <summary>
+    /// Gets the reset-only placeholder bullets that must not appear in a tagged release note.
+    /// </summary>
+    internal static IReadOnlyList<string> UnreleasedTemplatePlaceholders { get; } =
+    [
+        TakingShapePlaceholder,
+        IncludedChangesPlaceholder,
+        MigrationWatchPlaceholder
+    ];
+
     /// <summary>
     /// Converts the living unreleased note into a tagged release note.
     /// </summary>
@@ -14,7 +40,8 @@ internal static class ReleaseNoteBuilder
     /// <returns>Tagged release Markdown with a generated comment header and a trailing newline.</returns>
     /// <remarks>
     /// The method first parses Markdown to catch syntax problems, but it does not use the returned syntax tree to rewrite content.
-    /// It then replaces only the exact top-level <c># Unreleased</c> heading without consuming its following blank line, and two known narrative phrases using ordinal matching.
+    /// It then replaces only the exact top-level <c># Unreleased</c> heading without consuming its following blank line, reset-only placeholder
+    /// lines directly before their matching section markers, and two known narrative phrases using ordinal matching.
     /// Variants in casing or wording are left unchanged. Output is deterministic apart from the supplied version and date, uses
     /// <see cref="Environment.NewLine"/> for generated sections, and trims trailing whitespace from the source body. Callers should run
     /// release readiness checks first because duplicate headings, missing phrases, or concurrently edited Markdown are not treated as errors.
@@ -25,6 +52,11 @@ internal static class ReleaseNoteBuilder
         var body = Regex.Replace(unreleased, "^#[ \\t]+Unreleased[ \\t]*\\r?$", $"# Release {version}", RegexOptions.Multiline);
         body = body.Replace("living release note for the next coordinated AppSurface version", $"release note for AppSurface {version}", StringComparison.Ordinal);
         body = body.Replace("provisional until a tag is cut", $"finalized on {date:yyyy-MM-dd}", StringComparison.Ordinal);
+        foreach (var placeholder in UnreleasedTemplatePlaceholderDefinitions)
+        {
+            var templateLinePattern = $"^{Regex.Escape(placeholder.Text)}\\r?\\n(?=\\r?\\n<!-- appsurface:unreleased-entries section=\"{placeholder.Section}\" -->)";
+            body = Regex.Replace(body, templateLinePattern, string.Empty, RegexOptions.CultureInvariant | RegexOptions.Multiline);
+        }
 
         var header = $"""
             <!--
@@ -55,7 +87,7 @@ internal static class ReleaseNoteBuilder
 
             ## What is taking shape
 
-            - Add merged public changes here as they land.
+            {TakingShapePlaceholder}
 
             <!-- appsurface:unreleased-entries section="taking-shape" -->
 
@@ -63,13 +95,13 @@ internal static class ReleaseNoteBuilder
 
             ### Release and docs surface
 
-            - Add release-facing changes here as they land.
+            {IncludedChangesPlaceholder}
 
             <!-- appsurface:unreleased-entries section="included" -->
 
             ## Migration watch
 
-            - Record-breaking or behavior-changing guidance here before it moves into the tagged release note.
+            {MigrationWatchPlaceholder}
 
             <!-- appsurface:unreleased-entries section="migration-watch" -->
 

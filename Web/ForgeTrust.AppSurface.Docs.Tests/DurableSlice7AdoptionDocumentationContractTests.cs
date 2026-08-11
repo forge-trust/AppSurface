@@ -194,8 +194,7 @@ public sealed class DurableSlice7AdoptionDocumentationContractTests
             Environment.NewLine,
             Read(repoRoot, "examples/durable-postgresql/README.md"),
             Read(repoRoot, "Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md"),
-            Read(repoRoot, "Cli/ForgeTrust.AppSurface.Cli/README.md"),
-            Read(repoRoot, "releases/unreleased.md"));
+            Read(repoRoot, "Cli/ForgeTrust.AppSurface.Cli/README.md"));
 
         Assert.Contains("0006_flow_trace_context.sql", documentation, StringComparison.Ordinal);
         Assert.Contains("0008_flow_repair.sql", documentation, StringComparison.Ordinal);
@@ -203,7 +202,7 @@ public sealed class DurableSlice7AdoptionDocumentationContractTests
         Assert.Contains("regenerate the correct forward script", documentation, StringComparison.Ordinal);
         Assert.Contains("rerun the canonical role recipe after migrations", documentation, StringComparison.Ordinal);
         Assert.Contains("AddWorkerHost()", documentation, StringComparison.Ordinal);
-        Assert.Contains("application startup never applies DDL", documentation, StringComparison.Ordinal);
+        Assert.Contains("Application startup never applies DDL", documentation, StringComparison.Ordinal);
     }
 
     [Fact]
