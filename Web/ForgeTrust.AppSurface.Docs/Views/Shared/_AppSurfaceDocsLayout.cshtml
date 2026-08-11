@@ -625,7 +625,7 @@
 
             // RazorWire owns scrolling and active-link state for enhanced page-navigation outlines.
             // Do not prevent its click handler from setting aria-current on the selected section.
-            if (anchorLink.matches("a[data-rw-page-nav-link='true']")) {
+            if (anchorLink.matches("a[data-rw-page-nav-link]")) {
                 return;
             }
 
