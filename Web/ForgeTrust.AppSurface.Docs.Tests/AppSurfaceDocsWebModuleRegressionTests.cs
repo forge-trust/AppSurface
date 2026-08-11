@@ -574,9 +574,9 @@ public class AppSurfaceDocsWebModuleRegressionTests
 
         try
         {
-            var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
             var publishedTree = CreatePublishedExactTree(tempDirectory, "1.2.3");
             var releaseManifestSha256 = WriteReleaseManifest(publishedTree);
+            var previewSourceRoot = CreatePreviewSourceTree(tempDirectory);
             var catalogPath = TestPathUtils.PathUnder(tempDirectory, "catalog.json");
             File.WriteAllText(
                 catalogPath,
@@ -608,7 +608,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
                     configuration.AddInMemoryCollection(
                         new Dictionary<string, string?>
                         {
-                            ["AppSurfaceDocs:Source:RepositoryRoot"] = repoRoot,
+                            ["AppSurfaceDocs:Source:RepositoryRoot"] = previewSourceRoot,
                             ["AppSurfaceDocs:Routing:DocsRootPath"] = "/docs/next",
                             ["AppSurfaceDocs:Versioning:Enabled"] = "true",
                             ["AppSurfaceDocs:Versioning:CatalogPath"] = catalogPath
@@ -671,6 +671,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
                     var previewHtml = await previewResponse.Content.ReadAsStringAsync();
                     Assert.Equal(HttpStatusCode.OK, previewResponse.StatusCode);
                     Assert.DoesNotContain("data-tree=\"release-1.2.3\"", previewHtml);
+                    Assert.Contains("Preview documentation", previewHtml);
 
                     using var previewAssetResponse = await client.GetAsync("/docs/next/search-client.js");
                     var previewAssetBody = await previewAssetResponse.Content.ReadAsStringAsync();
@@ -2710,6 +2711,14 @@ public class AppSurfaceDocsWebModuleRegressionTests
               ]
             }
             """);
+        return root;
+    }
+
+    private static string CreatePreviewSourceTree(string parentDirectory)
+    {
+        var root = TestPathUtils.PathUnder(parentDirectory, "preview-source");
+        Directory.CreateDirectory(root);
+        File.WriteAllText(TestPathUtils.PathUnder(root, "README.md"), "# Preview documentation\n");
         return root;
     }
 
