@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using CliFx;
 using ForgeTrust.AppSurface.Cli;
@@ -110,6 +111,8 @@ public sealed class CoverageRunOutputGuardSecurityTests
     [Theory]
     [InlineData(".appsurface-coverage-output", MarkerContents)]
     [InlineData("summary.txt", "external sentinel")]
+    [InlineData("coverage-patch-targets.json", "external sentinel")]
+    [InlineData("coverage-patch-targets.md", "external sentinel")]
     public void Prepare_ShouldRejectManagedFileLinkWithoutTouchingExternalFile(
         string managedFile,
         string externalContents)
@@ -223,6 +226,12 @@ public sealed class CoverageRunOutputGuardSecurityTests
             "coverage.json",
             "coverage-gate.json",
             "coverage-gate.md",
+            "coverage-patch-targets.json",
+            "coverage-patch-targets.md",
+            ".coverage-gate.json.0123456789abcdef0123456789abcdef.tmp",
+            ".coverage-gate.md.0123456789abcdef0123456789abcdef.tmp",
+            ".coverage-patch-targets.json.0123456789abcdef0123456789abcdef.tmp",
+            ".coverage-patch-targets.md.0123456789abcdef0123456789abcdef.tmp",
             "coverage-watchdog.json",
             "summary.txt",
             "timings.json",
@@ -239,6 +248,7 @@ public sealed class CoverageRunOutputGuardSecurityTests
 
         var wrongExtension = root.WriteFile("coverage/junit-old.txt", "must remain");
         var unrelated = root.WriteFile("coverage/unrelated.xml", "must remain");
+        var malformedGateTemporary = root.WriteFile("coverage/.coverage-gate.json.not-a-guid.tmp", "must remain");
         var patternedDirectory = root.CreateDirectory("coverage/test-results-directory.xml");
 
         CoverageRunOutputGuard.Prepare(output, root.Path, [], clean: true);
@@ -246,6 +256,7 @@ public sealed class CoverageRunOutputGuardSecurityTests
         Assert.All(knownFiles, file => Assert.False(File.Exists(TestPathUtils.PathUnder(output, file))));
         Assert.Equal("must remain", File.ReadAllText(wrongExtension));
         Assert.Equal("must remain", File.ReadAllText(unrelated));
+        Assert.Equal("must remain", File.ReadAllText(malformedGateTemporary));
         Assert.True(Directory.Exists(patternedDirectory));
     }
 
@@ -435,16 +446,67 @@ public sealed class CoverageRunOutputGuardSecurityTests
             beforeMutation: () => Directory.Move(output, parked)));
 
         Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
-        if (OperatingSystem.IsWindows())
+        Assert.True(Directory.Exists(parked));
+        Assert.False(Directory.Exists(output));
+    }
+
+    [Fact]
+    public void Prepare_ShouldFailClosedWithoutTouchingOutputReplacementBeforeMutation()
+    {
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        root.WriteFile("coverage/.appsurface-coverage-output", MarkerContents + Environment.NewLine);
+        var originalSummary = root.WriteFile("coverage/summary.txt", "original output");
+        var replacement = root.CreateDirectory("replacement-coverage");
+        var replacementSentinel = root.WriteFile("replacement-coverage/sentinel.txt", "must remain");
+        var parked = Path.Join(root.Path, "parked-coverage");
+
+        var exception = Assert.Throws<CommandException>(() => CoverageRunOutputGuard.Prepare(
+            output,
+            root.Path,
+            [],
+            clean: true,
+            beforeMutation: () =>
+            {
+                Directory.Move(output, parked);
+                Directory.Move(replacement, output);
+            }));
+
+        Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("original output", File.ReadAllText(Path.Join(parked, Path.GetFileName(originalSummary))));
+        Assert.Equal("must remain", File.ReadAllText(Path.Join(output, Path.GetFileName(replacementSentinel))));
+    }
+
+    [Fact]
+    public void PrepareWindows_ShouldFailClosedWithoutTouchingOutputReplacementBeforeCleanup()
+    {
+        if (!OperatingSystem.IsWindows())
         {
-            Assert.True(Directory.Exists(output));
-            Assert.False(Directory.Exists(parked));
+            return;
         }
-        else
-        {
-            Assert.True(Directory.Exists(parked));
-            Assert.False(Directory.Exists(output));
-        }
+
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        root.WriteFile("coverage/.appsurface-coverage-output", MarkerContents + Environment.NewLine);
+        var originalSummary = root.WriteFile("coverage/summary.txt", "original output");
+        var replacement = root.CreateDirectory("replacement-coverage");
+        var replacementSentinel = root.WriteFile("replacement-coverage/sentinel.txt", "must remain");
+        var parked = Path.Join(root.Path, "parked-coverage");
+
+        var exception = Assert.Throws<CommandException>(() => CoverageRunOutputGuard.Prepare(
+            output,
+            root.Path,
+            [],
+            clean: true,
+            beforeCleanup: () =>
+            {
+                Directory.Move(output, parked);
+                Directory.Move(replacement, output);
+            }));
+
+        Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("original output", File.ReadAllText(Path.Join(parked, Path.GetFileName(originalSummary))));
+        Assert.Equal("must remain", File.ReadAllText(Path.Join(output, Path.GetFileName(replacementSentinel))));
     }
 
     [Fact]
@@ -590,6 +652,168 @@ public sealed class CoverageRunOutputGuardSecurityTests
     }
 
     [Fact]
+    public async Task OwnedGateArtifactOperations_ShouldWriteDeleteAndRejectUnsafeEntries()
+    {
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        using var lease = CoverageRunOutputLease.Acquire(output);
+
+        await lease.WriteOwnedGateArtifactAsync(CoverageGateArtifactNames.Json, "{}", CancellationToken.None);
+        lease.ValidateOwnedGateArtifacts([CoverageGateArtifactNames.Json]);
+        Assert.Equal("{}", File.ReadAllText(Path.Join(output, CoverageGateArtifactNames.Json)));
+
+        lease.DeleteOwnedGateArtifact(CoverageGateArtifactNames.Json);
+        lease.DeleteOwnedGateArtifact(CoverageGateArtifactNames.Json);
+        Assert.False(File.Exists(Path.Join(output, CoverageGateArtifactNames.Json)));
+
+        Assert.Throws<ArgumentNullException>(() => lease.DeleteOwnedGateArtifact(null!));
+        Assert.Throws<ArgumentException>(() => lease.DeleteOwnedGateArtifact(string.Empty));
+        Assert.Throws<IOException>(() => lease.DeleteOwnedGateArtifact("nested/coverage-gate.json"));
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => lease.WriteOwnedGateArtifactAsync(CoverageGateArtifactNames.Json, null!, CancellationToken.None));
+
+        Directory.CreateDirectory(Path.Join(output, CoverageGateArtifactNames.Markdown));
+        Assert.Throws<IOException>(() => lease.ValidateOwnedGateArtifacts([CoverageGateArtifactNames.Markdown]));
+        Assert.Throws<IOException>(() => lease.DeleteOwnedGateArtifact(CoverageGateArtifactNames.Markdown));
+    }
+
+    [Fact]
+    public async Task WriteOwnedGateArtifactAsync_Unix_ShouldCleanUpAfterPermissionOrPromotionFailure()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var root = TestDirectory.Create();
+        var permissionFailureOutput = root.CreateDirectory("permission-failure");
+        using (var permissionFailureLease = CoverageRunOutputLease.Acquire(
+                   permissionFailureOutput,
+                   unixFChmod: static (_, _) => -1))
+        {
+            var exception = await Assert.ThrowsAsync<IOException>(
+                () => permissionFailureLease.WriteOwnedGateArtifactAsync(
+                    CoverageGateArtifactNames.Json,
+                    "{}",
+                    CancellationToken.None));
+
+            Assert.Contains("Unable to set permissions", exception.Message, StringComparison.Ordinal);
+            Assert.Empty(Directory.EnumerateFiles(permissionFailureOutput, ".*.tmp"));
+        }
+
+        var promotionFailureOutput = root.CreateDirectory("promotion-failure");
+        using var promotionFailureLease = CoverageRunOutputLease.Acquire(promotionFailureOutput);
+        Directory.CreateDirectory(Path.Join(promotionFailureOutput, CoverageGateArtifactNames.Json));
+
+        var promotionException = await Assert.ThrowsAsync<IOException>(
+            () => promotionFailureLease.WriteOwnedGateArtifactAsync(
+                CoverageGateArtifactNames.Json,
+                "{}",
+                CancellationToken.None));
+
+        Assert.Contains("Unable to promote", promotionException.Message, StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFiles(promotionFailureOutput, ".*.tmp"));
+    }
+
+    [Fact]
+    public async Task WriteOwnedGateArtifactAsync_Unix_ShouldPreserveWriteFailureWhenTemporaryCleanupFails()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("cleanup-failure");
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        using var lease = CoverageRunOutputLease.Acquire(
+            output,
+            unixUnlinkAt: static (_, _, _) =>
+            {
+                Marshal.SetLastPInvokeError(5);
+                return -1;
+            });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => lease.WriteOwnedGateArtifactAsync(
+                CoverageGateArtifactNames.Json,
+                "{}",
+                cancellation.Token));
+    }
+
+    [Fact]
+    public async Task WriteOwnedGateArtifactAsync_Windows_ShouldPromoteStagedWritesWithinTheRetainedOutputDirectory()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        using var lease = CoverageRunOutputLease.Acquire(output);
+
+        await lease.WriteOwnedGateArtifactAsync(CoverageGateArtifactNames.Json, "first", CancellationToken.None);
+        await lease.WriteOwnedGateArtifactAsync(CoverageGateArtifactNames.Json, "second", CancellationToken.None);
+
+        Assert.Equal("second", File.ReadAllText(Path.Join(output, CoverageGateArtifactNames.Json)));
+        Assert.Empty(Directory.EnumerateFiles(output, ".*.tmp"));
+    }
+
+    [Fact]
+    public async Task WriteOwnedGateArtifactAsync_Windows_ShouldReportNativePromotionAccessDenied()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        var artifactPath = Path.Join(output, CoverageGateArtifactNames.Json);
+        using var lease = CoverageRunOutputLease.Acquire(output);
+        await lease.WriteOwnedGateArtifactAsync(CoverageGateArtifactNames.Json, "first", CancellationToken.None);
+        using var competing = new FileStream(
+            artifactPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read | FileShare.Write);
+
+        var exception = await Assert.ThrowsAsync<IOException>(
+            () => lease.WriteOwnedGateArtifactAsync(CoverageGateArtifactNames.Json, "second", CancellationToken.None));
+
+        Assert.Contains("Unable to promote", exception.Message, StringComparison.Ordinal);
+        var nativeException = Assert.IsType<Win32Exception>(exception.InnerException);
+        Assert.Equal(WindowsAccessDenied, nativeException.NativeErrorCode);
+        Assert.Equal("first", File.ReadAllText(artifactPath));
+        Assert.Empty(Directory.EnumerateFiles(output, ".*.tmp"));
+    }
+
+    [Fact]
+    public void WindowsRetainedLease_ShouldBlockCompetingStagedSiblingPromotion()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        var artifactPath = Path.Join(output, CoverageGateArtifactNames.Json);
+        var stagedPath = Path.Join(output, ".coverage-gate.json.probe.tmp");
+        using var lease = CoverageRunOutputLease.Acquire(output);
+
+        File.WriteAllText(artifactPath, "first");
+        File.WriteAllText(stagedPath, "second");
+
+        Assert.Throws<IOException>(() => File.Move(stagedPath, artifactPath, overwrite: true));
+
+        Assert.Equal("first", File.ReadAllText(artifactPath));
+        Assert.True(File.Exists(stagedPath));
+    }
+
+    [Fact]
     public void Prepare_ShouldFailClosedWhenValidMarkerIdentityChangesBeforeMutation()
     {
         using var root = TestDirectory.Create();
@@ -679,6 +903,7 @@ public sealed class CoverageRunOutputGuardSecurityTests
     private const uint WindowsOpenExisting = 3;
     private const uint WindowsBackupSemantics = 0x02000000;
     private const uint WindowsOpenReparsePoint = 0x00200000;
+    private const int WindowsAccessDenied = 5;
     private const int WindowsSharingViolation = 32;
 
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]

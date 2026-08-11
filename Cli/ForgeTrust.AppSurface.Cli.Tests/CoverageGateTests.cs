@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using CliFx;
 using CliFx.Infrastructure;
@@ -116,6 +117,8 @@ public sealed class CoverageGateTests
             var output = console.ReadOutputString();
             Assert.Contains("patch lines 100.00% >= 99.5%", output, StringComparison.Ordinal);
             Assert.Contains("patch branches 100.00% >= 99.5%", output, StringComparison.Ordinal);
+            Assert.Contains("Patch targets:", output, StringComparison.Ordinal);
+            Assert.Contains("coverage-patch-targets.json", output, StringComparison.Ordinal);
             Assert.Contains("Patch line mode: codecov", File.ReadAllText(Path.Join(temp.Path, "coverage-gate.md")), StringComparison.Ordinal);
         }
         finally
@@ -521,6 +524,8 @@ public sealed class CoverageGateTests
         Assert.Contains("\"tolerancePercent\": 0.5", json, StringComparison.Ordinal);
         Assert.Contains("\"thresholds\": {\n    \"line\": 100", json, StringComparison.Ordinal);
         Assert.Contains("\"effectiveThresholds\": {\n    \"line\": 99.5", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\r", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("\r", json, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -588,6 +593,391 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
+    public async Task WriteAsync_WritesDeterministicAgentTargets_FromTheSharedPatchAnalysis()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="2" branches-covered="2" branches-valid="4">
+              <packages>
+                <package name="Example">
+                  <classes>
+                    <class name="Example.Zebra" filename="src/Zebra.cs">
+                      <lines>
+                        <line number="1" hits="0" branch="true" condition-coverage="50% (1/2)" />
+                      </lines>
+                    </class>
+                    <class name="Example.Alpha" filename="src/Alpha.cs">
+                      <lines>
+                        <line number="10" hits="1" branch="true" condition-coverage="50% (1/2)" />
+                      </lines>
+                    </class>
+                  </classes>
+                </package>
+              </packages>
+            </coverage>
+            """);
+        var request = new CoverageGateRequest(
+            coverage,
+            temp.Path,
+            0,
+            0,
+            false,
+            null,
+            new CoveragePatchRequest(
+                temp.Path,
+                "origin/main",
+                null,
+                _ => Task.FromResult("""
+                    diff --git a/src/Zebra.cs b/src/Zebra.cs
+                    index 0000000..1111111 100644
+                    --- a/src/Zebra.cs
+                    +++ b/src/Zebra.cs
+                    @@ -0,0 +1,1 @@
+                    +zero hit
+                    diff --git a/src/Alpha.cs b/src/Alpha.cs
+                    index 0000000..1111111 100644
+                    --- a/src/Alpha.cs
+                    +++ b/src/Alpha.cs
+                    @@ -9,0 +10,2 @@
+                    +partial condition
+                    +not measured
+                    """),
+                LineMode: PatchLineMode.Codecov));
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+        await CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None);
+
+        Assert.NotNull(result.PatchAnalysis);
+        Assert.Equal(3, result.PatchAnalysis.Lines.Count);
+        Assert.Equal(2, result.PatchAnalysis.Metrics.LineCoverage.MeasurableLines);
+        Assert.Equal(0, result.PatchAnalysis.Metrics.LineCoverage.CoveredLines);
+
+        var json = File.ReadAllText(result.PatchTargetsJsonPath!);
+        var markdown = File.ReadAllText(result.PatchTargetsMarkdownPath!);
+        Assert.Contains("\"schemaVersion\": 1", json, StringComparison.Ordinal);
+        Assert.Contains("\"notMeasured\": 1", json, StringComparison.Ordinal);
+        Assert.Contains("\"notMeasuredSamplesTruncated\": false", json, StringComparison.Ordinal);
+        Assert.Contains("\"path\": \"src/Alpha.cs\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"path\": \"src/Zebra.cs\"", json, StringComparison.Ordinal);
+        Assert.True(json.IndexOf("src/Alpha.cs", StringComparison.Ordinal) < json.IndexOf("src/Zebra.cs", StringComparison.Ordinal));
+        Assert.Contains("\"partial-condition\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"uncovered-line\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"patchLine\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"patchBranch\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"reason\": \"not-reported-by-cobertura\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("zero hit", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\r", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\r", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Line | Reasons | Line covered | Conditions | Gate dimensions |", markdown, StringComparison.Ordinal);
+        Assert.True(markdown.IndexOf("## `src/Alpha.cs`", StringComparison.Ordinal) < markdown.IndexOf("## `src/Zebra.cs`", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WriteAsync_RemovesStalePatchTargets_WhenPatchEvaluationIsInactive()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var staleJson = Path.Join(temp.Path, CoverageGateArtifactNames.PatchTargetsJson);
+        var staleMarkdown = Path.Join(temp.Path, CoverageGateArtifactNames.PatchTargetsMarkdown);
+        var unrelated = Path.Join(temp.Path, "unrelated.txt");
+        File.WriteAllText(staleJson, "stale target queue");
+        File.WriteAllText(staleMarkdown, "stale target brief");
+        File.WriteAllText(unrelated, "must remain");
+        var request = new CoverageGateRequest(coverage, temp.Path, 0, 0, false, null);
+
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+        await CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None);
+
+        Assert.False(File.Exists(staleJson));
+        Assert.False(File.Exists(staleMarkdown));
+        Assert.Equal("must remain", File.ReadAllText(unrelated));
+    }
+
+    [Fact]
+    public async Task WriteAsync_BoundsNonMeasuredSamplesInPatchTargetArtifacts()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var source = new PatchDiffSourceReport(
+            PatchDiffSourceKind.GitBase,
+            "origin/main",
+            "origin/main",
+            null,
+            1,
+            "abc",
+            false,
+            false);
+        var lines = Enumerable.Range(1, 11)
+            .Select(line => new PatchCoverageLine("src/Unmeasured.cs", line, false, null, null, null))
+            .ToArray();
+        var metrics = new PatchCoverageMetrics(
+            source,
+            new PatchLineCoverageMetric("origin/main", 11, 0, 0, 100),
+            new PatchBranchCoverageMetric("origin/main", 11, 0, 0, 100));
+        var analysis = new PatchCoverageAnalysis(source, PatchLineMode.Measurable, lines, metrics);
+        var result = new CoverageGateResult(
+            coverage,
+            new CoverageMetric(1, 1, 100),
+            new CoverageMetric(1, 1, 100),
+            0,
+            0,
+            true,
+            Path.Join(temp.Path, CoverageGateArtifactNames.Json),
+            Path.Join(temp.Path, CoverageGateArtifactNames.Markdown),
+            PatchAnalysis: analysis,
+            PatchTargetsJsonPath: Path.Join(temp.Path, CoverageGateArtifactNames.PatchTargetsJson),
+            PatchTargetsMarkdownPath: Path.Join(temp.Path, CoverageGateArtifactNames.PatchTargetsMarkdown));
+        var request = new CoverageGateRequest(coverage, temp.Path, 0, 0, false, null);
+
+        await CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None);
+
+        var json = File.ReadAllText(result.PatchTargetsJsonPath!);
+        var markdown = File.ReadAllText(result.PatchTargetsMarkdownPath!);
+        Assert.Contains("\"notMeasuredSamplesTruncated\": true", json, StringComparison.Ordinal);
+        Assert.Equal(10, json.Split("not-reported-by-cobertura", StringSplitOptions.None).Length - 1);
+        Assert.Contains("1 additional non-measured changed line(s) omitted.", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteAsync_RendersPatchTargetMarkdownAsSafeCodeSpans()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("<coverage lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />");
+        var source = new PatchDiffSourceReport(
+            PatchDiffSourceKind.File,
+            "patch label\r\n## injected heading",
+            null,
+            "patch.diff",
+            1,
+            "abc",
+            false,
+            true);
+        var lines = new[]
+        {
+            new PatchCoverageLine("`src/[Target].cs`", 12, true, false, 0, 1),
+        };
+        var metrics = new PatchCoverageMetrics(
+            source,
+            new PatchLineCoverageMetric(null, 1, 1, 0, 0),
+            new PatchBranchCoverageMetric(null, 1, 1, 0, 0));
+        var analysis = new PatchCoverageAnalysis(source, PatchLineMode.Codecov, lines, metrics);
+        var result = new CoverageGateResult(
+            coverage,
+            new CoverageMetric(1, 1, 100),
+            new CoverageMetric(1, 1, 100),
+            0,
+            0,
+            true,
+            Path.Join(temp.Path, CoverageGateArtifactNames.Json),
+            Path.Join(temp.Path, CoverageGateArtifactNames.Markdown),
+            PatchAnalysis: analysis,
+            PatchTargetsJsonPath: Path.Join(temp.Path, CoverageGateArtifactNames.PatchTargetsJson),
+            PatchTargetsMarkdownPath: Path.Join(temp.Path, CoverageGateArtifactNames.PatchTargetsMarkdown));
+        var request = new CoverageGateRequest(coverage, temp.Path, 0, 0, false, null);
+
+        await CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None);
+
+        var markdown = File.ReadAllText(result.PatchTargetsMarkdownPath!);
+        Assert.Contains("Patch label: patch label## injected heading", markdown, StringComparison.Ordinal);
+        Assert.Contains("## `` `src/[Target].cs` ``", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n## injected heading", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteAsync_RejectsLinkedOutputAncestorWithoutCreatingExternalArtifacts()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("<coverage lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />");
+        var external = Path.Join(temp.Path, "external");
+        var linkedOutputParent = Path.Join(temp.Path, "linked-output");
+        Directory.CreateDirectory(external);
+        Directory.CreateSymbolicLink(linkedOutputParent, external);
+        var output = Path.Join(linkedOutputParent, "reports");
+        var request = new CoverageGateRequest(coverage, output, 0, 0, false, null);
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None));
+
+        Assert.Contains("ASCOV019", exception.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Join(external, "reports")));
+    }
+
+    [Fact]
+    public async Task WriteAsync_UsesRetainedOutputDirectory_WhenPathIsRelinkedAfterPreflight()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("<coverage lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />");
+        var output = Path.Join(temp.Path, "guarded-output");
+        var parkedOutput = Path.Join(temp.Path, "parked-output");
+        var external = Path.Join(temp.Path, "external");
+        Directory.CreateDirectory(output);
+        Directory.CreateDirectory(external);
+        var request = new CoverageGateRequest(coverage, output, 0, 0, false, null);
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+        var relinked = false;
+
+        try
+        {
+            await CoverageGateReportWriter.WriteAsync(
+                result,
+                request,
+                CancellationToken.None,
+                beforeArtifactWrite: () =>
+                {
+                    Directory.Move(output, parkedOutput);
+                    Directory.CreateSymbolicLink(output, external);
+                    relinked = true;
+                });
+
+            Assert.True(File.Exists(Path.Join(parkedOutput, CoverageGateArtifactNames.Json)));
+            Assert.True(File.Exists(Path.Join(parkedOutput, CoverageGateArtifactNames.Markdown)));
+            Assert.False(File.Exists(Path.Join(external, CoverageGateArtifactNames.Json)));
+            Assert.False(File.Exists(Path.Join(external, CoverageGateArtifactNames.Markdown)));
+        }
+        finally
+        {
+            if (relinked)
+            {
+                Directory.Delete(output);
+                Directory.Move(parkedOutput, output);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task WriteAsync_RejectsLinkedPatchTargetWithoutTouchingExternalFile()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1">
+              <packages><package name="Example"><classes><class name="Example.Foo" filename="src/Foo.cs"><lines>
+                <line number="1" hits="0" />
+              </lines></class></classes></package></packages>
+            </coverage>
+            """);
+        var external = Path.Join(temp.Path, "external-sentinel.txt");
+        File.WriteAllText(external, "external sentinel");
+        File.CreateSymbolicLink(Path.Join(temp.Path, CoverageGateArtifactNames.PatchTargetsJson), external);
+        var request = new CoverageGateRequest(
+            coverage,
+            temp.Path,
+            0,
+            0,
+            false,
+            null,
+            new CoveragePatchRequest(temp.Path, "origin/main", null, _ => Task.FromResult("""
+                diff --git a/src/Foo.cs b/src/Foo.cs
+                index 0000000..1111111 100644
+                --- a/src/Foo.cs
+                +++ b/src/Foo.cs
+                @@ -0,0 +1,1 @@
+                +uncovered
+                """)));
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None));
+
+        Assert.Contains("ASCOV019", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("external sentinel", File.ReadAllText(external));
+    }
+
+    [Fact]
+    public async Task WriteAsync_AtomicallyReplacesHardLinkedPatchTargetWithoutTouchingExternalFile()
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1">
+              <packages><package name="Example"><classes><class name="Example.Foo" filename="src/Foo.cs"><lines>
+                <line number="1" hits="0" />
+              </lines></class></classes></package></packages>
+            </coverage>
+            """);
+        var external = Path.Join(temp.Path, "external-sentinel.txt");
+        var target = Path.Join(temp.Path, CoverageGateArtifactNames.PatchTargetsJson);
+        File.WriteAllText(external, "external sentinel");
+        Assert.Equal(0, CreateHardLink(external, target));
+        var request = new CoverageGateRequest(
+            coverage,
+            temp.Path,
+            0,
+            0,
+            false,
+            null,
+            new CoveragePatchRequest(temp.Path, "origin/main", null, _ => Task.FromResult("""
+                diff --git a/src/Foo.cs b/src/Foo.cs
+                index 0000000..1111111 100644
+                --- a/src/Foo.cs
+                +++ b/src/Foo.cs
+                @@ -0,0 +1,1 @@
+                +uncovered
+                """)));
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+
+        await CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None);
+
+        Assert.Equal("external sentinel", File.ReadAllText(external));
+        Assert.Contains("\"schemaVersion\": 1", File.ReadAllText(target), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteAsync_RejectsTargetDirectoryDuringNonPatchCleanup()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var targetDirectory = Path.Join(temp.Path, CoverageGateArtifactNames.PatchTargetsJson);
+        Directory.CreateDirectory(targetDirectory);
+        var request = new CoverageGateRequest(coverage, temp.Path, 0, 0, false, null);
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None));
+
+        Assert.Contains("ASCOV019", exception.Message, StringComparison.Ordinal);
+        Assert.True(Directory.Exists(targetDirectory));
+        Assert.False(File.Exists(Path.Join(temp.Path, CoverageGateArtifactNames.Json)));
+        Assert.Empty(Directory.EnumerateFiles(temp.Path, ".*.tmp"));
+    }
+
+    [Fact]
+    public async Task WriteAsync_RemovesTemporaryArtifact_WhenCanceled()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var coverage = temp.WriteCoverage("""
+            <coverage lines-covered="1" lines-valid="1" branches-covered="1" branches-valid="1" />
+            """);
+        var request = new CoverageGateRequest(coverage, temp.Path, 0, 0, false, null);
+        var result = await CoverageGateEvaluator.EvaluateAsync(request, CancellationToken.None);
+        var report = Path.Join(temp.Path, CoverageGateArtifactNames.Json);
+        File.WriteAllText(report, "existing report");
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => CoverageGateReportWriter.WriteAsync(result, request, cancellation.Token));
+
+        Assert.Empty(Directory.EnumerateFiles(temp.Path, ".*.tmp"));
+        Assert.Equal("existing report", File.ReadAllText(report));
+    }
+
+    [Fact]
     public async Task EvaluateAsync_DefaultPatchLineMode_PreservesHitsOnlyCoverage()
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-");
@@ -626,6 +1016,13 @@ public sealed class CoverageGateTests
 
         Assert.Equal(PatchLineMode.Measurable, request.PatchCoverage?.LineMode);
         Assert.Equal(1, result.PatchLineCoverage?.CoveredLines);
+
+        await CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None);
+
+        var targets = File.ReadAllText(result.PatchTargetsJsonPath!);
+        Assert.Contains("\"partial-condition\"", targets, StringComparison.Ordinal);
+        Assert.Contains("\"patchBranch\"", targets, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"patchLine\"", targets, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -681,6 +1078,9 @@ public sealed class CoverageGateTests
         Assert.Equal(50, result.PatchLineCoverage?.Percent);
         Assert.Contains("\"patchLineMode\": \"codecov\"", File.ReadAllText(result.JsonReportPath), StringComparison.Ordinal);
         Assert.Contains("Patch line mode: codecov", File.ReadAllText(result.MarkdownReportPath), StringComparison.Ordinal);
+        var targets = File.ReadAllText(result.PatchTargetsJsonPath!);
+        Assert.DoesNotContain("\"line\": 2", targets, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"line\": 3", targets, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -853,6 +1253,12 @@ public sealed class CoverageGateTests
         Assert.True(result.Passed);
         Assert.Equal(0, result.PatchLineCoverage?.MeasurableLines);
         Assert.Equal(100, result.PatchLineCoverage?.Percent);
+
+        await CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None);
+
+        var targets = File.ReadAllText(result.PatchTargetsJsonPath!);
+        Assert.Contains("\"targets\": []", targets, StringComparison.Ordinal);
+        Assert.True(File.Exists(result.PatchTargetsMarkdownPath));
     }
 
     [Fact]
@@ -1506,7 +1912,9 @@ public sealed class CoverageGateTests
         var output = console.ReadOutputString();
         var markdown = File.ReadAllText(Path.Join(temp.Path, "coverage-gate.md"));
         var json = File.ReadAllText(Path.Join(temp.Path, "coverage-gate.json"));
+        var targets = File.ReadAllText(Path.Join(temp.Path, CoverageGateArtifactNames.PatchTargetsJson));
         Assert.Contains("patch lines 100.00% >= 99.5%", output, StringComparison.Ordinal);
+        Assert.Contains("Patch targets:", output, StringComparison.Ordinal);
         Assert.Contains("Patch source: file", markdown, StringComparison.Ordinal);
         Assert.Contains("Patch label: pull\\|123\\`label", markdown, StringComparison.Ordinal);
         Assert.DoesNotContain('\u0001', markdown);
@@ -1515,6 +1923,8 @@ public sealed class CoverageGateTests
         Assert.Contains("\"label\": \"pull|123`label\"", json, StringComparison.Ordinal);
         Assert.Contains("\"diffBase\": null", json, StringComparison.Ordinal);
         Assert.Contains("\"empty\": false", json, StringComparison.Ordinal);
+        Assert.Contains("\"schemaVersion\": 1", targets, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Join(temp.Path, CoverageGateArtifactNames.PatchTargetsMarkdown)));
     }
 
     [Fact]
@@ -1588,9 +1998,12 @@ public sealed class CoverageGateTests
         await command.ExecuteAsync(console, CancellationToken.None);
 
         var json = File.ReadAllText(Path.Join(temp.Path, "coverage-gate.json"));
+        var targets = File.ReadAllText(Path.Join(temp.Path, CoverageGateArtifactNames.PatchTargetsJson));
         Assert.Contains("\"kind\": \"stdin\"", json, StringComparison.Ordinal);
         Assert.Contains("\"label\": \"stdin diff\"", json, StringComparison.Ordinal);
         Assert.Contains("\"diffBase\": null", json, StringComparison.Ordinal);
+        Assert.Contains("\"kind\": \"stdin\"", targets, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Join(temp.Path, CoverageGateArtifactNames.PatchTargetsMarkdown)));
     }
 
     [Fact]
@@ -1678,8 +2091,11 @@ public sealed class CoverageGateTests
 
         var markdown = File.ReadAllText(Path.Join(temp.Path, "coverage-gate.md"));
         var json = File.ReadAllText(Path.Join(temp.Path, "coverage-gate.json"));
+        var targets = File.ReadAllText(Path.Join(temp.Path, CoverageGateArtifactNames.PatchTargetsJson));
         Assert.Contains("no measurable changed lines, 0 changed", markdown, StringComparison.Ordinal);
         Assert.Contains("\"empty\": true", json, StringComparison.Ordinal);
+        Assert.Contains("\"targets\": []", targets, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Join(temp.Path, CoverageGateArtifactNames.PatchTargetsMarkdown)));
     }
 
     [Fact]
@@ -1936,24 +2352,28 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
-    public async Task PatchDiffSource_ForGitBase_ReadsDiffFromRepository()
+    public async Task PatchDiffSource_ForGitBase_ReadsEmptyDiff_WhenBaseIsCurrentHead()
     {
-        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
-        File.WriteAllText(Path.Join(temp.Path, "README.md"), "base" + Environment.NewLine);
-        await RunGitAsync(temp.Path, "init");
-        await RunGitAsync(temp.Path, "config", "user.email", "tests@example.invalid");
-        await RunGitAsync(temp.Path, "config", "user.name", "AppSurface Tests");
-        await RunGitAsync(temp.Path, "add", ".");
-        await RunGitAsync(temp.Path, "commit", "-m", "base");
-        await File.AppendAllTextAsync(Path.Join(temp.Path, "README.md"), "changed" + Environment.NewLine);
-        await RunGitAsync(temp.Path, "add", ".");
-        await RunGitAsync(temp.Path, "commit", "-m", "change");
-        var source = PatchDiffSource.ForGitBase("HEAD~1", "previous");
+        var repositoryRoot = GitRepositoryRootResolver.FindRepositoryRoot(AppContext.BaseDirectory);
+        var source = PatchDiffSource.ForGitBase("HEAD", "current");
 
-        var artifact = await source.ReadAsync(temp.Path, CancellationToken.None);
+        var artifact = await source.ReadAsync(repositoryRoot, CancellationToken.None);
 
         Assert.Equal(PatchDiffSourceKind.GitBase, source.Kind);
-        Assert.Contains("+changed", artifact.Text, StringComparison.Ordinal);
+        Assert.Empty(artifact.Text);
+        Assert.True(artifact.Empty);
+    }
+
+    [Fact]
+    public async Task PatchDiffSource_ForGitBase_UsesConfiguredDiffProvider()
+    {
+        const string diff = "diff --git a/README.md b/README.md\n";
+        var source = PatchDiffSource.ForGitBase("HEAD~1", "previous", _ => Task.FromResult(diff));
+
+        var artifact = await source.ReadAsync(Directory.GetCurrentDirectory(), CancellationToken.None);
+
+        Assert.Equal(PatchDiffSourceKind.GitBase, source.Kind);
+        Assert.Equal(diff, artifact.Text);
         Assert.False(artifact.Empty);
     }
 
@@ -2806,6 +3226,27 @@ public sealed class CoverageGateTests
         Assert.Equal(PatchDiffParseStatus.Malformed, newlineOnly.Status);
     }
 
+    [Theory]
+    [InlineData("/etc/passwd")]
+    [InlineData("C:\\\\outside\\\\Foo.cs")]
+    [InlineData("./")]
+    [InlineData("src/../Foo.cs")]
+    [InlineData("src/./Foo.cs")]
+    public void ParseChangedLinesDetailed_RejectsUnsafePaths(string path)
+    {
+        var result = PatchCoverageEvaluator.ParseChangedLinesDetailed($"""
+            diff --git a/src/Foo.cs b/{path}
+            index 0000000..1111111 100644
+            --- a/src/Foo.cs
+            +++ {path}
+            @@ -0,0 +1,1 @@
+            +unsafe
+            """);
+
+        Assert.Equal(PatchDiffParseStatus.Malformed, result.Status);
+        Assert.Empty(result.ChangedLines);
+    }
+
     [Fact]
     public async Task ReadDiffAsync_ThrowsDiagnostic_WhenRepositoryRootDoesNotExist()
     {
@@ -2846,6 +3287,43 @@ public sealed class CoverageGateTests
 
         Assert.Contains("ASCOV010", exception.Message, StringComparison.Ordinal);
         Assert.Contains("HEAD^1", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadDiffAsync_ThrowsDiagnostic_WhenDiffExceedsConfiguredLimit()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        File.WriteAllText(Path.Join(temp.Path, "README.md"), "base" + Environment.NewLine);
+        await RunGitAsync(temp.Path, "init");
+        await RunGitAsync(temp.Path, "config", "user.email", "tests@example.invalid");
+        await RunGitAsync(temp.Path, "config", "user.name", "AppSurface Tests");
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "initial");
+        await File.WriteAllTextAsync(Path.Join(temp.Path, "README.md"), new string('x', 128));
+        await RunGitAsync(temp.Path, "add", ".");
+        await RunGitAsync(temp.Path, "commit", "-m", "change");
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => GitDiffReader.ReadDiffAsync(temp.Path, "HEAD^1", CancellationToken.None, maxBytes: 4));
+
+        Assert.Contains("ASCOV010", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("too large", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PatchDiffSource_ForGitBase_ShouldRejectOversizedTestProviderOutput()
+    {
+        var source = PatchDiffSource.ForGitBase(
+            "HEAD",
+            "current",
+            _ => Task.FromResult("too large"),
+            maxBytes: 4);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => source.ReadAsync("unused", CancellationToken.None));
+
+        Assert.Contains("ASCOV010", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("too large", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3241,7 +3719,51 @@ public sealed class CoverageGateTests
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             async () => await RunGitAsync(temp.Path, "commit", "-m", "empty"));
 
-        Assert.Contains("git -c commit.gpgsign=false commit -m empty failed:", exception.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            "git -c commit.gpgsign=false -c maintenance.auto=false -c gc.auto=0 commit -m empty failed:",
+            exception.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TempDirectory_Dispose_RetriesWindowsFileLocks()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var path = temp.WriteCoverage("<coverage />");
+        using var lockHandle = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+        var dispose = Task.Run(temp.Dispose);
+
+        await Task.Delay(100);
+        Assert.False(dispose.IsCompleted);
+
+        lockHandle.Dispose();
+        await dispose.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(Directory.Exists(temp.Path));
+    }
+
+    [Fact]
+    public void TempDirectory_Dispose_ClearsReadOnlyGitObjectAttributes_OnWindows()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var gitObjectsDirectory = Directory.CreateDirectory(Path.Join(temp.Path, ".git", "objects"));
+        var gitObject = Path.Join(gitObjectsDirectory.FullName, "object");
+        File.WriteAllText(gitObject, "object");
+        File.SetAttributes(gitObject, FileAttributes.ReadOnly);
+
+        temp.Dispose();
+
+        Assert.False(Directory.Exists(temp.Path));
     }
 
     private static async Task RunGitAsync(string workingDirectory, params string[] arguments)
@@ -3258,6 +3780,13 @@ public sealed class CoverageGateTests
         {
             executedArguments.Add("-c");
             executedArguments.Add("commit.gpgsign=false");
+            // Git for Windows can run automatic maintenance after a commit and retain handles
+            // under .git/objects after the commit process exits. Test repositories are temporary,
+            // so disable maintenance and automatic GC to keep their cleanup deterministic.
+            executedArguments.Add("-c");
+            executedArguments.Add("maintenance.auto=false");
+            executedArguments.Add("-c");
+            executedArguments.Add("gc.auto=0");
         }
 
         foreach (var argument in arguments)
@@ -3477,8 +4006,15 @@ public sealed class CoverageGateTests
             tolerance);
     }
 
+    [DllImport("libSystem.B.dylib", EntryPoint = "link", SetLastError = true)]
+    private static extern int CreateHardLink(string existingPath, string newPath);
+
     private sealed class TempDirectory : IDisposable
     {
+        private const int MaxDeleteAttempts = 100;
+
+        private const int DeleteRetryDelayMilliseconds = 50;
+
         private TempDirectory(string path)
         {
             Path = path;
@@ -3505,9 +4041,35 @@ public sealed class CoverageGateTests
 
         public void Dispose()
         {
-            if (Directory.Exists(Path))
+            for (var attempt = 0; Directory.Exists(Path); attempt++)
             {
-                Directory.Delete(Path, recursive: true);
+                try
+                {
+                    ClearReadOnlyGitObjectAttributes();
+                    Directory.Delete(Path, recursive: true);
+                }
+                catch (IOException) when (attempt < MaxDeleteAttempts - 1)
+                {
+                    Thread.Sleep(DeleteRetryDelayMilliseconds);
+                }
+                catch (UnauthorizedAccessException) when (attempt < MaxDeleteAttempts - 1)
+                {
+                    Thread.Sleep(DeleteRetryDelayMilliseconds);
+                }
+            }
+        }
+
+        private void ClearReadOnlyGitObjectAttributes()
+        {
+            var gitObjectsDirectory = System.IO.Path.Join(Path, ".git", "objects");
+            if (!Directory.Exists(gitObjectsDirectory))
+            {
+                return;
+            }
+
+            foreach (var gitObject in Directory.EnumerateFiles(gitObjectsDirectory, "*", SearchOption.AllDirectories))
+            {
+                File.SetAttributes(gitObject, File.GetAttributes(gitObject) & ~FileAttributes.ReadOnly);
             }
         }
     }
