@@ -585,7 +585,8 @@ public sealed class CoverageRunOutputGuardSecurityTests
 
         Assert.Contains("ASCOV109", exception.Message, StringComparison.Ordinal);
         Assert.Equal("original output", File.ReadAllText(Path.Join(parkedProjects, Path.GetFileName(original))));
-        Assert.Equal("must remain", File.ReadAllText(Path.Join(projects, Path.GetFileName(replacementSentinel))));
+        var replacementLocation = OperatingSystem.IsWindows() ? replacement : projects;
+        Assert.Equal("must remain", File.ReadAllText(Path.Join(replacementLocation, Path.GetFileName(replacementSentinel))));
     }
 
     [Fact]
@@ -761,7 +762,7 @@ public sealed class CoverageRunOutputGuardSecurityTests
     }
 
     [Fact]
-    public async Task WriteOwnedGateArtifactAsync_Windows_ShouldReportNativePromotionSharingFailure()
+    public async Task WriteOwnedGateArtifactAsync_Windows_ShouldReportNativePromotionAccessDenied()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -784,7 +785,7 @@ public sealed class CoverageRunOutputGuardSecurityTests
 
         Assert.Contains("Unable to promote", exception.Message, StringComparison.Ordinal);
         var nativeException = Assert.IsType<Win32Exception>(exception.InnerException);
-        Assert.Equal(WindowsSharingViolation, nativeException.NativeErrorCode);
+        Assert.Equal(WindowsAccessDenied, nativeException.NativeErrorCode);
         Assert.Equal("first", File.ReadAllText(artifactPath));
         Assert.Empty(Directory.EnumerateFiles(output, ".*.tmp"));
     }
@@ -902,6 +903,7 @@ public sealed class CoverageRunOutputGuardSecurityTests
     private const uint WindowsOpenExisting = 3;
     private const uint WindowsBackupSemantics = 0x02000000;
     private const uint WindowsOpenReparsePoint = 0x00200000;
+    private const int WindowsAccessDenied = 5;
     private const int WindowsSharingViolation = 32;
 
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
