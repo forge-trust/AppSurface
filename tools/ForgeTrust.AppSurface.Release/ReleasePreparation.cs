@@ -75,7 +75,9 @@ internal sealed class ReleasePreparation
         {
             var unreleasedTemplate = await File.ReadAllTextAsync(_workspace.UnreleasedPath, cancellationToken);
             unreleasedEntries = await UnreleasedEntryComposer.LoadAsync(_workspace.UnreleasedEntriesDirectory, cancellationToken);
-            unreleased = UnreleasedEntryComposer.Compose(unreleasedTemplate, unreleasedEntries.Entries);
+            unreleased = UnreleasedEntryComposer.Compose(
+                ReleaseNoteBuilder.StripResetOnlyTemplatePlaceholders(unreleasedTemplate),
+                unreleasedEntries.Entries);
         }
         catch (UnreleasedEntryException ex)
         {

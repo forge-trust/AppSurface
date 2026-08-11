@@ -6002,13 +6002,35 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
-    public void ReleaseNoteBuilderExcludesUnreleasedTemplatePlaceholders()
+    public void ReleaseNoteBuilderStripsCanonicalResetOnlyTemplatePlaceholders()
     {
-        var releaseNote = ReleaseNoteBuilder.Build(
-            SemVer.Parse("0.1.0-preview.1"),
-            new DateOnly(2026, 5, 25),
+        var unreleasedTemplate = ReleaseNoteBuilder.ResetUnreleased(SemVer.Parse("0.1.0-preview.0"))
+            .Replace("\n", "\r\n", StringComparison.Ordinal);
+        var strippedTemplate = ReleaseNoteBuilder.StripResetOnlyTemplatePlaceholders(unreleasedTemplate);
+
+        foreach (var placeholder in ReleaseNoteBuilder.UnreleasedTemplatePlaceholders)
+        {
+            Assert.DoesNotContain(placeholder, strippedTemplate, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("## Migration watch", strippedTemplate, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PrepareExcludesResetOnlyUnreleasedTemplatePlaceholders()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync(
+            "releases/unreleased.md",
             ReleaseNoteBuilder.ResetUnreleased(SemVer.Parse("0.1.0-preview.0"))
                 .Replace("\n", "\r\n", StringComparison.Ordinal));
+
+        var result = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(0, result.ExitCode);
+        var releaseNote = await ReadFileAsync("releases/v0.1.0-preview.1.md");
 
         foreach (var placeholder in ReleaseNoteBuilder.UnreleasedTemplatePlaceholders)
         {
@@ -6034,7 +6056,15 @@ public sealed class ReleaseToolTests : IDisposable
 
                 ```text
                 {placeholder}
+
+                <!-- appsurface:unreleased-entries section="taking-shape" -->
                 ```
+
+                <div>
+                {placeholder}
+
+                <!-- appsurface:unreleased-entries section="taking-shape" -->
+                </div>
 
                 {placeholder}
 
@@ -6045,11 +6075,18 @@ public sealed class ReleaseToolTests : IDisposable
         var releaseNote = ReleaseNoteBuilder.Build(
             SemVer.Parse("0.1.0-preview.1"),
             new DateOnly(2026, 5, 25),
-            unreleased);
+            ReleaseNoteBuilder.StripResetOnlyTemplatePlaceholders(unreleased));
 
         Assert.Contains($"This paragraph cites {placeholder}", releaseNote, StringComparison.Ordinal);
         Assert.Contains($"    {placeholder}", releaseNote, StringComparison.Ordinal);
-        Assert.Contains($"```text\n{placeholder}\n```", releaseNote, StringComparison.Ordinal);
+        Assert.Contains(
+            $"```text\n{placeholder}\n\n<!-- appsurface:unreleased-entries section=\"taking-shape\" -->\n```",
+            releaseNote,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            $"<div>\n{placeholder}\n\n<!-- appsurface:unreleased-entries section=\"taking-shape\" -->\n</div>",
+            releaseNote,
+            StringComparison.Ordinal);
         Assert.Contains($"\n{placeholder}\n\n## Migration watch", releaseNote, StringComparison.Ordinal);
     }
 
