@@ -921,9 +921,9 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         try
         {
             Marshal.WriteInt32(buffer, 0, 1);
-            // NtSetInformationFile preserves the native simple-name semantics: a null RootDirectory
-            // renames within the source file's existing directory. It avoids reopening the destination
-            // directory and preserves this lease's deliberate denial of competing directory-write access.
+            // With a simple name and null RootDirectory, NtSetInformationFile renames within the
+            // source file's existing directory. The retained output lease continues to deny
+            // competing directory-write access during the promotion.
             Marshal.WriteIntPtr(buffer, rootDirectoryOffset, IntPtr.Zero);
             Marshal.WriteInt32(buffer, fileNameLengthOffset, fileNameBytes.Length);
             Marshal.Copy(fileNameBytes, 0, IntPtr.Add(buffer, fileNameOffset), fileNameBytes.Length);
