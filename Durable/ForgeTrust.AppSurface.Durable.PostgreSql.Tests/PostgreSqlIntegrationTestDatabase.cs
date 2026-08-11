@@ -7,6 +7,8 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
 {
     private const int RequiredServerVersion = 170005;
+    private const int ContainerStartupProbeMaximumAttempts = 3;
+    private static readonly TimeSpan ContainerStartupProbeRetryDelay = TimeSpan.FromMilliseconds(250);
     private readonly List<NpgsqlDataSource> _additionalDataSources = [];
     private readonly string _databaseName;
     private readonly string? _maintenanceConnectionString;
@@ -79,7 +81,8 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
             var containerDataSource = NpgsqlDataSource.Create(containerConnectionString);
             try
             {
-                await EnsureRequiredServerVersionAsync(containerDataSource);
+                await ExecuteContainerStartupProbeAsync(
+                    _ => EnsureRequiredServerVersionAsync(containerDataSource));
             }
             catch
             {
@@ -118,6 +121,37 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
             maintenanceBuilder.ConnectionString,
             sourceBuilder.ConnectionString,
             dataSource);
+    }
+
+    /// <summary>
+    /// Executes an idempotent container-startup probe, retrying only an Npgsql connection timeout that can occur after
+    /// the container-local readiness probe succeeds but before Docker Desktop exposes the published port to the host.
+    /// </summary>
+    /// <param name="probe">The idempotent probe to execute.</param>
+    /// <param name="delayAsync">Optional delay seam for deterministic retry tests.</param>
+    /// <param name="cancellationToken">Token that cancels a pending retry delay.</param>
+    internal static async ValueTask ExecuteContainerStartupProbeAsync(
+        Func<CancellationToken, ValueTask> probe,
+        Func<TimeSpan, CancellationToken, ValueTask>? delayAsync = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(probe);
+
+        var delay = delayAsync ?? (static (duration, token) => new ValueTask(Task.Delay(duration, token)));
+        for (var attempt = 1; attempt <= ContainerStartupProbeMaximumAttempts; attempt++)
+        {
+            try
+            {
+                await probe(cancellationToken);
+                return;
+            }
+            catch (NpgsqlException exception) when (
+                exception.InnerException is TimeoutException
+                && attempt < ContainerStartupProbeMaximumAttempts)
+            {
+                await delay(ContainerStartupProbeRetryDelay, cancellationToken);
+            }
+        }
     }
 
     private static async ValueTask EnsureRequiredServerVersionAsync(NpgsqlDataSource dataSource)
