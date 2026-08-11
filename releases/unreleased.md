@@ -93,7 +93,7 @@ This is the living release note for the next coordinated AppSurface version afte
   without exposing values. The [migration guide](../Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/macos-keychain-v2-migration.md)
   covers namespace matching, resumable recovery, canonical-v2 precedence, and the interactive three-key smoke.
 - The PostgreSQL durable schema adds the Schedule ledger, payload-free dispatch leases, forced-RLS history partitions, and a reviewed role recipe. Operators can use the [migration and role setup guidance](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#explicit-schema-and-epoch-deployment) before enabling the manual processor.
-- The PostgreSQL durable source preview now provides explicit worker-host composition. Passive registration resolves the
+- The PostgreSQL Durable public preview now provides explicit worker-host composition. Passive registration resolves the
   bounded runtime pump, typed health and drain control, and authorized Work and scope control clients without starting a
   worker or applying DDL; `AddWorkerHost()` is the separate opt-in for one polling host with metadata-only PostgreSQL
   wake hints. The host records payload-free worker liveness and drain state through `0005_runtime_heartbeat.sql`, fails

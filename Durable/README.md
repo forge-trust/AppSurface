@@ -1,6 +1,6 @@
 # Portable durable execution
 
-AppSurface Durable is a source-only public preview of portable durable contracts. It is split by audience:
+AppSurface Durable is a public-preview package family for portable durable contracts. It is split by audience:
 
 - [`ForgeTrust.AppSurface.Durable`](ForgeTrust.AppSurface.Durable/README.md) is the application and reusable-module API
   for work, Flow, schedules, serialization, registration, and clients.
@@ -10,8 +10,9 @@ AppSurface Durable is a source-only public preview of portable durable contracts
   authoritative-store implementation. Slices 3–6 supply explicit schema management, Work, Flow, Schedule, and an
   explicitly opted-in hosted runtime.
 
-All three packages are machine-held out of every publish plan pending coordinated release evidence. They can be built
-and packed directly for contract verification, but they are not a supported NuGet release.
+All three packages participate in the coordinated prerelease publish plan. They remain preview contracts: adopt them
+only with the reviewed schema, role, recovery, and operational evidence described below, and do not treat the preview
+as production support.
 
 For the internal W3C causal-link contract, safe telemetry attributes, deployment order, and reference proof, read
 [Durable Flow trace context v1](flow-trace-context-v1.md). It supplies persistence and crash-proof seams now; it does
@@ -25,7 +26,7 @@ public, testable contracts without friend access to the application package. The
 `ForgeTrust.AppSurface.Durable.PostgreSql` → `ForgeTrust.AppSurface.Durable.Provider` → `ForgeTrust.AppSurface.Durable`
 
 The application package registers only passive registries. A provider is selected explicitly by the host. The PostgreSQL
-source preview adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`,
+provider adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`,
 `0004_schedule_protocol`, `0005_runtime_heartbeat`, `0006_flow_trace_context`, `0007_flow_retention`, and
 `0008_flow_repair`) plus one-operation-at-a-time Work, Flow, and Work-first Schedule persistence with versioned W3C
 causal evidence, verified retention, and evidence-first Flow repair. PostgreSQL registration remains passive; an
@@ -35,9 +36,8 @@ continuous activation. It adds no public endpoint, dashboard, or automatic migra
 
 ## Slice 7 discovery and reconciliation
 
-Slice 7 is still a source-only public preview. Publication of the Durable packages remains held pending coordinated
-release evidence; the documentation below describes the intended discovery and reconciliation contract, not a shipped
-NuGet release or a replacement for deployment review.
+Slice 7 remains a public-preview surface. The documentation below describes its discovery and reconciliation contract;
+it does not replace deployment review or confer production support.
 
 Storage registration is passive. The PostgreSQL provider opens no worker and installs no hosted service until the host
 explicitly calls [`AddWorkerHost()`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host). Startup validates the

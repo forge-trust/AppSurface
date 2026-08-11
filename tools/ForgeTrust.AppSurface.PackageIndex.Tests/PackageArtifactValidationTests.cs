@@ -394,7 +394,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task DurablePublicationHold_CheckedInManifestHoldsBothPackagesOutOfActualPublishPlan()
+    public async Task DurablePublicPreview_CheckedInManifestIncludesAllDurablePackagesInActualPublishPlan()
     {
         var repositoryRoot = GetRepositoryRoot();
         var manifestPath = CombineSafeChildPath(repositoryRoot, "packages/package-index.yml");
@@ -402,14 +402,15 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var durableEntries = manifest.Packages
             .Where(entry => entry.Project is
                 "Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj" or
-                "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj")
+                "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj" or
+                "Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj")
             .ToArray();
 
-        Assert.Equal(2, durableEntries.Length);
+        Assert.Equal(3, durableEntries.Length);
         Assert.All(durableEntries, entry =>
         {
-            Assert.Equal(PackagePublishDecision.DoNotPublish, entry.PublishDecision);
-            Assert.Contains("PostgreSQL provider milestone", entry.PublishReason, StringComparison.Ordinal);
+            Assert.Equal(PackagePublishDecision.Publish, entry.PublishDecision);
+            Assert.Null(entry.PublishReason);
         });
 
         var plan = await new PackagePublishPlanResolver(
@@ -417,8 +418,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
             new DotNetProjectMetadataProvider(),
             new PackageManifestLoader()).ResolveAsync(repositoryRoot, manifestPath, CancellationToken.None);
 
-        Assert.DoesNotContain(plan.Entries, entry =>
-            entry.PackageId is "ForgeTrust.AppSurface.Durable" or "ForgeTrust.AppSurface.Durable.Provider");
+        Assert.Contains(plan.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Durable");
+        Assert.Contains(plan.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Durable.Provider");
+        Assert.Contains(plan.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Durable.PostgreSql");
     }
 
     [Fact]

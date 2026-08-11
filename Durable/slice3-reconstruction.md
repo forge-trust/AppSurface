@@ -26,7 +26,7 @@ dispositions are `retained`, `adapted`, `replaced-by-landed-contract`, `deferred
 | Reconstruction base | current `main`; record its exact SHA in the implementing pull request |
 | Old semantic delta | 42 paths, about 8,300 added lines |
 | New package | `ForgeTrust.AppSurface.Durable.PostgreSql` |
-| Publication posture | source-only public preview; no hosted worker; machine-held from publish plans |
+| Publication posture | Public preview; worker hosting was intentionally outside this slice |
 
 ## Requirements-first inventory
 
@@ -69,11 +69,11 @@ Paths beginning with `PostgreSql/` or `PostgreSql.Tests/` are relative to `Durab
 | 33 | Ambient acceptance validates target/StoreId without a second connection. | `PostgreSql/PostgreSqlDurableWorkTransactionWriter.cs` | adapted | Public writer | Use the exact active transaction; never manage caller transaction lifetime. |
 | 34 | Evaluators need truthful selection/deployment/safety guidance. | `PostgreSql/README.md` | adapted | PostgreSQL package README | Replace five-migration, implicit epoch, and provider-key claims; link canonical guides. |
 | 35 | Runtime dependencies are reproducible. | `PostgreSql/packages.lock.json` | adapted | Regenerated lock file | Generate from the reconstructed graph; do not copy the old lock. |
-| 36 | Adopters find the provider without believing it is hosted/published. | `Durable/ForgeTrust.AppSurface.Durable/README.md` | adapted | Same path | Link source preview and exact slices 4-6 release gate; retain passive registration. |
-| 37 | The Durable hub describes the three-package direction. | `Durable/README.md` | adapted | Same path | Link this ledger, protocol, workload, and coordinated release gate. |
+| 36 | Adopters find the provider without inferring automatic hosting. | `Durable/ForgeTrust.AppSurface.Durable/README.md` | adapted | Same path | Link the public preview and its explicit host opt-in; retain passive registration. |
+| 37 | The Durable hub describes the three-package direction. | `Durable/README.md` | adapted | Same path | Link this ledger, protocol, workload, and public-preview release gate. |
 | 38 | New projects participate in build/coverage. | `ForgeTrust.AppSurface.slnx` | retained | Same path | Add runtime/test projects once; coverage must discover real PostgreSQL tests. |
 | 39 | README policy recognizes package docs. | `Web/ForgeTrust.AppSurface.Docs.Tests/RepositoryReadmePolicyTests.cs` | adapted | Same suite | Extend the established policy seam, not a bypass. |
-| 40 | Generated chooser exposes held source preview. | `packages/README.md` | adapted | Generated from package index | Never hand-edit; regenerate after source metadata is complete. |
+| 40 | Generated chooser exposes the public preview. | `packages/README.md` | adapted | Generated from package index | Never hand-edit; regenerate after package metadata is complete. |
 | 41 | Package index is publication truth. | `packages/package-index.yml` | adapted | Same path | Add PostgreSQL and exact slices 4-6 gate for all three packages. |
 | 42 | Generated readiness shows the same hold. | `packages/readiness.md` | adapted | Generated from package index | Never hand-edit; regenerate and verify. |
 

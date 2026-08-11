@@ -1,6 +1,6 @@
 # Durable slice 4 reference workload
 
-This is the first-success and conformance workload for the source-only PostgreSQL Flow engine (slice 4). It proves atomic
+This is the first-success and conformance workload for the PostgreSQL Flow engine (slice 4). It proves atomic
 Flow instance creation, transition step evaluation, external event delivery, timer expiry, child Work activity integration,
 recovery invariants across 11 protocol boundaries, options reuse, RLS scope isolation, and operator release/disable safety.
 The timer-winner boundary is certified by force-terminating a separate process after the database commit; the other

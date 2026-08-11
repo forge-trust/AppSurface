@@ -196,4 +196,4 @@ five-character SQLSTATE. Never log or serialize inner message text, detail, hint
 | `ASDUR400`–`ASDUR403` | Incompatible runtime store | Missing, pending, unsupported, or inconsistent migration state | Apply reviewed migrations with the migration owner, rerun the role recipe, and deploy compatible code; startup intentionally performs no DDL. |
 | `ASDUR108` | Recovery epoch required | The configured runtime epoch differs from the active store epoch | Perform authorized epoch initialization/rotation before enabling the worker host. |
 
-The canonical activation path is the PostgreSQL package's [worker-host quickstart](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host). Its source preview remains publication-held; real PostgreSQL reference workloads and runtime tests remain the operational proof surface.
+The canonical activation path is the PostgreSQL package's [worker-host quickstart](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host). It is a public preview; real PostgreSQL reference workloads and runtime tests remain the operational proof surface.
