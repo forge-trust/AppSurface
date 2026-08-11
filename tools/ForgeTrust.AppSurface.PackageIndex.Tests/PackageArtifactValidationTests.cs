@@ -411,6 +411,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
             Assert.Equal(PackagePublishDecision.DoNotPublish, entry.PublishDecision);
             Assert.Contains("PostgreSQL provider milestone", entry.PublishReason, StringComparison.Ordinal);
         });
+        var durableProviderEntry = Assert.Single(durableEntries, entry => entry.Project ==
+            "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj");
+        Assert.Equal(["ForgeTrust.AppSurface.Durable"], durableProviderEntry.ExpectedDependencyPackageIds);
 
         await WriteFileAsync("packages/package-index.yml",
             """
@@ -444,6 +447,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 includes: Provider contracts.
                 does_not_include: A storage implementation.
                 start_here_path: Durable/ForgeTrust.AppSurface.Durable.Provider/README.md
+                expected_dependency_package_ids:
+                  - ForgeTrust.AppSurface.Durable
             """);
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
@@ -451,6 +456,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
         await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable/README.md", "# Durable");
         await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj", "<Project />");
         await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable.Provider/README.md", "# Durable Provider");
+        var durableProjectPath = CombineSafeChildPath(
+            _repositoryRoot,
+            "Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj");
 
         var plan = await CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
         {
@@ -462,7 +470,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 "ForgeTrust.AppSurface.Durable"),
             ["Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj"] = CreateMetadata(
                 "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj",
-                "ForgeTrust.AppSurface.Durable.Provider")
+                "ForgeTrust.AppSurface.Durable.Provider",
+                projectReferences: [durableProjectPath])
         }).ResolveAsync(_repositoryRoot, ManifestPath, CancellationToken.None);
 
         var publishedWebPackage = Assert.Single(plan.Entries);

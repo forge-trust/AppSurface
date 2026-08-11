@@ -11,6 +11,11 @@ using Microsoft.Build.Framework;
 
 namespace ForgeTrust.AppSurface.Web.Tailwind.Tests;
 
+/// <summary>
+/// Verifies Tailwind build targets for source-tree and packaged-consumer scenarios.
+/// The <see cref="PackedTailwindPackageFixture"/> class fixture builds and packs one shared local package feed for
+/// every test instance; xUnit must create each instance after initializing that fixture.
+/// </summary>
 public sealed class TailwindBuildTargetsTests : IDisposable, IClassFixture<TailwindBuildTargetsTests.PackedTailwindPackageFixture>
 {
 #if DEBUG
@@ -25,6 +30,10 @@ public sealed class TailwindBuildTargetsTests : IDisposable, IClassFixture<Tailw
 
     private readonly PackedTailwindPackageFixture _packedPackages;
 
+    /// <summary>
+    /// Initializes a test instance with xUnit's shared packed-package fixture.
+    /// </summary>
+    /// <param name="packedPackages">Initialized fixture that supplies the shared local package feed and version.</param>
     public TailwindBuildTargetsTests(PackedTailwindPackageFixture packedPackages)
     {
         _packedPackages = packedPackages;

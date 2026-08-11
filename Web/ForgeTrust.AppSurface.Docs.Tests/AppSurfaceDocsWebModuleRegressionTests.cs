@@ -671,6 +671,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
                     var previewHtml = await previewResponse.Content.ReadAsStringAsync();
                     Assert.Equal(HttpStatusCode.OK, previewResponse.StatusCode);
                     Assert.DoesNotContain("data-tree=\"release-1.2.3\"", previewHtml);
+                    Assert.Contains("Preview documentation", previewHtml);
 
                     using var previewAssetResponse = await client.GetAsync("/docs/next/search-client.js");
                     var previewAssetBody = await previewAssetResponse.Content.ReadAsStringAsync();
