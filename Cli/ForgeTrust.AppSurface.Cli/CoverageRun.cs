@@ -555,6 +555,8 @@ internal sealed record CoverageRunResult(bool Success, string OutputDirectory, s
 /// </summary>
 internal sealed class CoverageRunWorkflow
 {
+    private const string ExclusiveFirstScheduleReason = "exclusive-first";
+
     private static readonly XmlReaderSettings ReaderSettings = new()
     {
         DtdProcessing = DtdProcessing.Ignore,
@@ -1255,7 +1257,7 @@ internal sealed class CoverageRunWorkflow
                     item.Project,
                     ScheduledSeconds: null,
                     DurationSource: "none",
-                    ScheduleReason: "exclusive-first"))
+                    ScheduleReason: ExclusiveFirstScheduleReason))
                 .Concat(nonExclusiveProjects.Select((item, index) => new CoverageRunScheduleEntry(
                     item.OriginalIndex,
                     exclusiveProjects.Length + index,
@@ -1283,7 +1285,7 @@ internal sealed class CoverageRunWorkflow
                 item.Project,
                 ScheduledSeconds: null,
                 DurationSource: "none",
-                ScheduleReason: "exclusive-first"));
+                ScheduleReason: ExclusiveFirstScheduleReason));
         }
 
         foreach (var item in SortScheduleSegment(nonExclusiveProjects, timingSource.TimingsByProject, priorityRanks))
