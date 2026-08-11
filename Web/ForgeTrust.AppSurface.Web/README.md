@@ -42,7 +42,7 @@ The base class for the application bootstrapping logic. While `WebApp` uses a ge
 
 ### Theme pairs quickstart
 
-AppSurface Web can render a native semantic light/dark pair for package-owned UI without resetting or styling application-authored components. First register a pair and the explicit Web adapter from a module or host service-registration path:
+AppSurface Web can render a native semantic light/dark pair for package-owned UI without resetting or styling application-authored components. `AppSurfaceThemePair.Graphite()` is the evidence-gated shared Graphite pair: registration validates its semantic tokens and both Light/Dark branches against the applicable WCAG contrast thresholds. First register the pair and the explicit Web adapter from a module or host service-registration path:
 
 ```csharp
 using ForgeTrust.AppSurface.Web;
@@ -50,9 +50,9 @@ using ForgeTrust.AppSurface.Theming;
 
 services.AddAppSurfaceTheming(options =>
 {
-    options.DefaultTheme = new AppSurfaceThemeId("appsurface");
+    options.DefaultTheme = new AppSurfaceThemeId("graphite");
     options.DefaultMode = AppSurfaceThemeMode.System;
-    options.Pairs.Add(AppSurfaceThemePair.AppSurface());
+    options.Pairs.Add(AppSurfaceThemePair.Graphite());
 });
 services.AddAppSurfaceWebTheming();
 ```
@@ -79,13 +79,13 @@ For the base adapter, the optional `nonce` attribute is copied to the live inlin
 
 The host owns generating that per-response nonce and its `style-src` policy. Static exports use the same canonical payload without a nonce. If the root already declares `color-scheme`, AppSurface preserves it and marks `data-as-theme-color-scheme-conflict="true"`; correct the host declaration rather than relying on hidden precedence.
 
-Use the neutral package's [theme contract](../../ForgeTrust.AppSurface.Theming/README.md) for roles, validation, typed application extras, diagnostics, and deliberately deferred preference/tenant policy. Use the [Docs migration guide](../ForgeTrust.AppSurface.Docs/README.md#theme-pairs-migration) when the application hosts AppSurface Docs. RazorWire's generated-error boundary is documented in [Failed Form UX](../ForgeTrust.RazorWire/Docs/form-failures.md#appsurface-theme-pairs).
+Use the neutral package's [theme contract](../../ForgeTrust.AppSurface.Theming/README.md) for semantic roles, validation, typed application extras, diagnostics, and deliberately deferred preference/tenant policy. Use the [Docs migration guide](../ForgeTrust.AppSurface.Docs/README.md#theme-pairs-migration) when the application hosts AppSurface Docs. RazorWire's generated-error boundary is documented in [Failed Form UX](../ForgeTrust.RazorWire/Docs/form-failures.md#appsurface-theme-pairs).
 
 ### Browser-local theme preferences
 
 Use browser-local preferences when Light and Dark change only presentation and one canonical HTML response must remain safe for caches, search, analytics, and static export. This is a progressive Web enhancement: it never writes a cookie, reads request or account state, changes a URL, or introduces a `Vary` value. Do not use it when theme choice changes semantic content, authorization, tenant state, or needs to follow a signed-in user between devices; those are application-owned policies.
 
-Register the neutral pair, then replace the fixed Web document with the one-call preference adapter. The adapter establishes the ordinary Web integration itself, so do not add `AddAppSurfaceWebTheming()` merely to make this work:
+Register the shared pair, then replace the fixed Web document with the one-call preference adapter. The adapter establishes the ordinary Web integration itself, so do not add `AddAppSurfaceWebTheming()` merely to make this work. Browser-local preferences affect presentation only; they do not turn the Docs-local `GraphiteDark` preset into a shared pair:
 
 ```csharp
 using ForgeTrust.AppSurface.Theming;
@@ -93,9 +93,9 @@ using ForgeTrust.AppSurface.Web;
 
 services.AddAppSurfaceTheming(options =>
 {
-    options.DefaultTheme = new AppSurfaceThemeId("appsurface");
+    options.DefaultTheme = new AppSurfaceThemeId("graphite");
     options.DefaultMode = AppSurfaceThemeMode.System;
-    options.Pairs.Add(AppSurfaceThemePair.AppSurface());
+    options.Pairs.Add(AppSurfaceThemePair.Graphite());
 });
 services.AddAppSurfaceWebThemePreferences(options => options.StorageKey = "site-theme");
 ```

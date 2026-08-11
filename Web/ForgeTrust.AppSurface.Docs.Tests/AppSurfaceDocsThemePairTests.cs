@@ -50,6 +50,47 @@ public sealed class AppSurfaceDocsThemePairTests
         Assert.Contains("--docs-color-link-visited:VisitedText;", theme.CriticalCss, StringComparison.Ordinal);
         Assert.Contains("--docs-color-syntax-comment:GrayText;", theme.CriticalCss, StringComparison.Ordinal);
         Assert.Contains("--docs-focus-outline:2px solid Highlight;", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("html[data-as-theme] .docs-gradient-title{background:none;color:CanvasText;-webkit-text-fill-color:CanvasText;}", theme.CriticalCss, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolver_ShouldMapTheSharedGraphitePairWithoutChangingTheDocsCompatibilityPreset()
+    {
+        var options = new AppSurfaceDocsOptions();
+        var pair = AppSurfaceThemePair.Graphite();
+        var resolution = new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.System, pair.Light, pair.Dark);
+
+        var theme = new AppSurfaceDocsThemeResolver(options, new StubThemeResolver(resolution)).Theme;
+
+        Assert.True(theme.UsesSharedTheme);
+        Assert.Equal(AppSurfaceDocsThemePreset.AppSurfaceDark, theme.Preset);
+        Assert.Equal("appsurface-dark", theme.PresetAttribute);
+        Assert.Contains("--docs-color-surface-canvas:var(--as-canvas);", theme.CriticalCss, StringComparison.Ordinal);
+        Assert.Contains("--docs-color-syntax-type:var(--as-link);", theme.CriticalCss, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SharedDocsSignatureStyles_ShouldUseSemanticSyntaxTokensInsteadOfFixedColors()
+    {
+        var repoRoot = ForgeTrust.AppSurface.Core.PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
+        var stylesheet = File.ReadAllText(
+            Path.Join(repoRoot, "Web", "ForgeTrust.AppSurface.Docs", "wwwroot", "css", "app.css"))
+            .ReplaceLineEndings("\n");
+
+        foreach (var (selector, token) in new[]
+                 {
+                     ("sig-generic", "--docs-color-syntax-inserted"),
+                     ("sig-type", "--docs-color-syntax-type"),
+                     ("sig-parameter", "--docs-color-syntax-parameter"),
+                     ("sig-modifier", "--docs-color-syntax-keyword"),
+                     ("sig-literal", "--docs-color-syntax-number")
+                 })
+        {
+            Assert.Contains(
+                $".docs-content .doc-signature .{selector} {{\n    color: var({token});\n}}",
+                stylesheet,
+                StringComparison.Ordinal);
+        }
     }
 
     [Fact]
