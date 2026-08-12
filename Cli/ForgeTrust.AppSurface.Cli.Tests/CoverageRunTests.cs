@@ -2505,6 +2505,15 @@ public sealed class CoverageRunTests
         Assert.Equal([first, second], parallelTests.Select(command => command.Arguments[1]).OrderBy(path => path));
         Assert.True(exclusiveTests[0].FinishedTick <= exclusiveTests[1].StartedTick);
         Assert.All(exclusiveTests, command => Assert.True(command.FinishedTick <= parallelTests.Min(parallel => parallel.StartedTick)));
+        using var timings = JsonDocument.Parse(File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json")));
+        var exclusiveProjects = timings.RootElement.GetProperty("projects")
+            .EnumerateArray()
+            .Where(project => project.GetProperty("exclusive").GetBoolean())
+            .ToArray();
+        Assert.Equal(2, exclusiveProjects.Length);
+        Assert.All(
+            exclusiveProjects,
+            project => Assert.Equal("exclusive-first", project.GetProperty("scheduleReason").GetString()));
         Assert.True(parallelTests.Max(command => command.StartedTick) < parallelTests.Min(command => command.FinishedTick));
         Assert.Contains("(exclusive)", console.ReadOutputString(), StringComparison.Ordinal);
     }

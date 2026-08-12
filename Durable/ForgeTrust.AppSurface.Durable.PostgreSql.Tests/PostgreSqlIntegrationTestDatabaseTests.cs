@@ -58,6 +58,12 @@ public sealed class PostgreSqlIntegrationTestDatabaseTests
             var replacementTask = PostgreSqlIntegrationTestDatabase.TryCreateAsync().AsTask();
             await disposing.DisposeAsync();
             disposed = true;
+            await using (var disposedDataSource = NpgsqlDataSource.Create(disposing.ConnectionString))
+            {
+                var exception = await Assert.ThrowsAsync<PostgresException>(async () => await disposedDataSource.OpenConnectionAsync());
+                Assert.Equal(PostgresErrorCodes.InvalidCatalogName, exception.SqlState);
+            }
+
             await using var replacement = await replacementTask;
 
             AssertSameServerWithDistinctDatabases(surviving.ConnectionString, replacement.ConnectionString);

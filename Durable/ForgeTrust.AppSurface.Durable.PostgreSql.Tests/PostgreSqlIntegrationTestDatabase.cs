@@ -59,7 +59,9 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
     /// <remarks>
     /// This is the same path that <see cref="TryCreateAsync"/> uses when
     /// <c>APPSURFACE_POSTGRES_TEST_CONNECTION</c> is set. It is exposed internally so fixture tests can verify
-    /// configured-server isolation without mutating process-wide environment state.
+    /// configured-server isolation without mutating process-wide environment state. The connection must target a
+    /// PostgreSQL 17.5 server whose database can be changed to <c>postgres</c>, and its credentials must be allowed
+    /// to create and drop databases.
     /// </remarks>
     internal static async ValueTask<PostgreSqlIntegrationTestDatabase> CreateFromConnectionStringAsync(string connectionString)
     {
