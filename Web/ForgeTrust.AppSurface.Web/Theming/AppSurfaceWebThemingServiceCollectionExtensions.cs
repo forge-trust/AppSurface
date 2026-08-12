@@ -97,16 +97,18 @@ public static class AppSurfaceWebThemingServiceCollectionExtensions
     /// <returns>The original <paramref name="services"/> instance.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">
-    /// Neutral theme services, a scoped <see cref="IAppSurfaceWebThemeSelectionPolicy"/>, or the built-in ordinary
-    /// Web document provider are missing; a conflicting adapter is registered; or selection is registered twice.
+    /// Singleton neutral theme services, a scoped <see cref="IAppSurfaceWebThemeSelectionPolicy"/>, or the built-in
+    /// ordinary Web document provider are missing; a conflicting adapter is registered; or selection is registered twice.
     /// </exception>
     /// <remarks>
     /// <para>
     /// Register <c>AddAppSurfaceTheming</c>, a scoped host implementation of
     /// <see cref="IAppSurfaceWebThemeSelectionPolicy"/>, then this opt-in. The policy consumes only already-authorized
     /// application context and returns either one registered <c>AppSurfaceThemeId</c> or <see langword="false"/> for
-    /// the configured default. The adapter validates selected ids and the resolver's configured default identifier and
-    /// role snapshots against the sealed registry and never serializes a caller-supplied theme pair.
+    /// the configured default. Both neutral services must be singletons because the adapter prevalidates and caches
+    /// package-owned documents once for the application. The adapter validates selected ids and the resolver's
+    /// configured default identifier and role snapshots against the sealed registry and never serializes a
+    /// caller-supplied theme pair.
     /// </para>
     /// <para>
     /// This adapter intentionally cannot compose with browser-local preferences or a consumer-owned
@@ -119,20 +121,9 @@ public static class AppSurfaceWebThemingServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        if (!services.Any(descriptor => descriptor.ServiceType == typeof(ForgeTrust.AppSurface.Theming.IAppSurfaceThemeResolver))
-            || !services.Any(descriptor => descriptor.ServiceType == typeof(ForgeTrust.AppSurface.Theming.IAppSurfaceThemeRegistry)))
-        {
-            throw new InvalidOperationException(
-                "ASWEBTHEME003: AddAppSurfaceWebThemeSelection requires IAppSurfaceThemeResolver and IAppSurfaceThemeRegistry to be registered first. AddAppSurfaceTheming is the supported registration path.");
-        }
-
-        var policyDescriptor = services.LastOrDefault(
-            descriptor => descriptor.ServiceType == typeof(IAppSurfaceWebThemeSelectionPolicy));
-        if (policyDescriptor is null || policyDescriptor.Lifetime != ServiceLifetime.Scoped)
-        {
-            throw new InvalidOperationException(
-                "ASWEBTHEME004: AddAppSurfaceWebThemeSelection requires a scoped IAppSurfaceWebThemeSelectionPolicy to be registered first.");
-        }
+        var registrationState = new AppSurfaceThemeSelectionRegistrationState(services);
+        registrationState.ValidateNeutralServiceLifetimes();
+        registrationState.ValidatePolicyLifetime();
 
         if (services.Any(descriptor => descriptor.ServiceType == typeof(AppSurfaceThemePreferenceRegistrationMarker)))
         {
@@ -149,7 +140,7 @@ public static class AppSurfaceWebThemingServiceCollectionExtensions
         EnsureOrdinaryDocumentProvider(services);
         services.Replace(ServiceDescriptor.Scoped<IAppSurfaceThemeDocumentProvider, AppSurfaceThemeSelectionDocumentProvider>());
         services.AddSingleton<AppSurfaceThemeSelectionDocumentCache>();
-        services.AddSingleton(new AppSurfaceThemeSelectionRegistrationState(services));
+        services.AddSingleton(registrationState);
         services.AddSingleton<AppSurfaceThemeSelectionRegistrationMarker>();
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IStartupFilter, AppSurfaceThemeSelectionStartupValidator>());

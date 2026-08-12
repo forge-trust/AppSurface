@@ -20,7 +20,7 @@ internal sealed class AppSurfaceThemeSelectionDocumentCache
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(resolver);
 
-        var defaultResolution = resolver.ResolveDefault();
+        var defaultResolution = ResolveDefault(resolver);
         var defaultDocument = AppSurfaceThemeDocumentSerializer.Serialize(defaultResolution);
         if (!defaultDocument.IsRenderable)
         {
@@ -31,12 +31,7 @@ internal sealed class AppSurfaceThemeSelectionDocumentCache
         var documents = new Dictionary<string, AppSurfaceThemeDocument>(StringComparer.Ordinal);
         var registeredThemeIds = new HashSet<string>(StringComparer.Ordinal);
         var registeredDefault = false;
-        var themeIds = registry.ThemeIds;
-        if (themeIds is null)
-        {
-            throw new InvalidOperationException(
-                "ASWEBTHEME008: The sealed neutral theme registry did not expose its theme pair identifiers.");
-        }
+        var themeIds = GetThemeIds(registry);
 
         foreach (var themeId in themeIds)
         {
@@ -55,6 +50,15 @@ internal sealed class AppSurfaceThemeSelectionDocumentCache
             {
                 throw new InvalidOperationException(
                     "ASWEBTHEME008: The sealed neutral theme registry could not resolve an advertised theme pair identifier.");
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                throw new InvalidOperationException(
+                    "ASWEBTHEME008: The sealed neutral theme registry failed while resolving an advertised theme pair identifier.");
             }
 
             if (pair is null || pair.Id != themeId)
@@ -109,5 +113,41 @@ internal sealed class AppSurfaceThemeSelectionDocumentCache
 
         document = AppSurfaceThemeDocument.Empty;
         return false;
+    }
+
+    private static AppSurfaceThemeResolution ResolveDefault(IAppSurfaceThemeResolver resolver)
+    {
+        try
+        {
+            return resolver.ResolveDefault();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            throw new InvalidOperationException(
+                "ASWEBTHEME008: The configured default AppSurface theme pair could not be resolved by the theme selection adapter.");
+        }
+    }
+
+    private static AppSurfaceThemeId[] GetThemeIds(IAppSurfaceThemeRegistry registry)
+    {
+        try
+        {
+            return registry.ThemeIds?.ToArray()
+                ?? throw new InvalidOperationException(
+                    "ASWEBTHEME008: The sealed neutral theme registry did not expose its theme pair identifiers.");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            throw new InvalidOperationException(
+                "ASWEBTHEME008: The sealed neutral theme registry could not expose its theme pair identifiers.");
+        }
     }
 }

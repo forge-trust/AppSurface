@@ -31,7 +31,9 @@ internal sealed class AppSurfaceThemeSelectionStartupValidator : IStartupFilter
     /// <summary>Validates that no later registration replaced the opt-in selection provider.</summary>
     internal void Validate()
     {
-        _serviceProvider.GetRequiredService<AppSurfaceThemeSelectionRegistrationState>().ValidatePolicyLifetime();
+        var registrationState = _serviceProvider.GetRequiredService<AppSurfaceThemeSelectionRegistrationState>();
+        registrationState.ValidateNeutralServiceLifetimes();
+        registrationState.ValidatePolicyLifetime();
 
         using var scope = _serviceProvider.CreateScope();
         var provider = scope.ServiceProvider.GetRequiredService<IAppSurfaceThemeDocumentProvider>();
@@ -51,7 +53,7 @@ internal sealed class AppSurfaceThemePreferenceRegistrationMarker;
 /// <summary>Marks the selection adapter so duplicate registration fails predictably.</summary>
 internal sealed class AppSurfaceThemeSelectionRegistrationMarker;
 
-/// <summary>Retains the mutable registration collection until startup can validate its final policy lifetime.</summary>
+/// <summary>Retains the mutable registration collection until startup can validate its final selection contract.</summary>
 internal sealed class AppSurfaceThemeSelectionRegistrationState(IServiceCollection services)
 {
     private readonly IServiceCollection _services = services ?? throw new ArgumentNullException(nameof(services));
@@ -65,6 +67,23 @@ internal sealed class AppSurfaceThemeSelectionRegistrationState(IServiceCollecti
         {
             throw new InvalidOperationException(
                 "ASWEBTHEME004: AddAppSurfaceWebThemeSelection requires the final IAppSurfaceWebThemeSelectionPolicy registration to be scoped.");
+        }
+    }
+
+    /// <summary>Rejects a later neutral-service registration that violates the cache lifetime contract.</summary>
+    internal void ValidateNeutralServiceLifetimes()
+    {
+        var registryDescriptor = _services.LastOrDefault(
+            descriptor => descriptor.ServiceType == typeof(ForgeTrust.AppSurface.Theming.IAppSurfaceThemeRegistry));
+        var resolverDescriptor = _services.LastOrDefault(
+            descriptor => descriptor.ServiceType == typeof(ForgeTrust.AppSurface.Theming.IAppSurfaceThemeResolver));
+        if (registryDescriptor is null
+            || resolverDescriptor is null
+            || registryDescriptor.Lifetime != ServiceLifetime.Singleton
+            || resolverDescriptor.Lifetime != ServiceLifetime.Singleton)
+        {
+            throw new InvalidOperationException(
+                "ASWEBTHEME003: AddAppSurfaceWebThemeSelection requires singleton IAppSurfaceThemeResolver and IAppSurfaceThemeRegistry services to be registered first. AddAppSurfaceTheming is the supported registration path.");
         }
     }
 }
