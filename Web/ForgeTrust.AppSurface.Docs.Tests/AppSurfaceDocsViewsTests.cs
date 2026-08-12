@@ -554,6 +554,13 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("article.append(link);", searchClient);
         Assert.Contains("docs-search-result-badges", searchClient);
         Assert.Contains("function createSearchResultPageTypeBadge(doc)", searchClient);
+        Assert.Contains("function getSearchLifecycleLabel(item)", searchClient);
+        Assert.Contains("function renderSearchLifecycleBadges(item, className = '')", searchClient);
+        Assert.Contains("docs-search-result-badge-lifecycle", searchClient);
+        Assert.Contains("docs-search-result-badge-deprecated", searchClient);
+        Assert.Contains("const state = [lifecycle, deprecated].filter(Boolean).join(', ');", searchClient);
+        Assert.Contains("return state ? `Open ${title}${location}. ${state}.` : `Open ${title}${location}`;", searchClient);
+        Assert.Contains("const lifecycleBadges = renderSearchLifecycleBadges(item, 'docs-search-option-badge');", searchClient);
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.component))", searchClient);
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.audience), true)", searchClient);
         Assert.Contains("docs-search-result-meta-line", searchClient);
@@ -742,6 +749,9 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains(".docs-search-result-link:active", searchStylesheet);
         Assert.Contains("background: var(--docs-search-color-state-active-fill);", searchStylesheet);
         Assert.Contains("color: var(--docs-search-color-accent);", searchStylesheet);
+        Assert.Contains(".docs-search-result-badge-lifecycle", searchStylesheet);
+        Assert.Contains(".docs-search-result-badge-deprecated", searchStylesheet);
+        Assert.Contains("--docs-search-color-syntax-parameter: var(--docs-color-syntax-parameter, #fcd34d);", searchStylesheet);
         Assert.Contains(
             "background: linear-gradient(90deg, var(--docs-search-color-skeleton-edge), var(--docs-search-color-skeleton-mid), var(--docs-search-color-skeleton-edge));",
             searchStylesheet);

@@ -778,7 +778,33 @@ public record DocNode(
     string? CanonicalPath = null,
     DocMetadata? Metadata = null,
     IReadOnlyList<DocOutlineItem>? Outline = null,
-    IReadOnlyList<DocSymbolSourceProvenance>? SymbolSourceProvenance = null);
+    IReadOnlyList<DocSymbolSourceProvenance>? SymbolSourceProvenance = null)
+{
+    /// <summary>
+    /// Gets optional generated API symbol metadata scoped to one fragment-addressable node.
+    /// </summary>
+    /// <remarks>
+    /// This non-positional property preserves the public constructor and deconstructor shape of <see cref="DocNode"/>.
+    /// </remarks>
+    public DocGeneratedApiSymbol? GeneratedApiSymbol { get; init; }
+}
+
+/// <summary>
+/// Describes lifecycle metadata for one generated API symbol represented by a fragment-addressable <see cref="DocNode"/>.
+/// </summary>
+/// <remarks>
+/// This metadata is intentionally symbol-scoped. It must not be attached to aggregate API group pages or reused as a
+/// page-level <see cref="DocMetadata.Status"/> value, because an API group can contain symbols at different lifecycle
+/// stages. Built-in search projects these optional values only for generated API symbol records; custom harvesters may
+/// leave the value <see langword="null"/>.
+/// </remarks>
+/// <param name="ApiLifecycle">Normalized lifecycle token: <c>public</c>, <c>alpha</c>, or <c>beta</c>.</param>
+/// <param name="ApiLifecycleLabel">Reader-facing lifecycle label such as <c>Public API</c>, <c>Alpha</c>, or <c>Beta</c>.</param>
+/// <param name="IsDeprecated">Whether the generated API symbol is deprecated.</param>
+public sealed record DocGeneratedApiSymbol(
+    string ApiLifecycle,
+    string ApiLifecycleLabel,
+    bool IsDeprecated);
 
 /// <summary>
 /// Describes the overall health of the latest AppSurface Docs harvest snapshot.
@@ -1045,6 +1071,16 @@ public static class DocHarvestDiagnosticCodes
     /// A public JavaScript doclet was malformed or incomplete and could not be safely rendered.
     /// </summary>
     public const string JavaScriptMalformedPublicDoclet = "appsurfacedocs.javascript.malformed_public_doclet";
+
+    /// <summary>
+    /// A JavaScript public API doclet declared conflicting lifecycle tags and was skipped.
+    /// </summary>
+    public const string JavaScriptLifecycleConflict = "appsurfacedocs.javascript.lifecycle_conflict";
+
+    /// <summary>
+    /// A JavaScript lifecycle modifier carried unsupported content and the doclet was skipped.
+    /// </summary>
+    public const string JavaScriptMalformedLifecycle = "appsurfacedocs.javascript.malformed_lifecycle";
 
     /// <summary>
     /// A rendered JavaScript API item is missing recommended documentation fields.

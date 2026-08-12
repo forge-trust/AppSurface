@@ -91,7 +91,7 @@ Use this order when deciding where a new style belongs:
 
 Classes such as `docs-page-badge` and `docs-metadata-chip` are not a failure of utility-first styling. They are the right tool when a repeated package component needs one stable contract across multiple views and stylesheets.
 
-Shared reusable primitives belong in the Tailwind entry stylesheet at `wwwroot/css/app.css`, which generates the package stylesheet loaded on every AppSurface Docs page. Search-specific state and result styling belongs in `wwwroot/docs/search.css`; do not make non-search pages depend on search assets for badges, metadata chips, or trust/provenance chrome.
+Shared reusable primitives belong in the Tailwind entry stylesheet at `wwwroot/css/app.css`, which generates the package stylesheet loaded on every AppSurface Docs page. Search-specific state and result styling belongs in `wwwroot/docs/search.css`; do not make non-search pages depend on search assets for badges, metadata chips, or trust/provenance chrome. Generated JavaScript API lifecycle badges (`Public API`, `Alpha`, `Beta`, and `Deprecated`) are symbol-scoped shared primitives: use the shared lifecycle badge selector on rendered API fragments, and reuse the existing search-result badge component for their search chrome. Do not put a lifecycle badge on an aggregate API group page, because its symbols can have different maturity states.
 
 #### Search workspace hooks
 

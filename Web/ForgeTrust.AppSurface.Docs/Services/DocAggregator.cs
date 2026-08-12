@@ -68,6 +68,10 @@ internal sealed record DocsSearchIndexMetadata(
 /// <param name="Language">Normalized programming language for generated API documentation.</param>
 /// <param name="LanguageLabel">Reader-facing programming language label for generated API documentation.</param>
 /// <param name="SummaryPresentation">Optional bounded, display-only rich presentation for the raw summary.</param>
+/// <param name="ApiLifecycle">Optional normalized lifecycle for a generated API symbol fragment.</param>
+/// <param name="ApiLifecycleLabel">Optional reader-facing lifecycle label for a generated API symbol fragment.</param>
+/// <param name="IsDeprecated">Optional deprecation state for a generated API symbol fragment.</param>
+/// <param name="IsGeneratedApiSymbol">Optional marker that identifies a generated API symbol fragment.</param>
 internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("path")] string Path,
@@ -105,7 +109,19 @@ internal sealed record DocsSearchIndexDocument(
     string? LanguageLabel = null,
     [property: JsonPropertyName("summaryPresentation")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<DocsSearchSummaryPresentationNode>? SummaryPresentation = null);
+    IReadOnlyList<DocsSearchSummaryPresentationNode>? SummaryPresentation = null,
+    [property: JsonPropertyName("apiLifecycle")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? ApiLifecycle = null,
+    [property: JsonPropertyName("apiLifecycleLabel")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? ApiLifecycleLabel = null,
+    [property: JsonPropertyName("isDeprecated")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    bool? IsDeprecated = null,
+    [property: JsonPropertyName("isGeneratedApiSymbol")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    bool? IsGeneratedApiSymbol = null);
 
 /// <summary>
 /// A bounded, display-only Markdown projection for a docs search-result summary.
@@ -1015,7 +1031,10 @@ public class DocAggregator
                                        null,
                                        n.Metadata,
                                        n.Outline,
-                                       n.SymbolSourceProvenance);
+                                       n.SymbolSourceProvenance)
+                                   {
+                                       GeneratedApiSymbol = n.GeneratedApiSymbol
+                                   };
                                })
                            .ToList();
 
@@ -1030,8 +1049,8 @@ public class DocAggregator
                                (n, index) =>
                                {
                                    var rewrittenNode = new DocNode(
-                                   n.Title,
-                                   n.Path,
+                                       n.Title,
+                                       n.Path,
                                        DocContentLinkRewriter.RewriteInternalDocLinks(
                                            n.Path,
                                            n.Content,
@@ -1042,9 +1061,12 @@ public class DocAggregator
                                    routeIdentityCatalog.TryGetPublicRoutePath(n.Path, out var publicRoutePath)
                                        ? publicRoutePath
                                        : null,
-                                   n.Metadata,
-                                   n.Outline,
-                                   n.SymbolSourceProvenance);
+                                       n.Metadata,
+                                       n.Outline,
+                                       n.SymbolSourceProvenance)
+                                   {
+                                       GeneratedApiSymbol = n.GeneratedApiSymbol
+                                   };
                                    if (markdownSourceOwnerIndexes.Contains(index))
                                    {
                                        markdownSourceOwnerNodes.Add(rewrittenNode);
@@ -1480,7 +1502,9 @@ public class DocAggregator
             or DocHarvestDiagnosticCodes.JavaScriptParseFailed
             or DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped
             or DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape
-            or DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet);
+            or DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet
+            or DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict
+            or DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle);
     }
 
     private static Task<IReadOnlyList<DocNode>> HarvestWithContextAsync(
@@ -2358,7 +2382,11 @@ public class DocAggregator
                         entryPoints,
                         codeLanguage,
                         codeLanguageLabel,
-                        summaryPresentation);
+                        summaryPresentation,
+                        d.GeneratedApiSymbol?.ApiLifecycle,
+                        d.GeneratedApiSymbol?.ApiLifecycleLabel,
+                        d.GeneratedApiSymbol?.IsDeprecated,
+                        d.GeneratedApiSymbol is null ? null : true);
                 })
             .Where(r => r is not null)
             .Select(r => r!)
@@ -2792,7 +2820,10 @@ public class DocAggregator
                     namespaceNode.CanonicalPath,
                     mergedMetadata,
                     CombineOutlines(readmeNode.Outline, namespaceNode.Outline),
-                    namespaceNode.SymbolSourceProvenance);
+                    namespaceNode.SymbolSourceProvenance)
+                {
+                    GeneratedApiSymbol = namespaceNode.GeneratedApiSymbol
+                };
 
                 var namespaceIndex = nodes.FindIndex(n => string.Equals(n.Path, namespaceNode.Path, StringComparison.OrdinalIgnoreCase));
                 if (namespaceIndex >= 0)
