@@ -196,7 +196,7 @@ public sealed class CoverageSolutionScriptTests
         var inventory = ReadRepositoryFile("artifacts", "issue-728-test-efficiency", "candidate-inventory.md");
         var results = ReadRepositoryFile("artifacts", "issue-728-test-efficiency", "results.md");
 
-        Assert.Contains("Exact wall-clock duration", scope, StringComparison.Ordinal);
+        Assert.Contains("High-resolution monotonic duration", scope, StringComparison.Ordinal);
         Assert.Contains("actual serial set is authoritative", scope, StringComparison.Ordinal);
         Assert.Contains("401 seconds", scope, StringComparison.Ordinal);
         Assert.Contains("relative spread", scope, StringComparison.Ordinal);
@@ -205,7 +205,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("screening-only, never CI or issue-claim evidence", scope, StringComparison.Ordinal);
         Assert.Contains("Testcontainers and externally configured paths separately", inventory, StringComparison.Ordinal);
         Assert.Contains("aggregate failures only after every cleanup attempt", inventory, StringComparison.Ordinal);
-        Assert.Contains("exact coverage-step wall-clock time", results, StringComparison.Ordinal);
+        Assert.Contains("high-resolution monotonic coverage-wrapper duration", results, StringComparison.Ordinal);
         Assert.Contains("at least 15% and at least five seconds", results, StringComparison.Ordinal);
         Assert.Contains("2027-02-11", results, StringComparison.Ordinal);
     }

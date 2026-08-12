@@ -285,27 +285,33 @@ jobs:
           max_artifact_total_bytes=$((512 * 1024 * 1024))
           artifact_copied_bytes=0
           artifact_source_errors=()
+          artifact_source_error_count=0
+
+          record_artifact_source_error() {
+            artifact_source_errors+=("$1")
+            artifact_source_error_count="$(( artifact_source_error_count + 1 ))"
+          }
 
           copy_if_present() {
             local source="$1"
             local destination="$2"
             if [[ -e "$source" || -L "$source" ]]; then
               if [[ -L "$source" ]]; then
-                artifact_source_errors+=("Refusing symlinked evidence source: $source")
+                record_artifact_source_error "Refusing symlinked evidence source: $source"
                 return
               fi
               if [[ ! -f "$source" ]]; then
-                artifact_source_errors+=("Evidence source is not a regular file: $source")
+                record_artifact_source_error "Evidence source is not a regular file: $source"
                 return
               fi
               local source_bytes
               source_bytes="$(wc -c < "$source")"
               if (( source_bytes > max_artifact_file_bytes )); then
-                artifact_source_errors+=("Evidence source exceeds the per-file size limit: $source")
+                record_artifact_source_error "Evidence source exceeds the per-file size limit: $source"
                 return
               fi
               if (( artifact_copied_bytes + source_bytes > max_artifact_total_bytes )); then
-                artifact_source_errors+=("Evidence sources exceed the aggregate size limit: $source")
+                record_artifact_source_error "Evidence sources exceed the aggregate size limit: $source"
                 return
               fi
               mkdir -p "$(dirname "$destination")"
@@ -369,9 +375,10 @@ jobs:
           done < <(find "$coverage_root/projects" -type f \( -name dotnet-test.log -o -name coverage-normalization.log \) -print 2>/dev/null || true)
 
           evidence_contract_complete=true
-          evidence_contract_errors=("${artifact_source_errors[@]}")
-          if (( ${#artifact_source_errors[@]} > 0 )); then
+          evidence_contract_errors=()
+          if (( artifact_source_error_count > 0 )); then
             evidence_contract_complete=false
+            evidence_contract_errors=("${artifact_source_errors[@]}")
           fi
           require_nonempty_file() {
             local path="$1"
