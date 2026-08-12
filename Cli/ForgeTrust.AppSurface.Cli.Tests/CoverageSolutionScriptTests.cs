@@ -32,6 +32,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("--min-patch-line 95", script, StringComparison.Ordinal);
         Assert.Contains("--min-patch-branch 85", script, StringComparison.Ordinal);
         Assert.Contains("--patch-line-mode codecov", script, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_REQUIRE_NON_SANDBOX:-true", script, StringComparison.Ordinal);
         Assert.Equal(3, CountOccurrences(script, "--no-restore"));
         Assert.Contains("if [[ -n \"$COVERAGE_GATE_DIFF_BASE\" ]]; then", script, StringComparison.Ordinal);
     }
@@ -77,6 +78,40 @@ public sealed class CoverageSolutionScriptTests
         Assert.DoesNotContain("coverage run \\", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("Gate PR coverage with AppSurface CLI", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("Gate baseline coverage with AppSurface CLI", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildWorkflow_ShouldCaptureCoverageSecurityHangDiagnosticsBeforeTheJobTimeout()
+    {
+        var workflow = ReadWorkflow();
+
+        Assert.Contains(
+            """
+              coverage-security-platform:
+                name: Coverage security contracts (${{ matrix.os }})
+                runs-on: ${{ matrix.os }}
+                timeout-minutes: 10
+            """,
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            """
+                      --logger "console;verbosity=detailed"
+                      --blame-hang
+                      --blame-hang-timeout 2m
+                      --blame-hang-dump-type mini
+
+                  - name: Upload coverage security diagnostics
+                    if: ${{ always() }}
+                    uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+                    with:
+                      name: coverage-security-diagnostics-${{ matrix.os }}
+                      path: Cli/ForgeTrust.AppSurface.Cli.Tests/TestResults
+                      if-no-files-found: warn
+                      retention-days: 7
+            """,
+            workflow,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -187,6 +222,40 @@ public sealed class CoverageSolutionScriptTests
             "--logger\nGitHubActions;report-warnings=false\n--no-restore",
             result.DotnetInvocations,
             StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("false", false)]
+    [InlineData("0", true)]
+    [InlineData("off", true)]
+    [InlineData("no", true)]
+    [InlineData("False", true)]
+    [InlineData("invalid", true)]
+    public async Task Script_ShouldRequireNonSandboxByDefaultWithExplicitRestrictedRunEscapeHatch(
+        string? requireNonSandbox,
+        bool expectsRequirement)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var result = await RunScriptAsync(
+            [],
+            "COVERAGE_REQUIRE_NON_SANDBOX",
+            requireNonSandbox,
+            dotnetExitCode: 0);
+
+        Assert.Equal(0, result.ExitCode);
+        if (expectsRequirement)
+        {
+            Assert.Contains("--require-non-sandbox", result.DotnetInvocations, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.DoesNotContain("--require-non-sandbox", result.DotnetInvocations, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

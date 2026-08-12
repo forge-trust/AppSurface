@@ -1,8 +1,7 @@
 # ForgeTrust.AppSurface.Durable.PostgreSql
 
-> **Source-only public preview:** this package supplies explicit PostgreSQL schema management, Work, Flow, Schedule,
-> an explicitly opted-in bounded runtime host, and durable W3C causal evidence. It remains excluded from publish plans
-> until coordinated release review proves operational conformance. Storage registration itself starts no worker or hosted
+> **Public preview:** this package supplies explicit PostgreSQL schema management, Work, Flow, Schedule, an explicitly
+> opted-in bounded runtime host, and durable W3C causal evidence. Storage registration itself starts no worker or hosted
 > service.
 
 Choose this package when an application must commit its domain mutation and durable Work acceptance in the same
@@ -19,8 +18,8 @@ depends on PostgreSQL.
 
 ## Slice 7 discovery and reconciliation
 
-This provider is a source-only public preview and remains held from publication pending coordinated release
-evidence. Registration is passive: `AddAppSurfaceDurablePostgreSql` installs storage and runtime services but does not
+This provider is a public preview. Registration is passive: `AddAppSurfaceDurablePostgreSql` installs storage and runtime
+services but does not
 start a worker, open a connection, or apply DDL. Continuous processing requires the explicit
 [`AddWorkerHost()` opt-in](#run-a-worker-host). Startup validates the installed schema and active epoch and never
 applies DDL or advances migration history.
@@ -482,7 +481,7 @@ depend on internal PostgreSQL claim/store types.
 ## Repair an ASDUR211 child-effect suspension
 
 Apply the additive [`0008_flow_repair.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/Migrations/0008_flow_repair.sql) migration after `0007_flow_retention.sql`, rerun the
-[`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) recipe, and deploy a compatible source-preview
+[`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) recipe, and deploy a compatible public-preview
 binary before enabling repair callers. Existing suspensions that lack the V1 descriptor identity intentionally return
 `ASDUR218`; the migration does not invent a digest from an incomplete legacy shape.
 
@@ -509,8 +508,7 @@ From the repository root, `./Durable/verify-postgresql.sh --quick` runs focused 
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
-This package has an explicitly experimental or publication-held contract. Do not
-treat it as a normal prerelease install; use the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and
-[release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) for the current publication decision, proof requirements, and
-migration guidance.
+AppSurface ships as a coordinated package family. Before installing this package
+from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md)
+for current release risk, migration guidance, and readiness.
 <!-- appsurface-release-guidance: end -->

@@ -1,6 +1,6 @@
 # Durable PostgreSQL local tutorial
 
-This source-preview tutorial proves the current public [`ForgeTrust.AppSurface.Durable.PostgreSql`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) adoption path on a disposable PostgreSQL 17 database. It is a local composition reference, not production operations guidance. Application startup never applies DDL.
+This public-preview tutorial proves the current [`ForgeTrust.AppSurface.Durable.PostgreSql`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) adoption path on a disposable PostgreSQL 17 database. It is a local composition reference, not production operations guidance. Application startup never applies DDL.
 
 The [AppSurface CLI](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands) owns migration status, reviewed scripts, preflight, and guarded apply. This example owns only two local-proof commands:
 
@@ -136,7 +136,7 @@ the temporary passfile, never a password; `--connection-env` names a variable an
 export APPSURFACE_DURABLE_MIGRATION_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_owner;Passfile=$APPSURFACE_DURABLE_PASSFILE"
 dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
   durable schema apply --connection-env APPSURFACE_DURABLE_MIGRATION_CONNECTION --apply
-# Expected: Durable schema: 0 -> 7; applied: 0001, 0002, 0003, 0004, 0005, 0006, 0007.
+# Expected: Durable schema: 0 -> 8; applied: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008.
 ```
 
 Apply the reviewed role recipe after migrations with the disposable container's bootstrap administrator, then configure

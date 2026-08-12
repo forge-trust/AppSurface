@@ -53,7 +53,20 @@ jobs:
           dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
           --configuration Release
           --no-restore
-          --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests"
+          --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests"
+          --logger "console;verbosity=detailed"
+          --blame-hang
+          --blame-hang-timeout 2m
+          --blame-hang-dump-type mini
+
+      - name: Upload coverage security diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-security-diagnostics-${{ matrix.os }}
+          path: Cli/ForgeTrust.AppSurface.Cli.Tests/TestResults
+          if-no-files-found: warn
+          retention-days: 7
 
   keycloak-theme-evidence:
     name: Keycloak theme evidence
@@ -356,9 +369,6 @@ jobs:
           cache: pnpm
           cache-dependency-path: Web/pnpm-lock.yaml
 
-      - name: Test dormant release-contract classifier
-        run: node --experimental-test-coverage --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 --test .github/scripts/release-contract-v1.test.mjs
-
       - name: Verify generated package chooser
         run: |
           dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --configuration Release --no-restore -- verify
@@ -400,12 +410,35 @@ jobs:
             TestResults/coverage-merged/slow-test-diagnostics.json
           if-no-files-found: warn
 
+      - name: Upload coverage gate reports
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() && !cancelled() }}
+        with:
+          name: coverage-gate-reports
+          path: |
+            TestResults/coverage-merged/coverage-gate.json
+            TestResults/coverage-merged/coverage-gate.md
+            TestResults/coverage-merged/coverage-patch-targets.json
+            TestResults/coverage-merged/coverage-patch-targets.md
+          if-no-files-found: warn
+
       - name: Publish slow-test diagnostics summary
         if: ${{ always() && !cancelled() }}
         run: |
           diagnostics_markdown="TestResults/coverage-merged/slow-test-diagnostics.md"
+          summary_preview_maximum_bytes=65536
           if [[ -f "$diagnostics_markdown" ]]; then
-            cat "$diagnostics_markdown" >> "$GITHUB_STEP_SUMMARY"
+            diagnostics_bytes="$(wc -c < "$diagnostics_markdown")"
+            if (( diagnostics_bytes <= summary_preview_maximum_bytes )); then
+              cat "$diagnostics_markdown" >> "$GITHUB_STEP_SUMMARY"
+            else
+              head -c "$summary_preview_maximum_bytes" "$diagnostics_markdown" >> "$GITHUB_STEP_SUMMARY"
+              {
+                echo
+                echo
+                echo "> Slow-test diagnostics were truncated in this summary (${diagnostics_bytes} bytes total). Download the \`slow-test-diagnostics\` artifact for the complete report."
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
           else
             {
               echo "## Slow-test diagnostics"

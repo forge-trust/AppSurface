@@ -69,6 +69,7 @@ public sealed class ToolPackageContractTests
             "--output",
             packageDirectory.Path,
             "/p:EnableRazorWireCliToolPackaging=true",
+            "/p:UseSharedCompilation=false",
             $"/p:PackageVersion={version}");
 
         packResult.AssertSucceeded("Expected the RazorWire CLI project to pack as a .NET tool package.");
