@@ -128,12 +128,7 @@ internal sealed class ReleasePreparationWitnessBuilder
         try
         {
             var directory = Path.GetDirectoryName(Path.GetFullPath(path));
-            if (string.IsNullOrWhiteSpace(directory))
-            {
-                throw new PackageIndexException("Release-preparation witness path must have a parent directory.");
-            }
-
-            Directory.CreateDirectory(directory);
+            Directory.CreateDirectory(directory!);
             var json = JsonSerializer.Serialize(witness, new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,

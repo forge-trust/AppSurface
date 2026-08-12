@@ -79,12 +79,7 @@ internal sealed partial class ReleaseVerifyPreparationDiffCommand : ICommand
             {
                 var reportPath = Path.GetFullPath(ReportPath, repositoryRoot);
                 var directory = Path.GetDirectoryName(reportPath);
-                if (string.IsNullOrWhiteSpace(directory))
-                {
-                    throw new IOException("The release-preparation report path must have a parent directory.");
-                }
-
-                Directory.CreateDirectory(directory);
+                Directory.CreateDirectory(directory!);
                 await File.WriteAllTextAsync(reportPath, report, cancellationToken);
             }
 

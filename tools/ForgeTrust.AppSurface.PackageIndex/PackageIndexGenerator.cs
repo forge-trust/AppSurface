@@ -188,6 +188,12 @@ internal sealed class PackageIndexGenerator
         return GenerateDocuments(request, entries);
     }
 
+    /// <summary>
+    /// Renders the package chooser and readiness documents from entries already resolved for the same request.
+    /// </summary>
+    /// <param name="request">Generation request that supplies output and repository context.</param>
+    /// <param name="entries">Canonical entries resolved by <see cref="ResolveGenerationEntriesAsync"/>.</param>
+    /// <returns>In-memory document content without reading or writing repository files.</returns>
     internal static PackageIndexDocuments GenerateDocuments(
         PackageIndexRequest request,
         IReadOnlyList<ResolvedPackageEntry> entries)
