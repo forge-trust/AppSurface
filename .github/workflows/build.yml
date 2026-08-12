@@ -53,6 +53,7 @@ jobs:
           dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
           --configuration Release
           --no-restore
+          /p:TailwindRuntimeBinaryResolutionEnabled=false
           --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests"
           --logger "console;verbosity=detailed"
           --blame-hang

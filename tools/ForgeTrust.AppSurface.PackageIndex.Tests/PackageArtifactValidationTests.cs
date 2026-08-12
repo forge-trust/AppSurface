@@ -5515,7 +5515,23 @@ public sealed class PackageArtifactValidationTests : IDisposable
         const string disabledRuntimeResolutionSetting =
             """(?im)(?:^\s*TailwindRuntimeBinaryResolutionEnabled:\s*(?:"false"|'false'|false)\s*$|(?:^|\s)(?:env\s+)?TailwindRuntimeBinaryResolutionEnabled=false\b|(?:/p:|-p:|/property:|-property:)(?:[^\s'"]*;)*TailwindRuntimeBinaryResolutionEnabled=false\b)""";
 
-        Assert.DoesNotMatch(disabledRuntimeResolutionSetting, buildWorkflow);
+        const string coverageSecurityJobStartMarker = "  coverage-security-platform:";
+        const string coverageSecurityJobEndMarker = "\n  keycloak-theme-evidence:";
+        var coverageSecurityJobStart = buildWorkflow.IndexOf(coverageSecurityJobStartMarker, StringComparison.Ordinal);
+        var coverageSecurityJobEnd = buildWorkflow.IndexOf(coverageSecurityJobEndMarker, coverageSecurityJobStart, StringComparison.Ordinal);
+        Assert.True(coverageSecurityJobStart >= 0, "The coverage security workflow job must remain defined.");
+        Assert.True(coverageSecurityJobEnd > coverageSecurityJobStart, "The coverage security workflow job must end before the Keycloak evidence job.");
+        var coverageSecurityJob = buildWorkflow[coverageSecurityJobStart..coverageSecurityJobEnd];
+        var buildWorkflowWithoutCoverageSecurityJob = buildWorkflow.Remove(
+            coverageSecurityJobStart,
+            coverageSecurityJobEnd - coverageSecurityJobStart);
+
+        Assert.Matches(disabledRuntimeResolutionSetting, coverageSecurityJob);
+        Assert.Contains(
+            "--no-restore\n          /p:TailwindRuntimeBinaryResolutionEnabled=false\n          --filter",
+            coverageSecurityJob,
+            StringComparison.Ordinal);
+        Assert.DoesNotMatch(disabledRuntimeResolutionSetting, buildWorkflowWithoutCoverageSecurityJob);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, codeQualityWorkflow);
         Assert.Matches(disabledRuntimeResolutionSetting, vcsIgnoreParityWorkflow);
         Assert.Contains("ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.csproj", vcsIgnoreParityWorkflow, StringComparison.Ordinal);
