@@ -205,6 +205,22 @@ public class ConfigAuditReporterTests
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
+    private sealed class ThrowingReadOnlyIndexerValues : IReadOnlyList<string>
+    {
+        public string this[int index] => throw new InvalidOperationException("read-only-indexer-secret");
+
+        public int Count => 1;
+
+        public IEnumerator<string> GetEnumerator() => throw new InvalidOperationException("read-only-indexer-secret");
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class GenericSecretValue
+    {
+        public string Value { get; set; } = "generic-secret-value";
+    }
+
     private sealed class PropertyBudgetShape
     {
         public string First { get; set; } = "first";
@@ -1349,6 +1365,34 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_EscapesDictionaryLabelControlCharactersBeforeTextRendering()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        const string rawLabel = "operator\r\nforged\tlabel";
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Labels.Items"] = new Dictionary<string, string> { [rawLabel] = "visible" }
+                }));
+        services.AddConfigAuditKey<Dictionary<string, string>>(
+            "Labels.Items",
+            options => options.TraverseCollectionElements = true);
+
+        var provider = services.BuildServiceProvider();
+        var report = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Production");
+        var rendered = provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report);
+
+        var child = Assert.Single(AssertEntry(report, "Labels.Items", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Equal("Labels.Items[\"operator\\r\\nforged\\tlabel\"]", child.Key);
+        Assert.Equal("operator\\r\\nforged\\tlabel", child.Element?.KeyLabel);
+        Assert.Contains("Labels.Items[\"operator\\r\\nforged\\tlabel\"]", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain(rawLabel, rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void GetReport_ReportsCollectionTraversalLimitsAndUnsupportedShapes()
     {
         var environment = A.Fake<IEnvironmentProvider>();
@@ -1576,6 +1620,33 @@ public class ConfigAuditReporterTests
         Assert.DoesNotContain(
             entry.Diagnostics,
             diagnostic => diagnostic.Message.Contains("read-only-list-secret", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GetReport_ExpandedModeConvertsReadOnlyListIndexerFailuresToSanitizedDiagnostics()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Values"] = new ThrowingReadOnlyIndexerValues()
+                }));
+        services.AddConfigAuditKey<ThrowingReadOnlyIndexerValues>("Values");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport(new ConfigAuditReportRequest("Production", ConfigAuditReportMode.ExpandKnownEntryCollections));
+
+        var entry = AssertEntry(report, "Values", ConfigAuditEntryState.Resolved, null);
+        Assert.Empty(entry.Children);
+        Assert.Contains(entry.Diagnostics, diagnostic => diagnostic.Code == "config-audit-traversal-threw");
+        Assert.DoesNotContain(
+            entry.Diagnostics,
+            diagnostic => diagnostic.Message.Contains("read-only-indexer-secret", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -3653,6 +3724,45 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_ExpandedRequest_RedactsGenericDescendantValuesAndHidesDictionaryLabels()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Objects"] = new List<GenericSecretValue> { new() },
+                    ["Labels"] = new Dictionary<string, string> { ["operator-supplied-label"] = "generic-secret-value" }
+                }));
+        services.AddConfigAuditKey<List<GenericSecretValue>>("Objects");
+        services.AddConfigAuditKey<Dictionary<string, string>>("Labels");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport(new ConfigAuditReportRequest("Production", ConfigAuditReportMode.ExpandKnownEntryCollections));
+        var serialized = JsonSerializer.Serialize(report);
+
+        var objectElement = Assert.Single(AssertEntry(report, "Objects", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Equal("[redacted]", objectElement.DisplayValue);
+        Assert.True(objectElement.IsRedacted);
+        var value = Assert.Single(objectElement.Children);
+        Assert.Equal("[redacted]", value.DisplayValue);
+        Assert.True(value.IsRedacted);
+
+        var dictionaryElement = Assert.Single(AssertEntry(report, "Labels", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Equal("Labels[[redacted-key-1]]", dictionaryElement.Key);
+        Assert.Equal("[redacted-key-1]", dictionaryElement.Element?.KeyLabel);
+        Assert.True(dictionaryElement.Element?.IsKeyRedacted);
+        Assert.Equal("[redacted]", dictionaryElement.DisplayValue);
+        Assert.True(dictionaryElement.IsRedacted);
+        Assert.DoesNotContain("generic-secret-value", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("operator-supplied-label", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void GetReport_ExpandedRequest_StopsAtSharedReportNodeBudgetAndRetainsKnownRoots()
     {
         var environment = A.Fake<IEnvironmentProvider>();
@@ -3719,6 +3829,25 @@ public class ConfigAuditReporterTests
         Assert.Empty(traversal.Diagnostics);
         Assert.Equal(0, value.GetterCalls);
         Assert.True(traversalContext.WasTruncated);
+    }
+
+    [Fact]
+    public void BuildChildren_CriticalPublicPropertyGetterExceptionsPropagate()
+    {
+        var traverser = new ConfigAuditValueTraverser(new ConfigAuditRedactor());
+
+        var exception = Assert.Throws<TargetInvocationException>(() =>
+            traverser.BuildChildren(
+                ConfigAuditPath.Root("Known"),
+                new CriticalPropertyProbe(),
+                [],
+                ConfigAuditFactContext.Empty,
+                new ConfigAuditEntryOptions(),
+                new HashSet<object>(ReferenceEqualityComparer.Instance),
+                new ConfigAuditDictionaryLabelSet(),
+                ConfigAuditDictionaryKeyCorrelationContext.Unavailable("dictionary key correlation was not requested")));
+
+        Assert.IsType<AccessViolationException>(exception.InnerException);
     }
 
     private static ServiceCollection CreateServices(string configDirectory, IEnvironmentProvider environment)
@@ -3905,6 +4034,11 @@ public class ConfigAuditReporterTests
                 return "should-not-be-read";
             }
         }
+    }
+
+    private sealed class CriticalPropertyProbe
+    {
+        public string Value => throw new AccessViolationException("critical traversal failure");
     }
 
     private sealed class EmptyEnvironmentConfigProvider : IEnvironmentConfigProvider

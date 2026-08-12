@@ -156,7 +156,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             {
                 Severity = ConfigAuditDiagnosticSeverity.Warning,
                 Code = "config-audit-expanded-report-node-limit",
-                Message = "Expanded config audit report reached its global child-node budget of 16384; reported child topology is intentionally incomplete."
+                Message = $"Expanded config audit report reached its global child-node budget of {ExpandedReportNodeLimit}; reported child topology is intentionally incomplete."
             });
         }
 
@@ -496,6 +496,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             ? sources
             : resolution.AuditSources;
         var options = GetEffectiveOptions(knownEntry, out var optionsDiagnostics);
+        var rootSensitivity = options.Sensitivity;
         if (mode == ConfigAuditReportMode.ExpandKnownEntryCollections)
         {
             options = new ConfigAuditEntryOptions(
@@ -503,8 +504,8 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                 options.MaxCollectionDepth,
                 options.MaxCollectionElements,
                 options.MaxReportNodes,
-                options.DisplayDictionaryKeys,
-                options.Sensitivity,
+                displayDictionaryKeys: false,
+                sensitivity: ConfigAuditSensitivity.Sensitive,
                 options.DictionaryKeyCorrelationMode,
                 options.AssignedOptions);
         }
@@ -533,7 +534,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             state = ConfigAuditEntryState.PartiallyResolved;
         }
 
-        var redacted = _redactor.FormatValue(knownEntry.Key, rawValue, sources, options.Sensitivity);
+        var redacted = _redactor.FormatValue(knownEntry.Key, rawValue, sources, rootSensitivity);
         return new ConfigAuditEntry
         {
             Key = knownEntry.Key,

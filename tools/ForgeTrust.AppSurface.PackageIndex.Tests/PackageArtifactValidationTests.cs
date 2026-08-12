@@ -5527,10 +5527,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
             coverageSecurityJobEnd - coverageSecurityJobStart);
 
         Assert.Matches(disabledRuntimeResolutionSetting, coverageSecurityJob);
-        Assert.Contains(
-            "--no-restore\n          /p:TailwindRuntimeBinaryResolutionEnabled=false\n          /p:TailwindEnabled=false\n          --filter",
-            coverageSecurityJob,
-            StringComparison.Ordinal);
+        Assert.Matches(
+            "(?s)--no-restore\\s+/p:TailwindRuntimeBinaryResolutionEnabled=false\\s+/p:TailwindEnabled=false\\s+--filter",
+            coverageSecurityJob);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, buildWorkflowWithoutCoverageSecurityJob);
         Assert.Contains("/p:TailwindEnabled=false", coverageSecurityJob, StringComparison.Ordinal);
         Assert.Contains("Prepare generated docs stylesheet for coverage security tests", coverageSecurityJob, StringComparison.Ordinal);

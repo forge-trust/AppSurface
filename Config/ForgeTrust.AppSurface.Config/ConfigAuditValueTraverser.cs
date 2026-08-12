@@ -438,7 +438,7 @@ internal sealed class ConfigAuditValueTraverser
             {
                 childValue = property.GetValue(value);
             }
-            catch (Exception ex) when (IsPropertyReadException(ex))
+            catch (Exception ex) when (IsRecoverableTraversalException(ex))
             {
                 diagnostics.Add(CreateMemberReadFailureDiagnostic(path.AppendMember(property.Name), ex));
                 continue;
@@ -800,12 +800,6 @@ internal sealed class ConfigAuditValueTraverser
             Source = source,
             Message = message
         };
-
-    private static bool IsPropertyReadException(Exception ex) =>
-        ex is TargetInvocationException
-            or TargetParameterCountException
-            or MethodAccessException
-            or ArgumentException;
 
     private static bool IsRecoverableTraversalException(Exception exception) =>
         exception switch

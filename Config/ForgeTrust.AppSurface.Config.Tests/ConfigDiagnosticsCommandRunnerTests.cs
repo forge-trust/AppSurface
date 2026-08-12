@@ -144,6 +144,29 @@ public sealed class ConfigDiagnosticsCommandRunnerTests
     }
 
     [Fact]
+    public void Run_WithUndefinedMode_ReturnsSanitizedFailureWithoutCallingReporter()
+    {
+        var reporter = A.Fake<IConfigAuditReporter>();
+        var environmentProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environmentProvider.Environment).Returns("Production");
+        using var output = new StringWriter();
+        var runner = new ConfigDiagnosticsCommandRunner(
+            reporter,
+            new ConfigAuditTextRenderer(),
+            environmentProvider);
+
+        var result = runner.Run(output, (ConfigAuditReportMode)42);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Empty(output.ToString());
+        Assert.NotNull(result.Failure);
+        Assert.Contains(nameof(ArgumentOutOfRangeException), result.Failure!.ToDisplayString(), StringComparison.Ordinal);
+        A.CallTo(() => reporter.GetReport(A<string>._)).MustNotHaveHappened();
+        A.CallTo(() => reporter.GetReport(A<ConfigAuditReportRequest>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
     public void Run_MissingAndInvalidEntriesRemainSuccessfulInspectionResults()
     {
         var reporter = A.Fake<IConfigAuditReporter>();
