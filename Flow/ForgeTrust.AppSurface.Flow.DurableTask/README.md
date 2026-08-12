@@ -83,6 +83,33 @@ services.AddSingleton<IFlowResumeAuthorizer, MyResumeAuthorizer>();
 
 Authorization should consider the flow id, version, durable instance id, waiting node id, event name, caller identity, and any app-specific metadata. Instance ids and event names are not authorization.
 
+### Delegated agent approval mapping
+
+When a host already uses the passive delegated-agent contracts in
+[`ForgeTrust.AppSurface.Auth`](../../Auth/ForgeTrust.AppSurface.Auth/README.md#delegated-agent-task-approval), map
+them into this existing authorization seam only after the host atomically consumes an approval receipt. This package
+does not reference Auth and does not issue, store, validate, or consume receipts.
+
+Use `FlowResumeAuthorizationRequest.Caller` for the host-validated local agent or harness reference. Do not overload it
+with the human approver. Construct a new immutable, ordinal-keyed metadata projection before building the Flow request;
+the request retains the dictionary supplied by its caller. The projection should contain only display-safe values:
+
+| Metadata key | Meaning |
+| --- | --- |
+| `appsurface.correlation_id` | The host correlation identifier. |
+| `appsurface.agent_approval.approver_ref` | Opaque host approver reference, never a credential. |
+| `appsurface.agent_approval.binding_profile` | The host binding profile/version. |
+| `appsurface.agent_approval.safe_intent_digest` | The host-derived safe intent digest. |
+| `appsurface.agent_approval.receipt_ref` | Opaque receipt reference. |
+| `appsurface.agent_approval.outcome` | The terminal receipt-consumption outcome. |
+
+Map `agent-approval.consumed` to `FlowResumeAuthorizationResult.Allow("agent-approval.consumed", ...)` only after
+current authority, narrow agent grant, workflow state/version, expiry, revocation, and binding checks all pass. Map
+`agent-approval.already-consumed`, `agent-approval.expired`, `agent-approval.revoked`, `agent-approval.stale`,
+`agent-approval.binding-mismatch`, and `agent-approval.consumption-denied` to `Deny` with the same stable code. The
+host should test that its `IFlowResumeAuthorizer` registration replaces `DenyAllFlowResumeAuthorizer`; the module uses
+`TryAddSingleton` specifically so a host registration wins.
+
 ## Pitfalls
 
 - Do not mutate Durable Task host state from `AppSurfaceFlowDurableTaskModule`; it is intentionally passive.

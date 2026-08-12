@@ -1,10 +1,11 @@
 # ForgeTrust.AppSurface.Auth
 
-`ForgeTrust.AppSurface.Auth` provides passive auth contracts for AppSurface modules.
+`ForgeTrust.AppSurface.Auth` provides passive auth contracts for AppSurface modules, including a transition-bound
+delegated-agent approval vocabulary for local task harnesses.
 
 It does not authenticate users, evaluate policies, redirect responses, issue cookies, validate tokens, sign users in, sign users out, or write audit logs. Host applications still own their security stack, such as ASP.NET Core authentication and authorization in a web host.
 
-Use this package when you are authoring AppSurface modules or host integrations that need one surface-neutral vocabulary for users, sessions, auth decisions, login/logout prompts, and auth audit event descriptions.
+Use this package when you are authoring AppSurface modules or host integrations that need one surface-neutral vocabulary for users, sessions, auth decisions, login/logout prompts, auth audit event descriptions, or delegated-agent approval descriptions.
 
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
@@ -74,6 +75,11 @@ if (result.Outcome == AppSurfaceAuthOutcome.Forbid)
 - `AppSurfaceLogoutPrompt`
 - `AppSurfaceAuthAuditEvent`
 - `AppSurfaceAuthMetadataKeys`
+- `AgentActionMetadata`, `AgentActionRequest`, and `AgentActionBinding`
+- `AgentIdentityReference` and `AgentApproverReference`
+- `AgentAuthorizationDecision` and `AgentConfirmationRequest`
+- `AgentApprovalReceipt` and `AgentApprovalConsumptionResult`
+- `AgentAuthorizationAuditEvent` and `AgentApprovalDiagnosticCodes`
 - Microsoft Options registration for `AppSurfaceAuthOptions`
 
 ## What The Package Does Not Include
@@ -87,6 +93,162 @@ if (result.Outcome == AppSurfaceAuthOutcome.Forbid)
 - Login, logout, redirect, or return-url execution
 - RazorWire, web, or UI behavior
 - Audit sinks, loggers, metrics, traces, or persistence
+- Agent runtimes, tool execution, agent grants, policy engines, receipt stores, or receipt consumption
+- Approval inboxes, notification delivery, HTTP approval endpoints, or automated-approval eligibility logic
+
+## Delegated Agent Task Approval
+
+Use the delegated-agent contracts when a local harness proposes one consequential workflow transition and the host
+needs a narrow, revocable, auditable approval boundary. The contracts are designed for a task-approval model: the
+agent proposes an action, the host evaluates current authority and a narrow agent grant, a human may approve the exact
+binding, and the host consumes that approval at most once immediately before execution.
+
+Start from the [Auth adoption ladder](../../start-here/auth-adoption-ladder.md#package-ladder), then run the local
+fixture from a clone of this repository:
+
+```bash
+dotnet test Auth/ForgeTrust.AppSurface.Auth.Tests/ForgeTrust.AppSurface.Auth.Tests.csproj \
+  --filter FullyQualifiedName~AgentApprovalLifecycleProofTests
+```
+
+The fixture proves one successful consumption plus refusal for confirmation denial, replay, expiry, revocation,
+workflow-state change, intent-digest change, lost human authority, and missing agent grant. It uses a fake clock and
+in-memory test store; it is not an AppSurface runtime implementation.
+
+### The golden path
+
+```csharp
+using ForgeTrust.AppSurface.Auth;
+
+var action = new AgentActionMetadata(
+    "workflow.approve",
+    "Approve workflow",
+    AgentActionRisk.High,
+    AgentConfirmationPosture.AlwaysRequireHuman,
+    AgentActionRedaction.DoNotExposeArguments);
+
+var request = new AgentActionRequest(
+    action,
+    new AgentActionBinding(
+        actionId: action.ActionId,
+        taskId: "task-42",
+        workflowInstanceId: "workflow-42",
+        expectedState: "pending",
+        expectedStateVersion: "7",
+        transition: "approve",
+        bindingProfile: "workflow-approval/v1",
+        safeIntentDigest: "sha256:host-derived-safe-digest"),
+    new AgentIdentityReference("harness:local"),
+    correlationId: "approval-42",
+    requestedAt: DateTimeOffset.UtcNow,
+    safeSummary: "Approve the production release workflow.");
+
+// The host evaluates current human authority and the agent's narrow task grant.
+var confirmation = new AgentConfirmationRequest(
+    request,
+    new AgentApproverReference("subject:release-manager"),
+    expiresAt: request.RequestedAt.AddMinutes(5));
+var decision = AgentAuthorizationDecision.ConfirmationRequired(confirmation);
+
+// Only after durable human approval, the host issues an opaque receipt and persists it itself.
+// FromConfirmedRequest also rejects an issuance after the confirmation has expired.
+var receipt = AgentApprovalReceipt.FromConfirmedRequest(
+    "host-opaque-receipt-reference",
+    confirmation,
+    issuedAt: DateTimeOffset.UtcNow,
+    expiresAt: confirmation.ExpiresAt);
+
+// Immediately before execution, the host atomically claims the receipt, rechecks current
+// authority/grant/state/binding, then returns AgentApprovalConsumptionResult. AppSurface
+// deliberately does not provide the store, claim operation, or workflow execution.
+```
+
+These contracts make the host boundary explicit; a constructor call is not an authorization decision. Never accept a
+receipt from agent input or treat it as execution authority without a host-owned durable record, atomic claim, and
+current authority/grant/state/binding checks. A host may use different identity, policy, storage, audit, or workflow
+technologies, but it must not let an agent inherit the human's full permissions or approve itself.
+
+### Contract lifecycle
+
+```text
+AgentActionRequest -> AgentAuthorizationDecision
+                         | Allowed | Denied | ConfirmationRequired
+                         v
+                AgentConfirmationRequest -> AgentApprovalReceipt
+                                                   |
+                                                   v
+                                  host atomic claim + current rechecks
+                                                   |
+                                                   v
+        Consumed | AlreadyConsumed | Expired | Revoked | Stale | BindingMismatch | Denied
+```
+
+`AgentActionBinding` binds the stable action identifier, task/harness run, workflow instance, expected state and
+concurrency version, requested transition, a host-defined binding profile, and a host-derived safe intent digest. Its
+`Matches(...)` method compares every approval-relevant field with ordinal semantics. The profile is versioned so the
+host can reproduce its own normalisation rule; AppSurface does not prescribe a JSON representation, hash algorithm,
+JWT, signature, database schema, or token format.
+
+`AgentIdentityReference` is a stable host-local agent or harness reference. `AgentApproverReference` is deliberately a
+different type so a host does not confuse an approver with an agent, a durable `AppUserId`, or a raw provider credential.
+A host can derive the approver reference from an [`ExternalSubject`](#durable-app-user-mapping), an app-owned identity,
+or another validated host subject namespace.
+
+### Confirmation and redaction rules
+
+`AgentConfirmationRequest` is the input to host-owned UI, CLI, or other human confirmation behavior. It carries the
+exact request, approver, expiry, safe summary, rationale, action metadata, and binding. It does not render UI or send a
+notification. A host confirmation display must fail closed—remove or disable approval when the request expires, the
+workflow state changes, or the binding cannot be reproduced.
+
+`AgentActionMetadata.Redaction` is guidance, not a policy bypass. Use `SafeSummaryOnly` for a host-provided safe
+summary, `RequireHostRedaction` when the host must transform additional detail, and `DoNotExposeArguments` for actions
+whose raw arguments never belong in confirmation, audit, or diagnostic displays. Do not place tokens, credentials,
+raw identity-provider payloads, or sensitive workflow inputs in metadata, messages, summaries, or digests.
+
+v0 supports **approve** and **deny** only. An edit changes the proposed transition, so it must become a new
+`AgentActionRequest` with a new binding, evaluation, and receipt. Never mutate an approved request or reuse a receipt
+for edited arguments.
+
+### Consumption outcomes and recovery
+
+The host owns atomic receipt consumption. A successful `Consumed` result is the only outcome that may execute the
+bound transition, and exactly one competing claimant may receive it. Every other result is terminal for that attempt.
+Branch on the typed `Outcome` (or `IsConsumed`), not a diagnostic code; hosts may add stable subcodes only within the
+canonical family for that outcome.
+
+Treat the claim and execution record as one durable host transaction, or write an outbox/idempotency record with the
+claim. A process crash after a claim but before execution must recover without losing the transition or executing it
+twice. Do not mark a receipt consumed and then fire-and-forget execution.
+
+| Outcome | Stable code | What happened | Host next step |
+| --- | --- | --- | --- |
+| `Consumed` | `agent-approval.consumed` | The host atomically claimed a valid receipt. | Execute the exact bound transition once and record the correlated audit event. |
+| `AlreadyConsumed` | `agent-approval.already-consumed` | A competing attempt already claimed the receipt. | Do not retry execution; inspect the correlated audit trail. |
+| `Expired` | `agent-approval.expired` | The receipt expired before claim. | Re-evaluate and request a fresh confirmation. |
+| `Revoked` | `agent-approval.revoked` | The host revoked the receipt before claim. | Do not execute; re-evaluate if the action is still needed. |
+| `Stale` | `agent-approval.stale` | The expected workflow state or version changed. | Build a fresh action request from current state. |
+| `BindingMismatch` | `agent-approval.binding-mismatch` | The host could not reproduce the bound action. | Investigate binding profile/input changes, then build a fresh request. |
+| `Denied` | `agent-approval.consumption-denied` | Current human authority or the agent grant is absent. | Do not execute; restore host authority/grant or stop the action. |
+
+Every decision, receipt, consumption attempt, and terminal outcome can be represented with
+`AgentAuthorizationAuditEvent`. The type requires the canonical code family for its event kind, an approver for an
+`Approved` event, and a receipt reference for receipt lifecycle events. It remains a passive audit description: the host
+decides whether audit delivery must be synchronous, durable through an outbox, retried, or fail closed. A contract
+object does not prove a sink received it. Use `AgentAuthorizationAuditEvent.FromReceipt(...)` for receipt-backed events
+so the receipt's binding, agent, approver, receipt reference, and correlation identifier cannot drift apart.
+
+Display-safe strings are limited to 4,096 characters. Metadata is limited to 32 entries, 128-character keys,
+1,024-character values, and 16,384 characters in total. These limits protect confirmation, audit, and diagnostic
+surfaces; hosts should store larger operational detail in a separate bounded record.
+
+### Flow Durable Task mapping
+
+`ForgeTrust.AppSurface.Auth` does not reference Flow. A Durable Task host that already uses
+[`IFlowResumeAuthorizer`](../../Flow/ForgeTrust.AppSurface.Flow.DurableTask/README.md#delegated-agent-approval-mapping)
+can project a successfully consumed receipt into its existing authorizer. The host remains responsible for defensive
+metadata projection and for mapping every non-consumed outcome to a stable deny code; there is no Auth-to-Flow adapter
+or package dependency.
 
 ## Result Outcomes And Reasons
 
