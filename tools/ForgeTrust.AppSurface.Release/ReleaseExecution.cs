@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 
 namespace ForgeTrust.AppSurface.Release;
 
@@ -31,7 +32,8 @@ internal sealed class ProcessCommandRunner : ICommandRunner
         {
             WorkingDirectory = invocation.WorkingDirectory,
             RedirectStandardOutput = true,
-            RedirectStandardError = true
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8
         };
 
         foreach (var argument in invocation.Arguments)
