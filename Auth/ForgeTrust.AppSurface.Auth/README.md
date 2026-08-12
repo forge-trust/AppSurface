@@ -189,9 +189,10 @@ AgentActionRequest -> AgentAuthorizationDecision
 
 `AgentActionBinding` binds the stable action identifier, task/harness run, workflow instance, expected state and
 concurrency version, requested transition, a host-defined binding profile, and a host-derived safe intent digest. Its
-`Matches(...)` method compares every approval-relevant field with ordinal semantics. The profile is versioned so the
-host can reproduce its own normalisation rule; AppSurface does not prescribe a JSON representation, hash algorithm,
-JWT, signature, database schema, or token format.
+`Matches(...)` method compares every approval-relevant field with ordinal semantics. The profile is versioned in
+exactly two non-empty, whitespace-free `profile/version` segments, such as `workflow-approval/v1`, so the host can
+reproduce its own normalisation rule; AppSurface does not prescribe a JSON representation, hash algorithm, JWT,
+signature, database schema, or token format.
 
 `AgentIdentityReference` is a stable host-local agent or harness reference. `AgentApproverReference` is deliberately a
 different type so a host does not confuse an approver with an agent, a durable `AppUserId`, or a raw provider credential.

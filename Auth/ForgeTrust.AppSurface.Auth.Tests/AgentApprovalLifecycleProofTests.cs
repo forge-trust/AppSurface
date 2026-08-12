@@ -16,6 +16,7 @@ public sealed class AgentApprovalLifecycleProofTests
 
         Assert.True(decision.IsDenied);
         Assert.Equal(AgentApprovalDiagnosticCodes.Denied, decision.Code);
+        Assert.Equal(0, host.IssuedReceiptCount);
         Assert.Equal(0, host.ExecutedTransitionCount);
     }
 
@@ -166,12 +167,11 @@ public sealed class AgentApprovalLifecycleProofTests
     }
 
     [Theory]
-    [InlineData(false, true, "lost human authority")]
-    [InlineData(true, false, "missing agent grant")]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
     public void Receipt_LostAuthorityOrGrant_FailsClosedAsDenied(
         bool humanAuthorityPresent,
-        bool agentGrantPresent,
-        string _)
+        bool agentGrantPresent)
     {
         var host = new InMemoryApprovalHost(new FakeClock(Utc(8, 0)));
         var receipt = host.Approve(Request());
@@ -231,6 +231,8 @@ public sealed class AgentApprovalLifecycleProofTests
         }
 
         public int ExecutedTransitionCount { get; private set; }
+
+        public int IssuedReceiptCount => _issuedReceipts.Count;
 
         public AgentAuthorizationDecision DenyConfirmation(AgentActionRequest request)
         {

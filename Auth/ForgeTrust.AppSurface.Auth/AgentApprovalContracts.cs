@@ -299,11 +299,10 @@ internal static class AgentApprovalContractValidation
     public static string RequireCode(string value, string parameterName)
     {
         var code = AppSurfaceAuthMetadata.RequireIdentifier(value, parameterName);
-        if (code.Any(char.IsWhiteSpace)
-            || code.EnumerateRunes().Any(rune => Rune.GetUnicodeCategory(rune) is UnicodeCategory.Control or UnicodeCategory.Format))
-        {
-            throw new ArgumentException("Diagnostic codes must not contain whitespace, control, or Unicode format characters.", parameterName);
-        }
+        EnsureNoWhitespaceControlOrFormatCharacters(
+            code,
+            "Diagnostic codes must not contain whitespace, control, or Unicode format characters.",
+            parameterName);
 
         return code;
     }
@@ -313,6 +312,28 @@ internal static class AgentApprovalContractValidation
         var text = AppSurfaceAuthMetadata.RequireIdentifier(value, parameterName);
         EnsureNoControlCharacters(text, parameterName);
         return text;
+    }
+
+    public static string RequireVersionedBindingProfile(string value, string parameterName)
+    {
+        var profile = AppSurfaceAuthMetadata.RequireIdentifier(value, parameterName);
+        var segments = profile.Split('/');
+        if (segments.Length != 2 || segments.Any(string.IsNullOrEmpty))
+        {
+            throw new ArgumentException(
+                "Binding profiles must contain exactly two non-empty host-defined profile and version segments in 'profile/version' form.",
+                parameterName);
+        }
+
+        foreach (var segment in segments)
+        {
+            EnsureNoWhitespaceControlOrFormatCharacters(
+                segment,
+                "Binding profile segments must not contain whitespace, control, or Unicode format characters.",
+                parameterName);
+        }
+
+        return profile;
     }
 
     public static string? NormalizeSafeDisplayText(string? value, string parameterName)
@@ -469,6 +490,18 @@ internal static class AgentApprovalContractValidation
                     $"Display-safe values must contain at most {MaximumDisplayTextLength} characters and no control or Unicode format characters.",
                     parameterName);
             }
+        }
+    }
+
+    private static void EnsureNoWhitespaceControlOrFormatCharacters(
+        string value,
+        string message,
+        string parameterName)
+    {
+        if (value.Any(char.IsWhiteSpace)
+            || value.EnumerateRunes().Any(rune => Rune.GetUnicodeCategory(rune) is UnicodeCategory.Control or UnicodeCategory.Format))
+        {
+            throw new ArgumentException(message, parameterName);
         }
     }
 }
@@ -631,7 +664,7 @@ public sealed class AgentActionBinding
     /// <param name="expectedState">Expected current workflow state.</param>
     /// <param name="expectedStateVersion">Expected state version or concurrency stamp.</param>
     /// <param name="transition">Requested transition or decision.</param>
-    /// <param name="bindingProfile">Host-defined canonicalisation profile and version.</param>
+    /// <param name="bindingProfile">Host-defined canonicalisation profile and version in exactly two non-empty, whitespace-free <c>profile/version</c> segments.</param>
     /// <param name="safeIntentDigest">Host-derived safe digest of the requested intent.</param>
     public AgentActionBinding(
         string actionId,
@@ -649,7 +682,7 @@ public sealed class AgentActionBinding
         ExpectedState = AppSurfaceAuthMetadata.RequireIdentifier(expectedState, nameof(expectedState));
         ExpectedStateVersion = AppSurfaceAuthMetadata.RequireIdentifier(expectedStateVersion, nameof(expectedStateVersion));
         Transition = AppSurfaceAuthMetadata.RequireIdentifier(transition, nameof(transition));
-        BindingProfile = AppSurfaceAuthMetadata.RequireIdentifier(bindingProfile, nameof(bindingProfile));
+        BindingProfile = AgentApprovalContractValidation.RequireVersionedBindingProfile(bindingProfile, nameof(bindingProfile));
         SafeIntentDigest = AppSurfaceAuthMetadata.RequireIdentifier(safeIntentDigest, nameof(safeIntentDigest));
     }
 
@@ -684,7 +717,7 @@ public sealed class AgentActionBinding
     public string Transition { get; }
 
     /// <summary>
-    /// Gets the host-defined canonicalisation profile and version.
+    /// Gets the host-defined canonicalisation profile and version in exactly two non-empty, whitespace-free <c>profile/version</c> segments.
     /// </summary>
     public string BindingProfile { get; }
 
@@ -725,7 +758,7 @@ public sealed class AgentActionBinding
         _ = AppSurfaceAuthMetadata.RequireIdentifier(ExpectedState, parameterName);
         _ = AppSurfaceAuthMetadata.RequireIdentifier(ExpectedStateVersion, parameterName);
         _ = AppSurfaceAuthMetadata.RequireIdentifier(Transition, parameterName);
-        _ = AppSurfaceAuthMetadata.RequireIdentifier(BindingProfile, parameterName);
+        _ = AgentApprovalContractValidation.RequireVersionedBindingProfile(BindingProfile, parameterName);
         _ = AppSurfaceAuthMetadata.RequireIdentifier(SafeIntentDigest, parameterName);
     }
 }

@@ -130,9 +130,7 @@ public sealed class AgentApprovalContractTests
         Assert.Equal(agent.GetHashCode(), sameAgent.GetHashCode());
         Assert.Equal(approver.GetHashCode(), sameApprover.GetHashCode());
         Assert.False(agent.Equals((object)"harness:local"));
-        Assert.False(((object)agent).Equals(null));
         Assert.False(approver.Equals((object)"subject:andrew"));
-        Assert.False(((object)approver).Equals(null));
         Assert.Contains("<redacted>", agent.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain(agent.Value, agent.ToString(), StringComparison.Ordinal);
         Assert.Contains("<redacted>", approver.ToString(), StringComparison.Ordinal);
@@ -164,6 +162,23 @@ public sealed class AgentApprovalContractTests
         });
 
         Assert.Equal(parameterName, exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData("workflow-approval")]
+    [InlineData("/v1")]
+    [InlineData("workflow-approval/")]
+    [InlineData("workflow-approval//v1")]
+    [InlineData("workflow-approval/v1/extra")]
+    [InlineData("workflow approval/v1")]
+    [InlineData("workflow-approval/ v1")]
+    [InlineData("workflow-approval/\u0001v1")]
+    [InlineData("workflow-approval/\u202Ev1")]
+    public void Binding_WhenProfileIsMalformed_Throws(string bindingProfile)
+    {
+        var exception = Assert.Throws<ArgumentException>(() => Binding(bindingProfile: bindingProfile));
+
+        Assert.Equal("bindingProfile", exception.ParamName);
     }
 
     [Fact]

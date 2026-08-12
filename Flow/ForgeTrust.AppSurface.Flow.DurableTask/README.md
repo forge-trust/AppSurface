@@ -99,7 +99,7 @@ display-safe values:
 | --- | --- |
 | `appsurface.correlation_id` | The host correlation identifier. |
 | `appsurface.agent_approval.approver_ref` | Opaque host approver reference, never a credential. |
-| `appsurface.agent_approval.binding_profile` | The host binding profile/version. |
+| `appsurface.agent_approval.binding_profile` | The host binding profile/version in exactly two non-empty, whitespace-free `profile/version` segments, such as `workflow-approval/v1`. |
 | `appsurface.agent_approval.safe_intent_digest` | The host-derived safe intent digest. |
 | `appsurface.agent_approval.receipt_ref` | Opaque receipt reference. |
 | `appsurface.agent_approval.outcome` | The terminal receipt-consumption outcome. |
