@@ -215,13 +215,18 @@ internal sealed class AppSurfaceDocsOutlineLayoutEvidence
     }
 
     /// <summary>
-    /// Canonicalizes an artifact path and rejects paths outside <paramref name="root"/>, including sibling-prefix
-    /// paths such as <c>/tmp/layout-evidence-old</c> for a <c>/tmp/layout-evidence</c> root.
+    /// Canonicalizes a relative artifact path and rejects rooted paths or paths outside <paramref name="root"/>,
+    /// including sibling-prefix paths such as <c>/tmp/layout-evidence-old</c> for a
+    /// <c>/tmp/layout-evidence</c> root.
     /// </summary>
     internal static string ResolveArtifactPath(string root, string relativePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+        if (Path.IsPathRooted(relativePath))
+        {
+            throw new ArgumentException("Evidence artifact paths must be relative to the configured root.", nameof(relativePath));
+        }
 
         var fullRoot = Path.GetFullPath(root);
         var candidate = Path.GetFullPath(Path.Combine(fullRoot, relativePath));

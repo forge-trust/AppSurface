@@ -78,15 +78,22 @@ public sealed class AppSurfaceDocsOutlineLayoutEvidenceTests
     }
 
     [Fact]
-    public void ResolveArtifactPath_RejectsEscapeAndSiblingPrefixPaths()
+    public void ResolveArtifactPath_RejectsRootedTraversalAndSiblingPrefixPaths()
     {
         var root = Path.Join(Path.GetTempPath(), "docs-outline-layout-tests", "evidence");
         var sibling = root + "-sibling";
 
         Assert.Throws<ArgumentException>(() =>
             AppSurfaceDocsOutlineLayoutEvidence.ResolveArtifactPath(root, Path.Join("..", "outside", "trace.zip")));
-        Assert.Throws<ArgumentException>(() =>
+        var exception = Assert.Throws<ArgumentException>(() =>
             AppSurfaceDocsOutlineLayoutEvidence.ResolveArtifactPath(root, Path.Join(sibling, "trace.zip")));
+
+        Assert.Equal("relativePath", exception.ParamName);
+        Assert.Contains("relative", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Throws<ArgumentException>(() =>
+            AppSurfaceDocsOutlineLayoutEvidence.ResolveArtifactPath(
+                root,
+                Path.Join("..", Path.GetFileName(sibling), "trace.zip")));
     }
 
     [Fact]
