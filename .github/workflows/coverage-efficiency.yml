@@ -17,10 +17,12 @@ permissions:
 
 jobs:
   capture-evidence:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+      NPM_CONFIG_STORE_DIR: ${{ runner.temp }}/coverage-efficiency-pnpm-store
 
     steps:
       - name: Checkout code
@@ -70,20 +72,28 @@ jobs:
           case "$CACHE_STATE" in
             cold)
               dotnet nuget locals global-packages --clear
-              pnpm_store_path="$(pnpm store path)"
-              case "$pnpm_store_path" in
-                /)
-                  echo "Refusing to clear an unsafe pnpm store path: '$pnpm_store_path'." >&2
-                  exit 2
-                  ;;
-                /*)
+              runner_temp_path="$(realpath -m "$RUNNER_TEMP")"
+              pnpm_store_root="$(realpath -m "$NPM_CONFIG_STORE_DIR")"
+              case "$pnpm_store_root" in
+                "$runner_temp_path"/coverage-efficiency-pnpm-store)
                   ;;
                 *)
-                  echo "Refusing to clear a non-absolute pnpm store path: '$pnpm_store_path'." >&2
+                  echo "Refusing to clear a pnpm store outside the runner-owned evidence directory: '$pnpm_store_root'." >&2
                   exit 2
                   ;;
               esac
-              rm -rf -- "$pnpm_store_path"
+
+              resolved_pnpm_store_path="$(realpath -m "$(pnpm store path)")"
+              case "$resolved_pnpm_store_path" in
+                "$pnpm_store_root"|"$pnpm_store_root"/*)
+                  ;;
+                *)
+                  echo "Refusing to clear a pnpm store redirected outside '$pnpm_store_root': '$resolved_pnpm_store_path'." >&2
+                  exit 2
+                  ;;
+              esac
+
+              rm -rf -- "$pnpm_store_root"
               ;;
             warm)
               ;;

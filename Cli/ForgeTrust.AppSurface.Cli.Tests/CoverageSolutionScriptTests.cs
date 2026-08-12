@@ -124,6 +124,12 @@ public sealed class CoverageSolutionScriptTests
 
         Assert.Contains("name: Coverage Efficiency Evidence", workflow, StringComparison.Ordinal);
         Assert.Single(yaml.Documents);
+        var root = (YamlMappingNode)yaml.Documents.Single().RootNode;
+        var jobs = (YamlMappingNode)root.Children[new YamlScalarNode("jobs")];
+        var captureEvidence = (YamlMappingNode)jobs.Children[new YamlScalarNode("capture-evidence")];
+        Assert.Equal(
+            "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)",
+            ((YamlScalarNode)captureEvidence.Children[new YamlScalarNode("if")]).Value);
         Assert.Contains("workflow_dispatch:", workflow, StringComparison.Ordinal);
         Assert.Contains("cache-state:", workflow, StringComparison.Ordinal);
         Assert.Contains("inputs['cache-state']", workflow, StringComparison.Ordinal);
@@ -141,8 +147,13 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("COVERAGE_PARALLELISM: 2", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_GATE_DIFF_BASE: ''", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("COVERAGE_REQUIRE_NON_SANDBOX: false", workflow, StringComparison.Ordinal);
-        Assert.Contains("pnpm_store_path=\"$(pnpm store path)\"", workflow, StringComparison.Ordinal);
-        Assert.Contains("rm -rf -- \"$pnpm_store_path\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("NPM_CONFIG_STORE_DIR: ${{ runner.temp }}/coverage-efficiency-pnpm-store", workflow, StringComparison.Ordinal);
+        Assert.Contains("runner_temp_path=\"$(realpath -m \"$RUNNER_TEMP\")\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("pnpm_store_root=\"$(realpath -m \"$NPM_CONFIG_STORE_DIR\")\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("resolved_pnpm_store_path=\"$(realpath -m \"$(pnpm store path)\")\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("Refusing to clear a pnpm store redirected outside", workflow, StringComparison.Ordinal);
+        Assert.Contains("rm -rf -- \"$pnpm_store_root\"", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("rm -rf -- \"$pnpm_store_path\"", workflow, StringComparison.Ordinal);
         Assert.Contains("time.monotonic_ns()", workflow, StringComparison.Ordinal);
         Assert.Contains("docker version > \"$evidence_root/docker-version.txt\"", workflow, StringComparison.Ordinal);
         Assert.Contains("PostgreSqlTestContainerImage.cs", workflow, StringComparison.Ordinal);
