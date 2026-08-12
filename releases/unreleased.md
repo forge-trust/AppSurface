@@ -4,7 +4,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
-- Add JavaScript API lifecycle modifiers (`@alpha`, `@beta`, and `@deprecated`) with fragment-level badges, structured diagnostics, and lifecycle-aware search ranking.
+- Add merged public changes here as they land.
 
 <!-- appsurface:unreleased-entries section="taking-shape" -->
 

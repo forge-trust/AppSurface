@@ -1045,6 +1045,12 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
 
     private static async Task AssertLifecyclePresentationAsync(IPage page, string resultRootSelector, string resultSelector)
     {
+        var renderedResults = (await page.Locator(resultRootSelector).Locator(resultSelector).AllTextContentsAsync()).ToArray();
+        var generatedResultIndex = Array.FindIndex(renderedResults, result => result.Contains("Beta Runtime API", StringComparison.Ordinal));
+        var guideIndex = Array.FindIndex(renderedResults, result => result.Contains("Beta Guide", StringComparison.Ordinal));
+        Assert.True(generatedResultIndex >= 0 && guideIndex >= 0);
+        Assert.True(generatedResultIndex < guideIndex, "A matching generated lifecycle symbol should rank ahead of a broad guide.");
+
         var generatedResult = page.Locator(resultRootSelector)
             .Locator(resultSelector)
             .Filter(new LocatorFilterOptions { HasText = "Beta Runtime API" });

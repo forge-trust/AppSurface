@@ -1033,7 +1033,8 @@ public class DocAggregator
                                        n.Outline,
                                        n.SymbolSourceProvenance)
                                    {
-                                       GeneratedApiSymbol = n.GeneratedApiSymbol
+                                       GeneratedApiSymbol = n.GeneratedApiSymbol,
+                                       HasJavaScriptApiLifecycleProvenance = n.HasJavaScriptApiLifecycleProvenance
                                    };
                                })
                            .ToList();
@@ -1065,7 +1066,8 @@ public class DocAggregator
                                        n.Outline,
                                        n.SymbolSourceProvenance)
                                    {
-                                       GeneratedApiSymbol = n.GeneratedApiSymbol
+                                       GeneratedApiSymbol = n.GeneratedApiSymbol,
+                                       HasJavaScriptApiLifecycleProvenance = n.HasJavaScriptApiLifecycleProvenance
                                    };
                                    if (markdownSourceOwnerIndexes.Contains(index))
                                    {
@@ -2352,6 +2354,7 @@ public class DocAggregator
                     var codeLanguage = DocMetadataPresentation.ResolveCodeLanguageValue(d.Metadata?.CodeLanguage);
                     var codeLanguageLabel = DocMetadataPresentation.ResolveCodeLanguageLabel(codeLanguage);
                     var hasPublicSection = DocPublicSectionCatalog.TryResolve(d.Metadata?.NavGroup, out var publicSection);
+                    var generatedApiSymbol = GetGeneratedApiSymbolForSearch(d);
 
                     return new DocsSearchIndexDocument(
                         publicRoutePath,
@@ -2383,10 +2386,10 @@ public class DocAggregator
                         codeLanguage,
                         codeLanguageLabel,
                         summaryPresentation,
-                        d.GeneratedApiSymbol?.ApiLifecycle,
-                        d.GeneratedApiSymbol?.ApiLifecycleLabel,
-                        d.GeneratedApiSymbol?.IsDeprecated,
-                        d.GeneratedApiSymbol is null ? null : true);
+                        generatedApiSymbol?.ApiLifecycle,
+                        generatedApiSymbol?.ApiLifecycleLabel,
+                        generatedApiSymbol?.IsDeprecated,
+                        generatedApiSymbol is null ? null : true);
                 })
             .Where(r => r is not null)
             .Select(r => r!)
@@ -2404,6 +2407,34 @@ public class DocAggregator
             records);
 
         return (payload, records.Count);
+    }
+
+    private static DocGeneratedApiSymbol? GetGeneratedApiSymbolForSearch(DocNode node)
+    {
+        var marker = node.GeneratedApiSymbol;
+        if (marker is null
+            || !node.HasJavaScriptApiLifecycleProvenance
+            || string.IsNullOrWhiteSpace(node.ParentPath)
+            || !node.Path.StartsWith("api/javascript/", StringComparison.Ordinal)
+            || !node.Path.StartsWith($"{node.ParentPath}#", StringComparison.Ordinal)
+            || node.Metadata?.PageType?.StartsWith("javascript-", StringComparison.Ordinal) != true
+            || !IsCanonicalGeneratedApiSymbol(marker))
+        {
+            return null;
+        }
+
+        return marker;
+    }
+
+    private static bool IsCanonicalGeneratedApiSymbol(DocGeneratedApiSymbol marker)
+    {
+        return (marker.ApiLifecycle, marker.ApiLifecycleLabel) switch
+        {
+            ("public", "Public API") => true,
+            ("alpha", "Alpha") => true,
+            ("beta", "Beta") => true,
+            _ => false
+        };
     }
 
     private static IReadOnlyList<DocsSearchIndexEntryPoint>? BuildSearchIndexEntryPoints(
@@ -2822,7 +2853,8 @@ public class DocAggregator
                     CombineOutlines(readmeNode.Outline, namespaceNode.Outline),
                     namespaceNode.SymbolSourceProvenance)
                 {
-                    GeneratedApiSymbol = namespaceNode.GeneratedApiSymbol
+                    GeneratedApiSymbol = namespaceNode.GeneratedApiSymbol,
+                    HasJavaScriptApiLifecycleProvenance = namespaceNode.HasJavaScriptApiLifecycleProvenance
                 };
 
                 var namespaceIndex = nodes.FindIndex(n => string.Equals(n.Path, namespaceNode.Path, StringComparison.OrdinalIgnoreCase));

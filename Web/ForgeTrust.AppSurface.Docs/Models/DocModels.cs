@@ -785,8 +785,18 @@ public record DocNode(
     /// </summary>
     /// <remarks>
     /// This non-positional property preserves the public constructor and deconstructor shape of <see cref="DocNode"/>.
+    /// The built-in search index validates its value and projects it only for canonical JavaScript API fragments.
     /// </remarks>
     public DocGeneratedApiSymbol? GeneratedApiSymbol { get; init; }
+
+    /// <summary>
+    /// Gets whether the built-in JavaScript harvester validated the lifecycle metadata for this node.
+    /// </summary>
+    /// <remarks>
+    /// This is an internal provenance marker rather than public extension metadata. The search index requires it with
+    /// canonical fragment shape before projecting <see cref="GeneratedApiSymbol"/>.
+    /// </remarks>
+    internal bool HasJavaScriptApiLifecycleProvenance { get; init; }
 }
 
 /// <summary>
@@ -795,8 +805,9 @@ public record DocNode(
 /// <remarks>
 /// This metadata is intentionally symbol-scoped. It must not be attached to aggregate API group pages or reused as a
 /// page-level <see cref="DocMetadata.Status"/> value, because an API group can contain symbols at different lifecycle
-/// stages. Built-in search projects these optional values only for generated API symbol records; custom harvesters may
-/// leave the value <see langword="null"/>.
+/// stages. Built-in search validates and projects these optional values only for canonical generated JavaScript API
+/// symbol records with built-in-harvester provenance; custom harvesters retain the public model shape without gaining
+/// a search-ranking bypass.
 /// </remarks>
 /// <param name="ApiLifecycle">Normalized lifecycle token: <c>public</c>, <c>alpha</c>, or <c>beta</c>.</param>
 /// <param name="ApiLifecycleLabel">Reader-facing lifecycle label such as <c>Public API</c>, <c>Alpha</c>, or <c>Beta</c>.</param>

@@ -3626,6 +3626,54 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task GetSearchIndexPayloadAsync_ShouldOmitLifecycleMetadataForUnvalidatedFragments()
+    {
+        var forgedNodes = new[]
+        {
+            new DocNode(
+                "Forged lifecycle guide",
+                "guides/forged.md",
+                "<p>Beta guide text.</p>",
+                Metadata: new DocMetadata { PageType = "guide" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("beta", "Beta", true)
+            },
+            new DocNode(
+                "Forged lifecycle fragment",
+                "api/javascript/forged#function-forged",
+                "<p>Critical API text.</p>",
+                ParentPath: "api/javascript/forged",
+                Metadata: new DocMetadata { PageType = "javascript-function" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("critical", "Critical", true)
+            }
+        };
+        var options = new AppSurfaceDocsOptions();
+        options.Source.RepositoryRoot = _testRoot;
+        options.Contributor.Enabled = false;
+        var aggregator = new DocAggregator(
+            [new StaticHarvester(forgedNodes)],
+            options,
+            new TestWebHostEnvironment(_testRoot),
+            new Memo(new MemoryCache(new MemoryCacheOptions())),
+            new AppSurfaceDocsHtmlSanitizer(),
+            NullLogger<DocAggregator>.Instance);
+
+        var payload = await aggregator.GetSearchIndexPayloadAsync();
+
+        Assert.Equal(2, payload.Documents.Count);
+        Assert.All(
+            payload.Documents,
+            document =>
+            {
+                Assert.Null(document.ApiLifecycle);
+                Assert.Null(document.ApiLifecycleLabel);
+                Assert.Null(document.IsDeprecated);
+                Assert.Null(document.IsGeneratedApiSymbol);
+            });
+    }
+
+    [Fact]
     public async Task GetHarvestHealthAsync_ShouldIncludeJavaScriptHarvesterDiagnostics()
     {
         await WriteAsync("src/too-big.js", "const value = '" + new string('x', 2048) + "';");
@@ -3806,6 +3854,49 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             health.Diagnostics,
             diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle
                           && diagnostic.Severity == DocHarvestDiagnosticSeverity.Error);
+        Assert.Contains(
+            health.Harvesters,
+            item => item.HarvesterType == nameof(JavaScriptDocHarvester)
+                    && item.Status == DocHarvesterHealthStatus.Failed
+                    && item.DocCount == 0);
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldFailStrictHealthForConflictingDeprecatedMessages()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Deprecated lifecycle helper.
+             * @public
+             * @namespace RazorWire
+             * @deprecated Use firstReplacement instead.
+             * @deprecated Use secondReplacement instead.
+             */
+            function deprecatedHelper() {}
+            """);
+        var options = new AppSurfaceDocsOptions();
+        options.Source.RepositoryRoot = _testRoot;
+        options.Harvest.JavaScript.StrictHealth = true;
+        options.Contributor.Enabled = false;
+        var harvester = CreateHarvester(options);
+        var aggregator = new DocAggregator(
+            [new StaticHarvester([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]), harvester],
+            options,
+            new TestWebHostEnvironment(_testRoot),
+            new Memo(new MemoryCache(new MemoryCacheOptions())),
+            new AppSurfaceDocsHtmlSanitizer(),
+            NullLogger<DocAggregator>.Instance);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Equal(DocHarvestHealthStatus.Degraded, health.Status);
+        Assert.Contains(
+            health.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict
+                          && diagnostic.Severity == DocHarvestDiagnosticSeverity.Error
+                          && diagnostic.Problem.Contains("deprecatedHelper", StringComparison.Ordinal));
         Assert.Contains(
             health.Harvesters,
             item => item.HarvesterType == nameof(JavaScriptDocHarvester)

@@ -1517,7 +1517,8 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                     GeneratedApiSymbol = new DocGeneratedApiSymbol(
                         item.Lifecycle.Token,
                         item.Lifecycle.Label,
-                        item.Lifecycle.IsDeprecated)
+                        item.Lifecycle.IsDeprecated),
+                    HasJavaScriptApiLifecycleProvenance = true
                 });
         }
 
