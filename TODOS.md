@@ -15,3 +15,9 @@
 ## Config-audit debug expansion follow-ups (#389)
 
 - Consider targeted expansion of one already-known audit entry and a separately mapped or more strictly authorized debug endpoint only after operator evidence shows that the bounded report-wide expansion is insufficient. Preserve the known-entry boundary, current redaction pipeline, and explicit operator intent.
+
+## Tenant-theme selection follow-ups (#705)
+
+- Design a separate composition contract for tenant/context pair selection together with browser-local user mode preference only when an adopter needs both. It must define first-paint order, CSP behavior, static-export limits, failure semantics, and migration guidance; do not let two document-provider opt-ins silently compose.
+- Revisit asynchronous selection only when a supported host context cannot be resolved before rendering without I/O. Keep tenant lookup and caching upstream from the Web rendering path by default.
+- Consider an explicit compatible-provider/decorator marker only if enterprise adopters demonstrate that the strict custom-provider escape path blocks legitimate instrumentation or resilience wrappers.
