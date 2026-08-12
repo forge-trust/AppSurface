@@ -159,6 +159,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("Missing managed JUnit log", workflow, StringComparison.Ordinal);
         Assert.Contains("Missing managed JUnit log path.", workflow, StringComparison.Ordinal);
         Assert.Contains("Missing project test log path.", workflow, StringComparison.Ordinal);
+        Assert.Contains("(.coverageCleanupLog // \"-\")", workflow, StringComparison.Ordinal);
         Assert.Contains("Timings evidence could not be read for per-project validation.", workflow, StringComparison.Ordinal);
         Assert.Contains("Fail incomplete runtime evidence capture", workflow, StringComparison.Ordinal);
         Assert.Contains("environment-manifest.json", workflow, StringComparison.Ordinal);

@@ -438,7 +438,7 @@ jobs:
                 | select(.executionStatus == "completed")
                 | [
                     .log,
-                    .coverageCleanupLog,
+                    (.coverageCleanupLog // "-"),
                     ([.testResults[] | select(.format == "junit") | .path] | first)
                   ]
                 | @tsv' "$output_root/timings.json")"; then
@@ -460,7 +460,7 @@ jobs:
                   else
                     require_project_evidence_file "$project_log" "Missing project test log"
                   fi
-                  if [[ -n "$normalization_log" ]]; then
+                  if [[ "$normalization_log" != "-" ]]; then
                     require_project_evidence_file "$normalization_log" "Missing project normalization log"
                   fi
                   if [[ -z "$junit_log" ]]; then
