@@ -188,7 +188,7 @@ internal sealed class PackageIndexGenerator
         return GenerateDocuments(request, entries);
     }
 
-    private static PackageIndexDocuments GenerateDocuments(
+    internal static PackageIndexDocuments GenerateDocuments(
         PackageIndexRequest request,
         IReadOnlyList<ResolvedPackageEntry> entries)
     {

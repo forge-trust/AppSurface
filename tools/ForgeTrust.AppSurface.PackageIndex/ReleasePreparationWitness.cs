@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -20,15 +19,18 @@ internal sealed class ReleasePreparationWitnessBuilder
     internal const string TemplatePath = ReleaseGuidanceRenderer.TemplateRelativePath;
 
     private readonly PackageIndexGenerator _generator;
+    private readonly ICommandRunner _commandRunner;
 
     /// <summary>
     /// Creates the witness builder around the canonical package-index renderer.
     /// </summary>
     /// <param name="generator">Canonical renderer used to calculate expected outputs.</param>
-    internal ReleasePreparationWitnessBuilder(PackageIndexGenerator generator)
+    /// <param name="commandRunner">Bounded Git runner used to establish witness provenance.</param>
+    internal ReleasePreparationWitnessBuilder(PackageIndexGenerator generator, ICommandRunner? commandRunner = null)
     {
         ArgumentNullException.ThrowIfNull(generator);
         _generator = generator;
+        _commandRunner = commandRunner ?? new ProcessCommandRunner();
     }
 
     /// <summary>
@@ -67,8 +69,9 @@ internal sealed class ReleasePreparationWitnessBuilder
             .Order(StringComparer.Ordinal)
             .ToHashSet(StringComparer.Ordinal);
 
-        var documents = await _generator.GenerateDocumentsAsync(request, cancellationToken);
-        var entries = await CreateReleaseGuidanceUpdatesAsync(request, cancellationToken);
+        var resolvedEntries = await _generator.ResolveGenerationEntriesAsync(request, cancellationToken);
+        var documents = PackageIndexGenerator.GenerateDocuments(request, resolvedEntries);
+        var entries = await CreateReleaseGuidanceUpdatesAsync(request.RepositoryRoot, resolvedEntries, cancellationToken);
         var surfaces = new List<ReleasePreparationWitnessSurface>
         {
             new("chooser", "packages/README.md", ComputeSha256(documents.ChooserMarkdown)),
@@ -122,66 +125,64 @@ internal sealed class ReleasePreparationWitnessBuilder
         ArgumentNullException.ThrowIfNull(witness);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        var directory = Path.GetDirectoryName(Path.GetFullPath(path));
-        if (string.IsNullOrWhiteSpace(directory))
+        try
         {
-            throw new PackageIndexException("Release-preparation witness path must have a parent directory.");
-        }
+            var directory = Path.GetDirectoryName(Path.GetFullPath(path));
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                throw new PackageIndexException("Release-preparation witness path must have a parent directory.");
+            }
 
-        Directory.CreateDirectory(directory);
-        var json = JsonSerializer.Serialize(witness, new JsonSerializerOptions
+            Directory.CreateDirectory(directory);
+            var json = JsonSerializer.Serialize(witness, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                WriteIndented = true
+            });
+            await File.WriteAllTextAsync(path, json + Environment.NewLine, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            WriteIndented = true
-        });
-        await File.WriteAllTextAsync(path, json + Environment.NewLine, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
+            throw new PackageIndexException($"Release-preparation witness could not be written to '{path}': {ex.Message}");
+        }
     }
 
-    private async Task<IReadOnlyList<ReleaseGuidanceUpdate>> CreateReleaseGuidanceUpdatesAsync(
-        PackageIndexRequest request,
+    private static async Task<IReadOnlyList<ReleaseGuidanceUpdate>> CreateReleaseGuidanceUpdatesAsync(
+        string repositoryRoot,
+        IReadOnlyList<ResolvedPackageEntry> resolvedEntries,
         CancellationToken cancellationToken)
     {
         // Re-rendering managed README regions must use the generator's renderer. Calling VerifyAsync would reject a
-        // deliberate generated diff, so resolve the same validated generation entries without performing writes.
+        // deliberate generated diff, so use the already-resolved entries without performing writes.
         var renderer = new ReleaseGuidanceRenderer();
-        var resolvedEntries = await _generator.ResolveGenerationEntriesAsync(request, cancellationToken);
-        return await renderer.CreateUpdatesAsync(request.RepositoryRoot, resolvedEntries, cancellationToken);
+        return await renderer.CreateUpdatesAsync(repositoryRoot, resolvedEntries, cancellationToken);
     }
 
-    private static async Task<string> RequireGitOutputAsync(
+    private async Task<string> RequireGitOutputAsync(
         string repositoryRoot,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)
     {
-        var startInfo = new ProcessStartInfo("git")
+        try
         {
-            WorkingDirectory = repositoryRoot,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
+            var result = await _commandRunner.RunAsync(
+                new CommandRunRequest(
+                    "git",
+                    arguments,
+                    repositoryRoot,
+                    "Git",
+                    "the release-preparation witness",
+                    "inspect",
+                    "inspecting repository identity and changed inputs",
+                    60_000),
+                cancellationToken);
+            return result.StandardOutput.Trim();
         }
-
-        using var process = new Process { StartInfo = startInfo };
-        if (!process.Start())
-        {
-            throw new PackageIndexException("Release-preparation witness could not start Git.");
-        }
-
-        var standardOutput = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var standardError = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        var output = await standardOutput;
-        var error = await standardError;
-        if (process.ExitCode != 0)
+        catch (PackageIndexException ex)
         {
             throw new PackageIndexException(
-                $"Release-preparation witness Git command failed. Problem: repository identity and changed inputs must be inspected before package provenance can be trusted. Cause: git {string.Join(' ', arguments)} exited {process.ExitCode}: {error.Trim()}. Fix: fetch the base ref, repair the local checkout, and rerun verify-prep-diff.");
+                $"Release-preparation witness Git command failed. Problem: repository identity and changed inputs must be inspected before package provenance can be trusted. Cause: git {string.Join(' ', arguments)} failed: {ex.Message}. Fix: fetch the base ref, repair the local checkout, and rerun verify-prep-diff.");
         }
-
-        return output.Trim();
     }
 
     private static string ComputeSha256(string content)

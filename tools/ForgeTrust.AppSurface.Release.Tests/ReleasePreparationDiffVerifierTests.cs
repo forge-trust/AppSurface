@@ -549,6 +549,13 @@ public sealed class ReleasePreparationDiffVerifierTests
                 repositoryRoot, "main", noFetch: true, witnessPath: null, CancellationToken.None);
             Assert.Contains(invalidManifest.Diagnostics, diagnostic => diagnostic.Code == "release-prep-release-manifest-shape"
                 && diagnostic.Problem == "The added release manifest is not a valid release-preparation manifest.");
+
+            File.Delete(Path.Join(repositoryRoot, "releases", "v1.2.3.release.json"));
+            Directory.CreateDirectory(Path.Join(repositoryRoot, "releases", "v1.2.3.release.json"));
+            var unreadableManifest = await new ReleasePreparationDiffVerifier(CreateRunnerForNoFetchDiff("A\0releases/v1.2.3.release.json\0")).VerifyAsync(
+                repositoryRoot, "main", noFetch: true, witnessPath: null, CancellationToken.None);
+            Assert.Contains(unreadableManifest.Diagnostics, diagnostic => diagnostic.Code == "release-prep-release-manifest-shape"
+                && diagnostic.Problem == "The added release manifest could not be read from HEAD.");
         }
         finally
         {
@@ -838,6 +845,7 @@ public sealed class ReleasePreparationDiffVerifierTests
     [InlineData("[{\"kind\":\"package-index-manifest\",\"path\":\"packages/package-index.yml\",\"surfaces\":[\"packages/missing.md\"]}]", "[]", "generated surface")]
     [InlineData("[{\"kind\":\"package-index-manifest\",\"path\":\"packages/package-index.yml\",\"surfaces\":[]}]", "[{\"kind\":\"chooser\",\"path\":\"packages/readiness.md\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}]", "surfaces contain")]
     [InlineData("[{\"kind\":\"invalid\",\"path\":\"packages/package-index.yml\",\"surfaces\":[]}]", "[]", "changedInputs contain")]
+    [InlineData("[{\"kind\":\"package-index-manifest\",\"path\":\"packages/other.yml\",\"surfaces\":[]}]", "[]", "changedInputs contain")]
     public void WitnessParserRejectsInvalidInputAndSurfaceOrderingContracts(string changedInputs, string surfaces, string expectedIssue)
     {
         var json = $$"""
@@ -972,6 +980,64 @@ public sealed class ReleasePreparationDiffVerifierTests
     }
 
     [Fact]
+    public async Task WitnessValidationRejectsAGeneratedPackageSurfaceUnderASymbolicLink()
+    {
+        const string baseCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        const string headCommit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        var repositoryRoot = Path.Join(Path.GetTempPath(), "ReleasePreparationDiffVerifierTests", Guid.NewGuid().ToString("N"));
+        var externalRoot = Path.Join(Path.GetTempPath(), "ReleasePreparationDiffVerifierTestsExternal", Guid.NewGuid().ToString("N"));
+        var linkedOutput = Path.Join(repositoryRoot, "packages", "README.md");
+        try
+        {
+            Directory.CreateDirectory(Path.Join(repositoryRoot, "packages"));
+            Directory.CreateDirectory(externalRoot);
+            var externalOutput = Path.Join(externalRoot, "README.md");
+            await File.WriteAllTextAsync(externalOutput, "new chooser");
+            if (!TryCreateSymbolicLink(linkedOutput, externalOutput))
+            {
+                return;
+            }
+
+            var runner = new FakeCommandRunner();
+            runner.Add($"git show {baseCommit}:packages/README.md", new CommandResult(0, "old chooser", string.Empty));
+            var diagnostics = new List<ReleaseDiagnostic>();
+
+            await new ReleasePreparationDiffVerifier(runner).ValidateWitnessAsync(
+                CreateManifestWitness(
+                    baseCommit,
+                    headCommit,
+                    [new ReleasePreparationWitnessSurfaceDocument("chooser", "packages/README.md", ComputeSha256("new chooser"))],
+                    ["packages/README.md"]),
+                [
+                    new ReleasePreparationChange("M", "packages/package-index.yml"),
+                    new ReleasePreparationChange("M", "packages/README.md")
+                ],
+                repositoryRoot,
+                "origin/main",
+                baseCommit,
+                baseCommit,
+                headCommit,
+                diagnostics,
+                CancellationToken.None);
+
+            Assert.Contains(diagnostics, diagnostic => diagnostic.Code == "release-prep-package-witness-mismatch"
+                && diagnostic.Problem == "A generated package document path is unsafe.");
+        }
+        finally
+        {
+            if (Directory.Exists(repositoryRoot))
+            {
+                Directory.Delete(repositoryRoot, recursive: true);
+            }
+
+            if (Directory.Exists(externalRoot))
+            {
+                Directory.Delete(externalRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task WitnessValidationAcceptsAManagedReadmeWithOnlyItsGuidanceBodyChanged()
     {
         const string baseCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -1066,4 +1132,25 @@ public sealed class ReleasePreparationDiffVerifierTests
 
     private static string ComputeSha256(string content) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();
+
+    private static bool TryCreateSymbolicLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            File.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
 }

@@ -78,6 +78,33 @@ public sealed class ReleasePreparationWitnessTests
     }
 
     [Fact]
+    public async Task WitnessWriterReportsAFilesystemFailureAsAPackageIndexDiagnostic()
+    {
+        var directory = Path.Join(Path.GetTempPath(), "ReleasePreparationWitnessTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var witness = new ReleasePreparationWitness(
+            ReleasePreparationWitnessBuilder.Schema,
+            "origin/main",
+            new string('a', 40),
+            new string('b', 40),
+            new string('c', 40),
+            "verified",
+            [],
+            []);
+
+        try
+        {
+            var error = await Assert.ThrowsAsync<PackageIndexException>(() => ReleasePreparationWitnessBuilder.WriteAsync(witness, directory));
+
+            Assert.Contains("could not be written", error.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task WitnessCommandBuildsAReadOnlySnapshotForTheCurrentCheckout()
     {
         var path = Path.Join(Path.GetTempPath(), "ReleasePreparationWitnessTests", Guid.NewGuid().ToString("N"), "witness.json");
@@ -217,6 +244,57 @@ public sealed class ReleasePreparationWitnessTests
         Assert.Equal(1, exitCode);
         Assert.Contains("Git command failed", error.ToString(), StringComparison.Ordinal);
         Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public async Task WitnessCommandRejectsAnAmbiguousMergeBaseWithoutWritingOutput()
+    {
+        var repositoryRoot = Path.Join(Path.GetTempPath(), "ReleasePreparationWitnessTests", Guid.NewGuid().ToString("N"));
+        var witnessPath = Path.Join(repositoryRoot, "witness.json");
+        try
+        {
+            Directory.CreateDirectory(repositoryRoot);
+            await RunGitAsync(repositoryRoot, "init");
+            await RunGitAsync(repositoryRoot, "config", "user.email", "tests@example.test");
+            await RunGitAsync(repositoryRoot, "config", "user.name", "PackageIndex Tests");
+
+            await WriteRepositoryFileAsync(repositoryRoot, "README.md", "baseline\n");
+            await RunGitAsync(repositoryRoot, "add", "README.md");
+            await RunGitAsync(repositoryRoot, "commit", "-m", "baseline");
+            await WriteRepositoryFileAsync(repositoryRoot, "first.txt", "first parent\n");
+            await RunGitAsync(repositoryRoot, "add", "first.txt");
+            await RunGitAsync(repositoryRoot, "commit", "-m", "first parent");
+            await RunGitAsync(repositoryRoot, "branch", "first-merge");
+            await RunGitAsync(repositoryRoot, "checkout", "-b", "second-merge", "HEAD~1");
+
+            await WriteRepositoryFileAsync(repositoryRoot, "second.txt", "second parent\n");
+            await RunGitAsync(repositoryRoot, "add", "second.txt");
+            await RunGitAsync(repositoryRoot, "commit", "-m", "second parent");
+            await RunGitAsync(repositoryRoot, "branch", "second-parent");
+            await RunGitAsync(repositoryRoot, "checkout", "first-merge");
+            await RunGitAsync(repositoryRoot, "merge", "--no-ff", "second-parent", "-m", "first merge");
+            await RunGitAsync(repositoryRoot, "checkout", "second-merge");
+            await RunGitAsync(repositoryRoot, "merge", "--no-ff", "first-merge~1", "-m", "second merge");
+
+            await using var output = new StringWriter();
+            await using var error = new StringWriter();
+            var exitCode = await Program.RunAsync(
+                ["release-prep-witness", "--repo-root", repositoryRoot, "--base-ref", "first-merge", "--witness", witnessPath],
+                output,
+                error,
+                repositoryRoot);
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("exactly one merge base", error.ToString(), StringComparison.Ordinal);
+            Assert.False(File.Exists(witnessPath));
+        }
+        finally
+        {
+            if (Directory.Exists(repositoryRoot))
+            {
+                Directory.Delete(repositoryRoot, recursive: true);
+            }
+        }
     }
 
     [Fact]

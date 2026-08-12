@@ -306,7 +306,13 @@ internal sealed class ReleasePreparationDiffVerifier
         }
 
         var version = ReleaseManifestPath.Match(manifests[0].Path).Groups["version"].Value;
-        var manifestPath = Path.Join(repositoryRoot, manifests[0].Path.Replace('/', Path.DirectorySeparatorChar));
+        if (!TryResolveWorkingTreePath(repositoryRoot, manifests[0].Path, out var manifestPath))
+        {
+            Add(diagnostics, "release-prep-release-manifest-shape", "The added release manifest path is unsafe.",
+                $"'{manifests[0].Path}' contains a symbolic link or reparse point.", "Restore the generated manifest as an ordinary tracked file and rerun verify-prep-diff.");
+            return;
+        }
+
         try
         {
             var json = await File.ReadAllTextAsync(manifestPath, cancellationToken);
@@ -322,7 +328,7 @@ internal sealed class ReleasePreparationDiffVerifier
 
             ValidateReleaseArtifactChanges(version, changes, manifest.ConsumedUnreleasedEntryPaths, diagnostics);
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             Add(diagnostics, "release-prep-release-manifest-shape", "The added release manifest could not be read from HEAD.",
                 ex.Message, "Restore the generated manifest as an ordinary tracked file and rerun verify-prep-diff.");
@@ -506,7 +512,13 @@ internal sealed class ReleasePreparationDiffVerifier
                 continue;
             }
 
-            var fullPath = Path.Join(repositoryRoot, output.Replace('/', Path.DirectorySeparatorChar));
+            if (!TryResolveWorkingTreePath(repositoryRoot, output, out var fullPath))
+            {
+                Add(diagnostics, "release-prep-package-witness-mismatch", "A generated package document path is unsafe.",
+                    $"'{output}' contains a symbolic link or reparse point.", "Restore the generated package document as an ordinary tracked file and rerun verify-prep-diff.");
+                continue;
+            }
+
             if (surface.Kind == "managed-readme")
             {
                 var baseContent = await ReadGitFileAsync(repositoryRoot, mergeBase, output, cancellationToken);
@@ -860,6 +872,41 @@ internal sealed class ReleasePreparationDiffVerifier
         && !path.Contains('\\')
         && !path.Contains('\0')
         && !path.Split('/').Any(segment => string.IsNullOrWhiteSpace(segment) || segment is "." or "..");
+
+    private static bool TryResolveWorkingTreePath(string repositoryRoot, string repositoryPath, out string fullPath)
+    {
+        fullPath = Path.Join(repositoryRoot, repositoryPath.Replace('/', Path.DirectorySeparatorChar));
+        try
+        {
+            if ((File.GetAttributes(repositoryRoot) & FileAttributes.ReparsePoint) != 0)
+            {
+                return false;
+            }
+
+            var current = repositoryRoot;
+            foreach (var segment in repositoryPath.Split('/'))
+            {
+                current = Path.Join(current, segment);
+                try
+                {
+                    if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                    {
+                        return false;
+                    }
+                }
+                catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+                {
+                    return true;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        return true;
+    }
 
     private static bool IsSupportedNameStatus(string status)
     {

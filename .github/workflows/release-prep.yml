@@ -159,17 +159,22 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
-          dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj
           manifest_paths="$(git diff --name-only --diff-filter=A "origin/${BASE_REF}...HEAD" -- ':(glob)releases/v*.release.json')"
+          if [[ -n "${manifest_paths}" ]]; then
+            if [[ "$(printf '%s\n' "${manifest_paths}" | sed '/^$/d' | wc -l | tr -d ' ')" != "1" ]]; then
+              echo "verify-prep-diff accepted an invalid release manifest set." >&2
+              exit 1
+            fi
+            version="${manifest_paths#releases/v}"
+            version="${version%.release.json}"
+            export RELEASE_PREP_POLICY_BASE_REF="${BASE_REF}"
+            export RELEASE_PREP_POLICY_VERSION="${version}"
+          fi
+
+          dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj
           if [[ -z "${manifest_paths}" ]]; then
             exit 0
           fi
-          if [[ "$(printf '%s\n' "${manifest_paths}" | sed '/^$/d' | wc -l | tr -d ' ')" != "1" ]]; then
-            echo "verify-prep-diff accepted an invalid release manifest set." >&2
-            exit 1
-          fi
-          version="${manifest_paths#releases/v}"
-          version="${version%.release.json}"
           if [[ "${version}" == *-* ]]; then
             ./eng/release check --version "${version}" --fail-on-warnings --allow-existing-targets
             exit 0
