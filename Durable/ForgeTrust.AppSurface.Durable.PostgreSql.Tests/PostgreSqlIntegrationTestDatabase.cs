@@ -7,21 +7,22 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
 {
     private const int RequiredServerVersion = 170005;
+    private const int ContainerStartupProbeMaximumAttempts = 3;
+    private static readonly TimeSpan ContainerStartupProbeRetryDelay = TimeSpan.FromMilliseconds(250);
+    private static readonly SemaphoreSlim SharedContainerServerGate = new(1, 1);
     private readonly List<NpgsqlDataSource> _additionalDataSources = [];
     private readonly string _databaseName;
-    private readonly string? _maintenanceConnectionString;
-    private readonly PostgreSqlContainer? _container;
+    private readonly string _maintenanceConnectionString;
+    private static Task<PostgreSqlTestServer>? _sharedContainerServer;
 
     private PostgreSqlIntegrationTestDatabase(
         string databaseName,
-        string? maintenanceConnectionString,
+        string maintenanceConnectionString,
         string connectionString,
-        NpgsqlDataSource dataSource,
-        PostgreSqlContainer? container = null)
+        NpgsqlDataSource dataSource)
     {
         _databaseName = databaseName;
         _maintenanceConnectionString = maintenanceConnectionString;
-        _container = container;
         ConnectionString = connectionString;
         DataSource = dataSource;
     }
@@ -38,86 +39,248 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
         return dataSource;
     }
 
+    /// <summary>
+    /// Creates an isolated disposable database on a configured server or a process-shared Testcontainers server.
+    /// </summary>
+    /// <remarks>
+    /// Each caller receives a unique database that <see cref="DisposeAsync"/> drops, so xUnit cases can run concurrently
+    /// without sharing application state. The default Testcontainers server is retained for the test-host lifetime and
+    /// cleaned up by Testcontainers' resource reaper when that host exits.
+    /// </remarks>
     internal static async ValueTask<PostgreSqlIntegrationTestDatabase> TryCreateAsync()
     {
         var configured = Environment.GetEnvironmentVariable("APPSURFACE_POSTGRES_TEST_CONNECTION");
-        if (string.IsNullOrWhiteSpace(configured))
+        return string.IsNullOrWhiteSpace(configured)
+            ? await CreateDatabaseAsync(await GetSharedContainerServerAsync())
+            : await CreateFromConnectionStringAsync(configured);
+    }
+
+    /// <summary>
+    /// Creates an isolated disposable database from an explicitly configured PostgreSQL server.
+    /// </summary>
+    /// <remarks>
+    /// This is the same path that <see cref="TryCreateAsync"/> uses when
+    /// <c>APPSURFACE_POSTGRES_TEST_CONNECTION</c> is set. It is exposed internally so fixture tests can verify
+    /// configured-server isolation without mutating process-wide environment state. The connection must target a
+    /// PostgreSQL 17.5 server whose database can be changed to <c>postgres</c>, and its credentials must be allowed
+    /// to create and drop databases.
+    /// </remarks>
+    internal static async ValueTask<PostgreSqlIntegrationTestDatabase> CreateFromConnectionStringAsync(string connectionString)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        return await CreateDatabaseAsync(await CreateConfiguredServerAsync(connectionString));
+    }
+
+    private static async Task<PostgreSqlIntegrationTestDatabase> CreateDatabaseAsync(PostgreSqlTestServer server)
+    {
+        var databaseName = $"appsurface_durable_{Guid.NewGuid():N}";
+        try
         {
-            var container = new PostgreSqlBuilder(PostgreSqlTestContainerImage.Reference)
-                .WithDatabase("appsurface_durable")
-                .WithUsername("appsurface")
-                .WithPassword("appsurface-test-password")
-                .Build();
-            try
+            await using (var maintenance = new NpgsqlConnection(server.MaintenanceConnectionString))
             {
-                await container.StartAsync();
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                await container.DisposeAsync();
-                var prerequisite =
-                    $"Real PostgreSQL tests require APPSURFACE_POSTGRES_TEST_CONNECTION or an available Docker daemon: {exception.Message}";
-                var skipRequested = string.Equals(
-                        Environment.GetEnvironmentVariable("APPSURFACE_POSTGRES_TEST_ALLOW_SKIP"),
-                        "true",
-                        StringComparison.OrdinalIgnoreCase);
-                var runningInCi = string.Equals(
-                    Environment.GetEnvironmentVariable("CI"),
-                    "true",
-                    StringComparison.OrdinalIgnoreCase);
-                if (skipRequested && !runningInCi)
-                {
-                    throw SkipException.ForSkip(prerequisite);
-                }
-
-                throw new InvalidOperationException(
-                    $"{prerequisite} Set APPSURFACE_POSTGRES_TEST_ALLOW_SKIP=true only for an intentional local opt-out.",
-                    exception);
+                await maintenance.OpenAsync();
+                await using var create = new NpgsqlCommand($"CREATE DATABASE \"{databaseName}\";", maintenance);
+                await create.ExecuteNonQueryAsync();
             }
 
-            var containerConnectionString = container.GetConnectionString();
-            var containerDataSource = NpgsqlDataSource.Create(containerConnectionString);
-            try
+            var sourceBuilder = new NpgsqlConnectionStringBuilder(server.ConnectionString)
             {
-                await EnsureRequiredServerVersionAsync(containerDataSource);
-            }
-            catch
-            {
-                await containerDataSource.DisposeAsync();
-                await container.DisposeAsync();
-                throw;
-            }
-
+                Database = databaseName,
+            };
+            var dataSource = NpgsqlDataSource.Create(sourceBuilder.ConnectionString);
             return new PostgreSqlIntegrationTestDatabase(
-                "appsurface_durable",
-                maintenanceConnectionString: null,
-                containerConnectionString,
-                containerDataSource,
-                container);
+                databaseName,
+                server.MaintenanceConnectionString,
+                sourceBuilder.ConnectionString,
+                dataSource);
+        }
+        catch (NpgsqlException) when (server.Container is not null)
+        {
+            await InvalidateSharedContainerServerAsync(server);
+            throw;
+        }
+    }
+
+    private static async Task<PostgreSqlTestServer> GetSharedContainerServerAsync()
+    {
+        Task<PostgreSqlTestServer> serverTask;
+        await SharedContainerServerGate.WaitAsync();
+        try
+        {
+            serverTask = _sharedContainerServer ??= CreateSharedContainerServerAsync();
+        }
+        finally
+        {
+            SharedContainerServerGate.Release();
         }
 
-        var sourceBuilder = new NpgsqlConnectionStringBuilder(configured);
-        var maintenanceBuilder = new NpgsqlConnectionStringBuilder(configured)
+        try
+        {
+            return await serverTask;
+        }
+        catch (SkipException)
+        {
+            // A caller explicitly opted out of Docker-backed integration tests; retain that result for this test host.
+            throw;
+        }
+        catch
+        {
+            await SharedContainerServerGate.WaitAsync();
+            try
+            {
+                if (ReferenceEquals(_sharedContainerServer, serverTask))
+                {
+                    _sharedContainerServer = null;
+                }
+            }
+            finally
+            {
+                SharedContainerServerGate.Release();
+            }
+
+            throw;
+        }
+    }
+
+    private static async Task InvalidateSharedContainerServerAsync(PostgreSqlTestServer server)
+    {
+        await SharedContainerServerGate.WaitAsync();
+        try
+        {
+            if (_sharedContainerServer is { IsCompletedSuccessfully: true } sharedServer
+                && ReferenceEquals(sharedServer.Result, server))
+            {
+                // Do not stop this container: other concurrently running databases may still use it.
+                // A later caller instead starts a replacement server; the resource reaper cleans the old server at exit.
+                _sharedContainerServer = null;
+            }
+        }
+        finally
+        {
+            SharedContainerServerGate.Release();
+        }
+    }
+
+    private static async Task<PostgreSqlTestServer> CreateSharedContainerServerAsync()
+    {
+        var container = new PostgreSqlBuilder(PostgreSqlTestContainerImage.Reference)
+            .WithDatabase("appsurface_durable")
+            .WithUsername("appsurface")
+            .WithPassword("appsurface-test-password")
+            // The Testcontainers resource reaper owns the process-lifetime server cleanup.
+            .WithCleanUp(true)
+            .Build();
+        try
+        {
+            await container.StartAsync();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            await container.DisposeAsync();
+            throw CreateContainerPrerequisiteException(exception);
+        }
+
+        try
+        {
+            return await CreateServerAsync(container.GetConnectionString(), container);
+        }
+        catch
+        {
+            await container.DisposeAsync();
+            throw;
+        }
+    }
+
+    private static Task<PostgreSqlTestServer> CreateConfiguredServerAsync(string connectionString) =>
+        CreateServerAsync(connectionString, container: null);
+
+    private static async Task<PostgreSqlTestServer> CreateServerAsync(
+        string connectionString,
+        PostgreSqlContainer? container)
+    {
+        var maintenanceBuilder = new NpgsqlConnectionStringBuilder(connectionString)
         {
             Database = "postgres",
             Pooling = false,
         };
-        var databaseName = $"appsurface_durable_{Guid.NewGuid():N}";
-        await using (var maintenance = new NpgsqlConnection(maintenanceBuilder.ConnectionString))
+        if (container is null)
         {
-            await maintenance.OpenAsync();
-            await EnsureRequiredServerVersionAsync(maintenance);
-            await using var create = new NpgsqlCommand($"CREATE DATABASE \"{databaseName}\";", maintenance);
-            await create.ExecuteNonQueryAsync();
+            await VerifyServerAsync(maintenanceBuilder.ConnectionString, CancellationToken.None);
+        }
+        else
+        {
+            await ExecuteContainerStartupProbeAsync(
+                cancellationToken => VerifyServerAsync(maintenanceBuilder.ConnectionString, cancellationToken));
         }
 
-        sourceBuilder.Database = databaseName;
-        var dataSource = NpgsqlDataSource.Create(sourceBuilder.ConnectionString);
-        return new PostgreSqlIntegrationTestDatabase(
-            databaseName,
-            maintenanceBuilder.ConnectionString,
-            sourceBuilder.ConnectionString,
-            dataSource);
+        return new PostgreSqlTestServer(connectionString, maintenanceBuilder.ConnectionString, container);
+    }
+
+    private static async ValueTask VerifyServerAsync(string maintenanceConnectionString, CancellationToken cancellationToken)
+    {
+        await using var maintenance = new NpgsqlConnection(maintenanceConnectionString);
+        await maintenance.OpenAsync(cancellationToken);
+        await EnsureRequiredServerVersionAsync(maintenance);
+    }
+
+    private static Exception CreateContainerPrerequisiteException(Exception exception)
+    {
+        var prerequisite =
+            $"Real PostgreSQL tests require APPSURFACE_POSTGRES_TEST_CONNECTION or an available Docker daemon: {exception.Message}";
+        var skipRequested = string.Equals(
+                Environment.GetEnvironmentVariable("APPSURFACE_POSTGRES_TEST_ALLOW_SKIP"),
+                "true",
+                StringComparison.OrdinalIgnoreCase);
+        var runningInCi = string.Equals(
+            Environment.GetEnvironmentVariable("CI"),
+            "true",
+            StringComparison.OrdinalIgnoreCase);
+        if (skipRequested && !runningInCi)
+        {
+            return SkipException.ForSkip(prerequisite);
+        }
+
+        return new InvalidOperationException(
+            $"{prerequisite} Set APPSURFACE_POSTGRES_TEST_ALLOW_SKIP=true only for an intentional local opt-out.",
+            exception);
+    }
+
+    /// <summary>
+    /// Executes an idempotent container-startup probe, retrying only an Npgsql connection timeout that can occur after
+    /// the container-local readiness probe succeeds but before Docker Desktop exposes the published port to the host.
+    /// </summary>
+    /// <remarks>
+    /// The probe runs at most three times. Each retry waits 250 milliseconds by default, and <paramref name="delayAsync"/>
+    /// runs only between eligible failed attempts. An eligible failure is an <see cref="NpgsqlException"/> with a direct
+    /// <see cref="TimeoutException"/> inner exception; every other exception propagates immediately. Cancellation from
+    /// either <paramref name="probe"/> or the retry delay also propagates. Use this only for the initial, idempotent
+    /// host-side probe of a newly started Testcontainers server, never for configured-server or database-creation work.
+    /// </remarks>
+    /// <param name="probe">The idempotent probe to execute with the supplied cancellation token.</param>
+    /// <param name="delayAsync">Optional replacement for the default 250 millisecond retry delay, primarily for deterministic tests.</param>
+    /// <param name="cancellationToken">Token supplied to the probe and delay that cancels pending retry work.</param>
+    internal static async ValueTask ExecuteContainerStartupProbeAsync(
+        Func<CancellationToken, ValueTask> probe,
+        Func<TimeSpan, CancellationToken, ValueTask>? delayAsync = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(probe);
+
+        var delay = delayAsync ?? (static (duration, token) => new ValueTask(Task.Delay(duration, token)));
+        for (var attempt = 1; attempt <= ContainerStartupProbeMaximumAttempts; attempt++)
+        {
+            try
+            {
+                await probe(cancellationToken);
+                return;
+            }
+            catch (NpgsqlException exception) when (
+                exception.InnerException is TimeoutException
+                && attempt < ContainerStartupProbeMaximumAttempts)
+            {
+                await delay(ContainerStartupProbeRetryDelay, cancellationToken);
+            }
+        }
     }
 
     private static async ValueTask EnsureRequiredServerVersionAsync(NpgsqlDataSource dataSource)
@@ -145,15 +308,15 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
         }
 
         await DataSource.DisposeAsync();
-        if (_container is not null)
-        {
-            await _container.DisposeAsync();
-            return;
-        }
-
-        await using var maintenance = new NpgsqlConnection(_maintenanceConnectionString!);
+        await using var maintenance = new NpgsqlConnection(_maintenanceConnectionString);
         await maintenance.OpenAsync();
         await using var drop = new NpgsqlCommand($"DROP DATABASE \"{_databaseName}\" WITH (FORCE);", maintenance);
         await drop.ExecuteNonQueryAsync();
     }
+
+    private sealed record PostgreSqlTestServer(
+        string ConnectionString,
+        string MaintenanceConnectionString,
+        // Retain the container instance until the test process and its resource-reaper session exit.
+        PostgreSqlContainer? Container);
 }

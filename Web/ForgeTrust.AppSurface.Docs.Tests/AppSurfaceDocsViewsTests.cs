@@ -63,6 +63,15 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
+    public void Layout_ShouldDeferRazorWireManagedOutlineLinks()
+    {
+        var layout = ReadLayoutMarkup();
+
+        Assert.Contains("anchorLink.matches(\"a[data-rw-page-nav-link]\")", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("anchorLink.matches(\"a[data-rw-page-nav-link='true']\")", layout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ViewStarts_ShouldSelectPackageSpecificAbsoluteLayout()
     {
         var projectRoot = GetDocsProjectRoot();

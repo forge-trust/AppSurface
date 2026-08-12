@@ -2,6 +2,7 @@ using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Theming;
 using ForgeTrust.AppSurface.Web;
 using ForgeTrust.AppSurface.Web.Theming;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
@@ -164,10 +165,26 @@ public sealed class AppSurfaceDocsThemePairTests
         var theme = new AppSurfaceDocsThemeResolver(
             options,
             new StubThemeResolver(darkResolution),
-            provider.GetRequiredService<IAppSurfaceThemeDocumentProvider>()).Theme;
+            provider.GetRequiredService<AppSurfaceThemePreferenceOptions>()).Theme;
 
         Assert.Contains("--docs-color-link:var(--as-link);", theme.CriticalCss, StringComparison.Ordinal);
         Assert.DoesNotContain("--docs-color-link:#9cf;", theme.CriticalCss, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DocsRegistration_ShouldNotResolveTheScopedSelectionDocumentProviderAtRoot()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddAppSurfaceTheming(options => options.Pairs.Add(AppSurfaceThemePair.AppSurface()));
+        services.AddAppSurfaceDocs();
+        services.AddScoped<IAppSurfaceWebThemeSelectionPolicy, NoSelectionPolicy>();
+        services.AddAppSurfaceWebThemeSelection();
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+
+        var theme = provider.GetRequiredService<AppSurfaceDocsThemeResolver>().Theme;
+
+        Assert.True(theme.UsesSharedTheme);
     }
 
     [Fact]
@@ -270,6 +287,15 @@ public sealed class AppSurfaceDocsThemePairTests
     private sealed class StubThemeResolver(AppSurfaceThemeResolution resolution) : IAppSurfaceThemeResolver
     {
         public AppSurfaceThemeResolution ResolveDefault() => resolution;
+    }
+
+    private sealed class NoSelectionPolicy : IAppSurfaceWebThemeSelectionPolicy
+    {
+        public bool TrySelect(out AppSurfaceThemeId themeId)
+        {
+            themeId = default;
+            return false;
+        }
     }
 
 }

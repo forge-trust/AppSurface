@@ -226,6 +226,34 @@ internal sealed class ReleaseGuidanceRenderer
         }
     }
 
+    /// <summary>
+    /// Extracts the body owned by the release-guidance marker pair without rewriting the README.
+    /// </summary>
+    /// <param name="content">Complete README content.</param>
+    /// <param name="displayPath">Repository-relative README path used in actionable failures.</param>
+    /// <returns>The exact bytes between the ordered marker lines, including their line endings.</returns>
+    /// <remarks>
+    /// Release-preparation provenance verification uses this method to bind a changed README only to the generated
+    /// region. It intentionally preserves line endings and does not trim whitespace: a hash of this value must prove
+    /// the exact generated body that will be committed.
+    /// </remarks>
+    /// <exception cref="PackageIndexException">Thrown when the README does not contain exactly one ordered marker pair.</exception>
+    internal static string ExtractManagedRegionBody(string content, string displayPath)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayPath);
+
+        var begin = FindExactMarkerLines(content, BeginMarker, displayPath);
+        var end = FindExactMarkerLines(content, EndMarker, displayPath);
+        if (begin.Count != 1 || end.Count != 1 || begin[0].LineStart >= end[0].LineStart)
+        {
+            throw new PackageIndexException(
+                $"README '{displayPath}' has malformed release-guidance markers. Problem: provenance verification requires one ordered generated region. Cause: the begin/end marker is missing, duplicated, or reversed. Fix: restore one '{BeginMarker}' and '{EndMarker}' pair, then run 'generate' and 'verify'. Docs: {DocumentationReference}.");
+        }
+
+        return content[begin[0].NextLineStart..end[0].LineStart];
+    }
+
     private static string RequireVariant(PackageManifestEntry entry, string documentationPath)
     {
         if (string.IsNullOrWhiteSpace(entry.ReleaseGuidanceVariant))

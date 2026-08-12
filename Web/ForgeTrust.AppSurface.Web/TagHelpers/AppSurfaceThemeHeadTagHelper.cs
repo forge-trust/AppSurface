@@ -24,14 +24,14 @@ public sealed class AppSurfaceThemeHeadTagHelper : TagHelper
     private readonly AppSurfaceThemePreferenceBootstrap? _preferenceBootstrap;
 
     /// <summary>Initializes a head helper from the registered document provider.</summary>
-    /// <param name="documentProvider">Provider for the safe default theme document.</param>
+    /// <param name="documentProvider">Provider for the safe theme document for the current rendering scope.</param>
     public AppSurfaceThemeHeadTagHelper(IAppSurfaceThemeDocumentProvider documentProvider)
         : this(documentProvider, EmptyServiceProvider.Instance)
     {
     }
 
     /// <summary>Initializes a head helper from the registered document provider and optional preference services.</summary>
-    /// <param name="documentProvider">Provider for the safe default theme document.</param>
+    /// <param name="documentProvider">Provider for the safe theme document for the current rendering scope.</param>
     /// <param name="serviceProvider">Provider used to resolve the optional preference bootstrap.</param>
     [ActivatorUtilitiesConstructor]
     public AppSurfaceThemeHeadTagHelper(IAppSurfaceThemeDocumentProvider documentProvider, IServiceProvider serviceProvider)
