@@ -205,6 +205,18 @@ public sealed record AppSurfaceDocsHarvesterProgress
     internal string ProgressId { get; init; } = string.Empty;
 
     /// <summary>
+    /// Gets a value indicating whether this entry belongs to a package-owned parser that reports detailed progress.
+    /// </summary>
+    /// <remarks>
+    /// This server-only marker is set from the registered harvester instance rather than inferred from
+    /// <see cref="HarvesterType"/>. It prevents a custom <c>IDocHarvester</c> whose class name matches a built-in
+    /// parser from being rendered with package-owned parser telemetry. The marker is intentionally omitted from the
+    /// browser progress contract.
+    /// </remarks>
+    [JsonIgnore]
+    internal bool IsBuiltInProgressHarvester { get; init; }
+
+    /// <summary>
     /// Gets the display status for this harvester.
     /// </summary>
     public string Status { get; init; }

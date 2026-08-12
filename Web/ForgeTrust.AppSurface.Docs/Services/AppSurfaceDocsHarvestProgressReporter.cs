@@ -11,7 +11,39 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// </summary>
 /// <param name="ProgressId">Unique, server-only callback identity for the configured harvester instance.</param>
 /// <param name="HarvesterType">Redacted concrete type name shown to the operator.</param>
-internal sealed record AppSurfaceDocsHarvesterRegistration(string ProgressId, string HarvesterType);
+/// <param name="IsBuiltInProgressHarvester">
+/// Whether the registration belongs to a package-owned parser that reports detailed progress.
+/// </param>
+internal sealed record AppSurfaceDocsHarvesterRegistration(
+    string ProgressId,
+    string HarvesterType,
+    bool IsBuiltInProgressHarvester = false)
+{
+    /// <summary>
+    /// Creates registrations with unique server-only identities for the supplied harvester type names.
+    /// </summary>
+    /// <param name="harvesterTypes">The redacted harvester type names to register.</param>
+    /// <returns>Registrations that preserve input order and distinguish repeated type names.</returns>
+    internal static IReadOnlyList<AppSurfaceDocsHarvesterRegistration> Create(
+        IReadOnlyList<string> harvesterTypes)
+    {
+        ArgumentNullException.ThrowIfNull(harvesterTypes);
+
+        var duplicateTypes = harvesterTypes
+            .GroupBy(harvesterType => harvesterType, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        return harvesterTypes
+            .Select(
+                (harvesterType, index) => new AppSurfaceDocsHarvesterRegistration(
+                    duplicateTypes.Contains(harvesterType)
+                        ? $"harvester-{index.ToString(CultureInfo.InvariantCulture)}"
+                        : harvesterType,
+                    harvesterType))
+            .ToArray();
+    }
+}
 
 /// <summary>
 /// Captures redacted live harvest progress and publishes bounded RazorWire updates for late-subscribing docs pages.
@@ -33,7 +65,6 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
     private readonly ILogger<AppSurfaceDocsHarvestProgressReporter> _logger;
     private readonly TimeProvider _timeProvider;
     private readonly object _gate = new();
-    private readonly SemaphoreSlim _publishGate = new(1, 1);
     private readonly HashSet<string> _completionVisitSuppressedRunIds = new(StringComparer.Ordinal);
     private readonly HashSet<string> _progressInstrumentedHarvesterIds = new(StringComparer.Ordinal);
     private readonly Dictionary<string, HarvesterTelemetry> _harvesterTelemetry = new(StringComparer.Ordinal);
@@ -42,7 +73,10 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
     private CancellationTokenSource? _ordinaryPublishCancellation;
     private CancellationTokenSource? _publicationRetryCancellation;
     private ProgressPublication? _pendingPublicationRetry;
+    private ProgressPublication? _pendingBackgroundPublication;
     private bool _pendingCompletionVisitRetry;
+    private bool _pendingBackgroundCompletionVisit;
+    private bool _backgroundPublicationInFlight;
     private bool _suppressNextCompletionVisit;
     private bool _recordQueuedRebuildForNextRun;
     private bool _hasProgressEvidence;
@@ -136,26 +170,14 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
     /// <returns>The generated run identifier used to correlate later progress callbacks.</returns>
     /// <remarks>
     /// The snapshot update is protected by the reporter gate and live publication is scheduled after the lock is
-    /// released. Parser execution never waits for a stream hub response. Passing <see langword="null"/> throws
+    /// released. Parser execution never waits for a stream hub response. Because this overload only receives display
+    /// names, its registrations remain status-only; <see cref="BeginRunAsync(IReadOnlyList{AppSurfaceDocsHarvesterRegistration})"/>
+    /// carries the trusted package-owned parser marker. Passing <see langword="null"/> throws
     /// <see cref="ArgumentNullException"/>.
     /// </remarks>
     internal ValueTask<string> BeginRunAsync(IReadOnlyList<string> harvesterTypes)
     {
-        ArgumentNullException.ThrowIfNull(harvesterTypes);
-        var duplicateTypes = harvesterTypes
-            .GroupBy(harvesterType => harvesterType, StringComparer.Ordinal)
-            .Where(group => group.Count() > 1)
-            .Select(group => group.Key)
-            .ToHashSet(StringComparer.Ordinal);
-        var registrations = harvesterTypes
-            .Select(
-                (harvesterType, index) => new AppSurfaceDocsHarvesterRegistration(
-                    duplicateTypes.Contains(harvesterType)
-                        ? $"harvester-{index.ToString(CultureInfo.InvariantCulture)}"
-                        : harvesterType,
-                    harvesterType))
-            .ToArray();
-        return BeginRunAsync(registrations);
+        return BeginRunAsync(AppSurfaceDocsHarvesterRegistration.Create(harvesterTypes));
     }
 
     /// <summary>
@@ -196,7 +218,8 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
                 .Select(
                     registration => new AppSurfaceDocsHarvesterProgress(registration.HarvesterType, "Waiting", 0)
                     {
-                        ProgressId = registration.ProgressId
+                        ProgressId = registration.ProgressId,
+                        IsBuiltInProgressHarvester = registration.IsBuiltInProgressHarvester
                     })
                 .ToArray();
             foreach (var harvester in harvesters)
@@ -703,89 +726,81 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
         ProgressPublication publication,
         bool publishCompletionVisit = false)
     {
-        await _publishGate.WaitAsync();
-        try
+        lock (_gate)
         {
-            lock (_gate)
+            var publicationIsSuperseded = publication.Generation != _generation
+                                           || publication.Revision < _revision;
+            if (publicationIsSuperseded)
             {
-                var publicationIsSuperseded = publication.Generation != _generation
-                                               || publication.Revision < _revision;
-                if (publicationIsSuperseded)
+                if (_pendingPublicationRetry is { } pendingPublication
+                    && pendingPublication.Equals(publication))
                 {
-                    if (_pendingPublicationRetry is { } pendingPublication
-                        && pendingPublication.Equals(publication))
-                    {
-                        _pendingPublicationRetry = null;
-                        _pendingCompletionVisitRetry = false;
-                    }
-
-                    return;
+                    _pendingPublicationRetry = null;
+                    _pendingCompletionVisitRetry = false;
                 }
 
-                var publicationWasAlreadyDelivered = publication.Generation < _lastPublishedGeneration
-                                                    || (publication.Generation == _lastPublishedGeneration
-                                                        && publication.Revision <= _lastPublishedRevision);
-                var completionVisitStillPending = publishCompletionVisit
-                                                  && string.Equals(_snapshot.RunId, publication.Snapshot.RunId, StringComparison.Ordinal)
-                                                  && _snapshot.State == AppSurfaceDocsHarvestRunState.Completed
-                                                  && !_completionVisitSuppressedRunIds.Contains(publication.Snapshot.RunId);
-                if (publicationWasAlreadyDelivered && !completionVisitStillPending)
-                {
-                    return;
-                }
-            }
-
-            var hub = _services.GetService<IRazorWireStreamHub>();
-            if (hub is null)
-            {
                 return;
             }
 
-            try
+            var publicationWasAlreadyDelivered = publication.Generation < _lastPublishedGeneration
+                                                || (publication.Generation == _lastPublishedGeneration
+                                                    && publication.Revision <= _lastPublishedRevision);
+            var completionVisitStillPending = publishCompletionVisit
+                                              && string.Equals(_snapshot.RunId, publication.Snapshot.RunId, StringComparison.Ordinal)
+                                              && _snapshot.State == AppSurfaceDocsHarvestRunState.Completed
+                                              && !_completionVisitSuppressedRunIds.Contains(publication.Snapshot.RunId);
+            if (publicationWasAlreadyDelivered && !completionVisitStillPending)
             {
-                var message = AppSurfaceDocsHarvestProgressRenderer.RenderTurboStream(
-                    publication.Snapshot,
-                    CompletionDelayMilliseconds);
+                return;
+            }
+        }
+
+        var hub = _services.GetService<IRazorWireStreamHub>();
+        if (hub is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var message = AppSurfaceDocsHarvestProgressRenderer.RenderTurboStream(
+                publication.Snapshot,
+                CompletionDelayMilliseconds);
+            await hub.PublishAsync(
+                ChannelName,
+                message,
+                new RazorWireStreamPublishOptions { Replay = true });
+
+            if (publishCompletionVisit && CanPublishCompletionVisit(publication.Snapshot.RunId))
+            {
+                var visitMessage = new RazorWireStreamBuilder()
+                    .Visit(CurrentPageVisitUrl, RazorWireVisitAction.Replace)
+                    .Build();
                 await hub.PublishAsync(
                     ChannelName,
-                    message,
-                    new RazorWireStreamPublishOptions { Replay = true });
-
-                if (publishCompletionVisit && CanPublishCompletionVisit(publication.Snapshot.RunId))
-                {
-                    var visitMessage = new RazorWireStreamBuilder()
-                        .Visit(CurrentPageVisitUrl, RazorWireVisitAction.Replace)
-                        .Build();
-                    await hub.PublishAsync(
-                        ChannelName,
-                        visitMessage,
-                        new RazorWireStreamPublishOptions { Replay = false });
-                    MarkCompletionVisitPublished(publication.Snapshot.RunId);
-                }
-
-                lock (_gate)
-                {
-                    _lastPublishedGeneration = publication.Generation;
-                    _lastPublishedRevision = publication.Revision;
-                    if (_pendingPublicationRetry is { } pendingPublication
-                        && !IsPublicationNewer(pendingPublication, publication))
-                    {
-                        CancelPublicationRetry_NoLock();
-                    }
-                }
+                    visitMessage,
+                    new RazorWireStreamPublishOptions { Replay = false });
+                MarkCompletionVisitPublished(publication.Snapshot.RunId);
             }
-            catch (Exception ex) when (!IsFatalException(ex))
+
+            lock (_gate)
             {
-                _logger.LogWarning(ex, "AppSurface Docs harvest progress publish failed.");
-                lock (_gate)
+                _lastPublishedGeneration = publication.Generation;
+                _lastPublishedRevision = publication.Revision;
+                if (_pendingPublicationRetry is { } pendingPublication
+                    && !IsPublicationNewer(pendingPublication, publication))
                 {
-                    SchedulePublicationRetry_NoLock(publication, publishCompletionVisit);
+                    CancelPublicationRetry_NoLock();
                 }
             }
         }
-        finally
+        catch (Exception ex) when (!IsFatalException(ex))
         {
-            _publishGate.Release();
+            _logger.LogWarning(ex, "AppSurface Docs harvest progress publish failed.");
+            lock (_gate)
+            {
+                SchedulePublicationRetry_NoLock(publication, publishCompletionVisit);
+            }
         }
     }
 
@@ -793,7 +808,60 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
         ProgressPublication publication,
         bool publishCompletionVisit = false)
     {
-        _ = PublishAsync(publication, publishCompletionVisit);
+        lock (_gate)
+        {
+            if (_backgroundPublicationInFlight)
+            {
+                QueueBackgroundPublication_NoLock(publication, publishCompletionVisit);
+                return;
+            }
+
+            _backgroundPublicationInFlight = true;
+        }
+
+        _ = PublishBackgroundQueueAsync(publication, publishCompletionVisit);
+    }
+
+    private async Task PublishBackgroundQueueAsync(
+        ProgressPublication publication,
+        bool publishCompletionVisit)
+    {
+        while (true)
+        {
+            await PublishAsync(publication, publishCompletionVisit);
+
+            lock (_gate)
+            {
+                if (_pendingBackgroundPublication is not { } pendingPublication)
+                {
+                    _backgroundPublicationInFlight = false;
+                    return;
+                }
+
+                publication = pendingPublication;
+                publishCompletionVisit = _pendingBackgroundCompletionVisit;
+                _pendingBackgroundPublication = null;
+                _pendingBackgroundCompletionVisit = false;
+            }
+        }
+    }
+
+    private void QueueBackgroundPublication_NoLock(
+        ProgressPublication publication,
+        bool publishCompletionVisit)
+    {
+        if (_pendingBackgroundPublication is null || IsPublicationNewer(publication, _pendingBackgroundPublication.Value))
+        {
+            _pendingBackgroundPublication = publication;
+            _pendingBackgroundCompletionVisit = publishCompletionVisit;
+            return;
+        }
+
+        if (publication.Generation == _pendingBackgroundPublication.Value.Generation
+            && publication.Revision == _pendingBackgroundPublication.Value.Revision)
+        {
+            _pendingBackgroundCompletionVisit |= publishCompletionVisit;
+        }
     }
 
     private bool IsCurrentRunningHarvester_NoLock(string runId, string progressId)
@@ -812,27 +880,26 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
             return snapshot;
         }
 
-        var hasChanges = false;
-        var harvesters = snapshot.Harvesters
-            .Select(
-                harvester =>
-                {
-                    if (!_harvesterTelemetry.TryGetValue(harvester.ProgressId, out var telemetry)
-                        || (harvester.DocCount == telemetry.DocumentCount
-                            && harvester.SourceUnitsProcessed == telemetry.SourceUnitsProcessed))
-                    {
-                        return harvester;
-                    }
+        AppSurfaceDocsHarvesterProgress[]? materializedHarvesters = null;
+        for (var index = 0; index < snapshot.Harvesters.Count; index++)
+        {
+            var harvester = snapshot.Harvesters[index];
+            if (!_harvesterTelemetry.TryGetValue(harvester.ProgressId, out var telemetry)
+                || (harvester.DocCount == telemetry.DocumentCount
+                    && harvester.SourceUnitsProcessed == telemetry.SourceUnitsProcessed))
+            {
+                continue;
+            }
 
-                    hasChanges = true;
-                    return harvester with
-                    {
-                        DocCount = telemetry.DocumentCount,
-                        SourceUnitsProcessed = telemetry.SourceUnitsProcessed
-                    };
-                })
-            .ToArray();
-        if (!hasChanges)
+            materializedHarvesters ??= snapshot.Harvesters.ToArray();
+            materializedHarvesters[index] = harvester with
+            {
+                DocCount = telemetry.DocumentCount,
+                SourceUnitsProcessed = telemetry.SourceUnitsProcessed
+            };
+        }
+
+        if (materializedHarvesters is null)
         {
             return snapshot;
         }
@@ -840,9 +907,9 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
         return snapshot with
         {
             TotalDocs = snapshot.State == AppSurfaceDocsHarvestRunState.Running
-                ? harvesters.Sum(harvester => harvester.DocCount)
+                ? materializedHarvesters.Sum(harvester => harvester.DocCount)
                 : snapshot.TotalDocs,
-            Harvesters = harvesters
+            Harvesters = materializedHarvesters
         };
     }
 
@@ -988,7 +1055,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
 
             if (publication is { } pendingPublication)
             {
-                await PublishAsync(pendingPublication);
+                PublishInBackground(pendingPublication);
             }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -1055,7 +1122,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
 
             if (publication is { } pendingPublication)
             {
-                await PublishAsync(pendingPublication, publishCompletionVisit);
+                PublishInBackground(pendingPublication, publishCompletionVisit);
             }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)

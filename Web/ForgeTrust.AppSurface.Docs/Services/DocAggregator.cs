@@ -1270,22 +1270,13 @@ public class DocAggregator
     private static IReadOnlyList<AppSurfaceDocsHarvesterRegistration> CreateHarvesterRegistrations(
         IReadOnlyList<IDocHarvester> harvesters)
     {
-        var duplicateTypes = harvesters
-            .Select(harvester => harvester.GetType().Name)
-            .GroupBy(harvesterType => harvesterType, StringComparer.Ordinal)
-            .Where(group => group.Count() > 1)
-            .Select(group => group.Key)
-            .ToHashSet(StringComparer.Ordinal);
-        return harvesters
+        var registrations = AppSurfaceDocsHarvesterRegistration.Create(
+            harvesters.Select(harvester => harvester.GetType().Name).ToArray());
+        return registrations
             .Select(
-                (harvester, index) =>
+                (registration, index) => registration with
                 {
-                    var harvesterType = harvester.GetType().Name;
-                    return new AppSurfaceDocsHarvesterRegistration(
-                        duplicateTypes.Contains(harvesterType)
-                            ? $"harvester-{index.ToString(CultureInfo.InvariantCulture)}"
-                            : harvesterType,
-                        harvesterType);
+                    IsBuiltInProgressHarvester = IsBuiltInProgressHarvester(harvesters[index])
                 })
             .ToArray();
     }
@@ -1336,9 +1327,9 @@ public class DocAggregator
             var markdownDownloadSourceCaptureExceededBudget = false;
             if (harvester is MarkdownHarvester markdownHarvester)
             {
-                var markdownResult = await markdownHarvester
-                    .HarvestWithSourceAsync(harvesterContext, timeoutCts.Token)
-                    .WaitAsync(harvesterTimeout);
+                var markdownResult = await AwaitHarvesterResultOrTimeoutAsync(
+                    markdownHarvester.HarvestWithSourceAsync(harvesterContext, timeoutCts.Token),
+                    timeoutCts.Token);
                 docs = markdownResult.Nodes ?? [];
                 markdownDownloadSources = markdownResult.SourceByPath;
                 markdownDownloadEligibleSourceBytes = markdownResult.EligibleSourceBytes;
@@ -1347,10 +1338,9 @@ public class DocAggregator
             else
             {
                 var harvestTask = HarvestWithContextAsync(harvester, harvesterContext, timeoutCts.Token);
-                docs = await harvestTask.WaitAsync(harvesterTimeout) ?? [];
+                docs = await AwaitHarvesterResultOrTimeoutAsync(harvestTask, timeoutCts.Token) ?? [];
             }
 
-            timeoutCts.Token.ThrowIfCancellationRequested();
             var additionalDiagnostics = CollectHarvestDiagnostics(harvester, harvesterType, logger);
             var blockingDiagnostic = FindStrictBlockingDiagnostic(harvester, additionalDiagnostics);
             var supplementalDiagnostics = blockingDiagnostic is null
@@ -1468,6 +1458,34 @@ public class DocAggregator
 
             return result;
         }
+    }
+
+    /// <summary>
+    /// Awaits one harvester task while giving a completed result precedence when it races the timeout cancellation.
+    /// </summary>
+    /// <remarks>
+    /// The shared timeout token cancels both the harvester and this wait. Once the wait returns a result, callers must
+    /// preserve it rather than re-reading the timeout token: that token can transition after a valid result crossed the
+    /// boundary. A task that has not completed when cancellation wins is classified by the caller as timed out.
+    /// </remarks>
+    internal static async Task<T> AwaitHarvesterResultOrTimeoutAsync<T>(Task<T> harvesterTask, CancellationToken timeoutToken)
+    {
+        ArgumentNullException.ThrowIfNull(harvesterTask);
+
+        if (harvesterTask.IsCompleted)
+        {
+            return await harvesterTask;
+        }
+
+        var timeoutTask = Task.Delay(Timeout.InfiniteTimeSpan, timeoutToken);
+        await Task.WhenAny(harvesterTask, timeoutTask);
+        if (harvesterTask.IsCompleted)
+        {
+            return await harvesterTask;
+        }
+
+        timeoutToken.ThrowIfCancellationRequested();
+        return await harvesterTask;
     }
 
     private static bool IsBuiltInProgressHarvester(IDocHarvester harvester)

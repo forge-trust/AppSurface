@@ -22,6 +22,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
                     new AppSurfaceDocsHarvesterProgress(nameof(MarkdownHarvester), "Running", 2)
                     {
                         ProgressId = "server-only-id",
+                        IsBuiltInProgressHarvester = true,
                         Phase = AppSurfaceDocsHarvestProgressPhase.Parsing,
                         SourceUnitsProcessed = 7
                     }
@@ -32,6 +33,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
         Assert.Contains("\"phase\":\"Parsing\"", json, StringComparison.Ordinal);
         Assert.Contains("\"sourceUnitsProcessed\":7", json, StringComparison.Ordinal);
         Assert.DoesNotContain("server-only-id", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("isBuiltInProgressHarvester", json, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -53,6 +55,51 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
         Assert.Equal(AppSurfaceDocsHarvestProgressPhase.Terminal, harvester.Phase);
         Assert.Equal(1, harvester.SourceUnitsProcessed);
         Assert.Equal(1, harvester.DocCount);
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldCarryTrustedBuiltInMarkerFromRegistration()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        await reporter.BeginRunAsync(
+        [
+            new AppSurfaceDocsHarvesterRegistration("built-in", nameof(MarkdownHarvester), true),
+            new AppSurfaceDocsHarvesterRegistration("custom", nameof(MarkdownHarvester))
+        ]);
+
+        var harvesters = reporter.CurrentSnapshot.Harvesters;
+        Assert.True(harvesters.Single(harvester => harvester.ProgressId == "built-in").IsBuiltInProgressHarvester);
+        Assert.False(harvesters.Single(harvester => harvester.ProgressId == "custom").IsBuiltInProgressHarvester);
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldIgnoreInvalidOrOutOfOrderPhaseTransitions()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        var session = reporter.CreateSession(runId, nameof(MarkdownHarvester));
+
+        await session.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Parsing);
+        await session.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Waiting);
+        await session.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Terminal);
+        Assert.Equal(AppSurfaceDocsHarvestProgressPhase.Waiting, Assert.Single(reporter.CurrentSnapshot.Harvesters).Phase);
+
+        await session.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Discovering);
+        await session.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Discovering);
+        await session.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Finalizing);
+        Assert.Equal(AppSurfaceDocsHarvestProgressPhase.Discovering, Assert.Single(reporter.CurrentSnapshot.Harvesters).Phase);
+
+        await reporter.CompleteRunAsync(runId, CreateHealth());
+        await session.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Parsing);
+
+        Assert.Equal(AppSurfaceDocsHarvestProgressPhase.Terminal, Assert.Single(reporter.CurrentSnapshot.Harvesters).Phase);
     }
 
     [Fact]
@@ -89,7 +136,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
         }
 
         Assert.Single(hub.Published);
-        await Task.Delay(TimeSpan.FromMilliseconds(350));
+        await hub.SecondPublicationObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Equal(2, hub.Published.Count);
         Assert.Equal(10_000, Assert.Single(reporter.CurrentSnapshot.Harvesters).SourceUnitsProcessed);
     }
@@ -242,10 +289,38 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
             NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
 
         var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]).AsTask().WaitAsync(TimeSpan.FromSeconds(1));
+        await hub.FirstPublicationStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
         await reporter.HarvesterStartedAsync(runId, nameof(MarkdownHarvester)).AsTask().WaitAsync(TimeSpan.FromSeconds(1));
 
         Assert.Equal("Running", Assert.Single(reporter.CurrentSnapshot.Harvesters).Status);
         hub.Release.TrySetResult();
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldDropNewPublicationsWhileAHubPublishIsStalled()
+    {
+        var hub = new BlockingRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        await hub.FirstPublicationStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        for (var index = 0; index < 100; index++)
+        {
+            await reporter.ActivityAsync(runId, $"Activity {index}");
+        }
+
+        await reporter.CompleteRunAsync(runId, CreateHealth());
+
+        Assert.False(hub.SecondPublicationStarted.Task.IsCompleted);
+
+        hub.Release.TrySetResult();
+        await hub.ThirdPublicationStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.Equal(3, hub.PublicationCount);
     }
 
     [Fact]
@@ -701,16 +776,27 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
     {
         public List<PublishedMessage> Published { get; } = [];
 
+        public TaskCompletionSource SecondPublicationObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public ValueTask PublishAsync(string channel, string message)
         {
-            Published.Add(new PublishedMessage(channel, message, null));
+            Record(channel, message, options: null);
             return ValueTask.CompletedTask;
         }
 
         public ValueTask PublishAsync(string channel, string message, RazorWireStreamPublishOptions? options)
         {
-            Published.Add(new PublishedMessage(channel, message, options));
+            Record(channel, message, options);
             return ValueTask.CompletedTask;
+        }
+
+        private void Record(string channel, string message, RazorWireStreamPublishOptions? options)
+        {
+            Published.Add(new PublishedMessage(channel, message, options));
+            if (Published.Count >= 2)
+            {
+                SecondPublicationObserved.TrySetResult();
+            }
         }
 
         public ChannelReader<string> Subscribe(string channel)
@@ -784,13 +870,37 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
     {
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        public TaskCompletionSource FirstPublicationStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource SecondPublicationStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource ThirdPublicationStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private int _publicationCount;
+
+        public int PublicationCount => Volatile.Read(ref _publicationCount);
+
         public ValueTask PublishAsync(string channel, string message)
         {
-            return new ValueTask(Release.Task);
+            return PublishAsync(channel, message, options: null);
         }
 
         public ValueTask PublishAsync(string channel, string message, RazorWireStreamPublishOptions? options)
         {
+            var publicationCount = Interlocked.Increment(ref _publicationCount);
+            if (publicationCount == 1)
+            {
+                FirstPublicationStarted.TrySetResult();
+            }
+            else if (publicationCount == 2)
+            {
+                SecondPublicationStarted.TrySetResult();
+            }
+            else if (publicationCount == 3)
+            {
+                ThirdPublicationStarted.TrySetResult();
+            }
+
             return new ValueTask(Release.Task);
         }
 

@@ -3787,6 +3787,20 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task AwaitHarvesterResultOrTimeoutAsync_ShouldKeepCompletedResultWhenTimeoutCancelsBeforeContinuationRuns()
+    {
+        using var timeout = new CancellationTokenSource();
+        var result = new TaskCompletionSource<IReadOnlyList<DocNode>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var wait = DocAggregator.AwaitHarvesterResultOrTimeoutAsync(result.Task, timeout.Token);
+        var expected = (IReadOnlyList<DocNode>)[new DocNode("Boundary", "boundary.md", "boundary")];
+
+        result.SetResult(expected);
+        timeout.Cancel();
+
+        Assert.Same(expected, await wait);
+    }
+
+    [Fact]
     public async Task GetHarvestHealthAsync_ShouldRecordCanceledHarvester_WhenHarvesterCancelsOutsideTimeout()
     {
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))

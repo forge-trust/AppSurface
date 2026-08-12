@@ -106,9 +106,11 @@ internal static class AppSurfaceDocsHarvestProgressRenderer
         sb.Append("<div class=\"docs-harvest-harvesters\" aria-label=\"Harvester progress\">");
         foreach (var harvester in snapshot.Harvesters)
         {
-            var isBuiltInParser = IsBuiltInParser(harvester.HarvesterType);
+            var isBuiltInParser = harvester.IsBuiltInProgressHarvester;
             sb.Append("<article class=\"docs-harvest-harvester\">");
-            sb.Append("<span class=\"docs-harvest-harvester-name\">").Append(Encode(FriendlyHarvesterName(harvester.HarvesterType))).Append("</span>");
+            sb.Append("<span class=\"docs-harvest-harvester-name\">")
+                .Append(Encode(isBuiltInParser ? FriendlyHarvesterName(harvester.HarvesterType) : harvester.HarvesterType))
+                .Append("</span>");
             sb.Append("<span class=\"docs-harvest-harvester-phase\">")
                 .Append(Encode(isBuiltInParser || harvester.Phase == AppSurfaceDocsHarvestProgressPhase.Terminal
                     ? FormatHarvesterPhase(harvester)
@@ -246,13 +248,6 @@ internal static class AppSurfaceDocsHarvestProgressRenderer
             nameof(JavaScriptDocHarvester) => "JavaScript public API",
             _ => harvesterType
         };
-    }
-
-    private static bool IsBuiltInParser(string harvesterType)
-    {
-        return harvesterType == nameof(MarkdownHarvester)
-               || harvesterType == nameof(CSharpDocHarvester)
-               || harvesterType == nameof(JavaScriptDocHarvester);
     }
 
     private static string FormatElapsed(AppSurfaceDocsHarvestProgressSnapshot snapshot)

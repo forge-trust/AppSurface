@@ -51,6 +51,7 @@ public sealed class AppSurfaceDocsHarvestProgressRendererTests
                 [
                     new AppSurfaceDocsHarvesterProgress(nameof(MarkdownHarvester), "Running", 42)
                     {
+                        IsBuiltInProgressHarvester = true,
                         Phase = AppSurfaceDocsHarvestProgressPhase.Parsing,
                         SourceUnitsProcessed = 99
                     }
@@ -139,7 +140,10 @@ public sealed class AppSurfaceDocsHarvestProgressRendererTests
                 TotalDocs = 0,
                 Harvesters =
                 [
-                    new AppSurfaceDocsHarvesterProgress("JavaScriptDocHarvester", "Succeeded", 0),
+                    new AppSurfaceDocsHarvesterProgress("JavaScriptDocHarvester", "Succeeded", 0)
+                    {
+                        IsBuiltInProgressHarvester = true
+                    },
                     new AppSurfaceDocsHarvesterProgress("CustomHarvester", "Waiting", 0)
                 ],
                 Activity = Enumerable.Range(0, 9)
@@ -164,6 +168,30 @@ public sealed class AppSurfaceDocsHarvestProgressRendererTests
         Assert.DoesNotContain("Activity 8", html, StringComparison.Ordinal);
         Assert.Contains("appsurface.test.3", html, StringComparison.Ordinal);
         Assert.DoesNotContain("appsurface.test.4", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Render_WhenCustomHarvesterNameMatchesBuiltInParser_RetainsStatusOnlyPresentation()
+    {
+        var html = AppSurfaceDocsHarvestProgressRenderer.Render(
+            new AppSurfaceDocsHarvestProgressSnapshot
+            {
+                State = AppSurfaceDocsHarvestRunState.Running,
+                Harvesters =
+                [
+                    new AppSurfaceDocsHarvesterProgress(nameof(MarkdownHarvester), "Running", 42)
+                    {
+                        Phase = AppSurfaceDocsHarvestProgressPhase.Parsing,
+                        SourceUnitsProcessed = 99
+                    }
+                ]
+            },
+            0);
+
+        Assert.Contains("MarkdownHarvester", html, StringComparison.Ordinal);
+        Assert.Contains("Status-only", html, StringComparison.Ordinal);
+        Assert.Contains("42 docs", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("99 sources", html, StringComparison.Ordinal);
     }
 
     [Fact]
