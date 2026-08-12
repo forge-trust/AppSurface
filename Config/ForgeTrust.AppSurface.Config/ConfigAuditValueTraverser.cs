@@ -185,6 +185,11 @@ internal sealed class ConfigAuditValueTraverser
                 ref budget,
                 reportTraversalContext);
         }
+        catch (Exception ex) when (IsRecoverableTraversalException(ex))
+        {
+            return ConfigAuditTraversalResult.DiagnosticsOnly(
+                CreateTraversalFailureDiagnostic(path, ex));
+        }
         finally
         {
             if (ShouldTrack(value))
@@ -430,6 +435,7 @@ internal sealed class ConfigAuditValueTraverser
             }
             catch (Exception ex) when (IsPropertyReadException(ex))
             {
+                diagnostics.Add(CreateMemberReadFailureDiagnostic(path.AppendMember(property.Name), ex));
                 continue;
             }
 
@@ -464,17 +470,24 @@ internal sealed class ConfigAuditValueTraverser
                 break;
             }
 
-            entries.Add(BuildChild(
-                path.AppendMember(field.Name),
-                field.GetValue(value),
-                sources,
-                factContext,
-                options,
-                visited,
-                labels,
-                correlation,
-                ref budget,
-                reportTraversalContext));
+            try
+            {
+                entries.Add(BuildChild(
+                    path.AppendMember(field.Name),
+                    field.GetValue(value),
+                    sources,
+                    factContext,
+                    options,
+                    visited,
+                    labels,
+                    correlation,
+                    ref budget,
+                    reportTraversalContext));
+            }
+            catch (Exception ex) when (IsRecoverableTraversalException(ex))
+            {
+                diagnostics.Add(CreateMemberReadFailureDiagnostic(path.AppendMember(field.Name), ex));
+            }
         }
 
         return new ConfigAuditTraversalResult(entries, diagnostics);
@@ -724,6 +737,20 @@ internal sealed class ConfigAuditValueTraverser
             ConfigAuditDiagnosticSeverity.Warning,
             $"Collection traversal for '{path.DisplayPath}' stopped at the configured depth limit.");
 
+    private static ConfigAuditDiagnostic CreateTraversalFailureDiagnostic(ConfigAuditPath path, Exception exception) =>
+        CreateDiagnostic(
+            path,
+            "config-audit-traversal-threw",
+            ConfigAuditDiagnosticSeverity.Warning,
+            $"Config audit traversal for '{path.DisplayPath}' stopped after {GetTraversalExceptionTypeName(exception)}.");
+
+    private static ConfigAuditDiagnostic CreateMemberReadFailureDiagnostic(ConfigAuditPath path, Exception exception) =>
+        CreateDiagnostic(
+            path,
+            "config-audit-member-read-threw",
+            ConfigAuditDiagnosticSeverity.Warning,
+            $"Config audit traversal skipped member '{path.DisplayPath}' after {GetTraversalExceptionTypeName(exception)}.");
+
     private static ConfigAuditDiagnostic CreateSourceDiagnostic(ConfigAuditPath path, string code, string message) =>
         CreateDiagnostic(path, code, ConfigAuditDiagnosticSeverity.Info, message);
 
@@ -748,6 +775,19 @@ internal sealed class ConfigAuditValueTraverser
             or TargetParameterCountException
             or MethodAccessException
             or ArgumentException;
+
+    private static bool IsRecoverableTraversalException(Exception exception) =>
+        exception switch
+        {
+            TargetInvocationException { InnerException: { } innerException } =>
+                IsRecoverableTraversalException(innerException),
+            _ => exception is not OutOfMemoryException and not StackOverflowException and not AccessViolationException
+        };
+
+    private static string GetTraversalExceptionTypeName(Exception exception) =>
+        exception is TargetInvocationException { InnerException: { } innerException }
+            ? innerException.GetType().Name
+            : exception.GetType().Name;
 
     private static bool ShouldTrack(object value)
     {

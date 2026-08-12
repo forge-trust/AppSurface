@@ -194,6 +194,17 @@ public class ConfigAuditReporterTests
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
+    private sealed class ThrowingReadOnlyValues : IReadOnlyList<string>
+    {
+        public string this[int index] => throw new InvalidOperationException("read-only-list-secret");
+
+        public int Count => throw new InvalidOperationException("read-only-list-secret");
+
+        public IEnumerator<string> GetEnumerator() => throw new InvalidOperationException("read-only-list-secret");
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     private sealed class PropertyBudgetShape
     {
         public string First { get; set; } = "first";
@@ -1538,6 +1549,33 @@ public class ConfigAuditReporterTests
         Assert.Contains(
             AssertEntry(report, "Matrix.Items", ConfigAuditEntryState.Resolved, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-audit-collection-kind-unsupported");
+    }
+
+    [Fact]
+    public void GetReport_ExpandedModeConvertsReadOnlyListAccessorFailuresToSanitizedDiagnostics()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Values"] = new ThrowingReadOnlyValues()
+                }));
+        services.AddConfigAuditKey<ThrowingReadOnlyValues>("Values");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport(new ConfigAuditReportRequest("Production", ConfigAuditReportMode.ExpandKnownEntryCollections));
+
+        var entry = AssertEntry(report, "Values", ConfigAuditEntryState.Resolved, null);
+        Assert.Empty(entry.Children);
+        Assert.Contains(entry.Diagnostics, diagnostic => diagnostic.Code == "config-audit-traversal-threw");
+        Assert.DoesNotContain(
+            entry.Diagnostics,
+            diagnostic => diagnostic.Message.Contains("read-only-list-secret", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -61,52 +61,7 @@ public sealed class ConfigDiagnosticsCommandRunner
     /// </remarks>
     public ConfigDiagnosticsCommandResult Run(TextWriter output)
     {
-        ArgumentNullException.ThrowIfNull(output);
-
-        string? environment = null;
-
-        try
-        {
-            environment = _environmentProvider.Environment;
-            if (string.IsNullOrWhiteSpace(environment))
-            {
-                return ConfigDiagnosticsCommandResult.Failed(
-                    environment,
-                    "Configuration diagnostics could not determine the active AppSurface environment.",
-                    "The active environment provider returned an empty environment name.",
-                    "Set the AppSurface host environment before running diagnostics.");
-            }
-
-            var report = _reporter.GetReport(environment);
-            var rendered = _renderer.Render(report);
-            output.Write(rendered);
-
-            return ConfigDiagnosticsCommandResult.Success(environment);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return CreateRenderFailure(environment, ex);
-        }
-        catch (ArgumentException ex)
-        {
-            return CreateRenderFailure(environment, ex);
-        }
-        catch (FormatException ex)
-        {
-            return CreateRenderFailure(environment, ex);
-        }
-        catch (IOException ex)
-        {
-            return CreateRenderFailure(environment, ex);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return CreateRenderFailure(environment, ex);
-        }
-        catch (Exception ex) when (IsNonFatalDiagnosticsFailure(ex))
-        {
-            return CreateRenderFailure(environment, ex);
-        }
+        return RunCore(output, _reporter.GetReport);
     }
 
     /// <summary>
@@ -128,7 +83,15 @@ public sealed class ConfigDiagnosticsCommandRunner
             return Run(output);
         }
 
+        return RunCore(output, environment => _reporter.GetReport(new ConfigAuditReportRequest(environment, mode)));
+    }
+
+    private ConfigDiagnosticsCommandResult RunCore(
+        TextWriter output,
+        Func<string, ConfigAuditReport> getReport)
+    {
         ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(getReport);
 
         string? environment = null;
 
@@ -144,7 +107,7 @@ public sealed class ConfigDiagnosticsCommandRunner
                     "Set the AppSurface host environment before running diagnostics.");
             }
 
-            var report = _reporter.GetReport(new ConfigAuditReportRequest(environment, mode));
+            var report = getReport(environment);
             var rendered = _renderer.Render(report);
             output.Write(rendered);
 
