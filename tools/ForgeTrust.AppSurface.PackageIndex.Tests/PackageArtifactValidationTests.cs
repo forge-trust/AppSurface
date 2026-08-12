@@ -5518,8 +5518,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
         const string coverageSecurityJobStartMarker = "  coverage-security-platform:";
         const string coverageSecurityJobEndMarker = "\n  keycloak-theme-evidence:";
         var coverageSecurityJobStart = buildWorkflow.IndexOf(coverageSecurityJobStartMarker, StringComparison.Ordinal);
-        var coverageSecurityJobEnd = buildWorkflow.IndexOf(coverageSecurityJobEndMarker, coverageSecurityJobStart, StringComparison.Ordinal);
         Assert.True(coverageSecurityJobStart >= 0, "The coverage security workflow job must remain defined.");
+        var coverageSecurityJobEnd = buildWorkflow.IndexOf(coverageSecurityJobEndMarker, coverageSecurityJobStart, StringComparison.Ordinal);
         Assert.True(coverageSecurityJobEnd > coverageSecurityJobStart, "The coverage security workflow job must end before the Keycloak evidence job.");
         var coverageSecurityJob = buildWorkflow[coverageSecurityJobStart..coverageSecurityJobEnd];
         var buildWorkflowWithoutCoverageSecurityJob = buildWorkflow.Remove(

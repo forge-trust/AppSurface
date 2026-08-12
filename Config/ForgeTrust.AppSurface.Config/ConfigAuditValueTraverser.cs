@@ -428,6 +428,11 @@ internal sealed class ConfigAuditValueTraverser
                 continue;
             }
 
+            if (!CanReadNextNode(path, budget, diagnostics, reportTraversalContext))
+            {
+                break;
+            }
+
             object? childValue;
             try
             {
@@ -465,29 +470,38 @@ internal sealed class ConfigAuditValueTraverser
                 continue;
             }
 
+            if (!CanReadNextNode(path, budget, diagnostics, reportTraversalContext))
+            {
+                break;
+            }
+
+            object? childValue;
+            try
+            {
+                childValue = field.GetValue(value);
+            }
+            catch (Exception ex) when (IsRecoverableTraversalException(ex))
+            {
+                diagnostics.Add(CreateMemberReadFailureDiagnostic(path.AppendMember(field.Name), ex));
+                continue;
+            }
+
             if (!TryConsumeNode(path, ref budget, diagnostics, reportTraversalContext))
             {
                 break;
             }
 
-            try
-            {
-                entries.Add(BuildChild(
-                    path.AppendMember(field.Name),
-                    field.GetValue(value),
-                    sources,
-                    factContext,
-                    options,
-                    visited,
-                    labels,
-                    correlation,
-                    ref budget,
-                    reportTraversalContext));
-            }
-            catch (Exception ex) when (IsRecoverableTraversalException(ex))
-            {
-                diagnostics.Add(CreateMemberReadFailureDiagnostic(path.AppendMember(field.Name), ex));
-            }
+            entries.Add(BuildChild(
+                path.AppendMember(field.Name),
+                childValue,
+                sources,
+                factContext,
+                options,
+                visited,
+                labels,
+                correlation,
+                ref budget,
+                reportTraversalContext));
         }
 
         return new ConfigAuditTraversalResult(entries, diagnostics);
@@ -588,6 +602,21 @@ internal sealed class ConfigAuditValueTraverser
 
         budget--;
         return true;
+    }
+
+    private static bool CanReadNextNode(
+        ConfigAuditPath path,
+        int budget,
+        ICollection<ConfigAuditDiagnostic> diagnostics,
+        ConfigAuditReportTraversalContext? reportTraversalContext)
+    {
+        if (budget <= 0)
+        {
+            diagnostics.Add(CreateNodeLimitDiagnostic(path));
+            return false;
+        }
+
+        return reportTraversalContext?.HasRemainingCapacity ?? true;
     }
 
     private static ConfigAuditSourceSelection SelectChildSources(

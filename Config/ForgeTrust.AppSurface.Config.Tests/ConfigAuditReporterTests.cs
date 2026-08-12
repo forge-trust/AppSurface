@@ -3696,6 +3696,31 @@ public class ConfigAuditReporterTests
             diagnostic.Message);
     }
 
+    [Fact]
+    public void BuildChildren_ExhaustedSharedReportBudget_DoesNotInvokePublicPropertyGetters()
+    {
+        var traversalContext = new ConfigAuditReportTraversalContext(maxNodes: 1);
+        Assert.True(traversalContext.TryConsumeNode());
+        var value = new BudgetExhaustedPropertyProbe();
+        var traverser = new ConfigAuditValueTraverser(new ConfigAuditRedactor());
+
+        var traversal = traverser.BuildChildren(
+            ConfigAuditPath.Root("Known"),
+            value,
+            [],
+            ConfigAuditFactContext.Empty,
+            new ConfigAuditEntryOptions(),
+            new HashSet<object>(ReferenceEqualityComparer.Instance),
+            new ConfigAuditDictionaryLabelSet(),
+            ConfigAuditDictionaryKeyCorrelationContext.Unavailable("dictionary key correlation was not requested"),
+            traversalContext);
+
+        Assert.Empty(traversal.Children);
+        Assert.Empty(traversal.Diagnostics);
+        Assert.Equal(0, value.GetterCalls);
+        Assert.True(traversalContext.WasTruncated);
+    }
+
     private static ServiceCollection CreateServices(string configDirectory, IEnvironmentProvider environment)
     {
         var services = new ServiceCollection();
@@ -3865,6 +3890,20 @@ public class ConfigAuditReporterTests
             }
 
             return (T)_value;
+        }
+    }
+
+    private sealed class BudgetExhaustedPropertyProbe
+    {
+        public int GetterCalls { get; private set; }
+
+        public string Value
+        {
+            get
+            {
+                GetterCalls++;
+                return "should-not-be-read";
+            }
         }
     }
 
