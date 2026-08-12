@@ -202,7 +202,7 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
     }
 
     [Fact]
-    public async Task WaitForCompletionAsync_WhenPerDocumentTestingDelayIsConfigured_PublishesDocumentCountsBeforeCompletion()
+    public async Task WaitForCompletionAsync_WhenPerDocumentTestingDelayIsConfigured_DoesNotSimulateCustomHarvesterOutput()
     {
         using var cache = new MemoryCache(new MemoryCacheOptions());
         await using var services = new ServiceCollection().BuildServiceProvider();
@@ -218,20 +218,12 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
             services,
             configureOptions: options => options.Harvest.TestingDelayPerDocumentMilliseconds = 500);
 
-        Assert.False(await coordinator.WaitForCompletionAsync(TimeSpan.Zero, CancellationToken.None));
-        var inProgressSnapshot = await WaitForProgressSnapshotAsync(
-            () => coordinator.CurrentProgress,
-            snapshot => snapshot.TotalDocs > 0 && snapshot.State == AppSurfaceDocsHarvestRunState.Running);
-
-        Assert.Equal(AppSurfaceDocsHarvestRunState.Running, inProgressSnapshot.State);
-        Assert.InRange(inProgressSnapshot.TotalDocs, 1, 2);
-        Assert.Contains(
-            inProgressSnapshot.Activity,
-            activity => activity.Message.Contains("processed", StringComparison.OrdinalIgnoreCase));
-
-        Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.FromSeconds(10), CancellationToken.None));
+        Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.FromSeconds(1), CancellationToken.None));
         Assert.Equal(AppSurfaceDocsHarvestRunState.Completed, coordinator.CurrentProgress.State);
         Assert.Equal(3, coordinator.CurrentProgress.TotalDocs);
+        Assert.DoesNotContain(
+            coordinator.CurrentProgress.Activity,
+            activity => activity.Message.Contains("processed", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

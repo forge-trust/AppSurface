@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Threading.Channels;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
@@ -9,6 +10,109 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public sealed class AppSurfaceDocsHarvestProgressReporterTests
 {
+    [Fact]
+    public void ProgressSnapshot_ShouldSerializeAdditiveRateAndPhaseContract()
+    {
+        var json = JsonSerializer.Serialize(
+            new AppSurfaceDocsHarvestProgressSnapshot
+            {
+                BuiltInDocumentsPerSecond = null,
+                Harvesters =
+                [
+                    new AppSurfaceDocsHarvesterProgress(nameof(MarkdownHarvester), "Running", 2)
+                    {
+                        ProgressId = "server-only-id",
+                        Phase = AppSurfaceDocsHarvestProgressPhase.Parsing,
+                        SourceUnitsProcessed = 7
+                    }
+                ]
+            });
+
+        Assert.Contains("\"builtInDocumentsPerSecond\":null", json, StringComparison.Ordinal);
+        Assert.Contains("\"phase\":\"Parsing\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"sourceUnitsProcessed\":7", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("server-only-id", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldRetainPhaseAndSourceEvidenceWhenHealthTerminalizesRun()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        var session = reporter.CreateSession(runId, nameof(MarkdownHarvester));
+
+        await session.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Discovering);
+        await session.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Parsing);
+        await session.ReportSourceUnitAsync(1);
+        await reporter.CompleteRunAsync(runId, CreateHealth());
+
+        var harvester = Assert.Single(reporter.CurrentSnapshot.Harvesters);
+        Assert.Equal(AppSurfaceDocsHarvestProgressPhase.Terminal, harvester.Phase);
+        Assert.Equal(1, harvester.SourceUnitsProcessed);
+        Assert.Equal(1, harvester.DocCount);
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldRejectNegativeProgressDelta()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        var session = reporter.CreateSession(runId, nameof(MarkdownHarvester));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => reporter.ReportSourceUnit(runId, nameof(MarkdownHarvester), -1));
+        Assert.Equal(0, Assert.Single(reporter.CurrentSnapshot.Harvesters).SourceUnitsProcessed);
+        await session.ReportSourceUnitAsync(0);
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldCoalesceOrdinarySourceReports()
+    {
+        var hub = new RecordingRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        var session = reporter.CreateSession(runId, nameof(MarkdownHarvester));
+
+        for (var index = 0; index < 10_000; index++)
+        {
+            await session.ReportSourceUnitAsync(0);
+        }
+
+        Assert.Single(hub.Published);
+        await Task.Delay(TimeSpan.FromMilliseconds(350));
+        Assert.Equal(2, hub.Published.Count);
+        Assert.Equal(10_000, Assert.Single(reporter.CurrentSnapshot.Harvesters).SourceUnitsProcessed);
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldComputeRollingBuiltInRateAfterMeasurementWindow()
+    {
+        var timeProvider = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance,
+            timeProvider);
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        var session = reporter.CreateSession(runId, nameof(MarkdownHarvester));
+
+        await session.ReportSourceUnitAsync(2);
+        timeProvider.Advance(TimeSpan.FromMilliseconds(250));
+        await reporter.CompleteRunAsync(runId, CreateHealth());
+
+        Assert.Equal(8, reporter.CurrentSnapshot.BuiltInDocumentsPerSecond);
+    }
+
     [Fact]
     public async Task ProgressReporter_ShouldIgnoreUpdatesFromStaleRunIds()
     {
@@ -28,6 +132,89 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
     }
 
     [Fact]
+    public async Task ProgressReporter_ShouldKeepDuplicateHarvesterInstancesDistinct()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+        AppSurfaceDocsHarvesterRegistration[] registrations =
+        [
+            new AppSurfaceDocsHarvesterRegistration("first", "CustomHarvester"),
+            new AppSurfaceDocsHarvesterRegistration("second", "CustomHarvester")
+        ];
+        var runId = await reporter.BeginRunAsync(registrations);
+
+        await reporter.HarvesterStartedAsync(runId, "first");
+        await reporter.HarvesterCompletedAsync(runId, "first", DocHarvesterHealthStatus.Succeeded, 1);
+        await reporter.HarvesterStartedAsync(runId, "second");
+        await reporter.HarvesterCompletedAsync(runId, "second", DocHarvesterHealthStatus.Succeeded, 2);
+        await reporter.CompleteRunAsync(runId, CreateHealthWithDuplicateHarvesters());
+
+        Assert.Equal(2, reporter.CurrentSnapshot.Harvesters.Count);
+        Assert.Equal([1, 2], reporter.CurrentSnapshot.Harvesters.Select(harvester => harvester.DocCount).ToArray());
+        Assert.Equal(2, reporter.CurrentSnapshot.CompletedHarvesters);
+    }
+
+    [Fact]
+    public void ProgressReporter_ShouldRejectDuplicateRegistrationIds()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+        AppSurfaceDocsHarvesterRegistration[] registrations =
+        [
+            new AppSurfaceDocsHarvesterRegistration("same", "FirstHarvester"),
+            new AppSurfaceDocsHarvesterRegistration("same", "SecondHarvester")
+        ];
+
+        Assert.Throws<ArgumentException>(() => reporter.BeginRunAsync(registrations));
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldKeepFailedRunTerminalWhenACompletionArrivesLate()
+    {
+        var hub = new RecordingRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+
+        await reporter.FailRunAsync(runId);
+        var terminalSnapshot = reporter.CurrentSnapshot;
+        await reporter.CompleteRunAsync(runId, CreateHealth());
+
+        Assert.Equal(AppSurfaceDocsHarvestRunState.Failed, reporter.CurrentSnapshot.State);
+        Assert.Equal(terminalSnapshot, reporter.CurrentSnapshot);
+        Assert.DoesNotContain(
+            hub.Published,
+            item => item.Message.Contains("action=\"rw-visit\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldIgnoreLateHarvesterCallbacksAfterTerminalization()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        await reporter.CompleteRunAsync(runId, CreateHealth());
+        var terminalSnapshot = reporter.CurrentSnapshot;
+
+        await reporter.HarvesterCompletedAsync(runId, nameof(MarkdownHarvester), DocHarvesterHealthStatus.Failed, 99);
+        await reporter.HarvesterDocumentCountUpdatedAsync(runId, nameof(MarkdownHarvester), 99);
+        await reporter.ActivityAsync(runId, "Late activity.");
+        reporter.ReportOutputOnly(runId, nameof(MarkdownHarvester), 99);
+
+        Assert.Equal(terminalSnapshot, reporter.CurrentSnapshot);
+    }
+
+    [Fact]
     public async Task ProgressReporter_ShouldSwallowNonFatalPublishFailures()
     {
         var services = new ServiceCollection();
@@ -41,6 +228,84 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
 
         Assert.Equal(runId, reporter.CurrentSnapshot.RunId);
         Assert.Equal(AppSurfaceDocsHarvestRunState.Running, reporter.CurrentSnapshot.State);
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldNotBlockStateTransitionsOnAStalledHub()
+    {
+        var hub = new BlockingRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]).AsTask().WaitAsync(TimeSpan.FromSeconds(1));
+        await reporter.HarvesterStartedAsync(runId, nameof(MarkdownHarvester)).AsTask().WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Equal("Running", Assert.Single(reporter.CurrentSnapshot.Harvesters).Status);
+        hub.Release.TrySetResult();
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldRetryTerminalPublicationAfterARecoverableFailure()
+    {
+        var hub = new FailingOnceTerminalRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        await reporter.CompleteRunAsync(runId, CreateHealth());
+        await hub.VisitPublicationSucceeded.Task.WaitAsync(TimeSpan.FromSeconds(4));
+
+        Assert.Contains(
+            hub.Published,
+            item => item.Message.Contains("data-appsurface-docs-harvest-complete=\"true\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldRetryCompletionVisitAfterARecoverableFailure()
+    {
+        var hub = new FailingOnceCompletionVisitRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        await reporter.CompleteRunAsync(runId, CreateHealth());
+        await hub.VisitPublicationSucceeded.Task.WaitAsync(TimeSpan.FromSeconds(4));
+
+        Assert.Contains(
+            hub.Published,
+            item => item.Message.Contains("action=\"rw-visit\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ProgressSession_ShouldCancelConfiguredPerDocumentPacing()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var session = reporter.CreateSession(
+            runId,
+            nameof(MarkdownHarvester),
+            testingDelayPerDocumentMilliseconds: 1,
+            cancellation.Token);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => session.ReportOutputOnlyAsync(1).AsTask());
+        Assert.Equal(1, Assert.Single(reporter.CurrentSnapshot.Harvesters).DocCount);
     }
 
     [Fact]
@@ -415,6 +680,23 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
             Diagnostics: []);
     }
 
+    private static DocHarvestHealthSnapshot CreateHealthWithDuplicateHarvesters()
+    {
+        return new DocHarvestHealthSnapshot(
+            DocHarvestHealthStatus.Healthy,
+            DateTimeOffset.UtcNow,
+            "/tmp/repo",
+            TotalHarvesters: 2,
+            SuccessfulHarvesters: 2,
+            FailedHarvesters: 0,
+            TotalDocs: 3,
+            [
+                new DocHarvesterHealth("CustomHarvester", DocHarvesterHealthStatus.Succeeded, 1, null),
+                new DocHarvesterHealth("CustomHarvester", DocHarvesterHealthStatus.Succeeded, 2, null)
+            ],
+            Diagnostics: []);
+    }
+
     private sealed class RecordingRazorWireStreamHub : IRazorWireStreamHub
     {
         public List<PublishedMessage> Published { get; } = [];
@@ -498,8 +780,141 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
         }
     }
 
+    private sealed class BlockingRazorWireStreamHub : IRazorWireStreamHub
+    {
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask PublishAsync(string channel, string message)
+        {
+            return new ValueTask(Release.Task);
+        }
+
+        public ValueTask PublishAsync(string channel, string message, RazorWireStreamPublishOptions? options)
+        {
+            return new ValueTask(Release.Task);
+        }
+
+        public ChannelReader<string> Subscribe(string channel)
+        {
+            return Channel.CreateUnbounded<string>().Reader;
+        }
+
+        public void Unsubscribe(string channel, ChannelReader<string> reader)
+        {
+        }
+    }
+
+    private sealed class FailingOnceTerminalRazorWireStreamHub : IRazorWireStreamHub
+    {
+        private int _terminalAttempts;
+
+        public List<PublishedMessage> Published { get; } = [];
+
+        public TaskCompletionSource VisitPublicationSucceeded { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask PublishAsync(string channel, string message)
+        {
+            return PublishAsync(channel, message, options: null);
+        }
+
+        public ValueTask PublishAsync(string channel, string message, RazorWireStreamPublishOptions? options)
+        {
+            if (message.Contains("data-appsurface-docs-harvest-complete=\"true\"", StringComparison.Ordinal)
+                && Interlocked.Increment(ref _terminalAttempts) == 1)
+            {
+                throw new InvalidOperationException("The terminal snapshot failed once.");
+            }
+
+            Published.Add(new PublishedMessage(channel, message, options));
+            if (message.Contains("action=\"rw-visit\"", StringComparison.Ordinal))
+            {
+                VisitPublicationSucceeded.TrySetResult();
+            }
+
+            return ValueTask.CompletedTask;
+        }
+
+        public ChannelReader<string> Subscribe(string channel)
+        {
+            return Channel.CreateUnbounded<string>().Reader;
+        }
+
+        public void Unsubscribe(string channel, ChannelReader<string> reader)
+        {
+        }
+    }
+
+    private sealed class FailingOnceCompletionVisitRazorWireStreamHub : IRazorWireStreamHub
+    {
+        private int _visitAttempts;
+
+        public List<PublishedMessage> Published { get; } = [];
+
+        public TaskCompletionSource VisitPublicationSucceeded { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask PublishAsync(string channel, string message)
+        {
+            return PublishAsync(channel, message, options: null);
+        }
+
+        public ValueTask PublishAsync(string channel, string message, RazorWireStreamPublishOptions? options)
+        {
+            if (message.Contains("action=\"rw-visit\"", StringComparison.Ordinal)
+                && Interlocked.Increment(ref _visitAttempts) == 1)
+            {
+                throw new InvalidOperationException("The completion visit failed once.");
+            }
+
+            Published.Add(new PublishedMessage(channel, message, options));
+            if (message.Contains("action=\"rw-visit\"", StringComparison.Ordinal))
+            {
+                VisitPublicationSucceeded.TrySetResult();
+            }
+
+            return ValueTask.CompletedTask;
+        }
+
+        public ChannelReader<string> Subscribe(string channel)
+        {
+            return Channel.CreateUnbounded<string>().Reader;
+        }
+
+        public void Unsubscribe(string channel, ChannelReader<string> reader)
+        {
+        }
+    }
+
     private sealed record PublishedMessage(
         string Channel,
         string Message,
         RazorWireStreamPublishOptions? Options);
+
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private DateTimeOffset _utcNow;
+        private long _timestamp;
+
+        public ManualTimeProvider(DateTimeOffset utcNow)
+        {
+            _utcNow = utcNow;
+        }
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            return _utcNow;
+        }
+
+        public override long GetTimestamp()
+        {
+            return _timestamp;
+        }
+
+        public void Advance(TimeSpan elapsed)
+        {
+            _utcNow = _utcNow.Add(elapsed);
+            _timestamp = checked(_timestamp + elapsed.Ticks);
+        }
+    }
 }

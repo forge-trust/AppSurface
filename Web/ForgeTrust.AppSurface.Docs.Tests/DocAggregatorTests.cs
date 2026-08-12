@@ -9,6 +9,7 @@ using ForgeTrust.RazorWire.Streams;
 using Ganss.Xss;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -3772,6 +3773,20 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetHarvestHealthAsync_ShouldRecordTimedOutHarvester_WhenItReturnsAfterTimeoutCancellation()
+    {
+        var harvester = new ReturnsAfterCancellationHarvester();
+        var aggregator = CreateHarvestHealthAggregator([harvester], harvesterTimeout: TimeSpan.FromMilliseconds(10));
+
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Equal(DocHarvestHealthStatus.Failed, health.Status);
+        var harvesterHealth = Assert.Single(health.Harvesters);
+        Assert.Equal(DocHarvesterHealthStatus.TimedOut, harvesterHealth.Status);
+        Assert.Equal(DocHarvestDiagnosticCodes.HarvesterTimedOut, harvesterHealth.Diagnostic?.Code);
+    }
+
+    [Fact]
     public async Task GetHarvestHealthAsync_ShouldRecordCanceledHarvester_WhenHarvesterCancelsOutsideTimeout()
     {
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
@@ -5428,6 +5443,28 @@ public class DocAggregatorTests : IDisposable
         Assert.DoesNotContain(docs, d => d.Path == "docs/ForgeTrust.Web/README.md");
     }
 
+    [Fact]
+    public async Task GetDocsAsync_ShouldReportDuplicateHarvesterInstancesSeparately()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+        var aggregator = CreateHarvestHealthAggregator(
+            [
+                new StaticHarvester([new DocNode("First", "first", "<p>First</p>")]),
+                new StaticHarvester([new DocNode("Second", "second", "<p>Second</p>")])
+            ],
+            harvestProgress: reporter);
+
+        var docs = await aggregator.GetDocsAsync();
+
+        Assert.Equal(2, docs.Count);
+        Assert.Equal(2, reporter.CurrentSnapshot.Harvesters.Count);
+        Assert.All(reporter.CurrentSnapshot.Harvesters, harvester => Assert.Equal(1, harvester.DocCount));
+        Assert.Equal(2, reporter.CurrentSnapshot.CompletedHarvesters);
+    }
+
     private DocAggregator CreateContributorAggregator(
         IDocHarvester harvester,
         AppSurfaceDocsContributorOptions contributorOptions,
@@ -5603,6 +5640,24 @@ public class DocAggregatorTests : IDisposable
         public void Release()
         {
             _release.TrySetResult([new DocNode("Late", "late.md", "late")]);
+        }
+    }
+
+    private sealed class ReturnsAfterCancellationHarvester : IDocHarvester
+    {
+        public async Task<IReadOnlyList<DocNode>> HarvestAsync(
+            string rootPath,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+
+            return [new DocNode("Late", "late.md", "late")];
         }
     }
 

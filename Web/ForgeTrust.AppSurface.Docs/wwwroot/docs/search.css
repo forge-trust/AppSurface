@@ -748,46 +748,6 @@
     line-height: 1;
 }
 
-.docs-harvest-phase-rail {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0.55rem;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-.docs-harvest-phase-rail li {
-    min-width: 0;
-    border: 1px solid var(--docs-search-color-border-muted);
-    border-radius: 0.5rem;
-    background: var(--docs-search-color-surface-overlay-soft);
-    padding: 0.7rem;
-}
-
-.docs-harvest-phase-rail li.is-active {
-    border-color: var(--docs-search-color-border-accent-hover);
-    background: var(--docs-search-color-accent-mark-fill);
-}
-
-.docs-harvest-phase-rail span,
-.docs-harvest-phase-rail strong {
-    display: block;
-}
-
-.docs-harvest-phase-rail span {
-    color: var(--docs-search-color-text-default);
-    font-weight: 700;
-}
-
-.docs-harvest-phase-rail strong {
-    margin-top: 0.3rem;
-    color: var(--docs-search-color-text-info-muted);
-    font-size: 0.72rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-}
-
 .docs-harvest-harvesters {
     display: grid;
     gap: 0.55rem;
@@ -795,7 +755,7 @@
 
 .docs-harvest-harvester {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(9rem, 1fr) auto auto minmax(10rem, auto);
     gap: 0.75rem;
     align-items: center;
     border-bottom: 1px solid var(--docs-search-color-border-default);
@@ -806,6 +766,14 @@
     min-width: 0;
     color: var(--docs-search-color-text-strong);
     font-weight: 700;
+}
+
+.docs-harvest-harvester-phase {
+    color: var(--docs-search-color-text-info-muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
 }
 
 .docs-harvest-harvester-status,
@@ -935,19 +903,12 @@
     }
 
     .docs-harvest-rate {
-        display: none;
+        justify-items: start;
+        width: 100%;
     }
 
     .docs-harvest-metrics {
         grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .docs-harvest-metric:nth-child(n + 3) {
-        display: none;
-    }
-
-    .docs-harvest-phase-rail {
-        grid-template-columns: 1fr;
     }
 
     .docs-harvest-harvester {

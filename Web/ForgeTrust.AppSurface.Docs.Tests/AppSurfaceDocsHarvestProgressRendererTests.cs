@@ -36,7 +36,7 @@ public sealed class AppSurfaceDocsHarvestProgressRendererTests
     }
 
     [Fact]
-    public void Render_WhenHarvestRuns_EmitsDocsPerSecondInsteadOfChart()
+    public void Render_WhenHarvestRuns_EmitsBuiltInRateAndParserTelemetryInsteadOfChart()
     {
         var html = AppSurfaceDocsHarvestProgressRenderer.Render(
             new AppSurfaceDocsHarvestProgressSnapshot
@@ -45,13 +45,55 @@ public sealed class AppSurfaceDocsHarvestProgressRendererTests
                 StartedUtc = DateTimeOffset.UtcNow.AddSeconds(-10),
                 TotalHarvesters = 2,
                 CompletedHarvesters = 1,
-                TotalDocs = 42
+                TotalDocs = 42,
+                BuiltInDocumentsPerSecond = 12.5,
+                Harvesters =
+                [
+                    new AppSurfaceDocsHarvesterProgress(nameof(MarkdownHarvester), "Running", 42)
+                    {
+                        Phase = AppSurfaceDocsHarvestProgressPhase.Parsing,
+                        SourceUnitsProcessed = 99
+                    }
+                ]
             },
             0);
 
         Assert.Contains("docs-harvest-rate", html, StringComparison.Ordinal);
-        Assert.Contains("Docs/sec", html, StringComparison.Ordinal);
+        Assert.Contains("Built-in docs/s", html, StringComparison.Ordinal);
+        Assert.Contains("Parsing", html, StringComparison.Ordinal);
+        Assert.Contains("99 sources · 42 docs", html, StringComparison.Ordinal);
+        Assert.Contains("aria-busy=\"true\"", html, StringComparison.Ordinal);
         Assert.DoesNotContain("docs-harvest-graph", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Render_WhenRateIsNotMeasured_RendersMeasuringState()
+    {
+        var html = AppSurfaceDocsHarvestProgressRenderer.Render(
+            new AppSurfaceDocsHarvestProgressSnapshot
+            {
+                State = AppSurfaceDocsHarvestRunState.Running,
+                BuiltInDocumentsPerSecond = null
+            },
+            0);
+
+        Assert.Contains("Built-in docs/s", html, StringComparison.Ordinal);
+        Assert.Contains("Measuring", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Render_WhenRateIsZero_RendersZeroInsteadOfMeasuringState()
+    {
+        var html = AppSurfaceDocsHarvestProgressRenderer.Render(
+            new AppSurfaceDocsHarvestProgressSnapshot
+            {
+                State = AppSurfaceDocsHarvestRunState.Running,
+                BuiltInDocumentsPerSecond = 0
+            },
+            0);
+
+        Assert.Contains("<strong>0.00</strong>", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("Measuring…", html, StringComparison.Ordinal);
     }
 
     [Fact]

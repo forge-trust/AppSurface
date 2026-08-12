@@ -75,6 +75,10 @@ internal static class AppSurfaceDocsHarvestProgressRenderer
 
         var sb = new StringBuilder();
         sb.Append("<section class=\"docs-harvest-observatory\" aria-labelledby=\"docs-harvest-title\"");
+        if (!isComplete)
+        {
+            sb.Append(" aria-busy=\"true\"");
+        }
         if (isComplete && snapshot.State == AppSurfaceDocsHarvestRunState.Completed)
         {
             sb.Append(" data-appsurface-docs-harvest-complete=\"true\"");
@@ -99,20 +103,25 @@ internal static class AppSurfaceDocsHarvestProgressRenderer
         AppendMetric(sb, "Harvesters", $"{snapshot.CompletedHarvesters}/{snapshot.TotalHarvesters}");
         sb.Append("</div>");
 
-        sb.Append("<ol class=\"docs-harvest-phase-rail\" aria-label=\"Harvest phases\">");
-        AppendPhase(sb, "Wake", "Done", true);
-        AppendPhase(sb, "Scan", isComplete ? "Done" : "Now", snapshot.State == AppSurfaceDocsHarvestRunState.Running);
-        AppendPhase(sb, "Index", isComplete ? "Done" : "Waiting", false);
-        AppendPhase(sb, "Ready", isComplete ? "Done" : "Waiting", false);
-        sb.Append("</ol>");
-
         sb.Append("<div class=\"docs-harvest-harvesters\" aria-label=\"Harvester progress\">");
         foreach (var harvester in snapshot.Harvesters)
         {
+            var isBuiltInParser = IsBuiltInParser(harvester.HarvesterType);
             sb.Append("<article class=\"docs-harvest-harvester\">");
             sb.Append("<span class=\"docs-harvest-harvester-name\">").Append(Encode(FriendlyHarvesterName(harvester.HarvesterType))).Append("</span>");
+            sb.Append("<span class=\"docs-harvest-harvester-phase\">")
+                .Append(Encode(isBuiltInParser || harvester.Phase == AppSurfaceDocsHarvestProgressPhase.Terminal
+                    ? FormatHarvesterPhase(harvester)
+                    : "Status-only"))
+                .Append("</span>");
             sb.Append("<span class=\"docs-harvest-harvester-status\">").Append(Encode(harvester.Status)).Append("</span>");
-            sb.Append("<span class=\"docs-harvest-harvester-count\">").Append(harvester.DocCount.ToString(CultureInfo.InvariantCulture)).Append(" docs</span>");
+            sb.Append("<span class=\"docs-harvest-harvester-count\">");
+            if (isBuiltInParser)
+            {
+                sb.Append(harvester.SourceUnitsProcessed.ToString(CultureInfo.InvariantCulture)).Append(" sources · ");
+            }
+
+            sb.Append(harvester.DocCount.ToString(CultureInfo.InvariantCulture)).Append(" docs</span>");
             sb.Append("</article>");
         }
 
@@ -197,28 +206,35 @@ internal static class AppSurfaceDocsHarvestProgressRenderer
 
     private static string RenderRateAccent(AppSurfaceDocsHarvestProgressSnapshot snapshot)
     {
-        return "<div class=\"docs-harvest-rate\" aria-label=\"Harvest speed\">"
-               + "<span>Docs/sec</span>"
+        return "<div class=\"docs-harvest-rate\" aria-label=\"Built-in harvest speed\">"
+               + "<span>Built-in docs/s</span>"
                + "<strong>" + Encode(FormatDocsPerSecond(snapshot)) + "</strong>"
                + "</div>";
     }
 
     private static string FormatDocsPerSecond(AppSurfaceDocsHarvestProgressSnapshot snapshot)
     {
-        var end = snapshot.CompletedUtc ?? DateTimeOffset.UtcNow;
-        var elapsed = end - snapshot.StartedUtc;
-        if (snapshot.TotalDocs <= 0 || elapsed <= TimeSpan.Zero)
+        if (snapshot.BuiltInDocumentsPerSecond is not { } rate)
         {
-            return "0";
+            return "Measuring…";
         }
 
-        var rate = snapshot.TotalDocs / Math.Max(elapsed.TotalSeconds, 1);
         return rate switch
         {
             >= 100 => rate.ToString("0", CultureInfo.InvariantCulture),
             >= 10 => rate.ToString("0.0", CultureInfo.InvariantCulture),
             _ => rate.ToString("0.00", CultureInfo.InvariantCulture)
         };
+    }
+
+    private static string FormatHarvesterPhase(AppSurfaceDocsHarvesterProgress harvester)
+    {
+        if (harvester.Phase == AppSurfaceDocsHarvestProgressPhase.Terminal)
+        {
+            return "Terminal";
+        }
+
+        return harvester.Phase.ToString();
     }
 
     private static string FriendlyHarvesterName(string harvesterType)
@@ -230,6 +246,13 @@ internal static class AppSurfaceDocsHarvestProgressRenderer
             nameof(JavaScriptDocHarvester) => "JavaScript public API",
             _ => harvesterType
         };
+    }
+
+    private static bool IsBuiltInParser(string harvesterType)
+    {
+        return harvesterType == nameof(MarkdownHarvester)
+               || harvesterType == nameof(CSharpDocHarvester)
+               || harvesterType == nameof(JavaScriptDocHarvester);
     }
 
     private static string FormatElapsed(AppSurfaceDocsHarvestProgressSnapshot snapshot)

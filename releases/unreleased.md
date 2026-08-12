@@ -12,6 +12,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
+- Add fine-grained, redacted live harvest progress for built-in Docs parsers. The additive snapshot fields expose parser phase, source-unit counts, and nullable rolling `builtInDocumentsPerSecond`; custom `IDocHarvester` implementations remain compatible and status-only, with no migration or configuration required.
 - Add release-facing changes here as they land.
 
 <!-- appsurface:unreleased-entries section="included" -->
