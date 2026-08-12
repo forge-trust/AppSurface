@@ -586,12 +586,7 @@ internal sealed class ConfigAuditValueTraverser
     {
         if (budget <= 0)
         {
-            diagnostics.Add(
-                CreateDiagnostic(
-                    path,
-                    "config-audit-report-node-limit",
-                    ConfigAuditDiagnosticSeverity.Warning,
-                    $"Config audit traversal for '{path.DisplayPath}' stopped at the node budget."));
+            diagnostics.Add(CreateNodeLimitDiagnostic(path));
             return false;
         }
 
@@ -765,6 +760,13 @@ internal sealed class ConfigAuditValueTraverser
             "config-audit-collection-depth-limit",
             ConfigAuditDiagnosticSeverity.Warning,
             $"Collection traversal for '{path.DisplayPath}' stopped at the configured depth limit.");
+
+    private static ConfigAuditDiagnostic CreateNodeLimitDiagnostic(ConfigAuditPath path) =>
+        CreateDiagnostic(
+            path,
+            "config-audit-report-node-limit",
+            ConfigAuditDiagnosticSeverity.Warning,
+            $"Config audit traversal for '{path.DisplayPath}' stopped at the node budget.");
 
     private static ConfigAuditDiagnostic CreateTraversalFailureDiagnostic(ConfigAuditPath path, Exception exception) =>
         CreateDiagnostic(
