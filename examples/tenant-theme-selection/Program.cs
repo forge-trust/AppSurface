@@ -28,6 +28,7 @@ builder.Services.AddScoped<IAppSurfaceWebThemeSelectionPolicy, TenantThemeSelect
 builder.Services.AddAppSurfaceWebThemeSelection();
 
 var app = builder.Build();
+app.Services.GetRequiredService<TenantThemeMap>();
 app.Use(
     async (httpContext, next) =>
     {

@@ -178,8 +178,11 @@ sealed class TenantThemeSelectionPolicy(AuthorizedTenantContext context)
             ["tenant-b"] = new("shared-blue")
         };
 
-    public bool TrySelect(out AppSurfaceThemeId themeId) =>
-        context.TenantId is { } tenantId && Pairs.TryGetValue(tenantId, out themeId);
+    public bool TrySelect(out AppSurfaceThemeId themeId)
+    {
+        themeId = default;
+        return context.TenantId is { } tenantId && Pairs.TryGetValue(tenantId, out themeId);
+    }
 }
 ```
 

@@ -134,11 +134,14 @@ internal sealed class AppSurfaceThemeSelectionDocumentCache
 
     private static AppSurfaceThemeId[] GetThemeIds(IAppSurfaceThemeRegistry registry)
     {
+        IReadOnlyCollection<AppSurfaceThemeId>? themeIds;
         try
         {
-            return registry.ThemeIds?.ToArray()
-                ?? throw new InvalidOperationException(
-                    "ASWEBTHEME008: The sealed neutral theme registry did not expose its theme pair identifiers.");
+            themeIds = registry.ThemeIds;
+            if (themeIds is not null)
+            {
+                return themeIds.ToArray();
+            }
         }
         catch (OperationCanceledException)
         {
@@ -149,5 +152,8 @@ internal sealed class AppSurfaceThemeSelectionDocumentCache
             throw new InvalidOperationException(
                 "ASWEBTHEME008: The sealed neutral theme registry could not expose its theme pair identifiers.");
         }
+
+        throw new InvalidOperationException(
+            "ASWEBTHEME008: The sealed neutral theme registry did not expose its theme pair identifiers.");
     }
 }

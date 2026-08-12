@@ -34,6 +34,7 @@ internal sealed class AppSurfaceThemeSelectionStartupValidator : IStartupFilter
         var registrationState = _serviceProvider.GetRequiredService<AppSurfaceThemeSelectionRegistrationState>();
         registrationState.ValidateNeutralServiceLifetimes();
         registrationState.ValidatePolicyLifetime();
+        registrationState.ValidateDocumentProviderRegistration();
 
         using var scope = _serviceProvider.CreateScope();
         var provider = scope.ServiceProvider.GetRequiredService<IAppSurfaceThemeDocumentProvider>();
@@ -84,6 +85,19 @@ internal sealed class AppSurfaceThemeSelectionRegistrationState(IServiceCollecti
         {
             throw new InvalidOperationException(
                 "ASWEBTHEME003: AddAppSurfaceWebThemeSelection requires singleton IAppSurfaceThemeResolver and IAppSurfaceThemeRegistry services to be registered first. AddAppSurfaceTheming is the supported registration path.");
+        }
+    }
+
+    /// <summary>Rejects a later document-provider registration that violates the scoped selection contract.</summary>
+    internal void ValidateDocumentProviderRegistration()
+    {
+        var descriptor = _services.LastOrDefault(
+            item => item.ServiceType == typeof(IAppSurfaceThemeDocumentProvider));
+        if (descriptor?.Lifetime != ServiceLifetime.Scoped
+            || descriptor.ImplementationType != typeof(AppSurfaceThemeSelectionDocumentProvider))
+        {
+            throw new InvalidOperationException(
+                "ASWEBTHEME006: AddAppSurfaceWebThemeSelection requires the built-in selection document provider. Remove the consumer-owned IAppSurfaceThemeDocumentProvider replacement or do not opt into selection.");
         }
     }
 }
