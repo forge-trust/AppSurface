@@ -5528,10 +5528,14 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         Assert.Matches(disabledRuntimeResolutionSetting, coverageSecurityJob);
         Assert.Contains(
-            "--no-restore\n          /p:TailwindRuntimeBinaryResolutionEnabled=false\n          --filter",
+            "--no-restore\n          /p:TailwindRuntimeBinaryResolutionEnabled=false\n          /p:TailwindEnabled=false\n          --filter",
             coverageSecurityJob,
             StringComparison.Ordinal);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, buildWorkflowWithoutCoverageSecurityJob);
+        Assert.Contains("/p:TailwindEnabled=false", coverageSecurityJob, StringComparison.Ordinal);
+        Assert.Contains("Prepare generated docs stylesheet for coverage security tests", coverageSecurityJob, StringComparison.Ordinal);
+        Assert.Contains("Web/ForgeTrust.AppSurface.Docs/wwwroot/css/site.gen.css", coverageSecurityJob, StringComparison.Ordinal);
+        Assert.DoesNotContain("/p:TailwindEnabled=false", buildWorkflowWithoutCoverageSecurityJob, StringComparison.Ordinal);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, codeQualityWorkflow);
         Assert.Matches(disabledRuntimeResolutionSetting, vcsIgnoreParityWorkflow);
         Assert.Contains("ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.csproj", vcsIgnoreParityWorkflow, StringComparison.Ordinal);

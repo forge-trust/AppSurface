@@ -48,12 +48,20 @@ jobs:
       - name: Restore coverage security tests (locked)
         run: dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode
 
+      - name: Prepare generated docs stylesheet for coverage security tests
+        shell: pwsh
+        run: |
+          $docsStylesheet = "Web/ForgeTrust.AppSurface.Docs/wwwroot/css/site.gen.css"
+          New-Item -ItemType Directory -Force -Path (Split-Path -Parent $docsStylesheet)
+          Set-Content -NoNewline -Path $docsStylesheet -Value ""
+
       - name: Run coverage security contracts
         run: >-
           dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
           --configuration Release
           --no-restore
           /p:TailwindRuntimeBinaryResolutionEnabled=false
+          /p:TailwindEnabled=false
           --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests"
           --logger "console;verbosity=detailed"
           --blame-hang
