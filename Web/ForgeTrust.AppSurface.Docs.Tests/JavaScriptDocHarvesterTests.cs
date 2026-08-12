@@ -3773,6 +3773,47 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task GetHarvestHealthAsync_ShouldFailStrictHealthForMalformedLifecycleModifiers()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Malformed lifecycle helper.
+             * @public
+             * @namespace RazorWire
+             * @alpha preview only
+             */
+            function malformedHelper() {}
+            """);
+        var options = new AppSurfaceDocsOptions();
+        options.Source.RepositoryRoot = _testRoot;
+        options.Harvest.JavaScript.StrictHealth = true;
+        options.Contributor.Enabled = false;
+        var harvester = CreateHarvester(options);
+        var aggregator = new DocAggregator(
+            [new StaticHarvester([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]), harvester],
+            options,
+            new TestWebHostEnvironment(_testRoot),
+            new Memo(new MemoryCache(new MemoryCacheOptions())),
+            new AppSurfaceDocsHtmlSanitizer(),
+            NullLogger<DocAggregator>.Instance);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Equal(DocHarvestHealthStatus.Degraded, health.Status);
+        Assert.Contains(
+            health.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle
+                          && diagnostic.Severity == DocHarvestDiagnosticSeverity.Error);
+        Assert.Contains(
+            health.Harvesters,
+            item => item.HarvesterType == nameof(JavaScriptDocHarvester)
+                    && item.Status == DocHarvesterHealthStatus.Failed
+                    && item.DocCount == 0);
+    }
+
+    [Fact]
     public async Task GetHarvestHealthAsync_ShouldFailConfiguredJavaScriptIncludeBoundaryForInvalidLifecycleDoclets()
     {
         await WriteAsync(

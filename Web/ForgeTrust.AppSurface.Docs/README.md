@@ -1812,6 +1812,15 @@ Every valid generated JavaScript API symbol has the reader-facing lifecycle labe
 
 `@alpha` and `@beta` describe maturity; they never publish a symbol by themselves. Keep `@public` for admission when `RequirePublicTag=true`, and keep another normal documentation tag when using the explicitly configured compatibility mode with `RequirePublicTag=false`. The lifecycle is fragment-scoped: aggregate JavaScript API group pages do not receive a page-level lifecycle or status, because one group can contain stable, alpha, beta, and deprecated symbols together.
 
+| Tag | Supported on | Reader-facing result | Not a substitute for |
+| --- | --- | --- | --- |
+| `@alpha` | Any generated JavaScript API symbol | **Alpha** lifecycle badge and search term | `@public` admission |
+| `@beta` | Any generated JavaScript API symbol | **Beta** lifecycle badge and search term | `@public` admission |
+| `@deprecated` | Any generated JavaScript API symbol | **Deprecated** badge; optional replacement message | A lifecycle maturity modifier |
+| `@stability` | `@cssHook` contract metadata | Describes the hook contract only | API lifecycle metadata |
+
+`@stability` remains the CSS-hook-specific contract field in the [browser-contract authoring guidance](#browser-contract-doclets); it neither creates an API lifecycle badge nor participates in lifecycle search ranking. Use `@alpha` or `@beta` when a generated JavaScript symbol's maturity must be visible to API readers, and use `@stability` only to describe a public styling hook.
+
 ```js
 /**
  * A transitional event emitted while migration completes.
