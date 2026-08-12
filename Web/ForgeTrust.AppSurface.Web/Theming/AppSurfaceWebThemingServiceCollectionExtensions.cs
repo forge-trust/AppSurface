@@ -105,8 +105,8 @@ public static class AppSurfaceWebThemingServiceCollectionExtensions
     /// Register <c>AddAppSurfaceTheming</c>, a scoped host implementation of
     /// <see cref="IAppSurfaceWebThemeSelectionPolicy"/>, then this opt-in. The policy consumes only already-authorized
     /// application context and returns either one registered <c>AppSurfaceThemeId</c> or <see langword="false"/> for
-    /// the configured default. The adapter validates selected ids against the sealed registry and never serializes a
-    /// caller-supplied theme pair.
+    /// the configured default. The adapter validates selected ids and the resolver's configured default identifier and
+    /// role snapshots against the sealed registry and never serializes a caller-supplied theme pair.
     /// </para>
     /// <para>
     /// This adapter intentionally cannot compose with browser-local preferences or a consumer-owned

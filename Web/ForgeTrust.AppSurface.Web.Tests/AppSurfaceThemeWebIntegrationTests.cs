@@ -540,6 +540,58 @@ public sealed class AppSurfaceThemeWebIntegrationTests
     }
 
     [Fact]
+    public void SelectionCache_ShouldRejectAnUnregisteredDefaultResolverSnapshot()
+    {
+        var registry = CreateRegistry();
+        var pair = AppSurfaceThemePair.Graphite();
+        var resolver = new StubResolver(new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.Light, pair.Light, pair.Dark));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(pair.Id.Value, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldRejectADefaultResolverSnapshotWithMismatchedPairRoles()
+    {
+        var registry = CreateRegistry();
+        var registeredPair = AppSurfaceThemePair.AppSurface();
+        var mismatchedPair = AppSurfaceThemePair.Graphite();
+        var resolver = new StubResolver(
+            new AppSurfaceThemeResolution(
+                registeredPair.Id,
+                AppSurfaceThemeMode.Light,
+                mismatchedPair.Light,
+                mismatchedPair.Dark));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(registeredPair.Id.Value, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldRejectAnUnsafeRegisteredPairFromACustomRegistry()
+    {
+        var defaultPair = AppSurfaceThemePair.AppSurface();
+        var unsafePair = new AppSurfaceThemePair(
+            new AppSurfaceThemeId("unsafe-pair"),
+            new AppSurfaceThemeRoles(
+                "invalid", defaultPair.Light.Surface, defaultPair.Light.RaisedSurface, defaultPair.Light.Text,
+                defaultPair.Light.MutedText, defaultPair.Light.Border, defaultPair.Light.Accent,
+                defaultPair.Light.AccentStrong, defaultPair.Light.Link, defaultPair.Light.VisitedLink,
+                defaultPair.Light.Danger, defaultPair.Light.Focus),
+            defaultPair.Dark);
+        var registry = new StubRegistry(defaultPair, unsafePair);
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SelectionRegistration_ShouldRequireTheNeutralRegistryAndResolver()
     {
         var services = new ServiceCollection();
@@ -1017,6 +1069,24 @@ public sealed class AppSurfaceThemeWebIntegrationTests
             ResolveCalls++;
             return resolution;
         }
+    }
+
+    private sealed class StubRegistry : IAppSurfaceThemeRegistry
+    {
+        private readonly IReadOnlyDictionary<string, AppSurfaceThemePair> _pairs;
+
+        public StubRegistry(params AppSurfaceThemePair[] pairs)
+        {
+            ThemeIds = Array.AsReadOnly(pairs.Select(pair => pair.Id).ToArray());
+            _pairs = pairs.ToDictionary(pair => pair.Id.Value, StringComparer.Ordinal);
+        }
+
+        public IReadOnlyCollection<AppSurfaceThemeId> ThemeIds { get; }
+
+        public AppSurfaceThemePair GetRequired(AppSurfaceThemeId id) =>
+            _pairs.TryGetValue(id.Value, out var pair)
+                ? pair
+                : throw new KeyNotFoundException();
     }
 
     private sealed class EmptyDocumentProvider : IAppSurfaceThemeDocumentProvider
