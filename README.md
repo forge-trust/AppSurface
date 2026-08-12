@@ -214,6 +214,8 @@ start/end and duration, environment manifest, `timings.json`, derived actual ser
 preceding-parallel-batch evidence, managed JUnit results, project logs, slow-test diagnostics,
 coverage outputs, and coverage-gate reports. It has read-only repository
 permissions, uses no secrets, and does not change ordinary pull-request validation.
+Dispatch the workflow from the repository’s default branch only: evidence branches are rejected so a
+candidate cannot redefine the command or its retained evidence while it is being measured.
 
 For a local **screening** run, use the CI-equivalent wrapper environment:
 
@@ -238,8 +240,8 @@ container, test database, browser context/profile, host process, or coverage out
 paths: it runs no tests and is never a timing sample.
 
 Read the artifact’s `environment-manifest.json` first, then use `resolved-serial-set.json` alongside
-`timings.json` to review the actual serial set and each barrier’s preceding parallel batch. Exact
-coverage-step wall-clock time is the outcome.
+`timings.json` to review the actual serial set and each barrier’s preceding parallel batch. The outcome
+is the high-resolution monotonic duration of the coverage-wrapper invocation.
 Each per-project `seconds` value is launch-through-normalization attribution, not test-process time.
 Record the baseline, candidate inventory, and result links in the committed
 [`issue-728-test-efficiency`](./artifacts/issue-728-test-efficiency/) evidence pages before changing

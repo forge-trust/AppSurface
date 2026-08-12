@@ -51,6 +51,17 @@ jobs:
           cache: pnpm
           cache-dependency-path: Web/pnpm-lock.yaml
 
+      - name: Require a trusted evidence ref
+        env:
+          EVIDENCE_REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVIDENCE_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
+            echo "Coverage-efficiency evidence must run from the trusted default branch '$DEFAULT_BRANCH', not '$EVIDENCE_REF'." >&2
+            exit 2
+          fi
+
       - name: Prepare declared comparison state
         env:
           CACHE_STATE: ${{ inputs['cache-state'] }}
@@ -59,7 +70,20 @@ jobs:
           case "$CACHE_STATE" in
             cold)
               dotnet nuget locals global-packages --clear
-              pnpm store prune
+              pnpm_store_path="$(pnpm store path)"
+              case "$pnpm_store_path" in
+                /)
+                  echo "Refusing to clear an unsafe pnpm store path: '$pnpm_store_path'." >&2
+                  exit 2
+                  ;;
+                /*)
+                  ;;
+                *)
+                  echo "Refusing to clear a non-absolute pnpm store path: '$pnpm_store_path'." >&2
+                  exit 2
+                  ;;
+              esac
+              rm -rf -- "$pnpm_store_path"
               ;;
             warm)
               ;;
@@ -106,7 +130,7 @@ jobs:
           evidence_root="$RUNNER_TEMP/coverage-efficiency-evidence"
           mkdir -p "$evidence_root"
           started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          started_seconds="$(date +%s)"
+          started_monotonic_nanoseconds="$(python3 -c 'import time; print(time.monotonic_ns())')"
 
           set +e
           ./scripts/coverage-solution.sh
@@ -116,8 +140,9 @@ jobs:
           echo "coverage-exit-code=$coverage_exit_code" >> "$GITHUB_OUTPUT"
 
           finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          finished_seconds="$(date +%s)"
-          duration_seconds="$(( finished_seconds - started_seconds ))"
+          finished_monotonic_nanoseconds="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          duration_nanoseconds="$(( finished_monotonic_nanoseconds - started_monotonic_nanoseconds ))"
+          duration_seconds="$(python3 -c 'import sys; print(f"{int(sys.argv[1]) / 1_000_000_000:.3f}")' "$duration_nanoseconds")"
 
           runtime_capture_exit_code=0
           capture_status=complete
@@ -177,14 +202,19 @@ jobs:
             capture_status=failed
           fi
 
-          playwright_chromium_paths=()
+          playwright_chromium_directories=()
+          playwright_chromium_executables=()
           playwright_chromium_count=0
-          while IFS= read -r playwright_chromium_path; do
-            playwright_chromium_paths+=("$playwright_chromium_path")
-            playwright_chromium_count="$(( playwright_chromium_count + 1 ))"
+          while IFS= read -r playwright_chromium_directory; do
+            playwright_chromium_executable="$(find "$playwright_chromium_directory" -type f \( -name chrome -o -name chrome-headless-shell \) -perm -111 -print -quit 2>/dev/null || true)"
+            if [[ -n "$playwright_chromium_executable" ]]; then
+              playwright_chromium_directories+=("$playwright_chromium_directory")
+              playwright_chromium_executables+=("$playwright_chromium_executable")
+              playwright_chromium_count="$(( playwright_chromium_count + 1 ))"
+            fi
           done < <(find "$playwright_root" -maxdepth 1 -mindepth 1 -type d -name 'chromium-*' -print 2>/dev/null || true)
           if (( playwright_chromium_count == 0 )); then
-            playwright_browser_status=chromium-unavailable
+            playwright_browser_status=chromium-executable-unavailable
             runtime_capture_exit_code=1
             capture_status=failed
           fi
@@ -193,9 +223,10 @@ jobs:
             echo "package-version=$playwright_package_version"
             echo "browser-root=$playwright_root"
             echo "browser-status=$playwright_browser_status"
-            if (( playwright_chromium_count > 0 )); then
-              for playwright_chromium_path in "${playwright_chromium_paths[@]}"; do
-                echo "installed=$(basename "$playwright_chromium_path")"
+          if (( playwright_chromium_count > 0 )); then
+              for playwright_chromium_index in "${!playwright_chromium_directories[@]}"; do
+                echo "installed=$(basename "${playwright_chromium_directories[$playwright_chromium_index]}")"
+                echo "executable=${playwright_chromium_executables[$playwright_chromium_index]}"
               done
             fi
           } > "$evidence_root/playwright-browser-inventory.txt"
@@ -250,13 +281,36 @@ jobs:
           coverage_root="TestResults/coverage-merged"
           output_root="$evidence_root/coverage-output"
           mkdir -p "$output_root/projects"
+          max_artifact_file_bytes=$((25 * 1024 * 1024))
+          max_artifact_total_bytes=$((512 * 1024 * 1024))
+          artifact_copied_bytes=0
+          artifact_source_errors=()
 
           copy_if_present() {
             local source="$1"
             local destination="$2"
-            if [[ -f "$source" ]]; then
+            if [[ -e "$source" || -L "$source" ]]; then
+              if [[ -L "$source" ]]; then
+                artifact_source_errors+=("Refusing symlinked evidence source: $source")
+                return
+              fi
+              if [[ ! -f "$source" ]]; then
+                artifact_source_errors+=("Evidence source is not a regular file: $source")
+                return
+              fi
+              local source_bytes
+              source_bytes="$(wc -c < "$source")"
+              if (( source_bytes > max_artifact_file_bytes )); then
+                artifact_source_errors+=("Evidence source exceeds the per-file size limit: $source")
+                return
+              fi
+              if (( artifact_copied_bytes + source_bytes > max_artifact_total_bytes )); then
+                artifact_source_errors+=("Evidence sources exceed the aggregate size limit: $source")
+                return
+              fi
               mkdir -p "$(dirname "$destination")"
               cp "$source" "$destination"
+              artifact_copied_bytes="$(( artifact_copied_bytes + source_bytes ))"
             fi
           }
 
@@ -301,22 +355,24 @@ jobs:
                 }' "$output_root/timings.json" > "$output_root/resolved-serial-set.json" || true
           fi
 
-          shopt -s nullglob
-          shopt -s globstar
-          junit_files=("$coverage_root"/junit-coverage-*.xml)
-          for source in "${junit_files[@]}"; do
-            cp "$source" "$output_root/"
-          done
+          junit_files=()
+          while IFS= read -r source; do
+            junit_files+=("$source")
+            copy_if_present "$source" "$output_root/$(basename "$source")"
+          done < <(find "$coverage_root" -maxdepth 1 -type f -name 'junit-coverage-*.xml' -print 2>/dev/null || true)
 
-          project_logs=("$coverage_root"/projects/**/dotnet-test.log "$coverage_root"/projects/**/coverage-normalization.log)
-          for source in "${project_logs[@]}"; do
+          project_logs=()
+          while IFS= read -r source; do
+            project_logs+=("$source")
             relative_path="${source#"$coverage_root"/}"
-            mkdir -p "$output_root/$(dirname "$relative_path")"
-            cp "$source" "$output_root/$relative_path"
-          done
+            copy_if_present "$source" "$output_root/$relative_path"
+          done < <(find "$coverage_root/projects" -type f \( -name dotnet-test.log -o -name coverage-normalization.log \) -print 2>/dev/null || true)
 
           evidence_contract_complete=true
-          evidence_contract_errors=()
+          evidence_contract_errors=("${artifact_source_errors[@]}")
+          if (( ${#artifact_source_errors[@]} > 0 )); then
+            evidence_contract_complete=false
+          fi
           require_nonempty_file() {
             local path="$1"
             local description="$2"
@@ -324,6 +380,19 @@ jobs:
               evidence_contract_complete=false
               evidence_contract_errors+=("$description: $path")
             fi
+          }
+
+          require_project_evidence_file() {
+            local relative_path="$1"
+            local description="$2"
+            case "$relative_path" in
+              ''|/*|..|../*|*/../*|*'/..')
+                evidence_contract_complete=false
+                evidence_contract_errors+=("Invalid project evidence path: $relative_path")
+                return
+                ;;
+            esac
+            require_nonempty_file "$output_root/$relative_path" "$description"
           }
 
           required_files=(
@@ -382,16 +451,16 @@ jobs:
                     evidence_contract_complete=false
                     evidence_contract_errors+=("Missing project test log path.")
                   else
-                    require_nonempty_file "$output_root/$project_log" "Missing project test log"
+                    require_project_evidence_file "$project_log" "Missing project test log"
                   fi
                   if [[ -n "$normalization_log" ]]; then
-                    require_nonempty_file "$output_root/$normalization_log" "Missing project normalization log"
+                    require_project_evidence_file "$normalization_log" "Missing project normalization log"
                   fi
                   if [[ -z "$junit_log" ]]; then
                     evidence_contract_complete=false
                     evidence_contract_errors+=("Missing managed JUnit log path.")
                   else
-                    require_nonempty_file "$output_root/$junit_log" "Missing managed JUnit log"
+                    require_project_evidence_file "$junit_log" "Missing managed JUnit log"
                   fi
                 done <<< "$project_evidence_rows"
               fi

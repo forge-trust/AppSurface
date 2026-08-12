@@ -134,11 +134,16 @@ public sealed class CoverageSolutionScriptTests
         Assert.DoesNotContain("push:", workflow, StringComparison.Ordinal);
         Assert.Contains("permissions:\n  contents: read", workflow, StringComparison.Ordinal);
         Assert.Contains("persist-credentials: false", workflow, StringComparison.Ordinal);
+        Assert.Contains("Require a trusted evidence ref", workflow, StringComparison.Ordinal);
+        Assert.Contains("refs/heads/$DEFAULT_BRANCH", workflow, StringComparison.Ordinal);
         Assert.Contains("BUILD_CONFIGURATION: Release", workflow, StringComparison.Ordinal);
         Assert.Contains("BUILD_NO_RESTORE: true", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_PARALLELISM: 2", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_GATE_DIFF_BASE: ''", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("COVERAGE_REQUIRE_NON_SANDBOX: false", workflow, StringComparison.Ordinal);
+        Assert.Contains("pnpm_store_path=\"$(pnpm store path)\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("rm -rf -- \"$pnpm_store_path\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("time.monotonic_ns()", workflow, StringComparison.Ordinal);
         Assert.Contains("docker version > \"$evidence_root/docker-version.txt\"", workflow, StringComparison.Ordinal);
         Assert.Contains("PostgreSqlTestContainerImage.cs", workflow, StringComparison.Ordinal);
         Assert.Contains("Directory.Packages.props", workflow, StringComparison.Ordinal);
@@ -149,7 +154,8 @@ public sealed class CoverageSolutionScriptTests
         Assert.DoesNotContain("postgresql-image.json\" 2>&1 || true", workflow, StringComparison.Ordinal);
         Assert.Contains("coverage-exit-code=$coverage_exit_code", workflow, StringComparison.Ordinal);
         Assert.Contains("runtime-capture-exit-code=$runtime_capture_exit_code", workflow, StringComparison.Ordinal);
-        Assert.Contains("chromium-unavailable", workflow, StringComparison.Ordinal);
+        Assert.Contains("chromium-executable-unavailable", workflow, StringComparison.Ordinal);
+        Assert.Contains("-name chrome -o -name chrome-headless-shell", workflow, StringComparison.Ordinal);
         Assert.Contains("Missing managed JUnit log", workflow, StringComparison.Ordinal);
         Assert.Contains("Missing managed JUnit log path.", workflow, StringComparison.Ordinal);
         Assert.Contains("Missing project test log path.", workflow, StringComparison.Ordinal);
@@ -168,6 +174,11 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("junit-coverage-*.xml", workflow, StringComparison.Ordinal);
         Assert.Contains("slow-test-diagnostics.json", workflow, StringComparison.Ordinal);
         Assert.Contains("coverage-normalization.log", workflow, StringComparison.Ordinal);
+        Assert.Contains("max_artifact_file_bytes", workflow, StringComparison.Ordinal);
+        Assert.Contains("Refusing symlinked evidence source", workflow, StringComparison.Ordinal);
+        Assert.Contains("find \"$coverage_root\" -maxdepth 1 -type f -name 'junit-coverage-*.xml'", workflow, StringComparison.Ordinal);
+        Assert.Contains("find \"$coverage_root/projects\" -type f", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("shopt -s globstar", workflow, StringComparison.Ordinal);
         Assert.Contains("coverage-efficiency-evidence", workflow, StringComparison.Ordinal);
         Assert.Contains("path: ${{ runner.temp }}/coverage-efficiency-evidence", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("path: TestResults/coverage-merged", workflow, StringComparison.Ordinal);
@@ -271,6 +282,156 @@ public sealed class CoverageSolutionScriptTests
             "Docker unavailable",
             await File.ReadAllTextAsync(Path.Join(evidenceRoot, "coverage-efficiency-evidence", "docker-version.txt")),
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CoverageEfficiencyAssembly_ShouldWriteCompletenessAndRejectMissingSuccessfulCoverageEvidence()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var assemblyScript = ExtractWorkflowRunScript("Assemble coverage efficiency evidence");
+        using var workspace = TemporaryDirectory.Create("appsurface-coverage-efficiency-assembly-");
+        var runnerTemp = Path.Join(workspace.Path, "runner-temp");
+        var evidenceRoot = Path.Join(runnerTemp, "coverage-efficiency-evidence");
+        Directory.CreateDirectory(evidenceRoot);
+
+        foreach (var fileName in new[]
+                 {
+                     "environment-manifest.json",
+                     "dotnet-info.txt",
+                     "docker-version.txt",
+                     "postgresql-image.json",
+                     "pnpm-version.txt",
+                     "node-version.txt",
+                     "playwright-browser-inventory.txt",
+                 })
+        {
+            await File.WriteAllTextAsync(Path.Join(evidenceRoot, fileName), "fixture evidence\n");
+        }
+
+        var scriptPath = Path.Join(workspace.Path, "assemble.sh");
+        await File.WriteAllTextAsync(scriptPath, assemblyScript);
+
+        var startInfo = new ProcessStartInfo("bash")
+        {
+            WorkingDirectory = workspace.Path,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add(scriptPath);
+        startInfo.Environment["RUNNER_TEMP"] = runnerTemp;
+        startInfo.Environment["COVERAGE_EXIT_CODE"] = "0";
+        startInfo.Environment["RUNTIME_CAPTURE_EXIT_CODE"] = "0";
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start assembly script.");
+        var standardErrorTask = process.StandardError.ReadToEndAsync();
+        await Task.WhenAll(process.WaitForExitAsync(), standardErrorTask);
+
+        Assert.NotEqual(0, process.ExitCode);
+        var standardError = await standardErrorTask;
+
+        var completenessPath = Path.Join(evidenceRoot, "evidence-completeness.json");
+        Assert.True(File.Exists(completenessPath), standardError);
+        var completeness = await File.ReadAllTextAsync(completenessPath);
+        Assert.Contains("\"captureStatus\": \"failed\"", completeness, StringComparison.Ordinal);
+        Assert.Contains("\"artifactContractComplete\": false", completeness, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CoverageEfficiencyAssembly_ShouldEmitCompleteManifestForValidSuccessfulCoverageEvidence()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var assemblyScript = ExtractWorkflowRunScript("Assemble coverage efficiency evidence");
+        using var workspace = TemporaryDirectory.Create("appsurface-coverage-efficiency-assembly-success-");
+        var runnerTemp = Path.Join(workspace.Path, "runner-temp");
+        var evidenceRoot = Path.Join(runnerTemp, "coverage-efficiency-evidence");
+        Directory.CreateDirectory(evidenceRoot);
+
+        foreach (var fileName in new[]
+                 {
+                     "environment-manifest.json",
+                     "dotnet-info.txt",
+                     "docker-version.txt",
+                     "postgresql-image.json",
+                     "pnpm-version.txt",
+                     "node-version.txt",
+                     "playwright-browser-inventory.txt",
+                 })
+        {
+            await File.WriteAllTextAsync(Path.Join(evidenceRoot, fileName), "fixture evidence\n");
+        }
+
+        var coverageRoot = Path.Join(workspace.Path, "TestResults", "coverage-merged");
+        Directory.CreateDirectory(Path.Join(coverageRoot, "projects", "fixture"));
+        await File.WriteAllTextAsync(
+            Path.Join(coverageRoot, "timings.json"),
+            """
+            {
+              "schedule": { "strategy": "fixture" },
+              "projects": [
+                {
+                  "project": "Fixture.Tests.csproj",
+                  "originalIndex": 0,
+                  "executionIndex": 0,
+                  "exclusive": true,
+                  "scheduleReason": "fixture",
+                  "executionStatus": "completed",
+                  "log": "projects/fixture/dotnet-test.log",
+                  "coverageCleanupLog": null,
+                  "testResults": [ { "format": "junit", "path": "junit-coverage-fixture.xml" } ]
+                }
+              ]
+            }
+            """);
+        foreach (var fileName in new[]
+                 {
+                     "slow-test-diagnostics.md",
+                     "slow-test-diagnostics.json",
+                     "coverage.cobertura.xml",
+                     "summary.txt",
+                     "coverage-gate.json",
+                     "coverage-gate.md",
+                     "junit-coverage-fixture.xml",
+                 })
+        {
+            await File.WriteAllTextAsync(Path.Join(coverageRoot, fileName), "fixture coverage output\n");
+        }
+        await File.WriteAllTextAsync(Path.Join(coverageRoot, "projects", "fixture", "dotnet-test.log"), "fixture test log\n");
+
+        var scriptPath = Path.Join(workspace.Path, "assemble.sh");
+        await File.WriteAllTextAsync(scriptPath, assemblyScript);
+
+        var startInfo = new ProcessStartInfo("bash")
+        {
+            WorkingDirectory = workspace.Path,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add(scriptPath);
+        startInfo.Environment["RUNNER_TEMP"] = runnerTemp;
+        startInfo.Environment["COVERAGE_EXIT_CODE"] = "0";
+        startInfo.Environment["RUNTIME_CAPTURE_EXIT_CODE"] = "0";
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start assembly script.");
+        var standardErrorTask = process.StandardError.ReadToEndAsync();
+        await Task.WhenAll(process.WaitForExitAsync(), standardErrorTask);
+
+        Assert.Equal(0, process.ExitCode);
+        Assert.True(string.IsNullOrWhiteSpace(await standardErrorTask), await standardErrorTask);
+
+        var completeness = await File.ReadAllTextAsync(Path.Join(evidenceRoot, "evidence-completeness.json"));
+        Assert.Contains("\"captureStatus\": \"complete\"", completeness, StringComparison.Ordinal);
+        Assert.Contains("\"artifactContractComplete\": true", completeness, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Join(evidenceRoot, "coverage-output", "resolved-serial-set.json")));
     }
 
     [Fact]

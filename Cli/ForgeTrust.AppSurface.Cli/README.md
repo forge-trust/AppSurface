@@ -626,7 +626,7 @@ not a new public `coverage run` option or an ordinary pull-request gate. It invo
 `BUILD_NO_RESTORE=true`, `COVERAGE_PARALLELISM=2`, and an empty `COVERAGE_GATE_DIFF_BASE`.
 The empty diff base intentionally measures the aggregate coverage lane, rather than the synthetic
 pull-request merge diff. The workflow preserves the wrapper’s `--require-non-sandbox` protection,
-runs with read-only contents permission and no secrets, and uses a fixed 14-day,
+runs only from the trusted default branch with read-only contents permission and no secrets, and uses a fixed 14-day,
 `if-no-files-found: error` artifact contract.
 
 Open `environment-manifest.json` in the retained `coverage-efficiency-evidence` artifact before
@@ -638,7 +638,7 @@ slow-test diagnostics, Cobertura/summary output, coverage-gate reports, and
 `resolved-serial-set.json`. That private report identifies each exclusive barrier and the preceding
 parallel batch it drains. The workflow deliberately does not upload an unbounded `TestResults` tree.
 
-The primary metric is the exact coverage-step wall-clock duration. `timings.json` project `seconds`
+The primary metric is the high-resolution monotonic duration of the coverage-wrapper invocation. `timings.json` project `seconds`
 starts before project execution and ends after coverage normalization, so it is end-to-end project-run
 attribution rather than test-process time. Use its schedule fields with `resolved-serial-set.json` to
 reconcile issue-named, explicit, automatic, and actual serial-set projects. Do not treat a shorter project value as an improvement

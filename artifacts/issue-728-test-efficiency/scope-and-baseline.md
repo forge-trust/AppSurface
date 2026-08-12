@@ -6,7 +6,7 @@ Complete this committed record before changing any sharing or scheduler boundary
 
 | Field | Value |
 | --- | --- |
-| Primary outcome | Exact wall-clock duration of the `Capture coverage efficiency evidence` step in `.github/workflows/coverage-efficiency.yml`. |
+| Primary outcome | High-resolution monotonic duration of the coverage-wrapper invocation within `Capture coverage efficiency evidence` in `.github/workflows/coverage-efficiency.yml`. |
 | Supporting attribution | Resolved schedule and per-project end-to-end `seconds` from `timings.json`; these include launch through coverage normalization and are never reported as test-process time. |
 | Authoritative CI command | The manual workflow runs `BUILD_CONFIGURATION=Release BUILD_NO_RESTORE=true COVERAGE_PARALLELISM=2 COVERAGE_GATE_DIFF_BASE= ./scripts/coverage-solution.sh` with the wrapper's non-sandbox guard enabled. |
 | CI-equivalent local screening command | `BUILD_CONFIGURATION=Release BUILD_NO_RESTORE=true COVERAGE_PARALLELISM=2 COVERAGE_GATE_DIFF_BASE= COVERAGE_REQUIRE_NON_SANDBOX=false ./scripts/coverage-solution.sh`; use the override only when a restricted local automation environment cannot satisfy the guard. This is screening-only, never CI or issue-claim evidence. |

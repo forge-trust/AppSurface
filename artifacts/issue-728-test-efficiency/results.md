@@ -13,7 +13,7 @@ Use this page to publish the implementation result. A safe no-change ceiling is 
 
 ## Claim rules
 
-- The primary metric is exact coverage-step wall-clock time from the retained manual workflow artifact.
+- The primary metric is the high-resolution monotonic coverage-wrapper duration from the retained manual workflow artifact.
 - A candidate needs a five-sample median reduction of at least 15% and at least five seconds in the same comparable cold or warm class.
 - Project/lifecycle attribution explains the result; it never replaces the step-time claim.
 - One successful ordinary PR coverage run is required to merge a sharing change.
