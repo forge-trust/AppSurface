@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using ForgeTrust.AppSurface.Testing;
 using YamlDotNet.RepresentationModel;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -120,7 +121,8 @@ public sealed class CoverageSolutionScriptTests
     {
         var workflow = ReadRepositoryFile(".github", "workflows", "coverage-efficiency.yml");
         var yaml = new YamlStream();
-        yaml.Load(new StringReader(workflow));
+        using var reader = new StringReader(workflow);
+        yaml.Load(reader);
 
         Assert.Contains("name: Coverage Efficiency Evidence", workflow, StringComparison.Ordinal);
         Assert.Single(yaml.Documents);
@@ -321,7 +323,7 @@ public sealed class CoverageSolutionScriptTests
                      "playwright-browser-inventory.txt",
                  })
         {
-            await File.WriteAllTextAsync(Path.Join(evidenceRoot, fileName), "fixture evidence\n");
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(evidenceRoot, fileName), "fixture evidence\n");
         }
 
         var scriptPath = Path.Join(workspace.Path, "assemble.sh");
@@ -378,7 +380,7 @@ public sealed class CoverageSolutionScriptTests
                      "playwright-browser-inventory.txt",
                  })
         {
-            await File.WriteAllTextAsync(Path.Join(evidenceRoot, fileName), "fixture evidence\n");
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(evidenceRoot, fileName), "fixture evidence\n");
         }
 
         var coverageRoot = Path.Join(workspace.Path, "TestResults", "coverage-merged");
@@ -414,7 +416,7 @@ public sealed class CoverageSolutionScriptTests
                      "junit-coverage-fixture.xml",
                  })
         {
-            await File.WriteAllTextAsync(Path.Join(coverageRoot, fileName), "fixture coverage output\n");
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(coverageRoot, fileName), "fixture coverage output\n");
         }
         await File.WriteAllTextAsync(Path.Join(coverageRoot, "projects", "fixture", "dotnet-test.log"), "fixture test log\n");
 
@@ -631,7 +633,8 @@ public sealed class CoverageSolutionScriptTests
     {
         var workflow = ReadRepositoryFile(".github", "workflows", "coverage-efficiency.yml");
         var yaml = new YamlStream();
-        yaml.Load(new StringReader(workflow));
+        using var reader = new StringReader(workflow);
+        yaml.Load(reader);
         var root = (YamlMappingNode)yaml.Documents.Single().RootNode;
         var jobs = (YamlMappingNode)root.Children[new YamlScalarNode("jobs")];
         var captureEvidence = (YamlMappingNode)jobs.Children[new YamlScalarNode("capture-evidence")];
