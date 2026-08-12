@@ -34,14 +34,16 @@ seam was removed. No public type was deleted outright.
 
 ## Compatibility rule
 
-All three packages remain source-only public previews and are machine-blocked from publication pending coordinated
-release evidence. The PostgreSQL source provider now supplies Work, Flow, Schedule, hosted runtime, drain/recovery, and
-restore fencing conformance. Changes may still be made, but every public member change must update the appropriate
-deterministic API snapshot and this ledger when it changes a type's audience, package, or visibility.
+All three packages are public previews in the coordinated prerelease publish plan. The PostgreSQL provider supplies
+Work, Flow, Schedule, hosted runtime, drain/recovery, retention, repair, and restore-fencing conformance. Every public
+member change must update the appropriate deterministic API snapshot and this ledger when it changes a type's audience,
+package, or visibility. The first supported publication and any persisted deployment are independent compatibility
+boundaries: whichever happens first freezes canonical bytes, and every later canonical-byte change requires a new schema
+id.
 
 ## Slice 3 PostgreSQL API
 
-The source-only `ForgeTrust.AppSurface.Durable.PostgreSql` package adds thirteen public types in three deliberate
+The public-preview `ForgeTrust.AppSurface.Durable.PostgreSql` package adds thirteen public types in three deliberate
 families. Its checked-in `PublicAPI.Shipped.txt` is the exhaustive member inventory.
 
 - Schema deployment: `IDurableRuntimeSchemaManager`, `PostgreSqlDurableRuntimeSchemaManager`, schema status,

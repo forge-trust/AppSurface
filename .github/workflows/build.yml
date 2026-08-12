@@ -397,8 +397,17 @@ jobs:
           BUILD_NO_RESTORE: true
           COVERAGE_PARALLELISM: 2
           COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
+          APP_SURFACE_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/docs-outline-layout-evidence
         run: |
           ./scripts/coverage-solution.sh
+
+      - name: Upload docs outline layout evidence
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docs-outline-layout-evidence
+          path: ${{ runner.temp }}/docs-outline-layout-evidence
+          if-no-files-found: warn
 
       - name: Upload slow-test diagnostics
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

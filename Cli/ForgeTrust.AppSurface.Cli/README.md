@@ -431,7 +431,7 @@ Per-project `coverage-normalization.log` files are the extended diagnostic chann
 
 The v1 contract assumes selected test projects use VSTest and are already instrumented with Coverlet. The default `collector` driver requires one direct `coverlet.collector` reference in every selected project. Native .NET 10 Microsoft Testing Platform execution is intentionally rejected because it uses a different runner and `coverlet.MTP`; see the [.NET test runner selection](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-test) and [Coverlet integration](https://github.com/coverlet-coverage/coverlet) guidance. No managed test result export happens by default. Use `--test-results junit` when AppSurface should own top-level JUnit artifacts, and make sure every selected test project references `JunitXml.TestLogger`. `junit` is the only managed test-result format supported in this release; `trx` and TUnit-compatible parsing are reserved for follow-up work. `--logger` remains raw `dotnet test` pass-through and does not create AppSurface-managed artifacts.
 
-The default schedule is input order. For repositories with enough projects for long-tail timing to matter, pass `--schedule longest-first` so non-exclusive projects with longer prior durations start first within each exclusive-project segment. The first run usually has no timing history and keeps unknown projects in input order; later runs can reuse the previous output directory's `timings.json` automatically.
+Exclusive projects always run first, in stable input order, so resource-sensitive suites do not wait for an ordinary parallel batch to drain. The remaining projects use input order by default. For repositories with enough projects for long-tail timing to matter, pass `--schedule longest-first` so non-exclusive projects with longer prior durations start first after exclusive projects complete. The first run usually has no timing history and keeps unknown projects in input order; later runs can reuse the previous output directory's `timings.json` automatically.
 
 #### Already Has Coverlet
 
@@ -513,7 +513,7 @@ Options:
 - `--watchdog`: Stall response, `warn`, `fail`, or `off`. Defaults to `warn`.
 - `--require-non-sandbox`: Fails before discovery or mutation when a known sandbox environment marker is enabled. Disabled by default.
 
-Duration-aware scheduling keeps exclusive projects as barriers. If discovery returns `A.Tests`, `Browser.IntegrationTests`, and `B.Tests`, `B.Tests` never jumps ahead of the exclusive browser project even when it was slower in the previous run. AppSurface sorts only the non-exclusive segment before each barrier and only the non-exclusive segment after it.
+Duration-aware scheduling starts exclusive projects before all non-exclusive projects. If discovery returns `A.Tests`, `Browser.IntegrationTests`, and `B.Tests`, the browser project runs first; AppSurface then orders the non-exclusive projects according to the selected schedule. This prevents an exclusive resource-sensitive project from waiting for an unrelated parallel batch to drain.
 
 ```bash
 dotnet tool run appsurface coverage run \
