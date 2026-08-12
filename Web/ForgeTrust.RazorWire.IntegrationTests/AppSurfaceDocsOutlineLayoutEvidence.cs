@@ -226,7 +226,7 @@ internal sealed class AppSurfaceDocsOutlineLayoutEvidence
         {
             return TestPathUtils.PathUnder(root, relativePath);
         }
-        catch (ArgumentException exception) when (exception.ParamName == "relativeSegments")
+        catch (ArgumentException exception) when (exception.ParamName is "relativeSegments" or "segments")
         {
             throw new ArgumentException(exception.Message, nameof(relativePath), exception);
         }
