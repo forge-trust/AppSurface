@@ -36,6 +36,7 @@ public sealed class AppSurfaceAuthDependencyGuardTests
             "System.IdentityModel",
             "Aspire",
             "Keycloak",
+            "ForgeTrust.AppSurface.Flow",
         };
 
         var packageReferences = project.Descendants()
@@ -60,6 +61,7 @@ public sealed class AppSurfaceAuthDependencyGuardTests
         {
             "/Auth.AspNetCore/",
             "/Aspire/",
+            "/Flow/",
             "/Web/",
         };
 

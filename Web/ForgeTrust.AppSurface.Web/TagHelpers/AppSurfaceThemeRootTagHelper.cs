@@ -6,7 +6,8 @@ namespace ForgeTrust.AppSurface.Web.TagHelpers;
 /// <summary>Applies safe AppSurface theme identity and color-scheme metadata to an HTML root.</summary>
 /// <remarks>
 /// Use <c>&lt;html appsurface-theme-root&gt;</c> after explicitly registering
-/// <see cref="AppSurfaceWebThemingServiceCollectionExtensions.AddAppSurfaceWebTheming(Microsoft.Extensions.DependencyInjection.IServiceCollection)"/>.
+/// <see cref="AppSurfaceWebThemingServiceCollectionExtensions.AddAppSurfaceWebTheming(Microsoft.Extensions.DependencyInjection.IServiceCollection)"/>
+/// or <see cref="AppSurfaceWebThemingServiceCollectionExtensions.AddAppSurfaceWebThemeSelection(Microsoft.Extensions.DependencyInjection.IServiceCollection)"/>.
 /// Existing attributes are preserved. An existing <c>style</c> attribute retains its declarations and receives the
 /// generated color-scheme declaration only when it does not already name <c>color-scheme</c>.
 /// </remarks>
@@ -19,7 +20,7 @@ public sealed class AppSurfaceThemeRootTagHelper : TagHelper
     private readonly IAppSurfaceThemeDocumentProvider _documentProvider;
 
     /// <summary>Initializes a root helper from the registered document provider.</summary>
-    /// <param name="documentProvider">Provider for the safe default theme document.</param>
+    /// <param name="documentProvider">Provider for the safe theme document for the current rendering scope.</param>
     public AppSurfaceThemeRootTagHelper(IAppSurfaceThemeDocumentProvider documentProvider)
     {
         _documentProvider = documentProvider ?? throw new ArgumentNullException(nameof(documentProvider));

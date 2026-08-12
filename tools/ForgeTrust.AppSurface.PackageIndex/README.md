@@ -84,6 +84,16 @@ Package README reconciliation is intentionally separate from the [release author
 `eng/release prepare`, including its dry run, must not regenerate package README files; release preparation validates
 its own exact artifact set while PackageIndex remains the owner of checked-in package-policy documentation.
 
+### Release-preparation witness
+
+When a release-preparation pull request also changes generated package documentation, the [Release verifier](../ForgeTrust.AppSurface.Release/README.md#verify-prep-diff) invokes this read-only command once:
+
+```bash
+dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- release-prep-witness --base-ref <base-tip-commit> --witness /tmp/appsurface-release-prep-witness.json
+```
+
+It does not write chooser, readiness, or README files. Instead it records the base tip, exactly one merge base, HEAD, changed semantic sources, and deterministic SHA-256 hashes for the chooser, readiness dashboard, and each managed README body. Only a changed `packages/package-index.yml` or `release-guidance.template` can authorize those surfaces; `packages/README.md.yml` is hand-authored metadata and is never an input. When an authorized input changes a surface relative to the merge base, the release pull request must commit that surface and match the witness digest; a partial PackageIndex regeneration is rejected. The Release verifier rejects unknown, duplicate, unordered, unsafe, or uppercase-hash JSON values, and it requires a README's bytes outside the managed marker body to be identical to the merge-base version. Treat `--witness` as an advanced CI/test seam; use `./eng/release verify-prep-diff --base-ref main` as the normal front door.
+
 ## Adding a variant
 
 Adding a variant is a policy change, not a per-package escape hatch. Document why the existing three variants cannot

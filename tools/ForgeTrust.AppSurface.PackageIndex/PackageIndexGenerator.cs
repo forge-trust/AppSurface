@@ -188,7 +188,13 @@ internal sealed class PackageIndexGenerator
         return GenerateDocuments(request, entries);
     }
 
-    private static PackageIndexDocuments GenerateDocuments(
+    /// <summary>
+    /// Renders the package chooser and readiness documents from entries already resolved for the same request.
+    /// </summary>
+    /// <param name="request">Generation request that supplies output and repository context.</param>
+    /// <param name="entries">Canonical entries resolved by <see cref="ResolveGenerationEntriesAsync"/>.</param>
+    /// <returns>In-memory document content without reading or writing repository files.</returns>
+    internal static PackageIndexDocuments GenerateDocuments(
         PackageIndexRequest request,
         IReadOnlyList<ResolvedPackageEntry> entries)
     {
@@ -249,7 +255,14 @@ internal sealed class PackageIndexGenerator
         return PackageGateValidator.Validate(request.RepositoryRoot, entries);
     }
 
-    private async Task<IReadOnlyList<ResolvedPackageEntry>> ResolveGenerationEntriesAsync(
+    /// <summary>
+    /// Resolves the validated package entries used by every canonical package-index rendering path.
+    /// </summary>
+    /// <remarks>
+    /// This is exposed internally so read-only provenance consumers can reuse the exact renderer inputs instead of
+    /// reconstructing manifest or project metadata rules.
+    /// </remarks>
+    internal async Task<IReadOnlyList<ResolvedPackageEntry>> ResolveGenerationEntriesAsync(
         PackageIndexRequest request,
         CancellationToken cancellationToken)
     {

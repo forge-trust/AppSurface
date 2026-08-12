@@ -1,4 +1,5 @@
 using ForgeTrust.AppSurface.Web.Theming;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -62,6 +63,12 @@ public static class AppSurfaceWebThemingServiceCollectionExtensions
         Action<AppSurfaceThemePreferenceOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(services);
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(AppSurfaceThemeSelectionRegistrationMarker)))
+        {
+            throw new InvalidOperationException(
+                "ASWEBTHEME005: AddAppSurfaceWebThemePreferences cannot be combined with AddAppSurfaceWebThemeSelection. Choose one document-provider adapter.");
+        }
+
         if (!services.Any(descriptor => descriptor.ServiceType == typeof(ForgeTrust.AppSurface.Theming.IAppSurfaceThemeResolver)))
         {
             throw new InvalidOperationException(
@@ -79,6 +86,88 @@ public static class AppSurfaceWebThemingServiceCollectionExtensions
             ServiceDescriptor.Singleton(
                 provider => new AppSurfaceThemePreferenceBootstrap(
                     provider.GetRequiredService<AppSurfaceThemePreferenceOptions>())));
+        services.TryAddSingleton<AppSurfaceThemePreferenceRegistrationMarker>();
         return services;
+    }
+
+    /// <summary>
+    /// Registers a scoped host-policy adapter that selects one registered theme pair before Web rendering.
+    /// </summary>
+    /// <param name="services">The service collection receiving the selection adapter.</param>
+    /// <returns>The original <paramref name="services"/> instance.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// Singleton neutral theme services, a scoped <see cref="IAppSurfaceWebThemeSelectionPolicy"/>, or the built-in
+    /// ordinary Web document provider are missing; a conflicting adapter is registered; or selection is registered twice.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// Register <c>AddAppSurfaceTheming</c>, a scoped host implementation of
+    /// <see cref="IAppSurfaceWebThemeSelectionPolicy"/>, then this opt-in. The policy consumes only already-authorized
+    /// application context and returns either one registered <c>AppSurfaceThemeId</c> or <see langword="false"/> for
+    /// the configured default. Both neutral services must be singletons because the adapter prevalidates and caches
+    /// package-owned documents once for the application. The adapter validates selected ids and the resolver's
+    /// configured default identifier and role snapshots against the sealed registry and never serializes a
+    /// caller-supplied theme pair.
+    /// </para>
+    /// <para>
+    /// This adapter intentionally cannot compose with browser-local preferences or a consumer-owned
+    /// <see cref="IAppSurfaceThemeDocumentProvider"/>. It caches package-owned documents by immutable pair id, but
+    /// it never configures HTTP caching, response variation, tenant resolution, authorization, or invalidation. A pair
+    /// id is not a safe host response-cache key; the host must partition or disable tenant-sensitive response caches.
+    /// </para>
+    /// </remarks>
+    public static IServiceCollection AddAppSurfaceWebThemeSelection(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var registrationState = new AppSurfaceThemeSelectionRegistrationState(services);
+        registrationState.ValidateNeutralServiceLifetimes();
+        registrationState.ValidatePolicyLifetime();
+
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(AppSurfaceThemePreferenceRegistrationMarker)))
+        {
+            throw new InvalidOperationException(
+                "ASWEBTHEME005: AddAppSurfaceWebThemeSelection cannot be combined with AddAppSurfaceWebThemePreferences. Choose one document-provider adapter.");
+        }
+
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(AppSurfaceThemeSelectionRegistrationMarker)))
+        {
+            throw new InvalidOperationException(
+                "ASWEBTHEME007: AddAppSurfaceWebThemeSelection can be registered only once.");
+        }
+
+        EnsureOrdinaryDocumentProvider(services);
+        services.Replace(ServiceDescriptor.Scoped<IAppSurfaceThemeDocumentProvider, AppSurfaceThemeSelectionDocumentProvider>());
+        services.AddSingleton<AppSurfaceThemeSelectionDocumentCache>();
+        services.AddSingleton(registrationState);
+        services.AddSingleton<AppSurfaceThemeSelectionRegistrationMarker>();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IStartupFilter, AppSurfaceThemeSelectionStartupValidator>());
+        return services;
+    }
+
+    private static void EnsureOrdinaryDocumentProvider(IServiceCollection services)
+    {
+        var descriptors = services
+            .Where(descriptor => descriptor.ServiceType == typeof(IAppSurfaceThemeDocumentProvider))
+            .ToArray();
+        if (descriptors.Length == 0)
+        {
+            services.AddAppSurfaceWebTheming();
+            descriptors = services
+                .Where(descriptor => descriptor.ServiceType == typeof(IAppSurfaceThemeDocumentProvider))
+                .ToArray();
+        }
+
+        if (descriptors.Length == 1
+            && descriptors[0].Lifetime == ServiceLifetime.Singleton
+            && descriptors[0].ImplementationType == typeof(AppSurfaceThemeDocumentProvider))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            "ASWEBTHEME006: AddAppSurfaceWebThemeSelection can replace only the built-in AppSurfaceThemeDocumentProvider. Remove the consumer-owned IAppSurfaceThemeDocumentProvider replacement or do not opt into selection.");
     }
 }

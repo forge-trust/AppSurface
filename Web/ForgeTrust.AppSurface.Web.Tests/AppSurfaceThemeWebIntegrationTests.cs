@@ -1,13 +1,18 @@
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using ForgeTrust.AppSurface.Theming;
 using ForgeTrust.AppSurface.Web.TagHelpers;
 using ForgeTrust.AppSurface.Web.Tests.CanaryConsumerFixture;
 using ForgeTrust.AppSurface.Web.Theming;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Razor.TagHelpers;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace ForgeTrust.AppSurface.Web.Tests;
 
@@ -429,6 +434,692 @@ public sealed class AppSurfaceThemeWebIntegrationTests
         Assert.Contains("ASWEBTHEME001", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void SelectionRegistration_ShouldRenderTheRegisteredPairOncePerScope()
+    {
+        var policy = new CountingThemeSelectionPolicy(new AppSurfaceThemeId("appsurface-alt"));
+        var services = CreateSelectionServices(policy);
+        services.AddAppSurfaceWebThemeSelection();
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        using var scope = provider.CreateScope();
+
+        var documentProvider = scope.ServiceProvider.GetRequiredService<IAppSurfaceThemeDocumentProvider>();
+        var first = documentProvider.GetDocument();
+        var second = documentProvider.GetDocument();
+
+        Assert.Same(first, second);
+        Assert.Equal(1, policy.CallCount);
+        Assert.Contains("data-as-theme=\"appsurface-alt\"", first.RootAttributes, StringComparison.Ordinal);
+        Assert.Contains("--as-canvas: #f8fafc;", first.HeadContent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionRegistration_ShouldFallBackToTheConfiguredDefaultWhenThePolicyHasNoSelection()
+    {
+        var services = CreateSelectionServices(new CountingThemeSelectionPolicy());
+        services.AddAppSurfaceWebThemeSelection();
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        using var scope = provider.CreateScope();
+
+        var document = scope.ServiceProvider.GetRequiredService<IAppSurfaceThemeDocumentProvider>().GetDocument();
+
+        Assert.Contains("data-as-theme=\"appsurface\"", document.RootAttributes, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SelectionProvider_ShouldRejectEmptyAndUnknownPairIds(bool useUnknownId)
+    {
+        var selectedId = useUnknownId ? new AppSurfaceThemeId("unknown") : default;
+        var provider = new AppSurfaceThemeSelectionDocumentProvider(
+            new CountingThemeSelectionPolicy(selectedId),
+            CreateSelectionDocumentCache());
+
+        var exception = Assert.Throws<InvalidOperationException>(() => provider.GetDocument());
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("unknown", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionProvider_ShouldSanitizePolicyFailuresWithoutFallingBack()
+    {
+        var expected = new InvalidOperationException("tenant-a secret");
+        var provider = new AppSurfaceThemeSelectionDocumentProvider(
+            new ThrowingThemeSelectionPolicy(expected),
+            CreateSelectionDocumentCache());
+
+        var exception = Assert.Throws<InvalidOperationException>(() => provider.GetDocument());
+
+        Assert.Contains("ASWEBTHEME009", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-a", exception.Message, StringComparison.Ordinal);
+        Assert.Null(exception.InnerException);
+    }
+
+    [Fact]
+    public void SelectionProvider_ShouldPreserveCancellation()
+    {
+        var expected = new OperationCanceledException("host cancellation");
+        var provider = new AppSurfaceThemeSelectionDocumentProvider(
+            new ThrowingThemeSelectionPolicy(expected),
+            CreateSelectionDocumentCache());
+
+        var actual = Assert.Throws<OperationCanceledException>(() => provider.GetDocument());
+
+        Assert.Same(expected, actual);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldResolveTheDefaultOnceAndReuseDocumentsAcrossScopes()
+    {
+        var resolver = new CountingResolver(CreateResolution(AppSurfaceThemeMode.Dark));
+        var registry = CreateRegistry();
+        var cache = new AppSurfaceThemeSelectionDocumentCache(registry, resolver);
+        var policy = new CountingThemeSelectionPolicy(new AppSurfaceThemeId("appsurface-alt"));
+
+        var first = new AppSurfaceThemeSelectionDocumentProvider(policy, cache).GetDocument();
+        var second = new AppSurfaceThemeSelectionDocumentProvider(policy, cache).GetDocument();
+
+        Assert.Equal(1, resolver.ResolveCalls);
+        Assert.Same(first, second);
+        Assert.Equal("dark", first.RootThemeMode);
+        Assert.True(cache.TryGet(new AppSurfaceThemeId("appsurface"), out var defaultDocument));
+        Assert.Same(cache.DefaultDocument, defaultDocument);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldRejectAnUnsafeDefaultResolverSnapshot()
+    {
+        var registry = CreateRegistry();
+        var resolver = new StubResolver(CreateResolution((AppSurfaceThemeMode)99));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldRejectAnUnregisteredDefaultResolverSnapshot()
+    {
+        var registry = CreateRegistry();
+        var pair = AppSurfaceThemePair.Graphite();
+        var resolver = new StubResolver(new AppSurfaceThemeResolution(pair.Id, AppSurfaceThemeMode.Light, pair.Light, pair.Dark));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(pair.Id.Value, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldRejectADefaultResolverSnapshotWithMismatchedPairRoles()
+    {
+        var registry = CreateRegistry();
+        var registeredPair = AppSurfaceThemePair.AppSurface();
+        var mismatchedPair = AppSurfaceThemePair.Graphite();
+        var resolver = new StubResolver(
+            new AppSurfaceThemeResolution(
+                registeredPair.Id,
+                AppSurfaceThemeMode.Light,
+                mismatchedPair.Light,
+                mismatchedPair.Dark));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(registeredPair.Id.Value, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldRejectAnUnsafeRegisteredPairFromACustomRegistry()
+    {
+        var defaultPair = AppSurfaceThemePair.AppSurface();
+        var unsafePair = new AppSurfaceThemePair(
+            new AppSurfaceThemeId("unsafe-pair"),
+            new AppSurfaceThemeRoles(
+                "invalid", defaultPair.Light.Surface, defaultPair.Light.RaisedSurface, defaultPair.Light.Text,
+                defaultPair.Light.MutedText, defaultPair.Light.Border, defaultPair.Light.Accent,
+                defaultPair.Light.AccentStrong, defaultPair.Light.Link, defaultPair.Light.VisitedLink,
+                defaultPair.Light.Danger, defaultPair.Light.Focus),
+            defaultPair.Dark);
+        var registry = new StubRegistry(defaultPair, unsafePair);
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldRejectACustomRegistryThatReturnsAPairWithADifferentId()
+    {
+        var defaultPair = AppSurfaceThemePair.AppSurface();
+        var differentPair = new AppSurfaceThemePair(
+            new AppSurfaceThemeId("appsurface-alt"),
+            defaultPair.Light,
+            defaultPair.Dark);
+        var registry = new StubRegistry([defaultPair.Id], _ => differentPair);
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(defaultPair.Id.Value, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldRejectACustomRegistryThatAdvertisesDuplicateIds()
+    {
+        var defaultPair = AppSurfaceThemePair.AppSurface();
+        var registry = new StubRegistry([defaultPair.Id, defaultPair.Id], _ => defaultPair);
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(defaultPair.Id.Value, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldRejectACustomRegistryThatAdvertisesAnEmptyId()
+    {
+        var defaultPair = AppSurfaceThemePair.AppSurface();
+        var registry = new StubRegistry([default(AppSurfaceThemeId)], _ => defaultPair);
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldRejectACustomRegistryThatReturnsANullPair()
+    {
+        var defaultPair = AppSurfaceThemePair.AppSurface();
+        var registry = new StubRegistry([defaultPair.Id], _ => null!);
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(defaultPair.Id.Value, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldSanitizeARegistryThatCannotResolveAnAdvertisedId()
+    {
+        var defaultPair = AppSurfaceThemePair.AppSurface();
+        var registry = new StubRegistry(
+            [defaultPair.Id],
+            _ => throw new KeyNotFoundException("host-specific registry failure"));
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("host-specific", exception.Message, StringComparison.Ordinal);
+        Assert.Null(exception.InnerException);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldSanitizeARegistryThatFailsWhileResolvingAnAdvertisedId()
+    {
+        var defaultPair = AppSurfaceThemePair.AppSurface();
+        var registry = new StubRegistry(
+            [defaultPair.Id],
+            _ => throw new InvalidOperationException("host-specific registry failure"));
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("host-specific", exception.Message, StringComparison.Ordinal);
+        Assert.Null(exception.InnerException);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldPreserveCancellationFromTheRegistry()
+    {
+        var defaultPair = AppSurfaceThemePair.AppSurface();
+        var expected = new OperationCanceledException("host cancellation");
+        var registry = new StubRegistry([defaultPair.Id], _ => throw expected);
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var actual = Assert.Throws<OperationCanceledException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Same(expected, actual);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldRejectACustomRegistryThatOmitsThemeIds()
+    {
+        var registry = new StubRegistry(null!, _ => throw new InvalidOperationException());
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Equal(
+            "ASWEBTHEME008: The sealed neutral theme registry did not expose its theme pair identifiers.",
+            exception.Message);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldSanitizeARegistryThatFailsWhileExposingThemeIds()
+    {
+        var registry = new ThrowingThemeIdsRegistry(new InvalidOperationException("host-specific registry failure"));
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("host-specific", exception.Message, StringComparison.Ordinal);
+        Assert.Null(exception.InnerException);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldSanitizeAResolverThatFailsWhileResolvingTheDefault()
+    {
+        var registry = CreateRegistry();
+        var resolver = new ThrowingResolver(new InvalidOperationException("host-specific resolver failure"));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("host-specific", exception.Message, StringComparison.Ordinal);
+        Assert.Null(exception.InnerException);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldPreserveCancellationFromTheResolver()
+    {
+        var registry = CreateRegistry();
+        var expected = new OperationCanceledException("host cancellation");
+        var resolver = new ThrowingResolver(expected);
+
+        var actual = Assert.Throws<OperationCanceledException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Same(expected, actual);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldPreserveCancellationFromTheThemeIdRegistry()
+    {
+        var expected = new OperationCanceledException("host cancellation");
+        var registry = new ThrowingThemeIdsRegistry(expected);
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var actual = Assert.Throws<OperationCanceledException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Same(expected, actual);
+    }
+
+    [Fact]
+    public void SelectionRegistration_ShouldRequireTheNeutralRegistryAndResolver()
+    {
+        var services = new ServiceCollection();
+        services.AddScoped<IAppSurfaceWebThemeSelectionPolicy, CountingThemeSelectionPolicy>();
+
+        var exception = Assert.Throws<InvalidOperationException>(() => services.AddAppSurfaceWebThemeSelection());
+
+        Assert.Contains("ASWEBTHEME003", exception.Message, StringComparison.Ordinal);
+        Assert.Contains(nameof(IAppSurfaceThemeRegistry), exception.Message, StringComparison.Ordinal);
+        Assert.Contains(nameof(IAppSurfaceThemeResolver), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionRegistration_ShouldRequireSingletonNeutralThemeServices()
+    {
+        var registry = CreateRegistry();
+        var services = new ServiceCollection();
+        services.AddScoped<IAppSurfaceThemeRegistry>(_ => registry);
+        services.AddScoped<IAppSurfaceThemeResolver>(_ => registry);
+        services.AddScoped<IAppSurfaceWebThemeSelectionPolicy, CountingThemeSelectionPolicy>();
+
+        var exception = Assert.Throws<InvalidOperationException>(() => services.AddAppSurfaceWebThemeSelection());
+
+        Assert.Contains("ASWEBTHEME003", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("singleton", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionRegistrationState_ShouldRejectANullServiceCollection()
+    {
+        Assert.Throws<ArgumentNullException>(() => new AppSurfaceThemeSelectionRegistrationState(null!));
+    }
+
+    [Fact]
+    public void SelectionRegistrationState_ShouldRejectAMissingPolicy()
+    {
+        var state = new AppSurfaceThemeSelectionRegistrationState(new ServiceCollection());
+
+        var exception = Assert.Throws<InvalidOperationException>(state.ValidatePolicyLifetime);
+
+        Assert.Contains("ASWEBTHEME004", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionRegistration_ShouldRequireAScopedPolicy()
+    {
+        var services = new ServiceCollection();
+        services.AddAppSurfaceTheming(options => options.Pairs.Add(AppSurfaceThemePair.AppSurface()));
+
+        var missing = Assert.Throws<InvalidOperationException>(() => services.AddAppSurfaceWebThemeSelection());
+        Assert.Contains("ASWEBTHEME004", missing.Message, StringComparison.Ordinal);
+
+        services.AddSingleton<IAppSurfaceWebThemeSelectionPolicy, CountingThemeSelectionPolicy>();
+        var singleton = Assert.Throws<InvalidOperationException>(() => services.AddAppSurfaceWebThemeSelection());
+        Assert.Contains("ASWEBTHEME004", singleton.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionRegistration_ShouldRejectPreferencesInEitherOrder()
+    {
+        var beforeSelection = CreateSelectionServices(new CountingThemeSelectionPolicy());
+        beforeSelection.AddAppSurfaceWebThemePreferences();
+        var firstException = Assert.Throws<InvalidOperationException>(() => beforeSelection.AddAppSurfaceWebThemeSelection());
+
+        var afterSelection = CreateSelectionServices(new CountingThemeSelectionPolicy());
+        afterSelection.AddAppSurfaceWebThemeSelection();
+        var secondException = Assert.Throws<InvalidOperationException>(() => afterSelection.AddAppSurfaceWebThemePreferences());
+
+        Assert.Contains("ASWEBTHEME005", firstException.Message, StringComparison.Ordinal);
+        Assert.Contains("ASWEBTHEME005", secondException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionRegistration_ShouldRejectConsumerOwnedProvidersAndDuplicates()
+    {
+        var custom = CreateSelectionServices(new CountingThemeSelectionPolicy());
+        custom.AddSingleton<IAppSurfaceThemeDocumentProvider, EmptyDocumentProvider>();
+        var customException = Assert.Throws<InvalidOperationException>(() => custom.AddAppSurfaceWebThemeSelection());
+
+        var duplicate = CreateSelectionServices(new CountingThemeSelectionPolicy());
+        duplicate.AddAppSurfaceWebThemeSelection();
+        var duplicateException = Assert.Throws<InvalidOperationException>(() => duplicate.AddAppSurfaceWebThemeSelection());
+
+        Assert.Contains("ASWEBTHEME006", customException.Message, StringComparison.Ordinal);
+        Assert.Contains("ASWEBTHEME007", duplicateException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionRegistration_ShouldRejectNonSingletonAndMultipleDocumentProviders()
+    {
+        var scoped = CreateSelectionServices(new CountingThemeSelectionPolicy());
+        scoped.AddScoped<IAppSurfaceThemeDocumentProvider, EmptyDocumentProvider>();
+        var scopedException = Assert.Throws<InvalidOperationException>(() => scoped.AddAppSurfaceWebThemeSelection());
+
+        var multiple = CreateSelectionServices(new CountingThemeSelectionPolicy());
+        multiple.AddSingleton<IAppSurfaceThemeDocumentProvider, EmptyDocumentProvider>();
+        multiple.AddSingleton<IAppSurfaceThemeDocumentProvider, EmptyDocumentProvider>();
+        var multipleException = Assert.Throws<InvalidOperationException>(() => multiple.AddAppSurfaceWebThemeSelection());
+
+        Assert.Contains("ASWEBTHEME006", scopedException.Message, StringComparison.Ordinal);
+        Assert.Contains("ASWEBTHEME006", multipleException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionStartupValidator_ShouldRejectALaterDocumentProviderReplacementWithoutInvokingThePolicy()
+    {
+        var policy = new ThrowingThemeSelectionPolicy(new InvalidOperationException("policy must not run at startup"));
+        var services = CreateSelectionServices(policy);
+        services.AddAppSurfaceWebThemeSelection();
+        services.Replace(ServiceDescriptor.Singleton<IAppSurfaceThemeDocumentProvider, EmptyDocumentProvider>());
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => new AppSurfaceThemeSelectionStartupValidator(provider).Validate());
+
+        Assert.Contains("ASWEBTHEME006", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionStartupValidator_ShouldRejectALaterTransientSelectionProviderReplacementWithoutInvokingThePolicy()
+    {
+        var policy = new ThrowingThemeSelectionPolicy(new InvalidOperationException("policy must not run at startup"));
+        var services = CreateSelectionServices(policy);
+        services.AddAppSurfaceWebThemeSelection();
+        services.Replace(ServiceDescriptor.Transient<IAppSurfaceThemeDocumentProvider, AppSurfaceThemeSelectionDocumentProvider>());
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => new AppSurfaceThemeSelectionStartupValidator(provider).Validate());
+
+        Assert.Contains("ASWEBTHEME006", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionStartupValidator_ShouldRejectALaterScopedConsumerProviderReplacementWithoutInvokingThePolicy()
+    {
+        var policy = new ThrowingThemeSelectionPolicy(new InvalidOperationException("policy must not run at startup"));
+        var services = CreateSelectionServices(policy);
+        services.AddAppSurfaceWebThemeSelection();
+        services.Replace(ServiceDescriptor.Scoped<IAppSurfaceThemeDocumentProvider, EmptyDocumentProvider>());
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => new AppSurfaceThemeSelectionStartupValidator(provider).Validate());
+
+        Assert.Contains("ASWEBTHEME006", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionStartupValidator_ShouldRejectALaterDocumentProviderRemovalWithoutInvokingThePolicy()
+    {
+        var policy = new ThrowingThemeSelectionPolicy(new InvalidOperationException("policy must not run at startup"));
+        var services = CreateSelectionServices(policy);
+        services.AddAppSurfaceWebThemeSelection();
+        services.RemoveAll<IAppSurfaceThemeDocumentProvider>();
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => new AppSurfaceThemeSelectionStartupValidator(provider).Validate());
+
+        Assert.Contains("ASWEBTHEME006", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionStartupValidator_ShouldRejectAResolvedProviderThatDiffersFromTheValidatedRegistration()
+    {
+        var policy = new ThrowingThemeSelectionPolicy(new InvalidOperationException("policy must not run at startup"));
+        var services = CreateSelectionServices(policy);
+        services.AddAppSurfaceWebThemeSelection();
+        services.Replace(ServiceDescriptor.Scoped<IAppSurfaceThemeDocumentProvider, EmptyDocumentProvider>());
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        services.Replace(ServiceDescriptor.Scoped<IAppSurfaceThemeDocumentProvider, AppSurfaceThemeSelectionDocumentProvider>());
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => new AppSurfaceThemeSelectionStartupValidator(provider).Validate());
+
+        Assert.Contains("ASWEBTHEME006", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionStartupValidator_ShouldAcceptTheBuiltInProviderWithoutInvokingThePolicy()
+    {
+        var policy = new ThrowingThemeSelectionPolicy(new InvalidOperationException("policy must not run at startup"));
+        var services = CreateSelectionServices(policy);
+        services.AddAppSurfaceWebThemeSelection();
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+
+        new AppSurfaceThemeSelectionStartupValidator(provider).Validate();
+    }
+
+    [Fact]
+    public void SelectionStartupValidator_ShouldRejectALaterNonScopedPolicyRegistration()
+    {
+        var services = CreateSelectionServices(new CountingThemeSelectionPolicy());
+        services.AddAppSurfaceWebThemeSelection();
+        services.AddSingleton<IAppSurfaceWebThemeSelectionPolicy, CountingThemeSelectionPolicy>();
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => new AppSurfaceThemeSelectionStartupValidator(provider).Validate());
+
+        Assert.Contains("ASWEBTHEME004", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BaseWebTheming_ShouldRemainANoOpAfterSelectionRegistration()
+    {
+        var services = CreateSelectionServices(new CountingThemeSelectionPolicy());
+        services.AddAppSurfaceWebThemeSelection();
+        services.AddAppSurfaceWebTheming();
+
+        var descriptor = Assert.Single(
+            services,
+            service => service.ServiceType == typeof(IAppSurfaceThemeDocumentProvider));
+        Assert.Equal(typeof(AppSurfaceThemeSelectionDocumentProvider), descriptor.ImplementationType);
+        Assert.Equal(ServiceLifetime.Scoped, descriptor.Lifetime);
+    }
+
+    [Fact]
+    public void TenantThemeProofMap_ShouldAllowSeveralExactTenantIdsToShareARegisteredPair()
+    {
+        var map = TenantThemeMap.Create(
+            CreateRegistry(),
+            [
+                new TenantThemeMapping("tenant-a", new AppSurfaceThemeId("appsurface-alt")),
+                new TenantThemeMapping("tenant-b", new AppSurfaceThemeId("appsurface-alt"))
+            ]);
+
+        Assert.True(map.TryGet("tenant-a", out var tenantATheme));
+        Assert.True(map.TryGet("tenant-b", out var tenantBTheme));
+        Assert.Equal(new AppSurfaceThemeId("appsurface-alt"), tenantATheme);
+        Assert.Equal(tenantATheme, tenantBTheme);
+        Assert.False(map.TryGet("Tenant-A", out _));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData(" tenant-a")]
+    [InlineData("tenant-a ")]
+    public void TenantThemeProofMap_ShouldRejectBlankAndWhitespaceTenantIds(string tenantId)
+    {
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => TenantThemeMap.Create(
+                CreateRegistry(),
+                [new TenantThemeMapping(tenantId, new AppSurfaceThemeId("appsurface"))]));
+
+        Assert.Contains("non-blank tenant id", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TenantThemeProofMap_ShouldRejectExactDuplicatesAndUnknownPairs()
+    {
+        var duplicate = Assert.Throws<InvalidOperationException>(
+            () => TenantThemeMap.Create(
+                CreateRegistry(),
+                [
+                    new TenantThemeMapping("tenant-a", new AppSurfaceThemeId("appsurface")),
+                    new TenantThemeMapping("tenant-a", new AppSurfaceThemeId("appsurface-alt"))
+                ]));
+        var unknown = Assert.Throws<InvalidOperationException>(
+            () => TenantThemeMap.Create(
+                CreateRegistry(),
+                [new TenantThemeMapping("tenant-a", new AppSurfaceThemeId("unknown"))]));
+
+        Assert.Contains("same ordinal tenant id", duplicate.Message, StringComparison.Ordinal);
+        Assert.Contains("registered by AddAppSurfaceTheming", unknown.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TenantThemeProofMap_ShouldRejectNullMappingsAndSafelyIgnoreANullLookupKey()
+    {
+        var nullEntry = Assert.Throws<InvalidOperationException>(
+            () => TenantThemeMap.Create(CreateRegistry(), [null!]));
+        var map = TenantThemeMap.Create(
+            CreateRegistry(),
+            [new TenantThemeMapping("tenant-a", new AppSurfaceThemeId("appsurface"))]);
+
+        Assert.Contains("null entries", nullEntry.Message, StringComparison.Ordinal);
+        Assert.False(map.TryGet(null, out _));
+    }
+
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("development")]
+    public void TenantThemeProofHostEnvironment_ShouldAllowDevelopment(string environmentName)
+    {
+        TenantThemeProofHostEnvironment.ThrowUnlessDevelopment(environmentName);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("Production")]
+    [InlineData("Staging")]
+    public void TenantThemeProofHostEnvironment_ShouldRejectEveryNonDevelopmentEnvironment(string? environmentName)
+    {
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => TenantThemeProofHostEnvironment.ThrowUnlessDevelopment(environmentName));
+
+        Assert.Contains("only in Development", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TenantThemeProofHost_ShouldRenderSelectedAndDefaultThemes()
+    {
+        await using var factory = new WebApplicationFactory<global::Program>()
+            .WithWebHostBuilder(builder => builder.UseEnvironment(Environments.Development));
+        using var client = factory.CreateClient();
+
+        await AssertTenantResponseAsync(client, "tenant-a", "shared-blue", "A");
+        await AssertTenantResponseAsync(client, "tenant-b", "shared-blue", "B");
+        await AssertTenantResponseAsync(client, "unknown", "appsurface", "default");
+    }
+
+    [Theory]
+    [InlineData(true, "ASWEBTHEME006")]
+    [InlineData(false, "ASWEBTHEME004")]
+    public async Task TenantThemeProofHost_ShouldRejectLateSelectionContractMutationsAtStartup(
+        bool replaceDocumentProvider,
+        string expectedDiagnostic)
+    {
+        await using var factory = new WebApplicationFactory<global::Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment(Environments.Development);
+                builder.ConfigureServices(services =>
+                {
+                    if (replaceDocumentProvider)
+                    {
+                        services.Replace(ServiceDescriptor.Singleton<IAppSurfaceThemeDocumentProvider, EmptyDocumentProvider>());
+                    }
+                    else
+                    {
+                        services.AddSingleton<IAppSurfaceWebThemeSelectionPolicy, CountingThemeSelectionPolicy>();
+                    }
+                });
+            });
+
+        var exception = Assert.Throws<InvalidOperationException>(() => factory.CreateClient());
+
+        Assert.Contains(expectedDiagnostic, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TenantThemeProofHost_ShouldRejectLateTransientNeutralThemeServicesAtStartup()
+    {
+        await using var factory = new WebApplicationFactory<global::Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment(Environments.Development);
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<IAppSurfaceThemeRegistry>();
+                    services.RemoveAll<IAppSurfaceThemeResolver>();
+                    services.AddTransient<IAppSurfaceThemeRegistry>(_ => CreateRegistry("shared-blue"));
+                    services.AddTransient<IAppSurfaceThemeResolver>(_ => CreateRegistry("shared-blue"));
+                });
+            });
+
+        var exception = Assert.Throws<InvalidOperationException>(() => factory.CreateClient());
+
+        Assert.Contains("ASWEBTHEME003", exception.Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -583,6 +1274,24 @@ public sealed class AppSurfaceThemeWebIntegrationTests
         return new AppSurfaceThemeResolution(pair.Id, mode, pair.Light, pair.Dark);
     }
 
+    private static async Task AssertTenantResponseAsync(
+        HttpClient client,
+        string requestedTenant,
+        string expectedThemeId,
+        string expectedVariant)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/");
+        request.Headers.Add("X-Proof-Authorized-Tenant", requestedTenant);
+        using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.Headers.CacheControl!.Private);
+        Assert.True(response.Headers.CacheControl.NoStore);
+        Assert.Contains($"data-as-theme=\"{expectedThemeId}\"", body, StringComparison.Ordinal);
+        Assert.Contains($"data-tenant-variant=\"{expectedVariant}\"", body, StringComparison.Ordinal);
+    }
+
     private static TagHelperContext CreateContext(TagHelperAttributeList? attributes = null) =>
         new(
             attributes ?? new TagHelperAttributeList(),
@@ -651,8 +1360,124 @@ public sealed class AppSurfaceThemeWebIntegrationTests
         }
     }
 
+    private sealed class StubRegistry : IAppSurfaceThemeRegistry
+    {
+        private readonly IReadOnlyDictionary<string, AppSurfaceThemePair> _pairs;
+
+        public StubRegistry(params AppSurfaceThemePair[] pairs)
+        {
+            ThemeIds = Array.AsReadOnly(pairs.Select(pair => pair.Id).ToArray());
+            _pairs = pairs.ToDictionary(pair => pair.Id.Value, StringComparer.Ordinal);
+        }
+
+        public StubRegistry(
+            IReadOnlyCollection<AppSurfaceThemeId> themeIds,
+            Func<AppSurfaceThemeId, AppSurfaceThemePair> resolve)
+        {
+            ThemeIds = themeIds;
+            Resolve = resolve;
+            _pairs = new Dictionary<string, AppSurfaceThemePair>(StringComparer.Ordinal);
+        }
+
+        public IReadOnlyCollection<AppSurfaceThemeId> ThemeIds { get; }
+
+        private Func<AppSurfaceThemeId, AppSurfaceThemePair>? Resolve { get; }
+
+        public AppSurfaceThemePair GetRequired(AppSurfaceThemeId id)
+        {
+            if (Resolve is not null)
+            {
+                return Resolve(id);
+            }
+
+            return _pairs.TryGetValue(id.Value, out var pair)
+                ? pair
+                : throw new KeyNotFoundException();
+        }
+    }
+
+    private sealed class ThrowingThemeIdsRegistry(Exception exception) : IAppSurfaceThemeRegistry
+    {
+        public IReadOnlyCollection<AppSurfaceThemeId> ThemeIds => throw exception;
+
+        public AppSurfaceThemePair GetRequired(AppSurfaceThemeId id) => throw new InvalidOperationException();
+    }
+
+    private sealed class ThrowingResolver(Exception exception) : IAppSurfaceThemeResolver
+    {
+        public AppSurfaceThemeResolution ResolveDefault() => throw exception;
+    }
+
     private sealed class EmptyDocumentProvider : IAppSurfaceThemeDocumentProvider
     {
         public AppSurfaceThemeDocument GetDocument() => AppSurfaceThemeDocument.Empty;
+    }
+
+    private static ServiceCollection CreateSelectionServices(IAppSurfaceWebThemeSelectionPolicy policy)
+    {
+        var services = new ServiceCollection();
+        services.AddAppSurfaceTheming(options =>
+        {
+            var defaultPair = AppSurfaceThemePair.AppSurface();
+            options.DefaultTheme = defaultPair.Id;
+            options.DefaultMode = AppSurfaceThemeMode.Light;
+            options.Pairs.Add(defaultPair);
+            options.Pairs.Add(new AppSurfaceThemePair(new AppSurfaceThemeId("appsurface-alt"), defaultPair.Light, defaultPair.Dark));
+        });
+        services.AddScoped<IAppSurfaceWebThemeSelectionPolicy>(_ => policy);
+        return services;
+    }
+
+    private static AppSurfaceThemeSelectionDocumentCache CreateSelectionDocumentCache()
+    {
+        var registry = CreateRegistry();
+        return new AppSurfaceThemeSelectionDocumentCache(registry, registry);
+    }
+
+    private static AppSurfaceThemeRegistry CreateRegistry(string alternateThemeId = "appsurface-alt")
+    {
+        var defaultPair = AppSurfaceThemePair.AppSurface();
+        var options = new AppSurfaceThemeRegistryOptions
+        {
+            DefaultTheme = defaultPair.Id,
+            DefaultMode = AppSurfaceThemeMode.Light
+        };
+        options.Pairs.Add(defaultPair);
+        options.Pairs.Add(new AppSurfaceThemePair(new AppSurfaceThemeId(alternateThemeId), defaultPair.Light, defaultPair.Dark));
+        return new AppSurfaceThemeRegistry(options);
+    }
+
+    private sealed class CountingThemeSelectionPolicy : IAppSurfaceWebThemeSelectionPolicy
+    {
+        private readonly bool _select;
+        private readonly AppSurfaceThemeId _themeId;
+
+        public CountingThemeSelectionPolicy()
+        {
+        }
+
+        public CountingThemeSelectionPolicy(AppSurfaceThemeId themeId)
+        {
+            _select = true;
+            _themeId = themeId;
+        }
+
+        public int CallCount { get; private set; }
+
+        public bool TrySelect(out AppSurfaceThemeId themeId)
+        {
+            CallCount++;
+            themeId = _themeId;
+            return _select;
+        }
+    }
+
+    private sealed class ThrowingThemeSelectionPolicy(Exception exception) : IAppSurfaceWebThemeSelectionPolicy
+    {
+        public bool TrySelect(out AppSurfaceThemeId themeId)
+        {
+            themeId = default;
+            throw exception;
+        }
     }
 }
