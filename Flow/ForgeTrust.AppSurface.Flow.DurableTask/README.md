@@ -91,8 +91,9 @@ them into this existing authorization seam only after the host atomically consum
 does not reference Auth and does not issue, store, validate, or consume receipts.
 
 Use `FlowResumeAuthorizationRequest.Caller` for the host-validated local agent or harness reference. Do not overload it
-with the human approver. Construct a new immutable, ordinal-keyed metadata projection before building the Flow request;
-the request retains the dictionary supplied by its caller. The projection should contain only display-safe values:
+with the human approver. Construct a new ordinal-keyed metadata snapshot before building the Flow request, and do not
+mutate it afterward; the request retains the dictionary supplied by its caller. The projection should contain only
+display-safe values:
 
 | Metadata key | Meaning |
 | --- | --- |

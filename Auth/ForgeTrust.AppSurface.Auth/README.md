@@ -76,10 +76,14 @@ if (result.Outcome == AppSurfaceAuthOutcome.Forbid)
 - `AppSurfaceAuthAuditEvent`
 - `AppSurfaceAuthMetadataKeys`
 - `AgentActionMetadata`, `AgentActionRequest`, and `AgentActionBinding`
+- `AgentActionRisk`, `AgentConfirmationPosture`, and `AgentActionRedaction` for host-declared action presentation guidance
 - `AgentIdentityReference` and `AgentApproverReference`
 - `AgentAuthorizationDecision` and `AgentConfirmationRequest`
+- `AgentAuthorizationDecisionKind` for branching on host evaluation results
 - `AgentApprovalReceipt` and `AgentApprovalConsumptionResult`
+- `AgentApprovalConsumptionOutcome` for branching on terminal consumption results
 - `AgentAuthorizationAuditEvent` and `AgentApprovalDiagnosticCodes`
+- `AgentAuthorizationAuditEventKind` for classifying passive lifecycle audit descriptions
 - Microsoft Options registration for `AppSurfaceAuthOptions`
 
 ## What The Package Does Not Include

@@ -15,17 +15,6 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
 
-## 0.1.0.0 - 2026-08-11
-
-### Added
-
-- Local agentic harnesses can now model one human-approved workflow transition with typed, transition-bound Auth contracts for action proposals, confirmation, opaque one-use receipts, terminal outcomes, and audit descriptions.
-- A deterministic local proof covers one successful consumption plus confirmation denial, replay, expiry, revocation, stale state, changed intent, lost authority, and missing agent grants.
-
-### Changed
-
-- Durable Task hosts now have a documented, dependency-free mapping for a successfully consumed approval and each terminal denial outcome.
-
 ## 0.2.0-preview.5 - 2026-07-31
 
 - Narrative release note: [v0.2.0-preview.5](./releases/v0.2.0-preview.5.md)
