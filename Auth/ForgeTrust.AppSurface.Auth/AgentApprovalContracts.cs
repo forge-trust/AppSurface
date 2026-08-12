@@ -299,9 +299,10 @@ internal static class AgentApprovalContractValidation
     public static string RequireCode(string value, string parameterName)
     {
         var code = AppSurfaceAuthMetadata.RequireIdentifier(value, parameterName);
-        if (code.Any(char.IsWhiteSpace) || code.Any(char.IsControl))
+        if (code.Any(char.IsWhiteSpace)
+            || code.EnumerateRunes().Any(rune => Rune.GetUnicodeCategory(rune) is UnicodeCategory.Control or UnicodeCategory.Format))
         {
-            throw new ArgumentException("Diagnostic codes must not contain whitespace or control characters.", parameterName);
+            throw new ArgumentException("Diagnostic codes must not contain whitespace, control, or Unicode format characters.", parameterName);
         }
 
         return code;

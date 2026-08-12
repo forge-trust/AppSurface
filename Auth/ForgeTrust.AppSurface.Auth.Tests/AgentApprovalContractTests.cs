@@ -130,9 +130,9 @@ public sealed class AgentApprovalContractTests
         Assert.Equal(agent.GetHashCode(), sameAgent.GetHashCode());
         Assert.Equal(approver.GetHashCode(), sameApprover.GetHashCode());
         Assert.False(agent.Equals((object)"harness:local"));
-        Assert.False(agent.Equals(null));
+        Assert.False(((object)agent).Equals(null));
         Assert.False(approver.Equals((object)"subject:andrew"));
-        Assert.False(approver.Equals(null));
+        Assert.False(((object)approver).Equals(null));
         Assert.Contains("<redacted>", agent.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain(agent.Value, agent.ToString(), StringComparison.Ordinal);
         Assert.Contains("<redacted>", approver.ToString(), StringComparison.Ordinal);
@@ -726,6 +726,7 @@ public sealed class AgentApprovalContractTests
     [Theory]
     [InlineData("agent approval")]
     [InlineData("agent-approval.allowed\nsubcode")]
+    [InlineData("agent-approval.allowed\U000E0001subcode")]
     public void Decision_WhenCodeContainsWhitespaceOrControlCharacters_Throws(string code)
     {
         var exception = Assert.Throws<ArgumentException>(() => new AgentAuthorizationDecision(
