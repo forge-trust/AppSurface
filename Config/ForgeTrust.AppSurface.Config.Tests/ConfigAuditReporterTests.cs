@@ -3573,6 +3573,91 @@ public class ConfigAuditReporterTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void GetReport_ExpandedRequest_ExpandsKnownCollectionsWithoutChangingCanonicalReport()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Endpoints"] = new List<string> { "https://one.example", "https://two.example" },
+                    ["Credentials.Passwords"] = new List<string> { "super-secret" }
+                }));
+        services.AddConfigAuditKey<List<string>>("Endpoints");
+        services.AddConfigAuditKey<List<string>>("Credentials.Passwords");
+
+        var reporter = services.BuildServiceProvider().GetRequiredService<IConfigAuditReporter>();
+        var canonical = reporter.GetReport("Production");
+        var defaultRequest = reporter.GetReport(new ConfigAuditReportRequest("Production"));
+        var expanded = reporter.GetReport(
+            new ConfigAuditReportRequest("Production", ConfigAuditReportMode.ExpandKnownEntryCollections));
+
+        Assert.Null(canonical.Mode);
+        Assert.Null(defaultRequest.Mode);
+        Assert.Empty(AssertEntry(canonical, "Endpoints", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Empty(AssertEntry(canonical, "Credentials.Passwords", ConfigAuditEntryState.Resolved, "[redacted]").Children);
+        Assert.Empty(AssertEntry(defaultRequest, "Endpoints", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Empty(AssertEntry(defaultRequest, "Credentials.Passwords", ConfigAuditEntryState.Resolved, "[redacted]").Children);
+
+        Assert.Equal(ConfigAuditReportMode.ExpandKnownEntryCollections, expanded.Mode);
+        Assert.Equal(
+            ["Endpoints[0]", "Endpoints[1]"],
+            AssertEntry(expanded, "Endpoints", ConfigAuditEntryState.Resolved, null).Children.Select(child => child.Key));
+        var passwordChild = Assert.Single(
+            AssertEntry(expanded, "Credentials.Passwords", ConfigAuditEntryState.Resolved, "[redacted]").Children);
+        Assert.Equal("[redacted]", passwordChild.DisplayValue);
+        Assert.True(passwordChild.IsRedacted);
+        Assert.DoesNotContain("super-secret", JsonSerializer.Serialize(expanded), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_ExpandedRequest_StopsAtSharedReportNodeBudgetAndRetainsKnownRoots()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Bulk.Items"] = Enumerable.Range(0, 16_385).Select(index => $"bulk-{index}").ToList(),
+                    ["Later.Items"] = new List<string> { "must-not-be-expanded" }
+                }));
+        services.AddConfigAuditKey<List<string>>(
+            "Bulk.Items",
+            options =>
+            {
+                options.MaxCollectionElements = 20_000;
+                options.MaxReportNodes = 20_000;
+            });
+        services.AddConfigAuditKey<List<string>>("Later.Items");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport(new ConfigAuditReportRequest("Production", ConfigAuditReportMode.ExpandKnownEntryCollections));
+
+        var bulk = AssertEntry(report, "Bulk.Items", ConfigAuditEntryState.Resolved, null);
+        var later = AssertEntry(report, "Later.Items", ConfigAuditEntryState.Resolved, null);
+        var diagnostic = Assert.Single(
+            report.Diagnostics,
+            candidate => candidate.Code == "config-audit-expanded-report-node-limit");
+
+        Assert.Equal(16_384, bulk.Children.Count);
+        Assert.Null(bulk.DisplayValue);
+        Assert.Empty(later.Children);
+        Assert.Equal(ConfigAuditDiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Null(diagnostic.Key);
+        Assert.Null(diagnostic.ConfigPath);
+        Assert.Equal(
+            "Expanded config audit report reached its global child-node budget of 16384; reported child topology is intentionally incomplete.",
+            diagnostic.Message);
+    }
+
     private static ServiceCollection CreateServices(string configDirectory, IEnvironmentProvider environment)
     {
         var services = new ServiceCollection();

@@ -32,6 +32,7 @@ internal sealed class ConfigAuditValueTraverser
     /// <param name="visited">Reference-tracking set used to avoid cycles.</param>
     /// <param name="labels">Dictionary label state carried through traversal.</param>
     /// <param name="correlation">Dictionary key correlation context.</param>
+    /// <param name="reportTraversalContext">Optional child-node budget shared by one expanded report.</param>
     /// <returns>The traversed child entries and traversal diagnostics.</returns>
     public ConfigAuditTraversalResult BuildChildren(
         ConfigAuditPath path,
@@ -41,10 +42,21 @@ internal sealed class ConfigAuditValueTraverser
         ConfigAuditEntryOptions options,
         HashSet<object> visited,
         ConfigAuditDictionaryLabelSet labels,
-        ConfigAuditDictionaryKeyCorrelationContext correlation)
+        ConfigAuditDictionaryKeyCorrelationContext correlation,
+        ConfigAuditReportTraversalContext? reportTraversalContext = null)
     {
         var budget = options.MaxReportNodes;
-        return BuildChildren(path, value, sources, factContext, options, visited, labels, correlation, ref budget);
+        return BuildChildren(
+            path,
+            value,
+            sources,
+            factContext,
+            options,
+            visited,
+            labels,
+            correlation,
+            ref budget,
+            reportTraversalContext);
     }
 
     /// <summary>
@@ -63,6 +75,7 @@ internal sealed class ConfigAuditValueTraverser
     /// <param name="labels">Dictionary label state carried through traversal.</param>
     /// <param name="correlation">Dictionary key correlation context.</param>
     /// <param name="budget">Remaining report-node budget shared across recursive traversal.</param>
+    /// <param name="reportTraversalContext">Optional child-node budget shared by one expanded report.</param>
     /// <returns>The traversed child entries and traversal diagnostics.</returns>
     private ConfigAuditTraversalResult BuildChildren(
         ConfigAuditPath path,
@@ -73,7 +86,8 @@ internal sealed class ConfigAuditValueTraverser
         HashSet<object> visited,
         ConfigAuditDictionaryLabelSet labels,
         ConfigAuditDictionaryKeyCorrelationContext correlation,
-        ref int budget)
+        ref int budget,
+        ConfigAuditReportTraversalContext? reportTraversalContext)
     {
         if (value == null || ConfigScalarTypes.IsScalar(value.GetType()))
         {
@@ -89,22 +103,62 @@ internal sealed class ConfigAuditValueTraverser
         {
             if (value is Array array)
             {
-                return BuildArrayChildren(path, array, sources, factContext, options, visited, labels, correlation, ref budget);
+                return BuildArrayChildren(
+                    path,
+                    array,
+                    sources,
+                    factContext,
+                    options,
+                    visited,
+                    labels,
+                    correlation,
+                    ref budget,
+                    reportTraversalContext);
             }
 
             if (value is IDictionary dictionary)
             {
-                return BuildDictionaryChildren(path, dictionary, sources, factContext, options, visited, labels, correlation, ref budget);
+                return BuildDictionaryChildren(
+                    path,
+                    dictionary,
+                    sources,
+                    factContext,
+                    options,
+                    visited,
+                    labels,
+                    correlation,
+                    ref budget,
+                    reportTraversalContext);
             }
 
             if (value is IList list)
             {
-                return BuildListChildren(path, list, sources, factContext, options, visited, labels, correlation, ref budget);
+                return BuildListChildren(
+                    path,
+                    list,
+                    sources,
+                    factContext,
+                    options,
+                    visited,
+                    labels,
+                    correlation,
+                    ref budget,
+                    reportTraversalContext);
             }
 
             if (TryCreateReadOnlyListAccessor(value, out var readOnlyList))
             {
-                return BuildReadOnlyListChildren(path, readOnlyList, sources, factContext, options, visited, labels, correlation, ref budget);
+                return BuildReadOnlyListChildren(
+                    path,
+                    readOnlyList,
+                    sources,
+                    factContext,
+                    options,
+                    visited,
+                    labels,
+                    correlation,
+                    ref budget,
+                    reportTraversalContext);
             }
 
             if (value is IEnumerable)
@@ -119,7 +173,17 @@ internal sealed class ConfigAuditValueTraverser
                     : ConfigAuditTraversalResult.Empty;
             }
 
-            return BuildObjectChildren(path, value, sources, factContext, options, visited, labels, correlation, ref budget);
+            return BuildObjectChildren(
+                path,
+                value,
+                sources,
+                factContext,
+                options,
+                visited,
+                labels,
+                correlation,
+                ref budget,
+                reportTraversalContext);
         }
         finally
         {
@@ -139,7 +203,8 @@ internal sealed class ConfigAuditValueTraverser
         HashSet<object> visited,
         ConfigAuditDictionaryLabelSet labels,
         ConfigAuditDictionaryKeyCorrelationContext correlation,
-        ref int budget)
+        ref int budget,
+        ConfigAuditReportTraversalContext? reportTraversalContext)
     {
         if (!options.TraverseCollectionElements)
         {
@@ -165,13 +230,23 @@ internal sealed class ConfigAuditValueTraverser
         var diagnostics = new List<ConfigAuditDiagnostic>();
         for (var i = 0; i < array.Length; i++)
         {
-            if (!CanVisitElement(path, options, entries.Count, ref budget, diagnostics))
+            if (!CanVisitElement(path, options, entries.Count, ref budget, diagnostics, reportTraversalContext))
             {
                 break;
             }
 
             var childPath = path.AppendIndex(i, ConfigAuditElementKind.ArrayItem);
-            entries.Add(BuildChild(childPath, array.GetValue(i), sources, factContext, options, visited, labels, correlation, ref budget));
+            entries.Add(BuildChild(
+                childPath,
+                array.GetValue(i),
+                sources,
+                factContext,
+                options,
+                visited,
+                labels,
+                correlation,
+                ref budget,
+                reportTraversalContext));
         }
 
         return new ConfigAuditTraversalResult(entries, diagnostics);
@@ -186,7 +261,8 @@ internal sealed class ConfigAuditValueTraverser
         HashSet<object> visited,
         ConfigAuditDictionaryLabelSet labels,
         ConfigAuditDictionaryKeyCorrelationContext correlation,
-        ref int budget)
+        ref int budget,
+        ConfigAuditReportTraversalContext? reportTraversalContext)
     {
         if (!options.TraverseCollectionElements)
         {
@@ -202,13 +278,23 @@ internal sealed class ConfigAuditValueTraverser
         var diagnostics = new List<ConfigAuditDiagnostic>();
         for (var i = 0; i < list.Count; i++)
         {
-            if (!CanVisitElement(path, options, entries.Count, ref budget, diagnostics))
+            if (!CanVisitElement(path, options, entries.Count, ref budget, diagnostics, reportTraversalContext))
             {
                 break;
             }
 
             var childPath = path.AppendIndex(i, ConfigAuditElementKind.ListItem);
-            entries.Add(BuildChild(childPath, list[i], sources, factContext, options, visited, labels, correlation, ref budget));
+            entries.Add(BuildChild(
+                childPath,
+                list[i],
+                sources,
+                factContext,
+                options,
+                visited,
+                labels,
+                correlation,
+                ref budget,
+                reportTraversalContext));
         }
 
         return new ConfigAuditTraversalResult(entries, diagnostics);
@@ -223,7 +309,8 @@ internal sealed class ConfigAuditValueTraverser
         HashSet<object> visited,
         ConfigAuditDictionaryLabelSet labels,
         ConfigAuditDictionaryKeyCorrelationContext correlation,
-        ref int budget)
+        ref int budget,
+        ConfigAuditReportTraversalContext? reportTraversalContext)
     {
         if (!options.TraverseCollectionElements)
         {
@@ -239,13 +326,23 @@ internal sealed class ConfigAuditValueTraverser
         var diagnostics = new List<ConfigAuditDiagnostic>();
         for (var i = 0; i < list.Count; i++)
         {
-            if (!CanVisitElement(path, options, entries.Count, ref budget, diagnostics))
+            if (!CanVisitElement(path, options, entries.Count, ref budget, diagnostics, reportTraversalContext))
             {
                 break;
             }
 
             var childPath = path.AppendIndex(i, ConfigAuditElementKind.ListItem);
-            entries.Add(BuildChild(childPath, list.GetValue(i), sources, factContext, options, visited, labels, correlation, ref budget));
+            entries.Add(BuildChild(
+                childPath,
+                list.GetValue(i),
+                sources,
+                factContext,
+                options,
+                visited,
+                labels,
+                correlation,
+                ref budget,
+                reportTraversalContext));
         }
 
         return new ConfigAuditTraversalResult(entries, diagnostics);
@@ -260,7 +357,8 @@ internal sealed class ConfigAuditValueTraverser
         HashSet<object> visited,
         ConfigAuditDictionaryLabelSet labels,
         ConfigAuditDictionaryKeyCorrelationContext correlation,
-        ref int budget)
+        ref int budget,
+        ConfigAuditReportTraversalContext? reportTraversalContext)
     {
         if (!options.TraverseCollectionElements)
         {
@@ -282,13 +380,23 @@ internal sealed class ConfigAuditValueTraverser
 
         foreach (DictionaryEntry item in dictionary)
         {
-            if (!CanVisitElement(path, options, entries.Count, ref budget, diagnostics))
+            if (!CanVisitElement(path, options, entries.Count, ref budget, diagnostics, reportTraversalContext))
             {
                 break;
             }
 
             var childPath = path.AppendDictionaryKey(item.Key, options, labels, correlation);
-            entries.Add(BuildChild(childPath, item.Value, sources, factContext, options, visited, labels, correlation, ref budget));
+            entries.Add(BuildChild(
+                childPath,
+                item.Value,
+                sources,
+                factContext,
+                options,
+                visited,
+                labels,
+                correlation,
+                ref budget,
+                reportTraversalContext));
         }
 
         return new ConfigAuditTraversalResult(entries, diagnostics);
@@ -303,7 +411,8 @@ internal sealed class ConfigAuditValueTraverser
         HashSet<object> visited,
         ConfigAuditDictionaryLabelSet labels,
         ConfigAuditDictionaryKeyCorrelationContext correlation,
-        ref int budget)
+        ref int budget,
+        ConfigAuditReportTraversalContext? reportTraversalContext)
     {
         var entries = new List<ConfigAuditEntry>();
         var diagnostics = new List<ConfigAuditDiagnostic>();
@@ -324,12 +433,22 @@ internal sealed class ConfigAuditValueTraverser
                 continue;
             }
 
-            if (!TryConsumeNode(path, ref budget, diagnostics))
+            if (!TryConsumeNode(path, ref budget, diagnostics, reportTraversalContext))
             {
                 break;
             }
 
-            entries.Add(BuildChild(path.AppendMember(property.Name), childValue, sources, factContext, options, visited, labels, correlation, ref budget));
+            entries.Add(BuildChild(
+                path.AppendMember(property.Name),
+                childValue,
+                sources,
+                factContext,
+                options,
+                visited,
+                labels,
+                correlation,
+                ref budget,
+                reportTraversalContext));
         }
 
         foreach (var field in value.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public))
@@ -340,12 +459,22 @@ internal sealed class ConfigAuditValueTraverser
                 continue;
             }
 
-            if (!TryConsumeNode(path, ref budget, diagnostics))
+            if (!TryConsumeNode(path, ref budget, diagnostics, reportTraversalContext))
             {
                 break;
             }
 
-            entries.Add(BuildChild(path.AppendMember(field.Name), field.GetValue(value), sources, factContext, options, visited, labels, correlation, ref budget));
+            entries.Add(BuildChild(
+                path.AppendMember(field.Name),
+                field.GetValue(value),
+                sources,
+                factContext,
+                options,
+                visited,
+                labels,
+                correlation,
+                ref budget,
+                reportTraversalContext));
         }
 
         return new ConfigAuditTraversalResult(entries, diagnostics);
@@ -360,12 +489,23 @@ internal sealed class ConfigAuditValueTraverser
         HashSet<object> visited,
         ConfigAuditDictionaryLabelSet labels,
         ConfigAuditDictionaryKeyCorrelationContext correlation,
-        ref int budget)
+        ref int budget,
+        ConfigAuditReportTraversalContext? reportTraversalContext)
     {
         var selectedSources = SelectChildSources(sources, path);
         var redactionSources = path.RequiresInheritedSource ? sources : selectedSources.Sources;
         var redacted = _redactor.FormatValue(path.DisplayPath, value, redactionSources, options.Sensitivity);
-        var traversal = BuildChildren(path, value, sources, factContext, options, visited, labels, correlation, ref budget);
+        var traversal = BuildChildren(
+            path,
+            value,
+            sources,
+            factContext,
+            options,
+            visited,
+            labels,
+            correlation,
+            ref budget,
+            reportTraversalContext);
         var diagnostics = selectedSources.Diagnostics
             .Concat(CreateProvenanceDiagnostics(path, factContext))
             .Concat(traversal.Diagnostics)
@@ -394,7 +534,8 @@ internal sealed class ConfigAuditValueTraverser
         ConfigAuditEntryOptions options,
         int visitedElements,
         ref int budget,
-        List<ConfigAuditDiagnostic> diagnostics)
+        List<ConfigAuditDiagnostic> diagnostics,
+        ConfigAuditReportTraversalContext? reportTraversalContext)
     {
         if (visitedElements >= options.MaxCollectionElements)
         {
@@ -407,13 +548,14 @@ internal sealed class ConfigAuditValueTraverser
             return false;
         }
 
-        return TryConsumeNode(path, ref budget, diagnostics);
+        return TryConsumeNode(path, ref budget, diagnostics, reportTraversalContext);
     }
 
     private static bool TryConsumeNode(
         ConfigAuditPath path,
         ref int budget,
-        ICollection<ConfigAuditDiagnostic> diagnostics)
+        ICollection<ConfigAuditDiagnostic> diagnostics,
+        ConfigAuditReportTraversalContext? reportTraversalContext)
     {
         if (budget <= 0)
         {
@@ -423,6 +565,11 @@ internal sealed class ConfigAuditValueTraverser
                     "config-audit-report-node-limit",
                     ConfigAuditDiagnosticSeverity.Warning,
                     $"Config audit traversal for '{path.DisplayPath}' stopped at the node budget."));
+            return false;
+        }
+
+        if (reportTraversalContext is not null && !reportTraversalContext.TryConsumeNode())
+        {
             return false;
         }
 

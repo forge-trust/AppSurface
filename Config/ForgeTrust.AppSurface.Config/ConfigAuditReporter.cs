@@ -24,6 +24,32 @@ public interface IConfigAuditReporter
     /// <param name="environment">The environment to audit.</param>
     /// <returns>The completed audit report.</returns>
     ConfigAuditReport GetReport(string environment);
+
+    /// <summary>
+    /// Builds a configuration audit report using an explicit request.
+    /// </summary>
+    /// <param name="request">The validated environment and mode to report.</param>
+    /// <returns>The completed audit report.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="request"/> is <see langword="null"/>.</exception>
+    /// <exception cref="NotSupportedException">
+    /// The request selects an expanded mode that this custom reporter has not explicitly implemented.
+    /// </exception>
+    /// <remarks>
+    /// The default implementation preserves source and runtime compatibility for existing reporters: default mode
+    /// delegates to <see cref="GetReport(string)"/>, while expansion fails closed until the reporter chooses how to
+    /// preserve its own redaction and traversal contract.
+    /// </remarks>
+    ConfigAuditReport GetReport(ConfigAuditReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return request.Mode switch
+        {
+            ConfigAuditReportMode.Default => GetReport(request.Environment),
+            ConfigAuditReportMode.ExpandKnownEntryCollections => throw new NotSupportedException(
+                "The configured configuration audit reporter does not support expanded known-entry collections."),
+            _ => throw new ArgumentOutOfRangeException(nameof(request), request.Mode, "The configuration audit report mode is not supported.")
+        };
+    }
 }
 
 /// <summary>
@@ -38,6 +64,8 @@ public interface IConfigAuditReporter
 /// </remarks>
 internal sealed class ConfigAuditReporter : IConfigAuditReporter
 {
+    private const int ExpandedReportNodeLimit = 16_384;
+
     /// <summary>
     /// Identifies the manager registration so it is not reported as a value provider.
     /// </summary>
@@ -91,16 +119,53 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(environment);
 
-        var entries = _knownEntries.Select(entry => BuildEntry(environment, entry)).ToList();
+        return GetReportCore(environment, mode: null);
+    }
+
+    public ConfigAuditReport GetReport(ConfigAuditReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return request.Mode switch
+        {
+            ConfigAuditReportMode.Default => GetReport(request.Environment),
+            ConfigAuditReportMode.ExpandKnownEntryCollections =>
+                GetReportCore(request.Environment, ConfigAuditReportMode.ExpandKnownEntryCollections),
+            _ => throw new ArgumentOutOfRangeException(nameof(request), request.Mode, "The configuration audit report mode is not supported.")
+        };
+    }
+
+    private ConfigAuditReport GetReportCore(string environment, ConfigAuditReportMode? mode)
+    {
+        var traversalContext = mode == ConfigAuditReportMode.ExpandKnownEntryCollections
+            ? new ConfigAuditReportTraversalContext(ExpandedReportNodeLimit)
+            : null;
+
+        var entries = new List<ConfigAuditEntry>(_knownEntries.Count);
+        foreach (var entry in _knownEntries)
+        {
+            entries.Add(BuildEntry(environment, entry, mode, traversalContext));
+        }
+
         var dictionaryKeyCorrelationRequested = _knownEntries.Any(entry =>
             GetEffectiveOptions(entry, out _).DictionaryKeyCorrelationMode == ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac);
         var diagnostics = BuildReportDiagnostics(environment).ToList();
         RemoveEntryLevelDiagnostics(diagnostics, entries);
+        if (traversalContext?.WasTruncated == true)
+        {
+            diagnostics.Add(new ConfigAuditDiagnostic
+            {
+                Severity = ConfigAuditDiagnosticSeverity.Warning,
+                Code = "config-audit-expanded-report-node-limit",
+                Message = "Expanded config audit report reached its global child-node budget of 16384; reported child topology is intentionally incomplete."
+            });
+        }
+
         var discoveredKeys = BuildDiscoveredKeys(environment, diagnostics);
         return new ConfigAuditReport
         {
             Environment = environment,
             GeneratedAt = DateTimeOffset.UtcNow,
+            Mode = mode,
             Providers = BuildProviderList(),
             Entries = entries,
             DiscoveredKeys = discoveredKeys,
@@ -414,7 +479,11 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                 and not StackOverflowException
                 and not AccessViolationException;
 
-    private ConfigAuditEntry BuildEntry(string environment, ConfigAuditKnownEntry knownEntry)
+    private ConfigAuditEntry BuildEntry(
+        string environment,
+        ConfigAuditKnownEntry knownEntry,
+        ConfigAuditReportMode? mode,
+        ConfigAuditReportTraversalContext? traversalContext)
     {
         var resolution = Resolve(environment, knownEntry);
         var inspection = InspectWrapper(knownEntry, resolution);
@@ -427,6 +496,19 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             ? sources
             : resolution.AuditSources;
         var options = GetEffectiveOptions(knownEntry, out var optionsDiagnostics);
+        if (mode == ConfigAuditReportMode.ExpandKnownEntryCollections)
+        {
+            options = new ConfigAuditEntryOptions(
+                traverseCollectionElements: true,
+                options.MaxCollectionDepth,
+                options.MaxCollectionElements,
+                options.MaxReportNodes,
+                options.DisplayDictionaryKeys,
+                options.Sensitivity,
+                options.DictionaryKeyCorrelationMode,
+                options.AssignedOptions);
+        }
+
         var correlation = options.DictionaryKeyCorrelationMode == ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac
             ? new ConfigAuditDictionaryKeyCorrelator(_correlationOptions).CreateContext(environment, knownEntry.Key)
             : ConfigAuditDictionaryKeyCorrelationContext.Unavailable("dictionary key correlation was not requested");
@@ -438,7 +520,8 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             options,
             new HashSet<object>(ReferenceEqualityComparer.Instance),
             new ConfigAuditDictionaryLabelSet(),
-            correlation);
+            correlation,
+            traversalContext);
         var diagnostics = resolution.Diagnostics
             .Concat(inspection.Diagnostics)
             .Concat(optionsDiagnostics)

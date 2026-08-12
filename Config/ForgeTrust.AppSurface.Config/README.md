@@ -93,6 +93,43 @@ var report = auditReporter.GetReport("Staging");
 var text = textRenderer.Render(report);
 ```
 
+### Safe debug expansion in 2 minutes
+
+The canonical report is the default contract. When an incident requires child topology for collections beneath already-known
+entries, request the explicit bounded mode instead:
+
+```csharp
+var report = auditReporter.GetReport(
+    new ConfigAuditReportRequest(
+        "Production",
+        ConfigAuditReportMode.ExpandKnownEntryCollections));
+```
+
+Expanded reports carry `Mode: ExpandKnownEntryCollections` in text and a `Mode` JSON member. They expand supported
+arrays, lists, read-only lists, and dictionaries only beneath entries that AppSurface already knows. They still use the
+same redactor, source selection, dictionary-label protection, cycle handling, and per-entry limits as canonical reports.
+An additional fixed report-wide child-node limit can stop expansion; the resulting `config-audit-expanded-report-node-limit`
+warning means the child topology is intentionally incomplete. This mode never becomes a raw provider, environment-variable,
+or `IConfigurationRoot.GetDebugView()` inventory.
+
+Custom `IConfigAuditReporter` implementations keep their existing default behavior. They safely reject expanded requests
+until they implement the request overload themselves. Only opt in when the custom reporter can preserve equivalent
+redaction and bounds:
+
+```csharp
+public ConfigAuditReport GetReport(ConfigAuditReportRequest request) =>
+    request.Mode switch
+    {
+        ConfigAuditReportMode.Default => GetReport(request.Environment),
+        ConfigAuditReportMode.ExpandKnownEntryCollections =>
+            BuildReportWithTheSameRedactionAndBounds(request.Environment),
+        _ => throw new ArgumentOutOfRangeException(nameof(request))
+    };
+```
+
+If that guarantee is not possible, do not implement the overload; the default interface behavior throws a documented
+`NotSupportedException` rather than widening disclosure.
+
 Explicit registrations are useful for keys that are read directly through `IConfigManager` instead of a wrapper:
 
 ```csharp
@@ -298,6 +335,9 @@ namespace MyApp;
 [Command("config diagnostics", Description = "Prints the active AppSurface configuration audit report.")]
 public sealed partial class ConfigDiagnosticsCommand(ConfigDiagnosticsCommandRunner runner) : ICommand
 {
+    [CommandOption("debug")]
+    public bool Debug { get; set; }
+
     /// <summary>
     /// Executes the diagnostics command against the already-selected AppSurface host environment.
     /// </summary>
@@ -308,7 +348,10 @@ public sealed partial class ConfigDiagnosticsCommand(ConfigDiagnosticsCommandRun
     /// </exception>
     public ValueTask ExecuteAsync(IConsole console)
     {
-        var result = runner.Run(console.Output);
+        var mode = Debug
+            ? ConfigAuditReportMode.ExpandKnownEntryCollections
+            : ConfigAuditReportMode.Default;
+        var result = runner.Run(console.Output, mode);
         if (!result.Succeeded)
         {
             throw new CommandException(result.Failure?.ToDisplayString() ?? "Configuration diagnostics failed.");
@@ -323,6 +366,7 @@ Run the command from the app project:
 
 ```bash
 dotnet run --project src/MyApp -- config diagnostics
+dotnet run --project src/MyApp -- config diagnostics --debug
 ```
 
 The command audits the active AppSurface environment selected during host startup. It does not define a command-level
@@ -345,6 +389,11 @@ Entries:
     State: Invalid
     Diagnostic: The configuration value must be between 1 and 5.
 ```
+
+Use `config diagnostics --debug` only when the canonical report needs bounded child topology. Its `Mode:` marker and any
+`config-audit-expanded-report-node-limit` warning make copied support artifacts distinguishable from the default report.
+If an app registered a custom reporter that has not opted in, the command returns its normal sanitized failure result;
+use the built-in reporter or implement the request overload with equivalent redaction and bounds.
 
 Known AppSurface audit entries include discovered `Config<T>` / `ConfigStruct<T>` wrappers and entries registered with
 `AddConfigAuditKey<T>()`. `DiscoveredKeys` separately exposes effective merged file-backed keys visible to enumerable

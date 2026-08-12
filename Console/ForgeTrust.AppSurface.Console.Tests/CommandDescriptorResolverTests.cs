@@ -30,6 +30,24 @@ public class CommandDescriptorResolverTests
     }
 
     [Fact]
+    public void GetRequiredDescriptor_ConsoleExampleConfigDiagnosticsCommand_HasDebugOption()
+    {
+        var descriptor = CommandDescriptorResolver.GetRequiredDescriptor(typeof(ConsoleAppExample.ConfigDiagnosticsCommand));
+
+        Assert.Equal("config diagnostics", descriptor.Name);
+        Assert.Single(descriptor.Inputs.OfType<CommandOptionDescriptor>(), input => input.Name == "debug");
+    }
+
+    [Fact]
+    public void GetRequiredDescriptor_LocalSecretsConfigDiagnosticsCommand_HasDebugOption()
+    {
+        var descriptor = CommandDescriptorResolver.GetRequiredDescriptor(typeof(LocalSecretsExample.ConfigDiagnosticsCommand));
+
+        Assert.Equal("config diagnostics", descriptor.Name);
+        Assert.Single(descriptor.Inputs.OfType<CommandOptionDescriptor>(), input => input.Name == "debug");
+    }
+
+    [Fact]
     public void TryGetDescriptor_WithoutGeneratedDescriptor_ReturnsNull()
     {
         Assert.Null(CommandDescriptorResolver.TryGetDescriptor(typeof(MissingDescriptorCommand)));

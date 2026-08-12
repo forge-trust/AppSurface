@@ -19,8 +19,10 @@ The sample also exposes the app-owned configuration diagnostics wrapper:
 
 ```bash
 dotnet run --project examples/console-app/ConsoleAppExample.csproj -- config diagnostics
+dotnet run --project examples/console-app/ConsoleAppExample.csproj -- config diagnostics --debug
 ```
 
 That command runs inside the sample app's own AppSurface host and prints the active environment's known configuration
-audit entries. It does not accept a command-level `--environment`; pass AppSurface host environment input at startup
-when the whole app should start under another environment.
+audit entries. The `--debug` form explicitly expands bounded child topology for known collection entries and labels the
+artifact with its report mode; the normal command remains canonical. Neither form accepts a command-level `--environment`;
+pass AppSurface host environment input at startup when the whole app should start under another environment.

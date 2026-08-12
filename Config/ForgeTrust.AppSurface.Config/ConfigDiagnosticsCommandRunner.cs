@@ -109,6 +109,73 @@ public sealed class ConfigDiagnosticsCommandRunner
         }
     }
 
+    /// <summary>
+    /// Writes the active environment's configuration audit report to <paramref name="output"/>.
+    /// </summary>
+    /// <param name="output">The writer that receives the rendered report.</param>
+    /// <param name="mode">The report mode, including explicit expansion for known-entry collections.</param>
+    /// <returns>
+    /// A result whose <see cref="ConfigDiagnosticsCommandResult.ExitCode"/> is zero when the report was generated.
+    /// </returns>
+    /// <remarks>
+    /// Default mode intentionally preserves the pre-existing <see cref="IConfigAuditReporter.GetReport(string)"/> flow so
+    /// existing custom reporters still function unchanged. Expanded report modes use explicit request-based reporting.
+    /// </remarks>
+    public ConfigDiagnosticsCommandResult Run(TextWriter output, ConfigAuditReportMode mode)
+    {
+        if (mode == ConfigAuditReportMode.Default)
+        {
+            return Run(output);
+        }
+
+        ArgumentNullException.ThrowIfNull(output);
+
+        string? environment = null;
+
+        try
+        {
+            environment = _environmentProvider.Environment;
+            if (string.IsNullOrWhiteSpace(environment))
+            {
+                return ConfigDiagnosticsCommandResult.Failed(
+                    environment,
+                    "Configuration diagnostics could not determine the active AppSurface environment.",
+                    "The active environment provider returned an empty environment name.",
+                    "Set the AppSurface host environment before running diagnostics.");
+            }
+
+            var report = _reporter.GetReport(new ConfigAuditReportRequest(environment, mode));
+            var rendered = _renderer.Render(report);
+            output.Write(rendered);
+
+            return ConfigDiagnosticsCommandResult.Success(environment);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return CreateRenderFailure(environment, ex);
+        }
+        catch (ArgumentException ex)
+        {
+            return CreateRenderFailure(environment, ex);
+        }
+        catch (FormatException ex)
+        {
+            return CreateRenderFailure(environment, ex);
+        }
+        catch (IOException ex)
+        {
+            return CreateRenderFailure(environment, ex);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return CreateRenderFailure(environment, ex);
+        }
+        catch (Exception ex) when (IsNonFatalDiagnosticsFailure(ex))
+        {
+            return CreateRenderFailure(environment, ex);
+        }
+    }
+
     private static ConfigDiagnosticsCommandResult CreateRenderFailure(string? environment, Exception exception) =>
         ConfigDiagnosticsCommandResult.Failed(
             environment,

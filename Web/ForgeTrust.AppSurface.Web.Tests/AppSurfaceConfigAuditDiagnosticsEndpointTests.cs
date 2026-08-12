@@ -155,6 +155,105 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
     }
 
     [Fact]
+    public async Task MapAppSurfaceConfigAuditDiagnostics_UsesStringReporterPathWhenModeIsAbsent()
+    {
+        var reporter = new TrackingConfigAuditReporter();
+        await using var host = await StartHostAsync(reporter: reporter);
+
+        using var request = CreateAuthorizedRequest(AppSurfaceConfigAuditDiagnosticsDefaults.DefaultRoute);
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(1, reporter.StringReportCallCount);
+        Assert.Equal(0, reporter.RequestReportCallCount);
+        Assert.Equal("Production", reporter.LastEnvironment);
+        AssertNoStore(response);
+    }
+
+    [Fact]
+    public async Task MapAppSurfaceConfigAuditDiagnostics_UsesExpandedReporterRequestForCaseInsensitiveMode()
+    {
+        var reporter = new TrackingConfigAuditReporter();
+        await using var host = await StartHostAsync(reporter: reporter);
+
+        using var request = CreateAuthorizedRequest(
+            $"{AppSurfaceConfigAuditDiagnosticsDefaults.DefaultRoute}?mode=EXPAND-KNOWN-ENTRY-COLLECTIONS");
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(0, reporter.StringReportCallCount);
+        Assert.Equal(1, reporter.RequestReportCallCount);
+        Assert.Equal("Production", reporter.LastEnvironment);
+        Assert.Equal(ConfigAuditReportMode.ExpandKnownEntryCollections, reporter.LastRequestMode);
+        Assert.Equal("Production", reporter.LastRequest?.Environment);
+        AssertNoStore(response);
+    }
+
+    [Theory]
+    [InlineData("?mode=", "empty")]
+    [InlineData("?mode=%20", "empty")]
+    [InlineData("?mode=expand-known-entry-collections&mode=expand-known-entry-collections", "multiple")]
+    [InlineData("?mode=expand-known-entry-collections&mode=unsupported", "multiple")]
+    [InlineData("?mode=unsupported", "unsupported")]
+    public async Task MapAppSurfaceConfigAuditDiagnostics_ReturnsSafeBadRequestForInvalidMode(
+        string query,
+        string causeFragment)
+    {
+        var reporter = new TrackingConfigAuditReporter();
+        await using var host = await StartHostAsync(reporter: reporter);
+
+        using var request = CreateAuthorizedRequest($"{AppSurfaceConfigAuditDiagnosticsDefaults.DefaultRoute}{query}");
+        using var response = await host.Client.SendAsync(request);
+        var json = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, reporter.StringReportCallCount);
+        Assert.Equal(0, reporter.RequestReportCallCount);
+        AssertNoStore(response);
+
+        using var problem = JsonDocument.Parse(json);
+        AssertProblem(problem, "Invalid AppSurface config audit request.", "mode");
+        Assert.Contains(causeFragment, problem.RootElement.GetProperty("cause").GetString()!, StringComparison.Ordinal);
+        Assert.DoesNotContain("raw-secret", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MapAppSurfaceConfigAuditDiagnostics_DoesNotEchoUnsupportedModeInBadRequest()
+    {
+        var reporter = new TrackingConfigAuditReporter();
+        await using var host = await StartHostAsync(reporter: reporter);
+
+        const string unsupportedMode = "raw-secret-mode";
+        using var request = CreateAuthorizedRequest(
+            $"{AppSurfaceConfigAuditDiagnosticsDefaults.DefaultRoute}?mode={unsupportedMode}");
+        using var response = await host.Client.SendAsync(request);
+        var json = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.DoesNotContain(unsupportedMode, json, StringComparison.Ordinal);
+        Assert.Equal(0, reporter.StringReportCallCount);
+        Assert.Equal(0, reporter.RequestReportCallCount);
+    }
+
+    [Fact]
+    public async Task MapAppSurfaceConfigAuditDiagnostics_ReturnsSafeProblemWhenExpandedReporterIsUnsupported()
+    {
+        await using var host = await StartHostAsync(reporter: new ThrowingConfigAuditReporter());
+
+        using var request = CreateAuthorizedRequest(
+            $"{AppSurfaceConfigAuditDiagnosticsDefaults.DefaultRoute}?mode=expand-known-entry-collections");
+        using var response = await host.Client.SendAsync(request);
+        var json = await response.Content.ReadAsStringAsync();
+        using var problem = JsonDocument.Parse(json);
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        AssertProblem(problem, "AppSurface config audit failed.", "sanitized report");
+        Assert.DoesNotContain("NotSupportedException", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("raw-secret", json, StringComparison.Ordinal);
+        AssertNoStore(response);
+    }
+
+    [Fact]
     public void ConfigPackage_DoesNotReferenceAspNetCoreOrWeb()
     {
         var references = typeof(ConfigAuditReport)
@@ -357,7 +456,8 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
         bool registerEnvironmentProvider = true,
         bool reporterThrows = false,
         bool environmentProviderThrows = false,
-        string environmentName = "Production")
+        string environmentName = "Production",
+        IConfigAuditReporter? reporter = null)
     {
         if (!registerAuthorizationMiddleware)
         {
@@ -373,7 +473,8 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
             registerEnvironmentProvider,
             reporterThrows,
             environmentProviderThrows,
-            environmentName);
+            environmentName,
+            reporter);
 
         var app = builder.Build();
         app.UseAuthentication();
@@ -439,7 +540,8 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
         bool registerEnvironmentProvider,
         bool reporterThrows,
         bool environmentProviderThrows,
-        string environmentName)
+        string environmentName,
+        IConfigAuditReporter? reporter = null)
     {
         services.AddLogging();
         services
@@ -457,7 +559,10 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
         if (registerReporter)
         {
             services.AddSingleton<IConfigAuditReporter>(
-                reporterThrows ? new ThrowingConfigAuditReporter() : new TestConfigAuditReporter());
+                reporter
+                    ?? (reporterThrows
+                        ? new ThrowingConfigAuditReporter()
+                        : new TestConfigAuditReporter()));
         }
 
         if (registerEnvironmentProvider)
@@ -575,6 +680,31 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
     {
         public ConfigAuditReport GetReport(string environment) =>
             CreateReport(environment);
+    }
+
+    private sealed class TrackingConfigAuditReporter : IConfigAuditReporter
+    {
+        public int StringReportCallCount { get; private set; }
+        public int RequestReportCallCount { get; private set; }
+        public string? LastEnvironment { get; private set; }
+        public ConfigAuditReportMode? LastRequestMode { get; private set; }
+        public ConfigAuditReportRequest? LastRequest { get; private set; }
+
+        public ConfigAuditReport GetReport(string environment)
+        {
+            StringReportCallCount++;
+            LastEnvironment = environment;
+            return CreateReport(environment);
+        }
+
+        public ConfigAuditReport GetReport(ConfigAuditReportRequest request)
+        {
+            RequestReportCallCount++;
+            LastRequest = request;
+            LastEnvironment = request.Environment;
+            LastRequestMode = request.Mode;
+            return CreateReport(request.Environment);
+        }
     }
 
     private sealed class ThrowingConfigAuditReporter : IConfigAuditReporter

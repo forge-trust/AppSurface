@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace ForgeTrust.AppSurface.Config;
 
 /// <summary>
@@ -21,6 +23,17 @@ public sealed class ConfigAuditReport
     /// Gets the time when this report was generated.
     /// </summary>
     public required DateTimeOffset GeneratedAt { get; init; }
+
+    /// <summary>
+    /// Gets the explicit mode used to produce this report, when it differs from the canonical default.
+    /// </summary>
+    /// <remarks>
+    /// Canonical reports leave this property <see langword="null"/> so existing JSON contracts do not gain a member.
+    /// Expanded reports identify <see cref="ConfigAuditReportMode.ExpandKnownEntryCollections"/> so copied support
+    /// artifacts remain distinguishable from the default report.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ConfigAuditReportMode? Mode { get; init; }
 
     /// <summary>
     /// Gets the provider precedence used while producing this report.
