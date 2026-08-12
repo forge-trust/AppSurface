@@ -85,6 +85,33 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Equal("${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", GetScalar(deployJob, "if"));
     }
 
+    [Fact]
+    public void BuildWorkflow_Should_Publish_Docs_Outline_Layout_Evidence()
+    {
+        var workflow = LoadBuildWorkflow();
+        var root = (YamlMappingNode)workflow.Documents[0].RootNode;
+        var jobs = GetMapping(root, "jobs");
+        var buildJob = GetMapping(jobs, "build");
+        var buildSteps = GetSequence(buildJob, "steps")
+            .Cast<YamlMappingNode>()
+            .ToArray();
+        var coverageStep = FindStep(buildSteps, "Run solution coverage and gate");
+        var coverageEnv = GetMapping(coverageStep, "env");
+        Assert.Equal(
+            "${{ runner.temp }}/docs-outline-layout-evidence",
+            GetScalar(coverageEnv, "APP_SURFACE_TEST_ARTIFACTS_DIR"));
+
+        var docsOutlineEvidenceUploadStep = FindStep(buildSteps, "Upload docs outline layout evidence");
+        Assert.Equal(
+            "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+            GetScalar(docsOutlineEvidenceUploadStep, "uses"));
+        Assert.Equal("${{ always() && !cancelled() }}", GetScalar(docsOutlineEvidenceUploadStep, "if"));
+        var docsOutlineEvidenceUploadWith = GetMapping(docsOutlineEvidenceUploadStep, "with");
+        Assert.Equal("docs-outline-layout-evidence", GetScalar(docsOutlineEvidenceUploadWith, "name"));
+        Assert.Equal("${{ runner.temp }}/docs-outline-layout-evidence", GetScalar(docsOutlineEvidenceUploadWith, "path"));
+        Assert.Equal("warn", GetScalar(docsOutlineEvidenceUploadWith, "if-no-files-found"));
+    }
+
     private static YamlStream LoadBuildWorkflow()
     {
         return LoadWorkflow("build.yml");

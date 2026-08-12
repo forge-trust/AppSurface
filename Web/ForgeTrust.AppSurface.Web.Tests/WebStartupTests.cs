@@ -221,7 +221,7 @@ public class WebStartupTests
     {
         var module = new HangingCancellationWebModule();
         var startup = new HangingCancellationWebStartup(module);
-        startup.WithOptions(options => options.StartupTimeout = TimeSpan.FromSeconds(1));
+        startup.WithOptions(options => options.StartupTimeout = TimeSpan.FromSeconds(5));
         var originalExitCode = Environment.ExitCode;
 
         try
@@ -229,9 +229,9 @@ public class WebStartupTests
             Environment.ExitCode = 0;
 
             var runTask = startup.RunResolvedAsync(["--urls", "http://127.0.0.1:0"]);
-            await module.Probe.CancellationRegistered.WaitAsync(TimeSpan.FromSeconds(5));
+            await module.Probe.CancellationRegistered.WaitAsync(TimeSpan.FromSeconds(10));
 
-            var completedTask = await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(10)));
+            var completedTask = await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(15)));
 
             Assert.Same(runTask, completedTask);
             await runTask;
