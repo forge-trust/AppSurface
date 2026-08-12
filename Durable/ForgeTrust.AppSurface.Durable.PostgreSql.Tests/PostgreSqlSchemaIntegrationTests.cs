@@ -18,14 +18,8 @@ public sealed class PostgreSqlSchemaIntegrationTests
     [Fact]
     public async Task ApplyStatusInitializeRotate_AreExplicitAndIdempotent()
     {
-        await using var container = new PostgreSqlBuilder(PostgreSqlTestContainerImage.Reference)
-            .WithDatabase("appsurface_durable")
-            .WithUsername("appsurface")
-            .WithPassword("appsurface-test-password")
-            .Build();
-        await container.StartAsync();
-        await using var dataSource = NpgsqlDataSource.Create(container.GetConnectionString());
-        var manager = new PostgreSqlDurableRuntimeSchemaManager(dataSource);
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
 
         var missing = await manager.GetStatusAsync();
         var missingEpoch = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(async () =>
@@ -108,16 +102,10 @@ public sealed class PostgreSqlSchemaIntegrationTests
     [Fact]
     public async Task ModifiedMigrationHistory_FailsClosed()
     {
-        await using var container = new PostgreSqlBuilder(PostgreSqlTestContainerImage.Reference)
-            .WithDatabase("appsurface_durable")
-            .WithUsername("appsurface")
-            .WithPassword("appsurface-test-password")
-            .Build();
-        await container.StartAsync();
-        await using var dataSource = NpgsqlDataSource.Create(container.GetConnectionString());
-        var manager = new PostgreSqlDurableRuntimeSchemaManager(dataSource);
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         await manager.ApplyAsync();
-        await using (var command = dataSource.CreateCommand(
+        await using (var command = database.DataSource.CreateCommand(
             "UPDATE appsurface_durable.schema_migration SET sha256 = repeat('0', 64) WHERE version = 1;"))
         {
             await command.ExecuteNonQueryAsync();

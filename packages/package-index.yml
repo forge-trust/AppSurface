@@ -19,7 +19,7 @@ packages:
     product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
-    release_notes_path: releases/unreleased.md
+    release_track: coordinated
     order: 15
     use_when: Add this directly only when authoring a package-owned theme adapter; ASP.NET Core applications normally install ForgeTrust.AppSurface.Web, which carries the neutral contract and Razor integration.
     includes: Immutable semantic light/dark pair contracts, the validated shared Graphite pair, strict opaque color and contrast validation, deterministic default resolution, and an opaque typed application-settings seam.
