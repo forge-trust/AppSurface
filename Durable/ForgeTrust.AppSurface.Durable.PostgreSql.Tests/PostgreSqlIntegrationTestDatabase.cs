@@ -249,9 +249,16 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
     /// Executes an idempotent container-startup probe, retrying only an Npgsql connection timeout that can occur after
     /// the container-local readiness probe succeeds but before Docker Desktop exposes the published port to the host.
     /// </summary>
-    /// <param name="probe">The idempotent probe to execute.</param>
-    /// <param name="delayAsync">Optional delay seam for deterministic retry tests.</param>
-    /// <param name="cancellationToken">Token that cancels a pending retry delay.</param>
+    /// <remarks>
+    /// The probe runs at most three times. Each retry waits 250 milliseconds by default, and <paramref name="delayAsync"/>
+    /// runs only between eligible failed attempts. An eligible failure is an <see cref="NpgsqlException"/> with a direct
+    /// <see cref="TimeoutException"/> inner exception; every other exception propagates immediately. Cancellation from
+    /// either <paramref name="probe"/> or the retry delay also propagates. Use this only for the initial, idempotent
+    /// host-side probe of a newly started Testcontainers server, never for configured-server or database-creation work.
+    /// </remarks>
+    /// <param name="probe">The idempotent probe to execute with the supplied cancellation token.</param>
+    /// <param name="delayAsync">Optional replacement for the default 250 millisecond retry delay, primarily for deterministic tests.</param>
+    /// <param name="cancellationToken">Token supplied to the probe and delay that cancels pending retry work.</param>
     internal static async ValueTask ExecuteContainerStartupProbeAsync(
         Func<CancellationToken, ValueTask> probe,
         Func<TimeSpan, CancellationToken, ValueTask>? delayAsync = null,

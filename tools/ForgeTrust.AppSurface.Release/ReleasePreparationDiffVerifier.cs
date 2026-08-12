@@ -335,6 +335,13 @@ internal sealed class ReleasePreparationDiffVerifier
         }
     }
 
+    /// <summary>
+    /// Appends diagnostics when the complete diff does not contain the exact artifact statuses required for a versioned release.
+    /// </summary>
+    /// <param name="version">Version segment without the leading <c>v</c>, used to derive required release artifact paths.</param>
+    /// <param name="changes">Complete, parsed Git diff to classify against the release-preparation contract.</param>
+    /// <param name="consumedEntryPaths">Unreleased entry paths declared by the validated release manifest; each must be deleted.</param>
+    /// <param name="diagnostics">Mutable result collection that receives validation errors instead of expected contract failures throwing.</param>
     internal static void ValidateReleaseArtifactChanges(
         string version,
         IReadOnlyList<ReleasePreparationChange> changes,
@@ -437,6 +444,23 @@ internal sealed class ReleasePreparationDiffVerifier
         || path.StartsWith(UnreleasedEntriesPathPrefix, StringComparison.Ordinal)
         || VersionedReleaseArtifactPath.IsMatch(path);
 
+    /// <summary>
+    /// Validates a parsed PackageIndex witness against the complete diff and appends diagnostics for every provenance mismatch.
+    /// </summary>
+    /// <param name="witness">Strictly parsed witness emitted from the same checked-out release-preparation candidate.</param>
+    /// <param name="changes">Complete, parsed Git diff whose package inputs and generated outputs the witness must authorize.</param>
+    /// <param name="repositoryRoot">Checked-out repository root used to read generated surfaces and their merge-base content.</param>
+    /// <param name="baseRef">Normalized origin-tracking base ref retained for diagnostic context.</param>
+    /// <param name="baseTip">Resolved lowercase full Git object ID for the fetched base tip; it must match both witness base identity fields.</param>
+    /// <param name="mergeBase">Resolved lowercase full Git object ID for the sole merge base that supplies expected prior surface content.</param>
+    /// <param name="head">Resolved lowercase full Git object ID for the candidate HEAD that the witness must bind.</param>
+    /// <param name="diagnostics">Mutable result collection that receives contract failures instead of expected witness mismatches throwing.</param>
+    /// <param name="cancellationToken">Cancellation token for merge-base file reads and Git content inspection.</param>
+    /// <remarks>
+    /// Direct callers should first parse the witness with <see cref="TryParseWitness"/> and resolve the exact identities
+    /// from the same complete diff. This method treats invalid provenance as diagnostics so the CLI can render a complete
+    /// report; ordinary I/O cancellation and unexpected filesystem failures still propagate.
+    /// </remarks>
     internal async Task ValidateWitnessAsync(
         ReleasePreparationWitnessDocument witness,
         IReadOnlyList<ReleasePreparationChange> changes,
@@ -1009,6 +1033,17 @@ internal sealed record ReleasePreparationDiffResult(
     internal bool IsValid => Diagnostics.All(diagnostic => !string.Equals(diagnostic.Severity, "error", StringComparison.Ordinal));
 }
 
+/// <summary>
+/// Parsed PackageIndex provenance witness that binds changed semantic inputs and generated output hashes to Git identities.
+/// </summary>
+/// <param name="Schema">Exact witness schema identifier.</param>
+/// <param name="BaseRef">Resolved lowercase full Git object ID for the fetched base tip.</param>
+/// <param name="BaseTipCommit">Resolved lowercase full Git object ID for the fetched base tip.</param>
+/// <param name="MergeBaseCommit">Resolved lowercase full Git object ID for the sole merge base.</param>
+/// <param name="HeadCommit">Resolved lowercase full Git object ID for the candidate HEAD.</param>
+/// <param name="Verification">Verification mode emitted by PackageIndex; accepted witnesses use <c>verified</c>.</param>
+/// <param name="ChangedInputs">Ordered semantic source inputs that authorize generated surfaces.</param>
+/// <param name="Surfaces">Ordered generated surfaces and their expected SHA-256 digests.</param>
 internal sealed record ReleasePreparationWitnessDocument(
     string Schema,
     string BaseRef,
@@ -1019,6 +1054,18 @@ internal sealed record ReleasePreparationWitnessDocument(
     IReadOnlyList<ReleasePreparationWitnessInputDocument> ChangedInputs,
     IReadOnlyList<ReleasePreparationWitnessSurfaceDocument> Surfaces);
 
+/// <summary>
+/// One changed semantic input and the ordered generated surfaces it authorizes.
+/// </summary>
+/// <param name="Kind">Supported input kind: <c>package-index-manifest</c> or <c>release-guidance-template</c>.</param>
+/// <param name="Path">Safe repository-relative input path.</param>
+/// <param name="Surfaces">Ordered safe repository-relative output paths authorized by the input.</param>
 internal sealed record ReleasePreparationWitnessInputDocument(string Kind, string Path, IReadOnlyList<string> Surfaces);
 
+/// <summary>
+/// One generated package documentation surface and the canonical SHA-256 digest it must match at HEAD.
+/// </summary>
+/// <param name="Kind">Supported surface kind: <c>chooser</c>, <c>readiness</c>, or <c>managed-readme</c>.</param>
+/// <param name="Path">Safe repository-relative generated output path.</param>
+/// <param name="Sha256">Lowercase 64-character SHA-256 digest of the required output or managed README body.</param>
 internal sealed record ReleasePreparationWitnessSurfaceDocument(string Kind, string Path, string Sha256);

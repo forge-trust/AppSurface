@@ -73,6 +73,31 @@ public sealed class PostgreSqlIntegrationTestDatabaseTests
         Assert.Equal(2, delays);
     }
 
+    [Fact]
+    public async Task ExecuteContainerStartupProbeAsync_PropagatesCancellationFromTheRetryDelay()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var attempts = 0;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => PostgreSqlIntegrationTestDatabase.ExecuteContainerStartupProbeAsync(
+                    _ =>
+                    {
+                        attempts++;
+                        return ValueTask.FromException(
+                            new NpgsqlException("Timed out opening PostgreSQL.", new TimeoutException()));
+                    },
+                    (_, cancellationToken) =>
+                    {
+                        cancellation.Cancel();
+                        return ValueTask.FromCanceled(cancellationToken);
+                    },
+                    cancellation.Token)
+                .AsTask());
+
+        Assert.Equal(1, attempts);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

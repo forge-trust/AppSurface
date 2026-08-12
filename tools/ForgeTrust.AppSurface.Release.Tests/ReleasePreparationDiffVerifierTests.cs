@@ -99,7 +99,7 @@ public sealed class ReleasePreparationDiffVerifierTests
             {"schema":"forge-trust.appsurface.release-prep-witness/v1","schema":"forge-trust.appsurface.release-prep-witness/v1","baseRef":"a","baseTipCommit":"a","mergeBaseCommit":"b","headCommit":"c","verification":"verified","changedInputs":[],"surfaces":[]}
             """;
         var uppercaseHash = """
-            {"schema":"forge-trust.appsurface.release-prep-witness/v1","baseRef":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","baseTipCommit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","mergeBaseCommit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","headCommit":"cccccccccccccccccccccccccccccccccccccccc","verification":"verified","changedInputs":[],"surfaces":[{"kind":"chooser","path":"packages/README.md","sha256":"ABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFAB"}]}
+            {"schema":"forge-trust.appsurface.release-prep-witness/v1","baseRef":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","baseTipCommit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","mergeBaseCommit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","headCommit":"cccccccccccccccccccccccccccccccccccccccc","verification":"verified","changedInputs":[],"surfaces":[{"kind":"chooser","path":"packages/README.md","sha256":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}]}
             """;
 
         Assert.False(ReleasePreparationDiffVerifier.TryParseWitness(duplicateProperty, out _, out var duplicateIssue));
@@ -665,11 +665,24 @@ public sealed class ReleasePreparationDiffVerifierTests
         await File.WriteAllTextAsync(Path.Join(repositoryRoot, "releases", "v1.2.3.release.json"), ValidReleaseManifestJson());
         try
         {
-            var result = await new ReleasePreparationDiffVerifier(CreateRunnerForNoFetchDiff(CompleteReleasePreparationDiff("M\0packages/package-index.yml\0"))).VerifyAsync(
+            string? generatedWitnessPath = null;
+            var runner = CreateRunnerForNoFetchDiff(CompleteReleasePreparationDiff("M\0packages/package-index.yml\0"));
+            runner.BeforeRun = invocation =>
+            {
+                if (string.Equals(invocation.Executable, "dotnet", StringComparison.Ordinal))
+                {
+                    generatedWitnessPath = invocation.Arguments.SkipWhile(argument => !string.Equals(argument, "--witness", StringComparison.Ordinal)).Skip(1).Single();
+                    File.WriteAllText(generatedWitnessPath, "partial witness");
+                }
+            };
+
+            var result = await new ReleasePreparationDiffVerifier(runner).VerifyAsync(
                 repositoryRoot, "main", noFetch: true, witnessPath: null, CancellationToken.None);
 
             Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-prep-package-witness-invalid"
                 && diagnostic.Problem == "PackageIndex could not produce a release-preparation witness.");
+            Assert.NotNull(generatedWitnessPath);
+            Assert.False(File.Exists(generatedWitnessPath));
         }
         finally
         {
@@ -716,6 +729,43 @@ public sealed class ReleasePreparationDiffVerifierTests
         {
             Directory.Delete(repositoryRoot, recursive: true);
         }
+    }
+
+    [Theory]
+    [InlineData("base-ref")]
+    [InlineData("base-tip")]
+    [InlineData("merge-base")]
+    [InlineData("head")]
+    [InlineData("verification")]
+    public async Task WitnessValidationRejectsEachIdentityContract(string mismatch)
+    {
+        const string baseCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        const string headCommit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        var witness = CreateManifestWitness(baseCommit, headCommit, [], []);
+        witness = mismatch switch
+        {
+            "base-ref" => witness with { BaseRef = headCommit },
+            "base-tip" => witness with { BaseTipCommit = headCommit },
+            "merge-base" => witness with { MergeBaseCommit = headCommit },
+            "head" => witness with { HeadCommit = baseCommit },
+            "verification" => witness with { Verification = "unverified" },
+            _ => throw new ArgumentOutOfRangeException(nameof(mismatch), mismatch, "Unsupported witness identity mismatch.")
+        };
+        var diagnostics = new List<ReleaseDiagnostic>();
+
+        await new ReleasePreparationDiffVerifier(new FakeCommandRunner()).ValidateWitnessAsync(
+            witness,
+            [],
+            Directory.GetCurrentDirectory(),
+            "origin/main",
+            baseCommit,
+            baseCommit,
+            headCommit,
+            diagnostics,
+            CancellationToken.None);
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("release-prep-package-witness-invalid", diagnostic.Code);
     }
 
     [Fact]

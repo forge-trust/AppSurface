@@ -73,7 +73,10 @@ public sealed class ReleasePreparationWitnessTests
         }
         finally
         {
-            Directory.Delete(directory, recursive: true);
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
         }
     }
 
@@ -210,6 +213,7 @@ public sealed class ReleasePreparationWitnessTests
 
             Assert.True(exitCode == 0, error.ToString());
             using var document = JsonDocument.Parse(await File.ReadAllTextAsync(witnessPath));
+            Assert.Equal(document.RootElement.GetProperty("baseTipCommit").GetString(), document.RootElement.GetProperty("baseRef").GetString());
             var changedInputs = document.RootElement.GetProperty("changedInputs").EnumerateArray().ToArray();
             Assert.Equal(2, changedInputs.Length);
             var manifestInput = Assert.Single(changedInputs, input => input.GetProperty("path").GetString() == "packages/package-index.yml");
@@ -333,6 +337,10 @@ public sealed class ReleasePreparationWitnessTests
             WorkingDirectory = repositoryRoot,
             RedirectStandardError = true
         };
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("commit.gpgsign=false");
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add($"core.hooksPath={Path.Join(repositoryRoot, ".git", "hooks-disabled")}");
         foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);

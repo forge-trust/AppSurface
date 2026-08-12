@@ -105,7 +105,7 @@ internal sealed class ReleasePreparationWitnessBuilder
 
         return new ReleasePreparationWitness(
             Schema,
-            baseRef,
+            baseTipCommit,
             baseTipCommit,
             mergeBases[0],
             headCommit,
