@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text;
+
 namespace ForgeTrust.AppSurface.Auth;
 
 /// <summary>
@@ -92,7 +95,9 @@ public enum AgentAuthorizationDecisionKind
 /// </summary>
 /// <remarks>
 /// Hosts own receipt storage and atomicity. A host must return exactly one terminal outcome for a consumption attempt
-/// and must not retry execution after <see cref="AlreadyConsumed"/>.
+/// and must not retry execution after <see cref="AlreadyConsumed"/>. Outcomes such as <see cref="Stale"/> are terminal
+/// for an attempt, not necessarily for the receipt: a host that detects stale state before its atomic claim leaves the
+/// receipt unconsumed and may retry after the original state is restored.
 /// </remarks>
 public enum AgentApprovalConsumptionOutcome
 {
@@ -447,13 +452,22 @@ internal static class AgentApprovalContractValidation
 
     private static void EnsureNoControlCharacters(string value, string parameterName)
     {
-        if (value.Any(character => char.IsControl(character)
-                || char.GetUnicodeCategory(character) == System.Globalization.UnicodeCategory.Format)
-            || value.Length > MaximumDisplayTextLength)
+        if (value.Length > MaximumDisplayTextLength)
         {
             throw new ArgumentException(
                 $"Display-safe values must contain at most {MaximumDisplayTextLength} characters and no control or Unicode format characters.",
                 parameterName);
+        }
+
+        foreach (var rune in value.EnumerateRunes())
+        {
+            var category = Rune.GetUnicodeCategory(rune);
+            if (category is UnicodeCategory.Control or UnicodeCategory.Format)
+            {
+                throw new ArgumentException(
+                    $"Display-safe values must contain at most {MaximumDisplayTextLength} characters and no control or Unicode format characters.",
+                    parameterName);
+            }
         }
     }
 }

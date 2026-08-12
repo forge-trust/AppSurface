@@ -139,6 +139,20 @@ public sealed class AgentApprovalLifecycleProofTests
     }
 
     [Fact]
+    public void Receipt_AfterStaleRejection_RemainsConsumableWhenStateIsRestored()
+    {
+        var host = new InMemoryApprovalHost(new FakeClock(Utc(8, 0)));
+        var receipt = host.Approve(Request());
+
+        var stale = host.Consume(receipt, Binding(expectedStateVersion: "version-2"));
+        var retry = host.Consume(receipt, receipt.Binding);
+
+        Assert.Equal(AgentApprovalConsumptionOutcome.Stale, stale.Outcome);
+        Assert.True(retry.IsConsumed);
+        Assert.Equal(1, host.ExecutedTransitionCount);
+    }
+
+    [Fact]
     public void Receipt_IntentDigestChange_FailsClosedAsBindingMismatch()
     {
         var host = new InMemoryApprovalHost(new FakeClock(Utc(8, 0)));

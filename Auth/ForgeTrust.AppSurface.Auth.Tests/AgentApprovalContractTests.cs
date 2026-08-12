@@ -117,9 +117,22 @@ public sealed class AgentApprovalContractTests
         var sameAgent = new AgentIdentityReference("harness:local");
         var differentAgent = new AgentIdentityReference("HARNESS:LOCAL");
         var approver = new AgentApproverReference("subject:andrew");
+        var sameApprover = new AgentApproverReference("subject:andrew");
+        var defaultAgent = default(AgentIdentityReference);
+        var defaultApprover = default(AgentApproverReference);
 
         Assert.Equal(agent, sameAgent);
         Assert.NotEqual(agent, differentAgent);
+        Assert.True(defaultAgent == default(AgentIdentityReference));
+        Assert.False(defaultAgent != default(AgentIdentityReference));
+        Assert.Equal(0, defaultAgent.GetHashCode());
+        Assert.Equal(0, defaultApprover.GetHashCode());
+        Assert.Equal(agent.GetHashCode(), sameAgent.GetHashCode());
+        Assert.Equal(approver.GetHashCode(), sameApprover.GetHashCode());
+        Assert.False(agent.Equals((object)"harness:local"));
+        Assert.False(agent.Equals(null));
+        Assert.False(approver.Equals((object)"subject:andrew"));
+        Assert.False(approver.Equals(null));
         Assert.Contains("<redacted>", agent.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain(agent.Value, agent.ToString(), StringComparison.Ordinal);
         Assert.Contains("<redacted>", approver.ToString(), StringComparison.Ordinal);
@@ -157,6 +170,7 @@ public sealed class AgentApprovalContractTests
     public void Binding_PreservesFieldsAndRedactsToString()
     {
         var binding = Binding();
+        var bindingText = binding.ToString();
 
         Assert.Equal("workflow.approve", binding.ActionId);
         Assert.Equal("task-1", binding.TaskId);
@@ -166,7 +180,21 @@ public sealed class AgentApprovalContractTests
         Assert.Equal("approve", binding.Transition);
         Assert.Equal("workflow-approval/v1", binding.BindingProfile);
         Assert.Equal("sha256:abc", binding.SafeIntentDigest);
-        Assert.DoesNotContain(binding.SafeIntentDigest, binding.ToString(), StringComparison.Ordinal);
+        Assert.Contains("<redacted>", bindingText, StringComparison.Ordinal);
+        foreach (var value in new[]
+                 {
+                     binding.ActionId,
+                     binding.TaskId,
+                     binding.WorkflowInstanceId,
+                     binding.ExpectedState,
+                     binding.ExpectedStateVersion,
+                     binding.Transition,
+                     binding.BindingProfile,
+                     binding.SafeIntentDigest,
+                 })
+        {
+            Assert.DoesNotContain(value, bindingText, StringComparison.Ordinal);
+        }
     }
 
     [Theory]
@@ -351,6 +379,18 @@ public sealed class AgentApprovalContractTests
         Assert.NotNull(exception.ParamName);
     }
 
+    [Fact]
+    public void DisplaySafeFields_WhenTheyContainSupplementaryUnicodeFormatCharacters_Throw()
+    {
+        const string languageTag = "\U000E0001";
+
+        var exception = Assert.Throws<ArgumentException>(() => new AgentActionMetadata(
+            "workflow.approve",
+            "Approve" + languageTag + "workflow"));
+
+        Assert.Equal("displayName", exception.ParamName);
+    }
+
     [Theory]
     [InlineData("rationale")]
     [InlineData("decisionMessage")]
@@ -472,6 +512,24 @@ public sealed class AgentApprovalContractTests
         });
 
         Assert.NotNull(exception.ParamName);
+    }
+
+    [Fact]
+    public void DisplaySafeFieldsAndMetadata_AtTheirBounds_ArePreserved()
+    {
+        var maximumKey = new string('k', 128);
+        var maximumValue = new string('v', 1024);
+        var metadata = Enumerable.Range(0, 31).ToDictionary(index => $"key-{index}", _ => "value");
+        metadata.Add(maximumKey, maximumValue);
+
+        var action = new AgentActionMetadata(
+            "workflow.approve",
+            new string('d', 4096),
+            metadata: metadata);
+
+        Assert.Equal(4096, action.DisplayName.Length);
+        Assert.Equal(32, action.Metadata.Count);
+        Assert.Equal(maximumValue, action.Metadata[maximumKey]);
     }
 
     [Theory]
@@ -717,11 +775,29 @@ public sealed class AgentApprovalContractTests
             issuedAt.AddMinutes(5),
             metadata);
         metadata["safe"] = "changed";
+        var receiptText = receipt.ToString();
 
         Assert.Equal("receipt-1", receipt.ReceiptId);
         Assert.Equal("subject:andrew", receipt.Approver.Value);
-        Assert.DoesNotContain(receipt.ReceiptId, receipt.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain(receipt.Binding.SafeIntentDigest, receipt.ToString(), StringComparison.Ordinal);
+        Assert.Contains("<redacted>", receiptText, StringComparison.Ordinal);
+        foreach (var value in new[]
+                 {
+                     receipt.ReceiptId,
+                     receipt.Binding.ActionId,
+                     receipt.Binding.TaskId,
+                     receipt.Binding.WorkflowInstanceId,
+                     receipt.Binding.ExpectedState,
+                     receipt.Binding.ExpectedStateVersion,
+                     receipt.Binding.Transition,
+                     receipt.Binding.BindingProfile,
+                     receipt.Binding.SafeIntentDigest,
+                     receipt.Agent.Value,
+                     receipt.Approver.Value,
+                     receipt.CorrelationId,
+                 })
+        {
+            Assert.DoesNotContain(value, receiptText, StringComparison.Ordinal);
+        }
         Assert.Equal("original", receipt.Metadata["safe"]);
 
         var exception = Assert.Throws<ArgumentException>(() => Receipt(issuedAt, expiresAt: issuedAt));
