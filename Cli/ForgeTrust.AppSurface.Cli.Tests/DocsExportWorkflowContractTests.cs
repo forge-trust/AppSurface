@@ -81,6 +81,16 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Equal("actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9", GetScalar(uploadStep, "uses"));
         Assert.Equal("${{ runner.temp }}/appsurface-docs-pages", GetScalar(GetMapping(uploadStep, "with"), "path"));
 
+        var deployJob = GetMapping(jobs, "deploy-appsurface-docs");
+        Assert.Equal("${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", GetScalar(deployJob, "if"));
+    }
+
+    [Fact]
+    public void BuildWorkflow_Should_Publish_Docs_Outline_Layout_Evidence()
+    {
+        var workflow = LoadBuildWorkflow();
+        var root = (YamlMappingNode)workflow.Documents[0].RootNode;
+        var jobs = GetMapping(root, "jobs");
         var buildJob = GetMapping(jobs, "build");
         var buildSteps = GetSequence(buildJob, "steps")
             .Cast<YamlMappingNode>()
@@ -100,9 +110,6 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Equal("docs-outline-layout-evidence", GetScalar(docsOutlineEvidenceUploadWith, "name"));
         Assert.Equal("${{ runner.temp }}/docs-outline-layout-evidence", GetScalar(docsOutlineEvidenceUploadWith, "path"));
         Assert.Equal("warn", GetScalar(docsOutlineEvidenceUploadWith, "if-no-files-found"));
-
-        var deployJob = GetMapping(jobs, "deploy-appsurface-docs");
-        Assert.Equal("${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", GetScalar(deployJob, "if"));
     }
 
     private static YamlStream LoadBuildWorkflow()

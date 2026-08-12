@@ -153,7 +153,7 @@ internal sealed class AppSurfaceDocsOutlineLayoutEvidence
         var snapshotPath = ResolveArtifactPath(directory, SnapshotFileName);
         await CaptureStageAsync(
             capture,
-            "outline-layout.json",
+            SnapshotFileName,
             snapshotPath,
             () => File.WriteAllTextAsync(
                 snapshotPath,
@@ -163,14 +163,14 @@ internal sealed class AppSurfaceDocsOutlineLayoutEvidence
         var screenshotPath = ResolveArtifactPath(directory, ScreenshotFileName);
         await CaptureStageAsync(
             capture,
-            "viewport.png",
+            ScreenshotFileName,
             screenshotPath,
             () => captureScreenshot(screenshotPath, cancellationToken));
 
         var tracePath = ResolveArtifactPath(directory, TraceFileName);
         await CaptureStageAsync(
             capture,
-            "trace.zip",
+            TraceFileName,
             tracePath,
             () => stopTracing(tracePath, cancellationToken));
 
@@ -215,32 +215,21 @@ internal sealed class AppSurfaceDocsOutlineLayoutEvidence
     }
 
     /// <summary>
-    /// Canonicalizes a relative artifact path and rejects rooted paths or paths outside <paramref name="root"/>,
-    /// including sibling-prefix paths such as <c>/tmp/layout-evidence-old</c> for a
-    /// <c>/tmp/layout-evidence</c> root.
+    /// Resolves an artifact path beneath <paramref name="root"/> and preserves the <paramref name="relativePath"/>
+    /// parameter name when shared test-path containment rejects an invalid segment.
     /// </summary>
     internal static string ResolveArtifactPath(string root, string relativePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
-        if (Path.IsPathRooted(relativePath))
+        try
         {
-            throw new ArgumentException("Evidence artifact paths must be relative to the configured root.", nameof(relativePath));
+            return TestPathUtils.PathUnder(root, relativePath);
         }
-
-        var fullRoot = Path.GetFullPath(root);
-        var candidate = Path.GetFullPath(Path.Combine(fullRoot, relativePath));
-        var rootWithSeparator = fullRoot.EndsWith(Path.DirectorySeparatorChar)
-            || fullRoot.EndsWith(Path.AltDirectorySeparatorChar)
-            ? fullRoot
-            : fullRoot + Path.DirectorySeparatorChar;
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        if (!candidate.StartsWith(rootWithSeparator, comparison))
+        catch (ArgumentException exception) when (exception.ParamName == "relativeSegments")
         {
-            throw new ArgumentException("Evidence artifact paths must remain below the configured root.", nameof(relativePath));
+            throw new ArgumentException(exception.Message, nameof(relativePath), exception);
         }
-
-        return candidate;
     }
 
     internal static string FormatFailureMessage(DocsOutlineLayoutEvaluation evaluation, DocsOutlineLayoutCapture capture)
@@ -395,11 +384,11 @@ internal sealed class DocsOutlineLayoutCapture
     internal IReadOnlyList<DocsOutlineLayoutCaptureStage> Stages => _stages;
 
     /// <summary>
-    /// Gets whether the failure-only capture attempted to stop the active Playwright trace, whether or not that
-    /// individual trace write succeeded.
+    /// Gets whether the failure-only capture successfully stopped the active Playwright trace and wrote its output.
     /// </summary>
-    internal bool TraceStopAttempted => Stages.Any(stage =>
-        string.Equals(stage.Name, AppSurfaceDocsOutlineLayoutEvidence.TraceFileName, StringComparison.Ordinal));
+    internal bool TraceStopSucceeded => Stages.Any(stage =>
+        string.Equals(stage.Name, AppSurfaceDocsOutlineLayoutEvidence.TraceFileName, StringComparison.Ordinal)
+        && stage.Error is null);
 
     internal static DocsOutlineLayoutCapture WithFailure(string name, string? path, Exception exception)
     {

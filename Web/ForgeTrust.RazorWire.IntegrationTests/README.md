@@ -49,6 +49,7 @@ Failure triage flow:
 
 - Artifact name: `docs-outline-layout-evidence`
 - The artifact should not exist on green runs.
+- Each failure writes one directory: `<evidence root>/docs-outline-layout/<yyyyMMddTHHmmssfffZ>-initial-<guid>/`. The three files are inside that directory, not directly under the evidence root.
 - Download artifacts for a failed run:
 
   ```bash
@@ -63,6 +64,7 @@ Failure triage flow:
     --filter FullyQualifiedName~ThemeCriticalCss_ShouldRenderBeforeExternalStylesAndKeepTheOutlineResponsive
   ```
 
+- `APP_SURFACE_TEST_ARTIFACTS_DIR` must be absolute. A relative or whitespace value records an `evidence-directory` capture failure in the assertion message and writes no artifacts. Leave it unset to use the system temporary directory.
 - Repository retention policy governs CI artifact retention; local temp evidence stays on disk until manually removed after triage.
 
 ## Run

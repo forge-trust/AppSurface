@@ -489,8 +489,8 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
                     });
 
                 Assert.NotNull(capture);
-                // When evidence setup fails before its trace stage, finally performs the one no-path stop instead.
-                tracingStarted = !capture.TraceStopAttempted;
+                // If the evidence trace did not finish, finally performs the one no-path stop instead.
+                tracingStarted = !capture.TraceStopSucceeded;
                 Assert.True(evaluation.Passed, AppSurfaceDocsOutlineLayoutEvidence.FormatFailureMessage(evaluation, capture));
             }
         }
