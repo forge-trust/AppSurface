@@ -29,11 +29,41 @@ internal sealed class AppSurfaceThemeSelectionDocumentCache
         }
 
         var documents = new Dictionary<string, AppSurfaceThemeDocument>(StringComparer.Ordinal);
+        var registeredThemeIds = new HashSet<string>(StringComparer.Ordinal);
         var registeredDefault = false;
-        foreach (var themeId in registry.ThemeIds)
+        var themeIds = registry.ThemeIds;
+        if (themeIds is null)
         {
-            var pair = registry.GetRequired(themeId);
-            var isDefault = pair.Id == defaultResolution.Id;
+            throw new InvalidOperationException(
+                "ASWEBTHEME008: The sealed neutral theme registry did not expose its theme pair identifiers.");
+        }
+
+        foreach (var themeId in themeIds)
+        {
+            if (string.IsNullOrEmpty(themeId.Value) || !registeredThemeIds.Add(themeId.Value))
+            {
+                throw new InvalidOperationException(
+                    "ASWEBTHEME008: The sealed neutral theme registry exposed invalid theme pair identifiers.");
+            }
+
+            AppSurfaceThemePair pair;
+            try
+            {
+                pair = registry.GetRequired(themeId);
+            }
+            catch (KeyNotFoundException)
+            {
+                throw new InvalidOperationException(
+                    "ASWEBTHEME008: The sealed neutral theme registry could not resolve an advertised theme pair identifier.");
+            }
+
+            if (pair is null || pair.Id != themeId)
+            {
+                throw new InvalidOperationException(
+                    "ASWEBTHEME008: The sealed neutral theme registry returned a pair with a different identifier.");
+            }
+
+            var isDefault = themeId == defaultResolution.Id;
             if (isDefault
                 && (pair.Light != defaultResolution.Light || pair.Dark != defaultResolution.Dark))
             {
@@ -52,7 +82,7 @@ internal sealed class AppSurfaceThemeSelectionDocumentCache
                     "ASWEBTHEME008: A registered AppSurface theme pair could not be safely rendered by the theme selection adapter.");
             }
 
-            documents.Add(pair.Id.Value, document);
+            documents.Add(themeId.Value, document);
             registeredDefault |= isDefault;
         }
 

@@ -592,6 +592,88 @@ public sealed class AppSurfaceThemeWebIntegrationTests
     }
 
     [Fact]
+    public void SelectionCache_ShouldRejectACustomRegistryThatReturnsAPairWithADifferentId()
+    {
+        var defaultPair = AppSurfaceThemePair.AppSurface();
+        var differentPair = new AppSurfaceThemePair(
+            new AppSurfaceThemeId("appsurface-alt"),
+            defaultPair.Light,
+            defaultPair.Dark);
+        var registry = new StubRegistry([defaultPair.Id], _ => differentPair);
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(defaultPair.Id.Value, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldRejectACustomRegistryThatAdvertisesDuplicateIds()
+    {
+        var defaultPair = AppSurfaceThemePair.AppSurface();
+        var registry = new StubRegistry([defaultPair.Id, defaultPair.Id], _ => defaultPair);
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(defaultPair.Id.Value, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldRejectACustomRegistryThatAdvertisesAnEmptyId()
+    {
+        var defaultPair = AppSurfaceThemePair.AppSurface();
+        var registry = new StubRegistry([default(AppSurfaceThemeId)], _ => defaultPair);
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldRejectACustomRegistryThatReturnsANullPair()
+    {
+        var defaultPair = AppSurfaceThemePair.AppSurface();
+        var registry = new StubRegistry([defaultPair.Id], _ => null!);
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(defaultPair.Id.Value, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldSanitizeARegistryThatCannotResolveAnAdvertisedId()
+    {
+        var defaultPair = AppSurfaceThemePair.AppSurface();
+        var registry = new StubRegistry(
+            [defaultPair.Id],
+            _ => throw new KeyNotFoundException("host-specific registry failure"));
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("host-specific", exception.Message, StringComparison.Ordinal);
+        Assert.Null(exception.InnerException);
+    }
+
+    [Fact]
+    public void SelectionCache_ShouldRejectACustomRegistryThatOmitsThemeIds()
+    {
+        var registry = new StubRegistry(null!, _ => throw new InvalidOperationException());
+        var resolver = new StubResolver(CreateResolution(AppSurfaceThemeMode.Light));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new AppSurfaceThemeSelectionDocumentCache(registry, resolver));
+
+        Assert.Contains("ASWEBTHEME008", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SelectionRegistration_ShouldRequireTheNeutralRegistryAndResolver()
     {
         var services = new ServiceCollection();
@@ -1081,12 +1163,30 @@ public sealed class AppSurfaceThemeWebIntegrationTests
             _pairs = pairs.ToDictionary(pair => pair.Id.Value, StringComparer.Ordinal);
         }
 
+        public StubRegistry(
+            IReadOnlyCollection<AppSurfaceThemeId> themeIds,
+            Func<AppSurfaceThemeId, AppSurfaceThemePair> resolve)
+        {
+            ThemeIds = themeIds;
+            Resolve = resolve;
+            _pairs = new Dictionary<string, AppSurfaceThemePair>(StringComparer.Ordinal);
+        }
+
         public IReadOnlyCollection<AppSurfaceThemeId> ThemeIds { get; }
 
-        public AppSurfaceThemePair GetRequired(AppSurfaceThemeId id) =>
-            _pairs.TryGetValue(id.Value, out var pair)
+        private Func<AppSurfaceThemeId, AppSurfaceThemePair>? Resolve { get; }
+
+        public AppSurfaceThemePair GetRequired(AppSurfaceThemeId id)
+        {
+            if (Resolve is not null)
+            {
+                return Resolve(id);
+            }
+
+            return _pairs.TryGetValue(id.Value, out var pair)
                 ? pair
                 : throw new KeyNotFoundException();
+        }
     }
 
     private sealed class EmptyDocumentProvider : IAppSurfaceThemeDocumentProvider

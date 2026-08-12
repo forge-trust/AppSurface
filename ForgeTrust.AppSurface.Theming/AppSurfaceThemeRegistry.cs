@@ -18,12 +18,17 @@ public sealed class AppSurfaceThemeRegistryOptions
 /// <summary>Looks up validated registered pairs by identifier.</summary>
 public interface IAppSurfaceThemeRegistry
 {
-    /// <summary>Gets the canonical ids of every sealed registered pair in registration order.</summary>
+    /// <summary>Gets the non-empty, ordinally unique canonical ids of every sealed registered pair in registration order.</summary>
+    /// <remarks>
+    /// Each id returned by this collection must resolve through <see cref="GetRequired"/> to a pair whose
+    /// <see cref="AppSurfaceThemePair.Id"/> equals that id. Consumers may reject implementations that do not
+    /// maintain this sealed-snapshot contract.
+    /// </remarks>
     IReadOnlyCollection<AppSurfaceThemeId> ThemeIds { get; }
 
     /// <summary>Gets a sealed pair by its canonical identifier.</summary>
     /// <param name="id">Registered pair identifier.</param>
-    /// <returns>The sealed semantic pair.</returns>
+    /// <returns>The sealed semantic pair whose <see cref="AppSurfaceThemePair.Id"/> equals <paramref name="id"/>.</returns>
     /// <exception cref="KeyNotFoundException">Thrown when <paramref name="id"/> is not registered.</exception>
     AppSurfaceThemePair GetRequired(AppSurfaceThemeId id);
 }
