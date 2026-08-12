@@ -14,6 +14,7 @@ internal static class Program
     private const string PublishPrereleaseCommand = "publish-prerelease";
     private const string PublishStableCommand = "publish-stable";
     private const string SmokeInstallCommand = "smoke-install";
+    private const string ReleasePreparationWitnessCommand = "release-prep-witness";
 
     private static readonly string Usage = """
         ForgeTrust.AppSurface.PackageIndex
@@ -34,6 +35,8 @@ internal static class Program
                       Publish validated stable package artifacts to NuGet from a protected workflow job.
           smoke-install
                       Restore published packages from a clean NuGet configuration.
+          release-prep-witness
+                      Emit a read-only JSON witness for generated package documentation in a release-preparation diff.
           gate        Validate release metadata, package class rules, stale brand strings, and managed release-guidance policy; does not write files.
 
         Options:
@@ -61,6 +64,8 @@ internal static class Program
           --smoke-work-dir <path>
                                 Isolated smoke install work directory. Defaults to artifacts/package-smoke.
           --smoke-report <path> Smoke install report path. Defaults to artifacts/package-smoke-report.md.
+          --base-ref <ref>      Required fetched base ref or commit for release-prep-witness.
+          --witness <path>      Required JSON witness output path for release-prep-witness; normally a temporary path.
           -h, --help            Show this help.
         """;
 
@@ -135,7 +140,8 @@ internal static class Program
                 and not GateCommand
                 and not PublishPrereleaseCommand
                 and not PublishStableCommand
-                and not SmokeInstallCommand)
+                and not SmokeInstallCommand
+                and not ReleasePreparationWitnessCommand)
             {
                 await standardError.WriteLineAsync($"Unknown command '{command}'.");
                 await standardError.WriteLineAsync(Usage);
@@ -205,6 +211,17 @@ internal static class Program
                 await generator.VerifyAsync(options.Request, cancellationToken);
                 await standardOut.WriteLineAsync(
                     $"Generated package-index documents and managed package README release guidance are up to date: {FormatDisplayPath(options.Request.RepositoryRoot, options.Request.ChooserOutputPath)}, {FormatDisplayPath(options.Request.RepositoryRoot, options.Request.ReadinessOutputPath)}.");
+                return 0;
+            }
+
+            if (normalizedCommand == ReleasePreparationWitnessCommand)
+            {
+                var request = options.CreateReleasePreparationWitnessRequest();
+                var witnessBuilder = new ReleasePreparationWitnessBuilder(generator);
+                var witness = await witnessBuilder.CreateAsync(request.Request, request.BaseRef, cancellationToken);
+                await ReleasePreparationWitnessBuilder.WriteAsync(witness, request.WitnessPath, cancellationToken);
+                await standardOut.WriteLineAsync(
+                    $"Wrote release-preparation package witness with {witness.ChangedInputs.Count} changed input(s) and {witness.Surfaces.Count} generated surface(s): {request.WitnessPath}.");
                 return 0;
             }
 
@@ -325,6 +342,8 @@ internal static class Program
 /// <param name="ApiKeyEnvironmentVariable">Environment variable name that supplies the NuGet API key.</param>
 /// <param name="SmokeWorkDirectory">Resolved isolated smoke install work directory.</param>
 /// <param name="SmokeReportPath">Resolved smoke install report path.</param>
+/// <param name="BaseRef">Optional fetched base ref or commit used only by the release-preparation witness command.</param>
+/// <param name="WitnessPath">Optional explicit JSON witness destination used only by the release-preparation witness command.</param>
 internal sealed record CommandLineOptions(
     PackageIndexRequest Request,
     string ArtifactsOutputPath,
@@ -338,7 +357,9 @@ internal sealed record CommandLineOptions(
     string Source,
     string ApiKeyEnvironmentVariable,
     string SmokeWorkDirectory,
-    string SmokeReportPath)
+    string SmokeReportPath,
+    string? BaseRef,
+    string? WitnessPath)
 {
     /// <summary>
     /// Parses path-related CLI options into a resolved chooser request.
@@ -365,6 +386,8 @@ internal sealed record CommandLineOptions(
         string? apiKeyEnvironmentVariable = null;
         string? smokeWorkDirectory = null;
         string? smokeReportPath = null;
+        string? baseRef = null;
+        string? witnessPath = null;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -465,6 +488,18 @@ internal sealed record CommandLineOptions(
                 continue;
             }
 
+            if (string.Equals(argument, "--base-ref", StringComparison.Ordinal))
+            {
+                baseRef = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
+            if (string.Equals(argument, "--witness", StringComparison.Ordinal))
+            {
+                witnessPath = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
             throw new PackageIndexException($"Unknown option '{argument}'.");
         }
 
@@ -495,7 +530,9 @@ internal sealed record CommandLineOptions(
             string.IsNullOrWhiteSpace(source) ? "https://api.nuget.org/v3/index.json" : source,
             string.IsNullOrWhiteSpace(apiKeyEnvironmentVariable) ? "NUGET_API_KEY" : apiKeyEnvironmentVariable,
             resolvedSmokeWorkDirectory,
-            resolvedSmokeReportPath);
+            resolvedSmokeReportPath,
+            baseRef,
+            string.IsNullOrWhiteSpace(witnessPath) ? null : ResolvePath(witnessPath, repoRoot, witnessPath));
     }
 
     /// <summary>
@@ -553,6 +590,26 @@ internal sealed record CommandLineOptions(
             Source);
     }
 
+    /// <summary>
+    /// Validates the dedicated read-only release-preparation witness options.
+    /// </summary>
+    /// <returns>Resolved witness inputs.</returns>
+    /// <exception cref="PackageIndexException">Thrown when either required witness option is absent.</exception>
+    internal ReleasePreparationWitnessRequest CreateReleasePreparationWitnessRequest()
+    {
+        if (string.IsNullOrWhiteSpace(BaseRef))
+        {
+            throw new PackageIndexException("Command 'release-prep-witness' requires '--base-ref <ref>'.");
+        }
+
+        if (string.IsNullOrWhiteSpace(WitnessPath))
+        {
+            throw new PackageIndexException("Command 'release-prep-witness' requires '--witness <path>'.");
+        }
+
+        return new ReleasePreparationWitnessRequest(Request, BaseRef, WitnessPath);
+    }
+
     private static string ReadRequiredValue(string[] args, ref int index, string argument)
     {
         if (index + 1 >= args.Length || string.IsNullOrWhiteSpace(args[index + 1]))
@@ -576,3 +633,11 @@ internal sealed record CommandLineOptions(
             : Path.GetFullPath(Path.Combine(baseDirectory, value));
     }
 }
+
+/// <summary>
+/// Resolved inputs for the read-only package release-preparation witness command.
+/// </summary>
+/// <param name="Request">Package-index generation request rooted at the checked-out repository.</param>
+/// <param name="BaseRef">Fetched base ref or immutable base commit used to calculate the merge base.</param>
+/// <param name="WitnessPath">Explicit JSON output path, normally outside the repository.</param>
+internal sealed record ReleasePreparationWitnessRequest(PackageIndexRequest Request, string BaseRef, string WitnessPath);

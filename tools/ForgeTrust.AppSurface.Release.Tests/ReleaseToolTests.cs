@@ -6168,6 +6168,26 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task ProcessCommandRunnerReadsUtf8StandardOutput()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var runner = new ProcessCommandRunner();
+        var invocation = new CommandInvocation(
+            "/bin/sh",
+            ["-c", "printf 'Gr\\303\\274\\303\\237e'"],
+            _repositoryRoot);
+
+        var result = await runner.RunAsync(invocation, CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("Grüße", result.StandardOutput);
+    }
+
+    [Fact]
     public async Task PublishReportsPrereleasePackageWorkflowErrors()
     {
         await SeedRepositoryAsync();

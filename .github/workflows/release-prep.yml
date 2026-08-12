@@ -10,7 +10,7 @@ on:
         description: Release date in YYYY-MM-DD form.
         required: true
       base-ref:
-        description: Branch or ref to prepare from.
+        description: Branch name to prepare from.
         required: false
         default: main
   pull_request:
@@ -134,6 +134,7 @@ jobs:
       - name: Checkout pull request
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -143,166 +144,154 @@ jobs:
           dotnet-version: |
             10.0.x
 
-      - name: Recompute release warnings
+      - name: Verify complete release-preparation diff
+        env:
+          RELEASE_PREP_REPORT: ${{ runner.temp }}/release-prep-diff-report.md
         run: |
           set -euo pipefail
-          git fetch origin "${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}"
-          if ! release_prep_changes="$(git diff --no-renames --name-status "origin/${GITHUB_BASE_REF}...HEAD" -- \
-            CHANGELOG.md \
-            releases/current.md \
-            releases/current.md.yml \
-            releases/unreleased.md \
-            releases/unreleased.md.yml \
-            releases/unreleased.entries \
-            ':(glob)releases/v*.md' \
-            ':(glob)releases/v*.md.yml' \
-            ':(glob)releases/v*.release.json' \
-            ':(glob)releases/v*.evidence.json')"; then
-            echo "Could not inspect release-preparation paths in the pull request diff." >&2
-            exit 1
-          fi
-          if ! manifest_paths="$(git diff --no-renames --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- ':(glob)releases/v*.release.json')"; then
-            echo "Could not inspect versioned release manifests in the pull request diff." >&2
-            exit 1
-          fi
-          manifests=()
-          while IFS= read -r manifest; do
-            [[ -n "${manifest}" ]] && manifests+=("${manifest}")
-          done <<< "${manifest_paths}"
-          if [[ "${#manifests[@]}" -eq 0 ]]; then
-            current_pointer_markdown_added=false
-            current_pointer_sidecar_added=false
-            requires_release_manifest=false
-            while IFS=$'\t' read -r status path; do
-              [[ -z "${status}" ]] && continue
-              case "${status}:${path}" in
-                M:releases/unreleased.md) ;;
-                A:releases/unreleased.entries/*.md) ;;
-                A:releases/current.md) current_pointer_markdown_added=true ;;
-                A:releases/current.md.yml) current_pointer_sidecar_added=true ;;
-                *) requires_release_manifest=true ;;
-              esac
-            done <<< "${release_prep_changes}"
-            if [[ "${requires_release_manifest}" == true || "${current_pointer_markdown_added}" != "${current_pointer_sidecar_added}" ]]; then
-              echo "Release-prep-owned paths changed without exactly one added or modified versioned release manifest. Non-release pull requests may update releases/unreleased.md and may bootstrap both releases/current.md and releases/current.md.yml together." >&2
+          ./eng/release verify-prep-diff \
+            --base-ref "${GITHUB_BASE_REF}" \
+            --report "${RELEASE_PREP_REPORT}"
+
+      - name: Validate release semantics
+        if: ${{ success() }}
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          manifest_paths="$(git diff --name-only --diff-filter=A "origin/${BASE_REF}...HEAD" -- ':(glob)releases/v*.release.json')"
+          if [[ -n "${manifest_paths}" ]]; then
+            if [[ "$(printf '%s\n' "${manifest_paths}" | sed '/^$/d' | wc -l | tr -d ' ')" != "1" ]]; then
+              echo "verify-prep-diff accepted an invalid release manifest set." >&2
               exit 1
             fi
-            echo "No versioned release manifest changed; validating the complete release test suite without applying the release-artifact diff gate."
-            dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj
+            version="${manifest_paths#releases/v}"
+            version="${version%.release.json}"
+            export RELEASE_PREP_POLICY_BASE_REF="${BASE_REF}"
+            export RELEASE_PREP_POLICY_VERSION="${version}"
+          fi
+
+          dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj
+          if [[ -z "${manifest_paths}" ]]; then
             exit 0
           fi
-          if [[ "${#manifests[@]}" -ne 1 ]]; then
-            echo "Release preparation pull requests must add or modify exactly one versioned release manifest." >&2
-            exit 1
-          fi
-          version=""
-          if [[ -f "${manifests[0]}" ]]; then
-            version="$(jq -r '.version // empty' "${manifests[0]}")"
-          fi
-          if [[ -z "${version}" ]]; then
-            echo "The changed release manifest must declare a version." >&2
-            exit 1
-          fi
-          RELEASE_PREP_POLICY_BASE_REF="${GITHUB_BASE_REF}" \
-          RELEASE_PREP_POLICY_VERSION="${version}" \
-            dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj
-          if [[ "${version}" != *-* ]]; then
-            evidence_path="releases/v${version}.evidence.json"
-            docs_exact_tree_path="$(jq -r '.docsArchive.exactTreePath // ""' "${evidence_path}")"
-            docs_release_manifest_sha256="$(jq -r '.docsArchive.releaseManifestSha256 // ""' "${evidence_path}")"
-            if [[ -z "${docs_exact_tree_path}" || -z "${docs_release_manifest_sha256}" ]]; then
-              echo "Stable release evidence must include docsArchive.exactTreePath and docsArchive.releaseManifestSha256 before release-prep review." >&2
-              exit 1
-            fi
-
-            normalized_exact_tree_path="${docs_exact_tree_path#./}"
-            case "${normalized_exact_tree_path}" in
-              ""|/*|../*|*/../*|*/..|"."|".."|.*|*/.*|*//*)
-                echo "Stable docs exactTreePath '${docs_exact_tree_path}' must be a trusted-root-relative path with no parent, hidden, or empty segments." >&2
-                exit 1
-                ;;
-            esac
-
-            docs_release_root="${RUNNER_TEMP}/appsurface-release-prep-docs-${version}"
-            docs_exact_tree="${docs_release_root}/${normalized_exact_tree_path}"
-            mkdir -p "$(dirname "${docs_exact_tree}")"
-            docs_source_ref="$(jq -r '.preparationBaseCommit // ""' "releases/v${version}.release.json")"
-            if [[ -z "${docs_source_ref}" ]]; then
-              docs_source_ref="$(git rev-parse HEAD)"
-            fi
-            export AppSurfaceDocs__Contributor__DefaultBranch="${GITHUB_BASE_REF}"
-            export AppSurfaceDocs__Contributor__SourceRef="${docs_source_ref}"
-            export AppSurfaceDocs__Contributor__SourceUrlTemplate="https://github.com/${GITHUB_REPOSITORY}/blob/{branch}/{path}"
-            export AppSurfaceDocs__Contributor__SymbolSourceUrlTemplate="https://github.com/${GITHUB_REPOSITORY}/blob/{ref}/{path}#L{line}"
-            export AppSurfaceDocs__Contributor__EditUrlTemplate="https://github.com/${GITHUB_REPOSITORY}/edit/{branch}/{path}"
-            export AppSurfaceDocs__Contributor__LastUpdatedMode="Git"
-            export AppSurfaceDocs__Identity__DisplayName="AppSurface"
-            export AppSurfaceDocs__Identity__Wordmark__HighlightText="Surface"
-            export AppSurfaceDocs__Identity__Wordmark__HighlightColor="#3b82f6"
-            export AppSurfaceDocs__Identity__BrandingAssets__DirectoryPath="branding"
-            export AppSurfaceDocs__Identity__BrandingAssets__AllowSvgAssets="true"
-            export AppSurfaceDocs__Identity__Logo__Path="/branding/appsurface-site-icon.svg"
-            export AppSurfaceDocs__Identity__Favicon__SvgPath="/branding/appsurface-site-icon.svg"
-            export AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0="Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js"
-            printf '%s\n' '/' '/docs' > "${RUNNER_TEMP}/appsurface-docs-seeds.txt"
-
-            docs_export_repo="."
-            docs_export_project="Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"
-            if git rev-parse --verify --quiet "refs/tags/v${version}^{commit}" >/dev/null; then
-              docs_export_repo="${RUNNER_TEMP}/appsurface-release-prep-source-${version}"
-              git worktree add --detach "${docs_export_repo}" "refs/tags/v${version}^{commit}"
-              docs_export_project="${docs_export_repo}/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"
-              docs_source_ref="$(git -C "${docs_export_repo}" rev-parse HEAD)"
-            fi
-            export AppSurfaceDocs__Contributor__SourceRef="${docs_source_ref}"
-
-            dotnet run --project "${docs_export_project}" -c Release -- \
-              docs export \
-              --repo "${docs_export_repo}" \
-              --mode cdn \
-              --seeds "${RUNNER_TEMP}/appsurface-docs-seeds.txt" \
-              --output "${docs_exact_tree}" \
-              --public-origin https://forge-trust.com \
-              --startup-timeout-seconds 30 \
-              --strict
-
-            catalog_release_manifest_sha256="${docs_release_manifest_sha256}"
-            if [[ "${catalog_release_manifest_sha256}" == "generated" ]]; then
-              catalog_release_manifest_sha256="$(sha256sum "${docs_exact_tree}/.appsurface-docs-release-manifest.json" | awk '{print $1}')"
-            fi
-
-            jq -n \
-              --arg version "${version}" \
-              --arg exactTreePath "${docs_exact_tree_path}" \
-              --arg releaseManifestSha256 "${catalog_release_manifest_sha256}" \
-              '{
-                recommendedVersion: $version,
-                versions: [
-                  {
-                    version: $version,
-                    label: $version,
-                    summary: ("Stable AppSurface release " + $version),
-                    exactTreePath: $exactTreePath,
-                    releaseManifestSha256: $releaseManifestSha256,
-                    supportState: "Current",
-                    visibility: "Public",
-                    advisoryState: "None"
-                  }
-                ]
-              }' > "${docs_release_root}/versions.json"
-
-            dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
-              docs verify-archive \
-              --catalog "${docs_release_root}/versions.json" \
-              --version "${version}" \
-              --trusted-release-root "${docs_release_root}"
-
-            ./eng/release check \
-              --version "${version}" \
-              --fail-on-warnings \
-              --allow-existing-targets \
-              --docs-catalog "${docs_release_root}/versions.json" \
-              --docs-trusted-release-root "${docs_release_root}"
-          else
+          if [[ "${version}" == *-* ]]; then
             ./eng/release check --version "${version}" --fail-on-warnings --allow-existing-targets
+            exit 0
+          fi
+
+          evidence_path="releases/v${version}.evidence.json"
+          docs_exact_tree_path="$(jq -r '.docsArchive.exactTreePath // ""' "${evidence_path}")"
+          docs_release_manifest_sha256="$(jq -r '.docsArchive.releaseManifestSha256 // ""' "${evidence_path}")"
+          if [[ -z "${docs_exact_tree_path}" || -z "${docs_release_manifest_sha256}" ]]; then
+            echo "Stable release evidence must include docsArchive.exactTreePath and docsArchive.releaseManifestSha256 before release-prep review." >&2
+            exit 1
+          fi
+
+          normalized_exact_tree_path="${docs_exact_tree_path#./}"
+          case "${normalized_exact_tree_path}" in
+            ""|/*|../*|*/../*|*/..|"."|".."|.*|*/.*|*//*)
+              echo "Stable docs exactTreePath '${docs_exact_tree_path}' must be a trusted-root-relative path with no parent, hidden, or empty segments." >&2
+              exit 1
+              ;;
+          esac
+
+          docs_release_root="${RUNNER_TEMP}/appsurface-release-prep-docs-${version}"
+          docs_exact_tree="${docs_release_root}/${normalized_exact_tree_path}"
+          mkdir -p "$(dirname "${docs_exact_tree}")"
+          docs_source_ref="$(jq -r '.preparationBaseCommit // ""' "releases/v${version}.release.json")"
+          if [[ -z "${docs_source_ref}" ]]; then
+            docs_source_ref="$(git rev-parse HEAD)"
+          fi
+          export AppSurfaceDocs__Contributor__DefaultBranch="${BASE_REF}"
+          export AppSurfaceDocs__Contributor__SourceRef="${docs_source_ref}"
+          export AppSurfaceDocs__Contributor__SourceUrlTemplate="https://github.com/${GITHUB_REPOSITORY}/blob/{branch}/{path}"
+          export AppSurfaceDocs__Contributor__SymbolSourceUrlTemplate="https://github.com/${GITHUB_REPOSITORY}/blob/{ref}/{path}#L{line}"
+          export AppSurfaceDocs__Contributor__EditUrlTemplate="https://github.com/${GITHUB_REPOSITORY}/edit/{branch}/{path}"
+          export AppSurfaceDocs__Contributor__LastUpdatedMode="Git"
+          export AppSurfaceDocs__Identity__DisplayName="AppSurface"
+          export AppSurfaceDocs__Identity__Wordmark__HighlightText="Surface"
+          export AppSurfaceDocs__Identity__Wordmark__HighlightColor="#3b82f6"
+          export AppSurfaceDocs__Identity__BrandingAssets__DirectoryPath="branding"
+          export AppSurfaceDocs__Identity__BrandingAssets__AllowSvgAssets="true"
+          export AppSurfaceDocs__Identity__Logo__Path="/branding/appsurface-site-icon.svg"
+          export AppSurfaceDocs__Identity__Favicon__SvgPath="/branding/appsurface-site-icon.svg"
+          export AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0="Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js"
+          printf '%s\n' '/' '/docs' > "${RUNNER_TEMP}/appsurface-docs-seeds.txt"
+
+          docs_export_repo="."
+          docs_export_project="Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"
+          if git rev-parse --verify --quiet "refs/tags/v${version}^{commit}" >/dev/null; then
+            docs_export_repo="${RUNNER_TEMP}/appsurface-release-prep-source-${version}"
+            git worktree add --detach "${docs_export_repo}" "refs/tags/v${version}^{commit}"
+            docs_export_project="${docs_export_repo}/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"
+            docs_source_ref="$(git -C "${docs_export_repo}" rev-parse HEAD)"
+          fi
+          export AppSurfaceDocs__Contributor__SourceRef="${docs_source_ref}"
+
+          dotnet run --project "${docs_export_project}" -c Release -- \
+            docs export \
+            --repo "${docs_export_repo}" \
+            --mode cdn \
+            --seeds "${RUNNER_TEMP}/appsurface-docs-seeds.txt" \
+            --output "${docs_exact_tree}" \
+            --public-origin https://forge-trust.com \
+            --startup-timeout-seconds 30 \
+            --strict
+
+          catalog_release_manifest_sha256="${docs_release_manifest_sha256}"
+          if [[ "${catalog_release_manifest_sha256}" == "generated" ]]; then
+            catalog_release_manifest_sha256="$(sha256sum "${docs_exact_tree}/.appsurface-docs-release-manifest.json" | awk '{print $1}')"
+          fi
+
+          jq -n \
+            --arg version "${version}" \
+            --arg exactTreePath "${docs_exact_tree_path}" \
+            --arg releaseManifestSha256 "${catalog_release_manifest_sha256}" \
+            '{
+              recommendedVersion: $version,
+              versions: [
+                {
+                  version: $version,
+                  label: $version,
+                  summary: ("Stable AppSurface release " + $version),
+                  exactTreePath: $exactTreePath,
+                  releaseManifestSha256: $releaseManifestSha256,
+                  supportState: "Current",
+                  visibility: "Public",
+                  advisoryState: "None"
+                }
+              ]
+            }' > "${docs_release_root}/versions.json"
+
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
+            docs verify-archive \
+            --catalog "${docs_release_root}/versions.json" \
+            --version "${version}" \
+            --trusted-release-root "${docs_release_root}"
+
+          ./eng/release check \
+            --version "${version}" \
+            --fail-on-warnings \
+            --allow-existing-targets \
+            --docs-catalog "${docs_release_root}/versions.json" \
+            --docs-trusted-release-root "${docs_release_root}"
+
+      - name: Publish release-preparation diff report
+        if: ${{ always() }}
+        env:
+          RELEASE_PREP_REPORT: ${{ runner.temp }}/release-prep-diff-report.md
+        run: |
+          set -euo pipefail
+          if [[ -L "${RELEASE_PREP_REPORT}" ]]; then
+            echo "Release-preparation report must not be a symbolic link." >&2
+            exit 1
+          fi
+          if [[ -f "${RELEASE_PREP_REPORT}" ]]; then
+            cat "${RELEASE_PREP_REPORT}" >> "${GITHUB_STEP_SUMMARY}"
+            rm -- "${RELEASE_PREP_REPORT}"
+          else
+            echo "# Release-preparation diff report" >> "${GITHUB_STEP_SUMMARY}"
+            echo "" >> "${GITHUB_STEP_SUMMARY}"
+            echo "The verifier did not produce a report; inspect the failed verification step." >> "${GITHUB_STEP_SUMMARY}"
           fi
