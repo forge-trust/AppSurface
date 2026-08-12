@@ -3421,6 +3421,37 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Contains($"@{lifecycle}", diagnostic.Cause, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("@alpha   ", "alpha", "Alpha")]
+    [InlineData("@beta\t", "beta", "Beta")]
+    [InlineData("@deprecated   ", "public", "Public API")]
+    public async Task HarvestAsync_ShouldTreatWhitespaceOnlyLifecycleModifierContentAsEmpty(
+        string lifecycleDoclet,
+        string expectedLifecycle,
+        string expectedLabel)
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            $$"""
+            /**
+             * Whitespace-normalized lifecycle helper.
+             * @public
+             * @namespace RazorWire
+             * {{lifecycleDoclet}}
+             */
+            function whitespaceLifecycleHelper() {}
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/public-api.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var symbol = Assert.Single(docs, doc => doc.Path.EndsWith("#function-whitespacelifecyclehelper", StringComparison.Ordinal));
+        Assert.Equal(expectedLifecycle, symbol.GeneratedApiSymbol?.ApiLifecycle);
+        Assert.Equal(expectedLabel, symbol.GeneratedApiSymbol?.ApiLifecycleLabel);
+        Assert.Equal(expectedLifecycle == "public", symbol.GeneratedApiSymbol?.IsDeprecated);
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
     [Fact]
     public async Task HarvestAsync_ShouldProjectLifecycleMetadataForStandaloneBrowserContracts()
     {

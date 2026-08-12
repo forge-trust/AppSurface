@@ -550,15 +550,25 @@ declare global {
   }
 
   function renderSearchLifecycleBadges(item, className = '') {
+    return getSearchLifecycleBadges(item, className)
+      .map(({ label, className: badgeClassName }) => `<span class="${badgeClassName}">${escapeHtml(label)}</span>`)
+      .join('');
+  }
+
+  function appendSearchLifecycleBadges(parent, item, className = '') {
+    getSearchLifecycleBadges(item, className).forEach(({ label, className: badgeClassName }) => {
+      parent.append(createElement('span', badgeClassName, label));
+    });
+  }
+
+  function getSearchLifecycleBadges(item, className = '') {
     const lifecycle = getSearchLifecycleLabel(item);
     const deprecated = getSearchDeprecationLabel(item);
     const classes = ['docs-search-result-badge', className].filter(Boolean).join(' ');
-    const badges = [
-      lifecycle ? `<span class="${classes} docs-search-result-badge-lifecycle">${escapeHtml(lifecycle)}</span>` : '',
-      deprecated ? `<span class="${classes} docs-search-result-badge-deprecated">${deprecated}</span>` : ''
-    ];
-
-    return badges.filter(Boolean).join('');
+    return [
+      lifecycle ? { label: lifecycle, className: `${classes} docs-search-result-badge-lifecycle` } : null,
+      deprecated ? { label: deprecated, className: `${classes} docs-search-result-badge-deprecated` } : null
+    ].filter(Boolean);
   }
 
   function limitDraftQuery(value) {
@@ -1454,17 +1464,7 @@ declare global {
       badgeRow.append(pageTypeBadge);
     }
 
-    const lifecycle = getSearchLifecycleLabel(doc);
-    if (lifecycle) {
-      badgeRow.append(createSearchResultBadge(lifecycle));
-      badgeRow.lastElementChild?.classList.add('docs-search-result-badge-lifecycle');
-    }
-
-    const deprecated = getSearchDeprecationLabel(doc);
-    if (deprecated) {
-      badgeRow.append(createSearchResultBadge(deprecated));
-      badgeRow.lastElementChild?.classList.add('docs-search-result-badge-deprecated');
-    }
+    appendSearchLifecycleBadges(badgeRow, doc);
 
     if (doc.languageLabel || doc.language) {
       badgeRow.append(createSearchResultBadge(`Language: ${doc.languageLabel || formatFacetValue(doc.language)}`));
@@ -2044,7 +2044,7 @@ declare global {
       const navigationAttributes = getDocsNavigationAttributes(item.path);
       const resultKind = getSearchResultKind(item);
       return `<li id="docs-search-option-${index}" role="option" aria-selected="${selected}" tabindex="-1" class="docs-search-option" data-href="${escapeHtml(item.path)}">
-        <a href="${escapeHtml(item.path)}"${navigationAttributes} data-rw-product-result-rank="${index + 1}" data-rw-product-result-kind="${escapeHtml(resultKind)}" data-rw-product-result-surface="sidebar">
+        <a href="${escapeHtml(item.path)}"${navigationAttributes} aria-label="${escapeHtml(createSearchResultLinkLabel(item))}" data-rw-product-result-rank="${index + 1}" data-rw-product-result-kind="${escapeHtml(resultKind)}" data-rw-product-result-surface="sidebar">
           <span class="docs-search-option-title-row">
             <span class="docs-search-option-title">${escapeHtml(item.title)}</span>
             ${pageTypeBadge}

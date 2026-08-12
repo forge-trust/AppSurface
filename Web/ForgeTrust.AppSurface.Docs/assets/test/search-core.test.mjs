@@ -353,6 +353,38 @@ test('rankSearchResults promotes generated API fragments for lifecycle queries',
   }
 });
 
+test('rankSearchResults keeps lifecycle symbols ahead of internal documents for lifecycle queries', async () => {
+  const { explainSearchResultRanking, normalizeSearchDocument, rankSearchResults } = await loadSearchCore();
+  const internalGuide = normalizeSearchDocument({
+    id: 'internal-beta-guide',
+    path: '/docs/internals/beta-guidance',
+    title: 'Beta internal guidance',
+    pageType: 'guide',
+    audience: 'maintainer',
+    bodyText: 'Beta release process for maintainers.'
+  });
+  const generatedSymbol = normalizeSearchDocument({
+    id: 'beta-runtime-symbol',
+    path: '/docs/api/javascript/razorwire#beta-runtime',
+    title: 'Beta runtime API',
+    apiLifecycle: 'beta',
+    apiLifecycleLabel: 'Beta',
+    isGeneratedApiSymbol: true
+  });
+
+  const candidates = [
+    { doc: internalGuide, miniSearchRank: 0, miniSearchScore: 10 },
+    { doc: generatedSymbol, miniSearchRank: 1, miniSearchScore: 1 }
+  ];
+  const ranked = rankSearchResults(candidates, { query: 'beta' });
+  const explanation = explainSearchResultRanking(candidates, { query: 'beta' });
+
+  assert.equal(ranked[0].id, generatedSymbol.id);
+  assert.equal(explanation[0].doc.id, generatedSymbol.id);
+  assert.equal(explanation[0].lifecycleSymbolMatch, true);
+  assert.equal(explanation[1].internalDemotion, true);
+});
+
 test('rankSearchResults promotes metadata and entry point matches before body-only matches', async () => {
   const { normalizeSearchDocument, rankSearchResults } = await loadSearchCore();
   const docs = [
