@@ -168,6 +168,13 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.Contains("| `ASCOV131` | No `coverage.cobertura.xml` files were found.", readme, StringComparison.Ordinal);
         Assert.Contains("- run: dotnet restore ./MyApp.slnx", readme, StringComparison.Ordinal);
         Assert.Contains("dotnet tool run appsurface coverage run --solution ./MyApp.slnx --configuration Release --no-restore", readme, StringComparison.Ordinal);
+        Assert.Contains("#### Coverage Efficiency Evidence Workflow", readme, StringComparison.Ordinal);
+        Assert.Contains("../../.github/workflows/coverage-efficiency.yml", readme, StringComparison.Ordinal);
+        Assert.Contains("coverage-efficiency-evidence", readme, StringComparison.Ordinal);
+        Assert.Contains("exact coverage-step wall-clock duration", readme, StringComparison.Ordinal);
+        Assert.Contains("end-to-end project-run", readme, StringComparison.Ordinal);
+        Assert.Contains("attribution rather than test-process time", readme, StringComparison.Ordinal);
+        Assert.Contains("../../artifacts/issue-728-test-efficiency/", readme, StringComparison.Ordinal);
         Assert.DoesNotContain("intentionally does not expose run or merge orchestration yet", readme, StringComparison.Ordinal);
     }
 
@@ -228,6 +235,12 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.Contains("[coverage driver selection](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-driver-selection)", readme, StringComparison.Ordinal);
         Assert.Contains("native Microsoft Testing Platform projects are rejected", readme, StringComparison.Ordinal);
         Assert.Contains("--coverage-driver msbuild", readme, StringComparison.Ordinal);
+        Assert.Contains("### Coverage efficiency evidence for issue #728", readme, StringComparison.Ordinal);
+        Assert.Contains("BUILD_CONFIGURATION=Release", readme, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_PARALLELISM=2", readme, StringComparison.Ordinal);
+        Assert.Contains("coverage-efficiency-evidence", readme, StringComparison.Ordinal);
+        Assert.Contains("`appsurface coverage run --dry-run` only to inspect discovery", readme, StringComparison.Ordinal);
+        Assert.Contains("./artifacts/issue-728-test-efficiency/", readme, StringComparison.Ordinal);
     }
 
     private static bool HasDirectMsbuildCoverageReference(string path)

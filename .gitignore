@@ -29,6 +29,10 @@ bld/
 project.lock.json
 project.fragment.lock.json
 artifacts/
+!/artifacts/
+artifacts/*
+!/artifacts/issue-728-test-efficiency/
+!/artifacts/issue-728-test-efficiency/*.md
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt

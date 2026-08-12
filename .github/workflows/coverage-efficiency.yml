@@ -1,0 +1,467 @@
+name: Coverage Efficiency Evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache-state:
+        description: Run the declared cold or warm comparison state.
+        required: true
+        default: warm
+        type: choice
+        options:
+          - cold
+          - warm
+
+permissions:
+  contents: read
+
+jobs:
+  capture-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: |
+            10.0.x
+          cache: true
+          cache-dependency-path: |
+            **/packages.lock.json
+            **/packages.*.lock.json
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 11.1.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: Web/pnpm-lock.yaml
+
+      - name: Prepare declared comparison state
+        env:
+          CACHE_STATE: ${{ inputs['cache-state'] }}
+        run: |
+          set -euo pipefail
+          case "$CACHE_STATE" in
+            cold)
+              dotnet nuget locals global-packages --clear
+              pnpm store prune
+              ;;
+            warm)
+              ;;
+            *)
+              echo "Unsupported cache state: $CACHE_STATE" >&2
+              exit 2
+              ;;
+          esac
+
+      - name: Restore .NET packages (locked, cache-aware)
+        run: dotnet restore ForgeTrust.AppSurface.slnx --locked-mode
+
+      - name: Verify generated package chooser
+        run: |
+          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --configuration Release --no-restore -- verify
+
+      - name: Verify generated Markdown snippets
+        run: |
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Durable/ForgeTrust.AppSurface.Durable/README.md
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Web/ForgeTrust.AppSurface.Web/README.md
+
+      - name: Verify packed Durable consumers
+        run: ./Durable/verify-packed-consumers.sh
+
+      - name: Verify web assets
+        run: |
+          pnpm --dir Web install --frozen-lockfile
+          pnpm --dir Web run assets:typecheck
+          pnpm --dir Web run assets:test
+          pnpm --dir Web run assets:build
+          pnpm --dir Web run assets:verify
+
+      - name: Capture coverage efficiency evidence
+        id: coverage
+        env:
+          BUILD_CONFIGURATION: Release
+          BUILD_NO_RESTORE: true
+          COVERAGE_PARALLELISM: 2
+          COVERAGE_GATE_DIFF_BASE: ''
+        run: |
+          set -euo pipefail
+          evidence_root="$RUNNER_TEMP/coverage-efficiency-evidence"
+          mkdir -p "$evidence_root"
+          started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          started_seconds="$(date +%s)"
+
+          set +e
+          ./scripts/coverage-solution.sh
+          coverage_exit_code=$?
+          set -e
+
+          echo "coverage-exit-code=$coverage_exit_code" >> "$GITHUB_OUTPUT"
+
+          finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          finished_seconds="$(date +%s)"
+          duration_seconds="$(( finished_seconds - started_seconds ))"
+
+          runtime_capture_exit_code=0
+          capture_status=complete
+
+          if dotnet_sdk_version="$(dotnet --version)" && dotnet --info > "$evidence_root/dotnet-info.txt" 2>&1; then
+            :
+          else
+            dotnet_sdk_version=unavailable
+            runtime_capture_exit_code=1
+            capture_status=failed
+          fi
+
+          if docker version > "$evidence_root/docker-version.txt" 2>&1 \
+            && docker_server_version="$(docker version --format '{{.Server.Version}}')"; then
+            :
+          else
+            docker_server_version=unavailable
+            runtime_capture_exit_code=1
+            capture_status=failed
+          fi
+
+          postgresql_image="$(sed -n '/internal const string Reference/,/;/s/.*"\([^"]*\)".*/\1/p' Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlTestContainerImage.cs)"
+          if [[ -z "$postgresql_image" ]]; then
+            printf '%s\n' 'PostgreSQL image reference could not be read from the repository source.' > "$evidence_root/postgresql-image.json"
+            runtime_capture_exit_code=1
+            capture_status=failed
+          elif ! docker image inspect "$postgresql_image" > "$evidence_root/postgresql-image.json" 2>&1; then
+            runtime_capture_exit_code=1
+            capture_status=failed
+          fi
+
+          if pnpm_version="$(pnpm --version)"; then
+            printf '%s\n' "$pnpm_version" > "$evidence_root/pnpm-version.txt"
+          else
+            printf '%s\n' 'pnpm version lookup failed.' > "$evidence_root/pnpm-version.txt"
+            pnpm_version=unavailable
+            runtime_capture_exit_code=1
+            capture_status=failed
+          fi
+
+          if node_version="$(node --version)"; then
+            printf '%s\n' "$node_version" > "$evidence_root/node-version.txt"
+          else
+            printf '%s\n' 'Node.js version lookup failed.' > "$evidence_root/node-version.txt"
+            node_version=unavailable
+            runtime_capture_exit_code=1
+            capture_status=failed
+          fi
+
+          playwright_package_version="$(sed -n 's/.*<PackageVersion Include="Microsoft.Playwright" Version="\([^"]*\)".*/\1/p' Directory.Packages.props)"
+          playwright_root="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
+          playwright_browser_status=available
+          if [[ -z "$playwright_package_version" ]]; then
+            playwright_package_version=unavailable
+            playwright_browser_status=package-version-unavailable
+            runtime_capture_exit_code=1
+            capture_status=failed
+          fi
+
+          playwright_chromium_paths=()
+          playwright_chromium_count=0
+          while IFS= read -r playwright_chromium_path; do
+            playwright_chromium_paths+=("$playwright_chromium_path")
+            playwright_chromium_count="$(( playwright_chromium_count + 1 ))"
+          done < <(find "$playwright_root" -maxdepth 1 -mindepth 1 -type d -name 'chromium-*' -print 2>/dev/null || true)
+          if (( playwright_chromium_count == 0 )); then
+            playwright_browser_status=chromium-unavailable
+            runtime_capture_exit_code=1
+            capture_status=failed
+          fi
+
+          {
+            echo "package-version=$playwright_package_version"
+            echo "browser-root=$playwright_root"
+            echo "browser-status=$playwright_browser_status"
+            if (( playwright_chromium_count > 0 )); then
+              for playwright_chromium_path in "${playwright_chromium_paths[@]}"; do
+                echo "installed=$(basename "$playwright_chromium_path")"
+              done
+            fi
+          } > "$evidence_root/playwright-browser-inventory.txt"
+
+          jq -n \
+            --arg schema_version "1" \
+            --arg workflow "coverage-efficiency.yml" \
+            --arg workflow_run_url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg commit_sha "$GITHUB_SHA" \
+            --arg ref "$GITHUB_REF" \
+            --arg runner_os "$RUNNER_OS" \
+            --arg runner_arch "$RUNNER_ARCH" \
+            --arg runner_name "$RUNNER_NAME" \
+            --arg runner_image_os "${ImageOS:-unknown}" \
+            --arg runner_image_version "${ImageVersion:-unknown}" \
+            --arg dotnet_sdk_version "$dotnet_sdk_version" \
+            --arg docker_server_version "$docker_server_version" \
+            --arg postgresql_image "$postgresql_image" \
+            --arg pnpm_version "$pnpm_version" \
+            --arg node_version "$node_version" \
+            --arg playwright_package_version "$playwright_package_version" \
+            --arg playwright_browser_root "$playwright_root" \
+            --arg playwright_browser_status "$playwright_browser_status" \
+            --arg runtime_capture_status "$capture_status" \
+            --argjson runtime_capture_exit_code "$runtime_capture_exit_code" \
+            --arg cache_state "${{ inputs['cache-state'] }}" \
+            --arg started_at "$started_at" \
+            --arg finished_at "$finished_at" \
+            --arg build_configuration "Release" \
+            --arg build_no_restore "true" \
+            --arg coverage_parallelism "2" \
+            --arg coverage_gate_diff_base "" \
+            --arg coverage_require_non_sandbox "true" \
+            --argjson coverage_step_duration_seconds "$duration_seconds" \
+            --argjson coverage_exit_code "$coverage_exit_code" \
+            '{schemaVersion: $schema_version, workflow: $workflow, workflowRunUrl: $workflow_run_url, commitSha: $commit_sha, ref: $ref, runner: {os: $runner_os, architecture: $runner_arch, name: $runner_name, imageOs: $runner_image_os, imageVersion: $runner_image_version}, runtime: {captureStatus: $runtime_capture_status, captureExitCode: $runtime_capture_exit_code, dotnetSdkVersion: $dotnet_sdk_version, dockerServerVersion: $docker_server_version, postgresqlImage: $postgresql_image, pnpmVersion: $pnpm_version, nodeVersion: $node_version, playwrightPackageVersion: $playwright_package_version, playwrightBrowserRoot: $playwright_browser_root, playwrightBrowserStatus: $playwright_browser_status}, comparison: {cacheState: $cache_state, buildConfiguration: $build_configuration, buildNoRestore: $build_no_restore, coverageParallelism: $coverage_parallelism, coverageGateDiffBase: $coverage_gate_diff_base, coverageRequireNonSandbox: $coverage_require_non_sandbox}, coverageStep: {startedAt: $started_at, finishedAt: $finished_at, durationSeconds: $coverage_step_duration_seconds, exitCode: $coverage_exit_code}}' \
+            > "$evidence_root/environment-manifest.json"
+
+          {
+            echo "coverage-duration-seconds=$duration_seconds"
+            echo "runtime-capture-exit-code=$runtime_capture_exit_code"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Assemble coverage efficiency evidence
+        if: ${{ always() && !cancelled() }}
+        env:
+          COVERAGE_EXIT_CODE: ${{ steps.coverage.outputs.coverage-exit-code }}
+          RUNTIME_CAPTURE_EXIT_CODE: ${{ steps.coverage.outputs.runtime-capture-exit-code }}
+        run: |
+          set -euo pipefail
+          evidence_root="$RUNNER_TEMP/coverage-efficiency-evidence"
+          coverage_root="TestResults/coverage-merged"
+          output_root="$evidence_root/coverage-output"
+          mkdir -p "$output_root/projects"
+
+          copy_if_present() {
+            local source="$1"
+            local destination="$2"
+            if [[ -f "$source" ]]; then
+              mkdir -p "$(dirname "$destination")"
+              cp "$source" "$destination"
+            fi
+          }
+
+          copy_if_present "$coverage_root/timings.json" "$output_root/timings.json"
+          copy_if_present "$coverage_root/slow-test-diagnostics.md" "$output_root/slow-test-diagnostics.md"
+          copy_if_present "$coverage_root/slow-test-diagnostics.json" "$output_root/slow-test-diagnostics.json"
+          copy_if_present "$coverage_root/coverage.cobertura.xml" "$output_root/coverage.cobertura.xml"
+          copy_if_present "$coverage_root/summary.txt" "$output_root/summary.txt"
+          copy_if_present "$coverage_root/reportgenerator-summary.txt" "$output_root/reportgenerator-summary.txt"
+          copy_if_present "$coverage_root/coverage-gate.json" "$output_root/coverage-gate.json"
+          copy_if_present "$coverage_root/coverage-gate.md" "$output_root/coverage-gate.md"
+
+          if [[ -f "$output_root/timings.json" ]]; then
+            jq '
+              . as $timings
+              | ($timings.projects | sort_by(.executionIndex)) as $projects
+              | {
+                  schemaVersion: 1,
+                  schedule: $timings.schedule,
+                  actualSerialSet: [
+                    range(0; $projects | length) as $index
+                    | $projects[$index] as $project
+                    | select($project.exclusive)
+                    | (
+                        ([$projects[0:$index][]] | reverse)
+                        | reduce .[] as $preceding (
+                            {precedingParallelBatch: [], stopped: false};
+                            if .stopped then .
+                            elif $preceding.exclusive then .stopped = true
+                            else .precedingParallelBatch += [$preceding.project]
+                            end)
+                        | {
+                            project: $project.project,
+                            originalIndex: $project.originalIndex,
+                            executionIndex: $project.executionIndex,
+                            scheduleReason: $project.scheduleReason,
+                            precedingParallelBatch: (.precedingParallelBatch | reverse),
+                            barrierCriticalPathRationale: "Exclusive projects wait for the preceding parallel batch before running."
+                          }
+                      )
+                  ]
+                }' "$output_root/timings.json" > "$output_root/resolved-serial-set.json" || true
+          fi
+
+          shopt -s nullglob
+          shopt -s globstar
+          junit_files=("$coverage_root"/junit-coverage-*.xml)
+          for source in "${junit_files[@]}"; do
+            cp "$source" "$output_root/"
+          done
+
+          project_logs=("$coverage_root"/projects/**/dotnet-test.log "$coverage_root"/projects/**/coverage-normalization.log)
+          for source in "${project_logs[@]}"; do
+            relative_path="${source#"$coverage_root"/}"
+            mkdir -p "$output_root/$(dirname "$relative_path")"
+            cp "$source" "$output_root/$relative_path"
+          done
+
+          evidence_contract_complete=true
+          evidence_contract_errors=()
+          require_nonempty_file() {
+            local path="$1"
+            local description="$2"
+            if [[ ! -s "$path" ]]; then
+              evidence_contract_complete=false
+              evidence_contract_errors+=("$description: $path")
+            fi
+          }
+
+          required_files=(
+            "$evidence_root/environment-manifest.json"
+            "$evidence_root/dotnet-info.txt"
+            "$evidence_root/docker-version.txt"
+            "$evidence_root/postgresql-image.json"
+            "$evidence_root/pnpm-version.txt"
+            "$evidence_root/node-version.txt"
+            "$evidence_root/playwright-browser-inventory.txt"
+          )
+          if [[ "$COVERAGE_EXIT_CODE" == "0" ]]; then
+            required_files+=(
+              "$output_root/timings.json"
+              "$output_root/slow-test-diagnostics.md"
+              "$output_root/slow-test-diagnostics.json"
+              "$output_root/coverage.cobertura.xml"
+              "$output_root/summary.txt"
+              "$output_root/coverage-gate.json"
+              "$output_root/coverage-gate.md"
+              "$output_root/resolved-serial-set.json"
+            )
+            if (( ${#junit_files[@]} == 0 )); then
+              evidence_contract_complete=false
+              evidence_contract_errors+=("No managed JUnit evidence was produced.")
+            fi
+            if (( ${#project_logs[@]} == 0 )); then
+              evidence_contract_complete=false
+              evidence_contract_errors+=("No project log evidence was produced.")
+            fi
+
+            project_evidence_rows=''
+            if [[ -s "$output_root/timings.json" ]] \
+              && project_evidence_rows="$(jq -r '
+                .projects[]
+                | select(.executionStatus == "completed")
+                | [
+                    .log,
+                    .coverageCleanupLog,
+                    ([.testResults[] | select(.format == "junit") | .path] | first)
+                  ]
+                | @tsv' "$output_root/timings.json")"; then
+              :
+            else
+              evidence_contract_complete=false
+              evidence_contract_errors+=("Timings evidence could not be read for per-project validation.")
+            fi
+
+            if [[ "$evidence_contract_complete" == true ]]; then
+              if [[ -z "$project_evidence_rows" ]]; then
+                evidence_contract_complete=false
+                evidence_contract_errors+=("No completed project evidence was produced.")
+              else
+                while IFS=$'\t' read -r project_log normalization_log junit_log; do
+                  if [[ -z "$project_log" ]]; then
+                    evidence_contract_complete=false
+                    evidence_contract_errors+=("Missing project test log path.")
+                  else
+                    require_nonempty_file "$output_root/$project_log" "Missing project test log"
+                  fi
+                  if [[ -n "$normalization_log" ]]; then
+                    require_nonempty_file "$output_root/$normalization_log" "Missing project normalization log"
+                  fi
+                  if [[ -z "$junit_log" ]]; then
+                    evidence_contract_complete=false
+                    evidence_contract_errors+=("Missing managed JUnit log path.")
+                  else
+                    require_nonempty_file "$output_root/$junit_log" "Missing managed JUnit log"
+                  fi
+                done <<< "$project_evidence_rows"
+              fi
+            fi
+          fi
+
+          for required_file in "${required_files[@]}"; do
+            require_nonempty_file "$required_file" "Required coverage evidence file is missing or empty"
+          done
+
+          capture_status=complete
+          if [[ "$COVERAGE_EXIT_CODE" != "0" || "$RUNTIME_CAPTURE_EXIT_CODE" != "0" || "$evidence_contract_complete" != true ]]; then
+            capture_status=failed
+          fi
+
+          artifact_contract_errors_json='[]'
+          if (( ${#evidence_contract_errors[@]} > 0 )); then
+            artifact_contract_errors_json="$(printf '%s\n' "${evidence_contract_errors[@]}" | jq -R . | jq -s .)"
+          fi
+
+          jq -n \
+            --arg capture_status "$capture_status" \
+            --argjson coverage_exit_code "$COVERAGE_EXIT_CODE" \
+            --argjson runtime_capture_exit_code "$RUNTIME_CAPTURE_EXIT_CODE" \
+            --argjson artifact_contract_complete "$evidence_contract_complete" \
+            --argjson artifact_contract_errors "$artifact_contract_errors_json" \
+            --arg artifact_contract "complete evidence requires environment-manifest.json, runtime inventories, timings, resolved serial-set and barrier-critical-path evidence, managed JUnit, diagnostics, coverage, gate reports, and project logs" \
+            '{captureStatus: $capture_status, coverageExitCode: $coverage_exit_code, runtimeCaptureExitCode: $runtime_capture_exit_code, artifactContractComplete: $artifact_contract_complete, artifactContractErrors: $artifact_contract_errors, artifactContract: $artifact_contract}' \
+            > "$evidence_root/evidence-completeness.json"
+
+          if [[ "$evidence_contract_complete" != true ]]; then
+            printf '%s\n' "${evidence_contract_errors[@]}" >&2
+            exit 1
+          fi
+
+      - name: Upload coverage efficiency evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() && !cancelled() }}
+        with:
+          name: coverage-efficiency-evidence
+          path: ${{ runner.temp }}/coverage-efficiency-evidence
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish coverage efficiency summary
+        if: ${{ always() && !cancelled() }}
+        env:
+          COVERAGE_EXIT_CODE: ${{ steps.coverage.outputs.coverage-exit-code }}
+          COVERAGE_DURATION_SECONDS: ${{ steps.coverage.outputs.coverage-duration-seconds }}
+        run: |
+          {
+            echo "## Coverage efficiency evidence"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+            echo "| Cache state | \`${{ inputs['cache-state'] }}\` |"
+            echo "| Coverage-step wall time | ${COVERAGE_DURATION_SECONDS:-unavailable}s |"
+            echo "| Coverage exit code | ${COVERAGE_EXIT_CODE:-unavailable} |"
+            echo "| Artifact | \`coverage-efficiency-evidence\` (retained 14 days) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail unsuccessful coverage capture
+        if: ${{ always() && !cancelled() && steps.coverage.outputs.coverage-exit-code != '0' }}
+        env:
+          COVERAGE_EXIT_CODE: ${{ steps.coverage.outputs.coverage-exit-code }}
+        run: exit "$COVERAGE_EXIT_CODE"
+
+      - name: Fail incomplete runtime evidence capture
+        if: ${{ always() && !cancelled() && steps.coverage.outputs.coverage-exit-code == '0' && steps.coverage.outputs.runtime-capture-exit-code != '0' }}
+        env:
+          RUNTIME_CAPTURE_EXIT_CODE: ${{ steps.coverage.outputs.runtime-capture-exit-code }}
+        run: exit "$RUNTIME_CAPTURE_EXIT_CODE"
