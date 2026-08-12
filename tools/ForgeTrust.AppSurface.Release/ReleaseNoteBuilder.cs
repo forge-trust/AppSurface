@@ -241,19 +241,27 @@ internal static class ReleaseNoteBuilder
             start++;
         }
 
-        delimiter = start < line.Length ? line[start] : '\0';
+        var candidateDelimiter = start < line.Length ? line[start] : '\0';
+        delimiter = '\0';
         delimiterCount = 0;
-        if (start > 3 || (delimiter != '`' && delimiter != '~'))
+        if (start > 3 || (candidateDelimiter != '`' && candidateDelimiter != '~'))
         {
             return false;
         }
 
-        while (start + delimiterCount < line.Length && line[start + delimiterCount] == delimiter)
+        while (start + delimiterCount < line.Length && line[start + delimiterCount] == candidateDelimiter)
         {
             delimiterCount++;
         }
 
-        return delimiterCount >= 3;
+        if (delimiterCount < 3)
+        {
+            delimiterCount = 0;
+            return false;
+        }
+
+        delimiter = candidateDelimiter;
+        return true;
     }
 
     private static bool IsFencedCodeBlockClosingLine(string line, char delimiter, int delimiterCount)

@@ -6091,6 +6091,33 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public void ReleaseNoteBuilderHandlesInvalidMarkdownBlockBoundaries()
+    {
+        var placeholder = ReleaseNoteBuilder.UnreleasedTemplatePlaceholders[0];
+        const string marker = "<!-- appsurface:unreleased-entries section=\"taking-shape\" -->";
+
+        var fourSpaceIndentedOpening = $"# Unreleased\n\n    ```text\n{placeholder}\n\n{marker}\n";
+        var strippedAfterIndentedOpening = ReleaseNoteBuilder.StripResetOnlyTemplatePlaceholders(fourSpaceIndentedOpening);
+
+        Assert.DoesNotContain(placeholder, strippedAfterIndentedOpening, StringComparison.Ordinal);
+
+        var shortFenceDelimiter = $"# Unreleased\n\n``\n{placeholder}\n\n{marker}\n";
+        var strippedAfterShortFenceDelimiter = ReleaseNoteBuilder.StripResetOnlyTemplatePlaceholders(shortFenceDelimiter);
+
+        Assert.DoesNotContain(placeholder, strippedAfterShortFenceDelimiter, StringComparison.Ordinal);
+
+        var fourSpaceIndentedClosing = $"# Unreleased\n\n```text\nExample.\n    ```\n{placeholder}\n\n{marker}\n";
+        var preservedAfterIndentedClosing = ReleaseNoteBuilder.StripResetOnlyTemplatePlaceholders(fourSpaceIndentedClosing);
+
+        Assert.Contains(placeholder, preservedAfterIndentedClosing, StringComparison.Ordinal);
+
+        var unsupportedHtmlTag = $"# Unreleased\n\n<foo>\n{placeholder}\n\n{marker}\n";
+        var strippedAfterUnsupportedHtmlTag = ReleaseNoteBuilder.StripResetOnlyTemplatePlaceholders(unsupportedHtmlTag);
+
+        Assert.DoesNotContain(placeholder, strippedAfterUnsupportedHtmlTag, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ModuleRegistersReleaseServicesAndNoOpHooks()
     {
         var module = new ReleaseCliModule();
