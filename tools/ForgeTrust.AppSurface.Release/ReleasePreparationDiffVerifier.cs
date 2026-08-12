@@ -140,7 +140,7 @@ internal sealed class ReleasePreparationDiffVerifier
             var deleteWitness = false;
             if (string.IsNullOrWhiteSpace(resolvedWitnessPath))
             {
-                resolvedWitnessPath = Path.Combine(Path.GetTempPath(), $"appsurface-release-prep-witness-{Guid.NewGuid():N}.json");
+                resolvedWitnessPath = Path.Join(Path.GetTempPath(), $"appsurface-release-prep-witness-{Guid.NewGuid():N}.json");
                 deleteWitness = true;
                 var witnessCommand = await RunProcessAsync(
                     "dotnet",
@@ -306,7 +306,7 @@ internal sealed class ReleasePreparationDiffVerifier
         }
 
         var version = ReleaseManifestPath.Match(manifests[0].Path).Groups["version"].Value;
-        var manifestPath = Path.Combine(repositoryRoot, manifests[0].Path.Replace('/', Path.DirectorySeparatorChar));
+        var manifestPath = Path.Join(repositoryRoot, manifests[0].Path.Replace('/', Path.DirectorySeparatorChar));
         try
         {
             var json = await File.ReadAllTextAsync(manifestPath, cancellationToken);
@@ -380,22 +380,16 @@ internal sealed class ReleasePreparationDiffVerifier
                 $"'{change.Path}' with status {change.Status} is not part of the release-preparation contract.", "Move unrelated work to a separate pull request, or regenerate the approved release artifacts.");
         }
 
-        foreach (var expectedPath in expected)
+        foreach (var expectedPath in expected.Where(expectedPath => !changes.Any(change => string.Equals(change.Path, expectedPath.Key, StringComparison.Ordinal))))
         {
-            if (!changes.Any(change => string.Equals(change.Path, expectedPath.Key, StringComparison.Ordinal)))
-            {
-                Add(diagnostics, "release-prep-unexpected-path", "A required release-preparation artifact is missing.",
-                    $"The complete diff does not contain '{expectedPath.Key}'.", "Regenerate the complete release artifact set with ./eng/release prepare.");
-            }
+            Add(diagnostics, "release-prep-unexpected-path", "A required release-preparation artifact is missing.",
+                $"The complete diff does not contain '{expectedPath.Key}'.", "Regenerate the complete release artifact set with ./eng/release prepare.");
         }
 
-        foreach (var consumedPath in consumed)
+        foreach (var consumedPath in consumed.Where(consumedPath => !changes.Any(change => change.Status == "D" && string.Equals(change.Path, consumedPath, StringComparison.Ordinal))))
         {
-            if (!changes.Any(change => change.Status == "D" && string.Equals(change.Path, consumedPath, StringComparison.Ordinal)))
-            {
-                Add(diagnostics, "release-prep-release-manifest-shape", "The release manifest records an unreleased entry that was not deleted.",
-                    $"'{consumedPath}' is listed in consumedUnreleasedEntryPaths but has no D diff entry.", "Regenerate the release artifacts so the manifest and archive handoff agree.");
-            }
+            Add(diagnostics, "release-prep-release-manifest-shape", "The release manifest records an unreleased entry that was not deleted.",
+                $"'{consumedPath}' is listed in consumedUnreleasedEntryPaths but has no D diff entry.", "Regenerate the release artifacts so the manifest and archive handoff agree.");
         }
     }
 
@@ -512,7 +506,7 @@ internal sealed class ReleasePreparationDiffVerifier
                 continue;
             }
 
-            var fullPath = Path.Combine(repositoryRoot, output.Replace('/', Path.DirectorySeparatorChar));
+            var fullPath = Path.Join(repositoryRoot, output.Replace('/', Path.DirectorySeparatorChar));
             if (surface.Kind == "managed-readme")
             {
                 var baseContent = await ReadGitFileAsync(repositoryRoot, mergeBase, output, cancellationToken);
@@ -533,13 +527,10 @@ internal sealed class ReleasePreparationDiffVerifier
             }
         }
 
-        foreach (var input in witness.ChangedInputs)
+        foreach (var input in witness.ChangedInputs.Where(input => !input.Surfaces.Any(changedOutputs.Contains)))
         {
-            if (!input.Surfaces.Any(changedOutputs.Contains))
-            {
-                Add(diagnostics, "release-prep-package-surface-without-source", "A changed package source did not produce a changed generated surface.",
-                    $"'{input.Path}' authorizes no changed package output in this diff.", "Remove the unrelated source edit or regenerate and commit each affected package surface.");
-            }
+            Add(diagnostics, "release-prep-package-surface-without-source", "A changed package source did not produce a changed generated surface.",
+                $"'{input.Path}' authorizes no changed package output in this diff.", "Remove the unrelated source edit or regenerate and commit each affected package surface.");
         }
     }
 
@@ -572,8 +563,13 @@ internal sealed class ReleasePreparationDiffVerifier
         try
         {
             using var document = JsonDocument.Parse(json);
-            if (document.RootElement.ValueKind != JsonValueKind.Object
-                || !TryGetObject(document.RootElement, ["schema", "baseRef", "baseTipCommit", "mergeBaseCommit", "headCommit", "verification", "changedInputs", "surfaces"], out var root, out issue)
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                issue = "Witness JSON root must be an object.";
+                return false;
+            }
+
+            if (!TryGetObject(document.RootElement, ["schema", "baseRef", "baseTipCommit", "mergeBaseCommit", "headCommit", "verification", "changedInputs", "surfaces"], out var root, out issue)
                 || !TryGetRequiredString(root, "schema", out var schema, out issue)
                 || !TryGetRequiredString(root, "baseRef", out var baseRef, out issue)
                 || !TryGetRequiredString(root, "baseTipCommit", out var baseTip, out issue)

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using ForgeTrust.AppSurface.PackageIndex;
 
@@ -41,6 +42,9 @@ public sealed class ReleasePreparationWitnessTests
         Assert.Equal("body\r\n", body);
         Assert.Throws<PackageIndexException>(() => ReleaseGuidanceRenderer.ExtractManagedRegionBody(
             content + "<!-- appsurface-release-guidance: begin -->\n",
+            "src/Package/README.md"));
+        Assert.Throws<PackageIndexException>(() => ReleaseGuidanceRenderer.ExtractManagedRegionBody(
+            "<!-- appsurface-release-guidance: end -->\nbody\n<!-- appsurface-release-guidance: begin -->\n",
             "src/Package/README.md"));
     }
 
@@ -104,6 +108,185 @@ public sealed class ReleasePreparationWitnessTests
             }
         }
     }
+
+    [Fact]
+    public async Task WitnessCommandRecordsManifestChangesFromAnIndependentGitHistory()
+    {
+        var repositoryRoot = Path.Join(Path.GetTempPath(), "ReleasePreparationWitnessTests", Guid.NewGuid().ToString("N"));
+        var witnessPath = Path.Join(repositoryRoot, "artifacts", "witness.json");
+        try
+        {
+            await WriteRepositoryFileAsync(
+                repositoryRoot,
+                "packages/package-index.yml",
+                """
+                packages:
+                  - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                    product_family: appsurface
+                    classification: public
+                    publish_decision: publish
+                    release_guidance_variant: default
+                    order: 10
+                    use_when: Use the test package.
+                    includes: Test package hosting.
+                    does_not_include: Optional packages.
+                    start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+                """);
+            await WriteRepositoryFileAsync(repositoryRoot, "packages/README.md.yml", "title: Package chooser\n");
+            await WriteRepositoryFileAsync(
+                repositoryRoot,
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <PackageId>ForgeTrust.AppSurface.Web</PackageId>
+                    <IsPackable>true</IsPackable>
+                  </PropertyGroup>
+                </Project>
+                """);
+            await WriteRepositoryFileAsync(
+                repositoryRoot,
+                "Web/ForgeTrust.AppSurface.Web/README.md",
+                """
+                # Web package
+
+                <!-- appsurface-release-guidance: begin -->
+                baseline guidance
+                <!-- appsurface-release-guidance: end -->
+                """);
+            await WriteRepositoryFileAsync(repositoryRoot, "examples/web-app/README.md", "# Web example\n");
+            await WriteRepositoryFileAsync(repositoryRoot, "start-here/first-success-path.md", "# Package-first path\n");
+            await WriteRepositoryFileAsync(repositoryRoot, "releases/README.md", "# Releases\n");
+            await WriteRepositoryFileAsync(repositoryRoot, "releases/upgrade-policy.md", "# Upgrade policy\n");
+            await WriteRepositoryFileAsync(repositoryRoot, "CHANGELOG.md", "# Changelog\n");
+            await WriteRepositoryFileAsync(repositoryRoot, "tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.template", ValidReleaseGuidanceTemplate("Baseline"));
+            await RunGitAsync(repositoryRoot, "init");
+            await RunGitAsync(repositoryRoot, "config", "user.email", "tests@example.test");
+            await RunGitAsync(repositoryRoot, "config", "user.name", "PackageIndex Tests");
+            await RunGitAsync(repositoryRoot, "add", ".");
+            await RunGitAsync(repositoryRoot, "commit", "-m", "baseline");
+            var manifestPath = Path.Join(repositoryRoot, "packages", "package-index.yml");
+            var manifest = await File.ReadAllTextAsync(manifestPath);
+            await File.WriteAllTextAsync(manifestPath, manifest.Replace("order: 10", "order: 11", StringComparison.Ordinal));
+            await File.WriteAllTextAsync(Path.Join(repositoryRoot, "tools", "ForgeTrust.AppSurface.PackageIndex", "release-guidance.template"), ValidReleaseGuidanceTemplate("Updated"));
+            await RunGitAsync(repositoryRoot, "add", "packages/package-index.yml", "tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.template");
+            await RunGitAsync(repositoryRoot, "commit", "-m", "change semantic inputs");
+
+            await using var output = new StringWriter();
+            await using var error = new StringWriter();
+            var exitCode = await Program.RunAsync(
+                ["release-prep-witness", "--repo-root", repositoryRoot, "--base-ref", "HEAD~1", "--witness", witnessPath],
+                output,
+                error,
+                repositoryRoot);
+
+            Assert.True(exitCode == 0, error.ToString());
+            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(witnessPath));
+            var changedInputs = document.RootElement.GetProperty("changedInputs").EnumerateArray().ToArray();
+            Assert.Equal(2, changedInputs.Length);
+            var manifestInput = Assert.Single(changedInputs, input => input.GetProperty("path").GetString() == "packages/package-index.yml");
+            Assert.Equal("package-index-manifest", manifestInput.GetProperty("kind").GetString());
+            Assert.Equal(3, manifestInput.GetProperty("surfaces").GetArrayLength());
+            var templateInput = Assert.Single(changedInputs, input => input.GetProperty("path").GetString() == "tools/ForgeTrust.AppSurface.PackageIndex/release-guidance.template");
+            Assert.Equal("release-guidance-template", templateInput.GetProperty("kind").GetString());
+            Assert.Equal(["Web/ForgeTrust.AppSurface.Web/README.md"], templateInput.GetProperty("surfaces").EnumerateArray().Select(surface => surface.GetString()));
+        }
+        finally
+        {
+            if (Directory.Exists(repositoryRoot))
+            {
+                Directory.Delete(repositoryRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task WitnessCommandReportsAnUnavailableBaseRefWithoutWritingOutput()
+    {
+        var path = Path.Join(Path.GetTempPath(), "ReleasePreparationWitnessTests", Guid.NewGuid().ToString("N"), "witness.json");
+        await using var output = new StringWriter();
+        await using var error = new StringWriter();
+
+        var exitCode = await Program.RunAsync(
+            ["release-prep-witness", "--base-ref", "refs/heads/does-not-exist", "--witness", path],
+            output,
+            error,
+            GetRepositoryRoot());
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("Git command failed", error.ToString(), StringComparison.Ordinal);
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public async Task PackageGateRoutesThroughTheFallbackWhenNoExplicitCommandMatches()
+    {
+        var repositoryRoot = Path.Join(Path.GetTempPath(), "ReleasePreparationWitnessTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repositoryRoot);
+        await using var output = new StringWriter();
+        await using var error = new StringWriter();
+        try
+        {
+            var exitCode = await Program.RunAsync(["gate", "--repo-root", repositoryRoot], output, error, repositoryRoot);
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("does not exist", error.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    private static async Task WriteRepositoryFileAsync(string repositoryRoot, string relativePath, string content)
+    {
+        var path = TestPathUtils.PathUnder(repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        var directory = Path.GetDirectoryName(path);
+        Assert.NotNull(directory);
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(path, content);
+    }
+
+    private static async Task RunGitAsync(string repositoryRoot, params string[] arguments)
+    {
+        var startInfo = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = repositoryRoot,
+            RedirectStandardError = true
+        };
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = new Process { StartInfo = startInfo };
+        Assert.True(process.Start());
+        var standardError = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        Assert.True(process.ExitCode == 0, standardError);
+    }
+
+    private static string ValidReleaseGuidanceTemplate(string description) =>
+        """
+        <!-- appsurface-release-guidance-template: default begin -->
+        ## Release Guidance
+
+        __DESCRIPTION__ {{PackageChooserUrl}} {{ReleaseHubUrl}}
+        <!-- appsurface-release-guidance-template: default end -->
+
+        <!-- appsurface-release-guidance-template: apphost begin -->
+        ## Release Guidance
+
+        __DESCRIPTION__ {{PackageChooserUrl}} {{ReleaseHubUrl}}
+        <!-- appsurface-release-guidance-template: apphost end -->
+
+        <!-- appsurface-release-guidance-template: experimental begin -->
+        ## Release Guidance
+
+        __DESCRIPTION__ {{PackageChooserUrl}} {{ReleaseHubUrl}}
+        <!-- appsurface-release-guidance-template: experimental end -->
+        """.Replace("__DESCRIPTION__", description, StringComparison.Ordinal);
 
     private static string GetRepositoryRoot(
         [System.Runtime.CompilerServices.CallerFilePath] string sourcePath = "")
