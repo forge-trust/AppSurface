@@ -619,7 +619,7 @@ GitHub's default `pull_request` checkout is the synthetic merge commit. `fetch-d
 
 #### Coverage Efficiency Evidence Workflow
 
-AppSurface’s repository-only [Coverage Efficiency Evidence workflow](../../.github/workflows/coverage-efficiency.yml)
+AppSurface’s repository-only [Coverage Efficiency Evidence workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/coverage-efficiency.yml)
 is a manual `cold`/`warm` comparison path for [issue #728](https://github.com/forge-trust/AppSurface/issues/728),
 not a new public `coverage run` option or an ordinary pull-request gate. It invokes the existing
 `./scripts/coverage-solution.sh` lane with `BUILD_CONFIGURATION=Release`,
@@ -647,7 +647,7 @@ five seconds without moving delay to an adjacent barrier batch.
 
 Use `coverage run --dry-run` or `--list-projects` to inspect selected projects, automatic
 exclusivity, and artifact paths before a run. Those commands are preflight only: they do not produce a
-baseline sample. The committed [issue #728 evidence templates](../../artifacts/issue-728-test-efficiency/)
+baseline sample. The committed [issue #728 evidence templates](https://github.com/forge-trust/AppSurface/tree/main/artifacts/issue-728-test-efficiency)
 define the scope reconciliation, candidate admission, timing formulas, failure-injection proof, and
 no-change-ceiling handoff. If Docker/PostgreSQL or Chromium is unavailable, a runtime fingerprint
 differs, an artifact is incomplete, or a sample class remains noisier than 10% after its one retry,

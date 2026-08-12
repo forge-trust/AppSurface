@@ -169,12 +169,12 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.Contains("- run: dotnet restore ./MyApp.slnx", readme, StringComparison.Ordinal);
         Assert.Contains("dotnet tool run appsurface coverage run --solution ./MyApp.slnx --configuration Release --no-restore", readme, StringComparison.Ordinal);
         Assert.Contains("#### Coverage Efficiency Evidence Workflow", readme, StringComparison.Ordinal);
-        Assert.Contains("../../.github/workflows/coverage-efficiency.yml", readme, StringComparison.Ordinal);
+        Assert.Contains("https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/coverage-efficiency.yml", readme, StringComparison.Ordinal);
         Assert.Contains("coverage-efficiency-evidence", readme, StringComparison.Ordinal);
         Assert.Contains("high-resolution monotonic duration of the coverage-wrapper invocation", readme, StringComparison.Ordinal);
         Assert.Contains("end-to-end project-run", readme, StringComparison.Ordinal);
         Assert.Contains("attribution rather than test-process time", readme, StringComparison.Ordinal);
-        Assert.Contains("../../artifacts/issue-728-test-efficiency/", readme, StringComparison.Ordinal);
+        Assert.Contains("https://github.com/forge-trust/AppSurface/tree/main/artifacts/issue-728-test-efficiency", readme, StringComparison.Ordinal);
         Assert.DoesNotContain("intentionally does not expose run or merge orchestration yet", readme, StringComparison.Ordinal);
     }
 
