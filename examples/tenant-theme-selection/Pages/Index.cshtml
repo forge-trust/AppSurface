@@ -1,0 +1,22 @@
+@page
+@addTagHelper *, ForgeTrust.AppSurface.Web
+@inject TenantThemeContext TenantContext
+@{
+    var variant = TenantContext.TenantId switch
+    {
+        "tenant-a" => "A",
+        "tenant-b" => "B",
+        _ => "default"
+    };
+}
+<!doctype html>
+<html appsurface-theme-root>
+<head>
+    <meta charset="utf-8" />
+    <appsurface-theme-head />
+    <title>Tenant theme selection proof</title>
+</head>
+<body>
+    <span data-tenant-variant="@variant">@variant</span>
+</body>
+</html>
