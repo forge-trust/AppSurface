@@ -425,8 +425,9 @@ public sealed class CoverageSolutionScriptTests
         var standardErrorTask = process.StandardError.ReadToEndAsync();
         await Task.WhenAll(process.WaitForExitAsync(), standardErrorTask);
 
-        Assert.Equal(0, process.ExitCode);
-        Assert.True(string.IsNullOrWhiteSpace(await standardErrorTask), await standardErrorTask);
+        var standardError = await standardErrorTask;
+        Assert.True(process.ExitCode == 0, standardError);
+        Assert.True(string.IsNullOrWhiteSpace(standardError), standardError);
 
         var completeness = await File.ReadAllTextAsync(Path.Join(evidenceRoot, "evidence-completeness.json"));
         Assert.Contains("\"captureStatus\": \"complete\"", completeness, StringComparison.Ordinal);
