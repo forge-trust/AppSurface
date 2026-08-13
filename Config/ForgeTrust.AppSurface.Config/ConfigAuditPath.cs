@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 
 namespace ForgeTrust.AppSurface.Config;
 
@@ -43,9 +44,10 @@ internal sealed record ConfigAuditPath(
         ConfigAuditDictionaryKeyCorrelationContext correlation)
     {
         var rawLabel = ConvertDictionaryKeyToLabel(key, out var conversionFailed, out var truncated);
-        var displayLabel = truncated
+        var rawDisplayLabel = truncated
             ? $"{rawLabel[..MaxDictionaryKeyLabelLength]}..."
             : rawLabel;
+        var displayLabel = EscapeDictionaryLabel(rawDisplayLabel);
         var keyIsSensitive = ConfigAuditRedactor.ContainsSensitiveFragment(rawLabel);
         var normalizedSensitivity = ConfigAuditEntryOptions.NormalizeSensitivity(options.Sensitivity);
         var entryIsSensitive = normalizedSensitivity == ConfigAuditSensitivity.Sensitive;
@@ -60,7 +62,7 @@ internal sealed record ConfigAuditPath(
             : suppressLabel || conversionFailed ? "[key]" : displayLabel;
         var displayKey = isRedacted
             ? $"{DisplayPath}[{label}]"
-            : $"{DisplayPath}[\"{EscapeDictionaryLabel(label)}\"]";
+            : $"{DisplayPath}[\"{label}\"]";
         var canUseExactSource = !isRedacted && !truncated && IsPlainSourceSegment(rawLabel);
 
         return new ConfigAuditPath(
@@ -82,8 +84,44 @@ internal sealed record ConfigAuditPath(
             RequiresInheritedSource || !canUseExactSource);
     }
 
-    private static string EscapeDictionaryLabel(string value) =>
-        value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
+    private static string EscapeDictionaryLabel(string value)
+    {
+        var builder = new StringBuilder(value.Length);
+        foreach (var character in value)
+        {
+            switch (character)
+            {
+                case '\\':
+                    builder.Append("\\\\");
+                    break;
+                case '\"':
+                    builder.Append("\\\"");
+                    break;
+                case '\r':
+                    builder.Append("\\r");
+                    break;
+                case '\n':
+                    builder.Append("\\n");
+                    break;
+                case '\t':
+                    builder.Append("\\t");
+                    break;
+                default:
+                    if (char.IsControl(character))
+                    {
+                        builder.Append("\\u").Append(((int)character).ToString("x4", CultureInfo.InvariantCulture));
+                    }
+                    else
+                    {
+                        builder.Append(character);
+                    }
+
+                    break;
+            }
+        }
+
+        return builder.ToString();
+    }
 
     private static bool HasRedactedDictionaryLabel(ConfigAuditElementIdentity? element) =>
         element is

@@ -62,6 +62,7 @@ Tailwind runtime package references must stay visible in every build graph. `Tai
 | Workflow/job | Package-sensitive? | Property value | Where to set it |
 | --- | --- | --- | --- |
 | `build.yml` / `build` | No | default `true` | Leave unset because the solution build compiles Tailwind-consuming projects |
+| `build.yml` / `coverage-security-platform` | No | `false` for binary resolution and build integration | The selected CLI security tests transitively compile the docs project but do not validate CSS or produce packages, so skip both the runtime download and generated CSS. Before compiling, the job creates an empty transient `site.gen.css` because the docs project embeds that generated file. |
 | `code-quality.yml` / `dotnet-format` | No | default `true` | Leave unset because the pre-format build compiles Tailwind-consuming projects |
 | `vcs-ignore-parity.yml` / `parity` smoke step | No | `false` | Dedicated runtime-project build step; the following docs tests leave Tailwind generation enabled |
 | `package-gate.yml` / `package-gate` | Yes | `true` | Pass `/p:TailwindRuntimeBinaryResolutionEnabled=true` on restore/build/pack |

@@ -320,6 +320,28 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
+      "consoleappexample": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Config": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Console": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.config": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "Microsoft.Extensions.Options": "[10.0.8, )"
+        }
+      },
+      "forgetrust.appsurface.config.localsecrets": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Config": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "Microsoft.Extensions.Options": "[10.0.8, )"
+        }
+      },
       "forgetrust.appsurface.console": {
         "type": "Project",
         "dependencies": {
@@ -333,6 +355,14 @@
           "CliWrap": "[3.10.1, )",
           "Microsoft.Extensions.Hosting": "[10.0.8, )",
           "Microsoft.Extensions.Logging.Console": "[10.0.8, )"
+        }
+      },
+      "localsecretsexample": {
+        "type": "Project",
+        "dependencies": {
+          "CliFx": "[3.0.0, )",
+          "ForgeTrust.AppSurface.Config.LocalSecrets": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Console": "[0.1.0, )"
         }
       },
       "CliFx": {

@@ -45,7 +45,125 @@ public sealed class ConfigDiagnosticsCommandRunnerTests
         Assert.Null(result.Failure);
         Assert.Contains("Environment: Staging", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("Billing.Endpoint = https://billing.internal", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Mode:", output.ToString(), StringComparison.Ordinal);
         A.CallTo(() => reporter.GetReport("Staging")).MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public void Run_WithDefaultModeOverload_UsesLegacyReportGetReport()
+    {
+        var reporter = A.Fake<IConfigAuditReporter>();
+        var environmentProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environmentProvider.Environment).Returns("Production");
+        A.CallTo(() => reporter.GetReport("Production")).Returns(CreateReport(
+            "Production",
+            new ConfigAuditEntry
+            {
+                Key = "Billing.Endpoint",
+                State = ConfigAuditEntryState.Resolved,
+                DisplayValue = "https://billing.internal",
+                Sources =
+                [
+                    new ConfigAuditSourceRecord
+                    {
+                        Kind = ConfigAuditSourceKind.File,
+                        ProviderName = "FileBasedConfigProvider",
+                        FilePath = "/repo/appsettings.Production.json",
+                        ConfigPath = "Billing.Endpoint",
+                        AppliedToPath = "Billing.Endpoint",
+                        Role = ConfigAuditSourceRole.Base
+                    }
+                ]
+            }));
+        using var output = new StringWriter();
+        var runner = new ConfigDiagnosticsCommandRunner(
+            reporter,
+            new ConfigAuditTextRenderer(),
+            environmentProvider);
+
+        var result = runner.Run(output, ConfigAuditReportMode.Default);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("Production", result.Environment);
+        Assert.Null(result.Failure);
+        Assert.DoesNotContain("Mode: ExpandKnownEntryCollections", output.ToString(), StringComparison.Ordinal);
+        A.CallTo(() => reporter.GetReport("Production")).MustHaveHappenedOnceExactly();
+        A.CallTo(() => reporter.GetReport(A<ConfigAuditReportRequest>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public void Run_WithExpandedMode_UsesReportRequestAndRendersMode()
+    {
+        var reporter = A.Fake<IConfigAuditReporter>();
+        var environmentProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environmentProvider.Environment).Returns("Production");
+        A.CallTo(() => reporter.GetReport(
+            A<ConfigAuditReportRequest>.That.Matches(request =>
+                    request.Environment == "Production"
+                    && request.Mode == ConfigAuditReportMode.ExpandKnownEntryCollections)))
+            .Returns(CreateReport(
+                "Production",
+                ConfigAuditReportMode.ExpandKnownEntryCollections,
+                new ConfigAuditEntry
+                {
+                    Key = "App:Secrets",
+                    State = ConfigAuditEntryState.Resolved,
+                    DisplayValue = "{...}",
+                    Sources =
+                    [
+                        new ConfigAuditSourceRecord
+                        {
+                            Kind = ConfigAuditSourceKind.File,
+                            ProviderName = "FileBasedConfigProvider",
+                            FilePath = "/repo/appsettings.Production.json",
+                            ConfigPath = "App:Secrets",
+                            AppliedToPath = "App:Secrets",
+                            Role = ConfigAuditSourceRole.Base
+                        }
+                    ]
+                }));
+        using var output = new StringWriter();
+        var runner = new ConfigDiagnosticsCommandRunner(
+            reporter,
+            new ConfigAuditTextRenderer(),
+            environmentProvider);
+
+        var result = runner.Run(output, ConfigAuditReportMode.ExpandKnownEntryCollections);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Mode: ExpandKnownEntryCollections", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("App:Secrets", output.ToString(), StringComparison.Ordinal);
+        A.CallTo(() => reporter.GetReport(
+                A<ConfigAuditReportRequest>.That.Matches(request =>
+                    request.Environment == "Production"
+                    && request.Mode == ConfigAuditReportMode.ExpandKnownEntryCollections)))
+            .MustHaveHappenedOnceExactly();
+        A.CallTo(() => reporter.GetReport("Production")).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public void Run_WithUndefinedMode_ReturnsSanitizedFailureWithoutCallingReporter()
+    {
+        var reporter = A.Fake<IConfigAuditReporter>();
+        var environmentProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environmentProvider.Environment).Returns("Production");
+        using var output = new StringWriter();
+        var runner = new ConfigDiagnosticsCommandRunner(
+            reporter,
+            new ConfigAuditTextRenderer(),
+            environmentProvider);
+
+        var result = runner.Run(output, (ConfigAuditReportMode)42);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Empty(output.ToString());
+        Assert.NotNull(result.Failure);
+        Assert.Contains(nameof(ArgumentOutOfRangeException), result.Failure!.ToDisplayString(), StringComparison.Ordinal);
+        A.CallTo(() => reporter.GetReport(A<string>._)).MustNotHaveHappened();
+        A.CallTo(() => reporter.GetReport(A<ConfigAuditReportRequest>._)).MustNotHaveHappened();
     }
 
     [Fact]
@@ -172,6 +290,31 @@ public sealed class ConfigDiagnosticsCommandRunnerTests
     }
 
     [Fact]
+    public void Run_ExpandedModeUnsupportedReporterReturnsSanitizedFailure()
+    {
+        var reporter = A.Fake<IConfigAuditReporter>();
+        var environmentProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environmentProvider.Environment).Returns("Production");
+        A.CallTo(() => reporter.GetReport(A<ConfigAuditReportRequest>._))
+            .Throws(new NotSupportedException("super-secret should never leak"));
+        using var output = new StringWriter();
+        var runner = new ConfigDiagnosticsCommandRunner(
+            reporter,
+            new ConfigAuditTextRenderer(),
+            environmentProvider);
+
+        var result = runner.Run(output, ConfigAuditReportMode.ExpandKnownEntryCollections);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Empty(output.ToString());
+        Assert.NotNull(result.Failure);
+        var display = result.Failure!.ToDisplayString();
+        Assert.Contains(nameof(NotSupportedException), display, StringComparison.Ordinal);
+        Assert.DoesNotContain("super-secret", display, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Run_NullOutput_Throws()
     {
         var runner = new ConfigDiagnosticsCommandRunner(
@@ -205,10 +348,17 @@ public sealed class ConfigDiagnosticsCommandRunnerTests
     }
 
     private static ConfigAuditReport CreateReport(string environment, params ConfigAuditEntry[] entries) =>
+        CreateReport(environment, mode: null, entries: entries);
+
+    private static ConfigAuditReport CreateReport(
+        string environment,
+        ConfigAuditReportMode? mode,
+        params ConfigAuditEntry[] entries) =>
         new()
         {
             Environment = environment,
             GeneratedAt = DateTimeOffset.UtcNow,
+            Mode = mode,
             Providers =
             [
                 new ConfigAuditProvider

@@ -18,6 +18,11 @@ namespace ConsoleAppExample;
 public sealed partial class ConfigDiagnosticsCommand(ConfigDiagnosticsCommandRunner runner) : ICommand
 {
     /// <summary>
+    /// Gets or sets whether diagnostics expand bounded known-entry collections while preserving redaction.
+    /// </summary>
+    [CommandOption("debug")] public bool Debug { get; set; }
+
+    /// <summary>
     /// Executes the diagnostics command against the already-selected AppSurface host environment.
     /// </summary>
     /// <param name="console">The CliFx console whose output writer receives the rendered audit report.</param>
@@ -27,7 +32,11 @@ public sealed partial class ConfigDiagnosticsCommand(ConfigDiagnosticsCommandRun
     /// </exception>
     public ValueTask ExecuteAsync(IConsole console)
     {
-        var result = runner.Run(console.Output);
+        var result = runner.Run(
+            console.Output,
+            Debug
+                ? ConfigAuditReportMode.ExpandKnownEntryCollections
+                : ConfigAuditReportMode.Default);
         if (!result.Succeeded)
         {
             throw new CommandException(result.Failure?.ToDisplayString() ?? "Configuration diagnostics failed.");

@@ -283,6 +283,7 @@ public sealed class ReleaseWorkflowPolicyTests
     {
         var workflow = await ReadRepositoryFileAsync(".github/workflows/release-contract.yml");
 
+        Assert.Contains("NODE_OPTIONS: --use-system-ca", workflow, StringComparison.Ordinal);
         Assert.Contains("github.rest.repos.getContent", workflow, StringComparison.Ordinal);
         Assert.Contains("validateUnreleasedTemplate", workflow, StringComparison.Ordinal);
         Assert.Contains("validateAddedUnreleasedEntries", workflow, StringComparison.Ordinal);
