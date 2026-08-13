@@ -6,6 +6,7 @@
     <meta name="description" content="Northstar Field Guide — steady practices for small teams." />
     <title>@ViewData["Title"] · Northstar Field Guide</title>
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    @await RenderSectionAsync("Head", required: false)
 </head>
 <body>
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -26,6 +27,5 @@
         <p>Northstar Field Guide · practical notes for clear work.</p>
         <a href="/contact">Start a conversation</a>
     </footer>
-    @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>
