@@ -37,7 +37,7 @@ Provider I/O never occurs while a database transaction or connection is held.
 | Initialize epoch | Deployment transaction under schema lock | StoreId, null active epoch, non-empty candidate/audit | One-time activation plus append-only history; never done by a writer. |
 | Rotate epoch | Deployment transaction under schema lock | StoreId and expected active epoch CAS | Records previous/new epoch and audit; stale expectation changes nothing. |
 | Accept Work | Caller/client transaction; scope then Work/dispatch | Target, StoreId, epoch, registry, fingerprint, active scope | Atomically creates generation-1 scope, Work, dispatch/history, or exact duplicate/conflict. |
-| Discover | Short dispatcher transaction; payload-free access | Due time/state only | Bounded candidate identities; lost notification cannot hide Work. |
+| Discover | Short dispatcher transaction; payload-free function access (`discover_work_dispatch`) | Requested contract names + versions, due/state only | Registry-scoped bounded candidate identities; lost notification cannot hide Work. |
 | Claim | Short scoped transaction; canonical lock order | Scope, revision, due state, epoch; classify expired permit | One winner advances attempt/lease; unsafe expired permits suspend. |
 | Renew lease | Short scoped transaction; canonical lock order | Exact revision, attempt, lease/scope generation, epoch, owner, lifetime | Extends exact active lease; stale renewal changes nothing. |
 | Prepare | No store transaction | Registry decodes immutable contract/payload/safety | Produces landed prepared invocation; unavailable history suspends `ASDUR109` before permit. |
@@ -101,7 +101,10 @@ supplied transaction and compared with the deployment-time value.
 
 The migration owner alone owns DDL. The dispatcher reads payload-free discovery. The scoped runtime has minimum DML
 under forced RLS; `PUBLIC` has no privileges and runtime roles have neither ownership nor `BYPASSRLS`. Transaction-local
-scope context is defense in depth, not application authorization: a credential holder can deliberately select a scope.
+scope context is defense in depth, not application authorization: a credential holder can deliberately select a scope. The
+dispatcher does not read `appsurface_durable.dispatch` directly for Work discovery; instead it calls
+[`appsurface_durable.discover_work_dispatch(text[], text[], integer)`](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/Migrations/0009_work_contract_discovery.sql) defined by
+`migration 0009` and constrained by policy `work_contract_discovery_owner`.
 
 Diagnostics preserve `ASDURxxx`, concrete Npgsql/PostgreSQL exception types, inner exceptions, stack traces, and SQLSTATE,
 but exclude connection strings, credentials, parameter values, payloads, and provider responses. See the
@@ -109,13 +112,17 @@ but exclude connection strings, credentials, parameter values, payloads, and pro
 
 ## Scale and contention gates
 
-The strict PostgreSQL verification gate uses PostgreSQL 17.5 and must prove all of the following:
+The strict PostgreSQL verification gate uses PostgreSQL 16.5 via `postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877` and must prove all of the following:
 
-- discovery uses `ix_dispatch_due`, without a sequential scan, across 100,000 Work/dispatch rows in 100 scopes;
-- 32 simultaneous claimers sharing an eight-connection pool complete within 30 seconds and produce one lease owner;
-- disabling a scope projects 10,000 pre-effect Work items and dispatch rows within 30 seconds; and
-- concurrent migration owners serialize, canceled lock waiters do not leak the session lock, and a terminated migration
-  connection can retry safely on a new physical session.
+- registry-scoped Work discovery uses `discover_work_dispatch` and `ix_work_contract_dispatch_lookup` across 100,000
+  Work/dispatch rows in 100 scopes;
+  - 32 simultaneous claimers sharing an eight-connection pool complete within 30 seconds and produce one lease owner;
+  - disabling a scope projects 10,000 pre-effect Work items and dispatch rows within 30 seconds; and
+  - concurrent migration owners serialize, canceled lock waiters do not leak the session lock, and a terminated migration
+    connection can retry safely on a new physical session.
+
+The checked-in reference-workload JSON manifests in this repository still record PostgreSQL 17.5 evidence and are preserved
+as historical proof for earlier releases.
 
 These are regression gates, not throughput promises. Operators must benchmark their own payload sizes, retention,
 indexes, PostgreSQL settings, and contention patterns before setting production capacity.

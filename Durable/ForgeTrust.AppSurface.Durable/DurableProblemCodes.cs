@@ -46,6 +46,8 @@ public static class DurableProblemCodes
     public const string OperatorProofRequired = "ASDUR117";
     /// <summary>Another operator command is already reconciling the work aggregate.</summary>
     public const string OperatorCommandInProgress = "ASDUR118";
+    /// <summary>The PostgreSQL worker host could not form an exact Work discovery contract snapshot.</summary>
+    public const string WorkDiscoveryContractSelectionUnavailable = "ASDUR119";
 
     /// <summary>The requested Flow definition or version is unavailable.</summary>
     public const string FlowDefinitionUnavailable = "ASDUR200";

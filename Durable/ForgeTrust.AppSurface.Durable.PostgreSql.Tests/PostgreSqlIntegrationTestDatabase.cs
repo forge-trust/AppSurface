@@ -6,7 +6,10 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 
 internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
 {
-    private const int RequiredServerVersion = 170005;
+    internal const int MinimumSupportedServerVersion = 160000;
+    internal const string MinimumSupportedServerVersionText = "PostgreSQL 16+";
+    internal static Func<int, bool> IsSupportedServerVersion { get; } =
+        static version => version >= MinimumSupportedServerVersion;
     private const int ContainerStartupProbeMaximumAttempts = 3;
     private static readonly TimeSpan ContainerStartupProbeRetryDelay = TimeSpan.FromMilliseconds(250);
     private static readonly SemaphoreSlim SharedContainerServerGate = new(1, 1);
@@ -62,8 +65,8 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
     /// This is the same path that <see cref="TryCreateAsync"/> uses when
     /// <c>APPSURFACE_POSTGRES_TEST_CONNECTION</c> is set. It is exposed internally so fixture tests can verify
     /// configured-server isolation without mutating process-wide environment state. The connection must target a
-    /// PostgreSQL 17.5 server whose database can be changed to <c>postgres</c>, and its credentials must be allowed
-    /// to create and drop databases.
+    /// PostgreSQL server (16 or later) whose database can be changed to <c>postgres</c>, and its credentials must be
+    /// allowed to create and drop databases.
     /// </remarks>
     internal static async ValueTask<PostgreSqlIntegrationTestDatabase> CreateFromConnectionStringAsync(string connectionString)
     {
@@ -293,10 +296,27 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
     {
         await using var command = new NpgsqlCommand("SHOW server_version_num;", connection);
         var value = (string?)await command.ExecuteScalarAsync();
-        if (!int.TryParse(value, out var version) || version != RequiredServerVersion)
+        EnsureRequiredServerVersion(value);
+    }
+
+    internal static void EnsureRequiredServerVersion(string? value)
+    {
+        if (!int.TryParse(value, out var version))
         {
             throw new InvalidOperationException(
-                $"Durable PostgreSQL integration tests require server_version_num {RequiredServerVersion} (PostgreSQL 17.5), but the server reported '{value ?? "<null>"}'.");
+                "Durable PostgreSQL integration tests require server_version_num >= "
+                + $"{MinimumSupportedServerVersion} ({MinimumSupportedServerVersionText}) "
+                + "for PostgreSQL 16 or newer. "
+                + $"The server reported '{value ?? "<null>"}'.");
+        }
+
+        if (!IsSupportedServerVersion(version))
+        {
+            throw new InvalidOperationException(
+                "Durable PostgreSQL integration tests require PostgreSQL 16 or newer, "
+                + $"server_version_num >= {MinimumSupportedServerVersion}, but the server reported {version}. "
+                + "Set APPSURFACE_POSTGRES_TEST_CONNECTION to PostgreSQL 16+ (server_version_num >= 160000) "
+                + "or clear that variable to use the pinned Testcontainers image.");
         }
     }
 

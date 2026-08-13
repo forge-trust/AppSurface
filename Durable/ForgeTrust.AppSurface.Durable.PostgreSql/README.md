@@ -9,7 +9,7 @@ PostgreSQL transaction, and when process-loss recovery must use explicit leases,
 and provider-safety policy. Choose a larger workflow platform for arbitrary deterministic replay, child workflows, or
 unbounded fan-out. PostgreSQL is this provider's sole durable truth.
 
-The verified database target is PostgreSQL 17.5.
+The verified database floor is PostgreSQL 16+; default verification and strict CI tests are pinned to PostgreSQL 16.5 via `postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877`.
 
 The package references the adopter-facing
 [`ForgeTrust.AppSurface.Durable`](../ForgeTrust.AppSurface.Durable/README.md) contracts and the
@@ -26,7 +26,7 @@ applies DDL or advances migration history.
 
 The production migration order is `0001_work_shared.sql`, `0002_forced_rls.sql`, `0003_flow_protocol.sql`,
 `0004_schedule_protocol.sql`, `0005_runtime_heartbeat.sql`, `0006_flow_trace_context.sql`,
-`0007_flow_retention.sql`, and `0008_flow_repair.sql`, followed by the
+`0007_flow_retention.sql`, `0008_flow_repair.sql`, and `0009_work_contract_discovery.sql`, followed by the
 canonical [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
 role recipe. Prefer generating the Durable schema script offline, reviewing it, applying the forward-only migrations,
 running the role recipe, and completing schema status/preflight before enabling the worker host. The
@@ -65,15 +65,18 @@ Runtime mutations take a shared, transaction-scoped advisory fence before valida
 and epoch rotation take the exclusive package lock, so they wait for in-flight runtime transactions and prevent an old
 epoch from committing new durable state after rotation.
 
-Runtime roles never own schema or apply DDL. Apply the eight migrations in numeric order: Work/shared state
-(`0001_work_shared.sql`),
-forced RLS and privilege revocation (`0002_forced_rls.sql`), Flow protocol persistence (`0003_flow_protocol.sql`), the
-Work-first Schedule ledger (`0004_schedule_protocol.sql`), the payload-free runtime heartbeat
-(`0005_runtime_heartbeat.sql`), value-free Flow trace context (`0006_flow_trace_context.sql`), and verified one-Flow
-retention lifecycle evidence (`0007_flow_retention.sql`), followed by evidence-first Flow repair
-(`0008_flow_repair.sql`). Applied schema is
-forward-only; rolling application code back does not authorize destructive schema rollback. Execute generated SQL with a
-client that stops on the first error; `psql` callers must pass `-v ON_ERROR_STOP=1`.
+Runtime roles never own schema or apply DDL. Apply the ordered migrations in numeric order:
+`0001_work_shared.sql`, `0002_forced_rls.sql`, `0003_flow_protocol.sql`, `0004_schedule_protocol.sql`,
+`0005_runtime_heartbeat.sql`, `0006_flow_trace_context.sql`, `0007_flow_retention.sql`,
+`0008_flow_repair.sql`, and `0009_work_contract_discovery.sql`.
+
+`0009_work_contract_discovery.sql` introduces registry-scoped Work discovery and the payload-free
+discovery function `appsurface_durable.discover_work_dispatch(text[], text[], integer)`. Its contract-lookup index uses
+transactional `CREATE INDEX`, which blocks concurrent Work writes. Schedule `0009` in a reviewed maintenance window
+after draining runtime and Work-writer hosts; the package's checksum-bound transactional migration protocol cannot use
+`CREATE INDEX CONCURRENTLY`. Apply schema is forward-only; rolling application code back does not authorize destructive
+schema rollback. Execute generated SQL with a client that stops on the first error; `psql` callers must pass
+`-v ON_ERROR_STOP=1`.
 
 Create host principals outside migrations. Use [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) to
 grant the migration-owner, payload-free dispatcher, scoped-runtime, and scoped-retention-operator capabilities. Service roles must not receive
@@ -96,6 +99,12 @@ connections can use the new relations.
 After the schema is current, the recovery epoch is initialized, and the role recipe has run, compose exactly one
 runtime-role and one payload-free dispatcher-role data source. The warm path is designed to reach one hosted Work
 completion in five minutes; it never performs DDL at application startup.
+
+Custom `IDurableWorkRegistry` implementations must expose a complete, stable `RegisteredContracts` snapshot before
+resolving `IDurableRuntimePump`. PostgreSQL snapshots the list once to define that host's discovery authority, rejects
+default/duplicate or more than 10,000 pairs with `ASDUR119`, and does not observe later registry mutation. An empty
+registry is valid and makes Work passes quiescent. Restart
+the host after changing the registered contracts.
 
 ```csharp
 using ForgeTrust.AppSurface.Durable.PostgreSql;
@@ -143,9 +152,9 @@ and `Incompatible` are intentionally not ready. Snapshots contain aggregate coun
 scope, aggregate, connection, or trace values. At shutdown, local admission closes synchronously before the host
 persists drain; already-permitted Work follows its ordinary cancellation/recovery path rather than inventing a result.
 
-For a cold path, apply every pending forward-only migration through `0008_flow_repair.sql` with the migration owner, rerun
-[`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql),
-verify the active epoch and StoreId, deploy with `AddWorkerHost()` disabled, then enable it. Roll back application code
+For a cold path, first drain and stop every pre-`0009` worker because the role recipe intentionally removes its raw
+`dispatch` access. Apply every pending forward-only migration through `0009_work_contract_discovery.sql` with the migration owner, rerun
+the role recipe, verify the active epoch and StoreId, deploy with `AddWorkerHost()` disabled, then enable it. Roll back application code
 by disabling the worker host and deploying a previous compatible binary; never destructively roll back a migration.
 
 ### Role recipe contract
@@ -163,10 +172,10 @@ psql -v ON_ERROR_STOP=1 \
 
 The dispatcher, runtime, and retention-operator values identify exact non-human credentials used to connect, not reusable capability
 groups. All three must be distinct `LOGIN` leaf roles with no memberships in either direction and without `SUPERUSER`,
-`CREATEDB`, `CREATEROLE`, `REPLICATION`, or `BYPASSRLS`. Create and rotate their credentials through the deployment
-secret system; the recipe never accepts or changes passwords. Neither service credential may own any database or hold
-grant options on the `appsurface_durable` schema or its objects. The migration owner remains separate and may be
-`NOLOGIN`.
+`CREATEDB`, `CREATEROLE`, `REPLICATION`, or `BYPASSRLS` and no grant options. Create and rotate their credentials through
+the deployment secret system; the recipe never accepts or changes passwords. Neither service credential may own
+any database or hold grant options on the `appsurface_durable` schema or its objects. The migration owner remains
+separate and may be `NOLOGIN`.
 
 The `appsurface_durable` schema is package-reserved. The recipe serializes with migrations and runtime transactions,
 then transfers every table, partition, sequence, view, materialized view, foreign table, and package function in that
@@ -174,8 +183,10 @@ schema to the migration owner. Do not place application-owned objects there.
 
 | Principal | Allowed privileges |
 | --- | --- |
-| Dispatcher | Schema `USAGE`; global table `SELECT` on payload-free `dispatch` and `flow_dispatch`; `EXECUTE` only on the constrained Schedule claim function. It receives Schedule routing IDs and revision, never raw `schedule_dispatch` columns. |
-| Runtime reads | Schema `USAGE`; table `SELECT` on package metadata, scoped Work, Flow, Schedule, and Flow trace-context relations. Dispatch reads are scope-filtered by transaction-local RLS. |
+| Dispatcher | Schema `USAGE`; table `SELECT` on payload-free Flow discovery tables; `EXECUTE` only on constrained Schedule and Work discovery functions.
+  It calls `appsurface_durable.discover_work_dispatch(text[], text[], integer)` for Work contracts and `appsurface_durable.claim_schedule_dispatch(text, interval)` for Schedule candidates. It receives routing IDs, due time, priority, and revision only, never raw `dispatch` columns. |
+| Runtime reads | Schema `USAGE`; table `SELECT` on package metadata, scoped Work, Flow, Schedule, and Flow trace-context relations. Work/Flow
+'discovery' reads are scope-filtered by transaction-local RLS or dispatcher function policy. |
 | Runtime inserts | Table `INSERT` on scoped Work, Flow, Schedule, and Flow trace-context relations. |
 | Runtime updates | Reviewed column-level `UPDATE` on mutable Work, Flow instance/wait/timer, Schedule definition/occurrence/dispatch, and dispatch fields; no table-wide update grant. |
 | Runtime sequences | `USAGE` and `SELECT` on every sequence in the package schema. |

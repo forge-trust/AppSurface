@@ -51,7 +51,7 @@ public sealed class ReferenceWorkloadEvidenceTests
             Assert.NotNull(document);
             Assert.Equal("20260720T120000Z-123", document.RunId);
             Assert.Equal("warm", document.Mode);
-            Assert.Equal("external-postgresql-17.5", document.DatabaseSource);
+            Assert.Equal("external-postgresql-16+", document.DatabaseSource);
             Assert.Equal("work.accept", Assert.Single(document.Events).Operation);
             Assert.DoesNotContain("secret-host", json, StringComparison.Ordinal);
             Assert.DoesNotContain("do-not-record", json, StringComparison.Ordinal);
@@ -118,7 +118,7 @@ public sealed class ReferenceWorkloadEvidenceTests
     public void PostgreSqlImage_IsPinnedToAnImmutableMultiPlatformDigest()
     {
         Assert.Matches(
-            "^postgres:17\\.5@sha256:[0-9a-f]{64}$",
+            "^postgres:16\\.5@sha256:[0-9a-f]{64}$",
             PostgreSqlTestContainerImage.Reference);
     }
 }

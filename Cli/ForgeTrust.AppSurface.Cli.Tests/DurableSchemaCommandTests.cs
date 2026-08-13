@@ -285,7 +285,7 @@ public sealed class DurableSchemaCommandTests
 
     [Theory]
     [InlineData(-1)]
-    [InlineData(9)]
+    [InlineData(10)]
     public async Task Script_rejects_versions_outside_the_current_catalog(int fromVersion)
     {
         var command = new DurableSchemaScriptCommand(new DurableSchemaCommandService()) { FromVersion = fromVersion };
@@ -300,7 +300,7 @@ public sealed class DurableSchemaCommandTests
     public async Task Script_at_the_current_version_contains_only_the_deterministic_advisory_lock_boundary()
     {
         var service = new DurableSchemaCommandService();
-        var command = new DurableSchemaScriptCommand(service) { FromVersion = 8 };
+        var command = new DurableSchemaScriptCommand(service) { FromVersion = 9 };
         using var console = new FakeInMemoryConsole();
 
         await command.ExecuteAsync(console);
@@ -603,7 +603,7 @@ public sealed class DurableSchemaCommandTests
     public async Task Durable_schema_command_service_reads_missing_applies_schema_and_reads_compatible_status()
     {
         await using var container = new PostgreSqlBuilder(
-                "postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302")
+                "postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877")
             .WithDatabase("appsurface_durable")
             .WithUsername("appsurface")
             .WithPassword("appsurface-test-password")
@@ -617,7 +617,7 @@ public sealed class DurableSchemaCommandTests
         var compatible = await service.GetStatusAsync(connectionString, CancellationToken.None);
 
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missing.Compatibility);
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9], applied.AppliedVersions);
         Assert.Equal(DurableRuntimeSchemaCompatibility.Compatible, compatible.Compatibility);
     }
 

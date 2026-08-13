@@ -173,6 +173,29 @@ public sealed class PostgreSqlIntegrationTestDatabaseTests
         }
     }
 
+
+    [Theory]
+    [InlineData("160000")]
+    [InlineData("170000")]
+    [InlineData("999999")]
+    public void EnsureRequiredServerVersion_AcceptsVersionAtOrAboveMinimum(string value)
+    {
+        PostgreSqlIntegrationTestDatabase.EnsureRequiredServerVersion(value);
+    }
+
+    [Theory]
+    [InlineData("159999")]
+    [InlineData("150000")]
+    [InlineData("foo")]
+    [InlineData("")]
+    public void EnsureRequiredServerVersion_RejectsUnsupportedValues(string value)
+    {
+        var error = Assert.Throws<InvalidOperationException>(() => PostgreSqlIntegrationTestDatabase.EnsureRequiredServerVersion(value));
+
+        Assert.Contains("server_version_num >=", error.Message, StringComparison.Ordinal);
+        Assert.Contains("PostgreSQL 16 or newer", error.Message, StringComparison.Ordinal);
+    }
+
     private static void AssertSameServerWithDistinctDatabases(string firstConnectionString, string secondConnectionString)
     {
         var firstConnection = new NpgsqlConnectionStringBuilder(firstConnectionString);

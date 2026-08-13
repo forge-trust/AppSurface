@@ -9,7 +9,7 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 public sealed class DurableSchemaContractTests
 {
     [Fact]
-    public void MigrationCatalog_IsExactlyEightOrderedChecksummedResources()
+    public void MigrationCatalog_IsExactlyNineOrderedChecksummedResources()
     {
         var migrations = DurablePostgreSqlMigrationCatalog.Load();
 
@@ -145,6 +145,22 @@ public sealed class DurableSchemaContractTests
                 Assert.Contains("NOT VALID", eighth.Sql, StringComparison.Ordinal);
                 Assert.Contains("VALIDATE CONSTRAINT", eighth.Sql, StringComparison.Ordinal);
                 Assert.Contains("FORCE ROW LEVEL SECURITY", eighth.Sql, StringComparison.Ordinal);
+            },
+            ninth =>
+            {
+                Assert.Equal(9, ninth.Version);
+                Assert.Equal("work_contract_discovery", ninth.Name);
+                Assert.Equal(64, ninth.Sha256.Length);
+                Assert.Contains("discover_work_dispatch", ninth.Sql, StringComparison.Ordinal);
+                Assert.Contains("SECURITY DEFINER", ninth.Sql, StringComparison.Ordinal);
+                Assert.Contains("SET search_path = pg_catalog, appsurface_durable, pg_temp", ninth.Sql, StringComparison.Ordinal);
+                Assert.Contains("work_contract_discovery_owner", ninth.Sql, StringComparison.Ordinal);
+                Assert.Contains("ix_work_contract_dispatch_lookup", ninth.Sql, StringComparison.Ordinal);
+                Assert.Contains("COLLATE \"C\"", ninth.Sql, StringComparison.Ordinal);
+                Assert.Contains(
+                    "REVOKE ALL ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) FROM PUBLIC;",
+                    ninth.Sql,
+                    StringComparison.Ordinal);
             });
         Assert.Equal(migrations.Count, DurablePostgreSqlMigrationCatalog.RequiredVersion);
         Assert.Equal(migrations.Count, PostgreSqlDurableRuntimeSchemaManager.RequiredVersion);
@@ -223,6 +239,9 @@ public sealed class DurableSchemaContractTests
         Assert.True(
             script.IndexOf("0007_flow_retention", StringComparison.Ordinal)
             < script.IndexOf("0008_flow_repair", StringComparison.Ordinal));
+        Assert.True(
+            script.IndexOf("0008_flow_repair", StringComparison.Ordinal)
+            < script.IndexOf("0009_work_contract_discovery", StringComparison.Ordinal));
         Assert.Contains("pg_advisory_lock", script, StringComparison.Ordinal);
         Assert.DoesNotContain("0001_work_shared", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0002_forced_rls", pendingOnly, StringComparison.Ordinal);
@@ -232,9 +251,10 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("0006_flow_trace_context", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0007_flow_retention", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0008_flow_repair", pendingOnly, StringComparison.Ordinal);
+        Assert.Contains("0009_work_contract_discovery", pendingOnly, StringComparison.Ordinal);
         Assert.DoesNotContain("-- Migration", current, StringComparison.Ordinal);
         Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(-1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(9));
+        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(10));
     }
 
     [Theory]

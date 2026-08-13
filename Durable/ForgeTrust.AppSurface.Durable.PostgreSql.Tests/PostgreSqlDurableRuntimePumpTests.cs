@@ -58,6 +58,60 @@ public sealed class PostgreSqlDurableRuntimePumpTests
     }
 
     [Fact]
+    public async Task RunOnceAsync_DiscoversOnlyTheHostRegisteredWorkContracts()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "contract-discovery");
+        var workOptions = new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId);
+        var foreignRegistration = new NamedSuccessfulWorkRegistration("tests.runtime-pump.foreign");
+        var localRegistration = new NamedSuccessfulWorkRegistration("tests.runtime-pump.local");
+        await using var foreignProvider = CreateWorkProvider(
+            database,
+            workOptions,
+            foreignRegistration,
+            "runtime-pump-foreign-host");
+        await using var localProvider = CreateWorkProvider(
+            database,
+            workOptions,
+            localRegistration,
+            "runtime-pump-local-host");
+        var scope = new DurableScopeId("runtime-pump-contract-discovery-scope");
+        var foreignAccepted = await EnqueueAsync(
+            foreignProvider,
+            scope,
+            "runtime-pump-foreign-command",
+            foreignRegistration);
+        var localAccepted = await EnqueueAsync(
+            localProvider,
+            scope,
+            "runtime-pump-local-command",
+            localRegistration);
+        var foreignBefore = await ReadWorkIsolationSnapshotAsync(database.DataSource, scope, foreignAccepted.WorkId);
+
+        var localResult = await localProvider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
+
+        Assert.Equal(1, localResult.Discovered);
+        Assert.Equal(1, localResult.Claimed);
+        Assert.Equal(1, localResult.Processed);
+        Assert.Equal(0, localResult.Failed);
+        Assert.Equal(
+            foreignBefore,
+            await ReadWorkIsolationSnapshotAsync(database.DataSource, scope, foreignAccepted.WorkId));
+        var localSnapshot = await localProvider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
+            new DurableWorkGetRequest(scope, localAccepted.WorkId));
+        Assert.True(localSnapshot.IsSuccess);
+        Assert.Equal(DurableWorkState.Succeeded, localSnapshot.Value!.State);
+
+        var foreignResult = await foreignProvider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
+        Assert.Equal(1, foreignResult.Processed);
+    }
+
+    [Fact]
     public async Task RunOnceAsync_ProcessesRegisteredFlowThroughTheProviderProcessor()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -1220,7 +1274,9 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work)).AsTask();
         await registration.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        var secondPump = CreatePump(provider, new PostgreSqlDurableWorkStore(database.DataSource, epoch));
+        var secondPump = CreatePump(
+            provider,
+            new PostgreSqlDurableWorkStore(database.CreateDataSource(), database.CreateDataSource(), epoch));
         var secondResult = await secondPump.RunOnceAsync(
             new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
 
@@ -1453,9 +1509,80 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             provider.GetRequiredService<PostgreSqlDurableFlowProcessor>(),
             provider.GetRequiredService<PostgreSqlDurableScheduleProcessor>(),
             provider.GetRequiredService<IDurableWorkRegistry>(),
+            new PostgreSqlDurableWorkContractSelection(provider.GetRequiredService<IDurableWorkRegistry>()),
             provider.GetRequiredService<IServiceScopeFactory>(),
             provider.GetRequiredService<IDurableRuntimeExecutionBoundary>(),
             provider.GetRequiredService<DurableRuntimeAdmissionGate>());
+
+    private static ServiceProvider CreateWorkProvider(
+        PostgreSqlIntegrationTestDatabase database,
+        PostgreSqlDurableWorkOptions workOptions,
+        DurableWorkRegistration registration,
+        string workerId)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(registration);
+        services.AddAppSurfaceDurablePostgreSql(
+            database.CreateDataSource(),
+            database.CreateDataSource(),
+            workOptions,
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = workerId;
+                options.SendWakeNotifications = false;
+            });
+        return services.BuildServiceProvider();
+    }
+
+    private static async ValueTask<DurableWorkAcceptance> EnqueueAsync(
+        ServiceProvider provider,
+        DurableScopeId scope,
+        string commandId,
+        NamedSuccessfulWorkRegistration registration)
+    {
+        var accepted = await provider.GetRequiredService<IDurableWorkClient>().EnqueueAsync(new DurableWorkRequest(
+            scope,
+            new DurableCommandId(commandId),
+            commandId,
+            registration.WorkName,
+            registration.WorkVersion,
+            registration.InputCodec.EncodeObject(Encoding.UTF8.GetBytes("input")),
+            DurableProviderSafety.Idempotent));
+        Assert.True(accepted.IsSuccess);
+        return accepted.Value!;
+    }
+
+    private static async ValueTask<string> ReadWorkIsolationSnapshotAsync(
+        NpgsqlDataSource dataSource,
+        DurableScopeId scope,
+        DurableWorkId workId)
+    {
+        await using var command = dataSource.CreateCommand(
+            """
+            SELECT jsonb_build_object(
+                       'work', to_jsonb(work),
+                       'dispatch', to_jsonb(dispatch),
+                       'history', COALESCE(
+                           jsonb_agg(to_jsonb(history) ORDER BY history.event_id)
+                               FILTER (WHERE history.event_id IS NOT NULL),
+                           '[]'::jsonb))::text
+            FROM appsurface_durable.work AS work
+            LEFT JOIN appsurface_durable.dispatch AS dispatch
+              ON dispatch.scope_id = work.scope_id
+             AND dispatch.aggregate_kind = 'work'
+             AND dispatch.aggregate_id = work.work_id
+            LEFT JOIN appsurface_durable.work_history AS history
+              ON history.scope_id = work.scope_id
+             AND history.work_id = work.work_id
+            WHERE work.scope_id = @scope_id
+              AND work.work_id = @work_id
+            GROUP BY work.scope_id, work.work_id, dispatch.dispatch_id;
+            """);
+        command.Parameters.AddWithValue("scope_id", scope.Value);
+        command.Parameters.AddWithValue("work_id", workId.Value);
+        return Assert.IsType<string>(await command.ExecuteScalarAsync());
+    }
 
     private static async ValueTask SetCancellationIntentAsync(
         NpgsqlDataSource dataSource,
@@ -1544,6 +1671,41 @@ public sealed class PostgreSqlDurableRuntimePumpTests
                 DurableProviderSafety.Idempotent,
                 new PostgreSqlOpaqueTestCodec("tests.runtime-pump.input", "v1"),
                 new PostgreSqlOpaqueTestCodec("tests.runtime-pump.result", "v1"))
+        {
+        }
+
+        internal IDurablePayloadCodec InputCodec => WorkCodec;
+
+        public override bool CanReconcile => false;
+
+        public override DurablePreparedWork Prepare(IServiceProvider services, DurableWorkExecutionContext work)
+        {
+            _ = WorkCodec.DecodeObject(work.Payload);
+            return new SuccessfulPreparedWork(ResultCodec.EncodeObject(Encoding.UTF8.GetBytes("result")));
+        }
+
+        public override ValueTask<DurableEncodedPayload> InvokeAsync(
+            IServiceProvider services,
+            DurableWorkExecutionContext work,
+            CancellationToken cancellationToken = default) =>
+            Prepare(services, work).InvokeAsync(cancellationToken);
+
+        public override ValueTask<DurableEncodedEffectReconciliation> ReconcileAsync(
+            IServiceProvider services,
+            DurableWorkExecutionContext work,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Idempotent test Work does not reconcile.");
+    }
+
+    private sealed class NamedSuccessfulWorkRegistration : DurableWorkRegistration
+    {
+        internal NamedSuccessfulWorkRegistration(string workName)
+            : base(
+                workName,
+                "v1",
+                DurableProviderSafety.Idempotent,
+                new PostgreSqlOpaqueTestCodec($"{workName}.input", "v1"),
+                new PostgreSqlOpaqueTestCodec($"{workName}.result", "v1"))
         {
         }
 

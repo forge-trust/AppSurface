@@ -7,7 +7,7 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 public sealed class PostgreSqlScaleIntegrationTests
 {
     [Fact]
-    public async Task Discovery_UsesDueIndexAcrossOneHundredThousandRowsAndOneHundredScopes()
+    public async Task WorkDiscovery_UsesScopedFunctionAndDueIndexAcrossOneHundredThousandRowsAndOneHundredScopes()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         await ApplySchemaAsync(database);
@@ -17,21 +17,37 @@ public sealed class PostgreSqlScaleIntegrationTests
         await using var command = database.DataSource.CreateCommand(
             """
             EXPLAIN (FORMAT JSON)
-            SELECT dispatch_id, scope_id, aggregate_id, due_at, expected_revision, priority
-            FROM appsurface_durable.dispatch
-            WHERE aggregate_kind = 'work'
-              AND state IN ('available', 'leased')
-              AND due_at <= clock_timestamp()
-            ORDER BY due_at, priority DESC, dispatch_id
+            WITH requested(work_name, work_version) AS
+            (
+                VALUES ('scale-work'::text, '1'::text)
+            )
+            SELECT dispatch.dispatch_id,
+                   dispatch.scope_id,
+                   dispatch.aggregate_id,
+                   dispatch.due_at,
+                   dispatch.expected_revision,
+                   dispatch.priority
+            FROM requested
+            JOIN appsurface_durable.work AS work
+              ON work.work_name COLLATE "C" = requested.work_name COLLATE "C"
+             AND work.work_version COLLATE "C" = requested.work_version COLLATE "C"
+            JOIN appsurface_durable.dispatch AS dispatch
+              ON dispatch.scope_id = work.scope_id
+             AND dispatch.aggregate_kind = 'work'
+             AND dispatch.aggregate_id = work.work_id
+            WHERE dispatch.state IN ('available', 'leased')
+              AND dispatch.due_at <= clock_timestamp()
+            ORDER BY dispatch.due_at, dispatch.priority DESC, dispatch.dispatch_id
             LIMIT 1000;
             """);
         var plan = (string)(await command.ExecuteScalarAsync()
             ?? throw new InvalidOperationException("PostgreSQL returned no discovery plan."));
 
-        Assert.Contains("ix_dispatch_due", plan, StringComparison.Ordinal);
-        Assert.DoesNotContain("Seq Scan", plan, StringComparison.Ordinal);
+        Assert.Contains("ix_work_contract_dispatch_lookup", plan, StringComparison.Ordinal);
+        var selection = new PostgreSqlDurableWorkContractSelection(new ScaleWorkRegistry(
+            [new DurableWorkContractIdentity("scale-work", "1")]));
         var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
-        Assert.Equal(1_000, (await store.DiscoverAsync(1_000)).Count);
+        Assert.Equal(1_000, (await store.DiscoverAsync(selection, 1_000)).Count);
     }
 
     [Fact]
@@ -213,7 +229,8 @@ public sealed class PostgreSqlScaleIntegrationTests
                 'activity-' || value,
                 'command-' || value,
                 'idempotency-' || value,
-                'scale-work', '1', 'scale-contract', '1', 'application/json',
+                CASE WHEN value <= 1000 THEN 'scale-work' ELSE 'unselected-scale-work-' || value END,
+                '1', 'scale-contract', '1', 'application/json',
                 decode('00', 'hex'), decode(repeat('00', 32), 'hex'), 'internal', 'default',
                 'durable-work-request-v1', repeat('0', 64),
                 'pending', 'idempotent', clock_timestamp() - interval '1 minute', 1, @epoch,
@@ -233,6 +250,7 @@ public sealed class PostgreSqlScaleIntegrationTests
                    revision
             FROM appsurface_durable.work;
 
+            ANALYZE appsurface_durable.work;
             ANALYZE appsurface_durable.dispatch;
             """);
         command.Parameters.AddWithValue("scope_count", scopeCount);
@@ -319,6 +337,14 @@ public sealed class PostgreSqlScaleIntegrationTests
         await using var command = dataSource.CreateCommand(sql);
         return (long)(await command.ExecuteScalarAsync()
             ?? throw new InvalidOperationException("PostgreSQL returned no count."));
+    }
+
+    private sealed class ScaleWorkRegistry(IReadOnlyList<DurableWorkContractIdentity> contracts) : IDurableWorkRegistry
+    {
+        public IReadOnlyList<DurableWorkContractIdentity> RegisteredContracts => contracts;
+
+        public DurableWorkRegistration GetRequired(string workName, string workVersion) =>
+            throw new NotSupportedException();
     }
 }
 

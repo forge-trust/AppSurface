@@ -226,10 +226,71 @@ public sealed class PostgreSqlDurablePublicContractTests
 
         Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableWorkStore(null!, Guid.NewGuid()));
         Assert.Throws<ArgumentException>(() => new PostgreSqlDurableWorkStore(dataSource, Guid.Empty));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableWorkStore(null!, dataSource, Guid.NewGuid()));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableWorkStore(dataSource, null!, Guid.NewGuid()));
+        Assert.Throws<ArgumentException>(() => new PostgreSqlDurableWorkStore(dataSource, dataSource, Guid.Empty));
 
         var store = new PostgreSqlDurableWorkStore(dataSource, Guid.NewGuid());
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () => await store.DiscoverAsync(0));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () => await store.DiscoverAsync(1_001));
+        var selection = new PostgreSqlDurableWorkContractSelection(new DurableWorkRegistry([]));
+        Assert.Empty(await store.DiscoverAsync(selection, 1));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () => await store.DiscoverAsync(selection, 0));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () => await store.DiscoverAsync(selection, 1_001));
+        var unavailable = Assert.Throws<InvalidOperationException>(
+            () => new PostgreSqlDurableWorkContractSelection(new LegacyWorkRegistry()));
+        Assert.StartsWith(DurableProblemCodes.WorkDiscoveryContractSelectionUnavailable, unavailable.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WorkContractSelection_SnapshotsCustomRegistriesAndBoundsDiscoveryParameters()
+    {
+        var contracts = new List<DurableWorkContractIdentity>
+        {
+            new("tests.contract-selection.a", "v1"),
+        };
+        var selection = new PostgreSqlDurableWorkContractSelection(new SnapshotWorkRegistry(contracts));
+        contracts.Add(new DurableWorkContractIdentity("tests.contract-selection.b", "v1"));
+
+        using var first = new NpgsqlCommand();
+        using var second = new NpgsqlCommand();
+        selection.AddDiscoveryParameters(first.Parameters, 1);
+        selection.AddDiscoveryParameters(second.Parameters, 1);
+
+        var firstNames = Assert.IsType<string[]>(first.Parameters["work_names"].Value);
+        var secondNames = Assert.IsType<string[]>(second.Parameters["work_names"].Value);
+        Assert.Equal(["tests.contract-selection.a"], firstNames);
+        Assert.Same(firstNames, secondNames);
+        Assert.Equal(["v1"], Assert.IsType<string[]>(first.Parameters["work_versions"].Value));
+        Assert.Equal(1, first.Parameters["maximum_candidates"].Value);
+
+        var tooManyContracts = Enumerable.Range(0, PostgreSqlDurableWorkContractSelection.MaximumContractCount + 1)
+            .Select(static index => new DurableWorkContractIdentity($"tests.contract-selection.{index}", "v1"))
+            .ToArray();
+        var unavailable = Assert.Throws<InvalidOperationException>(
+            () => new PostgreSqlDurableWorkContractSelection(new SnapshotWorkRegistry(tooManyContracts)));
+        Assert.StartsWith(DurableProblemCodes.WorkDiscoveryContractSelectionUnavailable, unavailable.Message, StringComparison.Ordinal);
+
+        Assert.Throws<InvalidOperationException>(() => new PostgreSqlDurableWorkContractSelection(
+            new SnapshotWorkRegistry(
+            [
+                new DurableWorkContractIdentity("tests.contract-selection.duplicate", "v1"),
+                new DurableWorkContractIdentity("tests.contract-selection.duplicate", "v1"),
+            ])));
+    }
+
+    private sealed class LegacyWorkRegistry : IDurableWorkRegistry
+    {
+        public DurableWorkRegistration GetRequired(string workName, string workVersion) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class SnapshotWorkRegistry(IReadOnlyList<DurableWorkContractIdentity> contracts) : IDurableWorkRegistry
+    {
+        public IReadOnlyList<DurableWorkContractIdentity> RegisteredContracts => contracts;
+
+        public DurableWorkRegistration GetRequired(string workName, string workVersion) =>
+            throw new NotSupportedException();
     }
 
     [Fact]

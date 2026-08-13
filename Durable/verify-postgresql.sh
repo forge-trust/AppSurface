@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 project="$repo_root/Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj"
-postgres_image="postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302"
+postgres_image="postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877"
 mode="--quick"
 use_flow=false
 use_schedule=false
@@ -38,7 +38,7 @@ trap cleanup EXIT
 fail() {
   echo "Durable PostgreSQL verification failed: $1" >&2
   echo "Test project: $project" >&2
-  echo "Use APPSURFACE_POSTGRES_TEST_CONNECTION for an external PostgreSQL 17.5 database," >&2
+  echo "Use APPSURFACE_POSTGRES_TEST_CONNECTION for an external PostgreSQL 16.0+ database," >&2
   echo "or start Docker so the pinned Testcontainers path can run." >&2
   exit 1
 }

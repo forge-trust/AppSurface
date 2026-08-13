@@ -16,14 +16,24 @@ internal class PostgreSqlDurableWorkStore
 {
     private static readonly Uri WorkDocumentation = new("https://appsurface.dev/docs/durable/work");
     private static readonly Uri ScopeDocumentation = new("https://appsurface.dev/docs/durable/scopes");
-    private readonly NpgsqlDataSource _dataSource;
+    private readonly NpgsqlDataSource _dispatcherDataSource;
+    private readonly NpgsqlDataSource _runtimeDataSource;
     private readonly Guid _runtimeEpoch;
 
     internal static int RequiredSchemaVersion => DurablePostgreSqlMigrationCatalog.RequiredVersion;
 
     internal PostgreSqlDurableWorkStore(NpgsqlDataSource dataSource, Guid runtimeEpoch)
+        : this(dataSource, dataSource, runtimeEpoch)
     {
-        _dataSource = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
+    }
+
+    internal PostgreSqlDurableWorkStore(
+        NpgsqlDataSource dispatcherDataSource,
+        NpgsqlDataSource runtimeDataSource,
+        Guid runtimeEpoch)
+    {
+        _dispatcherDataSource = dispatcherDataSource ?? throw new ArgumentNullException(nameof(dispatcherDataSource));
+        _runtimeDataSource = runtimeDataSource ?? throw new ArgumentNullException(nameof(runtimeDataSource));
         if (runtimeEpoch == Guid.Empty)
         {
             throw new ArgumentException("The durable runtime epoch must not be empty.", nameof(runtimeEpoch));
@@ -175,9 +185,54 @@ internal class PostgreSqlDurableWorkStore
             ORDER BY due_at, priority DESC, dispatch_id
             LIMIT @maximum_candidates;
             """;
-        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var connection = await _dispatcherDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("maximum_candidates", maximumCandidates);
+        var candidates = new List<PostgreSqlDispatchCandidate>(maximumCandidates);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            candidates.Add(new PostgreSqlDispatchCandidate(
+                reader.GetGuid(0),
+                new DurableScopeId(reader.GetString(1)),
+                new DurableWorkId(reader.GetString(2)),
+                ReadUtc(reader, 3),
+                reader.GetInt64(4),
+                reader.GetInt16(5)));
+        }
+
+        return candidates;
+    }
+
+    internal async ValueTask<IReadOnlyList<PostgreSqlDispatchCandidate>> DiscoverAsync(
+        PostgreSqlDurableWorkContractSelection selection,
+        int maximumCandidates,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        if (maximumCandidates is < 1 or > 1_000)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(maximumCandidates),
+                maximumCandidates,
+                "A discovery pass must request between 1 and 1000 candidates.");
+        }
+
+        if (selection.IsEmpty)
+        {
+            return Array.Empty<PostgreSqlDispatchCandidate>();
+        }
+
+        const string sql = """
+            SELECT dispatch_id, scope_id, aggregate_id, due_at, expected_revision, priority
+            FROM appsurface_durable.discover_work_dispatch(
+                @work_names,
+                @work_versions,
+                @maximum_candidates);
+        """;
+        await using var connection = await _dispatcherDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = new NpgsqlCommand(sql, connection);
+        selection.AddDiscoveryParameters(command.Parameters, maximumCandidates);
         var candidates = new List<PostgreSqlDispatchCandidate>(maximumCandidates);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -202,7 +257,7 @@ internal class PostgreSqlDurableWorkStore
     {
         ArgumentNullException.ThrowIfNull(candidate);
         workerId = RequireBoundedText(workerId, nameof(workerId), 200);
-        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var connection = await _runtimeDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -697,7 +752,7 @@ internal class PostgreSqlDurableWorkStore
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(claim);
-        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var connection = await _runtimeDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -798,7 +853,7 @@ internal class PostgreSqlDurableWorkStore
         Func<NpgsqlTransaction, DurableWorkState, string, CancellationToken, ValueTask>? onTerminalApplied = null)
     {
         ArgumentNullException.ThrowIfNull(claim);
-        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var connection = await _runtimeDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -1125,7 +1180,7 @@ internal class PostgreSqlDurableWorkStore
 
         var terminalCode = RequireBoundedText(completion.Code, nameof(completion), 200);
         EnsureBoundedJson(completion.DetailsJson);
-        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var connection = await _runtimeDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -1413,7 +1468,7 @@ internal class PostgreSqlDurableWorkStore
             throw new ArgumentOutOfRangeException(nameof(expectedRevision));
         }
 
-        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var connection = await _runtimeDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -1686,7 +1741,7 @@ internal class PostgreSqlDurableWorkStore
             throw new ArgumentOutOfRangeException(nameof(expectedGeneration));
         }
 
-        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var connection = await _runtimeDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
