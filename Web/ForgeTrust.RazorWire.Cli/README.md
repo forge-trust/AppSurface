@@ -4,16 +4,20 @@ The **RazorWire CLI** is a command-line tool for managing RazorWire projects. It
 
 The CLI uses AppSurface's command-first console mode. That means help and validation output are intentionally quiet, without Generic Host lifecycle banners, while real export runs still emit useful progress logs.
 
-## Start here: export the sample
+## Start here: export the package-only starter
 
-During repository development, the fastest confidence check is to export the RazorWire MVC sample from source:
+For the smallest install-shaped proof, use the [RazorWire brochure starter](../../examples/razorwire-brochure-starter/README.md). It restores `ForgeTrust.RazorWire` from an explicitly selected package source and uses a local proof-only `ForgeTrust.RazorWire.Cli` tool package to export its six-page field-notes site in CDN mode. The sample has no Tailwind or RazorWire source-project references, and its contact form deliberately has no delivery endpoint.
+
+## Source development: export the advanced sample
+
+During repository development, the fastest mechanics confidence check is to export the advanced RazorWire MVC sample from source:
 
 ```bash
 dotnet run --project Web/ForgeTrust.RazorWire.Cli -- export -o ./dist -p ./examples/razorwire-mvc/RazorWireWebExample.csproj
 test -f ./dist/index.html
 ```
 
-A successful run publishes the sample, starts it on an ephemeral loopback URL, crawls the discovered pages, writes static files under `./dist`, and shuts the target app down automatically. Inspect `./dist/index.html` first; it proves the exporter emitted the root artifact.
+A successful run publishes the sample, starts it on an ephemeral loopback URL, crawls the discovered pages, writes static files under `./dist`, and shuts the target app down automatically. Inspect `./dist/index.html` first; it proves the exporter emitted the root artifact. Use this source-backed sample for islands, streams, form failures, and other advanced mechanics; use the [brochure starter](../../examples/razorwire-brochure-starter/README.md) when validating the package-consumer shape.
 
 ## Installation
 

@@ -1,0 +1,74 @@
+@{
+    ViewData["Title"] = "Make the signal clearer";
+}
+
+<section class="hero shell" aria-labelledby="home-title">
+    <div class="hero-copy">
+        <p class="eyebrow">Independent editorial studio · New York / everywhere</p>
+        <h1 id="home-title">Make the signal <em>clearer.</em></h1>
+        <p class="lede">Northstar helps ambitious teams turn complex ideas into work people can understand, trust, and act on.</p>
+        <div class="button-row">
+            <a class="button button-primary" href="/services">Explore the studio</a>
+            <a class="text-link" href="/journal">Read the journal <span aria-hidden="true">↗</span></a>
+        </div>
+    </div>
+    <div class="hero-art" aria-label="Abstract Northstar star map" role="img">
+        <span class="orbit orbit-one"></span>
+        <span class="orbit orbit-two"></span>
+        <span class="star star-one">✦</span>
+        <span class="star star-two">✦</span>
+        <span class="star star-three">✦</span>
+        <span class="hero-coordinate">40° 42′ N<br>74° 00′ W</span>
+    </div>
+</section>
+
+@section Scripts {
+    <rw:scripts page-navigation="true" />
+}
+
+<section class="section-band" aria-labelledby="signal-title">
+    <div class="shell split-layout">
+        <nav rw-page-nav class="page-nav" aria-label="On this page">
+            <p class="eyebrow">On this page</p>
+            <a rw-page-nav-link href="#signal">The signal</a>
+            <a rw-page-nav-link href="#practice">Our practice</a>
+            <a rw-page-nav-link href="#field-notes">Field notes</a>
+        </nav>
+        <div class="content-column">
+            <div id="signal" class="content-section">
+                <p class="eyebrow">01 · The signal</p>
+                <h2 id="signal-title">Good work begins with a point of view.</h2>
+                <p>We find the useful thread in a crowded story, then give it a shape that can travel. The result is language with a pulse: specific enough to guide decisions and generous enough to invite people in.</p>
+            </div>
+            <div id="practice" class="content-section">
+                <p class="eyebrow">02 · Our practice</p>
+                <div class="practice-grid">
+                    <article>
+                        <span class="card-index">A</span>
+                        <h3>Strategy</h3>
+                        <p>Positioning, narratives, and editorial systems that make the next move visible.</p>
+                    </article>
+                    <article>
+                        <span class="card-index">B</span>
+                        <h3>Words</h3>
+                        <p>Websites, campaigns, and long-form pieces with a human voice and a sharp edge.</p>
+                    </article>
+                    <article>
+                        <span class="card-index">C</span>
+                        <h3>Direction</h3>
+                        <p>Creative direction that keeps the whole constellation moving together.</p>
+                    </article>
+                </div>
+            </div>
+            <div id="field-notes" class="content-section feature-callout">
+                <div>
+                    <p class="eyebrow">03 · Field notes</p>
+                    <h2>A small guide to making useful things.</h2>
+                    <p>Our field guide is a collection of working principles for teams navigating ambiguity.</p>
+                    <a class="text-link" href="/journal/field-guide">Open the field guide <span aria-hidden="true">↗</span></a>
+                </div>
+                <img src="~/images/northstar-field-guide.svg" alt="A Northstar field guide cover with a compass mark." width="220" height="165">
+            </div>
+        </div>
+    </div>
+</section>

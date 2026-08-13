@@ -1,0 +1,42 @@
+@{
+    ViewData["Title"] = "Field guide";
+}
+
+<article class="field-guide shell" aria-labelledby="field-guide-title">
+    <header class="article-header">
+        <p class="eyebrow">Northstar field guide · 08 min read</p>
+        <h1 id="field-guide-title">How to find your way through the fog.</h1>
+        <p class="lede">A practical set of prompts for making the next useful move when the whole map is still changing.</p>
+    </header>
+
+    <div class="article-layout">
+        <nav rw-page-nav class="page-nav article-nav" aria-label="Field guide sections">
+            <p class="eyebrow">In this guide</p>
+            <a rw-page-nav-link href="#name-the-weather">Name the weather</a>
+            <a rw-page-nav-link href="#choose-a-bearing">Choose a bearing</a>
+            <a rw-page-nav-link href="#take-the-step">Take the step</a>
+        </nav>
+        <div class="article-copy">
+            <img class="field-guide-image" src="~/images/northstar-field-guide.svg" alt="Northstar field guide cover." width="220" height="165">
+            <section id="name-the-weather">
+                <p class="eyebrow">01</p>
+                <h2>Name the weather.</h2>
+                <p>Before you solve a problem, describe the conditions around it. What changed? What feels heavier than it should? What are people already doing to compensate?</p>
+            </section>
+            <section id="choose-a-bearing">
+                <p class="eyebrow">02</p>
+                <h2>Choose a bearing.</h2>
+                <p>A bearing is smaller than a destination. Pick the direction that makes the next decision easier, and let the work teach you what the farther horizon looks like.</p>
+            </section>
+            <section id="take-the-step">
+                <p class="eyebrow">03</p>
+                <h2>Take the step.</h2>
+                <p>Make one thing real enough to react to. A draft, a conversation, a prototype, a sentence on a page. Momentum is often just contact with reality.</p>
+            </section>
+        </div>
+    </div>
+</article>
+
+@section Scripts {
+    <rw:scripts page-navigation="true" />
+}
