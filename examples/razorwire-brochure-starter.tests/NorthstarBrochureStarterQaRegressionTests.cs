@@ -31,6 +31,19 @@ public sealed class NorthstarBrochureStarterQaRegressionTests
         Assert.DoesNotContain("page-navigation.js", body, StringComparison.Ordinal);
     }
 
+    [Fact]
+    // Regression: ISSUE-002 — GET form submission discarded the demo marker from its action URL.
+    // Found by /qa on 2026-08-13
+    // Report: .gstack/qa-reports/qa-report-127-0-0-1-5233-2026-08-13.md
+    public async Task ContactPreviewSubmit_ProvidesTheDemoQueryMarker()
+    {
+        var html = await _client.GetStringAsync("/contact");
+        var form = ExtractElement(html, "form");
+
+        Assert.Contains("action=\"/thank-you.html?demo=1\"", form, StringComparison.Ordinal);
+        Assert.Contains("type=\"submit\" name=\"demo\" value=\"1\"", form, StringComparison.Ordinal);
+    }
+
     private static string ExtractElement(string html, string elementName)
     {
         var match = Regex.Match(
