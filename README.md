@@ -226,6 +226,59 @@ This command:
   [`codecov.yml`](./codecov.yml) and `--patch-line-mode codecov`, with a 0.5-point tolerance; the
   local gate remains authoritative for patch branches.
 
+### Coverage efficiency evidence for issue #728
+
+The ordinary coverage lane remains the pull-request gate. Use the manually dispatched
+[Coverage Efficiency Evidence workflow](https://github.com/forge-trust/AppSurface/actions/workflows/coverage-efficiency.yml)
+only to establish or compare the coverage lane’s contributor-visible duration for
+[issue #728](https://github.com/forge-trust/AppSurface/issues/728). It runs the same Release,
+no-restore, parallelism-2 lane as CI with aggregate coverage only, then retains a private
+`coverage-efficiency-evidence` artifact for 14 days. The artifact contains the exact coverage-step
+start/end and duration, environment manifest, `timings.json`, derived actual serial-set and
+preceding-parallel-batch evidence, managed JUnit results, project logs, slow-test diagnostics,
+coverage outputs, and coverage-gate reports. It has read-only repository
+permissions, uses no secrets, and does not change ordinary pull-request validation.
+Dispatch the workflow from the repository’s default branch only: evidence branches are rejected so a
+candidate cannot redefine the command or its retained evidence while it is being measured.
+
+For a local **screening** run, use the CI-equivalent wrapper environment:
+
+```bash
+BUILD_CONFIGURATION=Release \
+BUILD_NO_RESTORE=true \
+COVERAGE_PARALLELISM=2 \
+COVERAGE_GATE_DIFF_BASE= \
+./scripts/coverage-solution.sh
+```
+
+Do not set `COVERAGE_REQUIRE_NON_SANDBOX=false` unless the local automation is intentionally
+restricted; the GitHub-hosted evidence workflow keeps the guard enabled. A local sample supports a
+CI or issue-level claim only when its recorded OS/image, SDK, Docker/PostgreSQL image,
+Playwright/browser inventory, configuration, restore state, parallelism, and cold/warm declaration
+match the workflow artifact. Otherwise it is screening-only.
+
+The workflow accepts `cold` or `warm`: cold clears NuGet global packages and prunes pnpm’s store
+before the locked restore; warm uses the declared dependency caches. Neither mode may reuse a test
+container, test database, browser context/profile, host process, or coverage output. Use
+`appsurface coverage run --dry-run` only to inspect discovery, exclusive scheduling, and output
+paths: it runs no tests and is never a timing sample.
+
+Read the artifact’s `environment-manifest.json` first, then use `resolved-serial-set.json` alongside
+`timings.json` to review the actual serial set and each barrier’s preceding parallel batch. The outcome
+is the high-resolution monotonic duration of the coverage-wrapper invocation.
+Each per-project `seconds` value is launch-through-normalization attribution, not test-process time.
+Record the baseline, candidate inventory, and result links in the committed
+[`issue-728-test-efficiency`](./artifacts/issue-728-test-efficiency/) evidence pages before changing
+any fixture or scheduler boundary. If the runner/runtime differs, the artifact is incomplete, or the
+five-sample spread exceeds 10% twice, label the samples non-comparable and make no time claim.
+
+For Docker/PostgreSQL failures, inspect the project `dotnet-test.log` and the manifest, restore the
+documented prerequisite, then discard the failed sample. For browser/runtime mismatch, match the
+recorded inventory rather than averaging incompatible runs. An incomplete artifact fails its
+workflow upload contract; repair it before baselining. A safe no-change ceiling is a complete result:
+record the evidence, owner, focused follow-up, and the 2027-02-11 or topology/runtime/runner-image
+re-evaluation trigger in [`results.md`](./artifacts/issue-728-test-efficiency/results.md).
+
 Patch target files are private local artifacts in `TestResults/coverage-merged`, which is already
 covered by the repository's existing [`TestResults` ignore rule](./.gitignore); they are
 intentionally not added as separate `.gitignore` entries. When the gate receives exactly one of
