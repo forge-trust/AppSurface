@@ -617,6 +617,46 @@ Use this GitHub Actions shape for a private pull request workflow that already h
 
 GitHub's default `pull_request` checkout is the synthetic merge commit. `fetch-depth: 2` brings in the merge commit and its base parent, so `--diff-base HEAD^1` reports the pull request changes as tested by the job without fetching the full repository. If `fetch-depth: 2` is omitted, `actions/checkout` fetches only `HEAD`, `HEAD^1` is unavailable, and the gate fails closed with `ASCOV010`. If a workflow checks out the pull request head instead, use a head-vs-base source for that same tree; do not reuse merge-ref coverage artifacts with a head diff.
 
+#### Coverage Efficiency Evidence Workflow
+
+AppSurface’s repository-only [Coverage Efficiency Evidence workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/coverage-efficiency.yml)
+is a manual `cold`/`warm` comparison path for [issue #728](https://github.com/forge-trust/AppSurface/issues/728),
+not a new public `coverage run` option or an ordinary pull-request gate. It invokes the existing
+`./scripts/coverage-solution.sh` lane with `BUILD_CONFIGURATION=Release`,
+`BUILD_NO_RESTORE=true`, `COVERAGE_PARALLELISM=2`, and an empty `COVERAGE_GATE_DIFF_BASE`.
+The empty diff base intentionally measures the aggregate coverage lane, rather than the synthetic
+pull-request merge diff. The workflow preserves the wrapper’s `--require-non-sandbox` protection,
+runs only from the trusted default branch with read-only contents permission and no secrets, and uses a fixed 14-day,
+`if-no-files-found: error` artifact contract.
+
+Open `environment-manifest.json` in the retained `coverage-efficiency-evidence` artifact before
+comparing samples. It records exact coverage-step start/end timestamps and duration, commit/run URL,
+runner OS/image, .NET SDK details, Docker and pinned PostgreSQL image evidence, Node/pnpm, and the
+Playwright browser inventory. The same artifact packages the explicitly allowlisted `timings.json`,
+managed JUnit XML, per-project `dotnet-test.log` and any emitted `coverage-normalization.log`,
+slow-test diagnostics, Cobertura/summary output, `reportgenerator-summary.txt` when emitted, coverage-gate reports,
+and `resolved-serial-set.json`. That private report identifies each exclusive barrier and the preceding
+parallel batch it drains. Read `evidence-completeness.json` before trusting a sample: `captureStatus`
+describes whether capture completed, `artifactContractComplete` says whether the required evidence set
+is complete, and `artifactContractErrors` lists any contract failures. The workflow deliberately does
+not upload an unbounded `TestResults` tree.
+
+The primary metric is the high-resolution monotonic duration of the coverage-wrapper invocation. `timings.json` project `seconds`
+starts before project execution and ends after coverage normalization, so it is end-to-end project-run
+attribution rather than test-process time. Use its schedule fields with `resolved-serial-set.json` to
+reconcile issue-named, explicit, automatic, and actual serial-set projects. Do not treat a shorter project value as an improvement
+unless the same cold or warm class also lowers the exact step’s five-sample median by at least 15% and
+five seconds without moving delay to an adjacent barrier batch.
+
+Use `coverage run --dry-run` or `--list-projects` to inspect selected projects, automatic
+exclusivity, and artifact paths before a run. Those commands are preflight only: they do not produce a
+baseline sample. The committed [issue #728 evidence templates](https://github.com/forge-trust/AppSurface/tree/main/artifacts/issue-728-test-efficiency)
+define the scope reconciliation, candidate admission, timing formulas, failure-injection proof, and
+no-change-ceiling handoff. If Docker/PostgreSQL or Chromium is unavailable, a runtime fingerprint
+differs, an artifact is incomplete, or a sample class remains noisier than 10% after its one retry,
+the workflow retains the diagnostic artifact but fails the sample. Fix or record that condition and do
+not make a time claim.
+
 ### `appsurface coverage merge`
 
 Merge existing Cobertura shards that another workflow already produced.

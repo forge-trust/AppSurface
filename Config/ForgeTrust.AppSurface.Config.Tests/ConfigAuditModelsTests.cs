@@ -6,6 +6,46 @@ namespace ForgeTrust.AppSurface.Config.Tests;
 public class ConfigAuditModelsTests
 {
     [Fact]
+    public void ConfigAuditReportRequest_ValidatesEnvironmentAndMode()
+    {
+        Assert.Throws<ArgumentNullException>(() => new ConfigAuditReportRequest(null!));
+        Assert.Throws<ArgumentException>(() => new ConfigAuditReportRequest(" "));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ConfigAuditReportRequest("Production", (ConfigAuditReportMode)99));
+
+        var request = new ConfigAuditReportRequest("Production", ConfigAuditReportMode.ExpandKnownEntryCollections);
+
+        Assert.Equal("Production", request.Environment);
+        Assert.Equal(ConfigAuditReportMode.ExpandKnownEntryCollections, request.Mode);
+    }
+
+    [Fact]
+    public void ConfigAuditReporter_DefaultRequestPreservesLegacyReporterBehavior()
+    {
+        IConfigAuditReporter reporter = new LegacyAuditReporter();
+
+        var report = reporter.GetReport(new ConfigAuditReportRequest("Staging"));
+
+        Assert.Equal("Staging", report.Environment);
+        Assert.Null(report.Mode);
+        Assert.Throws<NotSupportedException>(() => reporter.GetReport(
+            new ConfigAuditReportRequest("Staging", ConfigAuditReportMode.ExpandKnownEntryCollections)));
+        Assert.Throws<ArgumentNullException>(() => reporter.GetReport((ConfigAuditReportRequest)null!));
+    }
+
+    [Fact]
+    public void ConfigAuditReport_OmitsDefaultModeFromJsonAndSerializesExpandedMode()
+    {
+        var canonical = CreateReport(mode: null);
+        var expanded = CreateReport(ConfigAuditReportMode.ExpandKnownEntryCollections);
+
+        var canonicalJson = JsonSerializer.Serialize(canonical);
+        var expandedJson = JsonSerializer.Serialize(expanded);
+
+        Assert.DoesNotContain("\"Mode\"", canonicalJson, StringComparison.Ordinal);
+        Assert.Contains("\"Mode\":1", expandedJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ConfigAuditKnownEntry_RejectsInvalidConstructorArguments()
     {
         Assert.Throws<ArgumentException>(() => new ConfigAuditKnownEntry("", null, typeof(string)));
@@ -643,6 +683,9 @@ public class ConfigAuditModelsTests
     [Fact]
     public void PublicEnums_KeepStableOrdinals()
     {
+        Assert.Equal(0, (int)ConfigAuditReportMode.Default);
+        Assert.Equal(1, (int)ConfigAuditReportMode.ExpandKnownEntryCollections);
+
         Assert.Equal(0, (int)ConfigAuditEntryState.Resolved);
         Assert.Equal(1, (int)ConfigAuditEntryState.PartiallyResolved);
         Assert.Equal(2, (int)ConfigAuditEntryState.Defaulted);
@@ -734,5 +777,23 @@ public class ConfigAuditModelsTests
             Sources: [],
             Diagnostics: []);
         Assert.Equal(ConfigAuditDiscoveredValueKind.Array, providerKey.ValueKind);
+    }
+
+    private static ConfigAuditReport CreateReport(ConfigAuditReportMode? mode, string environment = "Production") =>
+        new()
+        {
+            Environment = environment,
+            GeneratedAt = DateTimeOffset.UnixEpoch,
+            Mode = mode,
+            Redaction = new ConfigAuditRedaction
+            {
+                Enabled = true,
+                Placeholder = "[redacted]"
+            }
+        };
+
+    private sealed class LegacyAuditReporter : IConfigAuditReporter
+    {
+        public ConfigAuditReport GetReport(string environment) => CreateReport(mode: null, environment);
     }
 }

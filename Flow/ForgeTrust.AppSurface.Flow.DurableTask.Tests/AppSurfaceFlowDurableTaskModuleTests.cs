@@ -25,6 +25,20 @@ public sealed class AppSurfaceFlowDurableTaskModuleTests
     }
 
     [Fact]
+    public void ConfigureServices_PreservesHostRegisteredResumeAuthorizer()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IFlowResumeAuthorizer, AllowResumeAuthorizer>();
+        var module = new AppSurfaceFlowDurableTaskModule();
+
+        new AppSurfaceFlowModule().ConfigureServices(new StartupContext([], new TestHostModule()), services);
+        module.ConfigureServices(new StartupContext([], new TestHostModule()), services);
+
+        using var provider = services.BuildServiceProvider();
+        Assert.IsType<AllowResumeAuthorizer>(provider.GetRequiredService<IFlowResumeAuthorizer>());
+    }
+
+    [Fact]
     public void RegisterDependentModules_AddsCoreFlowModule()
     {
         var builder = new ModuleDependencyBuilder();
@@ -35,6 +49,18 @@ public sealed class AppSurfaceFlowDurableTaskModuleTests
     }
 
     private sealed record TestState(string Value);
+
+    private sealed class AllowResumeAuthorizer : IFlowResumeAuthorizer
+    {
+        public ValueTask<FlowResumeAuthorizationResult> AuthorizeAsync(
+            FlowResumeAuthorizationRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(FlowResumeAuthorizationResult.Allow("agent-approval.consumed", "Receipt consumed."));
+        }
+    }
 
     private sealed class TestHostModule : IAppSurfaceHostModule
     {

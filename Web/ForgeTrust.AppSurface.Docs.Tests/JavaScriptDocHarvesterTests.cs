@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
@@ -808,6 +809,8 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              * The form submission failed and custom UI may handle the failure.
              * @public
              * @namespace RazorWire
+             * @beta
+             * @deprecated Use razorwire:form:error instead.
              * @event razorwire:form:failure
              * @target form
              * @firesWhen a RazorWire-enhanced form receives an unhandled failure response or network error.
@@ -825,6 +828,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              * Failure payload passed through event.detail.
              * @public
              * @namespace RazorWire
+             * @alpha
              * @typedef {Object} FormFailureDetail
              * @property {HTMLFormElement} form - Submitted form.
              */
@@ -3264,6 +3268,303 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldRenderLifecycleBadgesAndProjectFragmentLifecycleMetadata()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Stable public helper.
+             * @public
+             * @namespace RazorWire
+             */
+            function publicHelper() {}
+
+            /**
+             * Experimental helper.
+             * @public
+             * @namespace RazorWire
+             * @alpha
+             */
+            function alphaHelper() {}
+
+            /**
+             * Transitional helper.
+             * @public
+             * @namespace RazorWire
+             * @beta
+             * @deprecated Use replacementHelper instead.
+             * @deprecated Use replacementHelper instead.
+             */
+            function betaHelper() {}
+
+            /**
+             * Retired helper.
+             * @public
+             * @namespace RazorWire
+             * @deprecated
+             */
+            function retiredHelper() {}
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/public-api.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var group = Assert.Single(docs, doc => string.Equals(doc.Path, "api/javascript/razorwire", StringComparison.Ordinal));
+        var publicHelper = Assert.Single(docs, doc => doc.Path.EndsWith("#function-publichelper", StringComparison.Ordinal));
+        var alphaHelper = Assert.Single(docs, doc => doc.Path.EndsWith("#function-alphahelper", StringComparison.Ordinal));
+        var betaHelper = Assert.Single(docs, doc => doc.Path.EndsWith("#function-betahelper", StringComparison.Ordinal));
+        var retiredHelper = Assert.Single(docs, doc => doc.Path.EndsWith("#function-retiredhelper", StringComparison.Ordinal));
+
+        Assert.Null(group.GeneratedApiSymbol);
+        Assert.Equal(new DocGeneratedApiSymbol("public", "Public API", false), publicHelper.GeneratedApiSymbol);
+        Assert.Equal(new DocGeneratedApiSymbol("alpha", "Alpha", false), alphaHelper.GeneratedApiSymbol);
+        Assert.Equal(new DocGeneratedApiSymbol("beta", "Beta", true), betaHelper.GeneratedApiSymbol);
+        Assert.Equal(new DocGeneratedApiSymbol("public", "Public API", true), retiredHelper.GeneratedApiSymbol);
+        Assert.Contains("docs-api-lifecycle-badge--alpha", alphaHelper.Content, StringComparison.Ordinal);
+        Assert.Contains("docs-api-lifecycle-badge--beta", betaHelper.Content, StringComparison.Ordinal);
+        Assert.Contains("Deprecated. Use replacementHelper instead.", betaHelper.Content, StringComparison.Ordinal);
+        Assert.Contains("Deprecated.</p>", retiredHelper.Content, StringComparison.Ordinal);
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSkipInvalidLifecycleDocletsWithoutPublishingLifecycleOnlyDoclets()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Valid helper.
+             * @public
+             * @namespace RazorWire
+             */
+            function validHelper() {}
+
+            /**
+             * Conflicting helper.
+             * @public
+             * @namespace RazorWire
+             * @alpha
+             * @beta
+             */
+            function conflictingHelper() {}
+
+            /**
+             * Malformed helper.
+             * @public
+             * @namespace RazorWire
+             * @alpha preview only
+             */
+            function malformedHelper() {}
+
+            /**
+             * Malformed beta helper.
+             * @public
+             * @namespace RazorWire
+             * @beta preview only
+             */
+            function malformedBetaHelper() {}
+
+            /**
+             * Ambiguous deprecated helper.
+             * @public
+             * @namespace RazorWire
+             * @deprecated Use firstReplacement.
+             * @deprecated Use secondReplacement.
+             */
+            function ambiguousHelper() {}
+
+            /**
+             * This is not public merely because it is deprecated.
+             * @deprecated Use replacementHelper instead.
+             */
+            function deprecatedOnlyHelper() {}
+
+            /**
+             * This is not public merely because it has a lifecycle tag.
+             * @alpha
+             */
+            function lifecycleOnlyHelper() {}
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequirePublicTag = false;
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+        var diagnostics = GetDiagnostics(harvester);
+
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#function-validhelper", StringComparison.Ordinal));
+        Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#function-conflictinghelper", StringComparison.Ordinal));
+        Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#function-malformedhelper", StringComparison.Ordinal));
+        Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#function-malformedbetahelper", StringComparison.Ordinal));
+        Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#function-ambiguoushelper", StringComparison.Ordinal));
+        Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#function-deprecatedonlyhelper", StringComparison.Ordinal));
+        Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#function-lifecycleonlyhelper", StringComparison.Ordinal));
+        Assert.Equal(2, diagnostics.Count(diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict));
+        Assert.Contains(
+            diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle
+                          && diagnostic.Severity == DocHarvestDiagnosticSeverity.Warning
+                          && diagnostic.Problem.Contains("malformedHelper", StringComparison.Ordinal)
+                          && diagnostic.Problem.Contains("src/public-api.js", StringComparison.Ordinal));
+        Assert.Contains(
+            diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle
+                          && diagnostic.Severity == DocHarvestDiagnosticSeverity.Warning
+                          && diagnostic.Problem.Contains("malformedBetaHelper", StringComparison.Ordinal)
+                          && diagnostic.Problem.Contains("src/public-api.js", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("@alpha\n             * @alpha", "alpha")]
+    [InlineData("@beta\n             * @beta", "beta")]
+    public async Task HarvestAsync_ShouldSkipRepeatedLifecycleModifiers(string lifecycleDoclet, string lifecycle)
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            $$"""
+            /**
+             * Repeated {{lifecycle}} lifecycle helper.
+             * @public
+             * @namespace RazorWire
+             * {{lifecycleDoclet}}
+             */
+            function repeatedLifecycleHelper() {}
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/public-api.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#function-repeatedlifecyclehelper", StringComparison.Ordinal));
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict);
+        Assert.Contains($"@{lifecycle}", diagnostic.Cause, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("@alpha   ", "alpha", "Alpha")]
+    [InlineData("@beta\t", "beta", "Beta")]
+    [InlineData("@deprecated   ", "public", "Public API")]
+    public async Task HarvestAsync_ShouldTreatWhitespaceOnlyLifecycleModifierContentAsEmpty(
+        string lifecycleDoclet,
+        string expectedLifecycle,
+        string expectedLabel)
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            $$"""
+            /**
+             * Whitespace-normalized lifecycle helper.
+             * @public
+             * @namespace RazorWire
+             * {{lifecycleDoclet}}
+             */
+            function whitespaceLifecycleHelper() {}
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/public-api.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var symbol = Assert.Single(docs, doc => doc.Path.EndsWith("#function-whitespacelifecyclehelper", StringComparison.Ordinal));
+        Assert.Equal(expectedLifecycle, symbol.GeneratedApiSymbol?.ApiLifecycle);
+        Assert.Equal(expectedLabel, symbol.GeneratedApiSymbol?.ApiLifecycleLabel);
+        Assert.Equal(expectedLifecycle == "public", symbol.GeneratedApiSymbol?.IsDeprecated);
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldProjectLifecycleMetadataForStandaloneBrowserContracts()
+    {
+        await WriteAsync(
+            "src/browser-contracts.js",
+            """
+            /**
+             * Beta event.
+             * @public
+             * @namespace RazorWire
+             * @beta
+             * @event razorwire:beta
+             * @target document
+             * @firesWhen a beta integration runs.
+             * @detail none
+             */
+
+            /**
+             * Deprecated payload.
+             * @public
+             * @namespace RazorWire
+             * @deprecated Use NewPayload instead.
+             * @typedef {Object} LegacyPayload
+             */
+
+            /**
+             * Alpha contract flag.
+             * @public
+             * @namespace RazorWire
+             * @alpha
+             * @attribute data-rw-alpha
+             * @target form[data-rw-form="true"]
+             * @type {string}
+             */
+
+            /**
+             * Beta config field.
+             * @public
+             * @namespace RazorWire
+             * @beta
+             * @config betaMode
+             * @source window.RazorWire.config.betaMode
+             * @type {string}
+             */
+
+            /**
+             * Deprecated module contract.
+             * @public
+             * @namespace RazorWire
+             * @deprecated Use mountV2 instead.
+             * @moduleContract mount
+             * @target module referenced by data-rw-module
+             * @signature mount(root)
+             */
+
+            /**
+             * Alpha CSS custom property.
+             * @public
+             * @namespace RazorWire
+             * @alpha
+             * @cssCustomProperty --rw-alpha-color
+             * @target [data-rw-form-error-generated="true"]
+             * @syntax <color>
+             */
+
+            /**
+             * Beta CSS hook.
+             * @public
+             * @namespace RazorWire
+             * @beta
+             * @cssHook [data-rw-beta-hook="true"]
+             * @hookKind data-attribute
+             * @target generated beta UI
+             * @stability experimental
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/browser-contracts.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        AssertLifecycleSymbol(docs, "#event-razorwire-beta", "beta", false);
+        AssertLifecycleSymbol(docs, "#typedef-legacypayload", "public", true);
+        AssertLifecycleSymbol(docs, "#attribute-data-rw-alpha", "alpha", false);
+        AssertLifecycleSymbol(docs, "#config-betamode", "beta", false);
+        AssertLifecycleSymbol(docs, "#module-contract-mount", "public", true);
+        AssertLifecycleSymbol(docs, "#css-custom-property-rw-alpha-color", "alpha", false);
+        AssertLifecycleSymbol(docs, "#css-hook-data-rw-beta-hook-true", "beta", false);
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
     public async Task GetSearchIndexPayloadAsync_ShouldIndexJavaScriptEventStubsWithKindLabelsAndDetailFields()
     {
         await WriteAsync(
@@ -3273,6 +3574,8 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              * The form submission failed and custom UI may handle the failure.
              * @public
              * @namespace RazorWire
+             * @beta
+             * @deprecated Use razorwire:form:error instead.
              * @event razorwire:form:failure
              * @target form
              * @firesWhen a RazorWire-enhanced form receives an unhandled failure response.
@@ -3285,6 +3588,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              * Failure payload passed through event.detail.
              * @public
              * @namespace RazorWire
+             * @alpha
              * @typedef {Object} FormFailureDetail
              * @property {HTMLFormElement} form - Submitted form.
              * @property {number|null} statusCode - HTTP status code when a response was received.
@@ -3312,11 +3616,196 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Equal("JavaScript Event", document.PageTypeLabel);
         Assert.Equal("javascript", document.Language);
         Assert.Equal("JavaScript", document.LanguageLabel);
+        Assert.Equal("beta", document.ApiLifecycle);
+        Assert.Equal("Beta", document.ApiLifecycleLabel);
+        Assert.True(document.IsDeprecated);
+        Assert.True(document.IsGeneratedApiSymbol);
         Assert.Equal(["API Reference", "JavaScript", "RazorWire"], document.Breadcrumbs);
         Assert.Contains("FormFailureDetail", document.BodyText, StringComparison.Ordinal);
         Assert.Contains("Submitted form", document.BodyText, StringComparison.Ordinal);
         Assert.Contains("statusCode", document.BodyText, StringComparison.Ordinal);
         Assert.Contains("razorwire:form:failure", document.BodyText, StringComparison.OrdinalIgnoreCase);
+        var typedef = Assert.Single(payload.Documents, doc => string.Equals(doc.Title, "FormFailureDetail", StringComparison.Ordinal));
+        Assert.Equal("alpha", typedef.ApiLifecycle);
+        Assert.Equal("Alpha", typedef.ApiLifecycleLabel);
+        Assert.False(typedef.IsDeprecated);
+        Assert.True(typedef.IsGeneratedApiSymbol);
+        var group = Assert.Single(payload.Documents, doc => string.Equals(doc.Title, "RazorWire JavaScript API", StringComparison.Ordinal));
+        Assert.Null(group.ApiLifecycle);
+        Assert.Null(group.ApiLifecycleLabel);
+        Assert.Null(group.IsDeprecated);
+        Assert.Null(group.IsGeneratedApiSymbol);
+
+        using var serializedPayload = JsonDocument.Parse(JsonSerializer.Serialize(payload));
+        var serializedDocuments = serializedPayload.RootElement.GetProperty("documents");
+        var serializedEvent = serializedDocuments.EnumerateArray().Single(item => item.GetProperty("title").GetString() == "razorwire:form:failure");
+        var serializedGroup = serializedDocuments.EnumerateArray().Single(item => item.GetProperty("title").GetString() == "RazorWire JavaScript API");
+        Assert.Equal("beta", serializedEvent.GetProperty("apiLifecycle").GetString());
+        Assert.True(serializedEvent.GetProperty("isGeneratedApiSymbol").GetBoolean());
+        Assert.True(serializedEvent.GetProperty("isDeprecated").GetBoolean());
+        Assert.False(serializedGroup.TryGetProperty("apiLifecycle", out _));
+        Assert.False(serializedGroup.TryGetProperty("isGeneratedApiSymbol", out _));
+    }
+
+    [Fact]
+    public async Task GetSearchIndexPayloadAsync_ShouldProjectOnlyProvenancedCanonicalJavaScriptFragments()
+    {
+        var nodes = new[]
+        {
+            new DocNode(
+                "No lifecycle marker",
+                "api/javascript/no-marker#function-no-marker",
+                "<p>API text.</p>",
+                ParentPath: "api/javascript/no-marker",
+                Metadata: new DocMetadata { PageType = "javascript-function" }),
+            new DocNode(
+                "Unprovenanced lifecycle fragment",
+                "api/javascript/unprovenanced#function-unprovenanced",
+                "<p>API text.</p>",
+                ParentPath: "api/javascript/unprovenanced",
+                Metadata: new DocMetadata { PageType = "javascript-function" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("beta", "Beta", true)
+            },
+            new DocNode(
+                "Fragment without a parent",
+                "api/javascript/no-parent#function-no-parent",
+                "<p>API text.</p>",
+                Metadata: new DocMetadata { PageType = "javascript-function" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("beta", "Beta", true),
+                HasJavaScriptApiLifecycleProvenance = true
+            },
+            new DocNode(
+                "Fragment outside JavaScript API routes",
+                "guides/outside#fragment",
+                "<p>API text.</p>",
+                ParentPath: "guides/outside",
+                Metadata: new DocMetadata { PageType = "javascript-function" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("beta", "Beta", true),
+                HasJavaScriptApiLifecycleProvenance = true
+            },
+            new DocNode(
+                "Fragment with an unrelated parent",
+                "api/javascript/actual#function-actual",
+                "<p>API text.</p>",
+                ParentPath: "api/javascript/other",
+                Metadata: new DocMetadata { PageType = "javascript-function" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("beta", "Beta", true),
+                HasJavaScriptApiLifecycleProvenance = true
+            },
+            new DocNode(
+                "Fragment with a non-JavaScript page type",
+                "api/javascript/wrong-page-type#fragment",
+                "<p>API text.</p>",
+                ParentPath: "api/javascript/wrong-page-type",
+                Metadata: new DocMetadata { PageType = "guide" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("beta", "Beta", true),
+                HasJavaScriptApiLifecycleProvenance = true
+            },
+            new DocNode(
+                "Fragment with a noncanonical lifecycle",
+                "api/javascript/noncanonical#fragment",
+                "<p>API text.</p>",
+                ParentPath: "api/javascript/noncanonical",
+                Metadata: new DocMetadata { PageType = "javascript-function" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("critical", "Critical", true),
+                HasJavaScriptApiLifecycleProvenance = true
+            },
+            new DocNode(
+                "Public lifecycle fragment",
+                "api/javascript/public#function-public",
+                "<p>API text.</p>",
+                ParentPath: "api/javascript/public",
+                Metadata: new DocMetadata { PageType = "javascript-function" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("public", "Public API", false),
+                HasJavaScriptApiLifecycleProvenance = true
+            },
+            new DocNode(
+                "Alpha lifecycle fragment",
+                "api/javascript/alpha#function-alpha",
+                "<p>API text.</p>",
+                ParentPath: "api/javascript/alpha",
+                Metadata: new DocMetadata { PageType = "javascript-function" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("alpha", "Alpha", false),
+                HasJavaScriptApiLifecycleProvenance = true
+            },
+            new DocNode(
+                "Beta lifecycle fragment",
+                "api/javascript/beta#function-beta",
+                "<p>API text.</p>",
+                ParentPath: "api/javascript/beta",
+                Metadata: new DocMetadata { PageType = "javascript-function" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("beta", "Beta", true),
+                HasJavaScriptApiLifecycleProvenance = true
+            }
+        };
+        var options = new AppSurfaceDocsOptions();
+        options.Source.RepositoryRoot = _testRoot;
+        options.Contributor.Enabled = false;
+        var aggregator = new DocAggregator(
+            [new StaticHarvester(nodes)],
+            options,
+            new TestWebHostEnvironment(_testRoot),
+            new Memo(new MemoryCache(new MemoryCacheOptions())),
+            new AppSurfaceDocsHtmlSanitizer(),
+            NullLogger<DocAggregator>.Instance);
+
+        var payload = await aggregator.GetSearchIndexPayloadAsync();
+
+        Assert.Equal(nodes.Length, payload.Documents.Count);
+        var projected = payload.Documents
+            .Where(document => document.IsGeneratedApiSymbol == true)
+            .OrderBy(document => document.Title, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Collection(
+            projected,
+            document => Assert.Equal(("Alpha lifecycle fragment", "alpha", "Alpha", false), (document.Title, document.ApiLifecycle, document.ApiLifecycleLabel, document.IsDeprecated)),
+            document => Assert.Equal(("Beta lifecycle fragment", "beta", "Beta", true), (document.Title, document.ApiLifecycle, document.ApiLifecycleLabel, document.IsDeprecated)),
+            document => Assert.Equal(("Public lifecycle fragment", "public", "Public API", false), (document.Title, document.ApiLifecycle, document.ApiLifecycleLabel, document.IsDeprecated)));
+        Assert.All(
+            payload.Documents.Where(document => document.IsGeneratedApiSymbol != true),
+            document =>
+            {
+                Assert.Null(document.ApiLifecycle);
+                Assert.Null(document.ApiLifecycleLabel);
+                Assert.Null(document.IsDeprecated);
+                Assert.Null(document.IsGeneratedApiSymbol);
+            });
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldExcludeTaglessAndLifecycleOnlyDoclets_WhenPublicTagIsNotRequired()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Description-only helper.
+             */
+            function descriptionOnlyHelper() {}
+
+            /**
+             * Lifecycle-only helper.
+             * @beta
+             */
+            function lifecycleOnlyHelper() {}
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequirePublicTag = false;
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(docs);
+        Assert.Empty(GetDiagnostics(harvester));
     }
 
     [Fact]
@@ -3422,6 +3911,172 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Contains(health.Harvesters, item => item.HarvesterType == nameof(JavaScriptDocHarvester)
             && item.Status == DocHarvesterHealthStatus.Failed);
         Assert.Contains(health.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptFileTooLarge);
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldFailStrictHealthForInvalidLifecycleDoclets()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Conflicting lifecycle helper.
+             * @public
+             * @namespace RazorWire
+             * @alpha
+             * @beta
+             */
+            function conflictingHelper() {}
+            """);
+        var options = new AppSurfaceDocsOptions();
+        options.Source.RepositoryRoot = _testRoot;
+        options.Harvest.JavaScript.StrictHealth = true;
+        options.Contributor.Enabled = false;
+        var harvester = CreateHarvester(options);
+        var aggregator = new DocAggregator(
+            [new StaticHarvester([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]), harvester],
+            options,
+            new TestWebHostEnvironment(_testRoot),
+            new Memo(new MemoryCache(new MemoryCacheOptions())),
+            new AppSurfaceDocsHtmlSanitizer(),
+            NullLogger<DocAggregator>.Instance);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Equal(DocHarvestHealthStatus.Degraded, health.Status);
+        Assert.Contains(
+            health.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict
+                          && diagnostic.Severity == DocHarvestDiagnosticSeverity.Error);
+        Assert.Contains(
+            health.Harvesters,
+            item => item.HarvesterType == nameof(JavaScriptDocHarvester)
+                    && item.Status == DocHarvesterHealthStatus.Failed
+                    && item.DocCount == 0);
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldFailStrictHealthForMalformedLifecycleModifiers()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Malformed lifecycle helper.
+             * @public
+             * @namespace RazorWire
+             * @alpha preview only
+             */
+            function malformedHelper() {}
+            """);
+        var options = new AppSurfaceDocsOptions();
+        options.Source.RepositoryRoot = _testRoot;
+        options.Harvest.JavaScript.StrictHealth = true;
+        options.Contributor.Enabled = false;
+        var harvester = CreateHarvester(options);
+        var aggregator = new DocAggregator(
+            [new StaticHarvester([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]), harvester],
+            options,
+            new TestWebHostEnvironment(_testRoot),
+            new Memo(new MemoryCache(new MemoryCacheOptions())),
+            new AppSurfaceDocsHtmlSanitizer(),
+            NullLogger<DocAggregator>.Instance);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Equal(DocHarvestHealthStatus.Degraded, health.Status);
+        Assert.Contains(
+            health.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle
+                          && diagnostic.Severity == DocHarvestDiagnosticSeverity.Error);
+        Assert.Contains(
+            health.Harvesters,
+            item => item.HarvesterType == nameof(JavaScriptDocHarvester)
+                    && item.Status == DocHarvesterHealthStatus.Failed
+                    && item.DocCount == 0);
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldFailStrictHealthForConflictingDeprecatedMessages()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Deprecated lifecycle helper.
+             * @public
+             * @namespace RazorWire
+             * @deprecated Use firstReplacement instead.
+             * @deprecated Use secondReplacement instead.
+             */
+            function deprecatedHelper() {}
+            """);
+        var options = new AppSurfaceDocsOptions();
+        options.Source.RepositoryRoot = _testRoot;
+        options.Harvest.JavaScript.StrictHealth = true;
+        options.Contributor.Enabled = false;
+        var harvester = CreateHarvester(options);
+        var aggregator = new DocAggregator(
+            [new StaticHarvester([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]), harvester],
+            options,
+            new TestWebHostEnvironment(_testRoot),
+            new Memo(new MemoryCache(new MemoryCacheOptions())),
+            new AppSurfaceDocsHtmlSanitizer(),
+            NullLogger<DocAggregator>.Instance);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Equal(DocHarvestHealthStatus.Degraded, health.Status);
+        Assert.Contains(
+            health.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict
+                          && diagnostic.Severity == DocHarvestDiagnosticSeverity.Error
+                          && diagnostic.Problem.Contains("deprecatedHelper", StringComparison.Ordinal));
+        Assert.Contains(
+            health.Harvesters,
+            item => item.HarvesterType == nameof(JavaScriptDocHarvester)
+                    && item.Status == DocHarvesterHealthStatus.Failed
+                    && item.DocCount == 0);
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldFailConfiguredJavaScriptIncludeBoundaryForInvalidLifecycleDoclets()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Conflicting lifecycle helper.
+             * @public
+             * @namespace RazorWire
+             * @alpha
+             * @beta
+             */
+            function conflictingHelper() {}
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Source.RepositoryRoot = _testRoot;
+        options.Contributor.Enabled = false;
+        var harvester = CreateHarvester(options);
+        var aggregator = new DocAggregator(
+            [new StaticHarvester([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]), harvester],
+            options,
+            new TestWebHostEnvironment(_testRoot),
+            new Memo(new MemoryCache(new MemoryCacheOptions())),
+            new AppSurfaceDocsHtmlSanitizer(),
+            NullLogger<DocAggregator>.Instance);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Equal(DocHarvestHealthStatus.Degraded, health.Status);
+        Assert.Contains(
+            health.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict
+                          && diagnostic.Severity == DocHarvestDiagnosticSeverity.Warning);
+        Assert.Contains(
+            health.Harvesters,
+            item => item.HarvesterType == nameof(JavaScriptDocHarvester)
+                    && item.Status == DocHarvesterHealthStatus.Failed);
     }
 
     [Fact]
@@ -3590,6 +4245,18 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     private static IReadOnlyList<DocHarvestDiagnostic> GetDiagnostics(JavaScriptDocHarvester harvester)
     {
         return ((IDocHarvesterDiagnosticProvider)harvester).GetHarvestDiagnostics();
+    }
+
+    private static void AssertLifecycleSymbol(
+        IReadOnlyList<DocNode> docs,
+        string fragment,
+        string lifecycle,
+        bool isDeprecated)
+    {
+        var symbol = Assert.Single(docs, doc => doc.Path.EndsWith(fragment, StringComparison.Ordinal));
+        Assert.Equal(lifecycle, symbol.GeneratedApiSymbol?.ApiLifecycle);
+        Assert.Equal(isDeprecated, symbol.GeneratedApiSymbol?.IsDeprecated);
+        Assert.Contains($"docs-api-lifecycle-badge--{lifecycle}", symbol.Content, StringComparison.Ordinal);
     }
 
     private static string CreateExternalTempDirectory()
