@@ -634,9 +634,12 @@ comparing samples. It records exact coverage-step start/end timestamps and durat
 runner OS/image, .NET SDK details, Docker and pinned PostgreSQL image evidence, Node/pnpm, and the
 Playwright browser inventory. The same artifact packages the explicitly allowlisted `timings.json`,
 managed JUnit XML, per-project `dotnet-test.log` and any emitted `coverage-normalization.log`,
-slow-test diagnostics, Cobertura/summary output, coverage-gate reports, and
-`resolved-serial-set.json`. That private report identifies each exclusive barrier and the preceding
-parallel batch it drains. The workflow deliberately does not upload an unbounded `TestResults` tree.
+slow-test diagnostics, Cobertura/summary output, `reportgenerator-summary.txt` when emitted, coverage-gate reports,
+and `resolved-serial-set.json`. That private report identifies each exclusive barrier and the preceding
+parallel batch it drains. Read `evidence-completeness.json` before trusting a sample: `captureStatus`
+describes whether capture completed, `artifactContractComplete` says whether the required evidence set
+is complete, and `artifactContractErrors` lists any contract failures. The workflow deliberately does
+not upload an unbounded `TestResults` tree.
 
 The primary metric is the high-resolution monotonic duration of the coverage-wrapper invocation. `timings.json` project `seconds`
 starts before project execution and ends after coverage normalization, so it is end-to-end project-run

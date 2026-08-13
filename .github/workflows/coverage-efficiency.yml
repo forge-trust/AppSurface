@@ -22,7 +22,6 @@ jobs:
     timeout-minutes: 45
     env:
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
-      NPM_CONFIG_STORE_DIR: ${{ runner.temp }}/coverage-efficiency-pnpm-store
 
     steps:
       - name: Checkout code
@@ -36,10 +35,16 @@ jobs:
         with:
           dotnet-version: |
             10.0.x
-          cache: true
-          cache-dependency-path: |
-            **/packages.lock.json
-            **/packages.*.lock.json
+          cache: false
+
+      - name: Restore NuGet packages for declared comparison state
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.3.0
+        with:
+          path: ${{ github.workspace }}/.nuget/packages
+          key: dotnet-cache-${{ runner.os }}-${{ hashFiles('**/packages.lock.json', '**/packages.*.lock.json') }}
+
+      - name: Configure pnpm evidence store
+        run: echo "NPM_CONFIG_STORE_DIR=$RUNNER_TEMP/coverage-efficiency-pnpm-store" >> "$GITHUB_ENV"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
@@ -50,8 +55,19 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-          cache: pnpm
-          cache-dependency-path: Web/pnpm-lock.yaml
+          package-manager-cache: false
+
+      - name: Compute pnpm cache key
+        id: pnpm-cache-key
+        env:
+          PNPM_LOCK_HASH: ${{ hashFiles('Web/pnpm-lock.yaml') }}
+        run: echo "key=node-cache-${RUNNER_OS}-$(node -p 'process.arch')-pnpm-${PNPM_LOCK_HASH}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore pnpm store for declared comparison state
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/coverage-efficiency-pnpm-store
+          key: ${{ steps.pnpm-cache-key.outputs.key }}
 
       - name: Require a trusted evidence ref
         env:
@@ -135,6 +151,7 @@ jobs:
           BUILD_NO_RESTORE: true
           COVERAGE_PARALLELISM: 2
           COVERAGE_GATE_DIFF_BASE: ''
+          CACHE_STATE: ${{ inputs['cache-state'] }}
         run: |
           set -euo pipefail
           evidence_root="$RUNNER_TEMP/coverage-efficiency-evidence"
@@ -262,7 +279,7 @@ jobs:
             --arg playwright_browser_status "$playwright_browser_status" \
             --arg runtime_capture_status "$capture_status" \
             --argjson runtime_capture_exit_code "$runtime_capture_exit_code" \
-            --arg cache_state "${{ inputs['cache-state'] }}" \
+            --arg cache_state "$CACHE_STATE" \
             --arg started_at "$started_at" \
             --arg finished_at "$finished_at" \
             --arg build_configuration "Release" \
@@ -296,6 +313,9 @@ jobs:
           artifact_copied_bytes=0
           artifact_source_errors=()
           artifact_source_error_count=0
+          coverage_exit_code_value="${COVERAGE_EXIT_CODE:--1}"
+          runtime_capture_exit_code_value="${RUNTIME_CAPTURE_EXIT_CODE:--1}"
+          serial_set_derivation_failed=false
 
           record_artifact_source_error() {
             artifact_source_errors+=("$1")
@@ -340,7 +360,7 @@ jobs:
           copy_if_present "$coverage_root/coverage-gate.md" "$output_root/coverage-gate.md"
 
           if [[ -f "$output_root/timings.json" ]]; then
-            jq '
+            if ! jq '
               . as $timings
               | ($timings.projects | sort_by(.executionIndex)) as $projects
               | {
@@ -368,7 +388,9 @@ jobs:
                           }
                       )
                   ]
-                }' "$output_root/timings.json" > "$output_root/resolved-serial-set.json" || true
+                }' "$output_root/timings.json" > "$output_root/resolved-serial-set.json" 2> "$output_root/resolved-serial-set.error.log"; then
+              serial_set_derivation_failed=true
+            fi
           fi
 
           junit_files=()
@@ -389,6 +411,10 @@ jobs:
           if (( artifact_source_error_count > 0 )); then
             evidence_contract_complete=false
             evidence_contract_errors=("${artifact_source_errors[@]}")
+          fi
+          if [[ "$serial_set_derivation_failed" == true ]]; then
+            evidence_contract_complete=false
+            evidence_contract_errors+=("Actual serial-set derivation failed; see coverage-output/resolved-serial-set.error.log.")
           fi
           require_nonempty_file() {
             local path="$1"
@@ -421,7 +447,7 @@ jobs:
             "$evidence_root/node-version.txt"
             "$evidence_root/playwright-browser-inventory.txt"
           )
-          if [[ "$COVERAGE_EXIT_CODE" == "0" ]]; then
+          if [[ "$coverage_exit_code_value" == "0" ]]; then
             required_files+=(
               "$output_root/timings.json"
               "$output_root/slow-test-diagnostics.md"
@@ -489,7 +515,7 @@ jobs:
           done
 
           capture_status=complete
-          if [[ "$COVERAGE_EXIT_CODE" != "0" || "$RUNTIME_CAPTURE_EXIT_CODE" != "0" || "$evidence_contract_complete" != true ]]; then
+          if [[ "$coverage_exit_code_value" != "0" || "$runtime_capture_exit_code_value" != "0" || "$evidence_contract_complete" != true ]]; then
             capture_status=failed
           fi
 
@@ -500,8 +526,8 @@ jobs:
 
           jq -n \
             --arg capture_status "$capture_status" \
-            --argjson coverage_exit_code "$COVERAGE_EXIT_CODE" \
-            --argjson runtime_capture_exit_code "$RUNTIME_CAPTURE_EXIT_CODE" \
+            --argjson coverage_exit_code "$coverage_exit_code_value" \
+            --argjson runtime_capture_exit_code "$runtime_capture_exit_code_value" \
             --argjson artifact_contract_complete "$evidence_contract_complete" \
             --argjson artifact_contract_errors "$artifact_contract_errors_json" \
             --arg artifact_contract "complete evidence requires environment-manifest.json, runtime inventories, timings, resolved serial-set and barrier-critical-path evidence, managed JUnit, diagnostics, coverage, gate reports, and project logs" \
@@ -527,6 +553,7 @@ jobs:
         env:
           COVERAGE_EXIT_CODE: ${{ steps.coverage.outputs.coverage-exit-code }}
           COVERAGE_DURATION_SECONDS: ${{ steps.coverage.outputs.coverage-duration-seconds }}
+          CACHE_STATE: ${{ inputs['cache-state'] }}
         run: |
           {
             echo "## Coverage efficiency evidence"
@@ -534,7 +561,7 @@ jobs:
             echo "| Field | Value |"
             echo "| --- | --- |"
             echo "| Commit | \`${GITHUB_SHA}\` |"
-            echo "| Cache state | \`${{ inputs['cache-state'] }}\` |"
+            echo "| Cache state | \`$CACHE_STATE\` |"
             echo "| Coverage-step wall time | ${COVERAGE_DURATION_SECONDS:-unavailable}s |"
             echo "| Coverage exit code | ${COVERAGE_EXIT_CODE:-unavailable} |"
             echo "| Artifact | \`coverage-efficiency-evidence\` (retained 14 days) |"
@@ -544,10 +571,10 @@ jobs:
         if: ${{ always() && !cancelled() && steps.coverage.outputs.coverage-exit-code != '0' }}
         env:
           COVERAGE_EXIT_CODE: ${{ steps.coverage.outputs.coverage-exit-code }}
-        run: exit "$COVERAGE_EXIT_CODE"
+        run: exit "${COVERAGE_EXIT_CODE:--1}"
 
       - name: Fail incomplete runtime evidence capture
         if: ${{ always() && !cancelled() && steps.coverage.outputs.coverage-exit-code == '0' && steps.coverage.outputs.runtime-capture-exit-code != '0' }}
         env:
           RUNTIME_CAPTURE_EXIT_CODE: ${{ steps.coverage.outputs.runtime-capture-exit-code }}
-        run: exit "$RUNTIME_CAPTURE_EXIT_CODE"
+        run: exit "${RUNTIME_CAPTURE_EXIT_CODE:--1}"

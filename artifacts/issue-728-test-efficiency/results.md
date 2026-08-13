@@ -22,7 +22,7 @@ Use this page to publish the implementation result. A safe no-change ceiling is 
 ## Safety protocol record
 
 | Candidate | Targeted ten-run command and seed | Full-gate runs | Failure-injection command | Captured identities | Absence assertions | Result |
-| --- | --- | --- | --- | --- | --- |
+| --- | --- | --- | --- | --- | --- | --- |
 | pending | pending | pending | pending | pending | pending | pending |
 
 ## Ceiling or follow-up decision

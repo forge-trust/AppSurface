@@ -202,6 +202,30 @@ The repository lane requires a non-sandboxed host by default. Set
 `COVERAGE_REQUIRE_NON_SANDBOX=false` only when a restricted run is intentional. This marker check
 deliberately leaves ordinary CI and container hosts valid; see the [non-sandboxed runner reference](./Cli/ForgeTrust.AppSurface.Cli/README.md#require-a-non-sandboxed-runner).
 
+This command:
+- Runs each solution test project.
+- Leaves assembly scope to the public CLI and Coverlet defaults; the merged artifact
+  includes RazorWire production sources when their tests exercise them.
+- Uses the public CLI's default test-module exclusions (`*.Tests` and
+  `*.IntegrationTests`).
+- Produces one merged Cobertura file at `TestResults/coverage-merged/coverage.cobertura.xml`.
+- Produces AppSurface-managed JUnit files as `TestResults/coverage-merged/junit-coverage-<index>-<project-name-hash>.xml`.
+- Writes a summary to `TestResults/coverage-merged/summary.txt`.
+- Writes machine-readable timing data to `TestResults/coverage-merged/timings.json`.
+- Writes slow-test diagnostics to `TestResults/coverage-merged/slow-test-diagnostics.md` and
+  `TestResults/coverage-merged/slow-test-diagnostics.json`, including diagnostic aggregation
+  overhead in seconds and as a percent of elapsed runner time at diagnostics generation.
+- When a patch source is configured, emits `coverage-patch-targets.json` and
+  `coverage-patch-targets.md` beside the other gate artifacts, even when no patch thresholds
+  are configured.
+- Uses the source AppSurface CLI and its package-owned ReportGenerator dependency for the default
+  full-solution lane.
+- Gates at 95% line coverage and 85% branch coverage, plus 95% line and 85% branch coverage for
+  the selected patch when a diff base is configured.
+- Keeps Codecov's patch status aligned with the repository's 95% patch-line gate through
+  [`codecov.yml`](./codecov.yml) and `--patch-line-mode codecov`, with a 0.5-point tolerance; the
+  local gate remains authoritative for patch branches.
+
 ### Coverage efficiency evidence for issue #728
 
 The ordinary coverage lane remains the pull-request gate. Use the manually dispatched
@@ -254,30 +278,6 @@ recorded inventory rather than averaging incompatible runs. An incomplete artifa
 workflow upload contract; repair it before baselining. A safe no-change ceiling is a complete result:
 record the evidence, owner, focused follow-up, and the 2027-02-11 or topology/runtime/runner-image
 re-evaluation trigger in [`results.md`](./artifacts/issue-728-test-efficiency/results.md).
-
-This command:
-- Runs each solution test project.
-- Leaves assembly scope to the public CLI and Coverlet defaults; the merged artifact
-  includes RazorWire production sources when their tests exercise them.
-- Uses the public CLI's default test-module exclusions (`*.Tests` and
-  `*.IntegrationTests`).
-- Produces one merged Cobertura file at `TestResults/coverage-merged/coverage.cobertura.xml`.
-- Produces AppSurface-managed JUnit files as `TestResults/coverage-merged/junit-coverage-<index>-<project-name-hash>.xml`.
-- Writes a summary to `TestResults/coverage-merged/summary.txt`.
-- Writes machine-readable timing data to `TestResults/coverage-merged/timings.json`.
-- Writes slow-test diagnostics to `TestResults/coverage-merged/slow-test-diagnostics.md` and
-  `TestResults/coverage-merged/slow-test-diagnostics.json`, including diagnostic aggregation
-  overhead in seconds and as a percent of elapsed runner time at diagnostics generation.
-- When a patch source is configured, emits `coverage-patch-targets.json` and
-  `coverage-patch-targets.md` beside the other gate artifacts, even when no patch thresholds
-  are configured.
-- Uses the source AppSurface CLI and its package-owned ReportGenerator dependency for the default
-  full-solution lane.
-- Gates at 95% line coverage and 85% branch coverage, plus 95% line and 85% branch coverage for
-  the selected patch when a diff base is configured.
-- Keeps Codecov's patch status aligned with the repository's 95% patch-line gate through
-  [`codecov.yml`](./codecov.yml) and `--patch-line-mode codecov`, with a 0.5-point tolerance; the
-  local gate remains authoritative for patch branches.
 
 Patch target files are private local artifacts in `TestResults/coverage-merged`, which is already
 covered by the repository's existing [`TestResults` ignore rule](./.gitignore); they are
