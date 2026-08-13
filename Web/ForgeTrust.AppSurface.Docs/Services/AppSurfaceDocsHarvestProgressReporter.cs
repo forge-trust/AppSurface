@@ -1032,6 +1032,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
 
     private async Task FlushOrdinaryPublishAsync(long generation, CancellationTokenSource cancellation)
     {
+        using var _ = cancellation;
         try
         {
             await Task.Delay(OrdinaryPublishInterval, _timeProvider, cancellation.Token);
@@ -1060,10 +1061,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
-        }
-        finally
-        {
-            cancellation.Dispose();
+            // The scheduled flush was superseded or the run ended before its bounded delay elapsed.
         }
     }
 
@@ -1099,6 +1097,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
 
     private async Task RetryPendingPublicationAsync(CancellationTokenSource cancellation)
     {
+        using var _ = cancellation;
         try
         {
             await Task.Delay(PublicationRetryInterval, _timeProvider, cancellation.Token);
@@ -1127,10 +1126,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
-        }
-        finally
-        {
-            cancellation.Dispose();
+            // A newer run or successful publication cleared the scheduled retry.
         }
     }
 

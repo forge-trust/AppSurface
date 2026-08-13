@@ -161,6 +161,25 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
     }
 
     [Fact]
+    public async Task ProgressReporter_ShouldDiscardStaleRateSamplesOutsideTheMeasurementWindow()
+    {
+        var timeProvider = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance,
+            timeProvider);
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        var session = reporter.CreateSession(runId, nameof(MarkdownHarvester));
+
+        await session.ReportSourceUnitAsync(2);
+        timeProvider.Advance(TimeSpan.FromSeconds(3));
+        await reporter.CompleteRunAsync(runId, CreateHealth());
+
+        Assert.Null(reporter.CurrentSnapshot.BuiltInDocumentsPerSecond);
+    }
+
+    [Fact]
     public async Task ProgressReporter_ShouldIgnoreUpdatesFromStaleRunIds()
     {
         using var provider = new ServiceCollection().BuildServiceProvider();
@@ -217,6 +236,86 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
         ];
 
         Assert.Throws<ArgumentException>(() => reporter.BeginRunAsync(registrations));
+    }
+
+    [Fact]
+    public void ProgressReporter_ShouldRejectBlankRegistrationIdentity()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => reporter.BeginRunAsync([new AppSurfaceDocsHarvesterRegistration(" ", nameof(MarkdownHarvester))]));
+
+        Assert.Contains("require non-blank progress IDs", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldIgnoreUnknownHarvesterCallbacksForTheCurrentRun()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        var before = reporter.CurrentSnapshot;
+
+        await reporter.HarvesterStartedAsync(runId, "missing");
+        await reporter.HarvesterCompletedAsync(runId, "missing", DocHarvesterHealthStatus.Succeeded, 42);
+        await reporter.HarvesterDocumentCountUpdatedAsync(runId, "missing", 42);
+
+        Assert.Equal(before, reporter.CurrentSnapshot);
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldIgnoreFailRunForStaleOrTerminalRuns()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        await reporter.FailRunAsync("stale");
+
+        Assert.Equal(AppSurfaceDocsHarvestRunState.Running, reporter.CurrentSnapshot.State);
+
+        await reporter.FailRunAsync(runId);
+        var failed = reporter.CurrentSnapshot;
+        await reporter.FailRunAsync(runId);
+
+        Assert.Equal(failed, reporter.CurrentSnapshot);
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldCreateTerminalProgressForHealthHarvestersWithoutStartedCallback()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        var health = new DocHarvestHealthSnapshot(
+            DocHarvestHealthStatus.Healthy,
+            DateTimeOffset.UtcNow,
+            "/tmp/repo",
+            TotalHarvesters: 2,
+            SuccessfulHarvesters: 2,
+            FailedHarvesters: 0,
+            TotalDocs: 3,
+            [
+                new DocHarvesterHealth(nameof(MarkdownHarvester), DocHarvesterHealthStatus.Succeeded, 1, null),
+                new DocHarvesterHealth(nameof(CSharpDocHarvester), DocHarvesterHealthStatus.Succeeded, 2, null)
+            ],
+            Diagnostics: []);
+
+        await reporter.CompleteRunAsync(runId, health);
+
+        var terminalHarvesters = reporter.CurrentSnapshot.Harvesters;
+        Assert.Equal(2, terminalHarvesters.Count);
+        Assert.All(terminalHarvesters, harvester => Assert.Equal(AppSurfaceDocsHarvestProgressPhase.Terminal, harvester.Phase));
+        Assert.Equal(2, terminalHarvesters.Single(harvester => harvester.HarvesterType == nameof(CSharpDocHarvester)).DocCount);
     }
 
     [Fact]

@@ -98,7 +98,7 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
     }
 
     [Fact]
-    public async Task WaitForCompletionAsync_WhenTestingDelayIsConfigured_DelaysHarvesterAfterPublishingProgress()
+    public async Task WaitForCompletionAsync_WhenTestingDelayIsConfigured_ContinuesAfterProgressPublicationStalls()
     {
         using var cache = new MemoryCache(new MemoryCacheOptions());
         var streamHub = new BlockingHarvesterStartedStreamHub();
@@ -120,19 +120,16 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
             await streamHub.HarvesterStartedPublished.Task.WaitAsync(TimeSpan.FromSeconds(3));
             Assert.False(harvester.Started.Task.IsCompleted);
             Assert.Equal(0, harvester.CallCount);
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            await Task.Delay(delay - tolerance);
+            Assert.False(harvester.Started.Task.IsCompleted);
+
+            await harvester.Started.Task.WaitAsync(delay + tolerance);
+            Assert.Equal(1, harvester.CallCount);
 
             streamHub.ReleaseHarvesterStartedPublish();
-            await harvester.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            sw.Stop();
-
-            Assert.True(
-                sw.Elapsed >= delay - tolerance,
-                $"Harvester started after {sw.Elapsed.TotalMilliseconds} ms.");
             harvester.Complete(new DocNode("Ready", "README.md", "<p>Ready</p>"));
 
             Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.FromSeconds(3), CancellationToken.None));
-            Assert.Equal(1, harvester.CallCount);
         }
         finally
         {

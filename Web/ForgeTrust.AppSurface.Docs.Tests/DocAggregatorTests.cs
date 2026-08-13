@@ -3773,17 +3773,24 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
-    public async Task GetHarvestHealthAsync_ShouldRecordTimedOutHarvester_WhenItReturnsAfterTimeoutCancellation()
+    public async Task GetHarvestHealthAsync_ShouldRecordTimedOutHarvester_WhenItReturnsOnlyAfterTimeoutCancellation()
     {
-        var harvester = new ReturnsAfterCancellationHarvester();
+        var harvester = new ReturnsAfterTimeoutCancellationHarvester();
         var aggregator = CreateHarvestHealthAggregator([harvester], harvesterTimeout: TimeSpan.FromMilliseconds(10));
 
-        var health = await aggregator.GetHarvestHealthAsync();
+        try
+        {
+            var health = await aggregator.GetHarvestHealthAsync();
 
-        Assert.Equal(DocHarvestHealthStatus.Failed, health.Status);
-        var harvesterHealth = Assert.Single(health.Harvesters);
-        Assert.Equal(DocHarvesterHealthStatus.TimedOut, harvesterHealth.Status);
-        Assert.Equal(DocHarvestDiagnosticCodes.HarvesterTimedOut, harvesterHealth.Diagnostic?.Code);
+            Assert.Equal(DocHarvestHealthStatus.Failed, health.Status);
+            var harvesterHealth = Assert.Single(health.Harvesters);
+            Assert.Equal(DocHarvesterHealthStatus.TimedOut, harvesterHealth.Status);
+            Assert.Equal(DocHarvestDiagnosticCodes.HarvesterTimedOut, harvesterHealth.Diagnostic?.Code);
+        }
+        finally
+        {
+            harvester.Release();
+        }
     }
 
     [Fact]
@@ -3844,6 +3851,28 @@ public class DocAggregatorTests : IDisposable
         Assert.Contains(
             progressSnapshot.Harvesters,
             item => item.Status == DocHarvesterHealthStatus.Canceled.ToString());
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldPublishTerminalProgress_WhenHarvesterThrowsTimeoutException()
+    {
+        var timeoutHarvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => timeoutHarvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Throws(new TimeoutException("The harvester timed out before producing docs."));
+        var services = A.Fake<IServiceProvider>();
+        A.CallTo(() => services.GetService(typeof(IRazorWireStreamHub))).Returns(null);
+        var progress = new AppSurfaceDocsHarvestProgressReporter(
+            services,
+            A.Fake<ILogger<AppSurfaceDocsHarvestProgressReporter>>());
+        var aggregator = CreateHarvestHealthAggregator([timeoutHarvester], harvestProgress: progress);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+        var progressSnapshot = progress.CurrentSnapshot;
+
+        Assert.Equal(DocHarvestHealthStatus.Failed, health.Status);
+        Assert.Equal(AppSurfaceDocsHarvestRunState.Failed, progressSnapshot.State);
+        Assert.Equal(1, progressSnapshot.CompletedHarvesters);
+        Assert.Equal(DocHarvesterHealthStatus.TimedOut.ToString(), Assert.Single(progressSnapshot.Harvesters).Status);
     }
 
     [Fact]
@@ -5657,8 +5686,10 @@ public class DocAggregatorTests : IDisposable
         }
     }
 
-    private sealed class ReturnsAfterCancellationHarvester : IDocHarvester
+    private sealed class ReturnsAfterTimeoutCancellationHarvester : IDocHarvester
     {
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public async Task<IReadOnlyList<DocNode>> HarvestAsync(
             string rootPath,
             CancellationToken cancellationToken = default)
@@ -5669,9 +5700,16 @@ public class DocAggregatorTests : IDisposable
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                // Deliberately return only after aggregation has classified the timeout.
             }
 
+            await _release.Task;
             return [new DocNode("Late", "late.md", "late")];
+        }
+
+        public void Release()
+        {
+            _release.TrySetResult();
         }
     }
 
