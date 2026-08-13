@@ -30,6 +30,8 @@ for current release risk, migration guidance, and readiness.
 - **`FileBasedConfigProvider`**: Loads configuration from files.
 - **`ConfigValueConverter`**: Shared provider conversion helper for scalar, enum, `Guid`, nullable, and JSON-backed values.
 - **`IConfigAuditReporter`**: Builds source-aware configuration audit reports for known config entries.
+- **[`ConfigAuditReportRequest`](#safe-debug-expansion-in-2-minutes)**: Selects the audited environment and explicit report mode.
+- **[`ConfigAuditReportMode`](#safe-debug-expansion-in-2-minutes)**: Selects canonical reporting or bounded topology-only debug expansion.
 - **`IConfigProviderAuditDiagnostics`**: Public provider seam for source-aware audit resolution without exposing secret values.
 - **`ConfigAuditTextRenderer`**: Renders a safe, human-readable audit report from the structured model.
 - **`ConfigAuditReportDiffer`**: Compares two existing sanitized audit reports without re-resolving providers.
@@ -92,6 +94,44 @@ variable names, diagnostics, and the existence of redacted values can still be o
 var report = auditReporter.GetReport("Staging");
 var text = textRenderer.Render(report);
 ```
+
+### Safe debug expansion in 2 minutes
+
+The canonical report is the default contract. When an incident requires child topology for collections beneath already-known
+entries, request the explicit bounded mode instead:
+
+```csharp
+var report = auditReporter.GetReport(
+    new ConfigAuditReportRequest(
+        "Production",
+        ConfigAuditReportMode.ExpandKnownEntryCollections));
+```
+
+Expanded reports carry `Mode: ExpandKnownEntryCollections` in text and a `Mode` JSON member. They expand supported
+arrays, lists, read-only lists, and dictionaries only beneath entries that AppSurface already knows. They still use the
+same source selection, cycle handling, and per-entry limits as canonical reports. To preserve this mode as topology-only
+operator evidence, expanded child display values are redacted and dictionary labels are hidden even when the parent key
+does not look sensitive. An additional fixed report-wide child-node limit can stop expansion; the resulting
+`config-audit-expanded-report-node-limit` warning means the child topology is intentionally incomplete. This mode never
+becomes a raw provider, environment-variable, or `IConfigurationRoot.GetDebugView()` inventory.
+
+Custom `IConfigAuditReporter` implementations keep their existing default behavior. They safely reject expanded requests
+until they implement the request overload themselves. Only opt in when the custom reporter can preserve equivalent
+redaction and bounds:
+
+```csharp
+public ConfigAuditReport GetReport(ConfigAuditReportRequest request) =>
+    request.Mode switch
+    {
+        ConfigAuditReportMode.Default => GetReport(request.Environment),
+        ConfigAuditReportMode.ExpandKnownEntryCollections =>
+            BuildReportWithTheSameRedactionAndBounds(request.Environment),
+        _ => throw new ArgumentOutOfRangeException(nameof(request))
+    };
+```
+
+If that guarantee is not possible, do not implement the overload; the default interface behavior throws a documented
+`NotSupportedException` rather than widening disclosure.
 
 Explicit registrations are useful for keys that are read directly through `IConfigManager` instead of a wrapper:
 
@@ -298,6 +338,9 @@ namespace MyApp;
 [Command("config diagnostics", Description = "Prints the active AppSurface configuration audit report.")]
 public sealed partial class ConfigDiagnosticsCommand(ConfigDiagnosticsCommandRunner runner) : ICommand
 {
+    [CommandOption("debug")]
+    public bool Debug { get; set; }
+
     /// <summary>
     /// Executes the diagnostics command against the already-selected AppSurface host environment.
     /// </summary>
@@ -308,7 +351,10 @@ public sealed partial class ConfigDiagnosticsCommand(ConfigDiagnosticsCommandRun
     /// </exception>
     public ValueTask ExecuteAsync(IConsole console)
     {
-        var result = runner.Run(console.Output);
+        var mode = Debug
+            ? ConfigAuditReportMode.ExpandKnownEntryCollections
+            : ConfigAuditReportMode.Default;
+        var result = runner.Run(console.Output, mode);
         if (!result.Succeeded)
         {
             throw new CommandException(result.Failure?.ToDisplayString() ?? "Configuration diagnostics failed.");
@@ -323,6 +369,7 @@ Run the command from the app project:
 
 ```bash
 dotnet run --project src/MyApp -- config diagnostics
+dotnet run --project src/MyApp -- config diagnostics --debug
 ```
 
 The command audits the active AppSurface environment selected during host startup. It does not define a command-level
@@ -345,6 +392,11 @@ Entries:
     State: Invalid
     Diagnostic: The configuration value must be between 1 and 5.
 ```
+
+Use `config diagnostics --debug` only when the canonical report needs bounded child topology. Its `Mode:` marker and any
+`config-audit-expanded-report-node-limit` warning make copied support artifacts distinguishable from the default report.
+If an app registered a custom reporter that has not opted in, the command returns its normal sanitized failure result;
+use the built-in reporter or implement the request overload with equivalent redaction and bounds.
 
 Known AppSurface audit entries include discovered `Config<T>` / `ConfigStruct<T>` wrappers and entries registered with
 `AddConfigAuditKey<T>()`. `DiscoveredKeys` separately exposes effective merged file-backed keys visible to enumerable
@@ -679,6 +731,9 @@ value does not leak.
 | `config-audit-collection-depth-limit` | Warning | Traversal stopped at `MaxCollectionDepth`. |
 | `config-audit-collection-element-limit` | Warning | Traversal stopped at `MaxCollectionElements` for one collection. |
 | `config-audit-report-node-limit` | Warning | Traversal stopped at `MaxReportNodes` for the entry. |
+| `config-audit-expanded-report-node-limit` | Warning | Explicit debug expansion reached its fixed report-wide child-node budget, so the reported child topology is incomplete. |
+| `config-audit-traversal-threw` | Warning | A supported collection accessor failed during bounded traversal; the report stopped expanding that value and preserved a sanitized diagnostic. |
+| `config-audit-member-read-threw` | Warning | A public property or field could not be read during bounded traversal; the report skipped that member and preserved a sanitized diagnostic. |
 | `config-audit-source-inherited` | Info | An element inherited parent provenance because an exact safe source path was unavailable. |
 | `config-audit-source-unavailable` | Info | No provider source record was available for an element. |
 | `config-audit-environment-created-element` | Info | An environment variable supplied a collection element and audit provenance proved no lower-priority element existed for that index. |
@@ -720,7 +775,8 @@ provider-only values that should continue appearing in reports.
 - Environment variables, secret providers, source-metadata redaction modes, shadowed raw file inventory, and strict
   drift gates are outside the first discovered-key surface.
 - Collection display values are intentionally omitted rather than summarized or serialized; opt into element traversal
-  for keys where element-level visibility is safe and useful.
+  for keys where element-level visibility is safe and useful. Explicit debug expansion is more conservative: it preserves
+  topology while redacting all child values and hiding dictionary labels.
 - `ConfigAuditCollectionTraversalAttribute` is inherited. Put a new attribute on a derived wrapper when inherited
   traversal limits are too broad or too narrow for that derived key.
 - Attribute values are compile-time metadata. Use manual `AddConfigAuditKey<T>()` options when traversal settings must

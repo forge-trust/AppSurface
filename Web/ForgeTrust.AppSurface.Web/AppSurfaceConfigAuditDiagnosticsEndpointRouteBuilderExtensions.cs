@@ -16,6 +16,8 @@ namespace ForgeTrust.AppSurface.Web;
 public static class AppSurfaceConfigAuditDiagnosticsEndpointRouteBuilderExtensions
 {
     private const string DocsLink = "Web/ForgeTrust.AppSurface.Web/README.md#config-audit-http-diagnostics";
+    private const string ExpandKnownEntryCollectionsMode = "expand-known-entry-collections";
+    private const string ModeQueryName = "mode";
 
     private static readonly JsonSerializerOptions ReportJsonOptions = new();
 
@@ -88,6 +90,11 @@ public static class AppSurfaceConfigAuditDiagnosticsEndpointRouteBuilderExtensio
         ArgumentNullException.ThrowIfNull(serializeReport);
         SetNoStoreHeaders(httpContext);
 
+        if (!TryGetReportMode(httpContext, out var reportMode, out var parseProblem))
+        {
+            return parseProblem;
+        }
+
         var services = httpContext.RequestServices;
         var reporter = services.GetService<IConfigAuditReporter>();
         var environmentProvider = services.GetService<IEnvironmentProvider>();
@@ -136,7 +143,9 @@ public static class AppSurfaceConfigAuditDiagnosticsEndpointRouteBuilderExtensio
         ConfigAuditReport report;
         try
         {
-            report = reporter.GetReport(environment);
+            report = reportMode == ConfigAuditReportMode.ExpandKnownEntryCollections
+                ? reporter.GetReport(new ConfigAuditReportRequest(environment, reportMode))
+                : reporter.GetReport(environment);
         }
         catch (Exception ex) when (IsNonFatalDiagnosticsFailure(ex))
         {
@@ -162,6 +171,54 @@ public static class AppSurfaceConfigAuditDiagnosticsEndpointRouteBuilderExtensio
         }
     }
 
+    private static bool TryGetReportMode(
+        HttpContext httpContext,
+        out ConfigAuditReportMode mode,
+        out IResult parseProblem)
+    {
+        mode = ConfigAuditReportMode.Default;
+        parseProblem = null!;
+
+        if (!httpContext.Request.Query.TryGetValue(ModeQueryName, out var modeValues))
+        {
+            return true;
+        }
+
+        if (modeValues.Count != 1)
+        {
+            parseProblem = CreateInvalidProblem(
+                "Invalid AppSurface config audit request.",
+                "The query mode is malformed.",
+                "The query included multiple mode values.",
+                "Provide one mode value, or omit mode for default behavior.");
+            return false;
+        }
+
+        var modeValue = modeValues[0];
+        if (string.IsNullOrWhiteSpace(modeValue))
+        {
+            parseProblem = CreateInvalidProblem(
+                "Invalid AppSurface config audit request.",
+                "The query mode is malformed.",
+                "The query mode was empty.",
+                "Omit mode for default behavior or supply one supported mode value.");
+            return false;
+        }
+
+        if (string.Equals(modeValue, ExpandKnownEntryCollectionsMode, StringComparison.OrdinalIgnoreCase))
+        {
+            mode = ConfigAuditReportMode.ExpandKnownEntryCollections;
+            return true;
+        }
+
+        parseProblem = CreateInvalidProblem(
+            "Invalid AppSurface config audit request.",
+            "The query mode is malformed.",
+            "The query mode value is unsupported.",
+            "Supply only 'expand-known-entry-collections' or omit mode for default behavior.");
+        return false;
+    }
+
     private static void SetNoStoreHeaders(HttpContext httpContext)
     {
         httpContext.Response.Headers.CacheControl = "no-store";
@@ -172,16 +229,24 @@ public static class AppSurfaceConfigAuditDiagnosticsEndpointRouteBuilderExtensio
         JsonSerializer.Serialize(report, ReportJsonOptions);
 
     private static IResult CreateSetupProblem(string title, string problem, string cause, string fix) =>
-        CreateProblem(title, problem, cause, fix);
+        CreateProblem(StatusCodes.Status500InternalServerError, title, problem, cause, fix);
 
     private static IResult CreateRuntimeProblem(string title, string problem, string cause, string fix) =>
-        CreateProblem(title, problem, cause, fix);
+        CreateProblem(StatusCodes.Status500InternalServerError, title, problem, cause, fix);
 
-    private static IResult CreateProblem(string title, string problem, string cause, string fix) =>
+    private static IResult CreateInvalidProblem(string title, string problem, string cause, string fix) =>
+        CreateProblem(StatusCodes.Status400BadRequest, title, problem, cause, fix);
+
+    private static IResult CreateProblem(
+        int statusCode,
+        string title,
+        string problem,
+        string cause,
+        string fix) =>
         Results.Problem(
             title: title,
             detail: $"Problem: {problem} Cause: {cause} Fix: {fix} Docs: {DocsLink}",
-            statusCode: StatusCodes.Status500InternalServerError,
+            statusCode: statusCode,
             extensions: new Dictionary<string, object?>
             {
                 ["problem"] = problem,

@@ -1350,6 +1350,21 @@ curl -H "Authorization: Bearer $SUPPORT_TOKEN" \
   > production.config-audit.json
 ```
 
+To request bounded collection-child topology for already-known audit entries, pass exactly one supported mode value:
+
+```bash
+curl -H "Authorization: Bearer $SUPPORT_TOKEN" \
+  'https://app.example.com/_appsurface/config/audit?mode=expand-known-entry-collections' \
+  > production.config-audit-expanded.json
+```
+
+Omit `mode` for the canonical report. A present `mode` must appear exactly once and equal
+`expand-known-entry-collections` case-insensitively; empty, repeated, mixed, and unsupported values return a safe `400`
+ProblemDetails response before report generation. The response does not echo the submitted value. Remove `mode` to retry
+the canonical report, or retry with the exact supported value. Expanded artifacts identify their mode and can include a
+`config-audit-expanded-report-node-limit` warning when bounded traversal stops; they remain support-sensitive, no-store
+artifacts under the host's authorization and retention policy.
+
 Compare captured host snapshots later with the Config package's captured-snapshot diff workflow:
 [Config diff in 10 minutes](../../Config/ForgeTrust.AppSurface.Config/README.md#config-diff-in-10-minutes).
 
@@ -1359,6 +1374,8 @@ Important behavior:
 - The endpoint maps `GET` only, applies `RequireAuthorization(policyName)`, and is hidden from API Explorer/OpenAPI by
   default with `ExcludeFromDescription()`.
 - Successful responses and AppSurface-owned setup/runtime failures set `Cache-Control: no-store` and `Pragma: no-cache`.
+- Invalid diagnostics `mode` input also sets those headers and returns a safe `400` response with a recovery-oriented
+  `problem`, `cause`, `fix`, and `docsLink` payload; it never invokes the report provider.
 - Missing Config services, missing environment services, blank environment names, reporter failures, and report JSON
   failures return safe `500` ProblemDetails with `problem`, `cause`, `fix`, and `docsLink` extensions.
 - Native ASP.NET Core authorization still owns challenge and forbid behavior. Cookie hosts may redirect on unauthorized

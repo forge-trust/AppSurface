@@ -5515,7 +5515,26 @@ public sealed class PackageArtifactValidationTests : IDisposable
         const string disabledRuntimeResolutionSetting =
             """(?im)(?:^\s*TailwindRuntimeBinaryResolutionEnabled:\s*(?:"false"|'false'|false)\s*$|(?:^|\s)(?:env\s+)?TailwindRuntimeBinaryResolutionEnabled=false\b|(?:/p:|-p:|/property:|-property:)(?:[^\s'"]*;)*TailwindRuntimeBinaryResolutionEnabled=false\b)""";
 
-        Assert.DoesNotMatch(disabledRuntimeResolutionSetting, buildWorkflow);
+        const string coverageSecurityJobStartMarker = "  coverage-security-platform:";
+        const string coverageSecurityJobEndMarker = "\n  keycloak-theme-evidence:";
+        var coverageSecurityJobStart = buildWorkflow.IndexOf(coverageSecurityJobStartMarker, StringComparison.Ordinal);
+        Assert.True(coverageSecurityJobStart >= 0, "The coverage security workflow job must remain defined.");
+        var coverageSecurityJobEnd = buildWorkflow.IndexOf(coverageSecurityJobEndMarker, coverageSecurityJobStart, StringComparison.Ordinal);
+        Assert.True(coverageSecurityJobEnd > coverageSecurityJobStart, "The coverage security workflow job must end before the Keycloak evidence job.");
+        var coverageSecurityJob = buildWorkflow[coverageSecurityJobStart..coverageSecurityJobEnd];
+        var buildWorkflowWithoutCoverageSecurityJob = buildWorkflow.Remove(
+            coverageSecurityJobStart,
+            coverageSecurityJobEnd - coverageSecurityJobStart);
+
+        Assert.Matches(disabledRuntimeResolutionSetting, coverageSecurityJob);
+        Assert.Matches(
+            "(?s)--no-restore\\s+/p:TailwindRuntimeBinaryResolutionEnabled=false\\s+/p:TailwindEnabled=false\\s+--filter",
+            coverageSecurityJob);
+        Assert.DoesNotMatch(disabledRuntimeResolutionSetting, buildWorkflowWithoutCoverageSecurityJob);
+        Assert.Contains("/p:TailwindEnabled=false", coverageSecurityJob, StringComparison.Ordinal);
+        Assert.Contains("Prepare generated docs stylesheet for coverage security tests", coverageSecurityJob, StringComparison.Ordinal);
+        Assert.Contains("Web/ForgeTrust.AppSurface.Docs/wwwroot/css/site.gen.css", coverageSecurityJob, StringComparison.Ordinal);
+        Assert.DoesNotContain("/p:TailwindEnabled=false", buildWorkflowWithoutCoverageSecurityJob, StringComparison.Ordinal);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, codeQualityWorkflow);
         Assert.Matches(disabledRuntimeResolutionSetting, vcsIgnoreParityWorkflow);
         Assert.Contains("ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.csproj", vcsIgnoreParityWorkflow, StringComparison.Ordinal);
