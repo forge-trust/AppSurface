@@ -1335,6 +1335,69 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void PackageArtifactValidator_RejectsStableDocsDependencyGroupWithoutTargetFramework()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            EmptyDependencies,
+            dependencyXml: """
+                <dependencies>
+                  <group>
+                    <dependency id="AngleSharp" version="[1.7.1]" />
+                    <dependency id="AngleSharp.Css" version="[1.0.1]" />
+                    <dependency id="HtmlSanitizer" version="[9.2.995]" />
+                  </group>
+                </dependencies>
+                """);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+                artifactDirectory,
+                "1.0.0"));
+
+        Assert.Contains("'<targetFramework>' at '<missing>'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_RejectsDuplicateStableDocsTargetFrameworkGroups()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Docs",
+            "1.0.0",
+            EmptyDependencies,
+            dependencyXml: """
+                <dependencies>
+                  <group targetFramework="net10.0">
+                    <dependency id="AngleSharp" version="[1.7.1]" />
+                    <dependency id="AngleSharp.Css" version="[1.0.1]" />
+                    <dependency id="HtmlSanitizer" version="[9.2.995]" />
+                  </group>
+                  <group targetFramework="net10.0">
+                    <dependency id="AngleSharp" version="[1.7.1]" />
+                    <dependency id="AngleSharp.Css" version="[1.0.1]" />
+                    <dependency id="HtmlSanitizer" version="[9.2.995]" />
+                  </group>
+                </dependencies>
+                """);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                CreateSinglePackagePlan("ForgeTrust.AppSurface.Docs"),
+                artifactDirectory,
+                "1.0.0"));
+
+        Assert.Contains("'<targetFramework>' at 'net10.0' (expected 'a unique target framework')", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PackageArtifactValidator_DoesNotApplyDocsGuardToUnrelatedPackage()
     {
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
@@ -5297,6 +5360,92 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void DocsPackageConsumerProofWorkflow_SelectDocsPackageRejectsMissingDocsArtifact()
+    {
+        var report = new PackageArtifactValidationReport(PackageVersion, []);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => DocsPackageConsumerProofWorkflow.SelectDocsPackage(report, PackageVersion));
+
+        Assert.Contains("exactly one validated package row", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DocsPackageConsumerProofWorkflow_SelectDocsPackageRejectsDuplicateDocsArtifacts()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var firstArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName(DocsPackageConsumerProofWorkflow.DocsPackageId));
+        var secondArtifactPath = CombineSafeChildPath(artifactDirectory, "ForgeTrust.AppSurface.Docs.0.0.0-ci.42.copy.nupkg");
+        File.WriteAllText(firstArtifactPath, "first", Encoding.UTF8);
+        File.WriteAllText(secondArtifactPath, "second", Encoding.UTF8);
+        var report = new PackageArtifactValidationReport(
+            PackageVersion,
+            [
+                CreateDocsProofValidationEntry(firstArtifactPath),
+                CreateDocsProofValidationEntry(secondArtifactPath)
+            ]);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => DocsPackageConsumerProofWorkflow.SelectDocsPackage(report, PackageVersion));
+
+        Assert.Contains("found 2", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DocsPackageConsumerProofWorkflow_SelectDocsPackageRejectsMissingArtifactFile()
+    {
+        var missingArtifactPath = CombineSafeChildPath(_repositoryRoot, CreatePackageFileName(DocsPackageConsumerProofWorkflow.DocsPackageId));
+        var report = new PackageArtifactValidationReport(PackageVersion, [CreateDocsProofValidationEntry(missingArtifactPath)]);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => DocsPackageConsumerProofWorkflow.SelectDocsPackage(report, PackageVersion));
+
+        Assert.Contains("requires an existing validated artifact", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DocsPackageConsumerProofWorkflow_SelectDocsPackageRejectsMismatchedArtifactFileName()
+    {
+        var artifactPath = CombineSafeChildPath(_repositoryRoot, "wrong-docs-package.nupkg");
+        File.WriteAllText(artifactPath, "docs package", Encoding.UTF8);
+        var report = new PackageArtifactValidationReport(PackageVersion, [CreateDocsProofValidationEntry(artifactPath)]);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => DocsPackageConsumerProofWorkflow.SelectDocsPackage(report, PackageVersion));
+
+        Assert.Contains("does not match package version", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("{}", "has no dependency graph")]
+    [InlineData("{ not valid json", "could not parse lock file")]
+    [InlineData("{ \"dependencies\": [] }", "has no dependency graph")]
+    public async Task DocsPackageConsumerProofWorkflow_ReadThirdPartyPackageIdsFromLockFileRejectsInvalidLockFile(
+        string content,
+        string expectedMessage)
+    {
+        var lockFilePath = CombineSafeChildPath(_repositoryRoot, "packages.lock.json");
+        await File.WriteAllTextAsync(lockFilePath, content, Encoding.UTF8);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => DocsPackageConsumerProofWorkflow.ReadThirdPartyPackageIdsFromLockFile(lockFilePath));
+
+        Assert.Contains(expectedMessage, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DocsPackageConsumerProofWorkflow_ReadThirdPartyPackageIdsFromLockFileRejectsMissingLockFile()
+    {
+        var lockFilePath = CombineSafeChildPath(_repositoryRoot, "missing.packages.lock.json");
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => DocsPackageConsumerProofWorkflow.ReadThirdPartyPackageIdsFromLockFile(lockFilePath));
+
+        Assert.Contains("requires committed lock file", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DocsPackageConsumerProofWorkflow_VerifiesExactResolvedStableGraph()
     {
         var proofDirectory = CombineSafeChildPath(_repositoryRoot, "docs-proof-graph");
@@ -5320,7 +5469,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
                     "dependencies": {
                       "AngleSharp": "[1.7.1]",
                       "AngleSharp.Css": "[1.0.1]",
-                      "HtmlSanitizer": "[9.2.995]"
+                      "HtmlSanitizer": "[9.2.995]",
+                      "Markdig": "[1.2.0]"
                     }
                   }
                 }
@@ -5341,7 +5491,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
                     "dependencies": {
                       "AngleSharp": "[1.7.1]",
                       "AngleSharp.Css": "[1.0.1]",
-                      "HtmlSanitizer": "[9.2.995]"
+                      "HtmlSanitizer": "[9.2.995]",
+                      "Markdig": "[1.2.0]"
                     }
                   }
                 }
@@ -5421,62 +5572,13 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Fact]
     public async Task DocsPackageConsumerProofWorkflow_ReportsRestoreAndGraphEvidence()
     {
-        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
-        Directory.CreateDirectory(artifactDirectory);
-        var artifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName(DocsPackageConsumerProofWorkflow.DocsPackageId));
-        await File.WriteAllTextAsync(artifactPath, "docs package", Encoding.UTF8);
-        await WriteFileAsync(
-            "Web/ForgeTrust.AppSurface.Docs/packages.lock.json",
-            $$"""
-            {
-              "version": 2,
-              "dependencies": {
-                "net10.0": {
-                  "AngleSharp": { "type": "Direct", "resolved": "1.7.1" },
-                  "AngleSharp.Css": { "type": "Direct", "resolved": "1.0.1" },
-                  "HtmlSanitizer": { "type": "Direct", "resolved": "9.2.995" }
-                }
-              }
-            }
-            """);
-        await WriteFileAsync(
-            "ForgeTrust.AppSurface.Core/packages.lock.json",
-            """
-            {
-              "version": 2,
-              "dependencies": {
-                "net10.0": {
-                  "Microsoft.Extensions.Options": { "type": "Transitive", "resolved": "10.0.8" }
-                }
-              }
-            }
-            """);
+        var (request, validationReport) = await CreateDocsProofFixtureAsync("docs-proof");
         var commandRunner = new DocsProofRecordingCommandRunner(PackageVersion);
         var workflow = new DocsPackageConsumerProofWorkflow(commandRunner);
 
         var report = await workflow.RunAsync(
-            new DocsPackageConsumerProofRequest(
-                _repositoryRoot,
-                artifactDirectory,
-                PackageVersion,
-                CombineSafeChildPath(artifactDirectory, "docs-proof"),
-                "https://api.nuget.org/v3/index.json"),
-            new PackageArtifactValidationReport(
-                PackageVersion,
-                [
-                    new PackageArtifactValidationReportEntry(
-                        DocsPackageConsumerProofWorkflow.DocsPackageId,
-                        "Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj",
-                        PackagePublishDecision.Publish,
-                        ["ForgeTrust.AppSurface.Core"],
-                        artifactPath),
-                    new PackageArtifactValidationReportEntry(
-                        "ForgeTrust.AppSurface.Core",
-                        "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj",
-                        PackagePublishDecision.Publish,
-                        [],
-                        CombineSafeChildPath(artifactDirectory, "ForgeTrust.AppSurface.Core.0.0.0.nupkg"))
-                ]),
+            request,
+            validationReport,
             CancellationToken.None);
 
         Assert.True(report.Succeeded, report.FirstFailure);
@@ -5509,6 +5611,32 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var markdown = DocsPackageConsumerProofReportRenderer.RenderMarkdown(report);
         Assert.Contains("Docs package consumer proof", markdown, StringComparison.Ordinal);
         Assert.Contains("HtmlSanitizer", markdown, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("dotnet restore consumer", 1)]
+    [InlineData("dotnet restore consumer --locked-mode", 2)]
+    public async Task DocsPackageConsumerProofWorkflow_RecordsAndCleansUpAfterRestoreFailure(
+        string failingOperationName,
+        int expectedCommandCount)
+    {
+        var (request, validationReport) = await CreateDocsProofFixtureAsync("docs-proof-failure");
+        var commandRunner = new DocsProofRecordingCommandRunner(PackageVersion, failingOperationName);
+        var workflow = new DocsPackageConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(request, validationReport, CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Equal(expectedCommandCount, report.Commands.Count);
+        Assert.Equal(failingOperationName, report.Commands[^1].OperationName);
+        Assert.Equal("Expected exit code 0, got 1.", report.FirstFailure);
+        Assert.Equal(expectedCommandCount, commandRunner.Requests.Count);
+        var environment = commandRunner.Requests[0].Environment
+            ?? throw new InvalidOperationException("Expected the Docs proof runner to isolate its environment.");
+        var cacheDirectory = Path.GetDirectoryName(Assert.IsType<string>(environment["NUGET_PACKAGES"]))!;
+        var dotNetHomeDirectory = Path.GetDirectoryName(Assert.IsType<string>(environment["DOTNET_CLI_HOME"]))!;
+        Assert.False(Directory.Exists(cacheDirectory));
+        Assert.False(Directory.Exists(dotNetHomeDirectory));
     }
 
     [Fact]
@@ -7764,6 +7892,70 @@ public sealed class PackageArtifactValidationTests : IDisposable
         return fileName;
     }
 
+    private static PackageArtifactValidationReportEntry CreateDocsProofValidationEntry(string artifactPath) =>
+        new(
+            DocsPackageConsumerProofWorkflow.DocsPackageId,
+            "Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj",
+            PackagePublishDecision.Publish,
+            [],
+            artifactPath);
+
+    private async Task<(DocsPackageConsumerProofRequest Request, PackageArtifactValidationReport ValidationReport)> CreateDocsProofFixtureAsync(
+        string proofDirectoryName)
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var artifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName(DocsPackageConsumerProofWorkflow.DocsPackageId));
+        await File.WriteAllTextAsync(artifactPath, "docs package", Encoding.UTF8);
+        await WriteFileAsync(
+            "Web/ForgeTrust.AppSurface.Docs/packages.lock.json",
+            """
+            {
+              "version": 2,
+              "dependencies": {
+                "net10.0": {
+                  "AngleSharp": { "type": "Direct", "resolved": "1.7.1" },
+                  "AngleSharp.Css": { "type": "Direct", "resolved": "1.0.1" },
+                  "HtmlSanitizer": { "type": "Direct", "resolved": "9.2.995" }
+                }
+              }
+            }
+            """);
+        await WriteFileAsync(
+            "ForgeTrust.AppSurface.Core/packages.lock.json",
+            """
+            {
+              "version": 2,
+              "dependencies": {
+                "net10.0": {
+                  "Microsoft.Extensions.Options": { "type": "Transitive", "resolved": "10.0.8" }
+                }
+              }
+            }
+            """);
+        var validationReport = new PackageArtifactValidationReport(
+            PackageVersion,
+            [
+                CreateDocsProofValidationEntry(artifactPath) with
+                {
+                    ExpectedDependencyPackageIds = ["ForgeTrust.AppSurface.Core"]
+                },
+                new PackageArtifactValidationReportEntry(
+                    "ForgeTrust.AppSurface.Core",
+                    "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj",
+                    PackagePublishDecision.Publish,
+                    [],
+                    CombineSafeChildPath(artifactDirectory, "ForgeTrust.AppSurface.Core.0.0.0.nupkg"))
+            ]);
+        var request = new DocsPackageConsumerProofRequest(
+            _repositoryRoot,
+            artifactDirectory,
+            PackageVersion,
+            CombineSafeChildPath(artifactDirectory, proofDirectoryName),
+            "https://api.nuget.org/v3/index.json");
+        return (request, validationReport);
+    }
+
     private static HttpRequestMessage CreateCanaryFixtureRequest(string baseUrl)
     {
         var request = new HttpRequestMessage(
@@ -8074,10 +8266,12 @@ public sealed class PackageArtifactValidationTests : IDisposable
     private sealed class DocsProofRecordingCommandRunner : IExternalCommandRunner
     {
         private readonly string _packageVersion;
+        private readonly string? _failingOperationName;
 
-        public DocsProofRecordingCommandRunner(string packageVersion)
+        public DocsProofRecordingCommandRunner(string packageVersion, string? failingOperationName = null)
         {
             _packageVersion = packageVersion;
+            _failingOperationName = failingOperationName;
         }
 
         public List<ExternalCommandRequest> Requests { get; } = [];
@@ -8089,6 +8283,11 @@ public sealed class PackageArtifactValidationTests : IDisposable
             CancellationToken cancellationToken)
         {
             Requests.Add(request);
+            if (string.Equals(request.OperationName, _failingOperationName, StringComparison.Ordinal))
+            {
+                return new ExternalCommandResult(1, string.Empty, "restore failed");
+            }
+
             if (request.OperationName == "dotnet restore consumer")
             {
                 var projectPath = request.Arguments[1];

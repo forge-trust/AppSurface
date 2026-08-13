@@ -623,7 +623,7 @@ internal sealed class DocsPackageConsumerProofWorkflow : IDocsPackageConsumerPro
             && dependency.TryGetProperty("type", out var type)
             && string.Equals(type.GetString(), "Direct", StringComparison.OrdinalIgnoreCase)
             && dependency.TryGetProperty("dependencies", out var dependencies)
-            && HasExactDependencies(dependencies, expectedDependencies);
+            && HasExactStableParserAndSanitizerDependencies(dependencies, expectedDependencies);
     }
 
     private static bool HasResolvedDocsAssetsGraph(
@@ -638,10 +638,12 @@ internal sealed class DocsPackageConsumerProofWorkflow : IDocsPackageConsumerPro
             && docsPackage.TryGetProperty("type", out var type)
             && string.Equals(type.GetString(), "package", StringComparison.OrdinalIgnoreCase)
             && docsPackage.TryGetProperty("dependencies", out var dependencies)
-            && HasExactDependencies(dependencies, expectedDependencies);
+            && HasExactStableParserAndSanitizerDependencies(dependencies, expectedDependencies);
     }
 
-    private static bool HasExactDependencies(JsonElement dependencies, IReadOnlyList<ExpectedPackage> expectedDependencies) =>
+    private static bool HasExactStableParserAndSanitizerDependencies(
+        JsonElement dependencies,
+        IReadOnlyList<ExpectedPackage> expectedDependencies) =>
         dependencies.ValueKind == JsonValueKind.Object
         && expectedDependencies.All(expected =>
             dependencies.TryGetProperty(expected.Id, out var version)
