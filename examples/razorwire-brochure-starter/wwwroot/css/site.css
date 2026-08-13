@@ -94,6 +94,7 @@ main { min-height: 70vh; }
 .article-layout { display: grid; gap: clamp(2rem, 6vw, 5rem); grid-template-columns: minmax(10rem, .3fr) minmax(0, 1fr); margin-top: clamp(3rem, 7vw, 6rem); }
 .article-nav { position: sticky; top: 1.5rem; }
 .article-copy { font-size: 1.1rem; max-width: 44rem; }
+.article-copy::after { content: ""; display: block; height: min(24rem, 50vh); }
 .article-copy section { scroll-margin-top: 2rem; }
 .article-copy section + section { border-top: 1px solid var(--line); margin-top: 2.75rem; padding-top: 2.75rem; }
 .field-guide-image { background: var(--wash); box-shadow: .8rem .8rem 0 var(--line); display: block; margin-bottom: 3.5rem; width: 13.75rem; }
