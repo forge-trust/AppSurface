@@ -194,6 +194,33 @@ public class ConfigAuditReporterTests
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
+    private sealed class ThrowingReadOnlyValues : IReadOnlyList<string>
+    {
+        public string this[int index] => throw new InvalidOperationException("read-only-list-secret");
+
+        public int Count => throw new InvalidOperationException("read-only-list-secret");
+
+        public IEnumerator<string> GetEnumerator() => throw new InvalidOperationException("read-only-list-secret");
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class ThrowingReadOnlyIndexerValues : IReadOnlyList<string>
+    {
+        public string this[int index] => throw new InvalidOperationException("read-only-indexer-secret");
+
+        public int Count => 1;
+
+        public IEnumerator<string> GetEnumerator() => throw new InvalidOperationException("read-only-indexer-secret");
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class GenericSecretValue
+    {
+        public string Value { get; set; } = "generic-secret-value";
+    }
+
     private sealed class PropertyBudgetShape
     {
         public string First { get; set; } = "first";
@@ -1338,6 +1365,34 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_EscapesDictionaryLabelControlCharactersBeforeTextRendering()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        const string rawLabel = "operator\r\nforged\tlabel";
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Labels.Items"] = new Dictionary<string, string> { [rawLabel] = "visible" }
+                }));
+        services.AddConfigAuditKey<Dictionary<string, string>>(
+            "Labels.Items",
+            options => options.TraverseCollectionElements = true);
+
+        var provider = services.BuildServiceProvider();
+        var report = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Production");
+        var rendered = provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report);
+
+        var child = Assert.Single(AssertEntry(report, "Labels.Items", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Equal("Labels.Items[\"operator\\r\\nforged\\tlabel\"]", child.Key);
+        Assert.Equal("operator\\r\\nforged\\tlabel", child.Element?.KeyLabel);
+        Assert.Contains("Labels.Items[\"operator\\r\\nforged\\tlabel\"]", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain(rawLabel, rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void GetReport_ReportsCollectionTraversalLimitsAndUnsupportedShapes()
     {
         var environment = A.Fake<IEnvironmentProvider>();
@@ -1538,6 +1593,60 @@ public class ConfigAuditReporterTests
         Assert.Contains(
             AssertEntry(report, "Matrix.Items", ConfigAuditEntryState.Resolved, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-audit-collection-kind-unsupported");
+    }
+
+    [Fact]
+    public void GetReport_ExpandedModeConvertsReadOnlyListAccessorFailuresToSanitizedDiagnostics()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Values"] = new ThrowingReadOnlyValues()
+                }));
+        services.AddConfigAuditKey<ThrowingReadOnlyValues>("Values");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport(new ConfigAuditReportRequest("Production", ConfigAuditReportMode.ExpandKnownEntryCollections));
+
+        var entry = AssertEntry(report, "Values", ConfigAuditEntryState.Resolved, null);
+        Assert.Empty(entry.Children);
+        Assert.Contains(entry.Diagnostics, diagnostic => diagnostic.Code == "config-audit-traversal-threw");
+        Assert.DoesNotContain(
+            entry.Diagnostics,
+            diagnostic => diagnostic.Message.Contains("read-only-list-secret", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GetReport_ExpandedModeConvertsReadOnlyListIndexerFailuresToSanitizedDiagnostics()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Values"] = new ThrowingReadOnlyIndexerValues()
+                }));
+        services.AddConfigAuditKey<ThrowingReadOnlyIndexerValues>("Values");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport(new ConfigAuditReportRequest("Production", ConfigAuditReportMode.ExpandKnownEntryCollections));
+
+        var entry = AssertEntry(report, "Values", ConfigAuditEntryState.Resolved, null);
+        Assert.Empty(entry.Children);
+        Assert.Contains(entry.Diagnostics, diagnostic => diagnostic.Code == "config-audit-traversal-threw");
+        Assert.DoesNotContain(
+            entry.Diagnostics,
+            diagnostic => diagnostic.Message.Contains("read-only-indexer-secret", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -3573,6 +3682,174 @@ public class ConfigAuditReporterTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void GetReport_ExpandedRequest_ExpandsKnownCollectionsWithoutChangingCanonicalReport()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Endpoints"] = new List<string> { "https://one.example", "https://two.example" },
+                    ["Credentials.Passwords"] = new List<string> { "super-secret" }
+                }));
+        services.AddConfigAuditKey<List<string>>("Endpoints");
+        services.AddConfigAuditKey<List<string>>("Credentials.Passwords");
+
+        var reporter = services.BuildServiceProvider().GetRequiredService<IConfigAuditReporter>();
+        var canonical = reporter.GetReport("Production");
+        var defaultRequest = reporter.GetReport(new ConfigAuditReportRequest("Production"));
+        var expanded = reporter.GetReport(
+            new ConfigAuditReportRequest("Production", ConfigAuditReportMode.ExpandKnownEntryCollections));
+
+        Assert.Null(canonical.Mode);
+        Assert.Null(defaultRequest.Mode);
+        Assert.Empty(AssertEntry(canonical, "Endpoints", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Empty(AssertEntry(canonical, "Credentials.Passwords", ConfigAuditEntryState.Resolved, "[redacted]").Children);
+        Assert.Empty(AssertEntry(defaultRequest, "Endpoints", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Empty(AssertEntry(defaultRequest, "Credentials.Passwords", ConfigAuditEntryState.Resolved, "[redacted]").Children);
+
+        Assert.Equal(ConfigAuditReportMode.ExpandKnownEntryCollections, expanded.Mode);
+        Assert.Equal(
+            ["Endpoints[0]", "Endpoints[1]"],
+            AssertEntry(expanded, "Endpoints", ConfigAuditEntryState.Resolved, null).Children.Select(child => child.Key));
+        var passwordChild = Assert.Single(
+            AssertEntry(expanded, "Credentials.Passwords", ConfigAuditEntryState.Resolved, "[redacted]").Children);
+        Assert.Equal("[redacted]", passwordChild.DisplayValue);
+        Assert.True(passwordChild.IsRedacted);
+        Assert.DoesNotContain("super-secret", JsonSerializer.Serialize(expanded), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_ExpandedRequest_RedactsGenericDescendantValuesAndHidesDictionaryLabels()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Objects"] = new List<GenericSecretValue> { new() },
+                    ["Labels"] = new Dictionary<string, string> { ["operator-supplied-label"] = "generic-secret-value" }
+                }));
+        services.AddConfigAuditKey<List<GenericSecretValue>>("Objects");
+        services.AddConfigAuditKey<Dictionary<string, string>>("Labels");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport(new ConfigAuditReportRequest("Production", ConfigAuditReportMode.ExpandKnownEntryCollections));
+        var serialized = JsonSerializer.Serialize(report);
+
+        var objectElement = Assert.Single(AssertEntry(report, "Objects", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Equal("[redacted]", objectElement.DisplayValue);
+        Assert.True(objectElement.IsRedacted);
+        var value = Assert.Single(objectElement.Children);
+        Assert.Equal("[redacted]", value.DisplayValue);
+        Assert.True(value.IsRedacted);
+
+        var dictionaryElement = Assert.Single(AssertEntry(report, "Labels", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Equal("Labels[[redacted-key-1]]", dictionaryElement.Key);
+        Assert.Equal("[redacted-key-1]", dictionaryElement.Element?.KeyLabel);
+        Assert.True(dictionaryElement.Element?.IsKeyRedacted);
+        Assert.Equal("[redacted]", dictionaryElement.DisplayValue);
+        Assert.True(dictionaryElement.IsRedacted);
+        Assert.DoesNotContain("generic-secret-value", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("operator-supplied-label", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_ExpandedRequest_StopsAtSharedReportNodeBudgetAndRetainsKnownRoots()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Bulk.Items"] = Enumerable.Range(0, 16_385).Select(index => $"bulk-{index}").ToList(),
+                    ["Later.Items"] = new List<string> { "must-not-be-expanded" }
+                }));
+        services.AddConfigAuditKey<List<string>>(
+            "Bulk.Items",
+            options =>
+            {
+                options.MaxCollectionElements = 20_000;
+                options.MaxReportNodes = 20_000;
+            });
+        services.AddConfigAuditKey<List<string>>("Later.Items");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport(new ConfigAuditReportRequest("Production", ConfigAuditReportMode.ExpandKnownEntryCollections));
+
+        var bulk = AssertEntry(report, "Bulk.Items", ConfigAuditEntryState.Resolved, null);
+        var later = AssertEntry(report, "Later.Items", ConfigAuditEntryState.Resolved, null);
+        var diagnostic = Assert.Single(
+            report.Diagnostics,
+            candidate => candidate.Code == "config-audit-expanded-report-node-limit");
+
+        Assert.Equal(16_384, bulk.Children.Count);
+        Assert.Null(bulk.DisplayValue);
+        Assert.Empty(later.Children);
+        Assert.Equal(ConfigAuditDiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Null(diagnostic.Key);
+        Assert.Null(diagnostic.ConfigPath);
+        Assert.Equal(
+            "Expanded config audit report reached its global child-node budget of 16384; reported child topology is intentionally incomplete.",
+            diagnostic.Message);
+    }
+
+    [Fact]
+    public void BuildChildren_ExhaustedSharedReportBudget_DoesNotInvokePublicPropertyGetters()
+    {
+        var traversalContext = new ConfigAuditReportTraversalContext(maxNodes: 1);
+        Assert.True(traversalContext.TryConsumeNode());
+        var value = new BudgetExhaustedPropertyProbe();
+        var traverser = new ConfigAuditValueTraverser(new ConfigAuditRedactor());
+
+        var traversal = traverser.BuildChildren(
+            ConfigAuditPath.Root("Known"),
+            value,
+            [],
+            ConfigAuditFactContext.Empty,
+            new ConfigAuditEntryOptions(),
+            new HashSet<object>(ReferenceEqualityComparer.Instance),
+            new ConfigAuditDictionaryLabelSet(),
+            ConfigAuditDictionaryKeyCorrelationContext.Unavailable("dictionary key correlation was not requested"),
+            traversalContext);
+
+        Assert.Empty(traversal.Children);
+        Assert.Empty(traversal.Diagnostics);
+        Assert.Equal(0, value.GetterCalls);
+        Assert.True(traversalContext.WasTruncated);
+    }
+
+    [Fact]
+    public void BuildChildren_CriticalPublicPropertyGetterExceptionsPropagate()
+    {
+        var traverser = new ConfigAuditValueTraverser(new ConfigAuditRedactor());
+
+        var exception = Assert.Throws<TargetInvocationException>(() =>
+            traverser.BuildChildren(
+                ConfigAuditPath.Root("Known"),
+                new CriticalPropertyProbe(),
+                [],
+                ConfigAuditFactContext.Empty,
+                new ConfigAuditEntryOptions(),
+                new HashSet<object>(ReferenceEqualityComparer.Instance),
+                new ConfigAuditDictionaryLabelSet(),
+                ConfigAuditDictionaryKeyCorrelationContext.Unavailable("dictionary key correlation was not requested")));
+
+        Assert.IsType<AccessViolationException>(exception.InnerException);
+    }
+
     private static ServiceCollection CreateServices(string configDirectory, IEnvironmentProvider environment)
     {
         var services = new ServiceCollection();
@@ -3743,6 +4020,25 @@ public class ConfigAuditReporterTests
 
             return (T)_value;
         }
+    }
+
+    private sealed class BudgetExhaustedPropertyProbe
+    {
+        public int GetterCalls { get; private set; }
+
+        public string Value
+        {
+            get
+            {
+                GetterCalls++;
+                return "should-not-be-read";
+            }
+        }
+    }
+
+    private sealed class CriticalPropertyProbe
+    {
+        public string Value => throw new AccessViolationException("critical traversal failure");
     }
 
     private sealed class EmptyEnvironmentConfigProvider : IEnvironmentConfigProvider

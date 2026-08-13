@@ -112,6 +112,20 @@ public sealed class CoverageSolutionScriptTests
             """,
             workflow,
             StringComparison.Ordinal);
+        Assert.Contains(
+            """
+                  - name: Prepare generated docs stylesheet for coverage security tests
+                    shell: pwsh
+                    run: |
+                      $docsStylesheet = "Web/ForgeTrust.AppSurface.Docs/wwwroot/css/site.gen.css"
+                      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $docsStylesheet)
+                      Set-Content -NoNewline -Path $docsStylesheet -Value ""
+            """,
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Matches(
+            "(?s)--no-restore\\s+/p:TailwindRuntimeBinaryResolutionEnabled=false\\s+/p:TailwindEnabled=false\\s+--filter",
+            workflow);
     }
 
     [Fact]

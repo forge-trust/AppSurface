@@ -18,6 +18,11 @@ public sealed class ConfigAuditTextRenderer
 
         var builder = new StringBuilder();
         builder.AppendLine($"Environment: {report.Environment}");
+        if (report.Mode == ConfigAuditReportMode.ExpandKnownEntryCollections)
+        {
+            builder.AppendLine("Mode: ExpandKnownEntryCollections");
+        }
+
         builder.AppendLine("Providers:");
         foreach (var provider in report.Providers.OrderBy(provider => provider.Precedence))
         {

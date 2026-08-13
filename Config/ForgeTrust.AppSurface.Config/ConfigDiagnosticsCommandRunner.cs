@@ -61,7 +61,37 @@ public sealed class ConfigDiagnosticsCommandRunner
     /// </remarks>
     public ConfigDiagnosticsCommandResult Run(TextWriter output)
     {
+        return RunCore(output, _reporter.GetReport);
+    }
+
+    /// <summary>
+    /// Writes the active environment's configuration audit report to <paramref name="output"/>.
+    /// </summary>
+    /// <param name="output">The writer that receives the rendered report.</param>
+    /// <param name="mode">The report mode, including explicit expansion for known-entry collections.</param>
+    /// <returns>
+    /// A result whose <see cref="ConfigDiagnosticsCommandResult.ExitCode"/> is zero when the report was generated.
+    /// </returns>
+    /// <remarks>
+    /// Default mode intentionally preserves the pre-existing <see cref="IConfigAuditReporter.GetReport(string)"/> flow so
+    /// existing custom reporters still function unchanged. Expanded report modes use explicit request-based reporting.
+    /// </remarks>
+    public ConfigDiagnosticsCommandResult Run(TextWriter output, ConfigAuditReportMode mode)
+    {
+        if (mode == ConfigAuditReportMode.Default)
+        {
+            return Run(output);
+        }
+
+        return RunCore(output, environment => _reporter.GetReport(new ConfigAuditReportRequest(environment, mode)));
+    }
+
+    private ConfigDiagnosticsCommandResult RunCore(
+        TextWriter output,
+        Func<string, ConfigAuditReport> getReport)
+    {
         ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(getReport);
 
         string? environment = null;
 
@@ -77,7 +107,7 @@ public sealed class ConfigDiagnosticsCommandRunner
                     "Set the AppSurface host environment before running diagnostics.");
             }
 
-            var report = _reporter.GetReport(environment);
+            var report = getReport(environment);
             var rendered = _renderer.Render(report);
             output.Write(rendered);
 
