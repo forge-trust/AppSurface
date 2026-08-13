@@ -44,6 +44,37 @@ public sealed class NorthstarBrochureStarterQaRegressionTests
         Assert.Contains("type=\"submit\" name=\"demo\" value=\"1\"", form, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("/")]
+    [InlineData("/journal/field-guide")]
+    // Regression: ISSUE-003 — a final in-page section could not be scrolled far enough to activate.
+    // Found by /qa on 2026-08-13
+    // Report: .gstack/qa-reports/qa-report-127-0-0-1-5233-2026-08-13.md
+    public async Task PageNavigationFragments_TargetExistingElements(string path)
+    {
+        var html = await _client.GetStringAsync(path);
+        var fragments = Regex.Matches(
+                html,
+                "<a\\b(?=[^>]*\\brw-page-nav-link\\b)(?=[^>]*\\bhref=\"#(?<fragment>[^\"]+)\")[^>]*>",
+                RegexOptions.IgnoreCase)
+            .Select(match => match.Groups["fragment"].Value)
+            .ToArray();
+
+        Assert.NotEmpty(fragments);
+        foreach (var fragment in fragments)
+        {
+            Assert.Matches($"\\bid\\s*=\\s*\"{Regex.Escape(fragment)}\"", html);
+        }
+
+        if (path == "/journal/field-guide")
+        {
+            var stylesheet = File.ReadAllText(RepositoryFileLocator.Find("examples", "razorwire-brochure-starter", "wwwroot", "css", "site.css"));
+
+            Assert.Contains(".article-copy::after", stylesheet, StringComparison.Ordinal);
+            Assert.Contains("height: min(24rem, 50vh)", stylesheet, StringComparison.Ordinal);
+        }
+    }
+
     private static string ExtractElement(string html, string elementName)
     {
         var match = Regex.Match(
@@ -54,4 +85,5 @@ public sealed class NorthstarBrochureStarterQaRegressionTests
         Assert.True(match.Success, $"Expected a {elementName} element in the rendered document.");
         return match.Value;
     }
+
 }

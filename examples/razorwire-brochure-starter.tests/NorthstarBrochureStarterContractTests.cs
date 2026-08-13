@@ -152,7 +152,7 @@ public sealed class NorthstarBrochureStarterContractTests
     [Fact]
     public void ApplicationProject_IsPackageOnlyAndUsesTheDefaultRazorWireVersion()
     {
-        var project = File.ReadAllText(FindRepositoryFile(
+        var project = File.ReadAllText(RepositoryFileLocator.Find(
             "examples",
             "razorwire-brochure-starter",
             "NorthstarBrochureStarter.csproj"));
@@ -164,7 +164,7 @@ public sealed class NorthstarBrochureStarterContractTests
         Assert.DoesNotContain("Tailwind", project, StringComparison.OrdinalIgnoreCase);
         Assert.Single(Regex.Matches(project, "<PackageReference\\b", RegexOptions.IgnoreCase));
 
-        var module = File.ReadAllText(FindRepositoryFile(
+        var module = File.ReadAllText(RepositoryFileLocator.Find(
             "examples",
             "razorwire-brochure-starter",
             "NorthstarModule.cs"));
@@ -175,7 +175,7 @@ public sealed class NorthstarBrochureStarterContractTests
     [Fact]
     public void StarterReadme_ExplainsItsBoundaryAndExportWorkflow()
     {
-        var readme = File.ReadAllText(FindRepositoryFile(
+        var readme = File.ReadAllText(RepositoryFileLocator.Find(
             "examples",
             "razorwire-brochure-starter",
             "README.md"));
@@ -192,7 +192,7 @@ public sealed class NorthstarBrochureStarterContractTests
     [Fact]
     public void Stylesheet_DefinesTheStarterComponentVocabulary()
     {
-        var stylesheet = File.ReadAllText(FindRepositoryFile(
+        var stylesheet = File.ReadAllText(RepositoryFileLocator.Find(
             "examples",
             "razorwire-brochure-starter",
             "wwwroot",
@@ -231,20 +231,4 @@ public sealed class NorthstarBrochureStarterContractTests
         }
     }
 
-    private static string FindRepositoryFile(params string[] segments)
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            var candidate = Path.Combine([directory.FullName, .. segments]);
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-
-            directory = directory.Parent;
-        }
-
-        throw new FileNotFoundException($"Could not locate {Path.Combine(segments)} from {AppContext.BaseDirectory}.");
-    }
 }
