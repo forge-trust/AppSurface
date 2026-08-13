@@ -98,7 +98,7 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
     }
 
     [Fact]
-    public async Task WaitForCompletionAsync_WhenTestingDelayIsConfigured_DelaysHarvesterAfterPublishingProgress()
+    public async Task WaitForCompletionAsync_WhenTestingDelayIsConfigured_ContinuesAfterProgressPublicationStalls()
     {
         using var cache = new MemoryCache(new MemoryCacheOptions());
         var streamHub = new BlockingHarvesterStartedStreamHub();
@@ -107,7 +107,8 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
             .BuildServiceProvider();
         var harvester = new BlockingHarvester();
         var delay = TimeSpan.FromMilliseconds(250);
-        var tolerance = TimeSpan.FromMilliseconds(75);
+        var earlyStartGuard = TimeSpan.FromMilliseconds(75);
+        var startBudget = TimeSpan.FromSeconds(3);
         var coordinator = CreateCoordinator(
             harvester,
             cache,
@@ -120,19 +121,16 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
             await streamHub.HarvesterStartedPublished.Task.WaitAsync(TimeSpan.FromSeconds(3));
             Assert.False(harvester.Started.Task.IsCompleted);
             Assert.Equal(0, harvester.CallCount);
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            await Task.Delay(delay - earlyStartGuard);
+            Assert.False(harvester.Started.Task.IsCompleted);
+
+            await harvester.Started.Task.WaitAsync(startBudget);
+            Assert.Equal(1, harvester.CallCount);
 
             streamHub.ReleaseHarvesterStartedPublish();
-            await harvester.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            sw.Stop();
-
-            Assert.True(
-                sw.Elapsed >= delay - tolerance,
-                $"Harvester started after {sw.Elapsed.TotalMilliseconds} ms.");
             harvester.Complete(new DocNode("Ready", "README.md", "<p>Ready</p>"));
 
             Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.FromSeconds(3), CancellationToken.None));
-            Assert.Equal(1, harvester.CallCount);
         }
         finally
         {
@@ -202,7 +200,7 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
     }
 
     [Fact]
-    public async Task WaitForCompletionAsync_WhenPerDocumentTestingDelayIsConfigured_PublishesDocumentCountsBeforeCompletion()
+    public async Task WaitForCompletionAsync_WhenPerDocumentTestingDelayIsConfigured_DoesNotSimulateCustomHarvesterOutput()
     {
         using var cache = new MemoryCache(new MemoryCacheOptions());
         await using var services = new ServiceCollection().BuildServiceProvider();
@@ -218,20 +216,12 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
             services,
             configureOptions: options => options.Harvest.TestingDelayPerDocumentMilliseconds = 500);
 
-        Assert.False(await coordinator.WaitForCompletionAsync(TimeSpan.Zero, CancellationToken.None));
-        var inProgressSnapshot = await WaitForProgressSnapshotAsync(
-            () => coordinator.CurrentProgress,
-            snapshot => snapshot.TotalDocs > 0 && snapshot.State == AppSurfaceDocsHarvestRunState.Running);
-
-        Assert.Equal(AppSurfaceDocsHarvestRunState.Running, inProgressSnapshot.State);
-        Assert.InRange(inProgressSnapshot.TotalDocs, 1, 2);
-        Assert.Contains(
-            inProgressSnapshot.Activity,
-            activity => activity.Message.Contains("processed", StringComparison.OrdinalIgnoreCase));
-
-        Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.FromSeconds(10), CancellationToken.None));
+        Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.FromSeconds(1), CancellationToken.None));
         Assert.Equal(AppSurfaceDocsHarvestRunState.Completed, coordinator.CurrentProgress.State);
         Assert.Equal(3, coordinator.CurrentProgress.TotalDocs);
+        Assert.DoesNotContain(
+            coordinator.CurrentProgress.Activity,
+            activity => activity.Message.Contains("processed", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

@@ -7,11 +7,13 @@ namespace ForgeTrust.RazorWire.IntegrationTests;
 public sealed class AppSurfaceDocsConsumerLayoutPlaywrightTests
 {
     private const string ConsumerLayoutSentinel = "data-appsurface-docs-consumer-layout=\"host\"";
+    private static readonly TimeSpan ConsumerDocsReadyTimeout = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan ConsumerDocsReadyPollInterval = TimeSpan.FromMilliseconds(250);
 
     [Fact]
     public async Task ConsumerGenericLayout_ShouldNotReplaceDocsShellOrLeaveSearchLoading()
     {
-        await using var appHost = await AppSurfaceDocsInProcessHost.StartConsumerAsync("http://127.0.0.1:0");
+        await using var appHost = await StartReadyConsumerAsync();
         var docsSearchUrl = $"{appHost.BaseUrl}/docs/search";
 
         using var client = new HttpClient();
@@ -82,7 +84,7 @@ public sealed class AppSurfaceDocsConsumerLayoutPlaywrightTests
     [Fact]
     public async Task ConsumerFixture_ShouldApplyAndPersistAccessibleBrowserLocalThemePreferences()
     {
-        await using var appHost = await AppSurfaceDocsInProcessHost.StartConsumerAsync("http://127.0.0.1:0");
+        await using var appHost = await StartReadyConsumerAsync();
         var docsSearchUrl = $"{appHost.BaseUrl}/docs/search";
 
         Assert.Equal(0, Microsoft.Playwright.Program.Main(["install", "chromium"]));
@@ -173,7 +175,7 @@ public sealed class AppSurfaceDocsConsumerLayoutPlaywrightTests
     [InlineData("not-a-theme")]
     public async Task ConsumerFixture_ShouldFallbackToSystemForNonExplicitBrowserLocalThemeValues(string storedTheme)
     {
-        await using var appHost = await AppSurfaceDocsInProcessHost.StartConsumerAsync("http://127.0.0.1:0");
+        await using var appHost = await StartReadyConsumerAsync();
 
         Assert.Equal(0, Microsoft.Playwright.Program.Main(["install", "chromium"]));
         using var playwright = await Playwright.CreateAsync();
@@ -201,7 +203,7 @@ public sealed class AppSurfaceDocsConsumerLayoutPlaywrightTests
     [Fact]
     public async Task ConsumerFixture_ShouldKeepSystemUsableAndReportSessionSelectionWhenStorageIsBlocked()
     {
-        await using var appHost = await AppSurfaceDocsInProcessHost.StartConsumerAsync("http://127.0.0.1:0");
+        await using var appHost = await StartReadyConsumerAsync();
 
         Assert.Equal(0, Microsoft.Playwright.Program.Main(["install", "chromium"]));
         using var playwright = await Playwright.CreateAsync();
@@ -251,5 +253,67 @@ public sealed class AppSurfaceDocsConsumerLayoutPlaywrightTests
             "() => window.__appsurfaceThemePreferenceEvents.at(-1) && [window.__appsurfaceThemePreferenceEvents.at(-1).mode, window.__appsurfaceThemePreferenceEvents.at(-1).persistence, window.__appsurfaceThemePreferenceEvents.at(-1).source]");
 
         Assert.Equal(["dark", "session", "control"], change);
+    }
+
+    /// <summary>
+    /// Starts the real consumer fixture and waits for its initial source harvest to produce a search index.
+    /// </summary>
+    /// <remarks>
+    /// The consumer host returns from startup before its background source harvest finishes. Waiting for the index
+    /// prevents browser assertions from accidentally exercising the temporary Harvesting page when coverage
+    /// instrumentation makes the first harvest take longer than the request wait budget.
+    /// </remarks>
+    private static async Task<AppSurfaceDocsInProcessHost> StartReadyConsumerAsync()
+    {
+        var appHost = await AppSurfaceDocsInProcessHost.StartConsumerAsync("http://127.0.0.1:0");
+
+        try
+        {
+            await WaitForSearchIndexAsync(appHost.BaseUrl);
+            return appHost;
+        }
+        catch
+        {
+            await appHost.DisposeAsync();
+            throw;
+        }
+    }
+
+    private static async Task WaitForSearchIndexAsync(string baseUrl)
+    {
+        using var timeout = new CancellationTokenSource(ConsumerDocsReadyTimeout);
+        using var client = new HttpClient();
+        var searchIndexUrl = $"{baseUrl}/docs/search-index.json";
+
+        while (true)
+        {
+            try
+            {
+                using var response = await client.GetAsync(searchIndexUrl, timeout.Token);
+                if (response.StatusCode == HttpStatusCode.OK)
+                {
+                    return;
+                }
+            }
+            catch (HttpRequestException) when (!timeout.IsCancellationRequested)
+            {
+                // The in-process host is still becoming reachable; retry until the bounded readiness timeout.
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    $"Consumer AppSurface Docs search index did not become ready within {ConsumerDocsReadyTimeout.TotalSeconds} seconds.");
+            }
+
+            try
+            {
+                await Task.Delay(ConsumerDocsReadyPollInterval, timeout.Token);
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    $"Consumer AppSurface Docs search index did not become ready within {ConsumerDocsReadyTimeout.TotalSeconds} seconds.");
+            }
+        }
     }
 }
