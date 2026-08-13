@@ -94,7 +94,7 @@ public sealed class AppSurfaceDocsHarvestProgressRendererTests
             0);
 
         Assert.Contains("<strong>0.00</strong>", html, StringComparison.Ordinal);
-        Assert.DoesNotContain("Measuring…", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("Measuring", html, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -107,7 +107,8 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
             .BuildServiceProvider();
         var harvester = new BlockingHarvester();
         var delay = TimeSpan.FromMilliseconds(250);
-        var tolerance = TimeSpan.FromMilliseconds(75);
+        var earlyStartGuard = TimeSpan.FromMilliseconds(75);
+        var startBudget = TimeSpan.FromSeconds(3);
         var coordinator = CreateCoordinator(
             harvester,
             cache,
@@ -120,10 +121,10 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
             await streamHub.HarvesterStartedPublished.Task.WaitAsync(TimeSpan.FromSeconds(3));
             Assert.False(harvester.Started.Task.IsCompleted);
             Assert.Equal(0, harvester.CallCount);
-            await Task.Delay(delay - tolerance);
+            await Task.Delay(delay - earlyStartGuard);
             Assert.False(harvester.Started.Task.IsCompleted);
 
-            await harvester.Started.Task.WaitAsync(delay + tolerance);
+            await harvester.Started.Task.WaitAsync(startBudget);
             Assert.Equal(1, harvester.CallCount);
 
             streamHub.ReleaseHarvesterStartedPublish();

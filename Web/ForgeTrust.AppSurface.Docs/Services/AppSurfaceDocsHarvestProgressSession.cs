@@ -14,7 +14,7 @@ internal sealed class AppSurfaceDocsHarvestProgressSession
 {
     private readonly AppSurfaceDocsHarvestProgressReporter _reporter;
     private readonly string _runId;
-    private readonly string _harvesterType;
+    private readonly string _progressId;
     private readonly int _testingDelayPerDocumentMilliseconds;
     private readonly CancellationToken _cancellationToken;
 
@@ -24,17 +24,17 @@ internal sealed class AppSurfaceDocsHarvestProgressSession
     internal AppSurfaceDocsHarvestProgressSession(
         AppSurfaceDocsHarvestProgressReporter reporter,
         string runId,
-        string harvesterType,
+        string progressId,
         int testingDelayPerDocumentMilliseconds = 0,
         CancellationToken cancellationToken = default)
     {
         _reporter = reporter ?? throw new ArgumentNullException(nameof(reporter));
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(harvesterType);
+        ArgumentException.ThrowIfNullOrWhiteSpace(progressId);
         ArgumentOutOfRangeException.ThrowIfNegative(testingDelayPerDocumentMilliseconds);
 
         _runId = runId;
-        _harvesterType = harvesterType;
+        _progressId = progressId;
         _testingDelayPerDocumentMilliseconds = testingDelayPerDocumentMilliseconds;
         _cancellationToken = cancellationToken;
     }
@@ -42,30 +42,49 @@ internal sealed class AppSurfaceDocsHarvestProgressSession
     /// <summary>
     /// Records a safe parser lifecycle transition.
     /// </summary>
+    /// <param name="phase">The next lifecycle phase. Waiting, terminal, stale, and non-sequential transitions are ignored.</param>
+    /// <returns>A task that completes after the transition is retained and a live publication is scheduled.</returns>
+    /// <remarks>
+    /// This method does not throw for an ignored transition. The server-issued progress identity prevents one harvester
+    /// from mutating another harvester's state.
+    /// </remarks>
     internal ValueTask TransitionAsync(AppSurfaceDocsHarvestProgressPhase phase)
     {
-        return _reporter.TransitionAsync(_runId, _harvesterType, phase);
+        return _reporter.TransitionAsync(_runId, _progressId, phase);
     }
 
     /// <summary>
     /// Records one inspected source unit and an optional output delta.
     /// </summary>
+    /// <param name="documentsFoundDelta">The non-negative number of documents found in the inspected source unit. Zero records source inspection without output.</param>
+    /// <returns>A task that completes after the delta is recorded and any configured test pacing has elapsed.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="documentsFoundDelta"/> is negative.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when harvester cancellation interrupts configured pacing for a positive delta.</exception>
     /// <remarks>
     /// A positive output delta is paced one document at a time only when the local test delay is configured. The delay
     /// follows the real report that found those documents; source units that yield no documents are never delayed.
     /// </remarks>
     internal async ValueTask ReportSourceUnitAsync(int documentsFoundDelta)
     {
-        _reporter.ReportSourceUnit(_runId, _harvesterType, documentsFoundDelta);
+        _reporter.ReportSourceUnit(_runId, _progressId, documentsFoundDelta);
         await PaceRealOutputAsync(documentsFoundDelta);
     }
 
     /// <summary>
     /// Records materialized output that is not attributable to one newly inspected source unit.
     /// </summary>
+    /// <param name="documentsFoundDelta">The non-negative number of additional documents materialized without inspecting a source unit.</param>
+    /// <returns>A task that completes after the delta is recorded and any configured test pacing has elapsed.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="documentsFoundDelta"/> is negative.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when harvester cancellation interrupts configured pacing for a positive delta.</exception>
+    /// <remarks>
+    /// Zero is valid and is not paced. Negative values throw <see cref="ArgumentOutOfRangeException"/> from the
+    /// reporter. Only positive deltas are delayed, so reporting a source unit that produces no documents never slows
+    /// a harvester.
+    /// </remarks>
     internal async ValueTask ReportOutputOnlyAsync(int documentsFoundDelta)
     {
-        _reporter.ReportOutputOnly(_runId, _harvesterType, documentsFoundDelta);
+        _reporter.ReportOutputOnly(_runId, _progressId, documentsFoundDelta);
         await PaceRealOutputAsync(documentsFoundDelta);
     }
 

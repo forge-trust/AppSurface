@@ -410,6 +410,18 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
             cancellationToken);
     }
 
+    /// <summary>
+    /// Advances one package-owned harvester through its next safe lifecycle phase.
+    /// </summary>
+    /// <param name="runId">The active run identifier returned when a run begins.</param>
+    /// <param name="progressId">The server-only identity assigned to the package-owned harvester.</param>
+    /// <param name="phase">The requested next lifecycle phase.</param>
+    /// <returns>A completed task after an accepted transition has been retained and publication has been scheduled.</returns>
+    /// <remarks>
+    /// Stale run identifiers and unknown progress identities are ignored. Only the next sequential phase is accepted;
+    /// waiting and terminal phases are reporter-owned and cannot be set by a harvester session. This preserves the
+    /// redaction boundary and prevents a delayed parser callback from mutating another harvester or a later run.
+    /// </remarks>
     internal ValueTask TransitionAsync(
         string runId,
         string progressId,
@@ -449,11 +461,35 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>
+    /// Records one inspected source unit and the documents it produced for a package-owned harvester.
+    /// </summary>
+    /// <param name="runId">The active run identifier returned when a run begins.</param>
+    /// <param name="progressId">The server-only identity assigned to the package-owned harvester.</param>
+    /// <param name="documentsFoundDelta">The non-negative number of documents produced by the inspected source unit.</param>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="documentsFoundDelta"/> is negative.</exception>
+    /// <remarks>
+    /// A zero delta still records the inspected source unit. Stale run identifiers and unknown progress identities are
+    /// ignored after input validation. Accepted reports are coalesced into ordinary live publication, so callers must
+    /// not expect a stream update for every source unit.
+    /// </remarks>
     internal void ReportSourceUnit(string runId, string progressId, int documentsFoundDelta)
     {
         ReportProgress(runId, progressId, documentsFoundDelta, sourceUnit: true);
     }
 
+    /// <summary>
+    /// Records output materialized without inspecting a new source unit for a package-owned harvester.
+    /// </summary>
+    /// <param name="runId">The active run identifier returned when a run begins.</param>
+    /// <param name="progressId">The server-only identity assigned to the package-owned harvester.</param>
+    /// <param name="documentsFoundDelta">The non-negative number of additional documents materialized by the harvester.</param>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="documentsFoundDelta"/> is negative.</exception>
+    /// <remarks>
+    /// This method deliberately does not increment source-unit telemetry. Stale run identifiers and unknown progress
+    /// identities are ignored after input validation. Accepted reports are coalesced into ordinary live publication,
+    /// so callers must not expect a stream update for every output delta.
+    /// </remarks>
     internal void ReportOutputOnly(string runId, string progressId, int documentsFoundDelta)
     {
         ReportProgress(runId, progressId, documentsFoundDelta, sourceUnit: false);
@@ -755,14 +791,14 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
             }
         }
 
-        var hub = _services.GetService<IRazorWireStreamHub>();
-        if (hub is null)
-        {
-            return;
-        }
-
         try
         {
+            var hub = _services.GetService<IRazorWireStreamHub>();
+            if (hub is null)
+            {
+                return;
+            }
+
             var message = AppSurfaceDocsHarvestProgressRenderer.RenderTurboStream(
                 publication.Snapshot,
                 CompletionDelayMilliseconds);
@@ -826,22 +862,36 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
         ProgressPublication publication,
         bool publishCompletionVisit)
     {
-        while (true)
+        try
         {
-            await PublishAsync(publication, publishCompletionVisit);
+            while (true)
+            {
+                await PublishAsync(publication, publishCompletionVisit);
 
+                lock (_gate)
+                {
+                    if (_pendingBackgroundPublication is not { } pendingPublication)
+                    {
+                        _backgroundPublicationInFlight = false;
+                        return;
+                    }
+
+                    publication = pendingPublication;
+                    publishCompletionVisit = _pendingBackgroundCompletionVisit;
+                    _pendingBackgroundPublication = null;
+                    _pendingBackgroundCompletionVisit = false;
+                }
+            }
+        }
+        catch (Exception ex) when (!IsFatalException(ex))
+        {
+            _logger.LogWarning(ex, "AppSurface Docs harvest progress publication loop stopped.");
+        }
+        finally
+        {
             lock (_gate)
             {
-                if (_pendingBackgroundPublication is not { } pendingPublication)
-                {
-                    _backgroundPublicationInFlight = false;
-                    return;
-                }
-
-                publication = pendingPublication;
-                publishCompletionVisit = _pendingBackgroundCompletionVisit;
-                _pendingBackgroundPublication = null;
-                _pendingBackgroundCompletionVisit = false;
+                _backgroundPublicationInFlight = false;
             }
         }
     }

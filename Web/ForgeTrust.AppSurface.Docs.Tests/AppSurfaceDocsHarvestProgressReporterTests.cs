@@ -378,6 +378,26 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
     }
 
     [Fact]
+    public async Task ProgressReporter_ShouldResumeBackgroundPublishingAfterRecoverableServiceResolutionFailure()
+    {
+        var hub = new RecordingRazorWireStreamHub();
+        var provider = new FailingOnceRazorWireStreamHubServiceProvider(hub);
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        await provider.FirstResolutionFailureObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        await reporter.ActivityAsync(runId, "Publishing recovered.");
+        await hub.FirstPublicationObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Contains(
+            hub.Published,
+            item => item.Message.Contains("Publishing recovered.", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ProgressReporter_ShouldNotBlockStateTransitionsOnAStalledHub()
     {
         var hub = new BlockingRazorWireStreamHub();
@@ -577,9 +597,10 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
         var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
         await reporter.CompleteRunAsync(runId, CreateHealth());
 
-        Assert.True(hub.Published.Count >= 3);
-        var completion = hub.Published[^2];
-        var visit = hub.Published[^1];
+        var published = hub.Published;
+        Assert.True(published.Count >= 3);
+        var completion = published[^2];
+        var visit = published[^1];
         Assert.Equal(AppSurfaceDocsHarvestProgressReporter.ChannelName, completion.Channel);
         Assert.True(completion.Options?.Replay);
         Assert.Contains("data-appsurface-docs-harvest-complete=\"true\"", completion.Message, StringComparison.Ordinal);
@@ -954,7 +975,11 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
 
     private sealed class RecordingRazorWireStreamHub : IRazorWireStreamHub
     {
-        public List<PublishedMessage> Published { get; } = [];
+        private readonly ConcurrentQueue<PublishedMessage> _published = [];
+
+        public IReadOnlyList<PublishedMessage> Published => _published.ToArray();
+
+        public TaskCompletionSource FirstPublicationObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TaskCompletionSource SecondPublicationObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -972,8 +997,9 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
 
         private void Record(string channel, string message, RazorWireStreamPublishOptions? options)
         {
-            Published.Add(new PublishedMessage(channel, message, options));
-            if (Published.Count >= 2)
+            _published.Enqueue(new PublishedMessage(channel, message, options));
+            FirstPublicationObserved.TrySetResult();
+            if (_published.Count >= 2)
             {
                 SecondPublicationObserved.TrySetResult();
             }
@@ -1046,6 +1072,35 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
         }
     }
 
+    private sealed class FailingOnceRazorWireStreamHubServiceProvider : IServiceProvider
+    {
+        private readonly IRazorWireStreamHub _hub;
+        private int _resolutionAttempts;
+
+        public FailingOnceRazorWireStreamHubServiceProvider(IRazorWireStreamHub hub)
+        {
+            _hub = hub;
+        }
+
+        public TaskCompletionSource FirstResolutionFailureObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public object? GetService(Type serviceType)
+        {
+            if (serviceType != typeof(IRazorWireStreamHub))
+            {
+                return null;
+            }
+
+            if (Interlocked.Increment(ref _resolutionAttempts) == 1)
+            {
+                FirstResolutionFailureObserved.TrySetResult();
+                throw new InvalidOperationException("The stream hub could not be resolved once.");
+            }
+
+            return _hub;
+        }
+    }
+
     private sealed class BlockingRazorWireStreamHub : IRazorWireStreamHub
     {
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1097,8 +1152,9 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
     private sealed class FailingOnceTerminalRazorWireStreamHub : IRazorWireStreamHub
     {
         private int _terminalAttempts;
+        private readonly ConcurrentQueue<PublishedMessage> _published = [];
 
-        public List<PublishedMessage> Published { get; } = [];
+        public IReadOnlyList<PublishedMessage> Published => _published.ToArray();
 
         public TaskCompletionSource VisitPublicationSucceeded { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -1115,7 +1171,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
                 throw new InvalidOperationException("The terminal snapshot failed once.");
             }
 
-            Published.Add(new PublishedMessage(channel, message, options));
+            _published.Enqueue(new PublishedMessage(channel, message, options));
             if (message.Contains("action=\"rw-visit\"", StringComparison.Ordinal))
             {
                 VisitPublicationSucceeded.TrySetResult();
@@ -1137,8 +1193,9 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
     private sealed class FailingOnceCompletionVisitRazorWireStreamHub : IRazorWireStreamHub
     {
         private int _visitAttempts;
+        private readonly ConcurrentQueue<PublishedMessage> _published = [];
 
-        public List<PublishedMessage> Published { get; } = [];
+        public IReadOnlyList<PublishedMessage> Published => _published.ToArray();
 
         public TaskCompletionSource VisitPublicationSucceeded { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -1155,7 +1212,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
                 throw new InvalidOperationException("The completion visit failed once.");
             }
 
-            Published.Add(new PublishedMessage(channel, message, options));
+            _published.Enqueue(new PublishedMessage(channel, message, options));
             if (message.Contains("action=\"rw-visit\"", StringComparison.Ordinal))
             {
                 VisitPublicationSucceeded.TrySetResult();
@@ -1352,14 +1409,9 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
                         return;
                     }
 
-                    if (_period == Timeout.InfiniteTimeSpan)
-                    {
-                        _dueTimestamp = null;
-                    }
-                    else
-                    {
-                        _dueTimestamp = checked(_owner._timestamp + _period.Ticks);
-                    }
+                    _dueTimestamp = _period == Timeout.InfiniteTimeSpan
+                        ? null
+                        : checked(_owner._timestamp + _period.Ticks);
                 }
 
                 _callback(_state);
