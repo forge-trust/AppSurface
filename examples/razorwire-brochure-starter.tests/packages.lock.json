@@ -58,36 +58,24 @@
         "resolved": "3.1.5",
         "contentHash": "tKi7dSTwP4m5m9eXPM2Ime4Kn7xNf4x4zT9sdLO/G4hZVnQCRiMTWoSZqI/pYTVeI27oPPqHBKYI/DjJ9GsYgA=="
       },
-      "ForgeTrust.AppSurface.Auth": {
-        "type": "Transitive",
-        "resolved": "0.1.0-rc.1",
-        "contentHash": "vriDr/5tCF76lyDZZoinspmnW181R/D0fDU9+ZwLwMRFI1p3+rpFDo7zyKbcjEM/d9j1mzdXYUoCbMqL2VQi5g==",
-        "dependencies": {
-          "CliWrap": "3.10.1",
-          "ForgeTrust.AppSurface.Core": "0.1.0-rc.1",
-          "Microsoft.Extensions.Hosting": "10.0.8",
-          "Microsoft.Extensions.Logging.Console": "10.0.8",
-          "Microsoft.Extensions.Options": "10.0.8"
-        }
-      },
       "ForgeTrust.AppSurface.Core": {
         "type": "Transitive",
-        "resolved": "0.1.0-rc.3",
-        "contentHash": "vES1iPsCt3v+gor9F4iIHtudInFi3kPOMWTcw7yoLOtCpjvTamW08ORmrCQgrfDZjh1Sf9y2ddNxwG87xKuJfQ==",
+        "resolved": "0.1.0",
+        "contentHash": "BelXToqPRr8OYBWYS/01FN+AaFL5zw17uNpIvU6VZsy1kmi2KbvbU6eQ/K++Nf6c7O5rtduezn+zyAOpfiMEzQ==",
         "dependencies": {
           "CliWrap": "3.10.1",
-          "Microsoft.Extensions.Hosting": "10.0.8",
-          "Microsoft.Extensions.Logging.Console": "10.0.8",
+          "Microsoft.Extensions.Hosting": "9.0.6",
+          "Microsoft.Extensions.Logging.Console": "9.0.6",
           "Microsoft.Extensions.Options": "10.0.8"
         }
       },
       "ForgeTrust.AppSurface.Intelligence": {
         "type": "Transitive",
-        "resolved": "0.1.0-rc.3",
-        "contentHash": "Ku2BLcheKAYs9/Y9tJ2BCiuYq7z4bsebPGh7coHD3cA5ddXekiuJ5NkTbvPsuYhmSjnzm+IScWP2GUtGUQCBjw==",
+        "resolved": "0.1.0",
+        "contentHash": "Oy3IjzxDXhPjcJOR5/C2A903FOB5C2JaO2tH6dT5JQ144OLVDLM+MGxkdrB6U0E9dV5tjjG5iAe/HJxwLXooaA==",
         "dependencies": {
           "CliWrap": "3.10.1",
-          "ForgeTrust.AppSurface.Core": "0.1.0-rc.3",
+          "ForgeTrust.AppSurface.Core": "0.1.0",
           "Microsoft.Extensions.Hosting": "10.0.8",
           "Microsoft.Extensions.Logging.Console": "10.0.8",
           "Microsoft.Extensions.Options": "10.0.8"
@@ -95,21 +83,21 @@
       },
       "ForgeTrust.AppSurface.Web": {
         "type": "Transitive",
-        "resolved": "0.1.0-preview.2",
-        "contentHash": "z8LWRxkPaK73yPMBSjr7re/ryxkHhuleN62wBudyRjOKcYFLbLmH2pbNNEFp1vqinmxQFareSd78LTZu2bfsJg==",
+        "resolved": "0.1.0",
+        "contentHash": "PdcT4jMFKDXAtZGs9F/gJa6j/U1RGZCtC2u6Ym3hbaKu/Of5mC1edtawiwmHTO0DA4Wd9UGkRd9ROEtNy5y3fw==",
         "dependencies": {
-          "ForgeTrust.AppSurface.Core": "0.1.0-preview.2"
+          "CliWrap": "3.10.1",
+          "ForgeTrust.AppSurface.Core": "0.1.0"
         }
       },
       "ForgeTrust.RazorWire": {
         "type": "Transitive",
-        "resolved": "0.1.0-preview.1",
-        "contentHash": "EpO+hMmv0DB5gppFm9+RksoS1pYBZS9ksH4ftu7C2XKXomh9YvHWEXenkICutqzJ7SZjsER9WcMdP9NHOxUhgA==",
+        "resolved": "0.1.0",
+        "contentHash": "L22TCebk2CsTZoGGfP/7AfvsATUVTPWcKpQn4oXLx+xeOYoIcTayWBN3UjVEgebE3yivU7FaIH2hhgjIk6nT+A==",
         "dependencies": {
           "CliWrap": "3.10.1",
-          "ForgeTrust.AppSurface.Auth": "0.1.0-preview.1",
-          "ForgeTrust.AppSurface.Intelligence": "0.1.0-preview.1",
-          "ForgeTrust.AppSurface.Web": "0.1.0-preview.1",
+          "ForgeTrust.AppSurface.Intelligence": "0.1.0",
+          "ForgeTrust.AppSurface.Web": "0.1.0",
           "Microsoft.AspNetCore.Mvc.Razor.Extensions": "6.0.36",
           "Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation": "10.0.2",
           "Microsoft.CodeAnalysis.Analyzers": "3.11.0",
@@ -407,7 +395,7 @@
       "northstarbrochurestarter": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.RazorWire": "[0.1.0-preview.1, )"
+          "ForgeTrust.RazorWire": "[0.1.0, )"
         }
       },
       "CliWrap": {

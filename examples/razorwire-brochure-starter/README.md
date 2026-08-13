@@ -13,7 +13,7 @@ Plain ASP.NET Core MVC is enough when conventional server-rendered pages are all
 The application project has exactly one product package reference:
 
 ```xml
-<RazorWirePackageVersion Condition="'$(RazorWirePackageVersion)' == ''">0.1.0-preview.1</RazorWirePackageVersion>
+<RazorWirePackageVersion Condition="'$(RazorWirePackageVersion)' == ''">0.1.0</RazorWirePackageVersion>
 <PackageReference Include="ForgeTrust.RazorWire" Version="$(RazorWirePackageVersion)" />
 ```
 

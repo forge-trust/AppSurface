@@ -158,7 +158,7 @@ public sealed class NorthstarBrochureStarterContractTests
             "NorthstarBrochureStarter.csproj"));
 
         Assert.Contains("<TargetFramework>net10.0</TargetFramework>", project, StringComparison.Ordinal);
-        Assert.Contains("<RazorWirePackageVersion Condition=\"'$(RazorWirePackageVersion)' == ''\">0.1.0-preview.1</RazorWirePackageVersion>", project, StringComparison.Ordinal);
+        Assert.Contains("<RazorWirePackageVersion Condition=\"'$(RazorWirePackageVersion)' == ''\">0.1.0</RazorWirePackageVersion>", project, StringComparison.Ordinal);
         Assert.Contains("<PackageReference Include=\"ForgeTrust.RazorWire\" Version=\"$(RazorWirePackageVersion)\" />", project, StringComparison.Ordinal);
         Assert.DoesNotContain("<ProjectReference", project, StringComparison.Ordinal);
         Assert.DoesNotContain("Tailwind", project, StringComparison.OrdinalIgnoreCase);
