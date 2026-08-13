@@ -18,13 +18,17 @@ test('real MiniSearch matches every AppSurface Docs search field', async () => {
       headings: ['HeadingNeedle'],
       bodyText: 'BodyNeedle',
       entryPoints: [{ label: 'EntryNeedle' }],
-      language: 'js'
+      language: 'js',
+      apiLifecycle: 'beta',
+      apiLifecycleLabel: 'Beta',
+      isDeprecated: true,
+      isGeneratedApiSymbol: true
     })
   ];
 
   index.addAll(docs.map(createMiniSearchDocument));
 
-  for (const term of ['TitleNeedle', 'AliasNeedle', 'KeywordNeedle', 'SummaryNeedle', 'HeadingNeedle', 'BodyNeedle', 'EntryNeedle', 'JavaScript']) {
+  for (const term of ['TitleNeedle', 'AliasNeedle', 'KeywordNeedle', 'SummaryNeedle', 'HeadingNeedle', 'BodyNeedle', 'EntryNeedle', 'JavaScript', 'Beta', 'deprecated']) {
     const results = index.search(term);
     assert.equal(results[0]?.id, 'field-probe', `${term} should match the indexed document`);
   }
@@ -92,4 +96,40 @@ test('real MiniSearch candidates hydrate into reader-intent ranked docs', async 
 
   assert.equal(ranked[0].id, 'guide');
   assert.equal(ranked.at(-1).id, 'internal');
+});
+
+test('real MiniSearch lifecycle queries promote generated symbols ahead of guides', async () => {
+  const { createMiniSearchConfiguration, createMiniSearchDocument, normalizeSearchDocument, rankSearchResults } = await loadSearchCore();
+  const index = new MiniSearch(createMiniSearchConfiguration());
+  const docs = [
+    normalizeSearchDocument({
+      id: 'beta-guide',
+      path: '/docs/guides/beta-rollout',
+      title: 'Beta rollout guide',
+      pageType: 'guide',
+      bodyText: 'Guidance for beta rollout.'
+    }),
+    normalizeSearchDocument({
+      id: 'beta-symbol',
+      path: '/docs/api/javascript/razorwire#beta-runtime',
+      title: 'Runtime API',
+      pageType: 'javascript-event',
+      apiLifecycle: 'beta',
+      apiLifecycleLabel: 'Beta',
+      isDeprecated: true,
+      isGeneratedApiSymbol: true
+    })
+  ];
+  const docsById = new Map(docs.map((doc) => [doc.id, doc]));
+  index.addAll(docs.map(createMiniSearchDocument));
+
+  const candidates = index.search('beta').map((result, miniSearchRank) => ({
+    doc: docsById.get(result.id),
+    miniSearchRank,
+    miniSearchScore: result.score
+  }));
+  const ranked = rankSearchResults(candidates, { query: 'beta' });
+
+  assert.equal(candidates[0].doc.id, 'beta-guide');
+  assert.equal(ranked[0].id, 'beta-symbol');
 });

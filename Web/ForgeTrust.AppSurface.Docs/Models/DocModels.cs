@@ -778,7 +778,44 @@ public record DocNode(
     string? CanonicalPath = null,
     DocMetadata? Metadata = null,
     IReadOnlyList<DocOutlineItem>? Outline = null,
-    IReadOnlyList<DocSymbolSourceProvenance>? SymbolSourceProvenance = null);
+    IReadOnlyList<DocSymbolSourceProvenance>? SymbolSourceProvenance = null)
+{
+    /// <summary>
+    /// Gets optional generated API symbol metadata scoped to one fragment-addressable node.
+    /// </summary>
+    /// <remarks>
+    /// This non-positional property preserves the public constructor and deconstructor shape of <see cref="DocNode"/>.
+    /// The built-in search index validates its value and projects it only for canonical JavaScript API fragments.
+    /// </remarks>
+    public DocGeneratedApiSymbol? GeneratedApiSymbol { get; init; }
+
+    /// <summary>
+    /// Gets whether the built-in JavaScript harvester validated the lifecycle metadata for this node.
+    /// </summary>
+    /// <remarks>
+    /// This is an internal provenance marker rather than public extension metadata. The search index requires it with
+    /// canonical fragment shape before projecting <see cref="GeneratedApiSymbol"/>.
+    /// </remarks>
+    internal bool HasJavaScriptApiLifecycleProvenance { get; init; }
+}
+
+/// <summary>
+/// Describes lifecycle metadata for one generated API symbol represented by a fragment-addressable <see cref="DocNode"/>.
+/// </summary>
+/// <remarks>
+/// This metadata is intentionally symbol-scoped. It must not be attached to aggregate API group pages or reused as a
+/// page-level <see cref="DocMetadata.Status"/> value, because an API group can contain symbols at different lifecycle
+/// stages. Built-in search validates and projects these optional values only for canonical generated JavaScript API
+/// symbol records with built-in-harvester provenance; custom harvesters retain the public model shape without gaining
+/// a search-ranking bypass.
+/// </remarks>
+/// <param name="ApiLifecycle">Normalized lifecycle token: <c>public</c>, <c>alpha</c>, or <c>beta</c>.</param>
+/// <param name="ApiLifecycleLabel">Reader-facing lifecycle label such as <c>Public API</c>, <c>Alpha</c>, or <c>Beta</c>.</param>
+/// <param name="IsDeprecated">Whether the generated API symbol is deprecated.</param>
+public sealed record DocGeneratedApiSymbol(
+    string ApiLifecycle,
+    string ApiLifecycleLabel,
+    bool IsDeprecated);
 
 /// <summary>
 /// Describes the overall health of the latest AppSurface Docs harvest snapshot.
@@ -1045,6 +1082,16 @@ public static class DocHarvestDiagnosticCodes
     /// A public JavaScript doclet was malformed or incomplete and could not be safely rendered.
     /// </summary>
     public const string JavaScriptMalformedPublicDoclet = "appsurfacedocs.javascript.malformed_public_doclet";
+
+    /// <summary>
+    /// A JavaScript public API doclet declared conflicting lifecycle tags and was skipped.
+    /// </summary>
+    public const string JavaScriptLifecycleConflict = "appsurfacedocs.javascript.lifecycle_conflict";
+
+    /// <summary>
+    /// A JavaScript lifecycle modifier carried unsupported content and the doclet was skipped.
+    /// </summary>
+    public const string JavaScriptMalformedLifecycle = "appsurfacedocs.javascript.malformed_lifecycle";
 
     /// <summary>
     /// A rendered JavaScript API item is missing recommended documentation fields.

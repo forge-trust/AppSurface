@@ -90,6 +90,8 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("appsurfacedocs.javascript.malformed_public_doclet", DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet);
         Assert.Equal("appsurfacedocs.javascript.incomplete_public_doclet", DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet);
         Assert.Equal("appsurfacedocs.javascript.incomplete_public_event_doclet", DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+        Assert.Equal("appsurfacedocs.javascript.lifecycle_conflict", DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict);
+        Assert.Equal("appsurfacedocs.javascript.malformed_lifecycle", DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle);
         Assert.Equal("appsurfacedocs.javascript.event_doclet_dispatch_missing", DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing);
         Assert.Equal("appsurfacedocs.javascript.event_dispatch_doclet_missing", DocHarvestDiagnosticCodes.JavaScriptEventDispatchDocletMissing);
         Assert.Equal("appsurfacedocs.javascript.duplicate_anchor", DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor);
