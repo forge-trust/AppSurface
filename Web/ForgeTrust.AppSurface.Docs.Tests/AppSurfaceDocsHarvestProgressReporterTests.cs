@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Channels;
 using ForgeTrust.AppSurface.Docs.Models;
@@ -463,6 +464,60 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
     }
 
     [Fact]
+    public async Task ProgressReporter_ShouldCancelPendingRetryWhenNextRunSupersedesFailedPublication()
+    {
+        var timeProvider = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        var hub = new FailingFirstPublicationRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance,
+            timeProvider);
+
+        await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        await hub.FirstFailureObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        await timeProvider.TimerCreated.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        var nextRunId = await reporter.BeginRunAsync([nameof(CSharpDocHarvester)]);
+        await hub.FirstSuccessfulPublicationObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        timeProvider.Advance(TimeSpan.FromSeconds(1));
+        await Task.Yield();
+
+        Assert.Equal(nextRunId, reporter.CurrentSnapshot.RunId);
+        Assert.Equal(2, hub.PublicationAttempts);
+        Assert.Single(hub.Published);
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldCancelOlderRetryWhenNewerPublicationSucceeds()
+    {
+        var timeProvider = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        var hub = new FailingFirstPublicationRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance,
+            timeProvider);
+
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        await hub.FirstFailureObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        await timeProvider.TimerCreated.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        await reporter.ActivityAsync(runId, "A newer progress update succeeded.");
+        await hub.FirstSuccessfulPublicationObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        timeProvider.Advance(TimeSpan.FromSeconds(1));
+        await Task.Yield();
+
+        Assert.Equal(2, hub.PublicationAttempts);
+        var publication = Assert.Single(hub.Published);
+        Assert.Contains("A newer progress update succeeded.", publication.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ProgressSession_ShouldCancelConfiguredPerDocumentPacing()
     {
         using var provider = new ServiceCollection().BuildServiceProvider();
@@ -480,6 +535,32 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => session.ReportOutputOnlyAsync(1).AsTask());
         Assert.Equal(1, Assert.Single(reporter.CurrentSnapshot.Harvesters).DocCount);
+    }
+
+    [Fact]
+    public async Task ProgressSession_ShouldApplyConfiguredPacingForEachReportedOutputDocument()
+    {
+        var timeProvider = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance,
+            timeProvider);
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        var session = reporter.CreateSession(
+            runId,
+            nameof(MarkdownHarvester),
+            testingDelayPerDocumentMilliseconds: 1);
+
+        var report = session.ReportOutputOnlyAsync(2).AsTask();
+        await timeProvider.TimerCreated.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        timeProvider.Advance(TimeSpan.FromMilliseconds(1));
+        await timeProvider.SecondTimerCreated.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        timeProvider.Advance(TimeSpan.FromMilliseconds(1));
+
+        await report.WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.Equal(2, Assert.Single(reporter.CurrentSnapshot.Harvesters).DocCount);
     }
 
     [Fact]
@@ -1093,6 +1174,46 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
         }
     }
 
+    private sealed class FailingFirstPublicationRazorWireStreamHub : IRazorWireStreamHub
+    {
+        private int _publicationAttempts;
+
+        public ConcurrentQueue<PublishedMessage> Published { get; } = [];
+
+        public TaskCompletionSource FirstFailureObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource FirstSuccessfulPublicationObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int PublicationAttempts => Volatile.Read(ref _publicationAttempts);
+
+        public ValueTask PublishAsync(string channel, string message)
+        {
+            return PublishAsync(channel, message, options: null);
+        }
+
+        public ValueTask PublishAsync(string channel, string message, RazorWireStreamPublishOptions? options)
+        {
+            if (Interlocked.Increment(ref _publicationAttempts) == 1)
+            {
+                FirstFailureObserved.TrySetResult();
+                throw new InvalidOperationException("The initial progress publication failed.");
+            }
+
+            Published.Enqueue(new PublishedMessage(channel, message, options));
+            FirstSuccessfulPublicationObserved.TrySetResult();
+            return ValueTask.CompletedTask;
+        }
+
+        public ChannelReader<string> Subscribe(string channel)
+        {
+            return Channel.CreateUnbounded<string>().Reader;
+        }
+
+        public void Unsubscribe(string channel, ChannelReader<string> reader)
+        {
+        }
+    }
+
     private sealed record PublishedMessage(
         string Channel,
         string Message,
@@ -1100,8 +1221,11 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
 
     private sealed class ManualTimeProvider : TimeProvider
     {
+        private readonly object _gate = new();
+        private readonly List<ManualTimer> _timers = [];
         private DateTimeOffset _utcNow;
         private long _timestamp;
+        private int _timerCreationCount;
 
         public ManualTimeProvider(DateTimeOffset utcNow)
         {
@@ -1110,20 +1234,143 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
 
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
 
+        public TaskCompletionSource TimerCreated { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource SecondTimerCreated { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public override DateTimeOffset GetUtcNow()
         {
-            return _utcNow;
+            lock (_gate)
+            {
+                return _utcNow;
+            }
         }
 
         public override long GetTimestamp()
         {
-            return _timestamp;
+            lock (_gate)
+            {
+                return _timestamp;
+            }
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            ArgumentNullException.ThrowIfNull(callback);
+            lock (_gate)
+            {
+                var timer = new ManualTimer(this, callback, state, dueTime, period);
+                _timers.Add(timer);
+                if (Interlocked.Increment(ref _timerCreationCount) == 1)
+                {
+                    TimerCreated.TrySetResult();
+                }
+                else
+                {
+                    SecondTimerCreated.TrySetResult();
+                }
+
+                return timer;
+            }
         }
 
         public void Advance(TimeSpan elapsed)
         {
-            _utcNow = _utcNow.Add(elapsed);
-            _timestamp = checked(_timestamp + elapsed.Ticks);
+            List<ManualTimer> dueTimers;
+            lock (_gate)
+            {
+                _utcNow = _utcNow.Add(elapsed);
+                _timestamp = checked(_timestamp + elapsed.Ticks);
+                dueTimers = _timers.Where(timer => timer.IsDue(_timestamp)).ToList();
+            }
+
+            foreach (var timer in dueTimers)
+            {
+                timer.Fire();
+            }
+        }
+
+        private sealed class ManualTimer : ITimer
+        {
+            private readonly ManualTimeProvider _owner;
+            private readonly TimerCallback _callback;
+            private readonly object? _state;
+            private long? _dueTimestamp;
+            private TimeSpan _period;
+            private bool _disposed;
+
+            public ManualTimer(ManualTimeProvider owner, TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+            {
+                _owner = owner;
+                _callback = callback;
+                _state = state;
+                _period = period;
+                _dueTimestamp = ToDueTimestamp(dueTime);
+            }
+
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                lock (_owner._gate)
+                {
+                    if (_disposed)
+                    {
+                        return false;
+                    }
+
+                    _period = period;
+                    _dueTimestamp = ToDueTimestamp(dueTime);
+                    return true;
+                }
+            }
+
+            public void Dispose()
+            {
+                lock (_owner._gate)
+                {
+                    _disposed = true;
+                    _owner._timers.Remove(this);
+                }
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
+
+            public bool IsDue(long timestamp)
+            {
+                return !_disposed && _dueTimestamp is { } dueTimestamp && dueTimestamp <= timestamp;
+            }
+
+            public void Fire()
+            {
+                lock (_owner._gate)
+                {
+                    if (!IsDue(_owner._timestamp))
+                    {
+                        return;
+                    }
+
+                    if (_period == Timeout.InfiniteTimeSpan)
+                    {
+                        _dueTimestamp = null;
+                    }
+                    else
+                    {
+                        _dueTimestamp = checked(_owner._timestamp + _period.Ticks);
+                    }
+                }
+
+                _callback(_state);
+            }
+
+            private long? ToDueTimestamp(TimeSpan dueTime)
+            {
+                return dueTime == Timeout.InfiniteTimeSpan
+                    ? null
+                    : checked(_owner._timestamp + dueTime.Ticks);
+            }
         }
     }
 }

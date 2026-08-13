@@ -1484,8 +1484,7 @@ public class DocAggregator
             return await harvesterTask;
         }
 
-        timeoutToken.ThrowIfCancellationRequested();
-        return await harvesterTask;
+        throw new OperationCanceledException(timeoutToken);
     }
 
     private static bool IsBuiltInProgressHarvester(IDocHarvester harvester)
