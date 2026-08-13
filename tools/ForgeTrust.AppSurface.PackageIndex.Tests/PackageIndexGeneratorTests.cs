@@ -2683,7 +2683,9 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 "--artifact-manifest", "reports/artifacts.json",
                 "--report", "reports/packages.md",
                 "--coverage-proof-work-dir", "reports/coverage-proof",
-                "--coverage-proof-report", "reports/coverage-proof.md"
+                "--coverage-proof-report", "reports/coverage-proof.md",
+                "--docs-proof-work-dir", "reports/docs-proof",
+                "--docs-proof-report", "reports/docs-proof.md"
             ],
             stdout,
             stderr,
@@ -2710,6 +2712,8 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(Path.Join(_repositoryRoot, "reports", "artifacts.json"), capturedRequest.ArtifactManifestPath);
         Assert.Equal(Path.Join(_repositoryRoot, "reports", "coverage-proof"), capturedRequest.CoverageProofWorkDirectory);
         Assert.Equal(Path.Join(_repositoryRoot, "reports", "coverage-proof.md"), capturedRequest.CoverageProofReportPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "reports", "docs-proof"), capturedRequest.DocsProofWorkDirectory);
+        Assert.Equal(Path.Join(_repositoryRoot, "reports", "docs-proof.md"), capturedRequest.DocsProofReportPath);
         Assert.Equal("https://api.nuget.org/v3/index.json", capturedRequest.Source);
         Assert.Equal("0.0.0-ci.99", capturedRequest.PackageVersion);
         Assert.Contains("Validated 1 package artifacts for 0.0.0-ci.99. Report: reports/packages.md.", stdout.ToString(), StringComparison.Ordinal);

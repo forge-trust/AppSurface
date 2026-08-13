@@ -2865,13 +2865,13 @@ trust:
 
 The coordinated response to [GHSA-pgww-w46g-26qg](https://github.com/advisories/GHSA-pgww-w46g-26qg) upgrades the HTML parsing and sanitization graph without changing the AppSurface Docs public API, registration sequence, configuration, or consumer usage. The package restores these exact versions from the repository's [central package version catalog](../../Directory.Packages.props):
 
-- `AngleSharp` `[1.5.2]`
-- `HtmlSanitizer` `[9.1.949-beta]`
-- `AngleSharp.Css` `[1.0.0-beta.216]`
+- `AngleSharp` `[1.7.1]`
+- `HtmlSanitizer` `[9.2.995]`
+- `AngleSharp.Css` `[1.0.1]`
 
-The exact pins are intentional: `HtmlSanitizer` and `AngleSharp.Css` must be upgraded as a compatible pair, and the brackets prevent NuGet from silently selecting a different dependency graph. Their beta versions are acceptable only while AppSurface packages are themselves preview releases. The [package artifact verification workflow](../../packages/README.md#maintainer-notes) requires all three dependencies for a stable Docs package, rejects missing or malformed ranges and AngleSharp lower bounds below 1.5.2, and blocks prerelease `HtmlSanitizer` or `AngleSharp.Css`; [issue #682](https://github.com/forge-trust/AppSurface/issues/682) tracks replacing the pair with compatible stable releases as a stable-release prerequisite, not a reason to loosen the exact pins.
+The exact pins are intentional: `HtmlSanitizer` and `AngleSharp.Css` must be upgraded as a compatible pair, and the brackets prevent NuGet from silently selecting a different dependency graph. The [package artifact verification workflow](../../packages/README.md#maintainer-notes) requires every Docs dependency container in a stable package to contain all three exact identities once, rejecting missing, duplicate, versionless, prerelease, or ranged entries. It also restores the freshly packed Docs artifact in an independent locked consumer and records its mapped source configuration, lock file, assets graph, and SHA-512 evidence. [Issue #682](https://github.com/forge-trust/AppSurface/issues/682) landed this stable graph; it is not permission to loosen the pins.
 
-If an adopter's central package policy conflicts with any of these versions, do not use `VersionOverride`, remove the equality brackets, or widen only one dependency. Align the application's entire trio to the exact graph above, or remain on the prior AppSurface preview until a coordinated compatible graph is available. A locally successful restore with a loosened range is not supported compatibility evidence. Maintainers proving the packed graph must follow the [#678 package-proof sequence](../../packages/README.md#issue-678-package-proof).
+If an adopter's central package policy conflicts with any of these versions, do not use `VersionOverride`, remove the equality brackets, or widen only one dependency. Align the application's entire trio to the exact graph above. A locally successful restore with a loosened range is not supported compatibility evidence. Maintainers proving the packed graph must follow the [#682 package-proof sequence](../../packages/README.md#issue-682-package-proof).
 
 `IAppSurfaceDocsHtmlSanitizer` protects rendered package-documentation fragments before AppSurface Docs includes them in its UI. It is not a general untrusted-user-content sanitizer, a whole-document security boundary, or a substitute for a host Content Security Policy. Applications accepting general UGC must define and verify their own sanitization policy, and hosts remain responsible for CSP and the rest of their response-hardening policy. Do not widen the Docs allowlist merely to make unrelated application HTML render.
 

@@ -13,6 +13,7 @@ internal sealed class PackageArtifactWorkflow
     private readonly ICommandRunner _commandRunner;
     private readonly PackageArtifactValidator _validator;
     private readonly ICoverageCliConsumerProofWorkflow _coverageProofWorkflow;
+    private readonly IDocsPackageConsumerProofWorkflow _docsProofWorkflow;
     private readonly PackagePayloadInventoryLoader _payloadInventoryLoader;
     private readonly PackageArtifactManifestWriter _artifactManifestWriter;
 
@@ -26,16 +27,22 @@ internal sealed class PackageArtifactWorkflow
     /// Packaged coverage CLI proof that installs the validated CLI artifact in a clean consumer fixture before
     /// protected publish jobs can consume the artifact manifest.
     /// </param>
+    /// <param name="docsProofWorkflow">
+    /// Packed Docs consumer proof that restores the validated Docs artifact in an independent locked consumer before
+    /// protected publish jobs can consume the artifact manifest.
+    /// </param>
     internal PackageArtifactWorkflow(
         PackagePublishPlanResolver planResolver,
         ICommandRunner commandRunner,
         PackageArtifactValidator validator,
-        ICoverageCliConsumerProofWorkflow coverageProofWorkflow)
+        ICoverageCliConsumerProofWorkflow coverageProofWorkflow,
+        IDocsPackageConsumerProofWorkflow docsProofWorkflow)
     {
         _planResolver = planResolver;
         _commandRunner = commandRunner;
         _validator = validator;
         _coverageProofWorkflow = coverageProofWorkflow;
+        _docsProofWorkflow = docsProofWorkflow;
         _payloadInventoryLoader = new PackagePayloadInventoryLoader();
         _artifactManifestWriter = new PackageArtifactManifestWriter();
     }
@@ -52,8 +59,15 @@ internal sealed class PackageArtifactWorkflow
     {
         ValidateRequest(request);
         PackageVersionValidator.Require(request.PackageVersion, PackageVersionPolicy.StableOrPrereleaseNoBuildMetadata);
-        CoverageCliConsumerProofWorkflow.PrepareWorkDirectory(
+        PackageProofWorkDirectory.RequireDisjoint(
             request.CoverageProofWorkDirectory,
+            request.DocsProofWorkDirectory);
+        PackageProofWorkDirectory.Prepare(
+            request.CoverageProofWorkDirectory,
+            request.RepositoryRoot,
+            request.ArtifactsOutputPath);
+        PackageProofWorkDirectory.Prepare(
+            request.DocsProofWorkDirectory,
             request.RepositoryRoot,
             request.ArtifactsOutputPath);
 
@@ -151,17 +165,35 @@ internal sealed class PackageArtifactWorkflow
             CoverageCliConsumerProofReportRenderer.RenderMarkdown(coverageProofReport),
             cancellationToken);
 
+        var docsProofReport = await _docsProofWorkflow.RunAsync(
+            new DocsPackageConsumerProofRequest(
+                request.RepositoryRoot,
+                request.ArtifactsOutputPath,
+                request.PackageVersion,
+                request.DocsProofWorkDirectory,
+                request.Source),
+            report,
+            cancellationToken);
+        CreateParentDirectoryIfPresent(request.DocsProofReportPath);
+        await File.WriteAllTextAsync(
+            request.DocsProofReportPath,
+            DocsPackageConsumerProofReportRenderer.RenderMarkdown(docsProofReport),
+            cancellationToken);
+
         CreateParentDirectoryIfPresent(request.ReportPath);
         await File.WriteAllTextAsync(
             request.ReportPath,
-            PackageArtifactReportRenderer.RenderMarkdown(report, coverageProofReport),
+            PackageArtifactReportRenderer.RenderMarkdown(report, coverageProofReport, docsProofReport),
             cancellationToken);
 
-        if (!coverageProofReport.Succeeded)
+        if (!coverageProofReport.Succeeded || !docsProofReport.Succeeded)
         {
             DeleteArtifactManifest(request.ArtifactManifestPath);
+            var failedProof = !coverageProofReport.Succeeded
+                ? "Coverage CLI consumer proof"
+                : "Docs package consumer proof";
             throw new PackageIndexException(
-                $"Coverage CLI consumer proof failed for '{CoverageCliConsumerProofWorkflow.CliPackageId}'. Report: {request.CoverageProofReportPath}");
+                $"{failedProof} failed. Report: {(!coverageProofReport.Succeeded ? request.CoverageProofReportPath : request.DocsProofReportPath)}");
         }
 
         await _artifactManifestWriter.WriteAsync(
@@ -209,6 +241,16 @@ internal sealed class PackageArtifactWorkflow
         if (string.IsNullOrWhiteSpace(request.CoverageProofReportPath))
         {
             throw new PackageIndexException("Coverage CLI consumer proof report path must be provided.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.DocsProofWorkDirectory))
+        {
+            throw new PackageIndexException("Docs package consumer proof work directory must be provided.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.DocsProofReportPath))
+        {
+            throw new PackageIndexException("Docs package consumer proof report path must be provided.");
         }
 
         if (string.IsNullOrWhiteSpace(request.Source))
@@ -290,6 +332,8 @@ internal sealed class PackageArtifactWorkflow
 /// <param name="ArtifactManifestPath">Machine-readable validation manifest path for the publish workflow.</param>
 /// <param name="CoverageProofWorkDirectory">Isolated work directory for the packaged coverage CLI consumer proof.</param>
 /// <param name="CoverageProofReportPath">Standalone markdown report path for the packaged coverage CLI consumer proof.</param>
+/// <param name="DocsProofWorkDirectory">Isolated work directory for the packed Docs consumer proof.</param>
+/// <param name="DocsProofReportPath">Standalone markdown report path for the packed Docs consumer proof.</param>
 /// <param name="Source">NuGet source used for third-party dependencies while first-party packages map to local artifacts.</param>
 internal sealed record PackageArtifactRequest(
     string RepositoryRoot,
@@ -300,4 +344,6 @@ internal sealed record PackageArtifactRequest(
     string ArtifactManifestPath,
     string CoverageProofWorkDirectory,
     string CoverageProofReportPath,
+    string DocsProofWorkDirectory,
+    string DocsProofReportPath,
     string Source);
