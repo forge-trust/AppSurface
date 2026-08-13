@@ -116,10 +116,10 @@ The strict PostgreSQL verification gate uses PostgreSQL 16.5 via `postgres:16.5@
 
 - registry-scoped Work discovery uses `discover_work_dispatch` and `ix_work_contract_dispatch_lookup` across 100,000
   Work/dispatch rows in 100 scopes;
-  - 32 simultaneous claimers sharing an eight-connection pool complete within 30 seconds and produce one lease owner;
-  - disabling a scope projects 10,000 pre-effect Work items and dispatch rows within 30 seconds; and
-  - concurrent migration owners serialize, canceled lock waiters do not leak the session lock, and a terminated migration
-    connection can retry safely on a new physical session.
+- 32 simultaneous claimers sharing an eight-connection pool complete within 30 seconds and produce one lease owner;
+- disabling a scope projects 10,000 pre-effect Work items and dispatch rows within 30 seconds; and
+- concurrent migration owners serialize, canceled lock waiters do not leak the session lock, and a terminated migration
+  connection can retry safely on a new physical session.
 
 The checked-in reference-workload JSON manifests in this repository still record PostgreSQL 17.5 evidence and are preserved
 as historical proof for earlier releases.

@@ -277,12 +277,75 @@ public sealed class PostgreSqlDurablePublicContractTests
                 new DurableWorkContractIdentity("tests.contract-selection.duplicate", "v1"),
                 new DurableWorkContractIdentity("tests.contract-selection.duplicate", "v1"),
             ])));
+        Assert.Throws<InvalidOperationException>(() => new PostgreSqlDurableWorkContractSelection(
+            new SnapshotWorkRegistry([default])));
+    }
+
+    [Fact]
+    public void WorkContractSelection_RejectsRegistrySnapshotsThatThrowOrReturnNull()
+    {
+        var propertyFailure = Assert.Throws<InvalidOperationException>(
+            () => new PostgreSqlDurableWorkContractSelection(new ThrowingWorkRegistry()));
+        Assert.StartsWith(DurableProblemCodes.WorkDiscoveryContractSelectionUnavailable, propertyFailure.Message, StringComparison.Ordinal);
+        Assert.IsType<InvalidOperationException>(propertyFailure.InnerException);
+
+        var nullSnapshot = Assert.Throws<InvalidOperationException>(
+            () => new PostgreSqlDurableWorkContractSelection(new NullWorkRegistry()));
+        Assert.StartsWith(DurableProblemCodes.WorkDiscoveryContractSelectionUnavailable, nullSnapshot.Message, StringComparison.Ordinal);
+        Assert.Null(nullSnapshot.InnerException);
+    }
+
+    [Fact]
+    public void WorkContractSelection_RejectsRegistrySnapshotsThatCannotBeEnumerated()
+    {
+        var unavailable = Assert.Throws<InvalidOperationException>(
+            () => new PostgreSqlDurableWorkContractSelection(new EnumeratingFailureWorkRegistry()));
+
+        Assert.StartsWith(DurableProblemCodes.WorkDiscoveryContractSelectionUnavailable, unavailable.Message, StringComparison.Ordinal);
+        Assert.IsType<InvalidOperationException>(unavailable.InnerException);
     }
 
     private sealed class LegacyWorkRegistry : IDurableWorkRegistry
     {
         public DurableWorkRegistration GetRequired(string workName, string workVersion) =>
             throw new NotSupportedException();
+    }
+
+    private sealed class ThrowingWorkRegistry : IDurableWorkRegistry
+    {
+        public IReadOnlyList<DurableWorkContractIdentity> RegisteredContracts =>
+            throw new InvalidOperationException("The custom registry could not produce a snapshot.");
+
+        public DurableWorkRegistration GetRequired(string workName, string workVersion) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class NullWorkRegistry : IDurableWorkRegistry
+    {
+        public IReadOnlyList<DurableWorkContractIdentity> RegisteredContracts => null!;
+
+        public DurableWorkRegistration GetRequired(string workName, string workVersion) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class EnumeratingFailureWorkRegistry : IDurableWorkRegistry
+    {
+        public IReadOnlyList<DurableWorkContractIdentity> RegisteredContracts { get; } = new EnumeratingFailureContracts();
+
+        public DurableWorkRegistration GetRequired(string workName, string workVersion) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class EnumeratingFailureContracts : IReadOnlyList<DurableWorkContractIdentity>
+    {
+        public int Count => 1;
+
+        public DurableWorkContractIdentity this[int index] => throw new InvalidOperationException("The custom registry cannot be indexed.");
+
+        public IEnumerator<DurableWorkContractIdentity> GetEnumerator() =>
+            throw new InvalidOperationException("The custom registry cannot be enumerated.");
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     private sealed class SnapshotWorkRegistry(IReadOnlyList<DurableWorkContractIdentity> contracts) : IDurableWorkRegistry

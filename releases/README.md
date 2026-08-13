@@ -39,9 +39,10 @@ The release evidence bundle is not a signature or hosted-build attestation. It i
 ## Durable public-preview release gate
 
 The Durable packages are eligible for coordinated prerelease publication only when release review confirms schema
-ownership, migrations `0001` through `0008`, the canonical PostgreSQL role recipe, passive storage registration,
-explicit `AddWorkerHost()` hosting, startup schema/epoch validation without DDL, recovery procedures, and the real
-PostgreSQL conformance evidence. The package chooser is the machine-facing install map; the [Durable discovery guide](../Durable/README.md#slice-7-discovery-and-reconciliation)
+ownership, migrations `0001` through `0009`, the canonical PostgreSQL role recipe, registry-scoped Work discovery,
+the drain-first `0009` role transition, passive storage registration, explicit `AddWorkerHost()` hosting, startup
+schema/epoch validation without DDL, recovery procedures, and the real PostgreSQL conformance evidence. The package
+chooser is the machine-facing install map; the [Durable discovery guide](../Durable/README.md#slice-7-discovery-and-reconciliation)
 is the reader-facing operational boundary. The `durable schema` commands do not replace this release review: scripts
 are offline, status and preflight resolve a named connection environment variable, and apply requires a named
 migration-owner environment variable. No command accepts or prints connection strings; the least-privilege role

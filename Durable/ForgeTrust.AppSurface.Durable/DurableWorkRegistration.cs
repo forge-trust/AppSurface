@@ -318,13 +318,13 @@ public interface IDurableWorkRegistry
     DurableWorkRegistration GetRequired(string workName, string workVersion);
 
     /// <summary>
-    /// Gets all registered work contracts, sorted by name and version, or throws if unavailable.
+    /// Gets all registered work contracts, or throws if unavailable.
     /// </summary>
     /// <remarks>
     /// A custom registry used with the PostgreSQL worker host must return one complete, exact, stable snapshot. The
-    /// provider snapshots it at worker activation and does not reread later mutations, so restart the host to change
-    /// discovery authority. A registry that cannot enumerate its registrations is valid for other consumers but cannot
-    /// activate PostgreSQL Work discovery.
+    /// provider normalizes its order while forming the activation-time snapshot and does not reread later mutations, so
+    /// restart the host to change discovery authority. A registry that cannot enumerate its registrations is valid for
+    /// other consumers but cannot activate PostgreSQL Work discovery.
     /// </remarks>
     /// <exception cref="NotSupportedException">Thrown when registry implementation does not expose registrations.</exception>
     IReadOnlyList<DurableWorkContractIdentity> RegisteredContracts => throw new NotSupportedException(

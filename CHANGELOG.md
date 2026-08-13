@@ -15,15 +15,6 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
 
-### Migration and diagnostics guidance
-
-- `#747` updates PostgreSQL durable compatibility and rollout guidance across documentation: minimum compatibility floor is
-  PostgreSQL 16+, strict test/default verification pin is `postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877`, and migration 0009 (`0009_work_contract_discovery.sql`) introduces registry-scoped Work discovery through
-  `appsurface_durable.discover_work_dispatch(text[], text[], integer)` and `work_contract_discovery_owner`.
-- `#747` adds canonical diagnostics and operational transition guidance for `ASDUR119` (correct a custom PostgreSQL Work
-  registry snapshot, then restart its host): include `durable-postgresql` tutorial, durable and protocol docs, and
-  `reconstruction` ledgers.
-
 ## 0.2.0-preview.6 - 2026-08-11
 
 - Narrative release note: [v0.2.0-preview.6](./releases/v0.2.0-preview.6.md)

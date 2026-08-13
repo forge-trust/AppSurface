@@ -104,7 +104,10 @@ Custom `IDurableWorkRegistry` implementations must expose a complete, stable `Re
 resolving `IDurableRuntimePump`. PostgreSQL snapshots the list once to define that host's discovery authority, rejects
 default/duplicate or more than 10,000 pairs with `ASDUR119`, and does not observe later registry mutation. An empty
 registry is valid and makes Work passes quiescent. Restart
-the host after changing the registered contracts.
+the host after changing the registered contracts. This is an execution-isolation boundary among trusted worker hosts,
+not an authorization boundary within the dispatcher credential: callers that possess that credential may invoke its
+payload-free discovery function with valid contract identities. Keep the exact dispatcher credential out of untrusted
+code, just as for the unscoped runtime-heartbeat credential.
 
 ```csharp
 using ForgeTrust.AppSurface.Durable.PostgreSql;
@@ -154,8 +157,10 @@ persists drain; already-permitted Work follows its ordinary cancellation/recover
 
 For a cold path, first drain and stop every pre-`0009` worker because the role recipe intentionally removes its raw
 `dispatch` access. Apply every pending forward-only migration through `0009_work_contract_discovery.sql` with the migration owner, rerun
-the role recipe, verify the active epoch and StoreId, deploy with `AddWorkerHost()` disabled, then enable it. Roll back application code
-by disabling the worker host and deploying a previous compatible binary; never destructively roll back a migration.
+the role recipe, verify the active epoch and StoreId, deploy with `AddWorkerHost()` disabled, then enable it. Never destructively roll
+back a migration. After the role recipe runs, a pre-`0009` worker is not a compatible application rollback target because its dispatcher
+credential no longer has raw `dispatch` access; keep that worker stopped and roll forward to a `0009`-compatible binary instead. Do not
+restore the broad grant as a rollback shortcut.
 
 ### Role recipe contract
 

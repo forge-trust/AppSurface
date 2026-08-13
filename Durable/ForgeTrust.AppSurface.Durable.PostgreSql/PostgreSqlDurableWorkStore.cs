@@ -188,20 +188,8 @@ internal class PostgreSqlDurableWorkStore
         await using var connection = await _dispatcherDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("maximum_candidates", maximumCandidates);
-        var candidates = new List<PostgreSqlDispatchCandidate>(maximumCandidates);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-        {
-            candidates.Add(new PostgreSqlDispatchCandidate(
-                reader.GetGuid(0),
-                new DurableScopeId(reader.GetString(1)),
-                new DurableWorkId(reader.GetString(2)),
-                ReadUtc(reader, 3),
-                reader.GetInt64(4),
-                reader.GetInt16(5)));
-        }
-
-        return candidates;
+        return await ReadDispatchCandidatesAsync(reader, maximumCandidates, cancellationToken).ConfigureAwait(false);
     }
 
     internal async ValueTask<IReadOnlyList<PostgreSqlDispatchCandidate>> DiscoverAsync(
@@ -233,8 +221,16 @@ internal class PostgreSqlDurableWorkStore
         await using var connection = await _dispatcherDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = new NpgsqlCommand(sql, connection);
         selection.AddDiscoveryParameters(command.Parameters, maximumCandidates);
-        var candidates = new List<PostgreSqlDispatchCandidate>(maximumCandidates);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await ReadDispatchCandidatesAsync(reader, maximumCandidates, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask<IReadOnlyList<PostgreSqlDispatchCandidate>> ReadDispatchCandidatesAsync(
+        NpgsqlDataReader reader,
+        int maximumCandidates,
+        CancellationToken cancellationToken)
+    {
+        var candidates = new List<PostgreSqlDispatchCandidate>(maximumCandidates);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             candidates.Add(new PostgreSqlDispatchCandidate(
