@@ -3618,8 +3618,8 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Equal("JavaScript", document.LanguageLabel);
         Assert.Equal("beta", document.ApiLifecycle);
         Assert.Equal("Beta", document.ApiLifecycleLabel);
-        Assert.Equal(true, document.IsDeprecated);
-        Assert.Equal(true, document.IsGeneratedApiSymbol);
+        Assert.True(document.IsDeprecated);
+        Assert.True(document.IsGeneratedApiSymbol);
         Assert.Equal(["API Reference", "JavaScript", "RazorWire"], document.Breadcrumbs);
         Assert.Contains("FormFailureDetail", document.BodyText, StringComparison.Ordinal);
         Assert.Contains("Submitted form", document.BodyText, StringComparison.Ordinal);
@@ -3628,8 +3628,8 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         var typedef = Assert.Single(payload.Documents, doc => string.Equals(doc.Title, "FormFailureDetail", StringComparison.Ordinal));
         Assert.Equal("alpha", typedef.ApiLifecycle);
         Assert.Equal("Alpha", typedef.ApiLifecycleLabel);
-        Assert.Equal(false, typedef.IsDeprecated);
-        Assert.Equal(true, typedef.IsGeneratedApiSymbol);
+        Assert.False(typedef.IsDeprecated);
+        Assert.True(typedef.IsGeneratedApiSymbol);
         var group = Assert.Single(payload.Documents, doc => string.Equals(doc.Title, "RazorWire JavaScript API", StringComparison.Ordinal));
         Assert.Null(group.ApiLifecycle);
         Assert.Null(group.ApiLifecycleLabel);

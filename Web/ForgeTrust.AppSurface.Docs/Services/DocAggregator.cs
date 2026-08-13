@@ -68,10 +68,10 @@ internal sealed record DocsSearchIndexMetadata(
 /// <param name="Language">Normalized programming language for generated API documentation.</param>
 /// <param name="LanguageLabel">Reader-facing programming language label for generated API documentation.</param>
 /// <param name="SummaryPresentation">Optional bounded, display-only rich presentation for the raw summary.</param>
-/// <param name="ApiLifecycle">Optional normalized lifecycle for a generated API symbol fragment.</param>
-/// <param name="ApiLifecycleLabel">Optional reader-facing lifecycle label for a generated API symbol fragment.</param>
-/// <param name="IsDeprecated">Optional deprecation state for a generated API symbol fragment.</param>
-/// <param name="IsGeneratedApiSymbol">Optional marker that identifies a generated API symbol fragment.</param>
+/// <param name="ApiLifecycle">Optional generated-symbol lifecycle: <c>public</c>, <c>alpha</c>, or <c>beta</c>. Omitted for all other documents.</param>
+/// <param name="ApiLifecycleLabel">Optional reader-facing label paired with <paramref name="ApiLifecycle"/>: <c>Public API</c>, <c>Alpha</c>, or <c>Beta</c>. Omitted for all other documents.</param>
+/// <param name="IsDeprecated">Optional deprecation flag. <c>true</c> is emitted only with generated-symbol metadata; <c>false</c> and missing values are omitted for other documents.</param>
+/// <param name="IsGeneratedApiSymbol">Optional <c>true</c> marker emitted only for validated, provenanced JavaScript API fragments. Consumers must not infer lifecycle from ordinary page metadata.</param>
 internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("path")] string Path,

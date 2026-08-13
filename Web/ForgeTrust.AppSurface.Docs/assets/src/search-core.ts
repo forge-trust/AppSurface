@@ -945,11 +945,13 @@ export function buildLanguageSearchText(language: any, label: any) {
   return [...new Set(terms.map((term) => String(term ?? '').trim()).filter(Boolean))].join(' ');
 }
 
+// Normalizes generated-symbol lifecycle input to public, alpha, or beta; all other values are excluded from search metadata.
 export function normalizeApiLifecycle(value: any) {
   const normalized = normalizeFacetValue(value).toLowerCase();
   return ['public', 'alpha', 'beta'].includes(normalized) ? normalized : '';
 }
 
+// Builds lifecycle search terms only for trusted generated symbols. Public API adds its reader-facing synonym; deprecated symbols add the deprecated term.
 export function buildApiLifecycleSearchText(doc: any) {
   if (doc?.isGeneratedApiSymbol !== true) {
     return '';

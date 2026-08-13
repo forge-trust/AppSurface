@@ -1819,7 +1819,7 @@ Every valid generated JavaScript API symbol has the reader-facing lifecycle labe
 | `@deprecated` | Any generated JavaScript API symbol | **Deprecated** badge; optional replacement message | A lifecycle maturity modifier |
 | `@stability` | `@cssHook` contract metadata | Describes the hook contract only | API lifecycle metadata |
 
-`@stability` remains the CSS-hook-specific contract field in the [browser-contract authoring guidance](#browser-contract-doclets); it neither creates an API lifecycle badge nor participates in lifecycle search ranking. Use `@alpha` or `@beta` when a generated JavaScript symbol's maturity must be visible to API readers, and use `@stability` only to describe a public styling hook.
+`@stability` remains the CSS-hook-specific contract field in the [JavaScript public API harvesting guidance](#javascript-public-api-harvesting); it neither creates an API lifecycle badge nor participates in lifecycle search ranking. Use `@alpha` or `@beta` when a generated JavaScript symbol's maturity must be visible to API readers, and use `@stability` only to describe a public styling hook.
 
 ```js
 /**

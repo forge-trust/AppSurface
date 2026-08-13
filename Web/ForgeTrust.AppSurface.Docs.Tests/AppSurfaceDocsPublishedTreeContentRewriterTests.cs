@@ -356,6 +356,8 @@ public sealed class AppSurfaceDocsPublishedTreeContentRewriterTests
 
         Assert.Contains("\"path\":\"/docs/v/1.2.3/guide.html\"", rewritten);
         Assert.Contains("\"apiLifecycle\":\"beta\"", rewritten);
+        Assert.Contains("\"apiLifecycleLabel\":\"Beta\"", rewritten);
+        Assert.Contains("\"isDeprecated\":true", rewritten);
         Assert.Contains("\"isGeneratedApiSymbol\":true", rewritten);
         Assert.Equal(json, unchanged);
     }
