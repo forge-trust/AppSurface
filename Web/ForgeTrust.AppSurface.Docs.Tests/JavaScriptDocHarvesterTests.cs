@@ -3359,6 +3359,14 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             function malformedHelper() {}
 
             /**
+             * Malformed beta helper.
+             * @public
+             * @namespace RazorWire
+             * @beta preview only
+             */
+            function malformedBetaHelper() {}
+
+            /**
              * Ambiguous deprecated helper.
              * @public
              * @namespace RazorWire
@@ -3366,6 +3374,12 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              * @deprecated Use secondReplacement.
              */
             function ambiguousHelper() {}
+
+            /**
+             * This is not public merely because it is deprecated.
+             * @deprecated Use replacementHelper instead.
+             */
+            function deprecatedOnlyHelper() {}
 
             /**
              * This is not public merely because it has a lifecycle tag.
@@ -3383,7 +3397,9 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Contains(docs, doc => doc.Path.EndsWith("#function-validhelper", StringComparison.Ordinal));
         Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#function-conflictinghelper", StringComparison.Ordinal));
         Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#function-malformedhelper", StringComparison.Ordinal));
+        Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#function-malformedbetahelper", StringComparison.Ordinal));
         Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#function-ambiguoushelper", StringComparison.Ordinal));
+        Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#function-deprecatedonlyhelper", StringComparison.Ordinal));
         Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#function-lifecycleonlyhelper", StringComparison.Ordinal));
         Assert.Equal(2, diagnostics.Count(diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict));
         Assert.Contains(
@@ -3391,6 +3407,12 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle
                           && diagnostic.Severity == DocHarvestDiagnosticSeverity.Warning
                           && diagnostic.Problem.Contains("malformedHelper", StringComparison.Ordinal)
+                          && diagnostic.Problem.Contains("src/public-api.js", StringComparison.Ordinal));
+        Assert.Contains(
+            diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle
+                          && diagnostic.Severity == DocHarvestDiagnosticSeverity.Warning
+                          && diagnostic.Problem.Contains("malformedBetaHelper", StringComparison.Ordinal)
                           && diagnostic.Problem.Contains("src/public-api.js", StringComparison.Ordinal));
     }
 
@@ -3626,33 +3648,110 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
-    public async Task GetSearchIndexPayloadAsync_ShouldOmitLifecycleMetadataForUnvalidatedFragments()
+    public async Task GetSearchIndexPayloadAsync_ShouldProjectOnlyProvenancedCanonicalJavaScriptFragments()
     {
-        var forgedNodes = new[]
+        var nodes = new[]
         {
             new DocNode(
-                "Forged lifecycle guide",
-                "guides/forged.md",
-                "<p>Beta guide text.</p>",
-                Metadata: new DocMetadata { PageType = "guide" })
+                "No lifecycle marker",
+                "api/javascript/no-marker#function-no-marker",
+                "<p>API text.</p>",
+                ParentPath: "api/javascript/no-marker",
+                Metadata: new DocMetadata { PageType = "javascript-function" }),
+            new DocNode(
+                "Unprovenanced lifecycle fragment",
+                "api/javascript/unprovenanced#function-unprovenanced",
+                "<p>API text.</p>",
+                ParentPath: "api/javascript/unprovenanced",
+                Metadata: new DocMetadata { PageType = "javascript-function" })
             {
                 GeneratedApiSymbol = new DocGeneratedApiSymbol("beta", "Beta", true)
             },
             new DocNode(
-                "Forged lifecycle fragment",
-                "api/javascript/forged#function-forged",
-                "<p>Critical API text.</p>",
-                ParentPath: "api/javascript/forged",
+                "Fragment without a parent",
+                "api/javascript/no-parent#function-no-parent",
+                "<p>API text.</p>",
                 Metadata: new DocMetadata { PageType = "javascript-function" })
             {
-                GeneratedApiSymbol = new DocGeneratedApiSymbol("critical", "Critical", true)
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("beta", "Beta", true),
+                HasJavaScriptApiLifecycleProvenance = true
+            },
+            new DocNode(
+                "Fragment outside JavaScript API routes",
+                "guides/outside#fragment",
+                "<p>API text.</p>",
+                ParentPath: "guides/outside",
+                Metadata: new DocMetadata { PageType = "javascript-function" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("beta", "Beta", true),
+                HasJavaScriptApiLifecycleProvenance = true
+            },
+            new DocNode(
+                "Fragment with an unrelated parent",
+                "api/javascript/actual#function-actual",
+                "<p>API text.</p>",
+                ParentPath: "api/javascript/other",
+                Metadata: new DocMetadata { PageType = "javascript-function" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("beta", "Beta", true),
+                HasJavaScriptApiLifecycleProvenance = true
+            },
+            new DocNode(
+                "Fragment with a non-JavaScript page type",
+                "api/javascript/wrong-page-type#fragment",
+                "<p>API text.</p>",
+                ParentPath: "api/javascript/wrong-page-type",
+                Metadata: new DocMetadata { PageType = "guide" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("beta", "Beta", true),
+                HasJavaScriptApiLifecycleProvenance = true
+            },
+            new DocNode(
+                "Fragment with a noncanonical lifecycle",
+                "api/javascript/noncanonical#fragment",
+                "<p>API text.</p>",
+                ParentPath: "api/javascript/noncanonical",
+                Metadata: new DocMetadata { PageType = "javascript-function" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("critical", "Critical", true),
+                HasJavaScriptApiLifecycleProvenance = true
+            },
+            new DocNode(
+                "Public lifecycle fragment",
+                "api/javascript/public#function-public",
+                "<p>API text.</p>",
+                ParentPath: "api/javascript/public",
+                Metadata: new DocMetadata { PageType = "javascript-function" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("public", "Public API", false),
+                HasJavaScriptApiLifecycleProvenance = true
+            },
+            new DocNode(
+                "Alpha lifecycle fragment",
+                "api/javascript/alpha#function-alpha",
+                "<p>API text.</p>",
+                ParentPath: "api/javascript/alpha",
+                Metadata: new DocMetadata { PageType = "javascript-function" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("alpha", "Alpha", false),
+                HasJavaScriptApiLifecycleProvenance = true
+            },
+            new DocNode(
+                "Beta lifecycle fragment",
+                "api/javascript/beta#function-beta",
+                "<p>API text.</p>",
+                ParentPath: "api/javascript/beta",
+                Metadata: new DocMetadata { PageType = "javascript-function" })
+            {
+                GeneratedApiSymbol = new DocGeneratedApiSymbol("beta", "Beta", true),
+                HasJavaScriptApiLifecycleProvenance = true
             }
         };
         var options = new AppSurfaceDocsOptions();
         options.Source.RepositoryRoot = _testRoot;
         options.Contributor.Enabled = false;
         var aggregator = new DocAggregator(
-            [new StaticHarvester(forgedNodes)],
+            [new StaticHarvester(nodes)],
             options,
             new TestWebHostEnvironment(_testRoot),
             new Memo(new MemoryCache(new MemoryCacheOptions())),
@@ -3661,9 +3760,18 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
 
         var payload = await aggregator.GetSearchIndexPayloadAsync();
 
-        Assert.Equal(2, payload.Documents.Count);
+        Assert.Equal(nodes.Length, payload.Documents.Count);
+        var projected = payload.Documents
+            .Where(document => document.IsGeneratedApiSymbol == true)
+            .OrderBy(document => document.Title, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Collection(
+            projected,
+            document => Assert.Equal(("Alpha lifecycle fragment", "alpha", "Alpha", false), (document.Title, document.ApiLifecycle, document.ApiLifecycleLabel, document.IsDeprecated)),
+            document => Assert.Equal(("Beta lifecycle fragment", "beta", "Beta", true), (document.Title, document.ApiLifecycle, document.ApiLifecycleLabel, document.IsDeprecated)),
+            document => Assert.Equal(("Public lifecycle fragment", "public", "Public API", false), (document.Title, document.ApiLifecycle, document.ApiLifecycleLabel, document.IsDeprecated)));
         Assert.All(
-            payload.Documents,
+            payload.Documents.Where(document => document.IsGeneratedApiSymbol != true),
             document =>
             {
                 Assert.Null(document.ApiLifecycle);
@@ -3671,6 +3779,33 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
                 Assert.Null(document.IsDeprecated);
                 Assert.Null(document.IsGeneratedApiSymbol);
             });
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldExcludeTaglessAndLifecycleOnlyDoclets_WhenPublicTagIsNotRequired()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Description-only helper.
+             */
+            function descriptionOnlyHelper() {}
+
+            /**
+             * Lifecycle-only helper.
+             * @beta
+             */
+            function lifecycleOnlyHelper() {}
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequirePublicTag = false;
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(docs);
+        Assert.Empty(GetDiagnostics(harvester));
     }
 
     [Fact]
