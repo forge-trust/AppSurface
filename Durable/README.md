@@ -35,7 +35,7 @@ application explicitly adds one bounded polling host through
 [`AddWorkerHost()`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host) only where it intends
 continuous activation. It adds no public endpoint, dashboard, or automatic migration.
 
-The minimum supported PostgreSQL compatibility floor is 16+ (`minimumSupportedServerVersion`); CI and default strict proof
+The minimum supported PostgreSQL compatibility floor is PostgreSQL 16 or newer (`server_version_num >= 160000`); CI and default strict proof
 use `postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877`.
 
 ## Slice 7 discovery and reconciliation

@@ -10,6 +10,7 @@ public readonly record struct DurableWorkContractIdentity
     /// </summary>
     /// <param name="workName">Work contract name.</param>
     /// <param name="workVersion">Work contract version.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="workName"/> or <paramref name="workVersion"/> is invalid.</exception>
     public DurableWorkContractIdentity(string workName, string workVersion)
     {
         WorkName = DurableIdentifier.Require(workName, nameof(workName), 200);

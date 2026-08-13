@@ -72,7 +72,7 @@ Runtime roles never own schema or apply DDL. Apply the ordered migrations in num
 
 `0009_work_contract_discovery.sql` introduces registry-scoped Work discovery and the payload-free
 discovery function `appsurface_durable.discover_work_dispatch(text[], text[], integer)`. Its contract-lookup index uses
-transactional `CREATE INDEX`, which blocks concurrent Work writes. Schedule `0009` in a reviewed maintenance window
+transactional `CREATE INDEX`, which blocks concurrent Work writes. Schedule migration `0009` in a reviewed maintenance window
 after draining runtime and Work-writer hosts; the package's checksum-bound transactional migration protocol cannot use
 `CREATE INDEX CONCURRENTLY`. Apply schema is forward-only; rolling application code back does not authorize destructive
 schema rollback. Execute generated SQL with a client that stops on the first error; `psql` callers must pass
@@ -188,10 +188,8 @@ schema to the migration owner. Do not place application-owned objects there.
 
 | Principal | Allowed privileges |
 | --- | --- |
-| Dispatcher | Schema `USAGE`; table `SELECT` on payload-free Flow discovery tables; `EXECUTE` only on constrained Schedule and Work discovery functions.
-  It calls `appsurface_durable.discover_work_dispatch(text[], text[], integer)` for Work contracts and `appsurface_durable.claim_schedule_dispatch(text, interval)` for Schedule candidates. It receives routing IDs, due time, priority, and revision only, never raw `dispatch` columns. |
-| Runtime reads | Schema `USAGE`; table `SELECT` on package metadata, scoped Work, Flow, Schedule, and Flow trace-context relations. Work/Flow
-'discovery' reads are scope-filtered by transaction-local RLS or dispatcher function policy. |
+| Dispatcher | Schema `USAGE`; table `SELECT` on payload-free Flow discovery tables; `EXECUTE` only on constrained Schedule and Work discovery functions. It calls `appsurface_durable.discover_work_dispatch(text[], text[], integer)` for Work contracts and `appsurface_durable.claim_schedule_dispatch(text, interval)` for Schedule candidates. It receives routing IDs, due time, priority, and revision only, never raw `dispatch` columns. |
+| Runtime reads | Schema `USAGE`; table `SELECT` on package metadata, scoped Work, Flow, Schedule, and Flow trace-context relations. Work/Flow `discovery` reads are scope-filtered by transaction-local RLS or dispatcher function policy. |
 | Runtime inserts | Table `INSERT` on scoped Work, Flow, Schedule, and Flow trace-context relations. |
 | Runtime updates | Reviewed column-level `UPDATE` on mutable Work, Flow instance/wait/timer, Schedule definition/occurrence/dispatch, and dispatch fields; no table-wide update grant. |
 | Runtime sequences | `USAGE` and `SELECT` on every sequence in the package schema. |

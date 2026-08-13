@@ -84,6 +84,15 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             scope,
             "runtime-pump-foreign-command",
             foreignRegistration);
+        await using (var markForeignRecoveryShaped = database.DataSource.CreateCommand(
+            "UPDATE appsurface_durable.work SET runtime_epoch = @other_epoch WHERE scope_id = @scope_id AND work_id = @work_id;"))
+        {
+            markForeignRecoveryShaped.Parameters.AddWithValue("other_epoch", Guid.NewGuid());
+            markForeignRecoveryShaped.Parameters.AddWithValue("scope_id", scope.Value);
+            markForeignRecoveryShaped.Parameters.AddWithValue("work_id", foreignAccepted.WorkId.Value);
+            Assert.Equal(1, await markForeignRecoveryShaped.ExecuteNonQueryAsync());
+        }
+
         var localAccepted = await EnqueueAsync(
             localProvider,
             scope,
@@ -106,9 +115,109 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.True(localSnapshot.IsSuccess);
         Assert.Equal(DurableWorkState.Succeeded, localSnapshot.Value!.State);
 
+        await using (var restoreForeignEpoch = database.DataSource.CreateCommand(
+            "UPDATE appsurface_durable.work SET runtime_epoch = @runtime_epoch WHERE scope_id = @scope_id AND work_id = @work_id;"))
+        {
+            restoreForeignEpoch.Parameters.AddWithValue("runtime_epoch", epoch);
+            restoreForeignEpoch.Parameters.AddWithValue("scope_id", scope.Value);
+            restoreForeignEpoch.Parameters.AddWithValue("work_id", foreignAccepted.WorkId.Value);
+            Assert.Equal(1, await restoreForeignEpoch.ExecuteNonQueryAsync());
+        }
+
         var foreignResult = await foreignProvider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
             new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
         Assert.Equal(1, foreignResult.Processed);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_KeepsTheResolvedWorkContractSnapshotWhenARegistryLaterChanges()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "fixed-contract-snapshot");
+        var workOptions = new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId);
+        var localRegistration = new NamedSuccessfulWorkRegistration("tests.runtime-pump.snapshot-local");
+        var foreignRegistration = new NamedSuccessfulWorkRegistration("tests.runtime-pump.snapshot-foreign");
+        var registry = new MutableWorkRegistry(localRegistration);
+        var services = new ServiceCollection();
+        services.AddSingleton<IDurableWorkRegistry>(registry);
+        services.AddSingleton<DurableWorkRegistration>(localRegistration);
+        services.AddAppSurfaceDurablePostgreSql(
+            database.CreateDataSource(),
+            database.CreateDataSource(),
+            workOptions,
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-fixed-contract-snapshot-host";
+                options.SendWakeNotifications = false;
+            });
+        await using var localProvider = services.BuildServiceProvider();
+        _ = localProvider.GetRequiredService<IDurableRuntimePump>();
+        await using var foreignProvider = CreateWorkProvider(
+            database,
+            workOptions,
+            foreignRegistration,
+            "runtime-pump-fixed-contract-snapshot-foreign-host");
+        var scope = new DurableScopeId("runtime-pump-fixed-contract-snapshot-scope");
+        var localAccepted = await EnqueueAsync(
+            localProvider,
+            scope,
+            "runtime-pump-fixed-contract-snapshot-local-command",
+            localRegistration);
+        var foreignAccepted = await EnqueueAsync(
+            foreignProvider,
+            scope,
+            "runtime-pump-fixed-contract-snapshot-foreign-command",
+            foreignRegistration);
+        registry.Add(foreignRegistration);
+        var foreignBefore = await ReadWorkIsolationSnapshotAsync(database.DataSource, scope, foreignAccepted.WorkId);
+
+        var result = await localProvider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 2, surfaces: DurableRuntimeSurface.Work));
+
+        Assert.Equal(1, result.Discovered);
+        Assert.Equal(1, result.Processed);
+        Assert.Equal(
+            foreignBefore,
+            await ReadWorkIsolationSnapshotAsync(database.DataSource, scope, foreignAccepted.WorkId));
+        var localSnapshot = await localProvider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
+            new DurableWorkGetRequest(scope, localAccepted.WorkId));
+        Assert.True(localSnapshot.IsSuccess);
+        Assert.Equal(DurableWorkState.Succeeded, localSnapshot.Value!.State);
+    }
+
+    [Fact]
+    public async Task Constructor_RejectsMissingWorkContractSelection()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "missing-contract-selection");
+        var registration = new SuccessfulWorkRegistration();
+        await using var provider = CreateWorkProvider(
+            database,
+            new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
+            registration,
+            "runtime-pump-missing-contract-selection-worker");
+
+        var failure = Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableRuntimePump(
+            provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>(),
+            provider.GetRequiredService<IDurableRuntimeSchemaManager>(),
+            provider.GetRequiredService<PostgreSqlDurableRuntimeHealth>(),
+            provider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+            provider.GetRequiredService<PostgreSqlDurableFlowProcessor>(),
+            provider.GetRequiredService<PostgreSqlDurableScheduleProcessor>(),
+            provider.GetRequiredService<IDurableWorkRegistry>(),
+            null!,
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            provider.GetRequiredService<IDurableRuntimeExecutionBoundary>(),
+            provider.GetRequiredService<DurableRuntimeAdmissionGate>()));
+
+        Assert.Equal("workContractSelection", failure.ParamName);
     }
 
     [Fact]
@@ -1730,6 +1839,21 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             DurableWorkExecutionContext work,
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("Idempotent test Work does not reconcile.");
+    }
+
+    private sealed class MutableWorkRegistry(params DurableWorkRegistration[] registrations) : IDurableWorkRegistry
+    {
+        private readonly List<DurableWorkRegistration> _registrations = [.. registrations];
+
+        public IReadOnlyList<DurableWorkContractIdentity> RegisteredContracts => _registrations
+            .Select(static registration => new DurableWorkContractIdentity(registration.WorkName, registration.WorkVersion))
+            .ToArray();
+
+        public DurableWorkRegistration GetRequired(string workName, string workVersion) => _registrations
+            .Single(registration => StringComparer.Ordinal.Equals(registration.WorkName, workName)
+                && StringComparer.Ordinal.Equals(registration.WorkVersion, workVersion));
+
+        internal void Add(DurableWorkRegistration registration) => _registrations.Add(registration);
     }
 
     private sealed class FailingWorkRegistration : DurableWorkRegistration

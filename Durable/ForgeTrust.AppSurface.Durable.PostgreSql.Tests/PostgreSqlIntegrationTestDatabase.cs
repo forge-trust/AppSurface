@@ -6,8 +6,23 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 
 internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
 {
+    /// <summary>
+    /// The inclusive PostgreSQL <c>server_version_num</c> floor accepted by integration tests.
+    /// </summary>
     internal const int MinimumSupportedServerVersion = 160000;
+
+    /// <summary>
+    /// Human-readable form of <see cref="MinimumSupportedServerVersion"/>.
+    /// </summary>
     internal const string MinimumSupportedServerVersionText = "PostgreSQL 16+";
+
+    /// <summary>
+    /// Tests whether a PostgreSQL numeric server version is supported.
+    /// </summary>
+    /// <remarks>
+    /// PostgreSQL encodes major version 16 as <c>160000</c>. Later versions are accepted so the test boundary does not
+    /// reject forward-compatible servers.
+    /// </remarks>
     internal static Func<int, bool> IsSupportedServerVersion { get; } =
         static version => version >= MinimumSupportedServerVersion;
     private const int ContainerStartupProbeMaximumAttempts = 3;
@@ -299,6 +314,14 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
         EnsureRequiredServerVersion(value);
     }
 
+    /// <summary>
+    /// Validates a PostgreSQL <c>server_version_num</c> value against the supported floor.
+    /// </summary>
+    /// <param name="value">The numeric version returned by PostgreSQL.</param>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when <paramref name="value"/> is missing, malformed, or below PostgreSQL 16. Higher future versions are
+    /// accepted.
+    /// </exception>
     internal static void EnsureRequiredServerVersion(string? value)
     {
         if (!int.TryParse(value, out var version))

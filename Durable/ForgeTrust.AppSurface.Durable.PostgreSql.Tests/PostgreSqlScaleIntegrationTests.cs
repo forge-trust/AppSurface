@@ -47,7 +47,7 @@ public sealed class PostgreSqlScaleIntegrationTests
         var selection = new PostgreSqlDurableWorkContractSelection(new ScaleWorkRegistry(
             [new DurableWorkContractIdentity("scale-work", "1")]));
         var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
-        Assert.Equal(1_000, (await store.DiscoverAsync(selection, 1_000)).Count);
+        Assert.Equal(900, (await store.DiscoverAsync(selection, 1_000)).Count);
     }
 
     [Fact]
@@ -229,7 +229,7 @@ public sealed class PostgreSqlScaleIntegrationTests
                 'activity-' || value,
                 'command-' || value,
                 'idempotency-' || value,
-                CASE WHEN value <= 1000 THEN 'scale-work' ELSE 'unselected-scale-work-' || value END,
+                CASE WHEN value <= 900 THEN 'scale-work' ELSE 'unselected-scale-work-' || value END,
                 '1', 'scale-contract', '1', 'application/json',
                 decode('00', 'hex'), decode(repeat('00', 32), 'hex'), 'internal', 'default',
                 'durable-work-request-v1', repeat('0', 64),

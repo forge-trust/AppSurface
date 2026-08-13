@@ -498,11 +498,18 @@ durable_relation AS
 ),
 relation_privilege(privilege_name) AS
 (
-  VALUES
-    ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'),
-    ('SELECT WITH GRANT OPTION'), ('INSERT WITH GRANT OPTION'), ('UPDATE WITH GRANT OPTION'),
-    ('DELETE WITH GRANT OPTION'), ('TRUNCATE WITH GRANT OPTION'), ('REFERENCES WITH GRANT OPTION'),
-    ('TRIGGER WITH GRANT OPTION')
+  SELECT privilege_name
+  FROM
+  (
+    VALUES
+      ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'),
+      ('SELECT WITH GRANT OPTION'), ('INSERT WITH GRANT OPTION'), ('UPDATE WITH GRANT OPTION'),
+      ('DELETE WITH GRANT OPTION'), ('TRUNCATE WITH GRANT OPTION'), ('REFERENCES WITH GRANT OPTION'),
+      ('TRIGGER WITH GRANT OPTION'),
+      ('MAINTAIN'), ('MAINTAIN WITH GRANT OPTION')
+  ) AS candidate(privilege_name)
+  WHERE pg_catalog.current_setting('server_version_num')::integer >= 170000
+     OR candidate.privilege_name NOT LIKE 'MAINTAIN%'
 )
 SELECT NOT EXISTS
 (

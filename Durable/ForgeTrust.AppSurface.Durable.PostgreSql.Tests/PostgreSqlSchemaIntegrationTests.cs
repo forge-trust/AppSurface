@@ -14,6 +14,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
     private const string DispatcherRoleTestPassword = "durable-dispatcher-test-password";
     private const string RuntimeRoleTestPassword = "durable-runtime-test-password";
     private const string RetentionRoleTestPassword = "durable-retention-test-password";
+    private const string UnrelatedRoleTestPassword = "durable-unrelated-test-password";
 
     [Fact]
     public async Task ApplyStatusInitializeRotate_AreExplicitAndIdempotent()
@@ -361,6 +362,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             CREATE ROLE durable_dispatcher LOGIN PASSWORD '{DispatcherRoleTestPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE durable_runtime LOGIN PASSWORD '{RuntimeRoleTestPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE durable_retention LOGIN PASSWORD '{RetentionRoleTestPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE unrelated_login LOGIN PASSWORD '{UnrelatedRoleTestPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE bypass_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
             CREATE ROLE createdb_dispatcher LOGIN NOSUPERUSER CREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE nologin_dispatcher NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
@@ -555,6 +557,47 @@ public sealed class PostgreSqlSchemaIntegrationTests
         Assert.True(
             accepted.ExitCode == 0,
             $"Role recipe failed with exit {accepted.ExitCode}. stdout: {accepted.Stdout} stderr: {accepted.Stderr}");
+        await using (var workDiscoveryPolicy = dataSource.CreateCommand(
+            """
+            SELECT policy.polcmd = 'r'
+                   AND pg_catalog.pg_get_expr(policy.polqual, policy.polrelid) = 'true'
+                   AND policy.polroles = ARRAY['durable_owner'::pg_catalog.regrole::oid]
+            FROM pg_catalog.pg_policy AS policy
+            WHERE policy.polrelid = 'appsurface_durable.work'::pg_catalog.regclass
+              AND policy.polname = 'work_contract_discovery_owner';
+            """))
+        {
+            Assert.True((bool)(await workDiscoveryPolicy.ExecuteScalarAsync())!);
+        }
+
+        await using (var discoveryFunctionPrivileges = dataSource.CreateCommand(
+            """
+            SELECT NOT has_function_privilege(
+                       'public',
+                       'appsurface_durable.discover_work_dispatch(text[], text[], integer)',
+                       'EXECUTE')
+                   AND NOT has_function_privilege(
+                       'unrelated_login',
+                       'appsurface_durable.discover_work_dispatch(text[], text[], integer)',
+                       'EXECUTE');
+            """))
+        {
+            Assert.True((bool)(await discoveryFunctionPrivileges.ExecuteScalarAsync())!);
+        }
+
+        var unrelatedConnectionString = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
+        {
+            Username = "unrelated_login",
+            Password = UnrelatedRoleTestPassword,
+        }.ConnectionString;
+        await using var unrelatedDataSource = NpgsqlDataSource.Create(unrelatedConnectionString);
+        var unrelatedInvocation = await Assert.ThrowsAsync<PostgresException>(async () =>
+        {
+            await using var command = unrelatedDataSource.CreateCommand(
+                "SELECT * FROM appsurface_durable.discover_work_dispatch(ARRAY['tests.role'], ARRAY['v1'], 1);");
+            await command.ExecuteNonQueryAsync();
+        });
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, unrelatedInvocation.SqlState);
         await using (var tracePointerPrivileges = dataSource.CreateCommand(
             """
             SELECT has_column_privilege('durable_runtime', 'appsurface_durable.flow_command', 'trace_context_id', 'UPDATE')

@@ -470,6 +470,8 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("AS service_roles_have_safe_relation_privileges", recipe, StringComparison.Ordinal);
         Assert.Contains("AS service_roles_have_safe_column_privileges", recipe, StringComparison.Ordinal);
         Assert.Contains("AS service_roles_have_safe_sequence_privileges", recipe, StringComparison.Ordinal);
+        Assert.Contains("current_setting('server_version_num')::integer >= 170000", recipe, StringComparison.Ordinal);
+        Assert.Contains("('MAINTAIN'), ('MAINTAIN WITH GRANT OPTION')", recipe, StringComparison.Ordinal);
         Assert.Contains("WITH GRANT OPTION", recipe, StringComparison.Ordinal);
         Assert.DoesNotContain("\\quit", recipe, StringComparison.Ordinal);
         Assert.Contains("format('ALTER SCHEMA appsurface_durable OWNER TO %I'", recipe, StringComparison.Ordinal);
@@ -486,6 +488,14 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("appsurface_durable.work_operator_command", recipe, StringComparison.Ordinal);
         Assert.Contains(
             "GRANT SELECT, INSERT ON appsurface_durable.scope_history, appsurface_durable.work_history",
+            recipe,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "REVOKE ALL ON TABLE appsurface_durable.dispatch FROM %I",
+            recipe,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "GRANT EXECUTE ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) TO %I",
             recipe,
             StringComparison.Ordinal);
         Assert.Contains(

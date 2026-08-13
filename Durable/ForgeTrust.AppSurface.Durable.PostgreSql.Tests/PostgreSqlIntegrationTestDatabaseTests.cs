@@ -188,12 +188,17 @@ public sealed class PostgreSqlIntegrationTestDatabaseTests
     [InlineData("150000")]
     [InlineData("foo")]
     [InlineData("")]
-    public void EnsureRequiredServerVersion_RejectsUnsupportedValues(string value)
+    [InlineData(null)]
+    public void EnsureRequiredServerVersion_RejectsUnsupportedValues(string? value)
     {
         var error = Assert.Throws<InvalidOperationException>(() => PostgreSqlIntegrationTestDatabase.EnsureRequiredServerVersion(value));
 
         Assert.Contains("server_version_num >=", error.Message, StringComparison.Ordinal);
         Assert.Contains("PostgreSQL 16 or newer", error.Message, StringComparison.Ordinal);
+        if (value is null)
+        {
+            Assert.Contains("<null>", error.Message, StringComparison.Ordinal);
+        }
     }
 
     private static void AssertSameServerWithDistinctDatabases(string firstConnectionString, string secondConnectionString)

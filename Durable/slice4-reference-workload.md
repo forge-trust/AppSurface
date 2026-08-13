@@ -19,9 +19,9 @@ certifies child Work process loss after an effect permit.
 Historically, this workload also executes against
 `postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302` for preserved evidence.
 Current default strict verification uses `postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877`.
-Use a disposable database. The workload requires forward-only Flow schema through `0003_flow_protocol`; the current
-provider may also apply later compatible migrations such as the Work-first Schedule `0004_schedule_protocol`. This
-workload does not exercise those later protocol facts and supplies no destructive down migration.
+Use a disposable database. The workload exercises the forward-only Flow protocol introduced through `0003_flow_protocol`,
+but the current provider schema must be applied through `0009_work_contract_discovery.sql` before child Work discovery
+can run. This workload does not exercise every later protocol fact and supplies no destructive down migration.
 
 ## Run the proof
 
@@ -81,7 +81,7 @@ For strict CI verification across all PostgreSQL integration tests including Flo
 The compiled reference workload requires:
 
 1. Construct `PostgreSqlDurableRuntimeSchemaManager` with a migration-owner data source.
-2. Call `GetStatusAsync`, `ApplyAsync` (applying current reviewed forward migrations; Slice 4 requires Flow facts through `0003_flow_protocol.sql`), and `InitializeRuntimeEpochAsync`; capture StoreId and active epoch.
+2. Call `GetStatusAsync`, `ApplyAsync` (applying current reviewed forward migrations through `0009_work_contract_discovery.sql`; Slice 4 exercises Flow facts introduced through `0003_flow_protocol.sql`), and `InitializeRuntimeEpochAsync`; capture StoreId and active epoch.
 3. Construct `PostgreSqlDurableWorkOptions` with `RuntimeEpoch` and `ExpectedStoreId`.
 4. Construct `PostgreSqlDurableFlowClient` with the scoped data source, Flow registry, payload codec registry, and shared PostgreSQL options.
 5. Invoke `IDurableFlowClient.StartAsync` or `IDurableFlowClient.RaiseEventAsync`. The manually driven Slice 4 processor discovers and evaluates steps through `PostgreSqlDurableFlowProcessor.DiscoverAsync` and `TryProcessAsync`; no public `ExecuteStepAsync` API exists.

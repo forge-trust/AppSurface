@@ -270,15 +270,39 @@ public sealed class PostgreSqlDurablePublicContractTests
         var unavailable = Assert.Throws<InvalidOperationException>(
             () => new PostgreSqlDurableWorkContractSelection(new SnapshotWorkRegistry(tooManyContracts)));
         Assert.StartsWith(DurableProblemCodes.WorkDiscoveryContractSelectionUnavailable, unavailable.Message, StringComparison.Ordinal);
+        Assert.Contains("more contracts than the supported maximum", unavailable.Message, StringComparison.Ordinal);
 
-        Assert.Throws<InvalidOperationException>(() => new PostgreSqlDurableWorkContractSelection(
+        var duplicate = Assert.Throws<InvalidOperationException>(() => new PostgreSqlDurableWorkContractSelection(
             new SnapshotWorkRegistry(
             [
                 new DurableWorkContractIdentity("tests.contract-selection.duplicate", "v1"),
                 new DurableWorkContractIdentity("tests.contract-selection.duplicate", "v1"),
             ])));
-        Assert.Throws<InvalidOperationException>(() => new PostgreSqlDurableWorkContractSelection(
+        Assert.Contains("duplicate Work name and version pair", duplicate.Message, StringComparison.Ordinal);
+        var defaultIdentity = Assert.Throws<InvalidOperationException>(() => new PostgreSqlDurableWorkContractSelection(
             new SnapshotWorkRegistry([default])));
+        Assert.Contains("default Work contract identity", defaultIdentity.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WorkContractSelection_SortsDiscoveryParametersByOrdinalNameAndVersion()
+    {
+        var selection = new PostgreSqlDurableWorkContractSelection(new SnapshotWorkRegistry(
+        [
+            new DurableWorkContractIdentity("tests.contract-selection.z", "v1"),
+            new DurableWorkContractIdentity("tests.contract-selection.a", "v2"),
+            new DurableWorkContractIdentity("tests.contract-selection.a", "v1"),
+        ]));
+        using var command = new NpgsqlCommand();
+
+        selection.AddDiscoveryParameters(command.Parameters, 3);
+
+        Assert.Equal(
+            ["tests.contract-selection.a", "tests.contract-selection.a", "tests.contract-selection.z"],
+            Assert.IsType<string[]>(command.Parameters["work_names"].Value));
+        Assert.Equal(
+            ["v1", "v2", "v1"],
+            Assert.IsType<string[]>(command.Parameters["work_versions"].Value));
     }
 
     [Fact]
@@ -287,11 +311,13 @@ public sealed class PostgreSqlDurablePublicContractTests
         var propertyFailure = Assert.Throws<InvalidOperationException>(
             () => new PostgreSqlDurableWorkContractSelection(new ThrowingWorkRegistry()));
         Assert.StartsWith(DurableProblemCodes.WorkDiscoveryContractSelectionUnavailable, propertyFailure.Message, StringComparison.Ordinal);
+        Assert.Contains("threw while producing", propertyFailure.Message, StringComparison.Ordinal);
         Assert.IsType<InvalidOperationException>(propertyFailure.InnerException);
 
         var nullSnapshot = Assert.Throws<InvalidOperationException>(
             () => new PostgreSqlDurableWorkContractSelection(new NullWorkRegistry()));
         Assert.StartsWith(DurableProblemCodes.WorkDiscoveryContractSelectionUnavailable, nullSnapshot.Message, StringComparison.Ordinal);
+        Assert.Contains("null contract snapshot", nullSnapshot.Message, StringComparison.Ordinal);
         Assert.Null(nullSnapshot.InnerException);
     }
 
@@ -302,6 +328,7 @@ public sealed class PostgreSqlDurablePublicContractTests
             () => new PostgreSqlDurableWorkContractSelection(new EnumeratingFailureWorkRegistry()));
 
         Assert.StartsWith(DurableProblemCodes.WorkDiscoveryContractSelectionUnavailable, unavailable.Message, StringComparison.Ordinal);
+        Assert.Contains("could not be enumerated", unavailable.Message, StringComparison.Ordinal);
         Assert.IsType<InvalidOperationException>(unavailable.InnerException);
     }
 

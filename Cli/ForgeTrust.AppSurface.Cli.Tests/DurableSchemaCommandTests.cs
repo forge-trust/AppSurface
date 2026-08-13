@@ -661,6 +661,7 @@ public sealed class DurableSchemaCommandTests
         Assert.Equal(first, second);
         Assert.Contains("0001", first, StringComparison.Ordinal);
         Assert.Contains("0007", first, StringComparison.Ordinal);
+        Assert.Contains("0009", first, StringComparison.Ordinal);
     }
 
     private sealed class FakeDurableSchemaCommandService : IDurableSchemaCommandService
