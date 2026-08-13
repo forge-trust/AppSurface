@@ -586,7 +586,16 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return;
         }
 
-        items.Add(CreateApiItem(name, kind, doclet, relativePath, provenanceNode.Location.Start.Line, options));
+        AddValidatedApiItem(
+            name,
+            kind,
+            doclet,
+            relativePath,
+            comment.Value.Location.Start.Line,
+            provenanceNode.Location.Start.Line,
+            options,
+            items,
+            diagnostics);
     }
 
     private static void AddVariableDeclarationItems(
@@ -696,7 +705,16 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 return;
             }
 
-            items.Add(CreateApiItem(name, kind, doclet, relativePath, comment.Location.Start.Line, options));
+            AddValidatedApiItem(
+                name,
+                kind,
+                doclet,
+                relativePath,
+                comment.Location.Start.Line,
+                comment.Location.Start.Line,
+                options,
+                items,
+                diagnostics);
             return;
         }
 
@@ -715,13 +733,34 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
     }
 
+    private static void AddValidatedApiItem(
+        string name,
+        JavaScriptApiKind kind,
+        JavaScriptDoclet doclet,
+        string relativePath,
+        int docletStartLine,
+        int sourceStartLine,
+        AppSurfaceDocsJavaScriptHarvestOptions options,
+        ICollection<JavaScriptApiItem> items,
+        ICollection<DocHarvestDiagnostic> diagnostics)
+    {
+        var lifecycle = ResolveLifecycle(doclet, name, relativePath, docletStartLine, options.StrictHealth, diagnostics);
+        if (lifecycle is null)
+        {
+            return;
+        }
+
+        items.Add(CreateApiItem(name, kind, doclet, relativePath, sourceStartLine, options, lifecycle));
+    }
+
     private static JavaScriptApiItem CreateApiItem(
         string name,
         JavaScriptApiKind kind,
         JavaScriptDoclet doclet,
         string relativePath,
         int startLine,
-        AppSurfaceDocsJavaScriptHarvestOptions options)
+        AppSurfaceDocsJavaScriptHarvestOptions options,
+        JavaScriptApiLifecycle lifecycle)
     {
         var group = ResolveGroup(doclet, name, relativePath, options);
         var summary = doclet.Summary.Length == 0 ? name : doclet.Summary;
@@ -759,7 +798,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             IsDetailNone(doclet),
             HasPublicSignal(doclet),
             doclet.TryGetTagValue("example"),
-            doclet.TryGetTagValue("deprecated"),
+            lifecycle,
             relativePath,
             startLine);
     }
@@ -1473,7 +1512,14 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                         GetPageType(item.Kind),
                         group.DisplayName,
                         groupSlug,
-                        order: 251)));
+                        order: 251))
+                {
+                    GeneratedApiSymbol = new DocGeneratedApiSymbol(
+                        item.Lifecycle.Token,
+                        item.Lifecycle.Label,
+                        item.Lifecycle.IsDeprecated),
+                    HasJavaScriptApiLifecycleProvenance = true
+                });
         }
 
         return nodes;
@@ -1543,6 +1589,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             $@"<section id=""{WebUtility.HtmlEncode(item.AnchorId)}"" class=""doc-method-group doc-javascript-item doc-javascript-{Slugify(kindLabel)}"">
 <header class=""doc-method-group-header"">
 <span class=""doc-kind"">{WebUtility.HtmlEncode(kindLabel)}</span>
+<span class=""docs-api-lifecycle-badge docs-api-lifecycle-badge--{WebUtility.HtmlEncode(item.Lifecycle.Token)}"">{WebUtility.HtmlEncode(item.Lifecycle.Label)}</span>{(item.Lifecycle.IsDeprecated ? "\n<span class=\"docs-api-lifecycle-badge docs-api-lifecycle-badge--deprecated\">Deprecated</span>" : string.Empty)}
 <h3>{WebUtility.HtmlEncode(item.Name)}</h3>");
         if (includeSourcePlaceholder)
         {
@@ -1558,9 +1605,13 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             AppendParagraph(builder, item.Description);
         }
 
-        if (item.Deprecated is not null)
+        if (item.Lifecycle.IsDeprecated)
         {
-            AppendParagraph(builder, "Deprecated. " + item.Deprecated);
+            AppendParagraph(
+                builder,
+                string.IsNullOrWhiteSpace(item.Lifecycle.DeprecationMessage)
+                    ? "Deprecated."
+                    : "Deprecated. " + item.Lifecycle.DeprecationMessage);
         }
 
         AppendSignature(builder, item);
@@ -2314,7 +2365,9 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return false;
         }
 
-        return requirePublicTag ? HasPublicSignal(doclet) : doclet.HasAnyTag;
+        return requirePublicTag
+            ? HasPublicSignal(doclet)
+            : doclet.HasAnyTag && doclet.HasNonLifecycleTag;
     }
 
     private static bool ShouldRequirePublicTag(
@@ -2332,6 +2385,84 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     private static bool IsHardExcluded(JavaScriptDoclet doclet)
     {
         return doclet.HasTag("internal") || doclet.HasTag("private") || doclet.HasTag("ignore");
+    }
+
+    private static JavaScriptApiLifecycle? ResolveLifecycle(
+        JavaScriptDoclet doclet,
+        string name,
+        string relativePath,
+        int line,
+        bool strictHealth,
+        ICollection<DocHarvestDiagnostic> diagnostics)
+    {
+        var alphaTags = doclet.GetAllTagValues("alpha").ToArray();
+        var betaTags = doclet.GetAllTagValues("beta").ToArray();
+        if (alphaTags.Any(static value => !string.IsNullOrWhiteSpace(value))
+            || betaTags.Any(static value => !string.IsNullOrWhiteSpace(value)))
+        {
+            diagnostics.Add(CreateLifecycleDiagnostic(
+                DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle,
+                relativePath,
+                line,
+                name,
+                "Lifecycle modifiers must not contain text.",
+                "@alpha and @beta are contentless modifiers in the JavaScript lifecycle contract.",
+                "Remove modifier content and put explanatory text in the doclet description.",
+                strictHealth));
+            return null;
+        }
+
+        if (alphaTags.Length + betaTags.Length > 1)
+        {
+            diagnostics.Add(CreateLifecycleDiagnostic(
+                DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict,
+                relativePath,
+                line,
+                name,
+                "Lifecycle modifiers conflict or repeat.",
+                "A public JavaScript API doclet may contain at most one lifecycle modifier: @alpha or @beta.",
+                "Keep exactly one lifecycle modifier, or omit both for a Public API symbol.",
+                strictHealth));
+            return null;
+        }
+
+        var deprecatedMessages = doclet.GetAllTagValues("deprecated")
+            .Select(NormalizeDocletTagValue)
+            .Where(static value => value.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (deprecatedMessages.Length > 1)
+        {
+            diagnostics.Add(CreateLifecycleDiagnostic(
+                DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict,
+                relativePath,
+                line,
+                name,
+                "Deprecated replacement guidance conflicts.",
+                "This doclet has more than one distinct nonblank @deprecated message.",
+                "Keep one replacement message, or make repeated @deprecated messages equivalent.",
+                strictHealth));
+            return null;
+        }
+
+        var token = alphaTags.Length == 1 ? "alpha" : betaTags.Length == 1 ? "beta" : "public";
+        return new JavaScriptApiLifecycle(
+            token,
+            token switch
+            {
+                "alpha" => "Alpha",
+                "beta" => "Beta",
+                _ => "Public API"
+            },
+            doclet.HasTag("deprecated"),
+            deprecatedMessages.FirstOrDefault());
+    }
+
+    private static string NormalizeDocletTagValue(string value)
+    {
+        return string.Join(
+            " ",
+            value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     }
 
     private static JavaScriptDoclet ParseDoclet(string commentText)
@@ -2799,6 +2930,24 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             "Update the JSDoc block to use a supported v1 public shape, or remove @public until the contract is ready to publish.");
     }
 
+    private static DocHarvestDiagnostic CreateLifecycleDiagnostic(
+        string code,
+        string relativePath,
+        int line,
+        string name,
+        string problem,
+        string cause,
+        string fix,
+        bool strictHealth)
+    {
+        return CreateDiagnostic(
+            code,
+            strictHealth ? DocHarvestDiagnosticSeverity.Error : DocHarvestDiagnosticSeverity.Warning,
+            $"Skipped JavaScript API item '{name}' in '{relativePath}' at line {line.ToString(CultureInfo.InvariantCulture)} because {problem.ToLowerInvariant()}",
+            cause,
+            fix);
+    }
+
     private static DocHarvestDiagnostic CreateDiagnostic(
         string code,
         DocHarvestDiagnosticSeverity severity,
@@ -2880,6 +3029,11 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     {
         public bool HasAnyTag => Tags.Count > 0;
 
+        public bool HasNonLifecycleTag => Tags.Any(static tag =>
+            !tag.Name.Equals("alpha", StringComparison.OrdinalIgnoreCase)
+            && !tag.Name.Equals("beta", StringComparison.OrdinalIgnoreCase)
+            && !tag.Name.Equals("deprecated", StringComparison.OrdinalIgnoreCase));
+
         public bool HasTag(string name)
         {
             return Tags.Any(tag => tag.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
@@ -2904,6 +3058,13 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 .Where(tag => tag.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
                 .Select(tag => tag.Value)
                 .Where(static value => !string.IsNullOrWhiteSpace(value));
+        }
+
+        public IEnumerable<string> GetAllTagValues(string name)
+        {
+            return Tags
+                .Where(tag => tag.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                .Select(tag => tag.Value);
         }
     }
 
@@ -3005,7 +3166,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         bool DetailNone,
         bool IsPublic,
         string? Example,
-        string? Deprecated,
+        JavaScriptApiLifecycle Lifecycle,
         string SourcePath,
         int StartLine)
     {
@@ -3013,5 +3174,11 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
         public JavaScriptTypedefReference? TypeReference { get; set; }
     }
+
+    private sealed record JavaScriptApiLifecycle(
+        string Token,
+        string Label,
+        bool IsDeprecated,
+        string? DeprecationMessage);
 
 }

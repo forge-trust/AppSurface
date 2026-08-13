@@ -539,6 +539,38 @@ declare global {
     return `<span class="docs-page-badge docs-page-badge--${escapeHtml(variant)} docs-search-option-badge">${escapeHtml(label)}</span>`;
   }
 
+  function getSearchLifecycleLabel(item) {
+    return item?.isGeneratedApiSymbol === true
+      ? String(item.apiLifecycleLabel ?? '').trim()
+      : '';
+  }
+
+  function getSearchDeprecationLabel(item) {
+    return item?.isGeneratedApiSymbol === true && item.isDeprecated === true ? 'Deprecated' : '';
+  }
+
+  function renderSearchLifecycleBadges(item, className = '') {
+    return getSearchLifecycleBadges(item, className)
+      .map(({ label, className: badgeClassName }) => `<span class="${badgeClassName}">${escapeHtml(label)}</span>`)
+      .join('');
+  }
+
+  function appendSearchLifecycleBadges(parent, item, className = '') {
+    getSearchLifecycleBadges(item, className).forEach(({ label, className: badgeClassName }) => {
+      parent.append(createElement('span', badgeClassName, label));
+    });
+  }
+
+  function getSearchLifecycleBadges(item, className = '') {
+    const lifecycle = getSearchLifecycleLabel(item);
+    const deprecated = getSearchDeprecationLabel(item);
+    const classes = ['docs-search-result-badge', className].filter(Boolean).join(' ');
+    return [
+      lifecycle ? { label: lifecycle, className: `${classes} docs-search-result-badge-lifecycle` } : null,
+      deprecated ? { label: deprecated, className: `${classes} docs-search-result-badge-deprecated` } : null
+    ].filter(Boolean);
+  }
+
   function limitDraftQuery(value) {
     return String(value ?? '').slice(0, maxQueryLength);
   }
@@ -1365,7 +1397,11 @@ declare global {
       .map((part) => String(part ?? '').trim())
       .find((part) => part && part.toLowerCase() !== titleKey);
 
-    return context ? `Open ${title} in ${context}` : `Open ${title}`;
+    const lifecycle = getSearchLifecycleLabel(doc);
+    const deprecated = getSearchDeprecationLabel(doc);
+    const state = [lifecycle, deprecated].filter(Boolean).join(', ');
+    const location = context ? ` in ${context}` : '';
+    return state ? `Open ${title}${location}. ${state}.` : `Open ${title}${location}`;
   }
 
   function createSearchResultArticle(doc, queryTokens, options: any = {}) {
@@ -1427,6 +1463,8 @@ declare global {
     if (pageTypeBadge) {
       badgeRow.append(pageTypeBadge);
     }
+
+    appendSearchLifecycleBadges(badgeRow, doc);
 
     if (doc.languageLabel || doc.language) {
       badgeRow.append(createSearchResultBadge(`Language: ${doc.languageLabel || formatFacetValue(doc.language)}`));
@@ -2002,13 +2040,15 @@ declare global {
     results.innerHTML = safeQueryResults.map((item, index) => {
       const selected = index === activeIndex ? 'true' : 'false';
       const pageTypeBadge = renderPageTypeBadge(item);
+      const lifecycleBadges = renderSearchLifecycleBadges(item, 'docs-search-option-badge');
       const navigationAttributes = getDocsNavigationAttributes(item.path);
       const resultKind = getSearchResultKind(item);
       return `<li id="docs-search-option-${index}" role="option" aria-selected="${selected}" tabindex="-1" class="docs-search-option" data-href="${escapeHtml(item.path)}">
-        <a href="${escapeHtml(item.path)}"${navigationAttributes} data-rw-product-result-rank="${index + 1}" data-rw-product-result-kind="${escapeHtml(resultKind)}" data-rw-product-result-surface="sidebar">
+        <a href="${escapeHtml(item.path)}"${navigationAttributes} aria-label="${escapeHtml(createSearchResultLinkLabel(item))}" data-rw-product-result-rank="${index + 1}" data-rw-product-result-kind="${escapeHtml(resultKind)}" data-rw-product-result-surface="sidebar">
           <span class="docs-search-option-title-row">
             <span class="docs-search-option-title">${escapeHtml(item.title)}</span>
             ${pageTypeBadge}
+            ${lifecycleBadges}
           </span>
           <span class="docs-search-option-path">${escapeHtml(getLocationLabel(item))}</span>
         </a>
