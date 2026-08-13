@@ -1669,6 +1669,39 @@ body {
     font-weight: 600;
 }
 
+.docs-content .docs-api-lifecycle-badge {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--docs-color-border-accent);
+    border-radius: 9999px;
+    padding: 0.2rem 0.65rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    line-height: 1.25;
+    text-transform: uppercase;
+    color: var(--docs-color-accent-muted);
+    background: var(--docs-color-accent-fill-soft);
+}
+
+.docs-content .docs-api-lifecycle-badge--alpha {
+    border-color: var(--docs-color-border-accent-faint);
+    background: var(--docs-color-brand-violet-wash);
+    color: var(--docs-color-link-visited);
+}
+
+.docs-content .docs-api-lifecycle-badge--beta {
+    border-color: var(--docs-color-border-accent-strong);
+    background: var(--docs-color-brand-teal-wash);
+    color: var(--docs-color-accent-soft);
+}
+
+.docs-content .docs-api-lifecycle-badge--deprecated {
+    border-color: var(--docs-color-border-default-strong);
+    background: var(--docs-color-surface-panel-hover);
+    color: var(--docs-color-syntax-parameter);
+}
+
 .docs-content h2 {
     font-size: 1.95rem;
     line-height: 1.2;

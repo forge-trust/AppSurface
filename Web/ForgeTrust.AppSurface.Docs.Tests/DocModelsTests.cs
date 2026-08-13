@@ -71,7 +71,10 @@ public class DocModelsTests
                     Id = "install",
                     Level = 2
                 }
-            ]);
+            ])
+        {
+            GeneratedApiSymbol = new DocGeneratedApiSymbol("beta", "Beta", true)
+        };
 
         // Act & Assert
         Assert.Equal("Title", node.Title);
@@ -98,6 +101,38 @@ public class DocModelsTests
         Assert.Equal(["alias-one"], node.Metadata?.Aliases);
         Assert.Equal(["legacy/alias"], node.Metadata?.RedirectAliases);
         Assert.Equal("Install", Assert.Single(node.Outline!).Title);
+        Assert.Equal(new DocGeneratedApiSymbol("beta", "Beta", true), node.GeneratedApiSymbol);
+    }
+
+    [Fact]
+    public void DocNode_ConstructorAndDeconstructor_ShouldKeepTheNinePositionalValues()
+    {
+        var node = new DocNode(
+            "Title",
+            "path/to/file",
+            "content",
+            "parent",
+            IsDirectory: true,
+            CanonicalPath: "/docs/path",
+            Metadata: new DocMetadata { Title = "Metadata" },
+            Outline: [],
+            SymbolSourceProvenance: [])
+        {
+            GeneratedApiSymbol = new DocGeneratedApiSymbol("alpha", "Alpha", false)
+        };
+
+        var (title, path, content, parentPath, isDirectory, canonicalPath, metadata, outline, provenance) = node;
+
+        Assert.Equal("Title", title);
+        Assert.Equal("path/to/file", path);
+        Assert.Equal("content", content);
+        Assert.Equal("parent", parentPath);
+        Assert.True(isDirectory);
+        Assert.Equal("/docs/path", canonicalPath);
+        Assert.Equal("Metadata", metadata?.Title);
+        Assert.Empty(outline!);
+        Assert.Empty(provenance!);
+        Assert.Equal("alpha", node.GeneratedApiSymbol?.ApiLifecycle);
     }
 
     [Fact]
