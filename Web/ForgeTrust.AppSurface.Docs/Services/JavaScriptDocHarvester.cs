@@ -230,7 +230,12 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             ? CollectEventDispatchEvidence(script, relativePath)
             : [];
 
-        foreach (var statement in EnumerateNodes(script))
+        if (script is not Program program)
+        {
+            return new JavaScriptParseResult(items, eventDispatches);
+        }
+
+        foreach (var statement in EnumerateHarvestNodes(program))
         {
             switch (statement)
             {
@@ -264,6 +269,44 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                         diagnostics);
                     break;
 
+                case ExportNamedDeclaration { Declaration: ClassDeclaration classDeclaration } exportNamedDeclaration:
+                    AddClassDeclarationItems(
+                        comments,
+                        attachedCommentStarts,
+                        items,
+                        source,
+                        relativePath,
+                        exportNamedDeclaration,
+                        classDeclaration,
+                        options,
+                        requirePublicTag,
+                        diagnostics);
+                    break;
+
+                case ExportDefaultDeclaration { Declaration: ClassDeclaration classDeclaration } exportDefaultDeclaration:
+                    ClaimDirectClassMemberComments(comments, attachedCommentStarts, source, classDeclaration.Body);
+                    AddUnsupportedAttachedItem(
+                        comments,
+                        attachedCommentStarts,
+                        source,
+                        relativePath,
+                        exportDefaultDeclaration,
+                        "Default-exported JavaScript classes are not supported by JavaScript API harvesting.",
+                        diagnostics);
+                    break;
+
+                case ExportDefaultDeclaration { Declaration: ClassExpression classExpression } exportDefaultDeclaration:
+                    ClaimDirectClassMemberComments(comments, attachedCommentStarts, source, classExpression.Body);
+                    AddUnsupportedAttachedItem(
+                        comments,
+                        attachedCommentStarts,
+                        source,
+                        relativePath,
+                        exportDefaultDeclaration,
+                        "Default-exported JavaScript classes are not supported by JavaScript API harvesting.",
+                        diagnostics);
+                    break;
+
                 case FunctionDeclaration functionDeclaration:
                     AddAttachedItem(
                         comments,
@@ -291,6 +334,17 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                         variableDeclaration,
                         options,
                         requirePublicTag,
+                        diagnostics);
+                    break;
+
+                case ExpressionStatement { Expression: AssignmentExpression { Right: ClassExpression classExpression } } expressionStatement:
+                    AddUnsupportedClassExpression(
+                        comments,
+                        attachedCommentStarts,
+                        source,
+                        relativePath,
+                        expressionStatement,
+                        classExpression,
                         diagnostics);
                     break;
 
@@ -327,18 +381,45 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
                     break;
 
-                case ClassDeclaration classDeclaration:
-                    AddUnsupportedAttachedItem(
+                case ExpressionStatement { Expression: ClassExpression classExpression } expressionStatement:
+                    AddUnsupportedClassExpression(
                         comments,
                         attachedCommentStarts,
                         source,
                         relativePath,
+                        expressionStatement,
+                        classExpression,
+                        diagnostics);
+                    break;
+
+                case ClassExpression classExpression:
+                    AddUnsupportedClassExpression(
+                        comments,
+                        attachedCommentStarts,
+                        source,
+                        relativePath,
+                        classExpression,
+                        classExpression,
+                        diagnostics);
+                    break;
+
+                case ClassDeclaration classDeclaration:
+                    AddClassDeclarationItems(
+                        comments,
+                        attachedCommentStarts,
+                        items,
+                        source,
+                        relativePath,
                         classDeclaration,
-                        $"JavaScript class harvesting is deferred from v1 for '{classDeclaration.Id?.Name ?? "anonymous class"}'.",
+                        classDeclaration,
+                        options,
+                        requirePublicTag,
                         diagnostics);
                     break;
             }
         }
+
+        ClaimNestedClassComments(program, comments, attachedCommentStarts, source);
 
         foreach (var comment in comments)
         {
@@ -351,6 +432,360 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
 
         return new JavaScriptParseResult(items, eventDispatches);
+    }
+
+    private static IEnumerable<Node> EnumerateHarvestNodes(Program program)
+    {
+        var emitted = new HashSet<Node>();
+        foreach (var statement in program.Body)
+        {
+            if (emitted.Add(statement))
+            {
+                yield return statement;
+            }
+        }
+
+        foreach (var node in EnumerateNodes(program))
+        {
+            if (node is FunctionDeclaration or VariableDeclaration or ExpressionStatement or ClassExpression
+                && emitted.Add(node))
+            {
+                yield return node;
+            }
+        }
+    }
+
+    private static void ClaimNestedClassComments(
+        Program program,
+        IReadOnlyList<Comment> comments,
+        ISet<int> attachedCommentStarts,
+        string source)
+    {
+        var topLevelDeclarations = new HashSet<ClassDeclaration>();
+        foreach (var statement in program.Body)
+        {
+            switch (statement)
+            {
+                case ClassDeclaration classDeclaration:
+                    topLevelDeclarations.Add(classDeclaration);
+                    break;
+                case ExportNamedDeclaration { Declaration: ClassDeclaration classDeclaration }:
+                    topLevelDeclarations.Add(classDeclaration);
+                    break;
+                case ExportDefaultDeclaration { Declaration: ClassDeclaration classDeclaration }:
+                    topLevelDeclarations.Add(classDeclaration);
+                    break;
+            }
+        }
+
+        foreach (var declaration in EnumerateNodes(program).OfType<ClassDeclaration>())
+        {
+            if (topLevelDeclarations.Contains(declaration))
+            {
+                continue;
+            }
+
+            ClaimClassLeadingComment(comments, attachedCommentStarts, source, declaration);
+
+            ClaimDirectClassMemberComments(comments, attachedCommentStarts, source, declaration.Body);
+        }
+
+        foreach (var expression in EnumerateNodes(program).OfType<ClassExpression>())
+        {
+            ClaimClassLeadingComment(comments, attachedCommentStarts, source, expression);
+
+            ClaimDirectClassMemberComments(comments, attachedCommentStarts, source, expression.Body);
+        }
+    }
+
+    private static void AddClassDeclarationItems(
+        IReadOnlyList<Comment> comments,
+        ISet<int> attachedCommentStarts,
+        ICollection<JavaScriptApiItem> items,
+        string source,
+        string relativePath,
+        Node attachmentNode,
+        ClassDeclaration classDeclaration,
+        AppSurfaceDocsJavaScriptHarvestOptions options,
+        bool requirePublicTag,
+        ICollection<DocHarvestDiagnostic> diagnostics)
+    {
+        ClaimDirectClassMemberComments(comments, attachedCommentStarts, source, classDeclaration.Body);
+
+        var comment = FindLeadingBlockComment(comments, attachmentNode, source);
+        if (comment is null)
+        {
+            return;
+        }
+
+        var doclet = ParseDoclet(GetCommentText(source, comment.Value));
+        if (!ShouldIncludeDoclet(doclet, requirePublicTag) || HasStandaloneContractTag(doclet))
+        {
+            return;
+        }
+
+        attachedCommentStarts.Add(comment.Value.Start);
+        if (string.IsNullOrWhiteSpace(classDeclaration.Id?.Name))
+        {
+            diagnostics.Add(MalformedDoclet(relativePath, comment.Value.Location.Start.Line, "A public JavaScript class doclet must be attached to a named class declaration."));
+            return;
+        }
+
+        if (GetUnsupportedClassReason(classDeclaration) is { } unsupportedReason)
+        {
+            diagnostics.Add(CreateDiagnostic(
+                DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape,
+                DocHarvestDiagnosticSeverity.Warning,
+                $"Skipped unsupported public JavaScript doclet in '{relativePath}'.",
+                unsupportedReason,
+                "Use a named, non-derived class with documented non-computed methods or accessors, or remove @public until the class shape is supported."));
+            return;
+        }
+
+        var className = classDeclaration.Id.Name;
+        var lifecycle = ResolveLifecycle(
+            doclet,
+            className,
+            relativePath,
+            comment.Value.Location.Start.Line,
+            options.StrictHealth,
+            diagnostics);
+        if (lifecycle is null)
+        {
+            return;
+        }
+
+        var classItem = CreateApiItem(
+            className,
+            JavaScriptApiKind.Class,
+            doclet,
+            relativePath,
+            classDeclaration.Location.Start.Line,
+            options,
+            lifecycle)
+        with
+        {
+            AnchorIdentity = $"class-{SlugifyJavaScriptIdentifier(className)}",
+            HeadingLevel = 2,
+            TopLevelDeclarationStartLine = classDeclaration.Location.Start.Line
+        };
+        var members = CreateClassMembers(
+            comments,
+            attachedCommentStarts,
+            source,
+            relativePath,
+            classDeclaration,
+            classItem,
+            options,
+            requirePublicTag,
+            diagnostics);
+        items.Add(classItem);
+        foreach (var member in members)
+        {
+            items.Add(member);
+        }
+    }
+
+    private static IReadOnlyList<JavaScriptApiItem> CreateClassMembers(
+        IReadOnlyList<Comment> comments,
+        ISet<int> attachedCommentStarts,
+        string source,
+        string relativePath,
+        ClassDeclaration classDeclaration,
+        JavaScriptApiItem classItem,
+        AppSurfaceDocsJavaScriptHarvestOptions options,
+        bool requirePublicTag,
+        ICollection<DocHarvestDiagnostic> diagnostics)
+    {
+        var members = new List<JavaScriptApiItem>();
+        var className = classDeclaration.Id!.Name;
+        var ordinal = 0;
+
+        foreach (var element in classDeclaration.Body.Body)
+        {
+            if (element is not MethodDefinition method || !TryGetClassMemberShape(method, out var shape))
+            {
+                continue;
+            }
+
+            ordinal++;
+            var comment = FindLeadingBlockComment(comments, method, source);
+            if (comment is null)
+            {
+                continue;
+            }
+
+            var doclet = ParseDoclet(GetCommentText(source, comment.Value));
+            if (!ShouldIncludeDoclet(doclet, requirePublicTag) || HasStandaloneContractTag(doclet))
+            {
+                continue;
+            }
+
+            var memberName = shape.Kind == JavaScriptClassMemberKind.Constructor
+                ? "constructor"
+                : ((Identifier)method.Key).Name;
+            var qualifiedName = $"{className}.{memberName}";
+            var lifecycle = ResolveLifecycle(
+                doclet,
+                qualifiedName,
+                relativePath,
+                comment.Value.Location.Start.Line,
+                options.StrictHealth,
+                diagnostics);
+            if (lifecycle is null)
+            {
+                continue;
+            }
+
+            var item = CreateApiItem(
+                qualifiedName,
+                ToApiKind(shape),
+                doclet,
+                relativePath,
+                method.Location.Start.Line,
+                options,
+                lifecycle)
+            with
+            {
+                GroupIdentity = classItem.GroupIdentity,
+                GroupDisplayName = classItem.GroupDisplayName,
+                GroupIsPathFallback = classItem.GroupIsPathFallback,
+                AnchorIdentity = BuildClassMemberAnchor(className, memberName, shape),
+                HeadingLevel = 3,
+                TopLevelDeclarationStartLine = classDeclaration.Location.Start.Line,
+                DeclarationOrdinal = ordinal,
+                DeclaringClassName = className,
+                ClassMemberKind = shape.Kind
+            };
+
+            members.Add(item);
+        }
+
+        return members;
+    }
+
+    private static void ClaimDirectClassMemberComments(
+        IReadOnlyList<Comment> comments,
+        ISet<int> attachedCommentStarts,
+        string source,
+        ClassBody classBody)
+    {
+        foreach (var element in classBody.Body)
+        {
+            if (element is MethodDefinition method
+                && FindLeadingBlockComment(comments, method, source) is { } comment)
+            {
+                var doclet = ParseDoclet(GetCommentText(source, comment));
+                if (!HasStandaloneContractTag(doclet))
+                {
+                    attachedCommentStarts.Add(comment.Start);
+                }
+            }
+        }
+    }
+
+    private static void ClaimClassLeadingComment(
+        IReadOnlyList<Comment> comments,
+        ISet<int> attachedCommentStarts,
+        string source,
+        Node classNode)
+    {
+        if (FindLeadingBlockComment(comments, classNode, source) is not { } comment)
+        {
+            return;
+        }
+
+        var doclet = ParseDoclet(GetCommentText(source, comment));
+        if (!HasStandaloneContractTag(doclet))
+        {
+            attachedCommentStarts.Add(comment.Start);
+        }
+    }
+
+    private static string? GetUnsupportedClassReason(ClassDeclaration classDeclaration)
+    {
+        if (classDeclaration.SuperClass is not null)
+        {
+            return "Derived JavaScript classes are not supported because inherited-member documentation semantics are not defined.";
+        }
+
+        foreach (var element in classDeclaration.Body.Body)
+        {
+            if (element is not MethodDefinition method)
+            {
+                return "JavaScript class fields, private elements, and static blocks are not supported.";
+            }
+
+            if (!TryGetClassMemberShape(method, out _))
+            {
+                return "JavaScript class members must be non-computed methods, constructors, getters, or setters with identifier names.";
+            }
+
+            if (method.Value.Async || method.Value.Generator)
+            {
+                return "Async and generator JavaScript class members are not supported.";
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryGetClassMemberShape(MethodDefinition method, out JavaScriptClassMemberShape shape)
+    {
+        shape = default;
+        if (method.Computed || method.Key is not Identifier)
+        {
+            return false;
+        }
+
+        var scope = method.Static ? JavaScriptClassMemberScope.Static : JavaScriptClassMemberScope.Instance;
+        var kind = method.Kind switch
+        {
+            PropertyKind.Constructor when !method.Static => JavaScriptClassMemberKind.Constructor,
+            PropertyKind.Method => JavaScriptClassMemberKind.Method,
+            PropertyKind.Get => JavaScriptClassMemberKind.Getter,
+            PropertyKind.Set => JavaScriptClassMemberKind.Setter,
+            _ => (JavaScriptClassMemberKind?)null
+        };
+        if (kind is null)
+        {
+            return false;
+        }
+
+        shape = new JavaScriptClassMemberShape(kind.Value, scope);
+        return true;
+    }
+
+    private static JavaScriptApiKind ToApiKind(JavaScriptClassMemberShape shape)
+    {
+        return (shape.Kind, shape.Scope) switch
+        {
+            (JavaScriptClassMemberKind.Constructor, _) => JavaScriptApiKind.Constructor,
+            (JavaScriptClassMemberKind.Method, JavaScriptClassMemberScope.Static) => JavaScriptApiKind.StaticMethod,
+            (JavaScriptClassMemberKind.Method, _) => JavaScriptApiKind.InstanceMethod,
+            (JavaScriptClassMemberKind.Getter, JavaScriptClassMemberScope.Static) => JavaScriptApiKind.StaticGetter,
+            (JavaScriptClassMemberKind.Getter, _) => JavaScriptApiKind.InstanceGetter,
+            (JavaScriptClassMemberKind.Setter, JavaScriptClassMemberScope.Static) => JavaScriptApiKind.StaticSetter,
+            (JavaScriptClassMemberKind.Setter, _) => JavaScriptApiKind.InstanceSetter,
+            _ => throw new InvalidOperationException("Unsupported JavaScript class member shape.")
+        };
+    }
+
+    private static string BuildClassMemberAnchor(
+        string className,
+        string memberName,
+        JavaScriptClassMemberShape shape)
+    {
+        var classSlug = SlugifyJavaScriptIdentifier(className);
+        var memberSlug = SlugifyJavaScriptIdentifier(memberName);
+        return shape.Kind switch
+        {
+            JavaScriptClassMemberKind.Constructor => $"constructor-{classSlug}",
+            JavaScriptClassMemberKind.Method => $"method-{shape.Scope.ToString().ToLowerInvariant()}-{classSlug}-{memberSlug}",
+            JavaScriptClassMemberKind.Getter => $"getter-{shape.Scope.ToString().ToLowerInvariant()}-{classSlug}-{memberSlug}",
+            JavaScriptClassMemberKind.Setter => $"setter-{shape.Scope.ToString().ToLowerInvariant()}-{classSlug}-{memberSlug}",
+            _ => throw new InvalidOperationException("Unsupported JavaScript class member shape.")
+        };
     }
 
     private static IEnumerable<Node> EnumerateNodes(Node root)
@@ -625,6 +1060,20 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
         var declarator = variableDeclaration.Declarations[0];
         var name = declarator.Id is Identifier identifier ? identifier.Name : null;
+        if (declarator.Init is ClassExpression classExpression)
+        {
+            ClaimDirectClassMemberComments(comments, attachedCommentStarts, source, classExpression.Body);
+            AddUnsupportedAttachedItem(
+                comments,
+                attachedCommentStarts,
+                source,
+                relativePath,
+                attachmentNode,
+                "JavaScript class expressions are not supported by JavaScript API harvesting.",
+                diagnostics);
+            return;
+        }
+
         var kind = declarator.Init is ArrowFunctionExpression or FunctionExpression
             ? JavaScriptApiKind.Function
             : JavaScriptApiKind.Constant;
@@ -669,13 +1118,37 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return;
         }
 
-        attachedCommentStarts.Add(comment.Value.Start);
+        if (!attachedCommentStarts.Add(comment.Value.Start))
+        {
+            return;
+        }
+
         diagnostics.Add(CreateDiagnostic(
             DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape,
             DocHarvestDiagnosticSeverity.Warning,
             $"Skipped unsupported public JavaScript doclet in '{relativePath}'.",
             reason,
             "Remove @public from this doclet for now, or implement the deferred JavaScript harvesting issue that covers this API shape."));
+    }
+
+    private static void AddUnsupportedClassExpression(
+        IReadOnlyList<Comment> comments,
+        ISet<int> attachedCommentStarts,
+        string source,
+        string relativePath,
+        Node attachmentNode,
+        ClassExpression classExpression,
+        ICollection<DocHarvestDiagnostic> diagnostics)
+    {
+        ClaimDirectClassMemberComments(comments, attachedCommentStarts, source, classExpression.Body);
+        AddUnsupportedAttachedItem(
+            comments,
+            attachedCommentStarts,
+            source,
+            relativePath,
+            attachmentNode,
+            "JavaScript class expressions are not supported by JavaScript API harvesting.",
+            diagnostics);
     }
 
     private static void AddStandaloneItem(
@@ -994,10 +1467,12 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             var groupItems = group.ToArray();
             var groupDisplayName = groupItems[0].GroupDisplayName;
             var groupIdentity = group.Key;
-            foreach (var anchorGroup in groupItems.GroupBy(item => BuildAnchorPrefix(item.Kind) + "-" + Slugify(item.Name), StringComparer.Ordinal))
+            foreach (var anchorGroup in groupItems.GroupBy(BuildAnchorIdentity, StringComparer.Ordinal))
             {
                 var ordered = anchorGroup
                     .OrderBy(item => item.SourcePath, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(item => item.TopLevelDeclarationStartLine ?? item.StartLine)
+                    .ThenBy(item => item.DeclarationOrdinal)
                     .ThenBy(item => item.StartLine)
                     .ThenBy(item => item.Name, StringComparer.Ordinal)
                     .ToArray();
@@ -1024,6 +1499,11 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
     }
 
+    private static string BuildAnchorIdentity(JavaScriptApiItem item)
+    {
+        return item.AnchorIdentity ?? BuildAnchorPrefix(item.Kind) + "-" + Slugify(item.Name);
+    }
+
     private static void ResolveTypedefReferences(
         IReadOnlyList<JavaScriptApiItem> items,
         ICollection<DocHarvestDiagnostic> diagnostics)
@@ -1042,7 +1522,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             }))
         {
             var typedefIndex = group.GroupItems
-                .Where(static item => item.Kind == JavaScriptApiKind.Typedef)
+                .Where(static item => item.Kind is JavaScriptApiKind.Typedef or JavaScriptApiKind.Class)
                 .GroupBy(static item => item.Name, StringComparer.Ordinal)
                 .ToDictionary(static group => group.Key, static group => group.ToArray(), StringComparer.Ordinal);
             var emittedDiagnostics = new HashSet<JavaScriptTypedefDiagnosticKey>();
@@ -1444,6 +1924,8 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     {
         var orderedItems = group.Items
             .OrderBy(item => item.SourcePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.TopLevelDeclarationStartLine ?? item.StartLine)
+            .ThenBy(item => item.DeclarationOrdinal)
             .ThenBy(item => item.StartLine)
             .ThenBy(item => item.Name, StringComparer.Ordinal)
             .ToArray();
@@ -1467,8 +1949,8 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 new DocOutlineItem
                 {
                     Id = item.AnchorId,
-                    Title = item.Name,
-                    Level = 2
+                    Title = item.DisplayName,
+                    Level = item.HeadingLevel
                 });
             provenance.Add(
                 new DocSymbolSourceProvenance
@@ -1503,16 +1985,25 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             var itemPath = $"{groupPath}#{item.AnchorId}";
             nodes.Add(
                 new DocNode(
-                    item.Name,
+                    item.DisplayName,
                     itemPath,
                     RenderItem(item, includeSourcePlaceholder: false),
                     groupPath,
                     Metadata: CreateJavaScriptMetadata(
-                        item.Name,
+                        item.DisplayName,
                         GetPageType(item.Kind),
                         group.DisplayName,
                         groupSlug,
-                        order: 251))
+                        order: 251),
+                    Outline:
+                    [
+                        new DocOutlineItem
+                        {
+                            Id = item.AnchorId,
+                            Title = item.DisplayName,
+                            Level = item.HeadingLevel
+                        }
+                    ])
                 {
                     GeneratedApiSymbol = new DocGeneratedApiSymbol(
                         item.Lifecycle.Token,
@@ -1590,7 +2081,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 <header class=""doc-method-group-header"">
 <span class=""doc-kind"">{WebUtility.HtmlEncode(kindLabel)}</span>
 <span class=""docs-api-lifecycle-badge docs-api-lifecycle-badge--{WebUtility.HtmlEncode(item.Lifecycle.Token)}"">{WebUtility.HtmlEncode(item.Lifecycle.Label)}</span>{(item.Lifecycle.IsDeprecated ? "\n<span class=\"docs-api-lifecycle-badge docs-api-lifecycle-badge--deprecated\">Deprecated</span>" : string.Empty)}
-<h3>{WebUtility.HtmlEncode(item.Name)}</h3>");
+<h{item.HeadingLevel + 1}>{WebUtility.HtmlEncode(item.DisplayName)}</h{item.HeadingLevel + 1}>");
         if (includeSourcePlaceholder)
         {
             builder.Append(CreateSymbolSourcePlaceholder(item.AnchorId));
@@ -1617,13 +2108,14 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         AppendSignature(builder, item);
         var renderedPreviews = new HashSet<string>(StringComparer.Ordinal);
         AppendContractMetadata(builder, item, renderedPreviews);
-        AppendMembers(builder, "Parameters", item.Parameters, renderedPreviews);
-        AppendMembers(builder, item.Kind == JavaScriptApiKind.Event ? "Detail fields" : "Properties", item.Properties, renderedPreviews);
+        var detailHeadingLevel = item.HeadingLevel + 2;
+        AppendMembers(builder, "Parameters", detailHeadingLevel, item.Parameters, renderedPreviews);
+        AppendMembers(builder, item.Kind == JavaScriptApiKind.Event ? "Detail fields" : "Properties", detailHeadingLevel, item.Properties, renderedPreviews);
         AppendReturns(builder, item.Returns, renderedPreviews);
 
         if (!string.IsNullOrWhiteSpace(item.Example))
         {
-            builder.Append("<h4>Example</h4><pre><code class=\"language-js\">");
+            builder.Append($"<h{detailHeadingLevel}>Example</h{detailHeadingLevel}><pre><code class=\"language-js\">");
             builder.Append(WebUtility.HtmlEncode(item.Example.Trim()));
             builder.Append("</code></pre>");
         }
@@ -1637,6 +2129,11 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         var signature = item.Kind switch
         {
             JavaScriptApiKind.Function => $"{item.Name}({string.Join(", ", item.Parameters.Select(parameter => parameter.Name))})",
+            JavaScriptApiKind.Class => $"class {item.Name}",
+            JavaScriptApiKind.Constructor => $"new {item.DeclaringClassName}({string.Join(", ", item.Parameters.Select(parameter => parameter.Name))})",
+            JavaScriptApiKind.InstanceMethod or JavaScriptApiKind.StaticMethod => $"{item.Name}({string.Join(", ", item.Parameters.Select(parameter => parameter.Name))})",
+            JavaScriptApiKind.InstanceGetter or JavaScriptApiKind.StaticGetter => $"get {item.Name}",
+            JavaScriptApiKind.InstanceSetter or JavaScriptApiKind.StaticSetter => $"set {item.Name}({string.Join(", ", item.Parameters.Select(parameter => parameter.Name))})",
             JavaScriptApiKind.ModuleContract when !string.IsNullOrWhiteSpace(item.Signature) => item.Signature,
             _ => item.Name
         };
@@ -1704,6 +2201,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     private static void AppendMembers(
         StringBuilder builder,
         string heading,
+        int headingLevel,
         IReadOnlyList<JavaScriptMember> members,
         ISet<string> renderedPreviews)
     {
@@ -1712,9 +2210,9 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return;
         }
 
-        builder.Append("<h4>");
+        builder.Append($"<h{headingLevel}>");
         builder.Append(WebUtility.HtmlEncode(heading));
-        builder.Append("</h4><ul>");
+        builder.Append($"</h{headingLevel}><ul>");
         foreach (var member in members)
         {
             builder.Append("<li><code>");
@@ -2344,18 +2842,31 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
     private static Comment? FindLeadingBlockComment(IReadOnlyList<Comment> comments, Node node, string source)
     {
-        for (var index = comments.Count - 1; index >= 0; index--)
+        var lowerBound = 0;
+        var upperBound = comments.Count - 1;
+        var matchingIndex = -1;
+        while (lowerBound <= upperBound)
         {
-            var comment = comments[index];
-            if (comment.Kind != CommentKind.Block || comment.End > node.Start)
+            var index = lowerBound + ((upperBound - lowerBound) / 2);
+            if (comments[index].End > node.Start)
             {
+                upperBound = index - 1;
                 continue;
             }
 
-            return IsOnlyWhitespace(source, comment.End, node.Start) ? comment : null;
+            matchingIndex = index;
+            lowerBound = index + 1;
         }
 
-        return null;
+        if (matchingIndex < 0)
+        {
+            return null;
+        }
+
+        var comment = comments[matchingIndex];
+        return comment.Kind == CommentKind.Block && IsOnlyWhitespace(source, comment.End, node.Start)
+            ? comment
+            : null;
     }
 
     private static bool ShouldIncludeDoclet(JavaScriptDoclet doclet, bool requirePublicTag)
@@ -2608,9 +3119,12 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return null;
         }
 
-        return Regex.IsMatch(type, @"^[A-Za-z_$][A-Za-z0-9_$]*$", RegexOptions.CultureInvariant)
-            ? type
-            : null;
+        if (Regex.IsMatch(type, @"^[A-Za-z_$][A-Za-z0-9_$]*$", RegexOptions.CultureInvariant))
+        {
+            return type;
+        }
+
+        return null;
     }
 
     private static bool IsKnownNonTypedefTypeName(string type)
@@ -2892,10 +3406,23 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         return normalized.Length == 0 ? "unnamed" : normalized;
     }
 
+    private static string SlugifyJavaScriptIdentifier(string value)
+    {
+        var separated = Regex.Replace(
+            value,
+            "(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])",
+            "-",
+            RegexOptions.CultureInvariant);
+        return Slugify(separated);
+    }
+
     private static string BuildAnchorPrefix(JavaScriptApiKind kind)
     {
         return kind switch
         {
+            JavaScriptApiKind.InstanceMethod or JavaScriptApiKind.StaticMethod => "method",
+            JavaScriptApiKind.InstanceGetter or JavaScriptApiKind.StaticGetter => "getter",
+            JavaScriptApiKind.InstanceSetter or JavaScriptApiKind.StaticSetter => "setter",
             JavaScriptApiKind.ModuleContract => "module-contract",
             JavaScriptApiKind.CssCustomProperty => "css-custom-property",
             JavaScriptApiKind.CssHook => "css-hook",
@@ -2907,6 +3434,14 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     {
         return kind switch
         {
+            JavaScriptApiKind.Class => "JavaScript Class",
+            JavaScriptApiKind.Constructor => "JavaScript Constructor",
+            JavaScriptApiKind.InstanceMethod => "JavaScript Instance Method",
+            JavaScriptApiKind.StaticMethod => "JavaScript Static Method",
+            JavaScriptApiKind.InstanceGetter => "JavaScript Instance Getter",
+            JavaScriptApiKind.StaticGetter => "JavaScript Static Getter",
+            JavaScriptApiKind.InstanceSetter => "JavaScript Instance Setter",
+            JavaScriptApiKind.StaticSetter => "JavaScript Static Setter",
             JavaScriptApiKind.ModuleContract => "JavaScript Module Contract",
             JavaScriptApiKind.CssCustomProperty => "JavaScript CSS Custom Property",
             JavaScriptApiKind.CssHook => "JavaScript CSS Hook",
@@ -3013,6 +3548,14 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         Function,
         Constant,
         Global,
+        Class,
+        Constructor,
+        InstanceMethod,
+        StaticMethod,
+        InstanceGetter,
+        StaticGetter,
+        InstanceSetter,
+        StaticSetter,
         Event,
         Typedef,
         Attribute,
@@ -3138,6 +3681,24 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string RouteSlugSeed,
         IReadOnlyList<JavaScriptApiItem> Items);
 
+    private enum JavaScriptClassMemberKind
+    {
+        Constructor,
+        Method,
+        Getter,
+        Setter
+    }
+
+    private enum JavaScriptClassMemberScope
+    {
+        Instance,
+        Static
+    }
+
+    private readonly record struct JavaScriptClassMemberShape(
+        JavaScriptClassMemberKind Kind,
+        JavaScriptClassMemberScope Scope);
+
     private sealed record JavaScriptApiItem(
         string Name,
         JavaScriptApiKind Kind,
@@ -3173,6 +3734,24 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         public string AnchorId { get; set; } = string.Empty;
 
         public JavaScriptTypedefReference? TypeReference { get; set; }
+
+        public string? AnchorIdentity { get; init; }
+
+        public int? TopLevelDeclarationStartLine { get; init; }
+
+        public int DeclarationOrdinal { get; init; }
+
+        public int HeadingLevel { get; init; } = 2;
+
+        public string? DeclaringClassName { get; init; }
+
+        public JavaScriptClassMemberKind? ClassMemberKind { get; init; }
+
+        public string DisplayName => DeclaringClassName is null
+            ? Name
+            : ClassMemberKind == JavaScriptClassMemberKind.Constructor
+                ? $"{DeclaringClassName}.constructor"
+                : Name;
     }
 
     private sealed record JavaScriptApiLifecycle(

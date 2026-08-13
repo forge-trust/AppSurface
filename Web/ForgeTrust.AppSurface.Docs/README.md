@@ -1794,6 +1794,7 @@ Supported public shapes:
 - attached `const name = (...) => ...` and `const name = function (...) { ... }` doclets, with one declarator per statement
 - attached `const name = value` doclets, with one declarator per statement
 - attached `window.Name = ...` or `window["Name"] = ...` doclets
+- attached named `class Name { ... }` and `export class Name { ... }` doclets, with an independently annotated constructor, method, getter, or setter for every member that should publish
 - standalone `@event event:name` doclets
 - standalone `@typedef {Type} Name` doclets
 - standalone `@attribute name` doclets for package-owned HTML or `data-*` attributes
@@ -1838,6 +1839,53 @@ Every valid generated JavaScript API symbol has the reader-facing lifecycle labe
 The built-in search index projects `apiLifecycle`, `apiLifecycleLabel`, `isDeprecated`, and `isGeneratedApiSymbol` only for validated generated JavaScript API fragments. The search client uses lifecycle values as searchable terms and ranks matching symbol fragments ahead of aggregate API group-body matches. Custom search clients should treat the fields as optional additions to the v1 payload and should not infer lifecycle from ordinary page metadata. Custom harvesters retain the public model shape, but lifecycle values are projected only when the built-in JavaScript harvester has recorded internal provenance and the fragment meets the canonical lifecycle contract.
 
 Invalid combinations skip only the affected item and emit structured diagnostics: repeated or mixed `@alpha`/`@beta` modifiers and conflicting nonblank `@deprecated` messages use `DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict`; modifiers with content use `DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle`. These diagnostics remain warnings in best-effort discovery and become errors when `AppSurfaceDocs:Harvest:JavaScript:StrictHealth=true`. A configured JavaScript include boundary still makes either lifecycle diagnostic fail aggregate strict health, even when the individual diagnostic remains warning-severity.
+
+#### Five-minute class contract recipe
+
+Use a declaration-only class contract when the runtime is class-shaped but consumers receive a package-owned singleton. Keep the singleton config as the first thing readers discover, and document each public method independently:
+
+```js
+/**
+ * Singleton manager exposed to browser consumers.
+ * Consumers use `window.RazorWire.sectionCopyManager`; do not construct `SectionCopyManager`.
+ * @public
+ * @namespace RazorWire
+ * @config window.RazorWire.sectionCopyManager
+ * @type {SectionCopyManager}
+ */
+
+/**
+ * Declaration-only class contract for the singleton.
+ * @public
+ * @namespace RazorWire
+ * @class SectionCopyManager
+ */
+class SectionCopyManager {
+  /** @public @method scan */
+  scan() {}
+
+  /** @public @method prune */
+  prune() {}
+
+  /** @public @method getDiagnostics
+   * @returns {RazorWireSectionCopyDiagnostic[]}
+   */
+  getDiagnostics() {}
+
+  /** @public @method clearDiagnostics */
+  clearDiagnostics() {}
+}
+```
+
+Do not add a constructor to a singleton contract. The harvester renders the declaration-only class and only those methods or accessors that carry their own `@public` annotation; the docs-only manifest remains the authoritative contract because generated bundles and TypeScript source are intentionally not harvest inputs. For the real TypeScript implementation, add one exact begin/end source marker around the class and test marker uniqueness/order without parsing TypeScript or comparing method signatures.
+
+| Decision | Author this shape | Avoid this shape |
+| --- | --- | --- |
+| Consumers access one package-owned runtime instance | `@config window.RazorWire.sectionCopyManager` plus a declaration-only class | A public constructor example or a second manager instance |
+| Consumers need a named object payload | Same-group `@typedef` with `@property` fields | Repeating a large anonymous object in every method or event |
+| Consumers call stable operations | One independently `@public` method doclet per operation | One class-level property list that duplicates method contracts |
+| A method returns reusable diagnostics | Same-group typedef, referenced from `@returns` | An undocumented `object[]` or a second diagnostic schema |
+| Runtime code is TypeScript or generated JavaScript | Docs-only `.js` contract plus a source marker around authored implementation | Harvesting minified output or assuming TypeScript is parsed |
 
 Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`, and detail payload fields through `@property detail.name` or an exact payload reference such as `@property {FormFailureDetail} detail`. Use `@detail none` only when the event deliberately carries no payload. Add `@example` when the event needs consumption guidance beyond the contract fields.
 
@@ -1944,7 +1992,7 @@ Browser-contract doclets should carry enough fields for readers to use them with
  */
 ```
 
-Unsupported public classes, CommonJS export inference, malformed public doclets, invalid lifecycle combinations, incomplete event contracts, missing or ambiguous exact typedef references, oversized files, parse failures, missing exact includes, configured reparse-point includes, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially. The strict event diagnostic code is `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`). The configured-link diagnostic is `DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped` (`appsurfacedocs.javascript.reparse_point_skipped`); its problem, cause, and fix are redacted to repository-relative include paths and do not reveal the symlink target.
+Named, non-derived class declarations are supported when the class and every published method or accessor have their own `@public` annotation; unnamed/default-exported classes, class expressions, fields, private or computed members, async/generator methods, static blocks, and derived classes are skipped with a `DocHarvestDiagnostic`. CommonJS export inference, malformed public doclets, invalid lifecycle combinations, incomplete event contracts, missing or ambiguous exact typedef references, oversized files, parse failures, missing exact includes, configured reparse-point includes, and duplicate normalized anchors follow the same diagnostic path. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially. The strict event diagnostic code is `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`). The configured-link diagnostic is `DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped` (`appsurfacedocs.javascript.reparse_point_skipped`); its problem, cause, and fix are redacted to repository-relative include paths and do not reveal the symlink target.
 
 The event-dispatch verifier emits `DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing` (`appsurfacedocs.javascript.event_doclet_dispatch_missing`) when a public `@event` doclet has no matching literal dispatch evidence, and `DocHarvestDiagnosticCodes.JavaScriptEventDispatchDocletMissing` (`appsurfacedocs.javascript.event_dispatch_doclet_missing`) when a literal `CustomEvent` dispatch has no matching public doclet. Both are warning diagnostics. They appear in health responses and successful `docs verify-health` warning output, but they are intentionally not strict blocking diagnostics.
 

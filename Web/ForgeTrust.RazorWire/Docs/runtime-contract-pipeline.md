@@ -41,6 +41,8 @@ The root `assets:typecheck`, `assets:test`, `assets:build`, and `assets:verify` 
 - `assets/contracts/razorwire-public-contracts.js` is a docs-only manifest for AppSurface Docs JavaScript API harvesting. It documents browser contracts without forcing the harvester to parse generated runtime bundles.
 - `wwwroot/razorwire/exampleJsInterop.js` remains hand-authored, demo-only JavaScript. It is not part of the generated runtime pipeline.
 
+The section-copy manager has two deliberately separate documentation boundaries: the manifest documents the consumer-facing singleton and a declaration-only `SectionCopyManager` class, while the TypeScript runtime keeps the implementation behind the exact `appsurface:source-marker` begin/end pair in [`assets/src/section-copy.ts`](../assets/src/section-copy.ts). The marker is a future harvesting anchor, not a generated bundle input or a permission to construct a second manager.
+
 Generated outputs stay committed because Razor Class Library static web assets, embedded fallback resources, command-line hosts, and existing consumers depend on those physical paths.
 
 ## Public Contract
@@ -57,6 +59,7 @@ The TypeScript migration preserves the public browser surface:
   - `/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js`
 - Tag helper output: `<rw:scripts />`, `<rw:scripts behavior-kit="true" />`, the bundled or custom same-origin Turbo script selected by `RazorWireOptions.Turbo`, host-managed omission, and lazy/eager split-runtime detectors. Hosts that need a cross-origin URL, subresource integrity, or custom script attributes own the complete Turbo tag and its synchronous load order through `HostManaged` mode.
 - Global state: `window.RazorWire`, `window.RazorWire.config`, `connectionManager`, `localTimeFormatter`, `formFailureManager`, `pageNavigationManager`, `sectionCopyManager`, `formInteractionsManager`, and `behaviors`.
+- Section copy: consumers use the singleton `window.RazorWire.sectionCopyManager`; they call `scan()` after out-of-band DOM changes, use `prune()` for disconnected roots, and use `getDiagnostics()`/`clearDiagnostics()` for recovery. Do not construct `SectionCopyManager`.
 - Form events: `razorwire:form:submit-start`, `razorwire:form:failure`, `razorwire:form:diagnostic`, and `razorwire:form:submit-end`.
 - DOM hooks: `data-rw-*` form, island, page-navigation, and section-copy attributes, including generated failure UI and section-copy fallback markers.
 - CSS hooks: RazorWire form failure variables, generated form error attributes, page-navigation state attributes, and section-copy state/fallback attributes.
@@ -99,5 +102,6 @@ Treat that property as an incident escape hatch. Re-run the asset verifier and r
 - Do not change public strategy taxonomy from `only` to `immediate`; existing docs and generated UI use `only`.
 - Do not enable source maps by default. Package consumers should receive compact runtime assets without source-map sidecars.
 - Do not move AppSurface Docs harvesting back to minified runtime outputs. Update `assets/contracts/razorwire-public-contracts.js` when the public JavaScript contract changes.
+- Keep singleton contracts and implementation anchors aligned: update the manifest, the marker-focused Node tests, and [Section Copy](section-copy.md) together when the section-copy manager contract changes.
 - Do not treat `exampleJsInterop.js` as a runtime source file. It exists for demos and examples only.
 - Do not add app-specific classes, icons, or layout assumptions to generated section-copy buttons or fallback UI. Hosts should decorate stable `data-rw-section-copy*` hooks outside the package runtime.

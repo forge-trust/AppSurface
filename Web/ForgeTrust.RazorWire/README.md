@@ -255,7 +255,7 @@ Use RazorWire section copy when long-form pages need "copy link to this section"
 </button>
 ```
 
-RazorWire resolves ids document-wide, writes copied/fallback state through stable `data-rw-section-copy*` hooks, announces feedback through an optional live status region, and renders an inline readonly-input fallback when clipboard writes are unavailable. See the full contract in [Section Copy](Docs/section-copy.md).
+RazorWire resolves ids document-wide, writes copied/fallback state through stable `data-rw-section-copy*` hooks, announces feedback through an optional live status region, and renders an inline readonly-input fallback when clipboard writes are unavailable. The runtime exposes one manager at `window.RazorWire.sectionCopyManager`; use its `scan()`, `prune()`, and diagnostic methods rather than constructing a manager. See the full singleton-first contract and recovery recipe in [Section Copy](Docs/section-copy.md), and the source/manifest boundary in [Runtime Contract Pipeline](Docs/runtime-contract-pipeline.md).
 
 ## Generated UI Design Contract
 

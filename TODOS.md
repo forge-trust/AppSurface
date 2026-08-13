@@ -21,3 +21,7 @@
 - Design a separate composition contract for tenant/context pair selection together with browser-local user mode preference only when an adopter needs both. It must define first-paint order, CSP behavior, static-export limits, failure semantics, and migration guidance; do not let two document-provider opt-ins silently compose.
 - Revisit asynchronous selection only when a supported host context cannot be resolved before rendering without I/O. Keep tenant lookup and caching upstream from the Web rendering path by default.
 - Consider an explicit compatible-provider/decorator marker only if enterprise adopters demonstrate that the strict custom-provider escape path blocks legitimate instrumentation or resilience wrappers.
+
+## JavaScript class harvesting follow-ups (#301)
+
+- Define derived-class and inherited-member documentation semantics only when a package author needs them. The follow-up must decide source identity, rendered hierarchy, stable anchors, search behavior, and diagnostics before locally declared derived-class members can be harvested; do not partially publish an inheritance model.

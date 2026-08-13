@@ -15,6 +15,7 @@ const islandsPath = new URL('../wwwroot/razorwire/razorwire.islands.js', import.
 const behaviorKitPath = new URL('../wwwroot/razorwire/behavior-kit.js', import.meta.url);
 const pageNavigationPath = new URL('../wwwroot/razorwire/page-navigation.js', import.meta.url);
 const sectionCopyPath = new URL('../wwwroot/razorwire/section-copy.js', import.meta.url);
+const sectionCopySourcePath = new URL('../assets/src/section-copy.ts', import.meta.url);
 const formInteractionsPath = new URL('../wwwroot/razorwire/form-interactions.js', import.meta.url);
 const turboPath = new URL('../wwwroot/razorwire/turbo.es2017-umd.js', import.meta.url);
 const packageRoot = new URL('../', import.meta.url);
@@ -90,6 +91,41 @@ test('public contract manifest includes page navigation, section copy, and form 
   assert.match(contracts, /BehaviorDiagnostic/);
   assert.match(contracts, /BehaviorConnectFailed/);
   assert.match(contracts, /BehaviorLifecycleEventInvalid/);
+});
+
+test('section copy manager source markers fence the runtime class exactly once and in order', () => {
+  const source = readFileSync(sectionCopySourcePath, 'utf8');
+  const beginMarker = '// appsurface:source-marker id="razorwire-section-copy-manager" position="begin"';
+  const endMarker = '// appsurface:source-marker id="razorwire-section-copy-manager" position="end"';
+
+  assert.equal(source.split(beginMarker).length - 1, 1);
+  assert.equal(source.split(endMarker).length - 1, 1);
+
+  const beginIndex = source.indexOf(beginMarker);
+  const classIndex = source.indexOf('class SectionCopyManager', beginIndex);
+  const endIndex = source.indexOf(endMarker, classIndex);
+  const managerSource = source.slice(classIndex, endIndex);
+  const runtimeMethods = managerSource
+    .split('\n')
+    .map(line => line.trim())
+    .flatMap(line => {
+      const match = /^(scan|prune|getDiagnostics|clearDiagnostics)\s*\(/.exec(line);
+      return match ? [match[1]] : [];
+    });
+
+  assert.ok(beginIndex < classIndex);
+  assert.ok(classIndex < endIndex);
+  assert.deepEqual(runtimeMethods, ['scan', 'prune', 'getDiagnostics', 'clearDiagnostics']);
+});
+
+test('section copy public contract documents only the four singleton methods', () => {
+  const contracts = readFileSync(new URL('assets/contracts/razorwire-public-contracts.js', packageRoot), 'utf8');
+  const classIndex = contracts.indexOf('class SectionCopyManager');
+  const classBlock = contracts.slice(classIndex, contracts.indexOf('\n}', classIndex));
+  const methods = [...classBlock.matchAll(/@method\s+([A-Za-z]+)/g)].map(match => match[1]);
+
+  assert.deepEqual(methods, ['scan', 'prune', 'getDiagnostics', 'clearDiagnostics']);
+  assert.doesNotMatch(classBlock, /constructor\s*\(/);
 });
 
 test('core behavior stub de-dupes missing-kit diagnostics', () => {

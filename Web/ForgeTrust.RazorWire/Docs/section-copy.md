@@ -33,7 +33,38 @@ Plain `<rw:scripts/>` is enough. It emits a small detector that loads `section-c
 - `data-rw-section-copy-status="true"` marks an optional `aria-live="polite"` or `aria-live="assertive"` status region.
 - `data-rw-section-copy-root="true"` optionally scopes generated status, timers, and cleanup. Without a root, RazorWire uses the document body.
 
-RazorWire exposes `window.RazorWire.sectionCopyManager` with `scan()`, `prune()`, `getDiagnostics()`, and `clearDiagnostics()`. Call `scan()` after custom DOM updates that add section-copy markup outside normal Turbo render events.
+RazorWire exposes one singleton at `window.RazorWire.sectionCopyManager` with `scan()`, `prune()`, `getDiagnostics()`, and `clearDiagnostics()`. Consumers must not call `new SectionCopyManager()`; the browser runtime owns the manager lifetime. Call `scan()` after custom DOM updates that add section-copy markup outside normal Turbo render events. The [RazorWire public contract manifest](../assets/contracts/razorwire-public-contracts.js) records the singleton and its declaration-only class shape for generated API docs.
+
+## Singleton-First Usage And Recovery
+
+Use the singleton after the section-copy bundle has loaded:
+
+```js
+const manager = window.RazorWire?.sectionCopyManager;
+manager?.scan();
+```
+
+For a host that replaces or appends markup outside Turbo, the safe sequence is:
+
+1. Update the DOM.
+2. Call `window.RazorWire.sectionCopyManager.scan()`.
+3. If a marker was rejected, inspect `getDiagnostics()`.
+4. Fix the markup, call `clearDiagnostics()`, and call `scan()` again.
+
+`prune()` is useful when a host removes a root without a normal lifecycle event. It only releases disconnected controllers; it does not repair invalid target ids or missing accessibility attributes.
+
+```js
+const manager = window.RazorWire?.sectionCopyManager;
+const diagnostics = manager?.getDiagnostics() ?? [];
+
+if (diagnostics.length > 0) {
+    console.table(diagnostics);
+    manager?.clearDiagnostics();
+    manager?.scan();
+}
+```
+
+Keep the manager access behind the singleton global. Do not retain a second manager, replace `window.RazorWire.sectionCopyManager`, or construct the declaration-only `SectionCopyManager` contract directly.
 
 ## Runtime-Owned Hooks
 
