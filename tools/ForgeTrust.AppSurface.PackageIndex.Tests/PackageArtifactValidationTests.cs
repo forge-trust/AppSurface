@@ -5331,6 +5331,21 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 Directory.GetParent(_repositoryRoot)!.FullName + Path.DirectorySeparatorChar,
                 _repositoryRoot,
                 artifactDirectory));
+        Assert.Throws<PackageIndexException>(
+            () => PackageProofWorkDirectory.Prepare(
+                CombineSafeChildPath(_repositoryRoot, ".git"),
+                _repositoryRoot,
+                artifactDirectory));
+        Assert.Throws<PackageIndexException>(
+            () => PackageProofWorkDirectory.Prepare(
+                CombineSafeChildPath(_repositoryRoot, "non-artifact-proof"),
+                _repositoryRoot,
+                artifactDirectory));
+        Assert.Throws<PackageIndexException>(
+            () => PackageProofWorkDirectory.Prepare(
+                CombineSafeChildPath(_repositoryRoot, ".git"),
+                _repositoryRoot,
+                Directory.GetParent(_repositoryRoot)!.FullName));
 
         var filesystemRoot = Path.GetPathRoot(_repositoryRoot);
         if (!string.IsNullOrWhiteSpace(filesystemRoot))
@@ -5629,7 +5644,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                   "HtmlSanitizer": { "type": "Transitive" },
                   "ForgeTrust.AppSurface.Docs": { "type": "Project" }
                 },
-                "not-a-framework": []
+                "netstandard2.0": {}
               }
             }
             """);
