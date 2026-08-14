@@ -56,6 +56,7 @@ public class DocsController : Controller
     private readonly AppSurfaceDocsHarvestCoordinator? _harvestCoordinator;
     private readonly AppSurfaceDocsSearchQualityReadModel? _searchQualityReadModel;
     private readonly IAppSurfaceProductIntelligence? _productIntelligence;
+    private readonly string _harvestProgressChannel;
 
     /// <summary>
     /// Initializes a new instance of <see cref="DocsController"/> for ad hoc callers that only supply the doc aggregator and logger.
@@ -80,7 +81,8 @@ public class DocsController : Controller
                 new DocsUrlBuilder(new AppSurfaceDocsOptions())),
             new AppSurfaceDocsOptions(),
             new DefaultWebHostEnvironment(),
-            logger)
+            logger,
+            harvestProgressChannel: AppSurfaceDocsStreamAuthorization.HarvestProgressChannel)
     {
     }
 
@@ -109,7 +111,8 @@ public class DocsController : Controller
             featuredPageResolver,
             new AppSurfaceDocsOptions(),
             new DefaultWebHostEnvironment(),
-            logger)
+            logger,
+            harvestProgressChannel: AppSurfaceDocsStreamAuthorization.HarvestProgressChannel)
     {
     }
 
@@ -132,13 +135,39 @@ public class DocsController : Controller
             new DocFeaturedPageResolver(NullLogger<DocFeaturedPageResolver>.Instance, docsUrlBuilder),
             new AppSurfaceDocsOptions(),
             new DefaultWebHostEnvironment(),
-            logger)
+            logger,
+            harvestProgressChannel: AppSurfaceDocsStreamAuthorization.HarvestProgressChannel)
     {
     }
 
     /// <summary>
-    /// Initializes a new instance of <see cref="DocsController"/> with the specified documentation services.
+    /// Initializes a Docs controller by resolving the runtime selected for the current Docs endpoint.
     /// </summary>
+    /// <param name="environment">Host environment used for development-default health visibility.</param>
+    /// <param name="logger">Logger used for search index diagnostics.</param>
+    /// <param name="runtimeAccessor">Accessor that selects the endpoint-owned Docs runtime.</param>
+    /// <param name="productIntelligence">Optional product-intelligence dispatcher used to forward accepted metrics to host sinks.</param>
+    [ActivatorUtilitiesConstructor]
+    public DocsController(
+        IAppSurfaceDocsRequestRuntimeAccessor runtimeAccessor,
+        IWebHostEnvironment environment,
+        ILogger<DocsController> logger,
+        IAppSurfaceProductIntelligence? productIntelligence = null)
+        : this(
+            runtimeAccessor.GetRequiredRuntime(),
+            environment,
+            logger,
+            productIntelligence)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a Docs controller from explicit services for tests and non-DI callers.
+    /// </summary>
+    /// <remarks>
+    /// Endpoint-driven applications should use the request-runtime constructor. This overload intentionally remains a
+    /// public compatibility seam for callers that need to compose a controller without an HTTP endpoint metadata scope.
+    /// </remarks>
     /// <param name="aggregator">Service used to retrieve documentation items.</param>
     /// <param name="docsUrlBuilder">Shared URL builder for the live source-backed docs surface.</param>
     /// <param name="versionCatalogService">Resolved catalog service for published docs versions.</param>
@@ -149,7 +178,6 @@ public class DocsController : Controller
     /// <param name="harvestCoordinator">Optional initial-harvest coordinator used to render the live harvest observatory during cold starts.</param>
     /// <param name="searchQualityReadModel">Optional hosted search-quality read model used by metrics collection and review.</param>
     /// <param name="productIntelligence">Optional product-intelligence dispatcher used to forward accepted metrics to host sinks.</param>
-    [ActivatorUtilitiesConstructor]
     public DocsController(
         DocAggregator aggregator,
         DocsUrlBuilder docsUrlBuilder,
@@ -161,6 +189,55 @@ public class DocsController : Controller
         AppSurfaceDocsHarvestCoordinator? harvestCoordinator = null,
         AppSurfaceDocsSearchQualityReadModel? searchQualityReadModel = null,
         IAppSurfaceProductIntelligence? productIntelligence = null)
+        : this(
+            aggregator,
+            docsUrlBuilder,
+            versionCatalogService,
+            featuredPageResolver,
+            options,
+            environment,
+            logger,
+            harvestCoordinator,
+            searchQualityReadModel,
+            productIntelligence,
+            AppSurfaceDocsStreamAuthorization.HarvestProgressChannel)
+    {
+    }
+
+    private DocsController(
+        AppSurfaceDocsRuntime runtime,
+        IWebHostEnvironment environment,
+        ILogger<DocsController> logger,
+        IAppSurfaceProductIntelligence? productIntelligence = null)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+
+        _aggregator = runtime.Aggregator;
+        _docsUrlBuilder = runtime.DocsUrlBuilder;
+        _recoveryLinkBuilder = runtime.RecoveryLinkBuilder;
+        _versionCatalogService = runtime.VersionCatalogService;
+        _featuredPageResolver = runtime.FeaturedPageResolver;
+        _options = runtime.Options;
+        _environment = environment ?? throw new ArgumentNullException(nameof(environment));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _harvestCoordinator = runtime.HarvestCoordinator;
+        _searchQualityReadModel = runtime.SearchQualityReadModel;
+        _productIntelligence = productIntelligence;
+        _harvestProgressChannel = runtime.HarvestProgressReporter.StreamChannelName;
+    }
+
+    private DocsController(
+        DocAggregator aggregator,
+        DocsUrlBuilder docsUrlBuilder,
+        AppSurfaceDocsVersionCatalogService versionCatalogService,
+        DocFeaturedPageResolver featuredPageResolver,
+        AppSurfaceDocsOptions options,
+        IWebHostEnvironment environment,
+        ILogger<DocsController> logger,
+        AppSurfaceDocsHarvestCoordinator? harvestCoordinator = null,
+        AppSurfaceDocsSearchQualityReadModel? searchQualityReadModel = null,
+        IAppSurfaceProductIntelligence? productIntelligence = null,
+        string harvestProgressChannel = "")
     {
         _aggregator = aggregator ?? throw new ArgumentNullException(nameof(aggregator));
         _docsUrlBuilder = docsUrlBuilder ?? throw new ArgumentNullException(nameof(docsUrlBuilder));
@@ -173,6 +250,9 @@ public class DocsController : Controller
         _harvestCoordinator = harvestCoordinator;
         _searchQualityReadModel = searchQualityReadModel;
         _productIntelligence = productIntelligence;
+        _harvestProgressChannel = string.IsNullOrWhiteSpace(harvestProgressChannel)
+            ? throw new ArgumentException("A harvest progress channel is required.", nameof(harvestProgressChannel))
+            : harvestProgressChannel;
     }
 
     /// <summary>
@@ -198,17 +278,24 @@ public class DocsController : Controller
     }
 
     /// <summary>
-    /// Displays the stable docs entry fallback when versioning is enabled but the recommended released tree is not mounted.
+    /// Resolves the stable Docs entry to the recommended release or its archive fallback.
     /// </summary>
     /// <returns>
-    /// A view result describing the available released versions plus the current preview surface, or a redirect to the
-    /// live docs home when versioning is disabled.
+    /// A redirect to the available recommended exact release, a view result describing available released versions plus
+    /// the current preview surface when no release is mounted, or a redirect to the live docs home when versioning is
+    /// disabled.
     /// </returns>
     public IActionResult VersionEntry()
     {
         if (!_docsUrlBuilder.VersioningEnabled)
         {
             return Redirect(PathBaseAware(_docsUrlBuilder.BuildHomeUrl()));
+        }
+
+        var recommendedVersion = _versionCatalogService.GetCatalog().RecommendedVersion;
+        if (recommendedVersion is { IsAvailable: true })
+        {
+            return Redirect(PathBaseAware(recommendedVersion.ExactRootUrl));
         }
 
         return View("Versions", BuildVersionArchiveViewModel(entryFallback: true));
@@ -1119,7 +1206,8 @@ public class DocsController : Controller
                 Progress = _harvestCoordinator.CurrentProgress,
                 ReturnUrl = ResolveCurrentRequestReturnUrl(),
                 CompletionNavigationDelayMilliseconds = _harvestCoordinator.CompletionDelay,
-                CanUseLiveProgress = await CanUseLiveHarvestProgressAsync()
+                CanUseLiveProgress = await CanUseLiveHarvestProgressAsync(),
+                HarvestProgressChannel = _harvestProgressChannel
             });
     }
 
@@ -1136,7 +1224,7 @@ public class DocsController : Controller
         // and tests.
         var streamAuthorizationContext = new RazorWireStreamAuthorizationContext(
             HttpContext,
-            AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
+            _harvestProgressChannel,
             requestServices.GetService<RazorWireOptions>()?.Streams.AuthorizationMode
             ?? RazorWireStreamAuthorizationMode.DenyAll);
 
@@ -1164,7 +1252,7 @@ public class DocsController : Controller
             {
                 return await channelAuthorizer.CanSubscribeAsync(
                     HttpContext,
-                    AppSurfaceDocsStreamAuthorization.HarvestProgressChannel);
+                    _harvestProgressChannel);
             }
 
             return AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment)

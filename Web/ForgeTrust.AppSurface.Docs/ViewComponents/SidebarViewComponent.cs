@@ -39,7 +39,32 @@ public class SidebarViewComponent : ViewComponent
     /// <param name="aggregator">The documentation aggregator used to retrieve document nodes.</param>
     /// <param name="options">Typed AppSurface Docs options used for optional namespace prefix simplification settings.</param>
     public SidebarViewComponent(DocAggregator aggregator, AppSurfaceDocsOptions options)
-        : this(aggregator, options, new DocsUrlBuilder(options), new DefaultWebHostEnvironment())
+        : this(
+            aggregator,
+            options,
+            new DocsUrlBuilder(options),
+            new DefaultWebHostEnvironment(),
+            CreateHarvestHealthLookup(aggregator))
+    {
+    }
+
+    /// <summary>
+    /// Initializes a sidebar for direct callers that already own the route builder and host environment.
+    /// </summary>
+    /// <remarks>
+    /// This compatibility overload remains useful for tests and non-DI callers. Endpoint-driven hosts should use the
+    /// request-runtime constructor so a named Docs endpoint cannot accidentally render another product's navigation.
+    /// </remarks>
+    /// <param name="aggregator">The documentation aggregator used to retrieve document nodes.</param>
+    /// <param name="options">Typed AppSurface Docs options used for sidebar settings.</param>
+    /// <param name="docsUrlBuilder">Shared URL builder for the matching Docs surface.</param>
+    /// <param name="environment">Host environment used for diagnostics visibility.</param>
+    public SidebarViewComponent(
+        DocAggregator aggregator,
+        AppSurfaceDocsOptions options,
+        DocsUrlBuilder docsUrlBuilder,
+        IWebHostEnvironment environment)
+        : this(aggregator, options, docsUrlBuilder, environment, CreateHarvestHealthLookup(aggregator))
     {
     }
 
@@ -47,22 +72,26 @@ public class SidebarViewComponent : ViewComponent
     /// Initializes a new instance of the <see cref="SidebarViewComponent"/> class.
     /// </summary>
     /// <remarks>
-    /// This is the dependency-injection-preferred overload. The shared <paramref name="docsUrlBuilder"/> should stay
-    /// aligned with <paramref name="options"/> so route detection, search-path checks, and generated sidebar links all
-    /// describe the same docs surface. Prefer this overload whenever a host already registered a shared or
-    /// preconfigured <see cref="DocsUrlBuilder"/> instance.
+    /// This is the dependency-injection-preferred overload. It resolves the runtime selected by endpoint metadata, so
+    /// route detection, search-path checks, and generated sidebar links all describe the same named Docs surface.
     /// </remarks>
-    /// <param name="aggregator">The documentation aggregator used to retrieve document nodes.</param>
-    /// <param name="options">Typed AppSurface Docs options used for optional namespace prefix simplification settings.</param>
-    /// <param name="docsUrlBuilder">Shared URL builder for the live source-backed docs surface.</param>
+    /// <param name="runtimeAccessor">Accessor that selects the current endpoint-owned Docs runtime.</param>
     /// <param name="environment">Host environment used for development-default health chrome visibility.</param>
     [ActivatorUtilitiesConstructor]
     public SidebarViewComponent(
-        DocAggregator aggregator,
-        AppSurfaceDocsOptions options,
-        DocsUrlBuilder docsUrlBuilder,
+        IAppSurfaceDocsRequestRuntimeAccessor runtimeAccessor,
         IWebHostEnvironment environment)
-        : this(aggregator, options, docsUrlBuilder, environment, CreateHarvestHealthLookup(aggregator))
+        : this(runtimeAccessor.GetRequiredRuntime(), environment)
+    {
+    }
+
+    private SidebarViewComponent(AppSurfaceDocsRuntime runtime, IWebHostEnvironment environment)
+        : this(
+            runtime.Aggregator,
+            runtime.Options,
+            runtime.DocsUrlBuilder,
+            environment,
+            runtime.Aggregator.GetHarvestHealthAsync)
     {
     }
 

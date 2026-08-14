@@ -1,19 +1,25 @@
 @using System.Text.Json
 @using ForgeTrust.AppSurface.Intelligence
 @inject ForgeTrust.AppSurface.Docs.AppSurfaceDocsAssetPathResolver AssetPathResolver
-@inject ForgeTrust.AppSurface.Docs.AppSurfaceDocsAssetVersioner AssetVersioner
-@inject ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsIdentityResolver IdentityResolver
-@inject ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsThemeResolver ThemeResolver
-@inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrlBuilder
-@inject ForgeTrust.AppSurface.Docs.AppSurfaceDocsOptions DocsOptions
+@inject ForgeTrust.AppSurface.Docs.IAppSurfaceDocsRequestRuntimeAccessor RuntimeAccessor
 @inject ForgeTrust.AppSurface.Web.Theming.IAppSurfaceThemeDocumentProvider ThemeDocumentProvider
 @inject Microsoft.Extensions.Options.IOptions<AppSurfaceProductIntelligenceOptions> ProductIntelligenceOptions
 @{
-    var stylesheetPath = AssetVersioner.AppendVersion(AssetPathResolver.StylesheetPath, "css/site.gen.css");
-    var docsIdentity = IdentityResolver.Identity;
+    var runtime = RuntimeAccessor.GetRequiredRuntime();
+    var assetVersioner = runtime.AssetVersioner;
+    var identityResolver = runtime.IdentityResolver;
+    var themeResolver = runtime.ThemeResolver;
+    var docsUrlBuilder = runtime.DocsUrlBuilder;
+    // These established local names now refer to the endpoint-selected runtime rather than global singleton services.
+    var AssetVersioner = assetVersioner;
+    var ThemeResolver = themeResolver;
+    var DocsUrlBuilder = docsUrlBuilder;
+    var docsOptions = runtime.Options;
+    var stylesheetPath = assetVersioner.AppendVersion(AssetPathResolver.StylesheetPath, "css/site.gen.css");
+    var docsIdentity = identityResolver.Identity;
     var docsTheme = ThemeResolver.Theme;
     var hasSystemThemeDocument = string.Equals(ThemeDocumentProvider.GetDocument().RootThemeMode, "system", StringComparison.Ordinal);
-    var docsRoutes = DocsUrlBuilder.Routes;
+    var docsRoutes = docsUrlBuilder.Routes;
     var docsRootUrl = Url.PathBaseAware(docsRoutes.Home);
     var docsHomeUrl = Url.PathBaseAware(docsIdentity.HomeHref);
     var docsSearchUrl = Url.PathBaseAware(docsRoutes.Search);
@@ -24,7 +30,7 @@
     var docsMiniSearchUrl = Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "minisearch.min.js"));
     var docsSearchClientUrl = Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "search-client.js"));
     var docsBrandIconUrl = Url.Content(AssetPathResolver.BrandIconPath);
-    var metricsOptions = DocsOptions.Metrics ?? new ForgeTrust.AppSurface.Docs.AppSurfaceDocsMetricsOptions();
+    var metricsOptions = docsOptions.Metrics ?? new ForgeTrust.AppSurface.Docs.AppSurfaceDocsMetricsOptions();
     var browserCollectorOptions = metricsOptions.BrowserCollector ?? new ForgeTrust.AppSurface.Docs.AppSurfaceDocsBrowserMetricsCollectorOptions();
     var hostedCollectionOptions = metricsOptions.HostedCollection ?? new ForgeTrust.AppSurface.Docs.AppSurfaceDocsHostedMetricsCollectionOptions();
     var hostedReviewOptions = metricsOptions.HostedReview ?? new ForgeTrust.AppSurface.Docs.AppSurfaceDocsHostedMetricsReviewOptions();
@@ -50,7 +56,7 @@
     var canonicalUrl = ViewData["CanonicalUrl"] as string;
     var canonicalHref = string.IsNullOrWhiteSpace(canonicalUrl)
         ? string.Empty
-        : Url.PathBaseAware(DocsUrlBuilder.BuildCanonicalHref(canonicalUrl));
+        : Url.PathBaseAware(docsUrlBuilder.BuildCanonicalHref(canonicalUrl));
     var docsClientConfigJson = JsonSerializer.Serialize(
         new
         {

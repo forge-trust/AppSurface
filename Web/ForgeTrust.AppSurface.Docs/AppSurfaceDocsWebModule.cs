@@ -711,6 +711,244 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             });
     }
 
+    /// <summary>
+    /// Maps the complete live endpoint family for one named Docs runtime.
+    /// </summary>
+    /// <remarks>
+    /// The caller supplies a route group already carrying <see cref="AppSurfaceDocsEndpointMetadata" /> and any
+    /// host-owned authorization conventions. Every route in this method therefore resolves one runtime through endpoint
+    /// metadata rather than an ambient default Docs service. Named published-tree handlers reserve only exact-version
+    /// routes, so host authorization conventions protect archive reads without preventing unmatched live Docs routes
+    /// from reaching their controller endpoints.
+    /// </remarks>
+    internal static void MapNamedInstanceEndpoints(
+        IEndpointRouteBuilder endpoints,
+        AppSurfaceDocsRuntime runtime,
+        Action<IEndpointConventionBuilder> applyInstanceConventions)
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+        ArgumentNullException.ThrowIfNull(runtime);
+        ArgumentNullException.ThrowIfNull(applyInstanceConventions);
+
+        var options = runtime.Options;
+        var urls = runtime.DocsUrlBuilder;
+        var routeNamePrefix = $"appsurfacedocs_{runtime.Name}";
+
+        if (runtime.PublishedTreeHandler is not null)
+        {
+            MapNamedPublishedTreeEndpoints(endpoints, urls, runtime.PublishedTreeHandler, applyInstanceConventions);
+        }
+
+        MapNamedBrandingAssetDirectory(endpoints, options, applyInstanceConventions);
+        MapNamedLegacyAssetRedirect(
+            endpoints,
+            urls.BuildAssetUrl("search.css"),
+            $"{AppSurfaceDocsStaticAssetBasePath}/search.css",
+            applyInstanceConventions);
+        MapNamedLegacyAssetRedirect(
+            endpoints,
+            urls.BuildAssetUrl("minisearch.min.js"),
+            $"{AppSurfaceDocsStaticAssetBasePath}/minisearch.min.js",
+            applyInstanceConventions);
+        MapNamedLegacyAssetRedirect(
+            endpoints,
+            urls.BuildAssetUrl("search-client.js"),
+            $"{AppSurfaceDocsStaticAssetBasePath}/search-client.js",
+            applyInstanceConventions);
+        MapNamedLegacyAssetRedirect(
+            endpoints,
+            urls.BuildAssetUrl("outline-client.js"),
+            $"{AppSurfaceDocsStaticAssetBasePath}/outline-client.js",
+            applyInstanceConventions);
+
+        if (options.Versioning?.Enabled == true)
+        {
+            var versionEntry = endpoints.MapControllerRoute(
+                name: $"{routeNamePrefix}_version_entry",
+                pattern: TrimLeadingSlash(urls.DocsEntryRootPath),
+                defaults: new { controller = "Docs", action = "VersionEntry" });
+            applyInstanceConventions(versionEntry);
+            var versions = endpoints.MapControllerRoute(
+                name: $"{routeNamePrefix}_versions",
+                pattern: TrimLeadingSlash(urls.BuildVersionsUrl()),
+                defaults: new { controller = "Docs", action = "Versions" });
+            applyInstanceConventions(versions);
+        }
+
+        var root = urls.CurrentDocsRootPath.TrimStart('/');
+        var search = TrimLeadingSlash(urls.BuildSearchUrl());
+        var searchIndex = TrimLeadingSlash(urls.BuildSearchIndexUrl());
+        var searchRefresh = TrimLeadingSlash(urls.BuildSearchIndexRefreshUrl());
+        var harvest = TrimLeadingSlash(urls.BuildHarvestUrl());
+        var harvestRebuild = TrimLeadingSlash(urls.BuildHarvestRebuildUrl());
+        var health = TrimLeadingSlash(urls.BuildHealthUrl());
+        var healthJson = TrimLeadingSlash(urls.BuildHealthJsonUrl());
+        var inspector = TrimLeadingSlash(urls.BuildRouteInspectorUrl());
+        var inspectorJson = TrimLeadingSlash(urls.BuildRouteInspectorJsonUrl());
+        var metrics = TrimLeadingSlash(urls.BuildMetricsCollectUrl());
+        var searchQuality = TrimLeadingSlash(urls.BuildSearchQualityUrl());
+        var section = TrimLeadingSlash(DocsUrlBuilder.JoinPath(urls.CurrentDocsRootPath, "sections/{sectionSlug}"));
+        var markdown = TrimLeadingSlash(DocsUrlBuilder.JoinPath(urls.CurrentDocsRootPath, "_markdown/{*path}"));
+        var details = TrimLeadingSlash(DocsUrlBuilder.JoinPath(urls.CurrentDocsRootPath, "{*path}"));
+
+        MapNamedControllerRoute(endpoints, routeNamePrefix, "index", root, "Index", applyInstanceConventions);
+        MapNamedControllerRoute(endpoints, routeNamePrefix, "search", search, "Search", applyInstanceConventions);
+        MapNamedControllerRoute(endpoints, routeNamePrefix, "search_index", searchIndex, "SearchIndex", applyInstanceConventions);
+        applyInstanceConventions(endpoints.MapMethods(
+            searchRefresh,
+            [HttpMethods.Delete, HttpMethods.Get, HttpMethods.Head, HttpMethods.Options, HttpMethods.Patch, HttpMethods.Put],
+            RejectSearchIndexRefreshUnsupportedMethodAsync));
+        MapNamedControllerRoute(endpoints, routeNamePrefix, "search_index_refresh", searchRefresh, "RefreshSearchIndex", applyInstanceConventions)
+            .WithMetadata(new HttpMethodMetadata([HttpMethods.Post]));
+        var namedHarvest = MapNamedControllerRoute(
+            endpoints,
+            routeNamePrefix,
+            "harvest",
+            harvest,
+            "Harvest",
+            applyInstanceConventions);
+        ApplyNamedPolicy(namedHarvest, ResolveHarvestReadAuthorizationPolicyName(options, endpoints.ServiceProvider));
+        applyInstanceConventions(endpoints.MapMethods(
+            harvestRebuild,
+            [HttpMethods.Delete, HttpMethods.Get, HttpMethods.Head, HttpMethods.Options, HttpMethods.Patch, HttpMethods.Put],
+            RejectHarvestRebuildUnsupportedMethodAsync));
+        MapNamedControllerRoute(endpoints, routeNamePrefix, "harvest_rebuild", harvestRebuild, "RebuildHarvest", applyInstanceConventions)
+            .WithMetadata(new HttpMethodMetadata([HttpMethods.Post]));
+        var namedHealth = MapNamedControllerRoute(
+            endpoints,
+            routeNamePrefix,
+            "harvest_health",
+            health,
+            "HarvestHealth",
+            applyInstanceConventions);
+        var namedHealthJson = MapNamedControllerRoute(
+            endpoints,
+            routeNamePrefix,
+            "harvest_health_json",
+            healthJson,
+            "HarvestHealthJson",
+            applyInstanceConventions);
+        var healthPolicy = ResolveHealthAuthorizationPolicyName(options, endpoints.ServiceProvider);
+        ApplyNamedPolicy(namedHealth, healthPolicy);
+        ApplyNamedPolicy(namedHealthJson, healthPolicy);
+
+        var namedRouteInspector = MapNamedControllerRoute(
+            endpoints,
+            routeNamePrefix,
+            "route_inspector",
+            inspector,
+            "RouteInspector",
+            applyInstanceConventions);
+        var namedRouteInspectorJson = MapNamedControllerRoute(
+            endpoints,
+            routeNamePrefix,
+            "route_inspector_json",
+            inspectorJson,
+            "RouteInspectorJson",
+            applyInstanceConventions);
+        var routeInspectorPolicy = ResolveRouteInspectorAuthorizationPolicyName(options, endpoints.ServiceProvider);
+        ApplyNamedPolicy(namedRouteInspector, routeInspectorPolicy);
+        ApplyNamedPolicy(namedRouteInspectorJson, routeInspectorPolicy);
+
+        if (ShouldMapHostedMetricsCollection(options))
+        {
+            applyInstanceConventions(endpoints.MapMethods(
+                metrics,
+                [HttpMethods.Delete, HttpMethods.Get, HttpMethods.Head, HttpMethods.Options, HttpMethods.Patch, HttpMethods.Put],
+                RejectMetricsCollectUnsupportedMethodAsync));
+            MapNamedControllerRoute(endpoints, routeNamePrefix, "metrics_collect", metrics, "CollectMetrics", applyInstanceConventions)
+                .WithMetadata(new HttpMethodMetadata([HttpMethods.Post]));
+        }
+
+        if (ShouldMapHostedSearchQualityReview(options))
+        {
+            MapNamedControllerRoute(endpoints, routeNamePrefix, "search_quality", searchQuality, "SearchQuality", applyInstanceConventions);
+        }
+
+        MapNamedControllerRoute(endpoints, routeNamePrefix, "section", section, "Section", applyInstanceConventions);
+        var namedMarkdownUnsupportedMethods = endpoints.MapMethods(
+            markdown,
+            [HttpMethods.Delete, HttpMethods.Connect, HttpMethods.Options, HttpMethods.Patch, HttpMethods.Post, HttpMethods.Put, HttpMethods.Trace],
+            RejectMarkdownDownloadUnsupportedMethodAsync);
+        applyInstanceConventions(namedMarkdownUnsupportedMethods);
+        if (options.MarkdownDownload?.Enabled == true)
+        {
+            namedMarkdownUnsupportedMethods.RequireAuthorization(options.MarkdownDownload.AuthorizationPolicy!);
+        }
+        var namedMarkdownDownload = MapNamedControllerRoute(
+                endpoints,
+                routeNamePrefix,
+                "markdown_download",
+                markdown,
+                "DownloadMarkdown",
+                applyInstanceConventions)
+            .WithMetadata(new HttpMethodMetadata(MarkdownDownloadMethods));
+        if (options.MarkdownDownload?.Enabled == true)
+        {
+            namedMarkdownDownload.RequireAuthorization(options.MarkdownDownload.AuthorizationPolicy!);
+        }
+        MapNamedControllerRoute(endpoints, routeNamePrefix, "doc", details, "Details", applyInstanceConventions);
+    }
+
+    private static void MapNamedPublishedTreeEndpoints(
+        IEndpointRouteBuilder endpoints,
+        DocsUrlBuilder urls,
+        AppSurfaceDocsPublishedTreeHandler publishedTreeHandler,
+        Action<IEndpointConventionBuilder> applyInstanceConventions)
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+        ArgumentNullException.ThrowIfNull(urls);
+        ArgumentNullException.ThrowIfNull(publishedTreeHandler);
+        ArgumentNullException.ThrowIfNull(applyInstanceConventions);
+
+        // The exact-version prefix is reserved for released content. Do not map a route-root catch-all here: an
+        // unmatched archive file must return 404, but an unmatched live Docs page must still reach Details.
+        var versionPrefix = TrimLeadingSlash(urls.DocsVersionPrefixPath);
+        var versionRoot = $"{versionPrefix}/{{version}}";
+        MapNamedPublishedTreeEndpoint(versionRoot);
+        MapNamedPublishedTreeEndpoint($"{versionRoot}/{{**path}}");
+
+        void MapNamedPublishedTreeEndpoint(string pattern)
+        {
+            applyInstanceConventions(endpoints.MapMethods(
+                pattern,
+                [HttpMethods.Get, HttpMethods.Head],
+                async context =>
+                {
+                    if (!await publishedTreeHandler.TryHandleAsync(context))
+                    {
+                        context.Response.StatusCode = StatusCodes.Status404NotFound;
+                    }
+                }));
+        }
+    }
+
+    private static IEndpointConventionBuilder MapNamedControllerRoute(
+        IEndpointRouteBuilder endpoints,
+        string namePrefix,
+        string routeName,
+        string pattern,
+        string action,
+        Action<IEndpointConventionBuilder> applyInstanceConventions)
+    {
+        var endpoint = endpoints.MapControllerRoute(
+            name: $"{namePrefix}_{routeName}",
+            pattern: pattern,
+            defaults: new { controller = "Docs", action });
+        applyInstanceConventions(endpoint);
+        return endpoint;
+    }
+
+    private static void ApplyNamedPolicy(IEndpointConventionBuilder endpoint, string? policyName)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+
+        if (!string.IsNullOrWhiteSpace(policyName))
+        {
+            endpoint.RequireAuthorization(policyName);
+        }
+    }
+
     private static void ApplyHealthAuthorizationPolicy(
         IEndpointConventionBuilder health,
         IEndpointConventionBuilder healthJson,
@@ -874,6 +1112,29 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
 
                 return Results.LocalRedirect(redirectPath, permanent: false).ExecuteAsync(context);
             });
+    }
+
+    private static void MapNamedLegacyAssetRedirect(
+        IEndpointRouteBuilder endpoints,
+        string route,
+        string targetPath,
+        Action<IEndpointConventionBuilder> applyInstanceConventions)
+    {
+        ArgumentNullException.ThrowIfNull(applyInstanceConventions);
+
+        var endpoint = endpoints.MapMethods(
+            route,
+            [HttpMethods.Get, HttpMethods.Head],
+            context =>
+            {
+                var redirectPath = BuildLegacyAssetRedirectPath(
+                    context.Request.PathBase,
+                    targetPath,
+                    context.Request.QueryString);
+
+                return Results.LocalRedirect(redirectPath, permanent: false).ExecuteAsync(context);
+            });
+        applyInstanceConventions(endpoint);
     }
 
     /// <summary>
@@ -1175,6 +1436,73 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
 
                 await context.Response.SendFileAsync(fileInfo, context.RequestAborted);
             });
+    }
+
+    private static void MapNamedBrandingAssetDirectory(
+        IEndpointRouteBuilder endpoints,
+        AppSurfaceDocsOptions options,
+        Action<IEndpointConventionBuilder> applyInstanceConventions)
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(applyInstanceConventions);
+
+        var directoryPath = ResolveBrandingAssetsDirectoryPath(endpoints.ServiceProvider, options);
+        if (directoryPath is null)
+        {
+            return;
+        }
+
+        if (!Directory.Exists(directoryPath))
+        {
+            throw new DirectoryNotFoundException(
+                $"Configured AppSurfaceDocs:Identity:BrandingAssets:DirectoryPath does not exist: '{directoryPath}'.");
+        }
+
+        var requestPath = ResolveBrandingAssetsRequestPath(options);
+        if (requestPath is null)
+        {
+            return;
+        }
+
+        var provider = CreateLifetimeOwnedBrandingAssetProvider(endpoints.ServiceProvider, directoryPath);
+        var allowSvgAssets = options.Identity?.BrandingAssets?.AllowSvgAssets == true;
+        var endpoint = endpoints.MapMethods(
+            $"{requestPath}/{{*assetPath}}",
+            [HttpMethods.Get, HttpMethods.Head],
+            async context =>
+            {
+                if (!TryResolveSafeBrandingAssetPath(
+                        context.Request.RouteValues["assetPath"],
+                        allowSvgAssets,
+                        out var assetPath))
+                {
+                    context.Response.StatusCode = StatusCodes.Status404NotFound;
+                    return;
+                }
+
+                var fileInfo = provider.GetFileInfo(assetPath);
+                if (!fileInfo.Exists || fileInfo.IsDirectory)
+                {
+                    context.Response.StatusCode = StatusCodes.Status404NotFound;
+                    return;
+                }
+
+                context.Response.StatusCode = StatusCodes.Status200OK;
+                context.Response.ContentType = ResolveContentType(assetPath);
+                context.Response.ContentLength = fileInfo.Length;
+                context.Response.Headers.LastModified = fileInfo.LastModified
+                    .ToUniversalTime()
+                    .ToString("R", CultureInfo.InvariantCulture);
+                if (HttpMethods.IsHead(context.Request.Method))
+                {
+                    return;
+                }
+
+                await using var fileStream = fileInfo.CreateReadStream();
+                await fileStream.CopyToAsync(context.Response.Body, context.RequestAborted);
+            });
+        applyInstanceConventions(endpoint);
     }
 
     [ExcludeFromCodeCoverage(

@@ -30,6 +30,45 @@ public static class AppSurfaceDocsStreamAuthorization
     /// </returns>
     public static bool IsHarvestProgressChannel(string? channel)
     {
-        return string.Equals(channel, HarvestProgressChannel, StringComparison.Ordinal);
+        return string.Equals(channel, HarvestProgressChannel, StringComparison.Ordinal)
+               || TryGetNamedInstanceFromHarvestProgressChannel(channel, out _);
+    }
+
+    /// <summary>
+    /// Builds the isolated harvest-progress channel name for one named Docs product.
+    /// </summary>
+    /// <param name="instanceName">The normalized Docs product name.</param>
+    /// <returns>A stable RazorWire-safe channel name for the supplied product.</returns>
+    public static string GetHarvestProgressChannel(string instanceName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(instanceName);
+        return $"{HarvestProgressChannel}-{instanceName.Trim()}";
+    }
+
+    /// <summary>
+    /// Attempts to read the Docs product name from a named harvest-progress channel.
+    /// </summary>
+    /// <param name="channel">The requested RazorWire channel.</param>
+    /// <param name="instanceName">The normalized instance name when the channel belongs to a named Docs product.</param>
+    /// <returns><see langword="true" /> when <paramref name="channel" /> is a named Docs harvest channel.</returns>
+    public static bool TryGetNamedInstanceFromHarvestProgressChannel(string? channel, out string? instanceName)
+    {
+        instanceName = null;
+        var prefix = HarvestProgressChannel + "-";
+        if (string.IsNullOrWhiteSpace(channel)
+            || !channel.StartsWith(prefix, StringComparison.Ordinal)
+            || channel.Length == prefix.Length)
+        {
+            return false;
+        }
+
+        var candidate = channel[prefix.Length..];
+        if (!candidate.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_'))
+        {
+            return false;
+        }
+
+        instanceName = candidate;
+        return true;
     }
 }
