@@ -10,6 +10,14 @@ public sealed class RepositoryFileLocatorTests
         Assert.Equal("segments", exception.ParamName);
     }
 
+    [Fact]
+    public void Find_RejectsANullPathSegment()
+    {
+        var exception = Assert.Throws<ArgumentException>(() => RepositoryFileLocator.Find("examples", null!));
+
+        Assert.Equal("segments", exception.ParamName);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData(" ")]

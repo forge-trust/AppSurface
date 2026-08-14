@@ -2,6 +2,19 @@ namespace NorthstarBrochureStarter.Tests;
 
 internal static class RepositoryFileLocator
 {
+    /// <summary>
+    /// Locates a test-only repository file by searching each ancestor of the executing test directory.
+    /// </summary>
+    /// <param name="segments">Non-empty, repository-relative path segments supplied by test code.</param>
+    /// <returns>The first matching repository file found while walking toward the filesystem root.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="segments"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when a segment is empty, rooted, absolute-looking, or contains parent traversal.
+    /// </exception>
+    /// <exception cref="FileNotFoundException">Thrown when the repository-relative file cannot be located.</exception>
+    /// <remarks>
+    /// Callers must pass fixed, test-owned path components only. Do not pass user-controlled values to this helper.
+    /// </remarks>
     public static string Find(params string[] segments)
     {
         ArgumentNullException.ThrowIfNull(segments);

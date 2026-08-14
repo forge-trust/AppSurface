@@ -59,11 +59,17 @@ public sealed class NorthstarBrochureStarterContractTests
         var home = await _client.GetStringAsync("/");
         var fieldGuide = await _client.GetStringAsync("/journal/field-guide");
         var contact = await _client.GetStringAsync("/contact");
+        var services = await _client.GetStringAsync("/services");
+        var journal = await _client.GetStringAsync("/journal");
+        var thankYou = await _client.GetStringAsync("/thank-you");
 
         Assert.Contains("page-navigation.js", home, StringComparison.Ordinal);
         Assert.Contains("page-navigation.js", fieldGuide, StringComparison.Ordinal);
-        Assert.DoesNotContain("/_content/ForgeTrust.RazorWire/razorwire/razorwire.js", contact, StringComparison.Ordinal);
-        Assert.DoesNotContain("page-navigation.js", contact, StringComparison.Ordinal);
+        foreach (var html in new[] { contact, services, journal, thankYou })
+        {
+            Assert.DoesNotContain("/_content/ForgeTrust.RazorWire/razorwire/razorwire.js", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("page-navigation.js", html, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

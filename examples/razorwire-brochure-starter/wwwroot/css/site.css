@@ -7,8 +7,8 @@
     --clay: #a84b31;
     --gold: #d6b34b;
     --line: #c9cdbf;
-    --display: Georgia, "Times New Roman", serif;
-    --body: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --display: "Georgia", "Times New Roman", serif;
+    --body: ui-sans-serif, system-ui, -apple-system, "BlinkMacSystemFont", "Segoe UI", sans-serif;
     --measure: 72rem;
 }
 

@@ -33,7 +33,7 @@ dotnet run \
   --urls http://localhost:5233
 ```
 
-Export locally with a host-selected RazorWire CLI tool package:
+Export locally with a host-selected [RazorWire CLI tool package](../../Web/ForgeTrust.RazorWire.Cli/README.md):
 
 ```bash
 dotnet tool install ForgeTrust.RazorWire.Cli \
@@ -46,7 +46,7 @@ dotnet tool install ForgeTrust.RazorWire.Cli \
   --output ./dist/northstar
 ```
 
-Replace the placeholders with package artifacts available to the host. For the repository's broader package and CLI guidance, continue with the linked [RazorWire README](../../Web/ForgeTrust.RazorWire/README.md) and [RazorWire CLI README](../../Web/ForgeTrust.RazorWire.Cli/README.md), which also point to this starter as the smallest package-consumer baseline.
+CDN mode is the default export mode, so no `--mode cdn` flag is needed. Replace the placeholders with package artifacts available to the host. For the repository's broader package and CLI guidance, continue with the linked [RazorWire README](../../Web/ForgeTrust.RazorWire/README.md), which also points to this starter as the smallest package-consumer baseline.
 
 ## Contact handoff
 

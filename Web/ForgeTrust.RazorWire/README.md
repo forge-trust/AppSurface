@@ -4,7 +4,7 @@ RazorWire lets ASP.NET Core MVC apps update UI by returning Razor fragments from
 
 ## 60-Second Quickstart
 
-For a small package-consumer MVC site, begin with the [RazorWire brochure starter](../../examples/razorwire-brochure-starter/README.md). It keeps the application dependency surface to `ForgeTrust.RazorWire`, explains how to point restore at an explicit package source, and proves a CDN export without copying source-project references.
+For a small package-consumer MVC site, begin with the [RazorWire brochure starter](https://github.com/forge-trust/AppSurface/tree/main/examples/razorwire-brochure-starter). It keeps the application dependency surface to `ForgeTrust.RazorWire`, explains how to point restore at an explicit package source, and proves a CDN export without copying source-project references.
 
 AppSurface has not published the public `v0.1` package set yet, so the advanced, source-backed mechanics demo remains repo-local:
 
@@ -19,7 +19,7 @@ dotnet run --project examples/razorwire-mvc/RazorWireWebExample.csproj
 
 Wait for the `Permanent Island` card to load, then click the `+` button. The `Instance Score` and `Session Score` update in place without a full-page reload.
 
-When consuming package builds from a configured feed, reference `ForgeTrust.RazorWire` first, use the [brochure starter](../../examples/razorwire-brochure-starter/README.md) for the package-only baseline, and continue at [Add the Module](#add-the-module) for module-level options. Public NuGet install commands will replace this note when the `v0.1` publishing path is live.
+When consuming package builds from a configured feed, reference `ForgeTrust.RazorWire` first, use the [brochure starter](https://github.com/forge-trust/AppSurface/tree/main/examples/razorwire-brochure-starter) for the package-only baseline, and continue at [Add the Module](#add-the-module) for module-level options. Public NuGet install commands will replace this note when the `v0.1` publishing path is live.
 
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance

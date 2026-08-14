@@ -5412,6 +5412,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Equal(
             ["restore", "ForgeTrust.AppSurface.slnx", "--configfile", "NuGet.package-gate.config"],
             restoreCommand.Arguments.Take(4));
+        Assert.DoesNotContain("--source", restoreCommand.Arguments);
         Assert.Contains("/p:ContinuousIntegrationBuild=true", restoreCommand.Arguments);
         Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", restoreCommand.Arguments);
         var packCommand = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet pack");
