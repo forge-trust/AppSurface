@@ -27,12 +27,16 @@ public, testable contracts without friend access to the application package. The
 
 The application package registers only passive registries. A provider is selected explicitly by the host. The PostgreSQL
 provider adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`,
-`0004_schedule_protocol`, `0005_runtime_heartbeat`, `0006_flow_trace_context`, `0007_flow_retention`, and
-`0008_flow_repair`) plus one-operation-at-a-time Work, Flow, and Work-first Schedule persistence with versioned W3C
+`0004_schedule_protocol`, `0005_runtime_heartbeat`, `0006_flow_trace_context`, `0007_flow_retention`,
+`0008_flow_repair`, and `0009_work_contract_discovery`) plus one-operation-at-a-time Work, Flow, and Work-first Schedule
+persistence with versioned W3C
 causal evidence, verified retention, and evidence-first Flow repair. PostgreSQL registration remains passive; an
 application explicitly adds one bounded polling host through
 [`AddWorkerHost()`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host) only where it intends
 continuous activation. It adds no public endpoint, dashboard, or automatic migration.
+
+The minimum supported PostgreSQL compatibility floor is PostgreSQL 16 or newer (`server_version_num >= 160000`); CI and default strict proof
+use `postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877`.
 
 ## Slice 7 discovery and reconciliation
 
@@ -54,10 +58,12 @@ The forward-only deployment order is:
 6. `0006_flow_trace_context.sql`
 7. `0007_flow_retention.sql`
 8. `0008_flow_repair.sql`
-9. [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
+9. `0009_work_contract_discovery.sql`
+10. [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
 
-The preferred production flow is to generate and review the Durable schema script offline, apply the reviewed
-migrations in the order above, apply the canonical role recipe, and run schema status/preflight before enabling the
+The preferred production flow is to generate and review the Durable schema script offline, drain and stop every pre-`0009`
+worker, apply the reviewed migrations in the order above (including `0009_work_contract_discovery.sql`), apply the canonical
+role recipe, and run schema status/preflight before enabling the
 worker host. The [`durable schema` CLI commands](../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands)
 make those checks discoverable. `apply --apply` is an explicit migration-owner operation only; deployments normally
 pass `--connection-env APPSURFACE_DURABLE_MIGRATION_CONNECTION`, and it is never a startup side effect. Offline and

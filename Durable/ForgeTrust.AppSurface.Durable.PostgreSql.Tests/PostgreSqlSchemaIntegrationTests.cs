@@ -14,6 +14,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
     private const string DispatcherRoleTestPassword = "durable-dispatcher-test-password";
     private const string RuntimeRoleTestPassword = "durable-runtime-test-password";
     private const string RetentionRoleTestPassword = "durable-retention-test-password";
+    private const string UnrelatedRoleTestPassword = "durable-unrelated-test-password";
 
     [Fact]
     public async Task ApplyStatusInitializeRotate_AreExplicitAndIdempotent()
@@ -40,7 +41,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missing.Compatibility);
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missingEpoch.Status.Compatibility);
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8], first.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9], first.AppliedVersions);
         Assert.Empty(second.AppliedVersions);
         Assert.True(compatible.IsCompatible);
         Assert.NotEqual(Guid.Empty, compatible.StoreId);
@@ -151,9 +152,193 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         var retry = await retryManager.ApplyAsync();
         var compatible = await retryManager.GetStatusAsync();
-        Assert.Equal([3, 4, 5, 6, 7, 8], retry.AppliedVersions);
+        Assert.Equal([3, 4, 5, 6, 7, 8, 9], retry.AppliedVersions);
         Assert.True(compatible.IsCompatible);
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8], compatible.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9], compatible.AppliedVersions);
+    }
+
+    [Fact]
+    public async Task WorkContractDiscoveryMigration_RollsBackItsPolicyIndexAndFunction()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var embedded = DurablePostgreSqlMigrationCatalog.Load();
+        var beforeDiscovery = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource, embedded.Take(8).ToArray());
+        await beforeDiscovery.ApplyAsync();
+        var failingNinth = embedded[8] with
+        {
+            Sql = $"{embedded[8].Sql}\nSELECT 1 / 0;",
+            Sha256 = new string('0', 64),
+        };
+        var failingManager = new PostgreSqlDurableRuntimeSchemaManager(
+            database.DataSource,
+            [.. embedded.Take(8), failingNinth]);
+
+        var exception = await Assert.ThrowsAsync<PostgresException>(async () => await failingManager.ApplyAsync());
+
+        Assert.Equal(PostgresErrorCodes.DivisionByZero, exception.SqlState);
+        await using (var discoveryObjects = database.DataSource.CreateCommand(
+            """
+            SELECT to_regprocedure('appsurface_durable.discover_work_dispatch(text[], text[], integer)') IS NULL,
+                   to_regclass('appsurface_durable.ix_work_contract_dispatch_lookup') IS NULL,
+                   NOT EXISTS
+                   (
+                       SELECT 1
+                       FROM pg_catalog.pg_policy AS policy
+                       WHERE policy.polrelid = 'appsurface_durable.work'::pg_catalog.regclass
+                         AND policy.polname = 'work_contract_discovery_owner'
+                   );
+            """))
+        {
+            await using var reader = await discoveryObjects.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.True(reader.GetBoolean(0));
+            Assert.True(reader.GetBoolean(1));
+            Assert.True(reader.GetBoolean(2));
+        }
+
+        var retry = await new PostgreSqlDurableRuntimeSchemaManager(database.DataSource).ApplyAsync();
+        Assert.Equal([9], retry.AppliedVersions);
+    }
+
+    [Fact]
+    public async Task WorkContractDiscovery_RejectsInvalidSelections()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await new PostgreSqlDurableRuntimeSchemaManager(database.DataSource).ApplyAsync();
+        var invalidCalls = new[]
+        {
+            "SELECT * FROM appsurface_durable.discover_work_dispatch(NULL, ARRAY['v1'], 1);",
+            "SELECT * FROM appsurface_durable.discover_work_dispatch(ARRAY['tests.selection'], NULL, 1);",
+            "SELECT * FROM appsurface_durable.discover_work_dispatch(ARRAY[]::text[], ARRAY[]::text[], 1);",
+            "SELECT * FROM appsurface_durable.discover_work_dispatch(ARRAY['tests.selection'], ARRAY['v1', 'v2'], 1);",
+            "SELECT * FROM appsurface_durable.discover_work_dispatch(ARRAY[NULL]::text[], ARRAY['v1'], 1);",
+            "SELECT * FROM appsurface_durable.discover_work_dispatch(ARRAY['   '], ARRAY['v1'], 1);",
+            "SELECT * FROM appsurface_durable.discover_work_dispatch(ARRAY[E'tests\\nselection'], ARRAY['v1'], 1);",
+            "SELECT * FROM appsurface_durable.discover_work_dispatch(ARRAY['invalid selection'], ARRAY['v1'], 1);",
+            $"SELECT * FROM appsurface_durable.discover_work_dispatch(ARRAY['{new string('n', 201)}'], ARRAY['v1'], 1);",
+            $"SELECT * FROM appsurface_durable.discover_work_dispatch(ARRAY['tests.selection'], ARRAY['{new string('v', 101)}'], 1);",
+            "SELECT * FROM appsurface_durable.discover_work_dispatch(ARRAY['tests.selection', 'tests.selection'], ARRAY['v1', 'v1'], 1);",
+            "SELECT * FROM appsurface_durable.discover_work_dispatch(ARRAY['tests.selection'], ARRAY['v1'], NULL);",
+            "SELECT * FROM appsurface_durable.discover_work_dispatch(ARRAY['tests.selection'], ARRAY['v1'], 0);",
+            "SELECT * FROM appsurface_durable.discover_work_dispatch(ARRAY['tests.selection'], ARRAY['v1'], 1001);",
+            "SELECT * FROM appsurface_durable.discover_work_dispatch(ARRAY(SELECT 'tests.selection.' || generate_series(1, 10001)), ARRAY(SELECT 'v1' FROM generate_series(1, 10001)), 1);",
+        };
+
+        foreach (var invalidCall in invalidCalls)
+        {
+            var exception = await Assert.ThrowsAsync<PostgresException>(async () =>
+            {
+                await using var command = database.DataSource.CreateCommand(invalidCall);
+                await command.ExecuteNonQueryAsync();
+            });
+            Assert.Equal(PostgresErrorCodes.InvalidParameterValue, exception.SqlState);
+        }
+    }
+
+    [Fact]
+    public async Task WorkContractDiscovery_AcceptsBoundarySelectionAndOrdersCappedCandidates()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await new PostgreSqlDurableRuntimeSchemaManager(database.DataSource).ApplyAsync();
+        await using (var seed = database.DataSource.CreateCommand(
+            """
+            INSERT INTO appsurface_durable.scope (scope_id)
+            VALUES ('contract-discovery-boundary');
+
+            WITH seeded AS
+            (
+                SELECT value,
+                       CASE value
+                           WHEN 1 THEN repeat('n', 196) || '.-:_'
+                           WHEN 2 THEN 'Tests.Selection.Case'
+                           WHEN 3 THEN 'tests.selection.case'
+                           ELSE 'tests.selection.' || value
+                       END AS work_name,
+                       CASE WHEN value = 1 THEN repeat('v', 96) || '.-:_' ELSE 'v1' END AS work_version
+                FROM generate_series(1, 1001) AS value
+            )
+            INSERT INTO appsurface_durable.work
+            (
+                scope_id, work_id, activity_id, command_id, idempotency_key, work_name, work_version,
+                contract_id, payload_schema_version, codec_id, payload, payload_sha256, payload_classification,
+                payload_retention, request_fingerprint_schema, request_fingerprint_sha256, state, provider_safety,
+                due_at, scope_generation, runtime_epoch, maximum_attempts, maximum_elapsed, backoff_algorithm,
+                initial_retry_delay, maximum_retry_delay, lease_duration, lease_renewal_cadence, maximum_lease_lifetime
+            )
+            SELECT 'contract-discovery-boundary',
+                   'contract-discovery-work-' || value,
+                   'contract-discovery-activity-' || value,
+                   'contract-discovery-command-' || value,
+                   'contract-discovery-key-' || value,
+                   work_name, work_version,
+                   'tests.contract-discovery', 'v1', 'tests.codec', decode('00', 'hex'), decode(repeat('0', 64), 'hex'),
+                   'approved_application', 'default', 'sha256', repeat('0', 64), 'pending', 'idempotent',
+                   clock_timestamp(), 1, @runtime_epoch, 2, interval '1 minute', 'exponential-v1',
+                   interval '1 second', interval '1 second', interval '10 seconds', interval '5 seconds', interval '1 minute'
+            FROM seeded;
+
+            WITH seeded AS
+            (
+                SELECT value FROM generate_series(1, 1001) AS value
+            )
+            INSERT INTO appsurface_durable.dispatch
+                (dispatch_id, scope_id, aggregate_kind, aggregate_id, due_at, state, expected_revision, priority)
+            SELECT md5('contract-discovery-dispatch-' || value)::uuid,
+                   'contract-discovery-boundary',
+                   'work',
+                   'contract-discovery-work-' || value,
+                   CASE value
+                       WHEN 1 THEN timestamp with time zone '2000-01-01 00:00:00+00'
+                       WHEN 2 THEN timestamp with time zone '2000-01-01 00:01:00+00'
+                       WHEN 3 THEN timestamp with time zone '2000-01-01 00:01:00+00'
+                       ELSE timestamp with time zone '2000-01-01 00:02:00+00'
+                   END,
+                   'available',
+                   1,
+                   CASE value
+                       WHEN 2 THEN 1
+                       WHEN 3 THEN 2
+                       ELSE 0
+                   END
+            FROM seeded;
+            """))
+        {
+            seed.Parameters.AddWithValue("runtime_epoch", Guid.NewGuid());
+            Assert.Equal(2_003, await seed.ExecuteNonQueryAsync());
+        }
+
+        await using var discover = database.DataSource.CreateCommand(
+            """
+            WITH contracts AS
+            (
+                SELECT value,
+                       CASE value
+                           WHEN 1 THEN repeat('n', 196) || '.-:_'
+                           WHEN 2 THEN 'Tests.Selection.Case'
+                           WHEN 3 THEN 'tests.selection.case'
+                           ELSE 'tests.selection.' || value
+                       END AS work_name,
+                       CASE WHEN value = 1 THEN repeat('v', 96) || '.-:_' ELSE 'v1' END AS work_version
+                FROM generate_series(1, 10000) AS value
+            )
+            SELECT aggregate_id
+            FROM appsurface_durable.discover_work_dispatch(
+                ARRAY(SELECT work_name FROM contracts ORDER BY value),
+                ARRAY(SELECT work_version FROM contracts ORDER BY value),
+                1000);
+            """);
+        await using var reader = await discover.ExecuteReaderAsync();
+        var aggregateIds = new List<string>();
+        while (await reader.ReadAsync())
+        {
+            aggregateIds.Add(reader.GetString(0));
+        }
+
+        Assert.Equal(1000, aggregateIds.Count);
+        Assert.Equal(
+            ["contract-discovery-work-1", "contract-discovery-work-3", "contract-discovery-work-2"],
+            aggregateIds.Take(3));
+        Assert.Equal(1000, aggregateIds.Distinct(StringComparer.Ordinal).Count());
     }
 
     [Fact]
@@ -177,6 +362,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             CREATE ROLE durable_dispatcher LOGIN PASSWORD '{DispatcherRoleTestPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE durable_runtime LOGIN PASSWORD '{RuntimeRoleTestPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE durable_retention LOGIN PASSWORD '{RetentionRoleTestPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE unrelated_login LOGIN PASSWORD '{UnrelatedRoleTestPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE bypass_dispatcher LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
             CREATE ROLE createdb_dispatcher LOGIN NOSUPERUSER CREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE nologin_dispatcher NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
@@ -202,7 +388,8 @@ public sealed class PostgreSqlSchemaIntegrationTests
             GRANT CREATE ON SCHEMA appsurface_durable TO direct_privilege_runtime;
             GRANT UPDATE (work_name) ON appsurface_durable.work TO column_privilege_runtime;
             GRANT UPDATE ON SEQUENCE appsurface_durable.scope_history_event_id_seq TO sequence_privilege_dispatcher;
-            GRANT SELECT ON appsurface_durable.dispatch TO grant_option_dispatcher WITH GRANT OPTION;
+            GRANT EXECUTE ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer)
+                TO grant_option_dispatcher WITH GRANT OPTION;
             GRANT USAGE ON SCHEMA appsurface_durable TO schema_grant_option_runtime WITH GRANT OPTION;
             GRANT CREATE ON SCHEMA appsurface_durable TO dispatcher_privilege_parent;
             GRANT TRIGGER ON appsurface_durable.work TO runtime_privilege_parent;
@@ -227,7 +414,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "direct_privilege_runtime", Expected: "schema CREATE or grant options"),
             (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "column_privilege_runtime", Expected: "effective durable-column privilege outside the package allowlist"),
             (Owner: "durable_owner", Dispatcher: "sequence_privilege_dispatcher", Runtime: "durable_runtime", Expected: "effective durable-sequence privilege outside the package allowlist"),
-            (Owner: "durable_owner", Dispatcher: "grant_option_dispatcher", Runtime: "durable_runtime", Expected: "effective durable-table privilege outside the package allowlist"),
+            (Owner: "durable_owner", Dispatcher: "grant_option_dispatcher", Runtime: "durable_runtime", Expected: "effective durable-function privilege outside the package allowlist"),
             (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "schema_grant_option_runtime", Expected: "schema CREATE or grant options"),
             (Owner: "durable_owner", Dispatcher: "inherited_privilege_dispatcher", Runtime: "durable_runtime", Expected: "exact login leaves with no role memberships"),
             (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "inherited_privilege_runtime", Expected: "exact login leaves with no role memberships"),
@@ -236,7 +423,10 @@ public sealed class PostgreSqlSchemaIntegrationTests
         foreach (var item in rejected)
         {
             var result = await RunRoleRecipeAsync(container, containerRecipePath, item.Owner, item.Dispatcher, item.Runtime);
-            Assert.NotEqual(0, result.ExitCode);
+            Assert.True(
+                result.ExitCode != 0,
+                $"Expected role recipe case ({item.Owner}, {item.Dispatcher}, {item.Runtime}) to fail. " +
+                $"stdout: {result.Stdout} stderr: {result.Stderr}");
             var output = $"{result.Stdout}\n{result.Stderr}";
             Assert.True(
                 output.Contains(item.Expected, StringComparison.Ordinal),
@@ -318,12 +508,14 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await using (var noRejectedGrant = dataSource.CreateCommand(
             """
             SELECT
-                NOT has_schema_privilege('durable_dispatcher', 'appsurface_durable', 'USAGE')
-                AND NOT has_table_privilege(
+                NOT has_table_privilege(
+                    'durable_dispatcher',
+                    'appsurface_durable.work',
+                    'SELECT') AS dispatcher_cannot_read_work,
+                NOT has_table_privilege(
                     'direct_privilege_dispatcher',
-                    'appsurface_durable.dispatch',
-                    'SELECT')
-                AND
+                    'appsurface_durable.flow_dispatch',
+                    'SELECT') AS direct_dispatcher_cannot_read_flow_dispatch,
                 (
                     SELECT owner_role.rolname = 'durable_runtime'
                     FROM pg_catalog.pg_class AS object
@@ -331,10 +523,14 @@ public sealed class PostgreSqlSchemaIntegrationTests
                     JOIN pg_catalog.pg_roles AS owner_role ON owner_role.oid = object.relowner
                     WHERE namespace.nspname = 'appsurface_durable'
                       AND object.relname = 'work'
-                );
+                ) AS work_owned_by_owner;
             """))
         {
-            Assert.True((bool)(await noRejectedGrant.ExecuteScalarAsync())!);
+            await using var reader = await noRejectedGrant.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.True(reader.GetBoolean(0));
+            Assert.True(reader.GetBoolean(1));
+            Assert.True(reader.GetBoolean(2));
         }
 
         await using var lockConnection = await dataSource.OpenConnectionAsync();
@@ -361,6 +557,47 @@ public sealed class PostgreSqlSchemaIntegrationTests
         Assert.True(
             accepted.ExitCode == 0,
             $"Role recipe failed with exit {accepted.ExitCode}. stdout: {accepted.Stdout} stderr: {accepted.Stderr}");
+        await using (var workDiscoveryPolicy = dataSource.CreateCommand(
+            """
+            SELECT policy.polcmd = 'r'
+                   AND pg_catalog.pg_get_expr(policy.polqual, policy.polrelid) = 'true'
+                   AND policy.polroles = ARRAY['durable_owner'::pg_catalog.regrole::oid]
+            FROM pg_catalog.pg_policy AS policy
+            WHERE policy.polrelid = 'appsurface_durable.work'::pg_catalog.regclass
+              AND policy.polname = 'work_contract_discovery_owner';
+            """))
+        {
+            Assert.True((bool)(await workDiscoveryPolicy.ExecuteScalarAsync())!);
+        }
+
+        await using (var discoveryFunctionPrivileges = dataSource.CreateCommand(
+            """
+            SELECT NOT has_function_privilege(
+                       'public',
+                       'appsurface_durable.discover_work_dispatch(text[], text[], integer)',
+                       'EXECUTE')
+                   AND NOT has_function_privilege(
+                       'unrelated_login',
+                       'appsurface_durable.discover_work_dispatch(text[], text[], integer)',
+                       'EXECUTE');
+            """))
+        {
+            Assert.True((bool)(await discoveryFunctionPrivileges.ExecuteScalarAsync())!);
+        }
+
+        var unrelatedConnectionString = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
+        {
+            Username = "unrelated_login",
+            Password = UnrelatedRoleTestPassword,
+        }.ConnectionString;
+        await using var unrelatedDataSource = NpgsqlDataSource.Create(unrelatedConnectionString);
+        var unrelatedInvocation = await Assert.ThrowsAsync<PostgresException>(async () =>
+        {
+            await using var command = unrelatedDataSource.CreateCommand(
+                "SELECT * FROM appsurface_durable.discover_work_dispatch(ARRAY['tests.role'], ARRAY['v1'], 1);");
+            await command.ExecuteNonQueryAsync();
+        });
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, unrelatedInvocation.SqlState);
         await using (var tracePointerPrivileges = dataSource.CreateCommand(
             """
             SELECT has_column_privilege('durable_runtime', 'appsurface_durable.flow_command', 'trace_context_id', 'UPDATE')
@@ -425,10 +662,10 @@ public sealed class PostgreSqlSchemaIntegrationTests
             relation_privilege(privilege_name) AS
             (
                 VALUES
-                    ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN'),
+                    ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'),
                     ('SELECT WITH GRANT OPTION'), ('INSERT WITH GRANT OPTION'), ('UPDATE WITH GRANT OPTION'),
                     ('DELETE WITH GRANT OPTION'), ('TRUNCATE WITH GRANT OPTION'), ('REFERENCES WITH GRANT OPTION'),
-                    ('TRIGGER WITH GRANT OPTION'), ('MAINTAIN WITH GRANT OPTION')
+                    ('TRIGGER WITH GRANT OPTION')
             ),
             durable_column AS
             (
@@ -486,7 +723,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
                       <>
                         (
                             service.role_name = 'durable_dispatcher'
-                            AND relation.relname IN ('dispatch', 'flow_dispatch')
+                            AND relation.relname = 'flow_dispatch'
                             AND privilege.privilege_name = 'SELECT'
                             OR service.role_name = 'durable_runtime'
                             AND
@@ -528,7 +765,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
                       <>
                         (
                             service.role_name = 'durable_dispatcher'
-                            AND column_value.relname IN ('dispatch', 'flow_dispatch')
+                            AND column_value.relname = 'flow_dispatch'
                             AND privilege.privilege_name = 'SELECT'
                             OR service.role_name = 'durable_runtime'
                             AND
@@ -865,6 +1102,23 @@ public sealed class PostgreSqlSchemaIntegrationTests
                 "SELECT NOT has_table_privilege(current_user, 'appsurface_durable.flow_trace_context', 'SELECT');";
             Assert.True((bool)(await dispatcherTracePrivilege.ExecuteScalarAsync())!);
         }
+        var rawWorkDiscovery = await Assert.ThrowsAsync<PostgresException>(async () =>
+        {
+            await using var read = dispatcherConnection.CreateCommand();
+            read.CommandText = "SELECT count(*) FROM appsurface_durable.dispatch;";
+            await read.ExecuteNonQueryAsync();
+        });
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, rawWorkDiscovery.SqlState);
+        await using (var discover = dispatcherConnection.CreateCommand())
+        {
+            discover.CommandText =
+                "SELECT scope_id, aggregate_id FROM appsurface_durable.discover_work_dispatch(ARRAY['tests.runtime-health'], ARRAY['v1'], 1);";
+            await using var reader = await discover.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal("flow-rls-scope-a", reader.GetString(0));
+            Assert.Equal("role-runtime-health-work", reader.GetString(1));
+            Assert.False(await reader.ReadAsync());
+        }
 
         var dueAtDisclosure = await Assert.ThrowsAsync<PostgresException>(async () =>
         {
@@ -924,6 +1178,14 @@ public sealed class PostgreSqlSchemaIntegrationTests
             await claim.ExecuteNonQueryAsync();
         });
         Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, runtimeClaim.SqlState);
+        var runtimeDiscovery = await Assert.ThrowsAsync<PostgresException>(async () =>
+        {
+            await using var discover = runtimeConnection.CreateCommand();
+            discover.CommandText =
+                "SELECT * FROM appsurface_durable.discover_work_dispatch(ARRAY['tests.runtime-health'], ARRAY['v1'], 1);";
+            await discover.ExecuteNonQueryAsync();
+        });
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, runtimeDiscovery.SqlState);
         await using (var allowedRead = runtimeConnection.CreateCommand())
         {
             allowedRead.CommandText =
@@ -1406,7 +1668,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             database.DataSource,
             """
            UPDATE appsurface_durable.store_metadata
-           SET schema_version = 8,
+           SET schema_version = 9,
                minimum_reader_version = 1,
                maximum_reader_version = 1,
                minimum_writer_version = 1,
@@ -1427,7 +1689,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await ExecuteNonQueryAsync(
             database.DataSource,
             """
-           DELETE FROM appsurface_durable.schema_migration WHERE version IN (3, 4, 5, 6, 7, 8);
+           DELETE FROM appsurface_durable.schema_migration WHERE version IN (3, 4, 5, 6, 7, 8, 9);
            UPDATE appsurface_durable.store_metadata
            SET schema_version = 2,
                minimum_reader_version = 1,
@@ -1439,7 +1701,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var upgrade = await manager.GetStatusAsync();
         Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgrade.Compatibility);
         Assert.Equal([1, 2], upgrade.AppliedVersions);
-        Assert.Equal([3, 4, 5, 6, 7, 8], upgrade.PendingVersions);
+        Assert.Equal([3, 4, 5, 6, 7, 8, 9], upgrade.PendingVersions);
         var upgradeValidation = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
             async () => await manager.ValidateAsync());
         Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgradeValidation.Status.Compatibility);
@@ -1460,12 +1722,12 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var results = await Task.WhenAll(first.ApplyAsync().AsTask(), second.ApplyAsync().AsTask())
             .WaitAsync(TimeSpan.FromSeconds(30));
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8], results.SelectMany(result => result.AppliedVersions).Order().ToArray());
-        Assert.Contains(results, result => result.AppliedVersions.SequenceEqual([1, 2, 3, 4, 5, 6, 7, 8]));
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9], results.SelectMany(result => result.AppliedVersions).Order().ToArray());
+        Assert.Contains(results, result => result.AppliedVersions.SequenceEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]));
         Assert.Contains(results, result => result.AppliedVersions.Count == 0);
         await using var count = database.DataSource.CreateCommand(
             "SELECT count(*) FROM appsurface_durable.schema_migration;");
-        Assert.Equal(8, (long)(await count.ExecuteScalarAsync())!);
+        Assert.Equal(9, (long)(await count.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -1491,7 +1753,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9], applied.AppliedVersions);
     }
 
     [Fact]
@@ -1556,7 +1818,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9], applied.AppliedVersions);
     }
 
     [Fact]

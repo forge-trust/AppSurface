@@ -534,6 +534,7 @@ type public static class ForgeTrust.AppSurface.Durable.DurableProblemCodes
   field public const System.String TransactionRequired = "ASDUR101"
   field public const System.String ValidationFailed = "ASDUR100"
   field public const System.String WorkContractUnavailable = "ASDUR109"
+  field public const System.String WorkDiscoveryContractSelectionUnavailable = "ASDUR119"
   field public const System.String WorkNotFound = "ASDUR111"
   field public const System.String WorkRevisionConflict = "ASDUR112"
   field public const System.String WorkerIdentityConflict = "ASDUR405"
@@ -834,6 +835,17 @@ type public sealed class ForgeTrust.AppSurface.Durable.DurableWorkAcceptance : S
 type public enum ForgeTrust.AppSurface.Durable.DurableWorkAcceptanceKind : System.Int32
   enum-member Accepted = 0
   enum-member Duplicate = 1
+type public readonly struct ForgeTrust.AppSurface.Durable.DurableWorkContractIdentity : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableWorkContractIdentity>
+  constructor public ForgeTrust.AppSurface.Durable.DurableWorkContractIdentity(System.String workName, System.String workVersion)
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableWorkContractIdentity other)
+  method public System.Boolean Equals(System.Object obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.DurableWorkContractIdentity left, ForgeTrust.AppSurface.Durable.DurableWorkContractIdentity right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.DurableWorkContractIdentity left, ForgeTrust.AppSurface.Durable.DurableWorkContractIdentity right)
+  property public System.Boolean IsDefault { get: public; }
+  property public System.String WorkName { get: public; }
+  property public System.String WorkVersion { get: public; }
 type public sealed class ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext>
   constructor public ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableWorkId workId, System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.DurableEncodedPayload payload, ForgeTrust.AppSurface.Durable.DurableProviderSafety providerSafety, ForgeTrust.AppSurface.Workers.DurableWorkerExecutionIdentity executionIdentity)
   method public ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext <Clone>$()
@@ -880,6 +892,7 @@ type public sealed class ForgeTrust.AppSurface.Durable.DurableWorkRegistration<T
 type public sealed class ForgeTrust.AppSurface.Durable.DurableWorkRegistry : ForgeTrust.AppSurface.Durable.IDurableWorkRegistry
   constructor public ForgeTrust.AppSurface.Durable.DurableWorkRegistry(System.Collections.Generic.IEnumerable<ForgeTrust.AppSurface.Durable.DurableWorkRegistration> registrations)
   method public ForgeTrust.AppSurface.Durable.DurableWorkRegistration GetRequired(System.String workName, System.String workVersion)
+  property public System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Durable.DurableWorkContractIdentity> RegisteredContracts { get: public; }
 type public sealed class ForgeTrust.AppSurface.Durable.DurableWorkRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableWorkRequest>
   constructor public ForgeTrust.AppSurface.Durable.DurableWorkRequest(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, System.String idempotencyKey, System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.DurableEncodedPayload payload, ForgeTrust.AppSurface.Durable.DurableProviderSafety providerSafety, ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy? retryPolicy = null, System.Nullable<System.DateTimeOffset> dueAtUtc = null)
   method public ForgeTrust.AppSurface.Durable.DurableWorkRequest <Clone>$()
@@ -985,6 +998,7 @@ type public interface ForgeTrust.AppSurface.Durable.IDurableWorkClient
   method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableWorkAcceptance>> EnqueueAsync(ForgeTrust.AppSurface.Durable.DurableWorkRequest request, System.Threading.CancellationToken cancellationToken = default)
 type public interface ForgeTrust.AppSurface.Durable.IDurableWorkRegistry
   method public abstract ForgeTrust.AppSurface.Durable.DurableWorkRegistration GetRequired(System.String workName, System.String workVersion)
+  property public virtual System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Durable.DurableWorkContractIdentity> RegisteredContracts { get: public; }
 type public sealed class ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy : System.IEquatable<ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy>
   method public ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy <Clone>$()
   method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.ScheduleMisfirePolicy? other)

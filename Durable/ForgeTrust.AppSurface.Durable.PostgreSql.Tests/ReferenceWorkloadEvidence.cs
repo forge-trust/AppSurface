@@ -61,6 +61,7 @@ internal sealed class ReferenceWorkloadEvidence
     private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
     private readonly DateTimeOffset _startedAtUtc = DateTimeOffset.UtcNow;
     private readonly string _scenario;
+    private const string ExternalPostgreSqlSource = "external-postgresql-16+";
 
     internal ReferenceWorkloadEvidence(string scenario)
     {
@@ -114,7 +115,7 @@ internal sealed class ReferenceWorkloadEvidence
             mode,
             string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("APPSURFACE_POSTGRES_TEST_CONNECTION"))
                 ? PostgreSqlTestContainerImage.Reference
-                : "external-postgresql-17.5",
+                : ExternalPostgreSqlSource,
             _startedAtUtc,
             _stopwatch.ElapsedMilliseconds,
             finalState,

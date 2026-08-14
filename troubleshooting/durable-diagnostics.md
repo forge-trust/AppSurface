@@ -16,6 +16,7 @@ context.
 | `ASDUR102` | Command conflict | A command identity was reused with a different known-schema fingerprint | Reuse the original semantic request or allocate a new command id |
 | `ASDUR106` | Ambiguous external outcome | Provider response was lost after an effect permit | Follow declared provider safety; reconcile or resolve rather than guessing |
 | `ASDUR109` | Work contract unavailable | Historical codec/executor registration is absent | Restore that immutable registration or perform an explicit migration |
+| `ASDUR119` | Work discovery contract selection unavailable | PostgreSQL worker activation could not snapshot the complete, exact custom registry contracts | Implement stable `RegisteredContracts`, correct default/duplicate/oversized values, then restart the host |
 | `ASDUR110` | Already terminal | A retry or operator request targets terminal Work | Return terminal truth; never repeat the executor |
 | `ASDUR111` | Work not found | The authorized scope does not contain the requested Work identity | Verify the authorized scope and opaque Work identity |
 | `ASDUR112` | Work revision conflict | Work changed after the operator read its revision | Reload authoritative Work truth before issuing another command |
@@ -68,6 +69,15 @@ different command rows. Stop retrying changed semantics and inspect the original
 
 The event name or encoded payload contract differs from the active wait’s exact contract, version, classification, or
 retention identity. Encode the registered contract and retry with the same still-unconsumed identities.
+
+### ASDUR119
+
+PostgreSQL could not form the in-memory Work discovery authority while resolving the worker host. A custom
+`IDurableWorkRegistry` must expose one complete, exact `RegisteredContracts` snapshot; it must not throw, be null,
+contain default or duplicate pairs, or contain more than 10,000 contracts. An empty snapshot is valid and leaves Work
+passes quiescent. The provider deliberately snapshots that list
+once, so registry mutation after activation does not change what the host may discover. Correct the registry and restart
+the host. Migration, role, schema, or epoch failures use their own schema/runtime diagnostics instead.
 
 ### ASDUR210
 
@@ -147,6 +157,7 @@ before any bounded retry.
 | `ASDUR105` | Lease lost | Stop the attempt; it cannot acquire a permit or change current Work. |
 | `ASDUR107` | Scope disabled | Treat the scope as a permanent tombstone; do not recreate it. |
 | `ASDUR108` | Recovery epoch required | Rotate the epoch through deployment tooling after restore before releasing Work or Flow. |
+| `ASDUR119` | Work discovery contract selection unavailable | Worker activation could not snapshot complete custom registry contracts | Correct `RegisteredContracts` and restart the host |
 | `ASDUR200` | Flow definition unavailable | Register required flow definition and version before starting or resuming instance. |
 | `ASDUR201` | Flow history incompatible | Definition fingerprint or step code changed; suspend instance and perform explicit migration. |
 | `ASDUR202` | Not waiting yet | Event arrived before instance entered active `waiting_event` state; retry event delivery. |

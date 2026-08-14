@@ -13,14 +13,15 @@ certifies child Work process loss after an effect permit.
 ## Success target and prerequisites
 
 - At most 5 minutes warm with PostgreSQL ready; at most 10 minutes cold with Docker.
-- .NET 10 SDK and either Docker or a dedicated PostgreSQL 17.5 connection in `APPSURFACE_POSTGRES_TEST_CONNECTION`.
+- .NET 10 SDK and either Docker or a dedicated PostgreSQL 16+ connection in `APPSURFACE_POSTGRES_TEST_CONNECTION`.
 - Filtered test run executing `DurableSlice4ReferenceWorkloadTests`. A skipped or zero-test run is not success.
 
-The Docker path uses the immutable multi-platform image
-`postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302`.
-Use a disposable database. The workload requires forward-only Flow schema through `0003_flow_protocol`; the current
-provider may also apply later compatible migrations such as the Work-first Schedule `0004_schedule_protocol`. This
-workload does not exercise those later protocol facts and supplies no destructive down migration.
+Historically, this workload also executes against
+`postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302` for preserved evidence.
+Current default strict verification uses `postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877`.
+Use a disposable database. The workload exercises the forward-only Flow protocol introduced through `0003_flow_protocol`,
+but the current provider schema must be applied through `0009_work_contract_discovery.sql` before child Work discovery
+can run. This workload does not exercise every later protocol fact and supplies no destructive down migration.
 
 ## Run the proof
 
@@ -52,8 +53,8 @@ For strict CI verification across all PostgreSQL integration tests including Flo
 
 ## What the workload proves
 
-1. **Schema Deployment**: Migration owner checks status, applies the current reviewed forward migrations (including the
-   Flow prerequisites `0001_work_shared.sql`, `0002_forced_rls.sql`, and `0003_flow_protocol.sql`), reads `StoreId`,
+1. **Schema Deployment**: Migration owner checks status, applies the current reviewed forward migrations (including `0001_work_shared.sql`, `0002_forced_rls.sql`, `0003_flow_protocol.sql`, and
+   `0009_work_contract_discovery.sql`), reads `StoreId`,
    and explicitly initializes the runtime epoch.
 2. **Atomic Flow Start**: `PostgreSqlDurableFlowClient` commits each Flow start atomically in its own short transaction. Slice 4 exposes no caller-owned Flow transaction API. Re-using `start_idempotency_key` with identical payload returns `Duplicate`; divergent definition or a new start identity targeting an existing Flow instance returns `ASDUR206`.
 3. **Step Evaluation & Determinism**: Step evaluation advances Flow state machine (`ready` -> `evaluating`) and verifies definition fingerprint SHA-256 against registered code.
@@ -80,7 +81,7 @@ For strict CI verification across all PostgreSQL integration tests including Flo
 The compiled reference workload requires:
 
 1. Construct `PostgreSqlDurableRuntimeSchemaManager` with a migration-owner data source.
-2. Call `GetStatusAsync`, `ApplyAsync` (applying current reviewed forward migrations; Slice 4 requires Flow facts through `0003_flow_protocol.sql`), and `InitializeRuntimeEpochAsync`; capture StoreId and active epoch.
+2. Call `GetStatusAsync`, `ApplyAsync` (applying current reviewed forward migrations through `0009_work_contract_discovery.sql`; Slice 4 exercises Flow facts introduced through `0003_flow_protocol.sql`), and `InitializeRuntimeEpochAsync`; capture StoreId and active epoch.
 3. Construct `PostgreSqlDurableWorkOptions` with `RuntimeEpoch` and `ExpectedStoreId`.
 4. Construct `PostgreSqlDurableFlowClient` with the scoped data source, Flow registry, payload codec registry, and shared PostgreSQL options.
 5. Invoke `IDurableFlowClient.StartAsync` or `IDurableFlowClient.RaiseEventAsync`. The manually driven Slice 4 processor discovers and evaluates steps through `PostgreSqlDurableFlowProcessor.DiscoverAsync` and `TryProcessAsync`; no public `ExecuteStepAsync` API exists.
@@ -90,6 +91,8 @@ The compiled reference workload requires:
 - Preflight/domain outcomes preserve caller transaction usability as specified by the [Flow protocol](flow-protocol-v1.md).
 - `ASDUR200` means definition unavailable; `ASDUR201` means history/definition mismatch; `ASDUR203` means aggregate revision race lost; `ASDUR204` means duplicate event ID; `ASDUR206` means start conflict; `ASDUR207` means command or event identity conflict.
 - `ASDUR400`-`ASDUR403` require deployment correction via schema manager, not runtime DDL.
+- `ASDUR119` means PostgreSQL worker activation could not snapshot its custom Work registry; correct
+  `RegisteredContracts` and restart the host.
 
 See the [`diagnostics catalog`](../troubleshooting/durable-diagnostics.md),
 [`Flow protocol`](flow-protocol-v1.md), and [`slice 4 reconstruction ledger`](slice4-reconstruction.md).
