@@ -71,7 +71,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string rootPath,
         CancellationToken cancellationToken = default)
     {
-        return await HarvestAsync(rootPath, _pathPolicy, cancellationToken);
+        return await HarvestAsync(rootPath, _pathPolicy, progress: null, cancellationToken);
     }
 
     /// <summary>
@@ -91,12 +91,13 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        return await HarvestAsync(context.RepositoryRoot, context.PathPolicy, cancellationToken);
+        return await HarvestAsync(context.RepositoryRoot, context.PathPolicy, context.Progress, cancellationToken);
     }
 
     private async Task<IReadOnlyList<DocNode>> HarvestAsync(
         string rootPath,
         IHarvestPathPolicy pathPolicy,
+        AppSurfaceDocsHarvestProgressSession? progress,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
@@ -108,6 +109,11 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             if (!javaScriptOptions.Enabled)
             {
                 return [];
+            }
+
+            if (progress is not null)
+            {
+                await progress.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Discovering);
             }
 
             var includePatterns = NormalizeIncludePatterns(javaScriptOptions.IncludeGlobs ?? []).ToArray();
@@ -126,6 +132,12 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
                 try
                 {
+                    if (progress is not null)
+                    {
+                        await progress.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Parsing);
+                        await progress.ReportSourceUnitAsync(0);
+                    }
+
                     var fileInfo = new FileInfo(filePath);
                     if (fileInfo.Length > javaScriptOptions.MaxFileSizeBytes)
                     {
@@ -174,6 +186,11 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 }
             }
 
+            if (progress is not null)
+            {
+                await progress.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Finalizing);
+            }
+
             AddEventDispatchDiagnostics(harvestedItems, eventDispatches, javaScriptOptions.VerifyEventDispatches, diagnostics);
             AssignStableAnchors(harvestedItems, diagnostics);
             ResolveTypedefReferences(harvestedItems, diagnostics);
@@ -182,7 +199,13 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 AddCompletenessDiagnostics(item, javaScriptOptions.RequireCompleteEventDoclets, diagnostics);
             }
 
-            return BuildDocNodes(harvestedItems);
+            var nodes = BuildDocNodes(harvestedItems);
+            if (progress is not null && nodes.Count > 0)
+            {
+                await progress.ReportOutputOnlyAsync(nodes.Count);
+            }
+
+            return nodes;
         }
         finally
         {

@@ -9,6 +9,7 @@ using ForgeTrust.RazorWire.Streams;
 using Ganss.Xss;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -3772,6 +3773,53 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetHarvestHealthAsync_ShouldRecordTimedOutHarvester_WhenItReturnsOnlyAfterTimeoutCancellation()
+    {
+        var harvester = new ReturnsAfterTimeoutCancellationHarvester();
+        var aggregator = CreateHarvestHealthAggregator([harvester], harvesterTimeout: TimeSpan.FromMilliseconds(10));
+
+        try
+        {
+            var health = await aggregator.GetHarvestHealthAsync();
+
+            Assert.Equal(DocHarvestHealthStatus.Failed, health.Status);
+            var harvesterHealth = Assert.Single(health.Harvesters);
+            Assert.Equal(DocHarvesterHealthStatus.TimedOut, harvesterHealth.Status);
+            Assert.Equal(DocHarvestDiagnosticCodes.HarvesterTimedOut, harvesterHealth.Diagnostic?.Code);
+        }
+        finally
+        {
+            harvester.Release();
+        }
+    }
+
+    [Fact]
+    public async Task AwaitHarvesterResultOrTimeoutAsync_ShouldKeepCompletedResultWhenTimeoutCancelsBeforeContinuationRuns()
+    {
+        using var timeout = new CancellationTokenSource();
+        var result = new TaskCompletionSource<IReadOnlyList<DocNode>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var wait = DocAggregator.AwaitHarvesterResultOrTimeoutAsync(result.Task, timeout.Token);
+        var expected = (IReadOnlyList<DocNode>)[new DocNode("Boundary", "boundary.md", "boundary")];
+
+        result.SetResult(expected);
+        timeout.Cancel();
+
+        Assert.Same(expected, await wait);
+    }
+
+    [Fact]
+    public async Task AwaitHarvesterResultOrTimeoutAsync_ShouldThrowWhenTimeoutWinsBeforeTheHarvester()
+    {
+        using var timeout = new CancellationTokenSource();
+        var result = new TaskCompletionSource<IReadOnlyList<DocNode>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var wait = DocAggregator.AwaitHarvesterResultOrTimeoutAsync(result.Task, timeout.Token);
+
+        timeout.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => wait);
+    }
+
+    [Fact]
     public async Task GetHarvestHealthAsync_ShouldRecordCanceledHarvester_WhenHarvesterCancelsOutsideTimeout()
     {
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
@@ -3815,6 +3863,28 @@ public class DocAggregatorTests : IDisposable
         Assert.Contains(
             progressSnapshot.Harvesters,
             item => item.Status == DocHarvesterHealthStatus.Canceled.ToString());
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldPublishTerminalProgress_WhenHarvesterThrowsTimeoutException()
+    {
+        var timeoutHarvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => timeoutHarvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Throws(new TimeoutException("The harvester timed out before producing docs."));
+        var services = A.Fake<IServiceProvider>();
+        A.CallTo(() => services.GetService(typeof(IRazorWireStreamHub))).Returns(null);
+        var progress = new AppSurfaceDocsHarvestProgressReporter(
+            services,
+            A.Fake<ILogger<AppSurfaceDocsHarvestProgressReporter>>());
+        var aggregator = CreateHarvestHealthAggregator([timeoutHarvester], harvestProgress: progress);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+        var progressSnapshot = progress.CurrentSnapshot;
+
+        Assert.Equal(DocHarvestHealthStatus.Failed, health.Status);
+        Assert.Equal(AppSurfaceDocsHarvestRunState.Failed, progressSnapshot.State);
+        Assert.Equal(1, progressSnapshot.CompletedHarvesters);
+        Assert.Equal(DocHarvesterHealthStatus.TimedOut.ToString(), Assert.Single(progressSnapshot.Harvesters).Status);
     }
 
     [Fact]
@@ -5428,6 +5498,28 @@ public class DocAggregatorTests : IDisposable
         Assert.DoesNotContain(docs, d => d.Path == "docs/ForgeTrust.Web/README.md");
     }
 
+    [Fact]
+    public async Task GetDocsAsync_ShouldReportDuplicateHarvesterInstancesSeparately()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+        var aggregator = CreateHarvestHealthAggregator(
+            [
+                new StaticHarvester([new DocNode("First", "first", "<p>First</p>")]),
+                new StaticHarvester([new DocNode("Second", "second", "<p>Second</p>")])
+            ],
+            harvestProgress: reporter);
+
+        var docs = await aggregator.GetDocsAsync();
+
+        Assert.Equal(2, docs.Count);
+        Assert.Equal(2, reporter.CurrentSnapshot.Harvesters.Count);
+        Assert.All(reporter.CurrentSnapshot.Harvesters, harvester => Assert.Equal(1, harvester.DocCount));
+        Assert.Equal(2, reporter.CurrentSnapshot.CompletedHarvesters);
+    }
+
     private DocAggregator CreateContributorAggregator(
         IDocHarvester harvester,
         AppSurfaceDocsContributorOptions contributorOptions,
@@ -5603,6 +5695,33 @@ public class DocAggregatorTests : IDisposable
         public void Release()
         {
             _release.TrySetResult([new DocNode("Late", "late.md", "late")]);
+        }
+    }
+
+    private sealed class ReturnsAfterTimeoutCancellationHarvester : IDocHarvester
+    {
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<IReadOnlyList<DocNode>> HarvestAsync(
+            string rootPath,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Deliberately return only after aggregation has classified the timeout.
+            }
+
+            await _release.Task;
+            return [new DocNode("Late", "late.md", "late")];
+        }
+
+        public void Release()
+        {
+            _release.TrySetResult();
         }
     }
 
