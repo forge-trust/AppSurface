@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using Markdig;
+using Markdig.Syntax;
 
 namespace ForgeTrust.AppSurface.ReleaseContracts;
 
@@ -164,7 +166,7 @@ internal static class UnreleasedEntryComposer
     /// Entry files live one directory below both <c>releases/unreleased.md</c> and versioned release notes. The composer
     /// therefore preserves each destination's target while recalculating its relative path from the composed document.
     /// External, rooted, query-only, and fragment-only destinations remain unchanged. The transformation deliberately
-    /// excludes inline and fenced code so examples retain their original bytes.
+    /// excludes inline, fenced, and indented code so examples retain their original bytes.
     /// </remarks>
     private static string RebaseRelativeLinkDestinations(string markdown, string entryPath, string destinationPath)
     {
@@ -177,33 +179,14 @@ internal static class UnreleasedEntryComposer
 
         var rebased = new StringBuilder(markdown.Length);
         var inlineCodeRanges = FindInlineCodeRanges(markdown);
-        var inFencedCodeBlock = false;
-        var fenceDelimiter = '\0';
-        var fenceDelimiterCount = 0;
+        var codeBlockRanges = FindCodeBlockRanges(markdown);
         var lineStart = 0;
         while (lineStart < markdown.Length)
         {
             var lineEnd = markdown.IndexOf('\n', lineStart);
             var contentEnd = lineEnd < 0 ? markdown.Length : lineEnd;
             var line = markdown.Substring(lineStart, contentEnd - lineStart);
-            if (TryGetFenceDelimiter(line, out var candidateFenceDelimiter, out var candidateFenceDelimiterCount))
-            {
-                if (!inFencedCodeBlock)
-                {
-                    inFencedCodeBlock = true;
-                    fenceDelimiter = candidateFenceDelimiter;
-                    fenceDelimiterCount = candidateFenceDelimiterCount;
-                }
-                else if (candidateFenceDelimiter == fenceDelimiter && candidateFenceDelimiterCount >= fenceDelimiterCount)
-                {
-                    inFencedCodeBlock = false;
-                    fenceDelimiter = '\0';
-                    fenceDelimiterCount = 0;
-                }
-
-                rebased.Append(line);
-            }
-            else if (inFencedCodeBlock)
+            if (IntersectsMarkdownRange(lineStart, contentEnd, codeBlockRanges))
             {
                 rebased.Append(line);
             }
@@ -226,6 +209,44 @@ internal static class UnreleasedEntryComposer
         return rebased.ToString();
     }
 
+    /// <summary>
+    /// Collects source-coordinate ranges for code blocks parsed from entry Markdown.
+    /// </summary>
+    /// <param name="markdown">Entry Markdown whose code blocks are excluded from rewriting.</param>
+    /// <returns>Half-open source ranges for every fenced or indented code block, including nested containers.</returns>
+    private static IReadOnlyList<MarkdownRange> FindCodeBlockRanges(string markdown)
+    {
+        var ranges = new List<MarkdownRange>();
+        AddCodeBlockRanges(Markdown.Parse(markdown), ranges);
+        return ranges;
+    }
+
+    /// <summary>
+    /// Recursively adds code-block spans from a Markdown block container.
+    /// </summary>
+    /// <param name="container">Container whose descendants may include code blocks.</param>
+    /// <param name="ranges">Collection receiving half-open source ranges.</param>
+    private static void AddCodeBlockRanges(ContainerBlock container, List<MarkdownRange> ranges)
+    {
+        foreach (var block in container)
+        {
+            if (block is CodeBlock)
+            {
+                ranges.Add(new MarkdownRange(block.Span.Start, block.Span.End + 1));
+            }
+
+            if (block is ContainerBlock childContainer)
+            {
+                AddCodeBlockRanges(childContainer, ranges);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Collects source-coordinate ranges delimited by inline-code backticks.
+    /// </summary>
+    /// <param name="markdown">Entry Markdown whose inline-code spans are excluded from rewriting.</param>
+    /// <returns>Half-open source ranges for matched inline-code delimiters and their contents.</returns>
     private static IReadOnlyList<MarkdownRange> FindInlineCodeRanges(string markdown)
     {
         var ranges = new List<MarkdownRange>();
@@ -254,6 +275,15 @@ internal static class UnreleasedEntryComposer
         return ranges;
     }
 
+    /// <summary>
+    /// Rewrites eligible link destinations from an immutable source line.
+    /// </summary>
+    /// <param name="markdown">One source line outside a Markdown code block.</param>
+    /// <param name="entryDirectory">Directory that resolves entry-relative destinations.</param>
+    /// <param name="destinationDirectory">Directory that must resolve the composed destinations.</param>
+    /// <param name="sourceOffset">Absolute offset of the source line in the entry Markdown.</param>
+    /// <param name="inlineCodeRanges">Inline-code ranges in the original entry Markdown.</param>
+    /// <returns>The line with eligible destination spans rebased without moving source coordinates.</returns>
     private static string RewriteLinkDestinations(
         string markdown,
         string entryDirectory,
@@ -261,38 +291,59 @@ internal static class UnreleasedEntryComposer
         int sourceOffset,
         IReadOnlyList<MarkdownRange> inlineCodeRanges)
     {
-        var rewritten = markdown;
-        foreach (var pattern in RelativeLinkDestinationPatterns)
+        var rewritten = new StringBuilder(markdown.Length);
+        var sourcePosition = 0;
+        var matches = RelativeLinkDestinationPatterns
+            .SelectMany(pattern => pattern.Matches(markdown).Cast<Match>())
+            .OrderBy(match => match.Index)
+            .ThenByDescending(match => match.Length);
+        foreach (var match in matches)
         {
-            rewritten = pattern.Replace(
-                rewritten,
-                match =>
-                {
-                    var destination = match.Groups["destination"];
-                    if (IsInInlineCodeRange(destination.Index + sourceOffset, inlineCodeRanges))
-                    {
-                        return match.Value;
-                    }
-
-                    var rebasedDestination = RebaseRelativeDestination(destination.Value, entryDirectory, destinationDirectory);
-                    if (string.Equals(destination.Value, rebasedDestination, StringComparison.Ordinal))
-                    {
-                        return match.Value;
-                    }
-
-                    var relativeStart = destination.Index - match.Index;
-                    return match.Value[..relativeStart]
-                           + rebasedDestination
-                           + match.Value[(relativeStart + destination.Length)..];
-                });
+            var destination = match.Groups["destination"];
+            rewritten.Append(markdown, sourcePosition, destination.Index - sourcePosition);
+            var rebasedDestination = IsInInlineCodeRange(destination.Index + sourceOffset, inlineCodeRanges)
+                ? destination.Value
+                : RebaseRelativeDestination(destination.Value, entryDirectory, destinationDirectory);
+            rewritten.Append(rebasedDestination);
+            sourcePosition = destination.Index + destination.Length;
         }
 
-        return rewritten;
+        rewritten.Append(markdown, sourcePosition, markdown.Length - sourcePosition);
+        return rewritten.ToString();
     }
 
+    /// <summary>
+    /// Determines whether a source position belongs to an inline-code span.
+    /// </summary>
+    /// <param name="position">Zero-based source position.</param>
+    /// <param name="inlineCodeRanges">Inline-code ranges in the source Markdown.</param>
+    /// <returns><see langword="true"/> when the position is preserved as inline code.</returns>
     private static bool IsInInlineCodeRange(int position, IReadOnlyList<MarkdownRange> inlineCodeRanges)
     {
-        return inlineCodeRanges.Any(range => position >= range.Start && position < range.End);
+        return IsInMarkdownRange(position, inlineCodeRanges);
+    }
+
+    /// <summary>
+    /// Determines whether a source position lies within any half-open Markdown range.
+    /// </summary>
+    /// <param name="position">Zero-based source position.</param>
+    /// <param name="ranges">Half-open ranges to inspect.</param>
+    /// <returns><see langword="true"/> when the position is contained by a range.</returns>
+    private static bool IsInMarkdownRange(int position, IReadOnlyList<MarkdownRange> ranges)
+    {
+        return ranges.Any(range => position >= range.Start && position < range.End);
+    }
+
+    /// <summary>
+    /// Determines whether a source line overlaps any half-open Markdown range.
+    /// </summary>
+    /// <param name="start">Inclusive line-start source position.</param>
+    /// <param name="end">Exclusive line-end source position.</param>
+    /// <param name="ranges">Half-open ranges to inspect.</param>
+    /// <returns><see langword="true"/> when the line and a range share source content.</returns>
+    private static bool IntersectsMarkdownRange(int start, int end, IReadOnlyList<MarkdownRange> ranges)
+    {
+        return ranges.Any(range => range.Start < end && start < range.End);
     }
 
     private static string RebaseRelativeDestination(string destination, string entryDirectory, string destinationDirectory)
@@ -300,7 +351,13 @@ internal static class UnreleasedEntryComposer
         var suffixStart = destination.IndexOfAny(['?', '#']);
         var path = suffixStart < 0 ? destination : destination[..suffixStart];
         var suffix = suffixStart < 0 ? string.Empty : destination[suffixStart..];
-        var sourcePath = Path.GetFullPath(Path.Combine(entryDirectory, path.Replace('/', Path.DirectorySeparatorChar)));
+        var normalizedPath = path.Replace('/', Path.DirectorySeparatorChar);
+        if (Path.IsPathRooted(normalizedPath) || path.StartsWith('\\'))
+        {
+            return destination;
+        }
+
+        var sourcePath = Path.GetFullPath(Path.Join(entryDirectory, normalizedPath));
         var relativePath = Path.GetRelativePath(destinationDirectory, sourcePath).Replace(Path.DirectorySeparatorChar, '/');
         if (path.EndsWith("/", StringComparison.Ordinal) && !relativePath.EndsWith("/", StringComparison.Ordinal))
         {
@@ -310,19 +367,13 @@ internal static class UnreleasedEntryComposer
         return relativePath + suffix;
     }
 
-    private static bool TryGetFenceDelimiter(string line, out char delimiter, out int delimiterCount)
-    {
-        var position = 0;
-        while (position < line.Length && position < 3 && line[position] == ' ')
-        {
-            position++;
-        }
-
-        delimiter = position < line.Length ? line[position] : '\0';
-        delimiterCount = delimiter is '`' or '~' ? CountRun(line, position, delimiter) : 0;
-        return delimiterCount >= 3;
-    }
-
+    /// <summary>
+    /// Counts consecutive occurrences of a character from a source position.
+    /// </summary>
+    /// <param name="value">Source text to inspect.</param>
+    /// <param name="start">Zero-based position where the candidate run begins.</param>
+    /// <param name="character">Character expected in the run.</param>
+    /// <returns>Number of consecutive matching characters.</returns>
     private static int CountRun(string value, int start, char character)
     {
         var end = start;
@@ -334,6 +385,11 @@ internal static class UnreleasedEntryComposer
         return end - start;
     }
 
+    /// <summary>
+    /// Half-open source-coordinate range in an entry Markdown document.
+    /// </summary>
+    /// <param name="Start">Inclusive zero-based source position.</param>
+    /// <param name="End">Exclusive zero-based source position.</param>
     private readonly record struct MarkdownRange(int Start, int End);
 
     /// <summary>

@@ -308,6 +308,7 @@ public class DocAggregator
     private readonly AppSurfaceDocsHarvestPathPolicySnapshotFactory _pathPolicySnapshotFactory;
     private readonly Func<string, CancellationToken, Task<DateTimeOffset?>> _resolveGitLastUpdatedUtcAsync;
     private readonly Func<TimeSpan, CancellationToken, Task> _testingPreHarvesterDelayAsync;
+    private readonly Func<TimeSpan, CancellationToken, Task> _testingPerHarvesterDelayAsync;
     private readonly TimeSpan _harvesterTimeout;
     private readonly TimeSpan _contributorFreshnessTimeout;
     private readonly CachePolicy _docsCachePolicy;
@@ -452,6 +453,10 @@ public class DocAggregator
     /// Optional test seam for the configured pre-harvester delay. When <see langword="null"/>, the aggregator uses
     /// <see cref="Task.Delay(TimeSpan, CancellationToken)"/>.
     /// </param>
+    /// <param name="testingPerHarvesterDelayAsync">
+    /// Optional test seam for the configured per-harvester delay. When <see langword="null"/>, the aggregator uses
+    /// <see cref="Task.Delay(TimeSpan, CancellationToken)"/>.
+    /// </param>
     internal DocAggregator(
         IEnumerable<IDocHarvester> harvesters,
         AppSurfaceDocsOptions options,
@@ -464,7 +469,8 @@ public class DocAggregator
         TimeSpan? contributorFreshnessTimeout = null,
         Func<DateTimeOffset>? utcNow = null,
         AppSurfaceDocsHarvestProgressReporter? harvestProgress = null,
-        Func<TimeSpan, CancellationToken, Task>? testingPreHarvesterDelayAsync = null)
+        Func<TimeSpan, CancellationToken, Task>? testingPreHarvesterDelayAsync = null,
+        Func<TimeSpan, CancellationToken, Task>? testingPerHarvesterDelayAsync = null)
         : this(
             harvesters,
             options,
@@ -478,7 +484,8 @@ public class DocAggregator
             contributorFreshnessTimeout,
             utcNow,
             harvestProgress,
-            testingPreHarvesterDelayAsync)
+            testingPreHarvesterDelayAsync,
+            testingPerHarvesterDelayAsync)
     {
     }
 
@@ -555,6 +562,10 @@ public class DocAggregator
     /// Optional test seam for the configured pre-harvester delay. When <see langword="null"/>, the aggregator uses
     /// <see cref="Task.Delay(TimeSpan, CancellationToken)"/>.
     /// </param>
+    /// <param name="testingPerHarvesterDelayAsync">
+    /// Optional test seam for the configured per-harvester delay. When <see langword="null"/>, the aggregator uses
+    /// <see cref="Task.Delay(TimeSpan, CancellationToken)"/>.
+    /// </param>
     /// <remarks>
     /// Contributor freshness is resolved during snapshot generation, not during Razor view rendering. Callers that inject
     /// <paramref name="resolveGitLastUpdatedUtcAsync"/> should respect the supplied <see cref="CancellationToken"/>, because
@@ -580,7 +591,8 @@ public class DocAggregator
         TimeSpan? contributorFreshnessTimeout = null,
         Func<DateTimeOffset>? utcNow = null,
         AppSurfaceDocsHarvestProgressReporter? harvestProgress = null,
-        Func<TimeSpan, CancellationToken, Task>? testingPreHarvesterDelayAsync = null)
+        Func<TimeSpan, CancellationToken, Task>? testingPreHarvesterDelayAsync = null,
+        Func<TimeSpan, CancellationToken, Task>? testingPerHarvesterDelayAsync = null)
     {
         ArgumentNullException.ThrowIfNull(harvesters);
         ArgumentNullException.ThrowIfNull(options);
@@ -609,6 +621,7 @@ public class DocAggregator
         _contributorFreshnessTimeout = contributorFreshnessTimeout ?? ContributorFreshnessTimeout;
         _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
         _testingPreHarvesterDelayAsync = testingPreHarvesterDelayAsync ?? Task.Delay;
+        _testingPerHarvesterDelayAsync = testingPerHarvesterDelayAsync ?? Task.Delay;
         _repositoryRoot = options.Mode switch
         {
             AppSurfaceDocsMode.Source => ResolveRepositoryRoot(
@@ -950,6 +963,7 @@ public class DocAggregator
         var localizationOptions = _localizationOptions;
         var harvestProgress = _harvestProgress;
         var testingPreHarvesterDelayAsync = _testingPreHarvesterDelayAsync;
+        var testingPerHarvesterDelayAsync = _testingPerHarvesterDelayAsync;
         var testingPreHarvestDelayMilliseconds = Math.Max(
             0,
             _harvestOptions.TestingPreHarvestDelayMilliseconds);
@@ -993,6 +1007,7 @@ public class DocAggregator
                                harvestContext,
                                harvesterTimeout,
                                logger,
+                               testingPerHarvesterDelayAsync,
                                harvestProgress,
                                runId,
                                harvesterRegistrations,
@@ -1261,6 +1276,7 @@ public class DocAggregator
         DocHarvestContext context,
         TimeSpan harvesterTimeout,
         ILogger logger,
+        Func<TimeSpan, CancellationToken, Task> testingPerHarvesterDelayAsync,
         AppSurfaceDocsHarvestProgressReporter? harvestProgress = null,
         string runId = "",
         IReadOnlyList<AppSurfaceDocsHarvesterRegistration>? harvesterRegistrations = null,
@@ -1278,6 +1294,7 @@ public class DocAggregator
                 context,
                 harvesterTimeout,
                 logger,
+                testingPerHarvesterDelayAsync,
                 harvestProgress,
                 runId,
                 harvesterRegistrations?[index].ProgressId ?? harvester.GetType().Name,
@@ -1310,6 +1327,7 @@ public class DocAggregator
         DocHarvestContext context,
         TimeSpan harvesterTimeout,
         ILogger logger,
+        Func<TimeSpan, CancellationToken, Task> testingPerHarvesterDelayAsync,
         AppSurfaceDocsHarvestProgressReporter? harvestProgress = null,
         string runId = "",
         string progressId = "",
@@ -1328,7 +1346,7 @@ public class DocAggregator
 
             if (testingDelayPerHarvesterMilliseconds > 0)
             {
-                await Task.Delay(
+                await testingPerHarvesterDelayAsync(
                     TimeSpan.FromMilliseconds(testingDelayPerHarvesterMilliseconds),
                     timeoutCts.Token);
             }

@@ -317,6 +317,65 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public void UnreleasedEntryComposerRebasesLinksWithoutChangingMarkdownCodeExamples()
+    {
+        const string template = """
+            # Unreleased
+            <!-- appsurface:unreleased-entries section="taking-shape" -->
+            <!-- appsurface:unreleased-entries section="included" -->
+            <!-- appsurface:unreleased-entries section="migration-watch" -->
+            """;
+        const string markdown = """
+            - [Guide](../../Guides/README.md)
+            - `[Literal](../../do-not-rebase-inline.md)`
+
+            ```markdown
+            [Fenced](../../do-not-rebase-fenced.md)
+            ```
+
+                [Indented](../../do-not-rebase-indented.md)
+
+            An unmatched ` stays literal.
+            - [After unmatched code](../../Guides/after.md)
+            """;
+
+        var composed = UnreleasedEntryComposer.Compose(
+            template,
+            [new UnreleasedEntry("/releases/unreleased.entries/2026-08-08-rebased-links.md", "included", markdown)],
+            "/releases/unreleased.md");
+
+        Assert.Contains("[Guide](../Guides/README.md)", composed, StringComparison.Ordinal);
+        Assert.Contains("`[Literal](../../do-not-rebase-inline.md)`", composed, StringComparison.Ordinal);
+        Assert.Contains("[Fenced](../../do-not-rebase-fenced.md)", composed, StringComparison.Ordinal);
+        Assert.Contains("    [Indented](../../do-not-rebase-indented.md)", composed, StringComparison.Ordinal);
+        Assert.Contains("[After unmatched code](../Guides/after.md)", composed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnreleasedEntryComposerPreservesLinksWhenPathsHaveNoDirectory()
+    {
+        const string template = """
+            # Unreleased
+            <!-- appsurface:unreleased-entries section="taking-shape" -->
+            <!-- appsurface:unreleased-entries section="included" -->
+            <!-- appsurface:unreleased-entries section="migration-watch" -->
+            """;
+        const string markdown = "- [Guide](../Guides/README.md)";
+
+        var sourceWithoutDirectory = UnreleasedEntryComposer.Compose(
+            template,
+            [new UnreleasedEntry("entry.md", "included", markdown)],
+            "/releases/unreleased.md");
+        var destinationWithoutDirectory = UnreleasedEntryComposer.Compose(
+            template,
+            [new UnreleasedEntry("/releases/unreleased.entries/entry.md", "included", markdown)],
+            "unreleased.md");
+
+        Assert.Contains(markdown, sourceWithoutDirectory, StringComparison.Ordinal);
+        Assert.Contains(markdown, destinationWithoutDirectory, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void UnreleasedEntryComposerRejectsUnsupportedTemplateMarkerAndPaths()
     {
         var unsupportedMarker = """
