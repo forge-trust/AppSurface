@@ -28,6 +28,46 @@ public sealed class ReleaseWorkflowPolicyTests
     }
 
     [Fact]
+    public void ReleasePreparationChangePolicyAcceptsAnUnchangedCanonicalNextCycleSidecar()
+    {
+        var result = ReleasePreparationChangePolicy.Validate(
+            "1.2.3",
+            [
+                new("A", "releases/v1.2.3.md"),
+                new("A", "releases/v1.2.3.md.yml"),
+                new("A", "releases/v1.2.3.release.json"),
+                new("A", "releases/v1.2.3.evidence.json"),
+                new("M", "releases/current.md"),
+                new("M", "CHANGELOG.md"),
+                new("M", "releases/unreleased.md"),
+                new("D", "releases/unreleased.entries/2026-08-08-release-workflow.md")
+            ],
+            ["releases/unreleased.entries/2026-08-08-release-workflow.md"]);
+
+        Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
+    }
+
+    [Fact]
+    public void ReleasePreparationChangePolicyRejectsAnAddedNextCycleSidecar()
+    {
+        var result = ReleasePreparationChangePolicy.Validate(
+            "1.2.3",
+            [
+                new("A", "releases/v1.2.3.md"),
+                new("A", "releases/v1.2.3.md.yml"),
+                new("A", "releases/v1.2.3.release.json"),
+                new("A", "releases/v1.2.3.evidence.json"),
+                new("M", "releases/current.md"),
+                new("M", "CHANGELOG.md"),
+                new("M", "releases/unreleased.md"),
+                new("A", "releases/unreleased.md.yml")
+            ]);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => error.Contains("must be M when present", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ReleasePreparationChangePolicyRejectsPackageReadmeChanges()
     {
         var result = ReleasePreparationChangePolicy.Validate(
