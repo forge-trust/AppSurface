@@ -463,13 +463,11 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             }
         }
 
-        foreach (var node in EnumerateNodes(program))
+        foreach (var node in EnumerateNodes(program).Where(node =>
+                     node is FunctionDeclaration or VariableDeclaration or ExpressionStatement or ClassExpression
+                     && emitted.Add(node)))
         {
-            if (node is FunctionDeclaration or VariableDeclaration or ExpressionStatement or ClassExpression
-                && emitted.Add(node))
-            {
-                yield return node;
-            }
+            yield return node;
         }
     }
 
@@ -619,7 +617,9 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         var className = classDeclaration.Id!.Name;
         var ordinal = 0;
 
-        foreach (var method in classDeclaration.Body.Body.OfType<MethodDefinition>())
+        foreach (var method in classDeclaration.Body.Body
+                     .Where(static element => element is MethodDefinition)
+                     .Cast<MethodDefinition>())
         {
             if (!TryGetClassMemberShape(method, out var shape))
             {
@@ -688,7 +688,9 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string source,
         ClassBody classBody)
     {
-        foreach (var method in classBody.Body.OfType<MethodDefinition>())
+        foreach (var method in classBody.Body
+                     .Where(static element => element is MethodDefinition)
+                     .Cast<MethodDefinition>())
         {
             if (FindLeadingBlockComment(comments, method, source) is { } comment)
             {
