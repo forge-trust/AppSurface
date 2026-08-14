@@ -5331,6 +5331,20 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 Directory.GetParent(_repositoryRoot)!.FullName + Path.DirectorySeparatorChar,
                 _repositoryRoot,
                 artifactDirectory));
+
+        var filesystemRoot = Path.GetPathRoot(_repositoryRoot);
+        if (!string.IsNullOrWhiteSpace(filesystemRoot))
+        {
+            Assert.Throws<PackageIndexException>(
+                () => PackageProofWorkDirectory.Prepare(filesystemRoot, _repositoryRoot, artifactDirectory));
+        }
+
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrWhiteSpace(userProfile))
+        {
+            Assert.Throws<PackageIndexException>(
+                () => PackageProofWorkDirectory.Prepare(userProfile, _repositoryRoot, artifactDirectory));
+        }
     }
 
     [Fact]
@@ -5425,6 +5439,21 @@ public sealed class PackageArtifactValidationTests : IDisposable
             []));
 
         Assert.Contains("third-party", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("*")]
+    [InlineData("AngleSharp.*")]
+    [InlineData("AngleSharp..Css")]
+    [InlineData("AngleSharp-")]
+    public void DocsPackageConsumerProofWorkflow_RejectsPatternPublicSourceMapping(string packageId)
+    {
+        var error = Assert.Throws<ArgumentException>(() => DocsPackageConsumerProofWorkflow.RenderMappedNuGetConfig(
+            CombineSafeChildPath(_repositoryRoot, "artifacts"),
+            "https://api.nuget.org/v3/index.json",
+            [packageId]));
+
+        Assert.Contains("exact NuGet package id", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -5548,6 +5577,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [InlineData("{}", "has no dependency graph")]
     [InlineData("{ not valid json", "could not parse lock file")]
     [InlineData("{ \"dependencies\": [] }", "has no dependency graph")]
+    [InlineData("{ \"dependencies\": { \"net10.0\": [] } }", "malformed framework")]
+    [InlineData("{ \"dependencies\": { \"net10.0\": { \"AngleSharp\": [] } } }", "malformed dependency")]
+    [InlineData("{ \"dependencies\": { \"net10.0\": { \"*\": { \"type\": \"Direct\" } } } }", "invalid third-party package id")]
     public async Task DocsPackageConsumerProofWorkflow_ReadThirdPartyPackageIdsFromLockFileRejectsInvalidLockFile(
         string content,
         string expectedMessage)
@@ -5826,6 +5858,48 @@ public sealed class PackageArtifactValidationTests : IDisposable
             () => DocsPackageConsumerProofWorkflow.VerifyConsumerGraph(assetsPath, lockPath, PackageVersion));
 
         File.WriteAllText(
+            assetsPath,
+            ValidDocsConsumerAssetsJson().Replace(
+                "\"AngleSharp/1.7.1\": { \"type\": \"package\" }",
+                "\"AngleSharp/1.7.1\": { \"type\": 1 }",
+                StringComparison.Ordinal),
+            Encoding.UTF8);
+        var nonStringLibraryType = Assert.Throws<PackageIndexException>(
+            () => DocsPackageConsumerProofWorkflow.VerifyConsumerGraph(assetsPath, lockPath, PackageVersion));
+
+        File.WriteAllText(
+            lockPath,
+            ValidDocsConsumerLockJson().Replace(
+                $"\"resolved\": \"{PackageVersion}\"",
+                "\"resolved\": 1",
+                StringComparison.Ordinal),
+            Encoding.UTF8);
+        File.WriteAllText(assetsPath, ValidDocsConsumerAssetsJson(), Encoding.UTF8);
+        var nonStringLockResolved = Assert.Throws<PackageIndexException>(
+            () => DocsPackageConsumerProofWorkflow.VerifyConsumerGraph(assetsPath, lockPath, PackageVersion));
+
+        File.WriteAllText(
+            lockPath,
+            ValidDocsConsumerLockJson().Replace(
+                "\"type\": \"Direct\"",
+                "\"type\": 1",
+                StringComparison.Ordinal),
+            Encoding.UTF8);
+        var nonStringLockType = Assert.Throws<PackageIndexException>(
+            () => DocsPackageConsumerProofWorkflow.VerifyConsumerGraph(assetsPath, lockPath, PackageVersion));
+
+        File.WriteAllText(lockPath, ValidDocsConsumerLockJson(), Encoding.UTF8);
+        File.WriteAllText(
+            assetsPath,
+            ValidDocsConsumerAssetsJson().Replace(
+                "\"type\": \"package\",",
+                "\"type\": 1,",
+                StringComparison.Ordinal),
+            Encoding.UTF8);
+        var nonStringAssetsTargetType = Assert.Throws<PackageIndexException>(
+            () => DocsPackageConsumerProofWorkflow.VerifyConsumerGraph(assetsPath, lockPath, PackageVersion));
+
+        File.WriteAllText(
             lockPath,
             """
             { "dependencies": { "net10.0": [] } }
@@ -5880,6 +5954,10 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("has no libraries graph", missingLibraries.Message, StringComparison.Ordinal);
         Assert.Contains("exact stable parser and sanitizer dependency edges", missingTargets.Message, StringComparison.Ordinal);
         Assert.Contains("does not resolve 'AngleSharp/1.7.1' as a package", wrongLibraryType.Message, StringComparison.Ordinal);
+        Assert.Contains("does not resolve 'AngleSharp/1.7.1' as a package", nonStringLibraryType.Message, StringComparison.Ordinal);
+        Assert.Contains("exact stable parser and sanitizer dependency edges", nonStringLockResolved.Message, StringComparison.Ordinal);
+        Assert.Contains("exact stable parser and sanitizer dependency edges", nonStringLockType.Message, StringComparison.Ordinal);
+        Assert.Contains("exact stable parser and sanitizer dependency edges", nonStringAssetsTargetType.Message, StringComparison.Ordinal);
         Assert.Contains("exact stable parser and sanitizer dependency edges", nonObjectLockFramework.Message, StringComparison.Ordinal);
         Assert.Contains("exact stable parser and sanitizer dependency edges", nonObjectAssetsTarget.Message, StringComparison.Ordinal);
         Assert.Contains("exact stable parser and sanitizer dependency edges", nonObjectLockDependencies.Message, StringComparison.Ordinal);
@@ -6451,7 +6529,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
-    public async Task PackageArtifactWorkflow_DoesNotWriteArtifactManifestWhenDocsProofFails()
+    public async Task PackageArtifactWorkflow_DoesNotWriteArtifactManifestWhenBothProofsFail()
     {
         await WriteFileAsync("packages/package-index.yml",
             """
@@ -6499,7 +6577,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             }),
             new RecordingCommandRunner(),
             new PackageArtifactValidator(),
-            new RecordingCoverageCliConsumerProofWorkflow(succeeded: true),
+            new RecordingCoverageCliConsumerProofWorkflow(succeeded: false),
             new RecordingDocsPackageConsumerProofWorkflow(succeeded: false));
 
         var error = await Assert.ThrowsAsync<PackageIndexException>(
@@ -6517,7 +6595,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
                     docsProofReportPath,
                     "https://api.nuget.org/v3/index.json")));
 
+        Assert.Contains("Coverage CLI consumer proof failed", error.Message, StringComparison.Ordinal);
         Assert.Contains("Docs package consumer proof failed", error.Message, StringComparison.Ordinal);
+        Assert.Contains(CombineSafeChildPath(artifactDirectory, "coverage-proof.md"), error.Message, StringComparison.Ordinal);
         Assert.Contains(docsProofReportPath, error.Message, StringComparison.Ordinal);
         Assert.True(File.Exists(reportPath), $"Expected failure report at {reportPath}.");
         Assert.True(File.Exists(docsProofReportPath), $"Expected Docs proof report at {docsProofReportPath}.");

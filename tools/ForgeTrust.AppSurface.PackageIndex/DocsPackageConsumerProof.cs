@@ -235,11 +235,12 @@ internal sealed class DocsPackageConsumerProofWorkflow : IDocsPackageConsumerPro
                 $"Docs package consumer proof selected artifact '{entry.ArtifactPath}' does not match package version '{packageVersion}'.");
         }
 
+        using var artifactStream = File.OpenRead(entry.ArtifactPath);
         return new DocsPackageConsumerProofSelectedArtifact(
             entry.PackageId,
             entry.ProjectPath,
             entry.ArtifactPath,
-            Convert.ToBase64String(SHA512.HashData(File.ReadAllBytes(entry.ArtifactPath))));
+            Convert.ToBase64String(SHA512.HashData(artifactStream)));
     }
 
     /// <summary>
@@ -284,7 +285,7 @@ internal sealed class DocsPackageConsumerProofWorkflow : IDocsPackageConsumerPro
     /// <param name="nugetOrgSource">Source used for reviewed third-party package identities.</param>
     /// <param name="thirdPartyPackageIds">Exact third-party package ids allowed from the public source.</param>
     /// <returns>NuGet configuration XML with package-source mapping.</returns>
-    /// <exception cref="ArgumentException">Thrown when no third-party package ids are supplied.</exception>
+    /// <exception cref="ArgumentException">Thrown when no third-party package ids are supplied or an id is a package-source mapping pattern.</exception>
     internal static string RenderMappedNuGetConfig(
         string localSource,
         string nugetOrgSource,
@@ -301,6 +302,14 @@ internal sealed class DocsPackageConsumerProofWorkflow : IDocsPackageConsumerPro
         if (publicPackageIds.Length == 0)
         {
             throw new ArgumentException("At least one reviewed third-party package id is required.", nameof(thirdPartyPackageIds));
+        }
+
+        var invalidPackageId = publicPackageIds.FirstOrDefault(packageId => !IsExactNuGetPackageId(packageId));
+        if (invalidPackageId is not null)
+        {
+            throw new ArgumentException(
+                $"Third-party package id '{invalidPackageId}' must be an exact NuGet package id, not a package-source mapping pattern.",
+                nameof(thirdPartyPackageIds));
         }
 
         var escapedLocalSource = SecurityElement.Escape(Path.GetFullPath(localSource)) ?? localSource;
@@ -415,14 +424,42 @@ internal sealed class DocsPackageConsumerProofWorkflow : IDocsPackageConsumerPro
                 throw new PackageIndexException($"Docs package consumer proof lock file '{lockFilePath}' has no dependency graph.");
             }
 
-            return frameworks
-                .EnumerateObject()
-                .SelectMany(framework => framework.Value.ValueKind == JsonValueKind.Object
-                    ? framework.Value.EnumerateObject().ToArray()
-                    : [])
-                .Where(dependency => !dependency.Name.StartsWith("ForgeTrust.", StringComparison.OrdinalIgnoreCase)
-                    && IsPackageLockEntry(dependency.Value))
-                .Select(dependency => dependency.Name)
+            var thirdPartyPackageIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var framework in frameworks.EnumerateObject())
+            {
+                if (framework.Value.ValueKind != JsonValueKind.Object)
+                {
+                    throw new PackageIndexException(
+                        $"Docs package consumer proof lock file '{lockFilePath}' has malformed framework '{framework.Name}'.");
+                }
+
+                foreach (var dependency in framework.Value.EnumerateObject())
+                {
+                    if (dependency.Value.ValueKind != JsonValueKind.Object
+                        || !dependency.Value.TryGetProperty("type", out var type)
+                        || type.ValueKind != JsonValueKind.String)
+                    {
+                        throw new PackageIndexException(
+                            $"Docs package consumer proof lock file '{lockFilePath}' has malformed dependency '{framework.Name}/{dependency.Name}'.");
+                    }
+
+                    if (dependency.Name.StartsWith("ForgeTrust.", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(type.GetString(), "Project", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (!IsExactNuGetPackageId(dependency.Name))
+                    {
+                        throw new PackageIndexException(
+                            $"Docs package consumer proof lock file '{lockFilePath}' has invalid third-party package id '{dependency.Name}'.");
+                    }
+
+                    thirdPartyPackageIds.Add(dependency.Name);
+                }
+            }
+
+            return thirdPartyPackageIds
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(packageId => packageId, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -585,6 +622,7 @@ internal sealed class DocsPackageConsumerProofWorkflow : IDocsPackageConsumerPro
                 if (!libraries.TryGetProperty(libraryKey, out var library)
                     || library.ValueKind != JsonValueKind.Object
                     || !library.TryGetProperty("type", out var type)
+                    || type.ValueKind != JsonValueKind.String
                     || !string.Equals(type.GetString(), "package", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new PackageIndexException(
@@ -619,8 +657,10 @@ internal sealed class DocsPackageConsumerProofWorkflow : IDocsPackageConsumerPro
             && framework.TryGetProperty(DocsPackageId, out var dependency)
             && dependency.ValueKind == JsonValueKind.Object
             && dependency.TryGetProperty("resolved", out var resolved)
+            && resolved.ValueKind == JsonValueKind.String
             && string.Equals(resolved.GetString(), packageVersion, StringComparison.Ordinal)
             && dependency.TryGetProperty("type", out var type)
+            && type.ValueKind == JsonValueKind.String
             && string.Equals(type.GetString(), "Direct", StringComparison.OrdinalIgnoreCase)
             && dependency.TryGetProperty("dependencies", out var dependencies)
             && HasExactStableParserAndSanitizerDependencies(dependencies, expectedDependencies);
@@ -636,6 +676,7 @@ internal sealed class DocsPackageConsumerProofWorkflow : IDocsPackageConsumerPro
             && target.TryGetProperty(docsLibraryKey, out var docsPackage)
             && docsPackage.ValueKind == JsonValueKind.Object
             && docsPackage.TryGetProperty("type", out var type)
+            && type.ValueKind == JsonValueKind.String
             && string.Equals(type.GetString(), "package", StringComparison.OrdinalIgnoreCase)
             && docsPackage.TryGetProperty("dependencies", out var dependencies)
             && HasExactStableParserAndSanitizerDependencies(dependencies, expectedDependencies);
@@ -650,11 +691,41 @@ internal sealed class DocsPackageConsumerProofWorkflow : IDocsPackageConsumerPro
             && version.ValueKind == JsonValueKind.String
             && string.Equals(version.GetString(), $"[{expected.Version}]", StringComparison.Ordinal));
 
-    private static bool IsPackageLockEntry(JsonElement dependency) =>
-        dependency.ValueKind == JsonValueKind.Object
-        && dependency.TryGetProperty("type", out var type)
-        && type.ValueKind == JsonValueKind.String
-        && !string.Equals(type.GetString(), "Project", StringComparison.OrdinalIgnoreCase);
+    private static bool IsExactNuGetPackageId(string packageId)
+    {
+        if (string.IsNullOrWhiteSpace(packageId)
+            || packageId.Length > 100
+            || !IsNuGetIdentifierCharacter(packageId[0]))
+        {
+            return false;
+        }
+
+        var previousWasSeparator = false;
+        for (var index = 1; index < packageId.Length; index++)
+        {
+            var character = packageId[index];
+            if (IsNuGetIdentifierCharacter(character))
+            {
+                previousWasSeparator = false;
+                continue;
+            }
+
+            if ((character != '.' && character != '-') || previousWasSeparator || index == packageId.Length - 1)
+            {
+                return false;
+            }
+
+            previousWasSeparator = true;
+        }
+
+        return true;
+    }
+
+    private static bool IsNuGetIdentifierCharacter(char character) =>
+        character is >= 'A' and <= 'Z'
+        || character is >= 'a' and <= 'z'
+        || character is >= '0' and <= '9'
+        || character == '_';
 
     private static IReadOnlyDictionary<string, string?> CreateProofEnvironment(string dotNetHomePath, string sharedPackagesPath) =>
         new Dictionary<string, string?>

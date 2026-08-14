@@ -189,11 +189,18 @@ internal sealed class PackageArtifactWorkflow
         if (!coverageProofReport.Succeeded || !docsProofReport.Succeeded)
         {
             DeleteArtifactManifest(request.ArtifactManifestPath);
-            var failedProof = !coverageProofReport.Succeeded
-                ? "Coverage CLI consumer proof"
-                : "Docs package consumer proof";
-            throw new PackageIndexException(
-                $"{failedProof} failed. Report: {(!coverageProofReport.Succeeded ? request.CoverageProofReportPath : request.DocsProofReportPath)}");
+            var failedProofs = new List<string>();
+            if (!coverageProofReport.Succeeded)
+            {
+                failedProofs.Add($"Coverage CLI consumer proof failed. Report: {request.CoverageProofReportPath}");
+            }
+
+            if (!docsProofReport.Succeeded)
+            {
+                failedProofs.Add($"Docs package consumer proof failed. Report: {request.DocsProofReportPath}");
+            }
+
+            throw new PackageIndexException(string.Join(" ", failedProofs));
         }
 
         await _artifactManifestWriter.WriteAsync(
