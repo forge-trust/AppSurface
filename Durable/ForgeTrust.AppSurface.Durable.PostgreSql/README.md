@@ -100,9 +100,10 @@ After the schema is current, the recovery epoch is initialized, and the role rec
 runtime-role and one payload-free dispatcher-role data source. The warm path is designed to reach one hosted Work
 completion in five minutes; it never performs DDL at application startup.
 
-Custom `IDurableWorkRegistry` implementations must expose a complete, stable `RegisteredContracts` snapshot before
-resolving `IDurableRuntimePump`. PostgreSQL snapshots the list once to define that host's discovery authority, rejects
-default/duplicate or more than 10,000 pairs with `ASDUR119`, and does not observe later registry mutation. An empty
+Custom [`IDurableWorkRegistry`](../ForgeTrust.AppSurface.Durable/README.md#public-api-by-audience) implementations
+must expose a complete, stable `RegisteredContracts` snapshot before resolving `IDurableRuntimePump`. PostgreSQL
+snapshots the list once to define that host's discovery authority, rejects default/duplicate or more than 10,000 pairs
+with [`ASDUR119`](../../troubleshooting/durable-diagnostics.md#asdur119), and does not observe later registry mutation. An empty
 registry is valid and makes Work passes quiescent. Restart
 the host after changing the registered contracts. This is an execution-isolation boundary among trusted worker hosts,
 not an authorization boundary within the dispatcher credential: callers that possess that credential may invoke its
