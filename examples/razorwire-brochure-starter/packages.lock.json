@@ -27,7 +27,7 @@
       "ForgeTrust.AppSurface.Core": {
         "type": "Transitive",
         "resolved": "0.1.0",
-        "contentHash": "BelXToqPRr8OYBWYS/01FN+AaFL5zw17uNpIvU6VZsy1kmi2KbvbU6eQ/K++Nf6c7O5rtduezn+zyAOpfiMEzQ==",
+        "contentHash": "AhF1tLSFBd92tmm0l0oojMLiHBEiwKf9Otrdkb9+/vI66b0u493L3EuuEmyuzXq81c9Tzyn26+J8Qop+t0AsxQ==",
         "dependencies": {
           "CliWrap": "3.10.1"
         }

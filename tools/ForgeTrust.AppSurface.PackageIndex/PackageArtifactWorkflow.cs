@@ -74,6 +74,8 @@ internal sealed class PackageArtifactWorkflow
             [
                 "restore",
                 "ForgeTrust.AppSurface.slnx",
+                "--configfile",
+                "NuGet.package-gate.config",
                 "/p:ContinuousIntegrationBuild=true",
                 "/p:TailwindRuntimeBinaryResolutionEnabled=true"
             ],

@@ -5409,6 +5409,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Single(coverageProofWorkflow.Requests);
         Assert.Equal(["dotnet restore", "dotnet build", "dotnet pack"], commandRunner.OperationNames);
         var restoreCommand = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet restore");
+        Assert.Equal(
+            ["restore", "ForgeTrust.AppSurface.slnx", "--configfile", "NuGet.package-gate.config"],
+            restoreCommand.Arguments.Take(4));
         Assert.Contains("/p:ContinuousIntegrationBuild=true", restoreCommand.Arguments);
         Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", restoreCommand.Arguments);
         var packCommand = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet pack");
