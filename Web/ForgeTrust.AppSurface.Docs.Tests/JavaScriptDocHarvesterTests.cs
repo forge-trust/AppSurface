@@ -4,6 +4,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -968,6 +969,67 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Equal("javascript-method", scanStub.Metadata?.PageType);
         Assert.Contains(scanStub.Outline!, item => item.Id == "method-instance-section-copy-manager-scan" && item.Level == 3);
         Assert.Contains("SectionCopyManager.scan(document)", scanStub.Content, StringComparison.Ordinal);
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldPublishClassOutputAndProgressThroughHarvestContext()
+    {
+        await WriteAsync(
+            "src/class-contract.js",
+            """
+            /**
+             * Copy manager contract.
+             * @public
+             * @namespace RazorWire
+             */
+            export class SectionCopyManager {
+              /**
+               * Scans section-copy markup.
+               * @public
+               * @param {Document} document - Document to scan.
+               * @returns {void}
+               */
+              scan() {}
+
+              /**
+               * Resets all section-copy roots.
+               * @public
+               */
+              static reset() {}
+            }
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/class-contract.js"));
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+        var progressId = nameof(JavaScriptDocHarvester);
+        var runId = await reporter.BeginRunAsync(
+        [
+            new AppSurfaceDocsHarvesterRegistration(
+                progressId,
+                nameof(JavaScriptDocHarvester),
+                IsBuiltInProgressHarvester: true)
+        ]);
+        var context = new DocHarvestContext(
+            _testRoot,
+            CreatePathPolicySnapshot(),
+            reporter.CreateSession(runId, progressId));
+
+        var docs = await harvester.HarvestAsync(context);
+
+        var page = Assert.Single(docs, doc => doc.Path == "api/javascript/razorwire");
+        Assert.Contains(page.Outline!, item => item.Id == "class-section-copy-manager" && item.Level == 2 && item.Title == "SectionCopyManager");
+        Assert.Contains(page.Outline!, item => item.Id == "method-instance-section-copy-manager-scan" && item.Level == 3 && item.Title == "SectionCopyManager.scan");
+        Assert.Contains(page.Outline!, item => item.Id == "method-static-section-copy-manager-reset" && item.Level == 3 && item.Title == "SectionCopyManager.reset");
+        Assert.Contains(docs, doc => doc.Path == "api/javascript/razorwire#method-instance-section-copy-manager-scan");
+        Assert.Contains("SectionCopyManager.scan(document)", page.Content, StringComparison.Ordinal);
+
+        var progress = Assert.Single(reporter.CurrentSnapshot.Harvesters, item => item.ProgressId == progressId);
+        Assert.Equal(AppSurfaceDocsHarvestProgressPhase.Finalizing, progress.Phase);
+        Assert.Equal(1, progress.SourceUnitsProcessed);
+        Assert.Equal(docs.Count, progress.DocCount);
         Assert.Empty(GetDiagnostics(harvester));
     }
 
@@ -2663,12 +2725,10 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Contains("css-hook-data-rw-form-error-generated-true", page.Content, StringComparison.Ordinal);
         Assert.Contains("css-custom-property-rw-form-error-text", page.Content, StringComparison.Ordinal);
         Assert.Contains("global-window-razorwire", page.Content, StringComparison.Ordinal);
-        Assert.Contains("class-section-copy-manager", page.Content, StringComparison.Ordinal);
-        Assert.Contains("method-instance-section-copy-manager-scan", page.Content, StringComparison.Ordinal);
-        Assert.Contains("method-instance-section-copy-manager-prune", page.Content, StringComparison.Ordinal);
-        Assert.Contains("method-instance-section-copy-manager-get-diagnostics", page.Content, StringComparison.Ordinal);
-        Assert.Contains("method-instance-section-copy-manager-clear-diagnostics", page.Content, StringComparison.Ordinal);
-        Assert.DoesNotContain("constructor-section-copy-manager", page.Content, StringComparison.Ordinal);
+        Assert.Contains("config-window-razorwire-sectioncopymanager", page.Content, StringComparison.Ordinal);
+        Assert.Contains("typedef-sectioncopymanager", page.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("class-section-copy-manager", page.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("method-instance-section-copy-manager", page.Content, StringComparison.Ordinal);
         Assert.Contains("{&quot;load&quot;|&quot;idle&quot;|&quot;visible&quot;|&quot;only&quot;}", page.Content, StringComparison.Ordinal);
         Assert.DoesNotContain("{&quot;load&quot;|&quot;idle&quot;|&quot;visible&quot;|&quot;immediate&quot;}", page.Content, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
@@ -4711,6 +4771,16 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
                 }
             }
         };
+    }
+
+    private AppSurfaceDocsHarvestPathPolicySnapshot CreatePathPolicySnapshot()
+    {
+        return new AppSurfaceDocsHarvestPathPolicySnapshot(
+            AppSurfaceDocsHarvestPathPolicy.CreateDefault(),
+            new AppSurfaceDocsHarvestVcsIgnorePolicy(
+                _testRoot,
+                new AppSurfaceDocsHarvestVcsIgnoreOptions(),
+                NullLogger.Instance));
     }
 
     private static IReadOnlyList<DocHarvestDiagnostic> GetDiagnostics(JavaScriptDocHarvester harvester)

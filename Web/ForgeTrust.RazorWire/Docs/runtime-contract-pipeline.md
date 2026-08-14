@@ -41,7 +41,7 @@ The root `assets:typecheck`, `assets:test`, `assets:build`, and `assets:verify` 
 - `assets/contracts/razorwire-public-contracts.js` is a docs-only manifest for AppSurface Docs JavaScript API harvesting. It documents browser contracts without forcing the harvester to parse generated runtime bundles.
 - `wwwroot/razorwire/exampleJsInterop.js` remains hand-authored, demo-only JavaScript. It is not part of the generated runtime pipeline.
 
-The section-copy manager has two deliberately separate documentation boundaries: the manifest documents the consumer-facing singleton and a declaration-only `SectionCopyManager` class, while the TypeScript runtime keeps the implementation behind the exact `appsurface:source-marker` begin/end pair in [`assets/src/section-copy.ts`](../assets/src/section-copy.ts). The marker is a future harvesting anchor, not a generated bundle input or a permission to construct a second manager.
+The section-copy manager has two deliberately separate documentation boundaries: the manifest documents the consumer-facing singleton and a declaration-only `SectionCopyManager` object shape, while the TypeScript runtime keeps the implementation behind the exact `appsurface:source-marker` begin/end pair. See [Section Copy](section-copy.md#api-shape) for the public singleton contract and recovery workflow. The marker is a future harvesting anchor, not a generated bundle input or a permission to construct a second manager.
 
 Generated outputs stay committed because Razor Class Library static web assets, embedded fallback resources, command-line hosts, and existing consumers depend on those physical paths.
 

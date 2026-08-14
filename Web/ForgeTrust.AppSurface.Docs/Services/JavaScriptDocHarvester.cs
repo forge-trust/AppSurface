@@ -444,13 +444,8 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
         ClaimNestedClassComments(program, comments, attachedCommentStarts, source);
 
-        foreach (var comment in comments)
+        foreach (var comment in comments.Where(comment => !attachedCommentStarts.Contains(comment.Start)))
         {
-            if (attachedCommentStarts.Contains(comment.Start))
-            {
-                continue;
-            }
-
             AddStandaloneItem(comment, items, source, relativePath, options, requirePublicTag, diagnostics);
         }
 
@@ -624,9 +619,9 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         var className = classDeclaration.Id!.Name;
         var ordinal = 0;
 
-        foreach (var element in classDeclaration.Body.Body)
+        foreach (var method in classDeclaration.Body.Body.OfType<MethodDefinition>())
         {
-            if (element is not MethodDefinition method || !TryGetClassMemberShape(method, out var shape))
+            if (!TryGetClassMemberShape(method, out var shape))
             {
                 continue;
             }
@@ -693,10 +688,9 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string source,
         ClassBody classBody)
     {
-        foreach (var element in classBody.Body)
+        foreach (var method in classBody.Body.OfType<MethodDefinition>())
         {
-            if (element is MethodDefinition method
-                && FindLeadingBlockComment(comments, method, source) is { } comment)
+            if (FindLeadingBlockComment(comments, method, source) is { } comment)
             {
                 var doclet = ParseDoclet(GetCommentText(source, comment));
                 if (!HasStandaloneContractTag(doclet))

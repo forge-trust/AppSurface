@@ -118,14 +118,30 @@ test('section copy manager source markers fence the runtime class exactly once a
   assert.deepEqual(runtimeMethods, ['scan', 'prune', 'getDiagnostics', 'clearDiagnostics']);
 });
 
-test('section copy public contract documents only the four singleton methods', () => {
+test('section copy public contract documents the singleton without an executable class stub', () => {
   const contracts = readFileSync(new URL('assets/contracts/razorwire-public-contracts.js', packageRoot), 'utf8');
-  const classIndex = contracts.indexOf('class SectionCopyManager');
-  const classBlock = contracts.slice(classIndex, contracts.indexOf('\n}', classIndex));
-  const methods = [...classBlock.matchAll(/@method\s+([A-Za-z]+)/g)].map(match => match[1]);
+  const getDoclet = marker => {
+    const markerIndex = contracts.indexOf(marker);
+    assert.notEqual(markerIndex, -1, `Expected contract marker '${marker}'.`);
 
-  assert.deepEqual(methods, ['scan', 'prune', 'getDiagnostics', 'clearDiagnostics']);
-  assert.doesNotMatch(classBlock, /constructor\s*\(/);
+    const start = contracts.lastIndexOf('/**', markerIndex);
+    const end = contracts.indexOf('*/', markerIndex);
+    assert.ok(start !== -1 && end !== -1, `Expected doclet for '${marker}'.`);
+
+    return contracts.slice(start, end);
+  };
+  const getFunctionProperties = doclet =>
+    [...doclet.matchAll(/^\s*\*\s+@property \{Function\} (\w+)/gm)].map(match => match[1]);
+  const singletonContract = getDoclet('@config window.RazorWire.sectionCopyManager');
+  const managerTypedef = getDoclet('@typedef {Object} SectionCopyManager');
+
+  assert.match(contracts, /@config window\.RazorWire\.behaviors\n \* @type \{object\}/);
+  assert.match(singletonContract, /@config window\.RazorWire\.sectionCopyManager\n \* @type \{SectionCopyManager\}/);
+  assert.deepEqual(getFunctionProperties(singletonContract), ['scan', 'prune', 'getDiagnostics', 'clearDiagnostics']);
+  assert.match(managerTypedef, /@typedef \{Object\} SectionCopyManager/);
+  assert.deepEqual(getFunctionProperties(managerTypedef), ['scan', 'prune', 'getDiagnostics', 'clearDiagnostics']);
+  assert.doesNotMatch(contracts, /class SectionCopyManager\s*\{/);
+  assert.doesNotMatch(contracts, /@method\s+(scan|prune|getDiagnostics|clearDiagnostics)/);
 });
 
 test('core behavior stub de-dupes missing-kit diagnostics', () => {

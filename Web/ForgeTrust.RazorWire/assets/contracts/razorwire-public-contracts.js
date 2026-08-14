@@ -136,6 +136,21 @@ window.RazorWire = window.RazorWire || {};
  * @config window.RazorWire.sectionCopyManager
  * @type {SectionCopyManager}
  * @source <rw:scripts /> with rendered `[data-rw-section-copy]` or `[data-rw-section-copy-target]` markup
+ * @property {Function} scan - Re-scans the document for section-copy roots and markers after custom DOM updates.
+ * @property {Function} prune - Removes controllers for disconnected section-copy roots.
+ * @property {Function} getDiagnostics - Returns stable section-copy diagnostics recorded since startup.
+ * @property {Function} clearDiagnostics - Clears recorded section-copy diagnostics.
+ */
+
+/**
+ * Declaration-only object shape for the section-copy manager singleton.
+ * @public
+ * @namespace RazorWire
+ * @typedef {Object} SectionCopyManager
+ * @property {Function} scan - Re-scans the document for section-copy roots and markers after custom DOM updates.
+ * @property {Function} prune - Removes controllers for disconnected section-copy roots.
+ * @property {Function} getDiagnostics - Returns stable section-copy diagnostics recorded since startup.
+ * @property {Function} clearDiagnostics - Clears recorded section-copy diagnostics.
  */
 
 /**
@@ -148,47 +163,6 @@ window.RazorWire = window.RazorWire || {};
  * @property {string} fix - Required remediation guidance suitable for docs, tests, and development diagnostics.
  * @property {string} docs - Required repository documentation path for the related troubleshooting guidance.
  */
-
-/**
- * Declaration-only public contract for the section-copy manager singleton.
- * Consumers use `window.RazorWire.sectionCopyManager`; do not construct `SectionCopyManager`.
- * @public
- * @namespace RazorWire
- * @class SectionCopyManager
- */
-class SectionCopyManager {
-  /**
-   * Re-scans the document for section-copy roots and markers after custom DOM updates.
-   * @public
-   * @method scan
-   * @returns {void}
-   */
-  scan() {}
-
-  /**
-   * Removes controllers for disconnected section-copy roots.
-   * @public
-   * @method prune
-   * @returns {void}
-   */
-  prune() {}
-
-  /**
-   * Returns stable section-copy diagnostics recorded since startup.
-   * @public
-   * @method getDiagnostics
-   * @returns {RazorWireSectionCopyDiagnostic[]}
-   */
-  getDiagnostics() {}
-
-  /**
-   * Clears recorded section-copy diagnostics.
-   * @public
-   * @method clearDiagnostics
-   * @returns {void}
-   */
-  clearDiagnostics() {}
-}
 
 /**
  * A RazorWire-enhanced form started submitting through Turbo.

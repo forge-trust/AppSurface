@@ -33,7 +33,7 @@ Plain `<rw:scripts/>` is enough. It emits a small detector that loads `section-c
 - `data-rw-section-copy-status="true"` marks an optional `aria-live="polite"` or `aria-live="assertive"` status region.
 - `data-rw-section-copy-root="true"` optionally scopes generated status, timers, and cleanup. Without a root, RazorWire uses the document body.
 
-RazorWire exposes one singleton at `window.RazorWire.sectionCopyManager` with `scan()`, `prune()`, `getDiagnostics()`, and `clearDiagnostics()`. Consumers must not call `new SectionCopyManager()`; the browser runtime owns the manager lifetime. Call `scan()` after custom DOM updates that add section-copy markup outside normal Turbo render events. The [RazorWire public contract manifest](../assets/contracts/razorwire-public-contracts.js) records the singleton and its declaration-only class shape for generated API docs.
+RazorWire exposes one singleton at `window.RazorWire.sectionCopyManager` with `scan()`, `prune()`, `getDiagnostics()`, and `clearDiagnostics()`. Consumers must not call `new SectionCopyManager()`; the browser runtime owns the manager lifetime. Call `scan()` after custom DOM updates that add section-copy markup outside normal Turbo render events. The [Runtime Contract Pipeline](runtime-contract-pipeline.md#public-contract) explains how the public contract manifest records this singleton and its declaration-only object shape for generated API docs.
 
 ## Singleton-First Usage And Recovery
 
@@ -64,7 +64,7 @@ if (diagnostics.length > 0) {
 }
 ```
 
-Keep the manager access behind the singleton global. Do not retain a second manager, replace `window.RazorWire.sectionCopyManager`, or construct the declaration-only `SectionCopyManager` contract directly.
+Keep the manager access behind the singleton global. Do not retain a second manager, replace `window.RazorWire.sectionCopyManager`, or construct the declaration-only `SectionCopyManager` object shape directly.
 
 ## Runtime-Owned Hooks
 
