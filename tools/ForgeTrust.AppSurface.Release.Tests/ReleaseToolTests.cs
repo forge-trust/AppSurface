@@ -172,6 +172,7 @@ public sealed class ReleaseToolTests : IDisposable
             ### Release workflow
 
             - Parallel pull requests add independent release-note entries.
+            - Follow the [Config guide](../../Config/ForgeTrust.AppSurface.Config/README.md#configuration-audit).
             """);
 
         var result = await RunAsync(
@@ -182,6 +183,8 @@ public sealed class ReleaseToolTests : IDisposable
         var releaseNote = await ReadFileAsync("releases/v0.1.0-preview.1.md");
         Assert.Contains("### Release workflow", releaseNote, StringComparison.Ordinal);
         Assert.Contains("Parallel pull requests add independent release-note entries.", releaseNote, StringComparison.Ordinal);
+        Assert.Contains("[Config guide](../Config/ForgeTrust.AppSurface.Config/README.md#configuration-audit)", releaseNote, StringComparison.Ordinal);
+        Assert.DoesNotContain("[Config guide](../../Config/ForgeTrust.AppSurface.Config/README.md#configuration-audit)", releaseNote, StringComparison.Ordinal);
         Assert.False(File.Exists(RepositoryPath(entryPath)));
         Assert.Contains("## Archived unreleased entries", result.Stdout, StringComparison.Ordinal);
         Assert.Contains(entryPath, result.Stdout, StringComparison.Ordinal);
@@ -305,7 +308,8 @@ public sealed class ReleaseToolTests : IDisposable
                 new UnreleasedEntry("/entries/2026-08-08-zulu.md", "included", "- Zulu entry."),
                 new UnreleasedEntry("/entries/2026-08-08-alpha.md", "included", "- Alpha entry."),
                 new UnreleasedEntry("/entries/2026-08-08-taking-shape.md", "taking-shape", "- Shaping entry.")
-            ]);
+            ],
+            "/releases/unreleased.md");
 
         Assert.Contains("- Existing note.\n- Alpha entry.\n\n- Zulu entry.", composed, StringComparison.Ordinal);
         Assert.Contains("## Taking shape\n- Shaping entry.", composed, StringComparison.Ordinal);
@@ -324,7 +328,7 @@ public sealed class ReleaseToolTests : IDisposable
             """;
 
         var templateException = Assert.Throws<UnreleasedEntryException>(
-            () => UnreleasedEntryComposer.Compose(unsupportedMarker, []));
+            () => UnreleasedEntryComposer.Compose(unsupportedMarker, [], "/releases/unreleased.md"));
         Assert.Contains("no unsupported entry markers", templateException.Message, StringComparison.Ordinal);
         Assert.Throws<ArgumentOutOfRangeException>(() => UnreleasedEntryComposer.MarkerFor("future"));
         Assert.True(UnreleasedEntryComposer.IsEntryPath("releases\\unreleased.entries\\2026-08-08-valid-entry.md"));

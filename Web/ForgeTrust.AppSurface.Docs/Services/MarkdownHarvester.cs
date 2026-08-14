@@ -408,7 +408,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                         var entries = await UnreleasedEntryComposer.LoadAsync(
                             Path.Combine(rootPath, "releases", UnreleasedEntryComposer.EntriesDirectoryName),
                             cancellationToken);
-                        content = UnreleasedEntryComposer.Compose(content, entries.Entries);
+                        content = UnreleasedEntryComposer.Compose(content, entries.Entries, file);
                     }
 
                     var (markdownBody, frontMatterResult) = MarkdownFrontMatterParser.ExtractWithDiagnostics(content);

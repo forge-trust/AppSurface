@@ -116,18 +116,73 @@ public sealed class UnreleasedEntryComposerTests : IDisposable
             [
                 new UnreleasedEntry("/entries/2026-08-08-zulu.md", "included", "- Zulu."),
                 new UnreleasedEntry("/entries/2026-08-08-alpha.md", "included", "- Alpha.")
-            ]);
+            ],
+            Path.Combine(_root, "releases", "unreleased.md"));
 
         Assert.Contains("- Alpha.\n\n- Zulu.", composed, StringComparison.Ordinal);
         Assert.DoesNotContain("<!-- appsurface:unreleased-entries", composed, StringComparison.Ordinal);
         Assert.Throws<UnreleasedEntryException>(
-            () => UnreleasedEntryComposer.Compose(validTemplate.Replace("included\" -->", "included\" -->\n<!-- appsurface:unreleased-entries section=\"included\" -->", StringComparison.Ordinal), []));
+            () => UnreleasedEntryComposer.Compose(validTemplate.Replace("included\" -->", "included\" -->\n<!-- appsurface:unreleased-entries section=\"included\" -->", StringComparison.Ordinal), [], Path.Combine(_root, "releases", "unreleased.md")));
         Assert.Throws<UnreleasedEntryException>(
-            () => UnreleasedEntryComposer.Compose(validTemplate + "\n<!-- appsurface:unreleased-entries section=\"future\" -->", []));
+            () => UnreleasedEntryComposer.Compose(validTemplate + "\n<!-- appsurface:unreleased-entries section=\"future\" -->", [], Path.Combine(_root, "releases", "unreleased.md")));
         Assert.Throws<ArgumentOutOfRangeException>(() => UnreleasedEntryComposer.MarkerFor("future"));
         Assert.True(UnreleasedEntryComposer.IsEntryPath("releases\\unreleased.entries\\2026-08-08-valid-entry.md"));
         Assert.False(UnreleasedEntryComposer.IsEntryPath("releases/unreleased.entries/nested/2026-08-08-valid-entry.md"));
         Assert.False(UnreleasedEntryComposer.IsEntryPath("releases/unreleased.entries/not-an-entry.md"));
+    }
+
+    [Fact]
+    public void ComposeRebasesRelativeMarkdownLinksAndPreservesCode()
+    {
+        const string template = """
+            # Unreleased
+            <!-- appsurface:unreleased-entries section="taking-shape" -->
+            <!-- appsurface:unreleased-entries section="included" -->
+            <!-- appsurface:unreleased-entries section="migration-watch" -->
+            """;
+        var entryPath = Path.Combine(EntriesDirectory(), "2026-08-08-rebased-links.md");
+        var destinationPath = Path.Combine(_root, "releases", "unreleased.md");
+        var markdown = """
+            - [Guide](../../Guides/README.md#start "Guide title")
+            - [Local README](../README.md)
+            - [Pointy](<../../Guides/Quick start.md>)
+            - [Pointy with title](<../../Guides/Quick start.md> "Guide title")
+            - ![Diagram](./assets/diagram.svg)
+            - [`UnreleasedEntry`](../../tools/ForgeTrust.AppSurface.ReleaseContracts/UnreleasedEntryComposer.cs)
+            - [Parenthesized](./guides/guide_(v1).md)
+            - [Bare relative](Guides/README.md)
+            - [External](https://example.test/docs) and [Anchor](#details)
+
+            [guide-reference]: ../../README.md#release
+
+            `[literal](../../do-not-rewrite.md)`
+
+            ```sh
+            [script](../../do-not-rewrite.sh)
+            ```
+
+            An unmatched ` remains literal.
+            - [After unmatched code](../../Guides/after.md)
+            """;
+
+        var composed = UnreleasedEntryComposer.Compose(
+            template,
+            [new UnreleasedEntry(entryPath, "included", markdown)],
+            destinationPath);
+
+        Assert.Contains("[Guide](../Guides/README.md#start \"Guide title\")", composed, StringComparison.Ordinal);
+        Assert.Contains("[Local README](README.md)", composed, StringComparison.Ordinal);
+        Assert.Contains("[Pointy](<../Guides/Quick start.md>)", composed, StringComparison.Ordinal);
+        Assert.Contains("[Pointy with title](<../Guides/Quick start.md> \"Guide title\")", composed, StringComparison.Ordinal);
+        Assert.Contains("![Diagram](unreleased.entries/assets/diagram.svg)", composed, StringComparison.Ordinal);
+        Assert.Contains("[`UnreleasedEntry`](../tools/ForgeTrust.AppSurface.ReleaseContracts/UnreleasedEntryComposer.cs)", composed, StringComparison.Ordinal);
+        Assert.Contains("[Parenthesized](unreleased.entries/guides/guide_(v1).md)", composed, StringComparison.Ordinal);
+        Assert.Contains("[Bare relative](unreleased.entries/Guides/README.md)", composed, StringComparison.Ordinal);
+        Assert.Contains("[guide-reference]: ../README.md#release", composed, StringComparison.Ordinal);
+        Assert.Contains("[External](https://example.test/docs) and [Anchor](#details)", composed, StringComparison.Ordinal);
+        Assert.Contains("`[literal](../../do-not-rewrite.md)`", composed, StringComparison.Ordinal);
+        Assert.Contains("[script](../../do-not-rewrite.sh)", composed, StringComparison.Ordinal);
+        Assert.Contains("[After unmatched code](../Guides/after.md)", composed, StringComparison.Ordinal);
     }
 
     public static IEnumerable<object[]> InvalidEntries =>

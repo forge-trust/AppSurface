@@ -28,6 +28,21 @@ internal static class UnreleasedEntryComposer
     private static readonly Regex TopLevelHeadingPattern = new(
         "^(?: {0,3}#{1,2}(?!#)[ \\t]| {0,3}\\S.*\\r?\\n {0,3}(?:=+|-+)[ \\t]*\\r?$)",
         RegexOptions.Multiline | RegexOptions.CultureInvariant);
+    private static readonly Regex[] RelativeLinkDestinationPatterns =
+    [
+        new Regex(
+            @"(?<!\\)!?\[[^\]\r\n]*\]\([ \t]*(?<destination>(?!(?:[A-Za-z][A-Za-z0-9+.-]*:|/|#|\?))(?:[^()\s<>\r\n]+|\((?<destinationParenthesis>)|\)(?<-destinationParenthesis>))+(?(destinationParenthesis)(?!)))(?=[ \t]*(?:(?:(?:""[^""\r\n]*""))|(?:'[^'\r\n]*')|\([^\)\r\n]*\))?[ \t]*\))",
+            RegexOptions.CultureInvariant),
+        new Regex(
+            @"(?<!\\)!?\[[^\]\r\n]*\]\([ \t]*<(?<destination>(?!(?:[A-Za-z][A-Za-z0-9+.-]*:|/|#|\?))[^>\r\n]+)>",
+            RegexOptions.CultureInvariant),
+        new Regex(
+            @"^ {0,3}\[[^\]\r\n]+\]:[ \t]*(?<destination>(?!(?:[A-Za-z][A-Za-z0-9+.-]*:|/|#|\?))(?:[^()\s<>\r\n]+|\((?<destinationParenthesis>)|\)(?<-destinationParenthesis>))+(?(destinationParenthesis)(?!)))",
+            RegexOptions.Multiline | RegexOptions.CultureInvariant),
+        new Regex(
+            @"^ {0,3}\[[^\]\r\n]+\]:[ \t]*<(?<destination>(?!(?:[A-Za-z][A-Za-z0-9+.-]*:|/|#|\?))[^>\r\n]+)>",
+            RegexOptions.Multiline | RegexOptions.CultureInvariant)
+    ];
 
     /// <summary>
     /// Loads and validates every entry file in a flat entries directory.
@@ -98,12 +113,14 @@ internal static class UnreleasedEntryComposer
     /// </summary>
     /// <param name="template">Living-note template that contains one marker for each supported section.</param>
     /// <param name="entries">Validated entries to insert.</param>
+    /// <param name="destinationPath">Absolute path of the composed living or versioned release note.</param>
     /// <returns>The deterministic composed release note.</returns>
     /// <exception cref="UnreleasedEntryException">Thrown when the template does not have the expected marker shape.</exception>
-    internal static string Compose(string template, IEnumerable<UnreleasedEntry> entries)
+    internal static string Compose(string template, IEnumerable<UnreleasedEntry> entries, string destinationPath)
     {
         ArgumentNullException.ThrowIfNull(template);
         ArgumentNullException.ThrowIfNull(entries);
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
 
         var entryList = entries.ToArray();
         var entriesBySection = entryList
@@ -123,7 +140,7 @@ internal static class UnreleasedEntryComposer
             }
 
             var sectionContent = entriesBySection.TryGetValue(section, out var sectionEntries)
-                ? string.Join("\n\n", sectionEntries.Select(entry => entry.Markdown))
+                ? string.Join("\n\n", sectionEntries.Select(entry => RebaseRelativeLinkDestinations(entry.Markdown, entry.Path, destinationPath)))
                 : string.Empty;
             composed = composed.Replace(marker, sectionContent, StringComparison.Ordinal);
         }
@@ -135,6 +152,189 @@ internal static class UnreleasedEntryComposer
 
         return composed;
     }
+
+    /// <summary>
+    /// Rebases relative Markdown link destinations from an entry source into its composed release-note destination.
+    /// </summary>
+    /// <param name="markdown">Validated entry Markdown.</param>
+    /// <param name="entryPath">Absolute entry source path.</param>
+    /// <param name="destinationPath">Absolute composed document path.</param>
+    /// <returns>Entry Markdown whose relative inline and reference link destinations resolve from the composed document.</returns>
+    /// <remarks>
+    /// Entry files live one directory below both <c>releases/unreleased.md</c> and versioned release notes. The composer
+    /// therefore preserves each destination's target while recalculating its relative path from the composed document.
+    /// External, rooted, query-only, and fragment-only destinations remain unchanged. The transformation deliberately
+    /// excludes inline and fenced code so examples retain their original bytes.
+    /// </remarks>
+    private static string RebaseRelativeLinkDestinations(string markdown, string entryPath, string destinationPath)
+    {
+        var entryDirectory = Path.GetDirectoryName(entryPath);
+        var destinationDirectory = Path.GetDirectoryName(destinationPath);
+        if (string.IsNullOrWhiteSpace(entryDirectory) || string.IsNullOrWhiteSpace(destinationDirectory))
+        {
+            return markdown;
+        }
+
+        var rebased = new StringBuilder(markdown.Length);
+        var inlineCodeRanges = FindInlineCodeRanges(markdown);
+        var inFencedCodeBlock = false;
+        var fenceDelimiter = '\0';
+        var fenceDelimiterCount = 0;
+        var lineStart = 0;
+        while (lineStart < markdown.Length)
+        {
+            var lineEnd = markdown.IndexOf('\n', lineStart);
+            var contentEnd = lineEnd < 0 ? markdown.Length : lineEnd;
+            var line = markdown.Substring(lineStart, contentEnd - lineStart);
+            if (TryGetFenceDelimiter(line, out var candidateFenceDelimiter, out var candidateFenceDelimiterCount))
+            {
+                if (!inFencedCodeBlock)
+                {
+                    inFencedCodeBlock = true;
+                    fenceDelimiter = candidateFenceDelimiter;
+                    fenceDelimiterCount = candidateFenceDelimiterCount;
+                }
+                else if (candidateFenceDelimiter == fenceDelimiter && candidateFenceDelimiterCount >= fenceDelimiterCount)
+                {
+                    inFencedCodeBlock = false;
+                    fenceDelimiter = '\0';
+                    fenceDelimiterCount = 0;
+                }
+
+                rebased.Append(line);
+            }
+            else if (inFencedCodeBlock)
+            {
+                rebased.Append(line);
+            }
+            else
+            {
+                rebased.Append(RewriteLinkDestinations(line, entryDirectory, destinationDirectory, lineStart, inlineCodeRanges));
+            }
+
+            if (lineEnd >= 0)
+            {
+                rebased.Append('\n');
+                lineStart = lineEnd + 1;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return rebased.ToString();
+    }
+
+    private static IReadOnlyList<MarkdownRange> FindInlineCodeRanges(string markdown)
+    {
+        var ranges = new List<MarkdownRange>();
+        var position = 0;
+        while (position < markdown.Length)
+        {
+            var openingDelimiter = markdown.IndexOf('`', position);
+            if (openingDelimiter < 0)
+            {
+                break;
+            }
+
+            var openingDelimiterCount = CountRun(markdown, openingDelimiter, '`');
+            var delimiter = new string('`', openingDelimiterCount);
+            var closingDelimiter = markdown.IndexOf(delimiter, openingDelimiter + openingDelimiterCount, StringComparison.Ordinal);
+            if (closingDelimiter < 0)
+            {
+                position = openingDelimiter + openingDelimiterCount;
+                continue;
+            }
+
+            ranges.Add(new MarkdownRange(openingDelimiter, closingDelimiter + openingDelimiterCount));
+            position = closingDelimiter + openingDelimiterCount;
+        }
+
+        return ranges;
+    }
+
+    private static string RewriteLinkDestinations(
+        string markdown,
+        string entryDirectory,
+        string destinationDirectory,
+        int sourceOffset,
+        IReadOnlyList<MarkdownRange> inlineCodeRanges)
+    {
+        var rewritten = markdown;
+        foreach (var pattern in RelativeLinkDestinationPatterns)
+        {
+            rewritten = pattern.Replace(
+                rewritten,
+                match =>
+                {
+                    var destination = match.Groups["destination"];
+                    if (IsInInlineCodeRange(destination.Index + sourceOffset, inlineCodeRanges))
+                    {
+                        return match.Value;
+                    }
+
+                    var rebasedDestination = RebaseRelativeDestination(destination.Value, entryDirectory, destinationDirectory);
+                    if (string.Equals(destination.Value, rebasedDestination, StringComparison.Ordinal))
+                    {
+                        return match.Value;
+                    }
+
+                    var relativeStart = destination.Index - match.Index;
+                    return match.Value[..relativeStart]
+                           + rebasedDestination
+                           + match.Value[(relativeStart + destination.Length)..];
+                });
+        }
+
+        return rewritten;
+    }
+
+    private static bool IsInInlineCodeRange(int position, IReadOnlyList<MarkdownRange> inlineCodeRanges)
+    {
+        return inlineCodeRanges.Any(range => position >= range.Start && position < range.End);
+    }
+
+    private static string RebaseRelativeDestination(string destination, string entryDirectory, string destinationDirectory)
+    {
+        var suffixStart = destination.IndexOfAny(['?', '#']);
+        var path = suffixStart < 0 ? destination : destination[..suffixStart];
+        var suffix = suffixStart < 0 ? string.Empty : destination[suffixStart..];
+        var sourcePath = Path.GetFullPath(Path.Combine(entryDirectory, path.Replace('/', Path.DirectorySeparatorChar)));
+        var relativePath = Path.GetRelativePath(destinationDirectory, sourcePath).Replace(Path.DirectorySeparatorChar, '/');
+        if (path.EndsWith("/", StringComparison.Ordinal) && !relativePath.EndsWith("/", StringComparison.Ordinal))
+        {
+            relativePath += "/";
+        }
+
+        return relativePath + suffix;
+    }
+
+    private static bool TryGetFenceDelimiter(string line, out char delimiter, out int delimiterCount)
+    {
+        var position = 0;
+        while (position < line.Length && position < 3 && line[position] == ' ')
+        {
+            position++;
+        }
+
+        delimiter = position < line.Length ? line[position] : '\0';
+        delimiterCount = delimiter is '`' or '~' ? CountRun(line, position, delimiter) : 0;
+        return delimiterCount >= 3;
+    }
+
+    private static int CountRun(string value, int start, char character)
+    {
+        var end = start;
+        while (end < value.Length && value[end] == character)
+        {
+            end++;
+        }
+
+        return end - start;
+    }
+
+    private readonly record struct MarkdownRange(int Start, int End);
 
     /// <summary>
     /// Gets whether a repository-relative path can be an append-only unreleased entry.
