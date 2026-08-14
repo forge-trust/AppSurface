@@ -68,7 +68,7 @@ test('normalizePageTypeAlias keeps client filters aligned with indexed docs', as
   }
 });
 
-test('normalizeSearchDocument preserves and labels generated code language', async () => {
+test('normalizeSearchDocument preserves generated code language and trusted API lifecycle metadata', async () => {
   const { createMiniSearchDocument, normalizeSearchDocument } = await loadSearchCore();
 
   const csharpDoc = normalizeSearchDocument({
@@ -83,6 +83,32 @@ test('normalizeSearchDocument preserves and labels generated code language', asy
     title: 'RazorWire JavaScript API',
     language: 'js'
   });
+  const betaDoc = normalizeSearchDocument({
+    id: 'beta-api',
+    path: '/docs/api/javascript/razorwire#beta-api',
+    title: 'Beta API',
+    apiLifecycle: 'Beta',
+    apiLifecycleLabel: 'Beta',
+    isDeprecated: true,
+    isGeneratedApiSymbol: true
+  });
+  const untrustedLifecycle = normalizeSearchDocument({
+    id: 'untrusted-lifecycle',
+    path: '/docs/guide',
+    title: 'Guide',
+    apiLifecycle: 'alpha',
+    apiLifecycleLabel: 'Alpha',
+    isDeprecated: true
+  });
+  const malformedLifecycle = normalizeSearchDocument({
+    id: 'malformed-lifecycle',
+    path: '/docs/malformed-lifecycle',
+    title: 'Malformed lifecycle',
+    apiLifecycle: 'beta',
+    apiLifecycleLabel: 'Beta',
+    isDeprecated: 'false',
+    isGeneratedApiSymbol: 'true'
+  });
 
   assert.equal(csharpDoc.language, 'csharp');
   assert.equal(csharpDoc.languageLabel, 'C#');
@@ -90,6 +116,16 @@ test('normalizeSearchDocument preserves and labels generated code language', asy
   assert.equal(jsDoc.languageLabel, 'JavaScript');
   assert.equal(createMiniSearchDocument(csharpDoc).languageSearchText, 'csharp C# CSharp C-Sharp');
   assert.equal(createMiniSearchDocument(jsDoc).languageSearchText, 'javascript JavaScript js');
+  assert.equal(betaDoc.apiLifecycle, 'beta');
+  assert.equal(betaDoc.apiLifecycleLabel, 'Beta');
+  assert.equal(betaDoc.isDeprecated, true);
+  assert.equal(createMiniSearchDocument(betaDoc).apiLifecycleSearchText, 'beta Beta deprecated');
+  assert.equal(untrustedLifecycle.apiLifecycle, '');
+  assert.equal(untrustedLifecycle.apiLifecycleLabel, '');
+  assert.equal(untrustedLifecycle.isDeprecated, false);
+  assert.equal(malformedLifecycle.isGeneratedApiSymbol, false);
+  assert.equal(malformedLifecycle.apiLifecycle, '');
+  assert.equal(malformedLifecycle.isDeprecated, false);
 });
 
 test('createMiniSearchConfiguration includes all searchable and stored fields', async () => {
@@ -97,7 +133,7 @@ test('createMiniSearchConfiguration includes all searchable and stored fields', 
 
   const config = createMiniSearchConfiguration();
 
-  assert.deepEqual(config.fields, ['title', 'aliases', 'keywords', 'summary', 'headings', 'bodyText', 'entryPoints', 'languageSearchText']);
+  assert.deepEqual(config.fields, ['title', 'aliases', 'keywords', 'summary', 'headings', 'bodyText', 'entryPoints', 'languageSearchText', 'apiLifecycleSearchText']);
   assert.deepEqual(config.searchOptions.boost, {
     title: 6,
     aliases: 4,
@@ -106,6 +142,7 @@ test('createMiniSearchConfiguration includes all searchable and stored fields', 
     summary: 2,
     entryPoints: 2,
     languageSearchText: 2,
+    apiLifecycleSearchText: 2,
     bodyText: 1
   });
   assert.equal(config.searchOptions.prefix, true);
@@ -115,6 +152,10 @@ test('createMiniSearchConfiguration includes all searchable and stored fields', 
   assert.ok(config.storeFields.includes('status'));
   assert.ok(config.storeFields.includes('language'));
   assert.ok(config.storeFields.includes('languageLabel'));
+  assert.ok(config.storeFields.includes('apiLifecycle'));
+  assert.ok(config.storeFields.includes('apiLifecycleLabel'));
+  assert.ok(config.storeFields.includes('isDeprecated'));
+  assert.ok(config.storeFields.includes('isGeneratedApiSymbol'));
 });
 
 test('normalizeSearchDocument accepts and normalizes valid summaryPresentation trees', async () => {
@@ -253,6 +294,128 @@ test('rankSearchResults preserves exact lookup matches ahead of broad candidates
   ], { query: 'AddRazorWire' });
 
   assert.equal(ranked[0].id, 'symbol');
+});
+
+test('rankSearchResults promotes generated API fragments for lifecycle queries', async () => {
+  const { explainSearchResultRanking, normalizeSearchDocument, rankSearchResults } = await loadSearchCore();
+  const docs = [
+    normalizeSearchDocument({
+      id: 'group',
+      path: '/docs/api/javascript/razorwire',
+      title: 'RazorWire JavaScript API',
+      pageType: 'api-reference',
+      bodyText: 'Beta form failure APIs and lifecycle guidance.'
+    }),
+    normalizeSearchDocument({
+      id: 'beta-form-failure',
+      path: '/docs/api/javascript/razorwire#event-razorwire-form-failure',
+      title: 'razorwire:form:failure',
+      pageType: 'javascript-event',
+      summary: 'Form failure event.',
+      apiLifecycle: 'beta',
+      apiLifecycleLabel: 'Beta',
+      isDeprecated: true,
+      isGeneratedApiSymbol: true
+    })
+  ];
+
+  const ranked = rankSearchResults([
+    { doc: docs[0], miniSearchRank: 0, miniSearchScore: 10 },
+    { doc: docs[1], miniSearchRank: 1, miniSearchScore: 2 }
+  ], { query: 'beta form failure' });
+
+  assert.equal(ranked[0].id, 'beta-form-failure');
+
+  for (const query of ['public', 'alpha', 'beta', 'deprecated']) {
+    const generated = normalizeSearchDocument({
+      id: `generated-${query}`,
+      path: `/docs/api/javascript/razorwire#${query}`,
+      title: `${query} API`,
+      apiLifecycle: query === 'deprecated' ? 'public' : query,
+      apiLifecycleLabel: query === 'deprecated' ? 'Public API' : query,
+      isDeprecated: query === 'deprecated',
+      isGeneratedApiSymbol: true
+    });
+    const aggregate = normalizeSearchDocument({
+      id: `aggregate-${query}`,
+      path: `/docs/api/javascript/razorwire/${query}`,
+      title: `${query} aggregate`,
+      bodyText: `${query} API lifecycle information`
+    });
+    const explanation = explainSearchResultRanking([
+      { doc: aggregate, miniSearchRank: 0, miniSearchScore: 10 },
+      { doc: generated, miniSearchRank: 1, miniSearchScore: 1 }
+    ], { query });
+
+    assert.equal(explanation[0].doc.id, generated.id);
+    assert.equal(explanation[0].lifecycleSymbolMatch, true);
+    assert.equal(explanation[1].lifecycleSymbolMatch, false);
+  }
+});
+
+test('rankSearchResults keeps lifecycle symbols ahead of internal documents for lifecycle queries', async () => {
+  const { explainSearchResultRanking, normalizeSearchDocument, rankSearchResults } = await loadSearchCore();
+  const internalGuide = normalizeSearchDocument({
+    id: 'internal-beta-guide',
+    path: '/docs/internals/beta-guidance',
+    title: 'Beta internal guidance',
+    pageType: 'guide',
+    audience: 'maintainer',
+    bodyText: 'Beta release process for maintainers.'
+  });
+  const generatedSymbol = normalizeSearchDocument({
+    id: 'beta-runtime-symbol',
+    path: '/docs/api/javascript/razorwire#beta-runtime',
+    title: 'Beta runtime API',
+    apiLifecycle: 'beta',
+    apiLifecycleLabel: 'Beta',
+    isGeneratedApiSymbol: true
+  });
+
+  const candidates = [
+    { doc: internalGuide, miniSearchRank: 0, miniSearchScore: 10 },
+    { doc: generatedSymbol, miniSearchRank: 1, miniSearchScore: 1 }
+  ];
+  const ranked = rankSearchResults(candidates, { query: 'beta' });
+  const explanation = explainSearchResultRanking(candidates, { query: 'beta' });
+
+  assert.equal(ranked[0].id, generatedSymbol.id);
+  assert.equal(explanation[0].doc.id, generatedSymbol.id);
+  assert.equal(explanation[0].lifecycleSymbolMatch, true);
+  assert.equal(explanation[1].internalDemotion, true);
+});
+
+test('rankSearchResults respects active filters before lifecycle promotion', async () => {
+  const { explainSearchResultRanking, normalizeSearchDocument, rankSearchResults } = await loadSearchCore();
+  const generatedSymbol = normalizeSearchDocument({
+    id: 'beta-api-symbol',
+    path: '/docs/api/javascript/razorwire#beta-runtime',
+    title: 'Beta runtime API',
+    pageType: 'javascript-event',
+    apiLifecycle: 'beta',
+    apiLifecycleLabel: 'Beta',
+    isGeneratedApiSymbol: true
+  });
+  const guide = normalizeSearchDocument({
+    id: 'beta-adoption-guide',
+    path: '/docs/guides/beta-adoption',
+    title: 'Beta adoption guide',
+    pageType: 'guide',
+    bodyText: 'Beta rollout guidance.'
+  });
+  const candidates = [
+    { doc: generatedSymbol, miniSearchRank: 0, miniSearchScore: 10 },
+    { doc: guide, miniSearchRank: 1, miniSearchScore: 1 }
+  ];
+
+  const ranked = rankSearchResults(candidates, { query: 'beta', filters: { pageType: 'guide' } });
+  const explanation = explainSearchResultRanking(candidates, { query: 'beta', filters: { pageType: 'guide' } });
+
+  assert.equal(ranked[0].id, guide.id);
+  assert.equal(explanation[0].doc.id, guide.id);
+  assert.equal(explanation[1].doc.id, generatedSymbol.id);
+  assert.equal(explanation[1].lifecycleSymbolMatch, true);
+  assert.equal(explanation[1].filterMismatch, true);
 });
 
 test('rankSearchResults promotes metadata and entry point matches before body-only matches', async () => {

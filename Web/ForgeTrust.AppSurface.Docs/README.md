@@ -381,6 +381,8 @@ AppSurface Docs currently emits these codes:
 - `DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet` (`appsurfacedocs.javascript.malformed_public_doclet`)
 - `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet` (`appsurfacedocs.javascript.incomplete_public_doclet`)
 - `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`)
+- `DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict` (`appsurfacedocs.javascript.lifecycle_conflict`)
+- `DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle` (`appsurfacedocs.javascript.malformed_lifecycle`)
 - `DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing` (`appsurfacedocs.javascript.event_doclet_dispatch_missing`)
 - `DocHarvestDiagnosticCodes.JavaScriptEventDispatchDocletMissing` (`appsurfacedocs.javascript.event_dispatch_doclet_missing`)
 - `DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor` (`appsurfacedocs.javascript.duplicate_anchor`)
@@ -435,7 +437,11 @@ AppSurface Docs starts the initial harvest in the background by default. If a us
 
 `InitialRequestWaitBudgetMilliseconds` controls how long a docs request waits for the initial harvest before showing the observatory. The default is `350`. Set it to `0` when you want the observatory immediately for any pending first harvest. Set it higher when a host usually harvests quickly and you prefer to avoid showing the progress page for sub-second starts.
 
-The `Testing*Delay*Milliseconds` options are local/manual testing knobs. The defaults are `0`. Set `TestingPreHarvestDelayMilliseconds` to pause after the run is published but before any harvester starts, `TestingDelayPerHarvesterMilliseconds` to pause each active harvester after it reports `Running`, and `TestingDelayPerDocumentMilliseconds` to publish each harvester's document count one document at a time. For example, `TestingPreHarvestDelayMilliseconds=1000` and `TestingDelayPerDocumentMilliseconds=150` make the observatory visibly unfold. Do not enable these for production traffic.
+The `Testing*Delay*Milliseconds` options are local/manual testing knobs. The defaults are `0`. Set `TestingPreHarvestDelayMilliseconds` to pause after the run is published but before any harvester starts, `TestingDelayPerHarvesterMilliseconds` to pause each active harvester after it reports `Running`, and `TestingDelayPerDocumentMilliseconds` to pace each **real positive parser-output report** by its actual document delta. For example, a report that discovers three documents receives three sequential configured delays; a source unit that yields no documents receives no per-document delay. This intentionally affects the observed local rate and makes the observatory visibly unfold. Do not enable these for production traffic.
+
+The observatory reports a bounded, redacted current state rather than a file event log. Package-owned Markdown, C#, and enabled JavaScript harvesters show a `Waiting`, `Discovering`, `Parsing`, `Finalizing`, or terminal phase, plus source units inspected and document nodes found. A source unit is an accepted parser input that has begun inspection; it can produce zero documents. The page never shows source paths, file names, source text, raw exceptions, stack traces, percentages, or an expected source total.
+
+`Built-in docs/s` is a rolling two-second measurement from those package-owned parser reports only. It is `Measuring…` until a 250 ms observation window with real parser evidence exists, and `0` is a valid measured result when parser work produces no nodes. Custom `IDocHarvester` implementations remain status-only and do not contribute to this rate. Ordinary source/output reports update the retained snapshot at most once every 250 ms; phase and terminal changes publish promptly, and late subscribers converge on the newest replayed snapshot rather than receiving a per-file history. Terminal rows retain the last source-unit count while health status and final document count remain authoritative.
 
 When the harvest completes successfully, AppSurface Docs first publishes the completed observatory state with replay enabled, then publishes a live-only RazorWire `rw-visit` command for active subscribers. Replay stays state-only, so late subscribers see the completed state and the plain continuation link without being auto-navigated by an old command. The completion view also renders a normal return link so no-JavaScript users can continue manually.
 
@@ -1800,6 +1806,43 @@ Supported public shapes:
 - standalone `@cssCustomProperty --name` doclets for public CSS variables
 - standalone `@cssHook selector` doclets for stable styling hooks paired with `@hookKind`
 
+#### API lifecycle and deprecation
+
+Every valid generated JavaScript API symbol has the reader-facing lifecycle label **Public API** by default. Add exactly one contentless modifier to an otherwise-public doclet when the symbol is not yet stable:
+
+- `@alpha` renders and indexes the fragment as **Alpha**.
+- `@beta` renders and indexes the fragment as **Beta**.
+- `@deprecated` renders a **Deprecated** badge. It may be bare, or carry one replacement message such as `@deprecated Use razorwire:error instead.`
+
+`@alpha` and `@beta` describe maturity; they never publish a symbol by themselves. Keep `@public` for admission when `RequirePublicTag=true`, and keep another normal documentation tag when using the explicitly configured compatibility mode with `RequirePublicTag=false`. The lifecycle is fragment-scoped: aggregate JavaScript API group pages do not receive a page-level lifecycle or status, because one group can contain stable, alpha, beta, and deprecated symbols together.
+
+| Tag | Supported on | Reader-facing result | Not a substitute for |
+| --- | --- | --- | --- |
+| `@alpha` | Any generated JavaScript API symbol | **Alpha** lifecycle badge and search term | `@public` admission |
+| `@beta` | Any generated JavaScript API symbol | **Beta** lifecycle badge and search term | `@public` admission |
+| `@deprecated` | Any generated JavaScript API symbol | **Deprecated** badge; optional replacement message | A lifecycle maturity modifier |
+| `@stability` | `@cssHook` contract metadata | Describes the hook contract only | API lifecycle metadata |
+
+`@stability` remains the CSS-hook-specific contract field in the [JavaScript public API harvesting guidance](#javascript-public-api-harvesting); it neither creates an API lifecycle badge nor participates in lifecycle search ranking. Use `@alpha` or `@beta` when a generated JavaScript symbol's maturity must be visible to API readers, and use `@stability` only to describe a public styling hook.
+
+```js
+/**
+ * A transitional event emitted while migration completes.
+ * @public
+ * @namespace RazorWire
+ * @beta
+ * @deprecated Use razorwire:form:error instead.
+ * @event razorwire:form:failure
+ * @target form[data-rw-form="true"]
+ * @firesWhen the legacy failure transport reports an unhandled error.
+ * @detail none
+ */
+```
+
+The built-in search index projects `apiLifecycle`, `apiLifecycleLabel`, `isDeprecated`, and `isGeneratedApiSymbol` only for validated generated JavaScript API fragments. The search client uses lifecycle values as searchable terms and ranks matching symbol fragments ahead of aggregate API group-body matches. Custom search clients should treat the fields as optional additions to the v1 payload and should not infer lifecycle from ordinary page metadata. Custom harvesters retain the public model shape, but lifecycle values are projected only when the built-in JavaScript harvester has recorded internal provenance and the fragment meets the canonical lifecycle contract.
+
+Invalid combinations skip only the affected item and emit structured diagnostics: repeated or mixed `@alpha`/`@beta` modifiers and conflicting nonblank `@deprecated` messages use `DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict`; modifiers with content use `DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle`. These diagnostics remain warnings in best-effort discovery and become errors when `AppSurfaceDocs:Harvest:JavaScript:StrictHealth=true`. A configured JavaScript include boundary still makes either lifecycle diagnostic fail aggregate strict health, even when the individual diagnostic remains warning-severity.
+
 Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`, and detail payload fields through `@property detail.name` or an exact payload reference such as `@property {FormFailureDetail} detail`. Use `@detail none` only when the event deliberately carries no payload. Add `@example` when the event needs consumption guidance beyond the contract fields.
 
 Set `AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets=true` when public browser events must be release-blocking. In that mode, each public `@event` must include `@target`, `@firesWhen`, and either at least one valid `detail.*` property, an exact `detail` property with a resolved simple same-group typedef reference, or `@detail none`. `@bubbles`, `@cancelable`, and `@example` remain recommended authoring fields, but they are intentionally excluded from the blocking strict-event contract. Valid direct detail property names are exactly `detail.` plus dot-separated segments. Segments may contain letters, digits, `_`, `$`, `-`, and a trailing `[]`. Optional JSDoc brackets and defaults are accepted, so `detail.message`, `[detail.message]`, `[detail.message="fallback"]`, `detail.items[]`, and `detail.items[].id` are valid. Values such as `detail`, `[detail]`, `detail.`, `detail..message`, `detail. message`, `detail.[x]`, `Detail.message`, `form`, and `message` are invalid unless the exact `detail` property resolves to a simple typedef payload reference. `@detail none` is contradictory when any event detail `@property` tag is present.
@@ -1905,7 +1948,7 @@ Browser-contract doclets should carry enough fields for readers to use them with
  */
 ```
 
-Unsupported public classes, CommonJS export inference, malformed public doclets, incomplete event contracts, missing or ambiguous exact typedef references, oversized files, parse failures, missing exact includes, configured reparse-point includes, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially. The strict event diagnostic code is `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`). The configured-link diagnostic is `DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped` (`appsurfacedocs.javascript.reparse_point_skipped`); its problem, cause, and fix are redacted to repository-relative include paths and do not reveal the symlink target.
+Unsupported public classes, CommonJS export inference, malformed public doclets, invalid lifecycle combinations, incomplete event contracts, missing or ambiguous exact typedef references, oversized files, parse failures, missing exact includes, configured reparse-point includes, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially. The strict event diagnostic code is `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`). The configured-link diagnostic is `DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped` (`appsurfacedocs.javascript.reparse_point_skipped`); its problem, cause, and fix are redacted to repository-relative include paths and do not reveal the symlink target.
 
 The event-dispatch verifier emits `DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing` (`appsurfacedocs.javascript.event_doclet_dispatch_missing`) when a public `@event` doclet has no matching literal dispatch evidence, and `DocHarvestDiagnosticCodes.JavaScriptEventDispatchDocletMissing` (`appsurfacedocs.javascript.event_dispatch_doclet_missing`) when a literal `CustomEvent` dispatch has no matching public doclet. Both are warning diagnostics. They appear in health responses and successful `docs verify-health` warning output, but they are intentionally not strict blocking diagnostics.
 
@@ -2762,6 +2805,7 @@ The current-surface `search-index.json` payload continues to emit the raw `pageT
 - `isSectionLanding` for authored section landing entry points
 - `entryPoints` for namespace-intro entry-point labels, summaries, targets, hrefs, and keywords when an intro source is consumed into a generated namespace page
 - `language` and `languageLabel` for generated API documentation language facets and result chrome
+- `apiLifecycle`, `apiLifecycleLabel`, `isDeprecated`, and `isGeneratedApiSymbol` for generated JavaScript API symbol fragments only
 These fields let custom search clients stay visually aligned with the landing and detail experiences without re-implementing the mapping table.
 
 `summaryPresentation` is an optional display-only array for clients that want to render Markdown-like summary emphasis without exposing raw Markdown markers. The legacy `summary` string remains unchanged and remains the summary search field; clients that do not recognize `summaryPresentation` can ignore it. When present, each node is one of `text`, `strong`, `emphasis`, or `code`: `text` and `code` nodes carry only `kind` and `text`, while `strong` and `emphasis` nodes carry only `kind` and `children`. The array root is not a node. Nodes are limited to depth 8, 128 total nodes, and 1,024 Unicode scalars across all leaves. The projection never carries HTML, attributes, URLs, image sources, or link destinations; links and images contribute only their reader-facing text. Custom clients should validate the whole optional tree atomically and fall back to `summary` (then `snippet`) if it is missing or invalid.
@@ -2775,7 +2819,7 @@ These fields let custom search clients stay visually aligned with the landing an
 ]
 ```
 
-Search runtime note: the bundled `minisearch.min.js` asset is generated from the pinned upstream MiniSearch browser bundle, not a CDN or hand-maintained compatibility shim. The built-in search client indexes `title`, `aliases`, `keywords`, `summary`, `headings`, `bodyText`, namespace `entryPoints`, and generated API `languageSearchText` as first-class MiniSearch fields with field-specific boosts. `summaryPresentation` is stored only for result rendering and must never become a MiniSearch field or ranking input. Package maintainers changing the search runtime should update the pinned package, rebuild the generated asset, verify the third-party notice, and run the asset verification scripts before shipping.
+Search runtime note: the bundled `minisearch.min.js` asset is generated from the pinned upstream MiniSearch browser bundle, not a CDN or hand-maintained compatibility shim. The built-in search client indexes `title`, `aliases`, `keywords`, `summary`, `headings`, `bodyText`, namespace `entryPoints`, and generated API `languageSearchText` and `apiLifecycleSearchText` as first-class MiniSearch fields with field-specific boosts. `summaryPresentation` is stored only for result rendering and must never become a MiniSearch field or ranking input. Package maintainers changing the search runtime should update the pinned package, rebuild the generated asset, verify the third-party notice, and run the asset verification scripts before shipping.
 
 ### Reader-intent search relevance
 
@@ -2786,12 +2830,13 @@ Ranking uses hydrated search-index documents, not only MiniSearch stored fields.
 Precedence is intentionally explicit:
 
 1. exact title, path, source path, canonical slug, alias, keyword, breadcrumb, or related-page matches
-2. explicit filter intent, such as API/reference or internal/contributor filters
-3. exact internal or contributor intent
-4. alias, keyword, or namespace entry-point matches
-5. broad task boosts for guides, start-here pages, how-to/tutorial pages, examples, FAQs, and troubleshooting pages
-6. internal/contributor demotion for broad non-internal queries
-7. original MiniSearch rank, then authored order/path tie-breaks
+2. lifecycle-term matches on generated JavaScript API fragments
+3. explicit filter intent, such as API/reference or internal/contributor filters
+4. exact internal or contributor intent
+5. alias, keyword, or namespace entry-point matches
+6. broad task boosts for guides, start-here pages, how-to/tutorial pages, examples, FAQs, and troubleshooting pages
+7. internal/contributor demotion for broad non-internal queries
+8. original MiniSearch rank, then authored order/path tie-breaks
 
 The relevance layer exposes pure test seams: `rankSearchResults(...)` returns ranked documents, and `explainSearchResultRanking(...)` returns local ranking details such as original MiniSearch rank/score, matched fields, metadata classifications, boosts, demotions, filter overrides, and final rank. These helpers are for tests and maintainer debugging; the production UI does not render match reasons, and product-intelligence events must continue to avoid raw query payloads.
 
