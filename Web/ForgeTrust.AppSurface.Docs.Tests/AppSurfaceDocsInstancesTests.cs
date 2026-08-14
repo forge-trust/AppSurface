@@ -844,7 +844,10 @@ public sealed class AppSurfaceDocsInstancesTests
     [Fact]
     public async Task NamedInstance_ShouldMountAndServePublishedExactVersionTreesWithoutShadowingMissingFiles()
     {
-        var fixtureRoot = Path.Combine(Path.GetTempPath(), "appsurface-docs-instance-tests", Guid.NewGuid().ToString("N"));
+        var fixtureRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "appsurface-docs-instance-tests",
+            Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(fixtureRoot);
 
         try
@@ -1369,15 +1372,15 @@ public sealed class AppSurfaceDocsInstancesTests
 
     private static string CreatePublishedExactTree(string fixtureRoot, string version)
     {
-        var treeRoot = Path.Combine(fixtureRoot, version);
+        var treeRoot = TestPathUtils.PathUnder(fixtureRoot, version);
         Directory.CreateDirectory(treeRoot);
-        File.WriteAllText(Path.Combine(treeRoot, "index.html"), "<html>published-index</html>");
-        File.WriteAllText(Path.Combine(treeRoot, "search.html"), "<html>published-search</html>");
-        File.WriteAllText(Path.Combine(treeRoot, "search-index.json"), "{\"documents\":[]}");
-        File.WriteAllText(Path.Combine(treeRoot, "search.css"), "body { color: #fff; }");
-        File.WriteAllText(Path.Combine(treeRoot, "search-client.js"), "window.__searchClientLoaded = true;");
-        File.WriteAllText(Path.Combine(treeRoot, "outline-client.js"), "window.__outlineClientLoaded = true;");
-        File.WriteAllText(Path.Combine(treeRoot, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
+        File.WriteAllText(TestPathUtils.PathUnder(treeRoot, "index.html"), "<html>published-index</html>");
+        File.WriteAllText(TestPathUtils.PathUnder(treeRoot, "search.html"), "<html>published-search</html>");
+        File.WriteAllText(TestPathUtils.PathUnder(treeRoot, "search-index.json"), "{\"documents\":[]}");
+        File.WriteAllText(TestPathUtils.PathUnder(treeRoot, "search.css"), "body { color: #fff; }");
+        File.WriteAllText(TestPathUtils.PathUnder(treeRoot, "search-client.js"), "window.__searchClientLoaded = true;");
+        File.WriteAllText(TestPathUtils.PathUnder(treeRoot, "outline-client.js"), "window.__outlineClientLoaded = true;");
+        File.WriteAllText(TestPathUtils.PathUnder(treeRoot, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
         return treeRoot;
     }
 
@@ -1397,7 +1400,7 @@ public sealed class AppSurfaceDocsInstancesTests
                 }
             ]
         };
-        var catalogPath = Path.Combine(fixtureRoot, "catalog.json");
+        var catalogPath = TestPathUtils.PathUnder(fixtureRoot, "catalog.json");
         File.WriteAllText(catalogPath, System.Text.Json.JsonSerializer.Serialize(catalog));
         return catalogPath;
     }
@@ -1419,7 +1422,7 @@ public sealed class AppSurfaceDocsInstancesTests
                 })
             .OrderBy(entry => entry.path, StringComparer.Ordinal)
             .ToArray();
-        var manifestPath = Path.Combine(treeRoot, AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        var manifestPath = TestPathUtils.PathUnder(treeRoot, AppSurfaceDocsReleaseArchiveVerifier.FileName);
         File.WriteAllText(
             manifestPath,
             System.Text.Json.JsonSerializer.Serialize(
