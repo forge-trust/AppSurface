@@ -124,6 +124,18 @@ public sealed record AppSurfaceDocsHarvestProgressSnapshot
     public string Status { get; init; } = "Starting";
 
     /// <summary>
+    /// Gets the rolling documents-per-second rate observed from progress-instrumented built-in harvesters.
+    /// </summary>
+    /// <remarks>
+    /// A <see langword="null"/> value means that the reporter has not observed a complete measurement window yet.
+    /// A value of zero is a valid measurement when inspected source units yielded no document nodes. Custom
+    /// <c>IDocHarvester</c> implementations are intentionally excluded because they retain status-only progress.
+    /// </remarks>
+    [JsonPropertyName("builtInDocumentsPerSecond")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public double? BuiltInDocumentsPerSecond { get; init; }
+
+    /// <summary>
     /// Gets redacted per-harvester progress entries.
     /// </summary>
     [JsonPropertyName("harvesters")]
@@ -176,7 +188,7 @@ public sealed record AppSurfaceDocsHarvesterProgress
     /// <summary>
     /// Initializes a new redacted harvester progress entry.
     /// </summary>
-    /// <param name="harvesterType">The non-secret harvester type name used as the stable row identity.</param>
+    /// <param name="harvesterType">The non-secret harvester type name shown for this parser row.</param>
     /// <param name="status">The display status for the harvester, such as <c>Waiting</c>, <c>Running</c>, or a terminal health status.</param>
     /// <param name="docCount">The number of documents reported by this harvester. Values are expected to be zero or greater.</param>
     public AppSurfaceDocsHarvesterProgress(string harvesterType, string status, int docCount)
@@ -187,9 +199,31 @@ public sealed record AppSurfaceDocsHarvesterProgress
     }
 
     /// <summary>
-    /// Gets the non-secret harvester type name used as the stable row identity.
+    /// Gets the non-secret harvester type name shown for this parser row.
     /// </summary>
     public string HarvesterType { get; init; }
+
+    /// <summary>
+    /// Gets the reporter-only stable identity for this harvester instance.
+    /// </summary>
+    /// <remarks>
+    /// This key distinguishes multiple registrations of the same concrete harvester type without exposing a new wire
+    /// contract to browser consumers. AppSurface Docs uses it only to correlate trusted server-side callbacks.
+    /// </remarks>
+    [JsonIgnore]
+    internal string ProgressId { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets a value indicating whether this entry belongs to a package-owned parser that reports detailed progress.
+    /// </summary>
+    /// <remarks>
+    /// This server-only marker is set from the registered harvester instance rather than inferred from
+    /// <see cref="HarvesterType"/>. It prevents a custom <c>IDocHarvester</c> whose class name matches a built-in
+    /// parser from being rendered with package-owned parser telemetry. The marker is intentionally omitted from the
+    /// browser progress contract.
+    /// </remarks>
+    [JsonIgnore]
+    internal bool IsBuiltInProgressHarvester { get; init; }
 
     /// <summary>
     /// Gets the display status for this harvester.
@@ -200,6 +234,62 @@ public sealed record AppSurfaceDocsHarvesterProgress
     /// Gets the number of documents reported by this harvester.
     /// </summary>
     public int DocCount { get; init; }
+
+    /// <summary>
+    /// Gets the safe lifecycle phase for a built-in parser.
+    /// </summary>
+    /// <remarks>
+    /// Custom harvesters retain <see cref="AppSurfaceDocsHarvestProgressPhase.Waiting"/> while active and receive
+    /// <see cref="AppSurfaceDocsHarvestProgressPhase.Terminal"/> with their existing terminal health status. The value
+    /// contains no source identity or free-form diagnostic text.
+    /// </remarks>
+    [JsonPropertyName("phase")]
+    public AppSurfaceDocsHarvestProgressPhase Phase { get; init; } = AppSurfaceDocsHarvestProgressPhase.Waiting;
+
+    /// <summary>
+    /// Gets the non-negative number of parser input units inspected by this harvester.
+    /// </summary>
+    /// <remarks>
+    /// This is a count rather than a denominator or percentage. It deliberately excludes source paths, file names,
+    /// source contents, and other source-identifying detail.
+    /// </remarks>
+    [JsonPropertyName("sourceUnitsProcessed")]
+    public long SourceUnitsProcessed { get; init; }
+}
+
+/// <summary>
+/// Safe lifecycle phases reported for package-owned AppSurface Docs parsers.
+/// </summary>
+/// <remarks>
+/// The explicit string JSON representation makes phase values stable independently of host serializer enum settings.
+/// </remarks>
+[JsonConverter(typeof(JsonStringEnumConverter<AppSurfaceDocsHarvestProgressPhase>))]
+public enum AppSurfaceDocsHarvestProgressPhase
+{
+    /// <summary>
+    /// The harvester has not begun package-owned parser work.
+    /// </summary>
+    Waiting = 0,
+
+    /// <summary>
+    /// The parser is discovering eligible source candidates.
+    /// </summary>
+    Discovering = 1,
+
+    /// <summary>
+    /// The parser is inspecting and interpreting source candidates.
+    /// </summary>
+    Parsing = 2,
+
+    /// <summary>
+    /// The parser is materializing final output and diagnostics.
+    /// </summary>
+    Finalizing = 3,
+
+    /// <summary>
+    /// The harvester has reached its terminal health state.
+    /// </summary>
+    Terminal = 4
 }
 
 /// <summary>

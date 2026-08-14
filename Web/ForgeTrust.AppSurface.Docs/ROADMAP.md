@@ -71,6 +71,7 @@ Primary issues:
 
 - [#104](https://github.com/forge-trust/AppSurface/issues/104) Expand search index with metadata and visibility controls
 - [#105](https://github.com/forge-trust/AppSurface/issues/105) Tune search ranking for intent-based relevance
+- [#303](https://github.com/forge-trust/AppSurface/issues/303) Surface generated JavaScript API lifecycle and deprecation metadata in docs and search
 - [#108](https://github.com/forge-trust/AppSurface/issues/108) Add config-gated search telemetry and docs metrics
 - [#145](https://github.com/forge-trust/AppSurface/issues/145) Add docs-adjacent content types for release notes, blog, and standalone pages
 - [#146](https://github.com/forge-trust/AppSurface/issues/146) Add extension surfaces and production docs platform plumbing

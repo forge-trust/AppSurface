@@ -4,6 +4,7 @@
 
 :root {
     --docs-search-color-border-default: var(--docs-color-border-default, #314461);
+    --docs-search-color-border-default-strong: var(--docs-color-border-default-strong, rgba(65, 87, 121, 0.88));
     --docs-search-color-border-muted: var(--docs-color-border-muted, #1b2a43);
     --docs-search-color-border-strong: var(--docs-color-border-strong, #526987);
     --docs-search-color-border-accent-hover: var(--docs-color-border-accent-hover, rgba(20, 184, 166, 0.56));
@@ -12,6 +13,7 @@
     --docs-search-color-surface-canvas: var(--docs-color-surface-canvas, #050b17);
     --docs-search-color-surface-raised: var(--docs-color-surface-raised, #0d182a);
     --docs-search-color-surface-panel: var(--docs-color-surface-panel, rgba(13, 24, 42, 0.72));
+    --docs-search-color-surface-panel-hover: var(--docs-color-surface-panel-hover, rgba(20, 35, 61, 0.56));
     --docs-search-color-surface-panel-elevated: var(--docs-color-surface-panel-elevated, rgba(13, 24, 42, 0.88));
     --docs-search-color-surface-panel-heavy: var(--docs-color-surface-panel-heavy, rgba(13, 24, 42, 0.92));
     --docs-search-color-surface-overlay: var(--docs-color-surface-overlay, rgba(5, 11, 23, 0.78));
@@ -23,6 +25,7 @@
     --docs-search-color-text-faint: var(--docs-color-text-faint, #728098);
     --docs-search-color-text-info-muted: var(--docs-color-text-info-muted, #c7d2fe);
     --docs-search-color-text-mark: var(--docs-color-text-mark, #f5f7fb);
+    --docs-search-color-syntax-parameter: var(--docs-color-syntax-parameter, #fcd34d);
     --docs-search-color-accent: var(--docs-color-accent, #14b8a6);
     --docs-search-color-accent-strong: var(--docs-color-accent-strong, #2563eb);
     --docs-search-color-accent-soft: var(--docs-color-accent-soft, #ccfbf1);
@@ -448,6 +451,18 @@
     color: var(--docs-search-color-text-muted);
 }
 
+.docs-search-result-badge-lifecycle {
+    border-color: var(--docs-search-color-border-accent-hover);
+    color: var(--docs-search-color-accent-soft);
+    background: var(--docs-search-color-accent-mark-fill);
+}
+
+.docs-search-result-badge-deprecated {
+    border-color: var(--docs-search-color-border-default-strong);
+    color: var(--docs-search-color-syntax-parameter);
+    background: var(--docs-search-color-surface-panel-hover);
+}
+
 .docs-search-result-page-type-badge {
     width: fit-content;
 }
@@ -748,46 +763,6 @@
     line-height: 1;
 }
 
-.docs-harvest-phase-rail {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0.55rem;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-.docs-harvest-phase-rail li {
-    min-width: 0;
-    border: 1px solid var(--docs-search-color-border-muted);
-    border-radius: 0.5rem;
-    background: var(--docs-search-color-surface-overlay-soft);
-    padding: 0.7rem;
-}
-
-.docs-harvest-phase-rail li.is-active {
-    border-color: var(--docs-search-color-border-accent-hover);
-    background: var(--docs-search-color-accent-mark-fill);
-}
-
-.docs-harvest-phase-rail span,
-.docs-harvest-phase-rail strong {
-    display: block;
-}
-
-.docs-harvest-phase-rail span {
-    color: var(--docs-search-color-text-default);
-    font-weight: 700;
-}
-
-.docs-harvest-phase-rail strong {
-    margin-top: 0.3rem;
-    color: var(--docs-search-color-text-info-muted);
-    font-size: 0.72rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-}
-
 .docs-harvest-harvesters {
     display: grid;
     gap: 0.55rem;
@@ -795,7 +770,7 @@
 
 .docs-harvest-harvester {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(9rem, 1fr) auto auto minmax(10rem, auto);
     gap: 0.75rem;
     align-items: center;
     border-bottom: 1px solid var(--docs-search-color-border-default);
@@ -806,6 +781,14 @@
     min-width: 0;
     color: var(--docs-search-color-text-strong);
     font-weight: 700;
+}
+
+.docs-harvest-harvester-phase {
+    color: var(--docs-search-color-text-info-muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
 }
 
 .docs-harvest-harvester-status,
@@ -935,19 +918,12 @@
     }
 
     .docs-harvest-rate {
-        display: none;
+        justify-items: start;
+        width: 100%;
     }
 
     .docs-harvest-metrics {
         grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .docs-harvest-metric:nth-child(n + 3) {
-        display: none;
-    }
-
-    .docs-harvest-phase-rail {
-        grid-template-columns: 1fr;
     }
 
     .docs-harvest-harvester {

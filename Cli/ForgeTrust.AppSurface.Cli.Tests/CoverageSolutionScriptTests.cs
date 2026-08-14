@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Text.Json;
+using ForgeTrust.AppSurface.Testing;
+using YamlDotNet.RepresentationModel;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -126,6 +129,530 @@ public sealed class CoverageSolutionScriptTests
         Assert.Matches(
             "(?s)--no-restore\\s+/p:TailwindRuntimeBinaryResolutionEnabled=false\\s+/p:TailwindEnabled=false\\s+--filter",
             workflow);
+    }
+
+    [Fact]
+    public void CoverageEfficiencyWorkflow_ShouldCaptureCompleteReadOnlyEvidenceWithoutChangingPrValidation()
+    {
+        var workflow = ReadRepositoryFile(".github", "workflows", "coverage-efficiency.yml");
+        var yaml = new YamlStream();
+        using var reader = new StringReader(workflow);
+        yaml.Load(reader);
+
+        Assert.Contains("name: Coverage Efficiency Evidence", workflow, StringComparison.Ordinal);
+        Assert.Single(yaml.Documents);
+        var root = (YamlMappingNode)yaml.Documents.Single().RootNode;
+        var jobs = (YamlMappingNode)root.Children[new YamlScalarNode("jobs")];
+        var captureEvidence = (YamlMappingNode)jobs.Children[new YamlScalarNode("capture-evidence")];
+        Assert.Equal(
+            "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)",
+            ((YamlScalarNode)captureEvidence.Children[new YamlScalarNode("if")]).Value);
+        Assert.Contains("workflow_dispatch:", workflow, StringComparison.Ordinal);
+        Assert.Contains("cache-state:", workflow, StringComparison.Ordinal);
+        Assert.Contains("inputs['cache-state']", workflow, StringComparison.Ordinal);
+        Assert.Contains("type: choice", workflow, StringComparison.Ordinal);
+        Assert.Contains("- cold", workflow, StringComparison.Ordinal);
+        Assert.Contains("- warm", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("pull_request:", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("push:", workflow, StringComparison.Ordinal);
+        Assert.Contains("permissions:\n  contents: read", workflow, StringComparison.Ordinal);
+        Assert.Contains("persist-credentials: false", workflow, StringComparison.Ordinal);
+        Assert.Contains("Require a trusted evidence ref", workflow, StringComparison.Ordinal);
+        Assert.Contains("refs/heads/$DEFAULT_BRANCH", workflow, StringComparison.Ordinal);
+        Assert.Contains("BUILD_CONFIGURATION: Release", workflow, StringComparison.Ordinal);
+        Assert.Contains("BUILD_NO_RESTORE: true", workflow, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_PARALLELISM: 2", workflow, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_GATE_DIFF_BASE: ''", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("COVERAGE_REQUIRE_NON_SANDBOX: false", workflow, StringComparison.Ordinal);
+        Assert.Contains("Setup .NET SDK", workflow, StringComparison.Ordinal);
+        Assert.Contains("cache: false", workflow, StringComparison.Ordinal);
+        Assert.Contains("Restore NuGet packages for declared comparison state", workflow, StringComparison.Ordinal);
+        Assert.Contains("path: ${{ github.workspace }}/.nuget/packages", workflow, StringComparison.Ordinal);
+        Assert.Contains("key: dotnet-cache-${{ runner.os }}-${{ hashFiles('**/packages.lock.json', '**/packages.*.lock.json') }}", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("NPM_CONFIG_STORE_DIR: ${{ runner.temp }}/coverage-efficiency-pnpm-store", workflow, StringComparison.Ordinal);
+        Assert.Contains("Configure pnpm evidence store", workflow, StringComparison.Ordinal);
+        Assert.Contains("NPM_CONFIG_STORE_DIR=$RUNNER_TEMP/coverage-efficiency-pnpm-store", workflow, StringComparison.Ordinal);
+        Assert.Contains("package-manager-cache: false", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("cache: pnpm", workflow, StringComparison.Ordinal);
+        Assert.Contains("actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684", workflow, StringComparison.Ordinal);
+        Assert.Contains("Compute pnpm cache key", workflow, StringComparison.Ordinal);
+        Assert.Contains("PNPM_LOCK_HASH: ${{ hashFiles('Web/pnpm-lock.yaml') }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("node-cache-${RUNNER_OS}-$(node -p 'process.arch')-pnpm-${PNPM_LOCK_HASH}", workflow, StringComparison.Ordinal);
+        Assert.Contains("key: ${{ steps.pnpm-cache-key.outputs.key }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("runner_temp_path=\"$(realpath -m \"$RUNNER_TEMP\")\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("pnpm_store_root=\"$(realpath -m \"$NPM_CONFIG_STORE_DIR\")\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("resolved_pnpm_store_path=\"$(realpath -m \"$(pnpm store path)\")\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("Refusing to clear a pnpm store redirected outside", workflow, StringComparison.Ordinal);
+        Assert.Contains("rm -rf -- \"$pnpm_store_root\"", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("rm -rf -- \"$pnpm_store_path\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("time.monotonic_ns()", workflow, StringComparison.Ordinal);
+        Assert.Contains("docker version > \"$evidence_root/docker-version.txt\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("PostgreSqlTestContainerImage.cs", workflow, StringComparison.Ordinal);
+        Assert.Contains("Directory.Packages.props", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("postgresql_image=\"postgres:", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("playwright_package_version=\"1.60.0\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("docker image inspect \"$postgresql_image\"", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("docker-version.txt\" 2>&1 || true", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("postgresql-image.json\" 2>&1 || true", workflow, StringComparison.Ordinal);
+        Assert.Contains("coverage-exit-code=$coverage_exit_code", workflow, StringComparison.Ordinal);
+        Assert.Contains("runtime-capture-exit-code=$runtime_capture_exit_code", workflow, StringComparison.Ordinal);
+        Assert.Contains("CACHE_STATE: ${{ inputs['cache-state'] }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("--arg cache_state \"$CACHE_STATE\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("echo \"| Cache state | \\`$CACHE_STATE\\` |\"", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("--arg cache_state \"${{ inputs['cache-state'] }}\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("coverage_exit_code_value=\"${COVERAGE_EXIT_CODE:--1}\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("runtime_capture_exit_code_value=\"${RUNTIME_CAPTURE_EXIT_CODE:--1}\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("resolved-serial-set.error.log", workflow, StringComparison.Ordinal);
+        Assert.Contains("Actual serial-set derivation failed", workflow, StringComparison.Ordinal);
+        Assert.Contains("run: exit \"${COVERAGE_EXIT_CODE:--1}\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("run: exit \"${RUNTIME_CAPTURE_EXIT_CODE:--1}\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("chromium-executable-unavailable", workflow, StringComparison.Ordinal);
+        Assert.Contains("-name chrome -o -name chrome-headless-shell", workflow, StringComparison.Ordinal);
+        Assert.Contains("Missing managed JUnit log", workflow, StringComparison.Ordinal);
+        Assert.Contains("Missing managed JUnit log path.", workflow, StringComparison.Ordinal);
+        Assert.Contains("Missing project test log path.", workflow, StringComparison.Ordinal);
+        Assert.Contains("(.coverageCleanupLog // \"-\")", workflow, StringComparison.Ordinal);
+        Assert.Contains("Timings evidence could not be read for per-project validation.", workflow, StringComparison.Ordinal);
+        Assert.Contains("Fail incomplete runtime evidence capture", workflow, StringComparison.Ordinal);
+        Assert.Contains("environment-manifest.json", workflow, StringComparison.Ordinal);
+        Assert.Contains("dotnetSdkVersion", workflow, StringComparison.Ordinal);
+        Assert.Contains("dockerServerVersion", workflow, StringComparison.Ordinal);
+        Assert.Contains("postgresqlImage", workflow, StringComparison.Ordinal);
+        Assert.Contains("playwrightPackageVersion", workflow, StringComparison.Ordinal);
+        Assert.Contains("evidence-completeness.json", workflow, StringComparison.Ordinal);
+        Assert.Contains("timings.json", workflow, StringComparison.Ordinal);
+        Assert.Contains("resolved-serial-set.json", workflow, StringComparison.Ordinal);
+        Assert.Contains("precedingParallelBatch", workflow, StringComparison.Ordinal);
+        Assert.Contains("barrierCriticalPathRationale", workflow, StringComparison.Ordinal);
+        Assert.Contains("junit-coverage-*.xml", workflow, StringComparison.Ordinal);
+        Assert.Contains("slow-test-diagnostics.json", workflow, StringComparison.Ordinal);
+        Assert.Contains("coverage-normalization.log", workflow, StringComparison.Ordinal);
+        Assert.Contains("max_artifact_file_bytes", workflow, StringComparison.Ordinal);
+        Assert.Contains("Refusing symlinked evidence source", workflow, StringComparison.Ordinal);
+        Assert.Contains("find \"$coverage_root\" -maxdepth 1 -type f -name 'junit-coverage-*.xml'", workflow, StringComparison.Ordinal);
+        Assert.Contains("find \"$coverage_root/projects\" -type f", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("shopt -s globstar", workflow, StringComparison.Ordinal);
+        Assert.Contains("coverage-efficiency-evidence", workflow, StringComparison.Ordinal);
+        Assert.Contains("path: ${{ runner.temp }}/coverage-efficiency-evidence", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("path: TestResults/coverage-merged", workflow, StringComparison.Ordinal);
+        Assert.Contains("if-no-files-found: error", workflow, StringComparison.Ordinal);
+        Assert.Contains("retention-days: 14", workflow, StringComparison.Ordinal);
+        Assert.Contains("coverageStep", workflow, StringComparison.Ordinal);
+        Assert.Contains("durationSeconds", workflow, StringComparison.Ordinal);
+        Assert.Contains("Fail unsuccessful coverage capture", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CoverageEfficiencyEvidenceTemplates_ShouldDocumentScopeInventoryAndCeilingContract()
+    {
+        var scope = ReadRepositoryFile("artifacts", "issue-728-test-efficiency", "scope-and-baseline.md");
+        var inventory = ReadRepositoryFile("artifacts", "issue-728-test-efficiency", "candidate-inventory.md");
+        var results = ReadRepositoryFile("artifacts", "issue-728-test-efficiency", "results.md");
+
+        Assert.Contains("High-resolution monotonic duration", scope, StringComparison.Ordinal);
+        Assert.Contains("actual serial set is authoritative", scope, StringComparison.Ordinal);
+        Assert.Contains("401 seconds", scope, StringComparison.Ordinal);
+        Assert.Contains("relative spread", scope, StringComparison.Ordinal);
+        Assert.Contains("manual workflow runs", scope, StringComparison.Ordinal);
+        Assert.Contains("with the wrapper's non-sandbox guard enabled", scope, StringComparison.Ordinal);
+        Assert.Contains("screening-only, never CI or issue-claim evidence", scope, StringComparison.Ordinal);
+        Assert.Contains("Testcontainers and externally configured paths separately", inventory, StringComparison.Ordinal);
+        Assert.Contains("aggregate failures only after every cleanup attempt", inventory, StringComparison.Ordinal);
+        Assert.Contains("high-resolution monotonic coverage-wrapper duration", results, StringComparison.Ordinal);
+        Assert.Contains("at least 15% and at least five seconds", results, StringComparison.Ordinal);
+        Assert.Contains("2027-02-11", results, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CoverageEfficiencyCapture_ShouldPreserveCoverageFailureWhenDockerEvidenceFails()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var captureScript = ExtractWorkflowRunScript("Capture coverage efficiency evidence");
+        using var workspace = TemporaryDirectory.Create("appsurface-coverage-efficiency-capture-");
+        var binDirectory = Path.Join(workspace.Path, "bin");
+        var evidenceRoot = Path.Join(workspace.Path, "evidence");
+        var outputPath = Path.Join(workspace.Path, "github-output");
+        Directory.CreateDirectory(binDirectory);
+
+        await WriteExecutableAsync(
+            Path.Join(workspace.Path, "scripts", "coverage-solution.sh"),
+            "#!/usr/bin/env bash\nprintf '%*s\\n' 131072 '' | tr ' ' x\nexit 47\n");
+        await WriteExecutableAsync(Path.Join(binDirectory, "docker"), "#!/usr/bin/env bash\nprintf '%s\\n' 'Docker unavailable' >&2\nexit 1\n");
+        await WriteExecutableAsync(Path.Join(binDirectory, "dotnet"), "#!/usr/bin/env bash\nif [[ \"$1\" == \"--version\" ]]; then echo 10.0.100; exit 0; fi\necho '.NET SDK information'\n");
+        await WriteExecutableAsync(Path.Join(binDirectory, "pnpm"), "#!/usr/bin/env bash\necho 11.1.3\n");
+        await WriteExecutableAsync(Path.Join(binDirectory, "node"), "#!/usr/bin/env bash\necho v24.0.0\n");
+
+        var scriptPath = Path.Join(workspace.Path, "capture.sh");
+        await File.WriteAllTextAsync(scriptPath, captureScript);
+        var postgreSqlImageSource = Path.Join(
+            workspace.Path,
+            "Durable",
+            "ForgeTrust.AppSurface.Durable.PostgreSql.Tests",
+            "PostgreSqlTestContainerImage.cs");
+        Directory.CreateDirectory(Path.GetDirectoryName(postgreSqlImageSource)!);
+        await File.WriteAllTextAsync(
+            postgreSqlImageSource,
+            "internal static class PostgreSqlTestContainerImage { internal const string Reference = \"postgres:17.5@test\"; }\n");
+        await File.WriteAllTextAsync(
+            Path.Join(workspace.Path, "Directory.Packages.props"),
+            "<Project><ItemGroup><PackageVersion Include=\"Microsoft.Playwright\" Version=\"1.60.0\" /></ItemGroup></Project>\n");
+
+        var startInfo = new ProcessStartInfo("bash")
+        {
+            WorkingDirectory = workspace.Path,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add(scriptPath);
+        startInfo.Environment["PATH"] = string.Concat(binDirectory, Path.PathSeparator, Environment.GetEnvironmentVariable("PATH"));
+        startInfo.Environment["RUNNER_TEMP"] = evidenceRoot;
+        startInfo.Environment["GITHUB_OUTPUT"] = outputPath;
+        startInfo.Environment["GITHUB_SERVER_URL"] = "https://github.com";
+        startInfo.Environment["GITHUB_REPOSITORY"] = "forge-trust/AppSurface";
+        startInfo.Environment["GITHUB_RUN_ID"] = "123";
+        startInfo.Environment["GITHUB_SHA"] = "abc123";
+        startInfo.Environment["GITHUB_REF"] = "refs/heads/test";
+        startInfo.Environment["RUNNER_OS"] = "Linux";
+        startInfo.Environment["RUNNER_ARCH"] = "X64";
+        startInfo.Environment["RUNNER_NAME"] = "test-runner";
+        startInfo.Environment["CACHE_STATE"] = "warm";
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start capture script.");
+        var standardOutputTask = process.StandardOutput.ReadToEndAsync();
+        var standardErrorTask = process.StandardError.ReadToEndAsync();
+        await Task.WhenAll(process.WaitForExitAsync(), standardOutputTask, standardErrorTask);
+
+        Assert.True(process.ExitCode == 0, await standardErrorTask);
+        Assert.True((await standardOutputTask).Length >= 131072);
+        Assert.Contains("coverage-exit-code=47", await File.ReadAllTextAsync(outputPath), StringComparison.Ordinal);
+        Assert.Contains("runtime-capture-exit-code=1", await File.ReadAllTextAsync(outputPath), StringComparison.Ordinal);
+
+        var manifest = await File.ReadAllTextAsync(Path.Join(evidenceRoot, "coverage-efficiency-evidence", "environment-manifest.json"));
+        Assert.Contains("\"exitCode\": 47", manifest, StringComparison.Ordinal);
+        Assert.Contains("\"captureExitCode\": 1", manifest, StringComparison.Ordinal);
+        Assert.Contains(
+            "Docker unavailable",
+            await File.ReadAllTextAsync(Path.Join(evidenceRoot, "coverage-efficiency-evidence", "docker-version.txt")),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CoverageEfficiencyAssembly_ShouldWriteCompletenessAndRejectMissingSuccessfulCoverageEvidence()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var assemblyScript = ExtractWorkflowRunScript("Assemble coverage efficiency evidence");
+        using var workspace = TemporaryDirectory.Create("appsurface-coverage-efficiency-assembly-");
+        var runnerTemp = Path.Join(workspace.Path, "runner-temp");
+        var evidenceRoot = Path.Join(runnerTemp, "coverage-efficiency-evidence");
+        Directory.CreateDirectory(evidenceRoot);
+
+        foreach (var fileName in new[]
+                 {
+                     "environment-manifest.json",
+                     "dotnet-info.txt",
+                     "docker-version.txt",
+                     "postgresql-image.json",
+                     "pnpm-version.txt",
+                     "node-version.txt",
+                     "playwright-browser-inventory.txt",
+                 })
+        {
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(evidenceRoot, fileName), "fixture evidence\n");
+        }
+
+        var scriptPath = Path.Join(workspace.Path, "assemble.sh");
+        await File.WriteAllTextAsync(scriptPath, assemblyScript);
+
+        var startInfo = new ProcessStartInfo("bash")
+        {
+            WorkingDirectory = workspace.Path,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add(scriptPath);
+        startInfo.Environment["RUNNER_TEMP"] = runnerTemp;
+        startInfo.Environment["COVERAGE_EXIT_CODE"] = "0";
+        startInfo.Environment["RUNTIME_CAPTURE_EXIT_CODE"] = "0";
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start assembly script.");
+        var standardOutputTask = process.StandardOutput.ReadToEndAsync();
+        var standardErrorTask = process.StandardError.ReadToEndAsync();
+        await Task.WhenAll(process.WaitForExitAsync(), standardOutputTask, standardErrorTask);
+
+        Assert.NotEqual(0, process.ExitCode);
+        var standardError = await standardErrorTask;
+
+        var completenessPath = Path.Join(evidenceRoot, "evidence-completeness.json");
+        Assert.True(File.Exists(completenessPath), standardError);
+        var completeness = await File.ReadAllTextAsync(completenessPath);
+        Assert.Contains("\"captureStatus\": \"failed\"", completeness, StringComparison.Ordinal);
+        Assert.Contains("\"artifactContractComplete\": false", completeness, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CoverageEfficiencyAssembly_ShouldWriteNumericFailureDefaultsWhenCaptureOutputsAreMissing()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var assemblyScript = ExtractWorkflowRunScript("Assemble coverage efficiency evidence");
+        using var workspace = TemporaryDirectory.Create("appsurface-coverage-efficiency-assembly-defaults-");
+        var runnerTemp = Path.Join(workspace.Path, "runner-temp");
+        var evidenceRoot = Path.Join(runnerTemp, "coverage-efficiency-evidence");
+        Directory.CreateDirectory(evidenceRoot);
+
+        foreach (var fileName in new[]
+                 {
+                     "environment-manifest.json",
+                     "dotnet-info.txt",
+                     "docker-version.txt",
+                     "postgresql-image.json",
+                     "pnpm-version.txt",
+                     "node-version.txt",
+                     "playwright-browser-inventory.txt",
+                 })
+        {
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(evidenceRoot, fileName), "fixture evidence\n");
+        }
+
+        var scriptPath = Path.Join(workspace.Path, "assemble.sh");
+        await File.WriteAllTextAsync(scriptPath, assemblyScript);
+
+        var startInfo = new ProcessStartInfo("bash")
+        {
+            WorkingDirectory = workspace.Path,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add(scriptPath);
+        startInfo.Environment["RUNNER_TEMP"] = runnerTemp;
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start assembly script.");
+        var standardOutputTask = process.StandardOutput.ReadToEndAsync();
+        var standardErrorTask = process.StandardError.ReadToEndAsync();
+        await Task.WhenAll(process.WaitForExitAsync(), standardOutputTask, standardErrorTask);
+
+        var standardError = await standardErrorTask;
+        Assert.True(process.ExitCode == 0, standardError);
+
+        var completeness = await File.ReadAllTextAsync(Path.Join(evidenceRoot, "evidence-completeness.json"));
+        Assert.Contains("\"captureStatus\": \"failed\"", completeness, StringComparison.Ordinal);
+        Assert.Contains("\"coverageExitCode\": -1", completeness, StringComparison.Ordinal);
+        Assert.Contains("\"runtimeCaptureExitCode\": -1", completeness, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CoverageEfficiencyAssembly_ShouldEmitCompleteManifestForValidSuccessfulCoverageEvidence()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var assemblyScript = ExtractWorkflowRunScript("Assemble coverage efficiency evidence");
+        using var workspace = TemporaryDirectory.Create("appsurface-coverage-efficiency-assembly-success-");
+        var runnerTemp = Path.Join(workspace.Path, "runner-temp");
+        var evidenceRoot = Path.Join(runnerTemp, "coverage-efficiency-evidence");
+        Directory.CreateDirectory(evidenceRoot);
+
+        foreach (var fileName in new[]
+                 {
+                     "environment-manifest.json",
+                     "dotnet-info.txt",
+                     "docker-version.txt",
+                     "postgresql-image.json",
+                     "pnpm-version.txt",
+                     "node-version.txt",
+                     "playwright-browser-inventory.txt",
+                 })
+        {
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(evidenceRoot, fileName), "fixture evidence\n");
+        }
+
+        var coverageRoot = Path.Join(workspace.Path, "TestResults", "coverage-merged");
+        Directory.CreateDirectory(Path.Join(coverageRoot, "projects", "first-exclusive"));
+        Directory.CreateDirectory(Path.Join(coverageRoot, "projects", "second-exclusive"));
+        await File.WriteAllTextAsync(
+            Path.Join(coverageRoot, "timings.json"),
+            """
+            {
+              "schedule": { "strategy": "fixture" },
+              "projects": [
+                {
+                  "project": "SecondExclusive.Tests.csproj",
+                  "originalIndex": 4,
+                  "executionIndex": 4,
+                  "exclusive": true,
+                  "scheduleReason": "fixture",
+                  "executionStatus": "completed",
+                  "log": "projects/second-exclusive/dotnet-test.log",
+                  "coverageCleanupLog": null,
+                  "testResults": [ { "format": "junit", "path": "junit-coverage-second-exclusive.xml" } ]
+                },
+                {
+                  "project": "ParallelBeforeFirst.Tests.csproj",
+                  "originalIndex": 0,
+                  "executionIndex": 0,
+                  "exclusive": false,
+                  "scheduleReason": "fixture"
+                },
+                {
+                  "project": "FirstExclusive.Tests.csproj",
+                  "originalIndex": 1,
+                  "executionIndex": 1,
+                  "exclusive": true,
+                  "scheduleReason": "fixture",
+                  "executionStatus": "completed",
+                  "log": "projects/first-exclusive/dotnet-test.log",
+                  "coverageCleanupLog": null,
+                  "testResults": [ { "format": "junit", "path": "junit-coverage-first-exclusive.xml" } ]
+                },
+                {
+                  "project": "ParallelBetweenBarriers.Tests.csproj",
+                  "originalIndex": 2,
+                  "executionIndex": 2,
+                  "exclusive": false,
+                  "scheduleReason": "fixture"
+                },
+                {
+                  "project": "ParallelAfterFirst.Tests.csproj",
+                  "originalIndex": 3,
+                  "executionIndex": 3,
+                  "exclusive": false,
+                  "scheduleReason": "fixture"
+                }
+              ]
+            }
+            """);
+        foreach (var fileName in new[]
+                 {
+                     "slow-test-diagnostics.md",
+                     "slow-test-diagnostics.json",
+                     "coverage.cobertura.xml",
+                     "summary.txt",
+                     "coverage-gate.json",
+                     "coverage-gate.md",
+                     "junit-coverage-first-exclusive.xml",
+                     "junit-coverage-second-exclusive.xml",
+                 })
+        {
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(coverageRoot, fileName), "fixture coverage output\n");
+        }
+        await File.WriteAllTextAsync(Path.Join(coverageRoot, "projects", "first-exclusive", "dotnet-test.log"), "fixture test log\n");
+        await File.WriteAllTextAsync(Path.Join(coverageRoot, "projects", "second-exclusive", "dotnet-test.log"), "fixture test log\n");
+
+        var scriptPath = Path.Join(workspace.Path, "assemble.sh");
+        await File.WriteAllTextAsync(scriptPath, assemblyScript);
+
+        var startInfo = new ProcessStartInfo("bash")
+        {
+            WorkingDirectory = workspace.Path,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add(scriptPath);
+        startInfo.Environment["RUNNER_TEMP"] = runnerTemp;
+        startInfo.Environment["COVERAGE_EXIT_CODE"] = "0";
+        startInfo.Environment["RUNTIME_CAPTURE_EXIT_CODE"] = "0";
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start assembly script.");
+        var standardOutputTask = process.StandardOutput.ReadToEndAsync();
+        var standardErrorTask = process.StandardError.ReadToEndAsync();
+        await Task.WhenAll(process.WaitForExitAsync(), standardOutputTask, standardErrorTask);
+
+        var standardError = await standardErrorTask;
+        Assert.True(process.ExitCode == 0, standardError);
+        Assert.True(string.IsNullOrWhiteSpace(standardError), standardError);
+
+        var completeness = await File.ReadAllTextAsync(Path.Join(evidenceRoot, "evidence-completeness.json"));
+        Assert.Contains("\"captureStatus\": \"complete\"", completeness, StringComparison.Ordinal);
+        Assert.Contains("\"artifactContractComplete\": true", completeness, StringComparison.Ordinal);
+        using var serialSet = JsonDocument.Parse(
+            await File.ReadAllTextAsync(Path.Join(evidenceRoot, "coverage-output", "resolved-serial-set.json")));
+        var actualSerialSet = serialSet.RootElement.GetProperty("actualSerialSet");
+        Assert.Equal(2, actualSerialSet.GetArrayLength());
+        Assert.Equal("FirstExclusive.Tests.csproj", actualSerialSet[0].GetProperty("project").GetString());
+        Assert.Equal(
+            ["ParallelBeforeFirst.Tests.csproj"],
+            actualSerialSet[0].GetProperty("precedingParallelBatch").EnumerateArray().Select(project => project.GetString()));
+        Assert.Equal("SecondExclusive.Tests.csproj", actualSerialSet[1].GetProperty("project").GetString());
+        Assert.Equal(
+            ["ParallelBetweenBarriers.Tests.csproj", "ParallelAfterFirst.Tests.csproj"],
+            actualSerialSet[1].GetProperty("precedingParallelBatch").EnumerateArray().Select(project => project.GetString()));
+    }
+
+    [Fact]
+    public async Task CoverageEfficiencyAssembly_ShouldPreserveSerialSetDerivationDiagnostics()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var assemblyScript = ExtractWorkflowRunScript("Assemble coverage efficiency evidence");
+        using var workspace = TemporaryDirectory.Create("appsurface-coverage-efficiency-assembly-diagnostics-");
+        var runnerTemp = Path.Join(workspace.Path, "runner-temp");
+        var evidenceRoot = Path.Join(runnerTemp, "coverage-efficiency-evidence");
+        var coverageRoot = Path.Join(workspace.Path, "TestResults", "coverage-merged");
+        Directory.CreateDirectory(evidenceRoot);
+        Directory.CreateDirectory(coverageRoot);
+
+        foreach (var fileName in new[]
+                 {
+                     "environment-manifest.json",
+                     "dotnet-info.txt",
+                     "docker-version.txt",
+                     "postgresql-image.json",
+                     "pnpm-version.txt",
+                     "node-version.txt",
+                     "playwright-browser-inventory.txt",
+                 })
+        {
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(evidenceRoot, fileName), "fixture evidence\n");
+        }
+
+        await File.WriteAllTextAsync(Path.Join(coverageRoot, "timings.json"), "{");
+
+        var scriptPath = Path.Join(workspace.Path, "assemble.sh");
+        await File.WriteAllTextAsync(scriptPath, assemblyScript);
+
+        var startInfo = new ProcessStartInfo("bash")
+        {
+            WorkingDirectory = workspace.Path,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add(scriptPath);
+        startInfo.Environment["RUNNER_TEMP"] = runnerTemp;
+        startInfo.Environment["COVERAGE_EXIT_CODE"] = "0";
+        startInfo.Environment["RUNTIME_CAPTURE_EXIT_CODE"] = "0";
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start assembly script.");
+        var standardOutputTask = process.StandardOutput.ReadToEndAsync();
+        var standardErrorTask = process.StandardError.ReadToEndAsync();
+        await Task.WhenAll(process.WaitForExitAsync(), standardOutputTask, standardErrorTask);
+
+        Assert.NotEqual(0, process.ExitCode);
+        var outputRoot = Path.Join(evidenceRoot, "coverage-output");
+        var diagnostic = await File.ReadAllTextAsync(Path.Join(outputRoot, "resolved-serial-set.error.log"));
+        Assert.Contains("parse error", diagnostic, StringComparison.OrdinalIgnoreCase);
+        var completeness = await File.ReadAllTextAsync(Path.Join(evidenceRoot, "evidence-completeness.json"));
+        Assert.Contains("Actual serial-set derivation failed", completeness, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -307,6 +834,44 @@ public sealed class CoverageSolutionScriptTests
 
     private static string ReadWorkflow()
         => ReadRepositoryFile(".github", "workflows", "build.yml");
+
+    private static string ExtractWorkflowRunScript(string stepName)
+    {
+        var workflow = ReadRepositoryFile(".github", "workflows", "coverage-efficiency.yml");
+        var yaml = new YamlStream();
+        using var reader = new StringReader(workflow);
+        yaml.Load(reader);
+        var root = (YamlMappingNode)yaml.Documents.Single().RootNode;
+        var jobs = (YamlMappingNode)root.Children[new YamlScalarNode("jobs")];
+        var captureEvidence = (YamlMappingNode)jobs.Children[new YamlScalarNode("capture-evidence")];
+        var steps = (YamlSequenceNode)captureEvidence.Children[new YamlScalarNode("steps")];
+
+        var step = steps.Children
+            .OfType<YamlMappingNode>()
+            .Single(candidate => string.Equals(
+                ((YamlScalarNode)candidate.Children[new YamlScalarNode("name")]).Value,
+                stepName,
+                StringComparison.Ordinal));
+
+        return ((YamlScalarNode)step.Children[new YamlScalarNode("run")]).Value
+            ?? throw new InvalidOperationException($"Workflow step '{stepName}' has no run script.");
+    }
+
+    private static async Task WriteExecutableAsync(string path, string contents)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Executable script fixtures require Unix file permissions.");
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllTextAsync(path, contents);
+        File.SetUnixFileMode(
+            path,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+            UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+            UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+    }
 
     private static int CountOccurrences(string text, string value)
     {

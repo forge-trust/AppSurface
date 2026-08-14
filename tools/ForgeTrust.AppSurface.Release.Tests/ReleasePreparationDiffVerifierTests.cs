@@ -429,6 +429,29 @@ public sealed class ReleasePreparationDiffVerifierTests
     }
 
     [Fact]
+    public void ReleaseArtifactValidationAcceptsAnUnchangedCanonicalNextCycleSidecar()
+    {
+        var diagnostics = new List<ReleaseDiagnostic>();
+
+        ReleasePreparationDiffVerifier.ValidateReleaseArtifactChanges(
+            "1.2.3",
+            [
+                new ReleasePreparationChange("A", "releases/v1.2.3.md"),
+                new ReleasePreparationChange("A", "releases/v1.2.3.md.yml"),
+                new ReleasePreparationChange("A", "releases/v1.2.3.release.json"),
+                new ReleasePreparationChange("A", "releases/v1.2.3.evidence.json"),
+                new ReleasePreparationChange("M", "releases/current.md"),
+                new ReleasePreparationChange("M", "CHANGELOG.md"),
+                new ReleasePreparationChange("M", "releases/unreleased.md"),
+                new ReleasePreparationChange("D", "releases/unreleased.entries/2026-08-11.md")
+            ],
+            ["releases/unreleased.entries/2026-08-11.md"],
+            diagnostics);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
     public void ReleaseArtifactValidationReportsInvalidStatusesMissingConsumedEntriesAndUnrelatedChanges()
     {
         var diagnostics = new List<ReleaseDiagnostic>();

@@ -316,6 +316,19 @@ public interface IDurableWorkRegistry
     /// <exception cref="ArgumentException">Thrown when an identifier is invalid.</exception>
     /// <exception cref="InvalidOperationException">Thrown when no exact registration exists.</exception>
     DurableWorkRegistration GetRequired(string workName, string workVersion);
+
+    /// <summary>
+    /// Gets all registered work contracts, or throws if unavailable.
+    /// </summary>
+    /// <remarks>
+    /// A custom registry used with the PostgreSQL worker host must return one complete, exact, stable snapshot. The
+    /// provider normalizes its order while forming the activation-time snapshot and does not reread later mutations, so
+    /// restart the host to change discovery authority. A registry that cannot enumerate its registrations is valid for
+    /// other consumers but cannot activate PostgreSQL Work discovery.
+    /// </remarks>
+    /// <exception cref="NotSupportedException">Thrown when registry implementation does not expose registrations.</exception>
+    IReadOnlyList<DurableWorkContractIdentity> RegisteredContracts => throw new NotSupportedException(
+        "Registered work contracts are not available from this registry implementation.");
 }
 
 /// <summary>
@@ -324,6 +337,7 @@ public interface IDurableWorkRegistry
 public sealed class DurableWorkRegistry : IDurableWorkRegistry
 {
     private readonly IReadOnlyDictionary<(string Name, string Version), DurableWorkRegistration> _registrations;
+    private readonly IReadOnlyList<DurableWorkContractIdentity> _registeredContracts;
 
     /// <summary>
     /// Initializes a registry and rejects duplicate contract identities.
@@ -347,16 +361,26 @@ public sealed class DurableWorkRegistry : IDurableWorkRegistry
         }
 
         _registrations = map;
+        _registeredContracts = map.Keys
+            .Select(key => new DurableWorkContractIdentity(key.Name, key.Version))
+            .OrderBy(static identity => identity.WorkName, StringComparer.Ordinal)
+            .ThenBy(static identity => identity.WorkVersion, StringComparer.Ordinal)
+            .Distinct()
+            .ToList()
+            .AsReadOnly();
     }
+
+    /// <inheritdoc />
+    public IReadOnlyList<DurableWorkContractIdentity> RegisteredContracts => _registeredContracts;
 
     /// <inheritdoc />
     public DurableWorkRegistration GetRequired(string workName, string workVersion)
     {
-        var name = DurableIdentifier.Require(workName, nameof(workName), 200);
-        var version = DurableIdentifier.Require(workVersion, nameof(workVersion), 100);
-        return _registrations.TryGetValue((name, version), out var registration)
+        var identity = new DurableWorkContractIdentity(workName, workVersion);
+        return _registrations.TryGetValue((identity.WorkName, identity.WorkVersion), out var registration)
             ? registration
-            : throw new InvalidOperationException($"Durable work '{name}' version '{version}' is not registered.");
+            : throw new InvalidOperationException(
+                $"Durable work '{identity.WorkName}' version '{identity.WorkVersion}' is not registered.");
     }
 }
 

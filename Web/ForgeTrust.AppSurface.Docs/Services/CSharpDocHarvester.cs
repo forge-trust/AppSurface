@@ -88,7 +88,7 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         string rootPath,
         CancellationToken cancellationToken = default)
     {
-        return await HarvestAsync(rootPath, _pathPolicy, cancellationToken);
+        return await HarvestAsync(rootPath, _pathPolicy, progress: null, cancellationToken);
     }
 
     /// <summary>
@@ -113,12 +113,13 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
             return await ((IDocHarvester)this).HarvestAsync(context.RepositoryRoot, cancellationToken);
         }
 
-        return await HarvestAsync(context.RepositoryRoot, context.PathPolicy, cancellationToken);
+        return await HarvestAsync(context.RepositoryRoot, context.PathPolicy, context.Progress, cancellationToken);
     }
 
     private async Task<IReadOnlyList<DocNode>> HarvestAsync(
         string rootPath,
         IHarvestPathPolicy pathPolicy,
+        AppSurfaceDocsHarvestProgressSession? progress,
         CancellationToken cancellationToken)
     {
         var nodes = new List<DocNode>();
@@ -127,6 +128,11 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         var diagnostics = new List<DocHarvestDiagnostic>();
         try
         {
+            if (progress is not null)
+            {
+                await progress.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Discovering);
+            }
+
             var csharpOptions = _options.Harvest?.CSharp ?? new AppSurfaceDocsCSharpHarvestOptions();
             foreach (var file in EnumerateEligibleCSharpFiles(rootPath, pathPolicy, cancellationToken))
             {
@@ -141,6 +147,12 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
 
                 try
                 {
+                    if (progress is not null)
+                    {
+                        await progress.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Parsing);
+                        await progress.ReportSourceUnitAsync(0);
+                    }
+
                     var readResult = await AppSurfaceDocsParserInputBudget.ReadUtf8SourceAsync(
                         file,
                         relativePath,
@@ -335,6 +347,7 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                                     Metadata: DocMetadataFactory.CreateApiReferenceMetadata(enumDecl.Identifier.Text, namespacePage.FullNamespace)));
                         }
                     }
+
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException
                                            and not OutOfMemoryException
@@ -347,6 +360,11 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                 {
                     _logger.LogError(ex, "Failed to parse C# file: {File}", file);
                 }
+            }
+
+            if (progress is not null)
+            {
+                await progress.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Finalizing);
             }
 
             EnsureNamespaceHierarchy(namespacePages);
@@ -366,9 +384,17 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                         Metadata: namespacePage.Metadata,
                         Outline: namespacePage.Outline,
                         SymbolSourceProvenance: namespacePage.SymbolSourceProvenance));
+                if (progress is not null)
+                {
+                    await progress.ReportOutputOnlyAsync(1);
+                }
             }
 
             nodes.AddRange(stubNodes);
+            if (progress is not null && stubNodes.Count > 0)
+            {
+                await progress.ReportOutputOnlyAsync(stubNodes.Count);
+            }
 
             return nodes;
         }
