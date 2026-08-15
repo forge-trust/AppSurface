@@ -247,6 +247,32 @@ public sealed class AppSurfaceThemeWebIntegrationTests
     }
 
     [Fact]
+    public void RootTagHelper_ShouldRemoveTheMarkerWithoutApplyingThemeMetadataWhenDisabled()
+    {
+        var attributes = new TagHelperAttributeList
+        {
+            new("appsurface-theme-root", false),
+            new("class", "shell"),
+            new("style", "color-scheme: light;")
+        };
+        var output = CreateOutput("html", attributes);
+        var helper = new AppSurfaceThemeRootTagHelper(
+            new AppSurfaceThemeDocumentProvider(new StubResolver(CreateResolution(AppSurfaceThemeMode.Dark))))
+        {
+            IsEnabled = false
+        };
+
+        helper.Process(CreateContext(attributes), output);
+
+        Assert.Null(output.Attributes["appsurface-theme-root"]);
+        Assert.Equal("shell", output.Attributes["class"]?.Value);
+        Assert.Equal("color-scheme: light;", output.Attributes["style"]?.Value);
+        Assert.Null(output.Attributes["data-as-theme"]);
+        Assert.Null(output.Attributes["data-as-theme-mode"]);
+        Assert.Null(output.Attributes["data-as-theme-color-scheme-conflict"]);
+    }
+
+    [Fact]
     public void RootTagHelper_ReportsExistingColorSchemeWithoutOverwritingIt()
     {
         var attributes = new TagHelperAttributeList

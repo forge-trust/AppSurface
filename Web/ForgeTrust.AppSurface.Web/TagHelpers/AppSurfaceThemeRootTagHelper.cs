@@ -17,6 +17,17 @@ public sealed class AppSurfaceThemeRootTagHelper : TagHelper
     /// <summary>Names the opt-in root marker attribute.</summary>
     public const string AttributeName = "appsurface-theme-root";
 
+    /// <summary>
+    /// Gets or sets whether the opt-in root marker should apply the registered theme document.
+    /// </summary>
+    /// <remarks>
+    /// Set this to <see langword="false"/> when an embedding layout owns a complete fixed color-scheme contract and
+    /// must not emit potentially conflicting host-theme metadata. The marker attribute is removed without changing
+    /// any other existing root attributes.
+    /// </remarks>
+    [HtmlAttributeName(AttributeName)]
+    public bool IsEnabled { get; set; } = true;
+
     private readonly IAppSurfaceThemeDocumentProvider _documentProvider;
 
     /// <summary>Initializes a root helper from the registered document provider.</summary>
@@ -31,6 +42,12 @@ public sealed class AppSurfaceThemeRootTagHelper : TagHelper
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(output);
+
+        if (!IsEnabled)
+        {
+            output.Attributes.RemoveAll(AttributeName);
+            return;
+        }
 
         var document = _documentProvider.GetDocument();
         if (!document.IsRenderable)

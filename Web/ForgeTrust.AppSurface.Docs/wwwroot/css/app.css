@@ -150,13 +150,31 @@ html[data-docs-theme-preset="appsurface-light"] {
 }
 
 /*
- * The fixed Docs-local preset does not emit the host-owned --as-danger role.
- * Keep diagnostics readable by using its complete package-owned syntax palette.
+ * The fixed Docs-local preset does not emit the host-owned status roles. Map every status utility still used by
+ * diagnostics to the complete package-owned syntax and surface palette so those panels do not retain dark fills.
  */
 html[data-docs-theme-preset="appsurface-light"] {
+    --color-amber-100: var(--docs-color-syntax-parameter);
+    --color-amber-200: var(--docs-color-syntax-parameter);
+    --color-amber-400: var(--docs-color-syntax-parameter);
+    --color-amber-500: var(--docs-color-syntax-parameter);
+    --color-amber-950: var(--docs-color-surface-panel-faint);
+    --color-emerald-100: var(--docs-color-syntax-inserted);
+    --color-emerald-200: var(--docs-color-syntax-inserted);
+    --color-emerald-300: var(--docs-color-syntax-inserted);
+    --color-emerald-400: var(--docs-color-syntax-inserted);
+    --color-emerald-500: var(--docs-color-syntax-inserted);
+    --color-emerald-950: var(--docs-color-surface-panel-faint);
     --color-rose-100: var(--docs-color-syntax-deleted);
     --color-rose-200: var(--docs-color-syntax-deleted);
     --color-rose-300: var(--docs-color-syntax-deleted);
+    --color-rose-400: var(--docs-color-syntax-deleted);
+    --color-rose-500: var(--docs-color-syntax-deleted);
+    --color-rose-950: var(--docs-color-surface-panel-faint);
+    --color-sky-100: var(--docs-color-syntax-type);
+    --color-sky-400: var(--docs-color-syntax-type);
+    --color-sky-950: var(--docs-color-surface-panel-faint);
+    --color-teal-100: var(--docs-brand-teal);
 }
 
 /* Fixed-light badges need dark semantic foregrounds over their translucent category fills. */

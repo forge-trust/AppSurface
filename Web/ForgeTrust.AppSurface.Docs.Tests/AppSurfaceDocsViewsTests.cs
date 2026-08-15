@@ -194,6 +194,10 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("color-scheme: light;", rootStyle, StringComparison.Ordinal);
         Assert.Contains("--docs-color-surface-canvas:#f8fafc;", rootStyle, StringComparison.Ordinal);
         Assert.Contains("--docs-color-state-active-fill-strong:rgba(30, 64, 175, 0.34);", rootStyle, StringComparison.Ordinal);
+        Assert.Null(root.GetAttribute("appsurface-theme-root"));
+        Assert.Null(root.GetAttribute("data-as-theme"));
+        Assert.Null(root.GetAttribute("data-as-theme-mode"));
+        Assert.Null(root.GetAttribute("data-as-theme-color-scheme-conflict"));
         Assert.Empty(document.QuerySelectorAll("fieldset[data-as-theme-preference-control]"));
         Assert.Empty(document.QuerySelectorAll("script[data-as-theme-preference-bootstrap]"));
         Assert.Empty(document.QuerySelectorAll("style[data-docs-theme-critical]"));
@@ -773,8 +777,16 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("--color-emerald-100: var(--docs-color-link);", tailwindEntryStylesheet);
         Assert.Contains("--color-rose-100: var(--as-danger);", tailwindEntryStylesheet);
         Assert.Contains(
-            "html[data-docs-theme-preset=\"appsurface-light\"] {\n    --color-rose-100: var(--docs-color-syntax-deleted);",
+            "html[data-docs-theme-preset=\"appsurface-light\"] {\n    --color-amber-100: var(--docs-color-syntax-parameter);",
             tailwindEntryStylesheet);
+        Assert.Contains("--color-amber-950: var(--docs-color-surface-panel-faint);", tailwindEntryStylesheet);
+        Assert.Contains("--color-emerald-100: var(--docs-color-syntax-inserted);", tailwindEntryStylesheet);
+        Assert.Contains("--color-emerald-950: var(--docs-color-surface-panel-faint);", tailwindEntryStylesheet);
+        Assert.Contains("--color-rose-100: var(--docs-color-syntax-deleted);", tailwindEntryStylesheet);
+        Assert.Contains("--color-rose-950: var(--docs-color-surface-panel-faint);", tailwindEntryStylesheet);
+        Assert.Contains("--color-sky-100: var(--docs-color-syntax-type);", tailwindEntryStylesheet);
+        Assert.Contains("--color-sky-950: var(--docs-color-surface-panel-faint);", tailwindEntryStylesheet);
+        Assert.Contains("--color-teal-100: var(--docs-brand-teal);", tailwindEntryStylesheet);
         Assert.Contains("--color-sky-100: var(--docs-color-link);", tailwindEntryStylesheet);
         Assert.Contains(".docs-token-bg-accent-strong.text-white", tailwindEntryStylesheet);
         Assert.Contains(".docs-content--markdown a:visited", tailwindEntryStylesheet);

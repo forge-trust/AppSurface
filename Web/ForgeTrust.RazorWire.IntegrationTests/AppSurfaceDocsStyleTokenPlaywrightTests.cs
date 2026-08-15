@@ -1,4 +1,6 @@
+using System.Buffers.Binary;
 using ForgeTrust.AppSurface.Docs;
+using ForgeTrust.AppSurface.Testing;
 using ForgeTrust.AppSurface.Theming;
 using ForgeTrust.AppSurface.Web.Theming;
 using Microsoft.Extensions.DependencyInjection;
@@ -48,22 +50,42 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
               const inputStyle = getComputedStyle(document.getElementById('docs-search-page-input'));
               const amberSample = document.createElement('span');
               amberSample.className = 'text-amber-100';
+              const emeraldSample = document.createElement('span');
+              emeraldSample.className = 'text-emerald-100';
               const roseSample = document.createElement('span');
               roseSample.className = 'text-rose-100';
+              const skySample = document.createElement('span');
+              skySample.className = 'text-sky-100';
+              const tealSample = document.createElement('span');
+              tealSample.className = 'text-teal-100';
               const exampleBadge = document.createElement('span');
               exampleBadge.className = 'docs-page-badge docs-page-badge--example';
               const apiBadge = document.createElement('span');
               apiBadge.className = 'docs-page-badge docs-page-badge--api-reference';
               const internalsBadge = document.createElement('span');
               internalsBadge.className = 'docs-page-badge docs-page-badge--internals';
-              document.body.append(amberSample, roseSample, exampleBadge, apiBadge, internalsBadge);
+              document.body.append(
+                amberSample,
+                emeraldSample,
+                roseSample,
+                skySample,
+                tealSample,
+                exampleBadge,
+                apiBadge,
+                internalsBadge);
               const amberColor = getComputedStyle(amberSample).color;
+              const emeraldColor = getComputedStyle(emeraldSample).color;
               const roseColor = getComputedStyle(roseSample).color;
+              const skyColor = getComputedStyle(skySample).color;
+              const tealColor = getComputedStyle(tealSample).color;
               const exampleBadgeColor = getComputedStyle(exampleBadge).color;
               const apiBadgeColor = getComputedStyle(apiBadge).color;
               const internalsBadgeColor = getComputedStyle(internalsBadge).color;
               amberSample.remove();
+              emeraldSample.remove();
               roseSample.remove();
+              skySample.remove();
+              tealSample.remove();
               exampleBadge.remove();
               apiBadge.remove();
               internalsBadge.remove();
@@ -78,10 +100,21 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
                 inputStyle.color,
                 inputStyle.boxShadow,
                 amberColor,
+                emeraldColor,
                 roseColor,
+                skyColor,
+                tealColor,
+                rootStyle.getPropertyValue('--color-amber-950').trim(),
+                rootStyle.getPropertyValue('--color-emerald-950').trim(),
+                rootStyle.getPropertyValue('--color-rose-950').trim(),
+                rootStyle.getPropertyValue('--color-sky-950').trim(),
                 exampleBadgeColor,
                 apiBadgeColor,
-                internalsBadgeColor
+                internalsBadgeColor,
+                String(root.hasAttribute('appsurface-theme-root')),
+                root.getAttribute('data-as-theme') ?? '',
+                root.getAttribute('data-as-theme-mode') ?? '',
+                root.getAttribute('data-as-theme-color-scheme-conflict') ?? ''
               ];
             }
             """);
@@ -95,11 +128,68 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
         AssertCssColor(values[6], "248, 250, 252");
         AssertCssColor(values[7], "30, 41, 59");
         Assert.Contains("30, 64, 175", values[8], StringComparison.Ordinal);
-        AssertCssColor(values[9], "91, 33, 182");
-        AssertCssColor(values[10], "185, 28, 28");
-        AssertCssColor(values[11], "22, 101, 52");
+        AssertCssColor(values[9], "133, 77, 14");
+        AssertCssColor(values[10], "22, 101, 52");
+        AssertCssColor(values[11], "185, 28, 28");
         AssertCssColor(values[12], "29, 78, 216");
-        AssertCssColor(values[13], "133, 77, 14");
+        AssertCssColor(values[13], "15, 118, 110");
+        Assert.Equal("rgba(241, 245, 249, 0.56)", values[14]);
+        Assert.Equal("rgba(241, 245, 249, 0.56)", values[15]);
+        Assert.Equal("rgba(241, 245, 249, 0.56)", values[16]);
+        Assert.Equal("rgba(241, 245, 249, 0.56)", values[17]);
+        AssertCssColor(values[18], "22, 101, 52");
+        AssertCssColor(values[19], "29, 78, 216");
+        AssertCssColor(values[20], "133, 77, 14");
+        Assert.Equal("false", values[21]);
+        Assert.Equal(string.Empty, values[22]);
+        Assert.Equal(string.Empty, values[23]);
+        Assert.Equal(string.Empty, values[24]);
+    }
+
+    [Fact]
+    public void FixedAppSurfaceLightPreset_ShouldCommitTheExpectedVisualBaselineManifest()
+    {
+        var expected = new[]
+        {
+            new AppSurfaceLightBaselineManifestEntry("home-desktop-1440x1000.png", 1440),
+            new AppSurfaceLightBaselineManifestEntry("search-desktop-1440x1000.png", 1440),
+            new AppSurfaceLightBaselineManifestEntry("detail-desktop-1440x1000.png", 1440),
+            new AppSurfaceLightBaselineManifestEntry("packages-desktop-1440x1000.png", 1440),
+            new AppSurfaceLightBaselineManifestEntry("release-desktop-1440x1000.png", 1440),
+            new AppSurfaceLightBaselineManifestEntry("home-mobile-390x844.png", 390),
+            new AppSurfaceLightBaselineManifestEntry("search-mobile-390x844.png", 390),
+            new AppSurfaceLightBaselineManifestEntry("detail-mobile-390x844.png", 390)
+        };
+        var configured = GetAppSurfaceLightBaselineViewports()
+            .SelectMany(
+                viewport => GetAppSurfaceLightBaselineRoutes(viewport.Name)
+                    .Select(route => new AppSurfaceLightBaselineManifestEntry(route.BaselineFileName, viewport.Width)))
+            .ToArray();
+
+        Assert.Equal(expected, configured);
+
+        var repositoryRoot = ForgeTrust.AppSurface.Core.PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
+        var baselineDirectory = TestPathUtils.PathUnder(
+            repositoryRoot,
+            "Web",
+            "ForgeTrust.RazorWire.IntegrationTests",
+            "VisualBaselines",
+            "AppSurfaceDocsLight");
+        ReadOnlySpan<byte> pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+        ReadOnlySpan<byte> pngHeader = [73, 72, 68, 82];
+        foreach (var baseline in expected)
+        {
+            var baselinePath = TestPathUtils.PathUnder(baselineDirectory, baseline.FileName);
+            var bytes = File.ReadAllBytes(baselinePath);
+
+            Assert.True(bytes.Length >= 24, $"Baseline '{baseline.FileName}' is too short to be a PNG.");
+            Assert.True(bytes.AsSpan(0, pngSignature.Length).SequenceEqual(pngSignature), $"Baseline '{baseline.FileName}' has an invalid PNG signature.");
+            Assert.True(bytes.AsSpan(12, pngHeader.Length).SequenceEqual(pngHeader), $"Baseline '{baseline.FileName}' does not begin with an IHDR chunk.");
+            Assert.Equal(baseline.ViewportWidth, BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(16, sizeof(int))));
+            Assert.True(
+                BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(20, sizeof(int))) > 0,
+                $"Baseline '{baseline.FileName}' has no rendered content height.");
+        }
     }
 
     [Fact]
@@ -109,7 +199,7 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
         // browser-contract tests keep the fixed light preset covered on every platform.
         if (!OperatingSystem.IsMacOS())
         {
-            return;
+            throw Xunit.Sdk.SkipException.ForSkip("Fixed-light pixel comparison requires reviewed macOS Chromium baselines.");
         }
 
         await using var host = await StartAppSurfaceLightHostAsync();
@@ -837,6 +927,8 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
     }
 
     private sealed record AppSurfaceLightBaselineViewport(string Name, int Width, int Height);
+
+    private sealed record AppSurfaceLightBaselineManifestEntry(string FileName, int ViewportWidth);
 
     private sealed record AppSurfaceLightBaselineRoute(
         string Path,

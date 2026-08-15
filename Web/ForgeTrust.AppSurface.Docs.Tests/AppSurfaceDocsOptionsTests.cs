@@ -354,6 +354,58 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
+    public void AddAppSurfaceDocs_ShouldBindTheAccessibleAppSurfaceLightRecipeFromEnvironmentVariables()
+    {
+        const string environmentPrefix = "APPSURFACE_DOCS_LIGHT_TEST_";
+        var values = new Dictionary<string, string?>
+        {
+            ["AppSurfaceDocs__Theme__Preset"] = "AppSurfaceLight",
+            ["AppSurfaceDocs__Theme__Colors__AccentColor"] = "#1e3a8a",
+            ["AppSurfaceDocs__Theme__Colors__AccentStrongColor"] = "#1e40af",
+            ["AppSurfaceDocs__Theme__Colors__LinkColor"] = "#1e3a8a",
+            ["AppSurfaceDocs__Theme__Colors__VisitedLinkColor"] = "#5b21b6"
+        };
+        var originalValues = values.Keys.ToDictionary(
+            key => environmentPrefix + key,
+            Environment.GetEnvironmentVariable,
+            StringComparer.Ordinal);
+
+        try
+        {
+            foreach (var (key, value) in values)
+            {
+                Environment.SetEnvironmentVariable(environmentPrefix + key, value);
+            }
+
+            var services = new ServiceCollection();
+            services.AddSingleton<IConfiguration>(
+                new ConfigurationBuilder()
+                    .AddEnvironmentVariables(environmentPrefix)
+                    .Build());
+            services.AddAppSurfaceDocs();
+
+            using var provider = services.BuildServiceProvider();
+            var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+            var resolved = provider.GetRequiredService<AppSurfaceDocsThemeResolver>().Theme;
+
+            Assert.Equal(AppSurfaceDocsThemePreset.AppSurfaceLight, options.Theme.Preset);
+            Assert.Equal("#1e3a8a", options.Theme.Colors.AccentColor);
+            Assert.Equal("#1e40af", options.Theme.Colors.AccentStrongColor);
+            Assert.Equal("#1e3a8a", options.Theme.Colors.LinkColor);
+            Assert.Equal("#5b21b6", options.Theme.Colors.VisitedLinkColor);
+            Assert.Equal("light", resolved.RootColorScheme);
+            Assert.Equal("rgba(30, 64, 175, 0.34)", resolved.CssVariables["--docs-color-state-active-fill-strong"]);
+        }
+        finally
+        {
+            foreach (var (key, value) in originalValues)
+            {
+                Environment.SetEnvironmentVariable(key, value);
+            }
+        }
+    }
+
+    [Fact]
     public void AddAppSurfaceDocs_ShouldResolveAppSurfaceLightDefaultsThroughTheOptionsPipeline()
     {
         var services = new ServiceCollection();
@@ -410,6 +462,8 @@ public sealed class AppSurfaceDocsOptionsTests
             Path.Join(repositoryRoot, "Web", "ForgeTrust.AppSurface.Docs", "wwwroot", "css", "app.css"));
         var searchCss = File.ReadAllText(
             Path.Join(repositoryRoot, "Web", "ForgeTrust.AppSurface.Docs", "wwwroot", "docs", "search.css"));
+        var generatedSiteCss = File.ReadAllText(
+            Path.Join(repositoryRoot, "Web", "ForgeTrust.AppSurface.Docs", "wwwroot", "css", "site.gen.css"));
         var rootBlock = Regex.Match(appCss, @"^:root\s*\{(?<declarations>.*?)^\}", RegexOptions.Multiline | RegexOptions.Singleline);
         Assert.True(rootBlock.Success);
 
@@ -421,6 +475,7 @@ public sealed class AppSurfaceDocsOptionsTests
             .ToArray();
         Assert.Equal(111, expectedTokens.Length);
         Assert.Equal(expectedTokens.Length, expectedTokens.Distinct(StringComparer.Ordinal).Count());
+        Assert.All(expectedTokens, token => Assert.Contains($"{token}:", generatedSiteCss, StringComparison.Ordinal));
 
         var resolved = new AppSurfaceDocsThemeResolver(
             new AppSurfaceDocsOptions
