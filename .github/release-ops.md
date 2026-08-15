@@ -52,16 +52,22 @@ from the protected `main` branch. Always select `main` as the dispatch ref,
 even when preparing a maintained release branch. The `base-ref` input accepts
 only `main` or a maintained `release/<major>.<minor>.<patch>` branch. Protect
 those branches before enabling Release Prep: they are the trusted source of
-the release tooling the workflow executes. It uses the job's read-only
+the release tooling the workflow executes. The first job uses a read-only
 `GITHUB_TOKEN` only to check out and fetch that base, without persisting
-credentials. Release preparation therefore runs before the organization-owned
-`appsurface-release-bot` GitHub App credentials are read. The workflow then
-creates the local release commit, mints a short-lived installation token, and
-uses that token only to verify and fetch an existing `release-bot/v<version>`
-branch, push the prepared branch, and create or update its release-preparation
-pull request. It does not use a personal access token. Using a GitHub App token
-for the write step also avoids the downstream workflow behavior of pull
-requests created with `GITHUB_TOKEN`.
+credentials. It prepares the release commit, bundle, and report, then uploads
+those files as the `release-prep` artifact. That job never receives the
+organization-owned `appsurface-release-bot` GitHub App credentials.
+
+After that job succeeds, a separate fresh runner downloads only the bundle and
+report. It does not check out or execute files from `base-ref`; it validates the
+artifact paths, mints a short-lived installation token, and uses the token only
+to verify and fetch an existing `release-bot/v<version>` branch, push the
+prepared branch, and create or update its release-preparation pull request. It
+does not use a personal access token. This runner boundary prevents
+base-ref-controlled release tooling from persisting command or environment state
+until the write token is present. Using a GitHub App token for the write step
+also avoids the downstream workflow behavior of pull requests created with
+`GITHUB_TOKEN`.
 
 The generated `release-bot/v<version>` branch namespace is intentionally
 separate from release source branches. A `release/*` branch-protection rule can
@@ -73,12 +79,12 @@ update those branches; the pull request still targets a protected base branch.
 Create the GitHub Actions environment named `release-prep` before enabling the
 workflow. Set its **Deployment branches and tags** policy to **Selected
 branches and tags** with the exact branch pattern `main`, and leave tags
-disallowed. The job sets `deployment: false`, so this boundary protects the
-secret without adding deployment-history noise. Do not use **Protected branches
-only** as a substitute: GitHub permits every branch when no branch-protection
-rule exists. The environment rule is also what prevents an API-dispatched
-workflow from another branch from reading the private key, even if that branch
-changes its workflow file.
+disallowed. The separate token-publishing job sets `deployment: false`, so this
+boundary protects the secret without adding deployment-history noise. Do not use
+**Protected branches only** as a substitute: GitHub permits every branch when no
+branch-protection rule exists. The environment rule is also what prevents an
+API-dispatched workflow from another branch from reading the private key, even
+if that branch changes its workflow file.
 
 Install the App on **only** `forge-trust/AppSurface` with repository
 permissions **Contents: read and write** and **Pull requests: read and write**.

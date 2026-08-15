@@ -37,9 +37,6 @@ jobs:
     env:
       # Keep generated pull-request branches outside the protected release/* source namespace.
       RELEASE_BRANCH: release-bot/v${{ inputs.version }}
-    environment:
-      name: release-prep
-      deployment: false
     permissions:
       contents: read
 
@@ -119,6 +116,39 @@ jobs:
           git -c core.hooksPath=/dev/null commit -m "chore(release): prepare v${VERSION}"
           git bundle create "${RUNNER_TEMP}/release-prep.bundle" "${RELEASE_BRANCH}"
 
+      # This job executes base-ref-controlled release tooling. It must never receive
+      # App credentials; the next job runs on a fresh runner and consumes only these files.
+      - name: Upload prepared release artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-prep
+          path: |
+            ${{ runner.temp }}/release-prep.bundle
+            ${{ runner.temp }}/release-prep-report.md
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-release-preparation:
+    needs: prepare
+    if: ${{ needs.prepare.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RELEASE_BRANCH: release-bot/v${{ inputs.version }}
+    environment:
+      name: release-prep
+      deployment: false
+    permissions:
+      contents: read
+
+    steps:
+      # Do not check out base-ref-controlled source in this token-bearing job.
+      - name: Download prepared release artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-prep
+          path: ${{ runner.temp }}/release-prep
+
       - name: Validate release bot app credentials
         env:
           RELEASE_BOT_APP_CLIENT_ID: ${{ secrets.RELEASE_BOT_APP_CLIENT_ID }}
@@ -154,6 +184,13 @@ jobs:
         run: |
           set -euo pipefail
           push_repository="${RUNNER_TEMP}/release-prep-push.git"
+          artifact_directory="${RUNNER_TEMP}/release-prep"
+          bundle_path="${artifact_directory}/release-prep.bundle"
+          report_path="${artifact_directory}/release-prep-report.md"
+          if [[ ! -f "${bundle_path}" || -L "${bundle_path}" || ! -f "${report_path}" || -L "${report_path}" ]]; then
+            echo "Release Prep did not receive the expected regular bundle and report artifact files." >&2
+            exit 1
+          fi
           release_bot_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 | tr -d '\n')"
           git_with_release_bot_token() {
             GIT_CONFIG_COUNT=1 \
@@ -164,7 +201,7 @@ jobs:
             git -c core.hooksPath=/dev/null "$@"
           }
           GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git init --bare "${push_repository}"
-          GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${push_repository}" fetch "${RUNNER_TEMP}/release-prep.bundle" "refs/heads/${RELEASE_BRANCH}:refs/heads/${RELEASE_BRANCH}"
+          GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${push_repository}" fetch "${bundle_path}" "refs/heads/${RELEASE_BRANCH}:refs/heads/${RELEASE_BRANCH}"
           GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${push_repository}" remote add origin "https://github.com/forge-trust/AppSurface.git"
           if git_with_release_bot_token -C "${push_repository}" fetch origin "+refs/heads/${RELEASE_BRANCH}:refs/remotes/origin/${RELEASE_BRANCH}"; then
             :
@@ -184,13 +221,13 @@ jobs:
           git_with_release_bot_token -C "${push_repository}" push --force-with-lease origin "refs/heads/${RELEASE_BRANCH}:refs/heads/${RELEASE_BRANCH}"
           existing_pr="$(gh pr list --head "${RELEASE_BRANCH}" --base "${BASE_REF}" --json number,headRefName,headRepositoryOwner,isCrossRepository,baseRefName --jq '[.[] | select(.headRefName == env.RELEASE_BRANCH and .headRepositoryOwner.login == "forge-trust" and .isCrossRepository == false and .baseRefName == env.BASE_REF)][0].number // ""')"
           if [[ -n "${existing_pr}" ]]; then
-            gh pr edit "${existing_pr}" --title "chore(release): prepare v${VERSION}" --body-file "${RUNNER_TEMP}/release-prep-report.md"
+            gh pr edit "${existing_pr}" --title "chore(release): prepare v${VERSION}" --body-file "${report_path}"
           else
             gh pr create \
               --base "${BASE_REF}" \
               --head "${RELEASE_BRANCH}" \
               --title "chore(release): prepare v${VERSION}" \
-              --body-file "${RUNNER_TEMP}/release-prep-report.md"
+              --body-file "${report_path}"
           fi
 
   release-prep-review:
