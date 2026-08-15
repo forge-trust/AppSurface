@@ -444,8 +444,13 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
         ClaimNestedClassComments(program, comments, attachedCommentStarts, source);
 
-        foreach (var comment in comments.Where(comment => !attachedCommentStarts.Contains(comment.Start)))
+        foreach (var comment in comments)
         {
+            if (attachedCommentStarts.Contains(comment.Start))
+            {
+                continue;
+            }
+
             AddStandaloneItem(comment, items, source, relativePath, options, requirePublicTag, diagnostics);
         }
 
@@ -463,11 +468,13 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             }
         }
 
-        foreach (var node in EnumerateNodes(program).Where(node =>
-                     node is FunctionDeclaration or VariableDeclaration or ExpressionStatement or ClassExpression
-                     && emitted.Add(node)))
+        foreach (var node in EnumerateNodes(program))
         {
-            yield return node;
+            if (node is FunctionDeclaration or VariableDeclaration or ExpressionStatement or ClassExpression
+                && emitted.Add(node))
+            {
+                yield return node;
+            }
         }
     }
 
@@ -617,11 +624,9 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         var className = classDeclaration.Id!.Name;
         var ordinal = 0;
 
-        foreach (var method in classDeclaration.Body.Body
-                     .Where(static element => element is MethodDefinition)
-                     .Cast<MethodDefinition>())
+        foreach (var element in classDeclaration.Body.Body)
         {
-            if (!TryGetClassMemberShape(method, out var shape))
+            if (element is not MethodDefinition method || !TryGetClassMemberShape(method, out var shape))
             {
                 continue;
             }
@@ -688,11 +693,10 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string source,
         ClassBody classBody)
     {
-        foreach (var method in classBody.Body
-                     .Where(static element => element is MethodDefinition)
-                     .Cast<MethodDefinition>())
+        foreach (var element in classBody.Body)
         {
-            if (FindLeadingBlockComment(comments, method, source) is { } comment)
+            if (element is MethodDefinition method
+                && FindLeadingBlockComment(comments, method, source) is { } comment)
             {
                 var doclet = ParseDoclet(GetCommentText(source, comment));
                 if (!HasStandaloneContractTag(doclet))
