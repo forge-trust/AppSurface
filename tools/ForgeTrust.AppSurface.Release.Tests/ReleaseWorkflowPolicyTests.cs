@@ -909,6 +909,7 @@ public sealed class ReleaseWorkflowPolicyTests
             process.StartInfo.ArgumentList.Add("-s");
             process.StartInfo.Environment["BASE_REF"] = "main";
             process.StartInfo.Environment["GH_TOKEN"] = "test-release-bot-token";
+            process.StartInfo.Environment["GITHUB_TOKEN"] = "test-github-token";
             process.StartInfo.Environment["HARNESS_CALL_LOG"] = callLogPath;
             process.StartInfo.Environment["HARNESS_EXISTING_PULL_REQUEST"] = existingPullRequest;
             process.StartInfo.Environment["HARNESS_SCENARIO"] = scenario;
