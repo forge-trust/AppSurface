@@ -212,6 +212,12 @@ jobs:
             ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof/consumer/.config/dotnet-tools.json
             ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof/consumer/TestResults/**
             ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof/logs/**
+            ${{ runner.temp }}/package-artifacts/docs-package-consumer-proof.md
+            ${{ runner.temp }}/package-artifacts/docs-package-consumer-proof/consumer/NuGet.config
+            ${{ runner.temp }}/package-artifacts/docs-package-consumer-proof/consumer/Docs.ConsumerProof.csproj
+            ${{ runner.temp }}/package-artifacts/docs-package-consumer-proof/consumer/packages.lock.json
+            ${{ runner.temp }}/package-artifacts/docs-package-consumer-proof/consumer/obj/project.assets.json
+            ${{ runner.temp }}/package-artifacts/docs-package-consumer-proof/logs/**
           if-no-files-found: warn
 
       - name: Upload validated package artifacts

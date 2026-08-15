@@ -87,7 +87,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
 
         try
         {
-            PrepareWorkDirectory(request.WorkDirectory, request.RepositoryRoot, request.ArtifactsDirectory);
+            PackageProofWorkDirectory.Prepare(request.WorkDirectory, request.RepositoryRoot, request.ArtifactsDirectory);
         }
         catch (PackageIndexException ex)
         {
@@ -598,70 +598,6 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
               </packageSources>
             </configuration>
             """;
-    }
-
-    /// <summary>
-    /// Deletes and recreates the isolated coverage proof workspace after rejecting unsafe deletion targets.
-    /// </summary>
-    /// <param name="workDirectory">Workspace that may be recursively deleted and recreated.</param>
-    /// <param name="repositoryRoot">Repository root that must not be deleted or contained by the work directory.</param>
-    /// <param name="artifactsDirectory">Package artifact directory that must not be deleted or contained by the work directory.</param>
-    /// <exception cref="PackageIndexException">
-    /// Thrown when <paramref name="workDirectory" /> is a filesystem root, the repository root, the artifact directory,
-    /// the user's home directory, or a parent of the repository or artifact directory.
-    /// </exception>
-    /// <remarks>
-    /// All compared paths are normalized and trailing directory separators are trimmed before comparison. This prevents
-    /// bypasses such as passing the repository root with a trailing slash before the recursive delete runs.
-    /// </remarks>
-    internal static void PrepareWorkDirectory(string workDirectory, string repositoryRoot, string artifactsDirectory)
-    {
-        var normalizedWorkDirectory = NormalizeDirectoryForSafetyComparison(workDirectory);
-        var normalizedRepositoryRoot = NormalizeDirectoryForSafetyComparison(repositoryRoot);
-        var normalizedArtifactsDirectory = NormalizeDirectoryForSafetyComparison(artifactsDirectory);
-        var homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var invalidTargets = new List<string>
-        {
-            Path.GetPathRoot(normalizedWorkDirectory) ?? normalizedWorkDirectory,
-            normalizedRepositoryRoot,
-            normalizedArtifactsDirectory
-        };
-        if (!string.IsNullOrWhiteSpace(homeDirectory))
-        {
-            invalidTargets.Add(NormalizeDirectoryForSafetyComparison(homeDirectory));
-        }
-
-        if (invalidTargets.Any(target => string.Equals(normalizedWorkDirectory, target, PackageIndexGenerator.RepositoryPathComparison)))
-        {
-            throw new PackageIndexException($"Coverage CLI consumer proof work directory '{normalizedWorkDirectory}' is not a safe deletion target.");
-        }
-
-        if (IsParentOrSame(normalizedWorkDirectory, normalizedRepositoryRoot)
-            || IsParentOrSame(normalizedWorkDirectory, normalizedArtifactsDirectory))
-        {
-            throw new PackageIndexException($"Coverage CLI consumer proof work directory '{normalizedWorkDirectory}' must not contain the repository root or package artifact directory.");
-        }
-
-        if (Directory.Exists(normalizedWorkDirectory))
-        {
-            Directory.Delete(normalizedWorkDirectory, recursive: true);
-        }
-
-        Directory.CreateDirectory(normalizedWorkDirectory);
-    }
-
-    private static string NormalizeDirectoryForSafetyComparison(string path)
-    {
-        var fullPath = Path.GetFullPath(path);
-        var root = Path.GetPathRoot(fullPath) ?? string.Empty;
-        while (fullPath.Length > root.Length
-            && (fullPath.EndsWith(Path.DirectorySeparatorChar)
-                || fullPath.EndsWith(Path.AltDirectorySeparatorChar)))
-        {
-            fullPath = fullPath[..^1];
-        }
-
-        return fullPath;
     }
 
     private static async Task<CoverageCliConsumerProofSelectedArtifact> SelectCliToolPackageAsync(
@@ -1211,15 +1147,6 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         using var stream = File.OpenRead(path);
         var hash = SHA512.HashData(stream);
         return Convert.ToHexString(hash).ToLowerInvariant();
-    }
-
-    private static bool IsParentOrSame(string possibleParent, string child)
-    {
-        var parent = possibleParent.EndsWith(Path.DirectorySeparatorChar)
-            ? possibleParent
-            : possibleParent + Path.DirectorySeparatorChar;
-        return string.Equals(possibleParent, child, PackageIndexGenerator.RepositoryPathComparison)
-            || child.StartsWith(parent, PackageIndexGenerator.RepositoryPathComparison);
     }
 
     private static string SanitizeFileName(string value)
