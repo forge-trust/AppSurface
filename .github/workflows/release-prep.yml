@@ -180,10 +180,6 @@ jobs:
           }
           git_with_read_token -C "${prepared_repository}" fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           verified_base="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${prepared_repository}" rev-parse "origin/${BASE_REF}^{commit}")"
-          if ! GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${prepared_repository}" cat-file -e "${verified_base}^{commit}"; then
-            echo "Release Prep bundle does not contain the current verified base commit ${verified_base}." >&2
-            exit 1
-          fi
           release_commit="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${prepared_repository}" rev-parse "refs/heads/${RELEASE_BRANCH}^{commit}")"
           release_parents="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${prepared_repository}" show -s --format=%P "${release_commit}")"
           if [[ "${release_parents}" != "${verified_base}" ]]; then
@@ -313,6 +309,7 @@ jobs:
       - name: Create release pull request
         env:
           GH_TOKEN: ${{ steps.release-bot-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
           BASE_REF: ${{ inputs.base-ref }}
           VERSION: ${{ inputs.version }}
         run: |

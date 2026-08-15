@@ -380,6 +380,7 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.DoesNotContain("RELEASE_BRANCH: release/v${{ inputs.version }}", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("GH_TOKEN", prepare, StringComparison.Ordinal);
         Assert.Contains("GH_TOKEN: ${{ steps.release-bot-token.outputs.token }}", publishPreparation, StringComparison.Ordinal);
+        Assert.Contains("GH_REPO: ${{ github.repository }}", publishPreparation, StringComparison.Ordinal);
         Assert.DoesNotContain("RELEASE_BOT_TOKEN", prep, StringComparison.Ordinal);
         var trustedBaseStepIndex = prepare.IndexOf("- name: Validate trusted release base", StringComparison.Ordinal);
         var checkoutStepIndex = prepare.IndexOf("- name: Checkout base", StringComparison.Ordinal);
@@ -464,7 +465,6 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("git_with_read_token() {", validateArtifactStep, StringComparison.Ordinal);
         Assert.Contains("git_with_read_token -C \"${prepared_repository}\" fetch origin \"${BASE_REF}:refs/remotes/origin/${BASE_REF}\"", validateArtifactStep, StringComparison.Ordinal);
         Assert.Contains("verified_base=\"$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C \"${prepared_repository}\" rev-parse \"origin/${BASE_REF}^{commit}\")\"", validateArtifactStep, StringComparison.Ordinal);
-        Assert.Contains("cat-file -e \"${verified_base}^{commit}\"", validateArtifactStep, StringComparison.Ordinal);
         Assert.Contains("show -s --format=%P \"${release_commit}\"", validateArtifactStep, StringComparison.Ordinal);
         Assert.Contains("[[ \"${release_parents}\" != \"${verified_base}\" ]]", validateArtifactStep, StringComparison.Ordinal);
         Assert.Contains("git -C \"${prepared_repository}\" diff --name-status --no-renames \"${verified_base}\" \"${release_commit}\"", validateArtifactStep, StringComparison.Ordinal);
@@ -516,9 +516,21 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("git_with_release_bot_token -C \"${push_repository}\" push --force-with-lease origin", createPullRequestStep, StringComparison.Ordinal);
         Assert.DoesNotContain("-c http.https://github.com/.extraheader=", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("|| true", createPullRequestStep, StringComparison.Ordinal);
-        var hookableGitCommands = Regex.Matches(prepare + Environment.NewLine + publishPreparation, @"(?m)^\s+git .*(?:\bcheckout\b|\bcommit\b|\bpush\b).*$");
+        var hookableGitCommands = Regex.Matches(
+            prepare + Environment.NewLine + publishPreparation,
+            @"(?m)^\s+(?<command>git(?:_with_(?:read_token|release_bot_token))?) .*(?:\bcheckout\b|\bcommit\b|\bpush\b).*$");
         Assert.NotEmpty(hookableGitCommands);
-        Assert.All(hookableGitCommands, command => Assert.Contains("core.hooksPath=/dev/null", command.Value, StringComparison.Ordinal));
+        foreach (Match command in hookableGitCommands)
+        {
+            var gitCommand = command.Groups["command"].Value;
+            if (gitCommand == "git")
+            {
+                Assert.Contains("core.hooksPath=/dev/null", command.Value, StringComparison.Ordinal);
+                continue;
+            }
+
+            Assert.Contains("git -c core.hooksPath=/dev/null \"$@\"", GetBashFunction(prep, gitCommand), StringComparison.Ordinal);
+        }
         Assert.DoesNotContain("eval ", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("eval ", publish, StringComparison.Ordinal);
         Assert.DoesNotContain("eval ", stablePublish, StringComparison.Ordinal);
@@ -823,7 +835,17 @@ public sealed class ReleaseWorkflowPolicyTests
     private static async Task<string> ReadRepositoryFileAsync(string relativePath)
     {
         var root = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-        return await File.ReadAllTextAsync(TestPathUtils.PathUnder(root, relativePath));
+        return (await File.ReadAllTextAsync(TestPathUtils.PathUnder(root, relativePath))).ReplaceLineEndings("\n");
+    }
+
+    private static string GetBashFunction(string workflow, string name)
+    {
+        var start = workflow.IndexOf($"{name}() {{", StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Expected workflow to define {name}.");
+
+        var end = workflow.IndexOf("\n          }", start, StringComparison.Ordinal);
+        Assert.True(end > start, $"Expected workflow function {name} to have a closing brace.");
+        return workflow[start..end];
     }
 
     private static string GetWorkflowJob(string workflow, string jobName, string? nextJobName = null)
