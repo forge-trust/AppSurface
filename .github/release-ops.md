@@ -44,6 +44,85 @@ when carrying `redirect_aliases` forward to the new canonical release-candidate
 note. Do not use that sidecar allowance for content edits, trust-bar edits, or
 manifest/evidence rewrites from older releases.
 
+## Release-prep bot authentication
+
+The trusted `workflow_dispatch` job in
+[`release-prep.yml`](./workflows/release-prep.yml) runs only when dispatched
+from the protected `main` branch. Always select `main` as the dispatch ref,
+even when preparing a maintained release branch. The `base-ref` input accepts
+only `main` or a maintained `release/<major>.<minor>.<patch>` branch. Protect
+those branches before enabling Release Prep: they are the trusted source of
+the release tooling the workflow executes. The first job uses a read-only
+`GITHUB_TOKEN` only to check out and fetch that base, without persisting
+credentials. It prepares the release commit, bundle, and report, then uploads
+those files as the `release-prep` artifact. Before it runs base-ref-controlled
+release tooling, it verifies that the checkout is the current tip of the
+selected base. That job never receives the organization-owned
+`appsurface-release-bot` GitHub App credentials.
+
+After that job succeeds, a separate fresh runner downloads only the bundle and
+report. It does not check out or execute files from `base-ref`; before it reads
+the App credentials, it fetches the selected protected base itself using its
+read-only workflow token, requires the bundled release commit and manifest to
+match that current base, rejects every changed path outside the
+release-preparation allowlist, and requires every added or modified artifact to
+be an ordinary Git file rather than a symlink or gitlink. Only then does it mint
+a short-lived installation token to verify and fetch an existing
+`release-bot/v<version>` branch, push the validated branch, and create or update
+its release-preparation pull request. Before it updates that branch, it refuses
+to overwrite a same-version branch that already backs an open pull request to a
+different base. It does not use a personal access token.
+This runner boundary prevents base-ref-controlled release tooling from
+persisting command or environment state until the write token is present, and
+prevents the token-bearing job from publishing arbitrary changes supplied by the
+artifact. Using a GitHub App token for the write step also avoids the downstream
+workflow behavior of pull requests created with `GITHUB_TOKEN`.
+
+The generated `release-bot/v<version>` branch namespace is intentionally
+separate from release source branches. A `release/*` branch-protection rule can
+therefore protect maintained `release/<major>.<minor>.<patch>` bases without
+matching the bot's pull-request branches. Keep the bot namespace unprotected
+unless a later policy explicitly allows `appsurface-release-bot` to create and
+update those branches; the pull request still targets a protected base branch.
+
+Create the GitHub Actions environment named `release-prep` before enabling the
+workflow. Set its **Deployment branches and tags** policy to **Selected
+branches and tags** with the exact branch pattern `main`, and leave tags
+disallowed. The separate token-publishing job sets `deployment: false`, so this
+boundary protects the secret without adding deployment-history noise. Do not use
+**Protected branches only** as a substitute: GitHub permits every branch when no
+branch-protection rule exists. The environment rule is also what prevents an
+API-dispatched workflow from another branch from reading the private key, even
+if that branch changes its workflow file.
+
+Install the App on **only** `forge-trust/AppSurface` with repository
+permissions **Contents: read and write** and **Pull requests: read and write**.
+Leave webhooks, user authorization, every organization permission, and every
+other repository permission disabled. Do not grant a branch-protection bypass
+for the bot namespace; the App should propose changes through pull requests,
+not push directly to protected release sources.
+
+Configure the App credentials before dispatching Release Prep:
+
+- **Repository secret** `RELEASE_BOT_APP_CLIENT_ID`: the App's Client ID. This
+  is an identifier, but it is intentionally stored as a secret so the workflow
+  has one credential configuration boundary.
+- **`release-prep` environment secret** `RELEASE_BOT_APP_PRIVATE_KEY`: the
+  entire downloaded App private-key PEM, including its `BEGIN` and `END`
+  lines. Move the key out of any repository or organization secret with this
+  name before enabling the workflow; do not leave a duplicate outside the
+  protected environment.
+
+An organization secret is acceptable for `RELEASE_BOT_APP_CLIENT_ID` only when
+its repository access list explicitly includes `forge-trust/AppSurface`. Do not
+store the private key as an organization or repository secret. The workflow
+validates both values without printing either, uses the pinned
+[`actions/create-github-app-token`](https://github.com/actions/create-github-app-token)
+action to mint the installation token, and revokes that token at the end of the
+job. Rotate the private key by adding a replacement key, updating the repository
+environment secret, proving one successful Release Prep run, and only then
+deleting the old key in the GitHub App settings.
+
 ## Package artifact dry run
 
 The pack-only release slice uses `packages/package-index.yml` as the single package
