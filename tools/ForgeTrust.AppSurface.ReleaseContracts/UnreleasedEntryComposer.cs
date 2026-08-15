@@ -293,13 +293,13 @@ internal static class UnreleasedEntryComposer
     {
         var rewritten = new StringBuilder(markdown.Length);
         var sourcePosition = 0;
-        var matches = RelativeLinkDestinationPatterns
+        var destinations = RelativeLinkDestinationPatterns
             .SelectMany(pattern => pattern.Matches(markdown).Cast<Match>())
             .OrderBy(match => match.Index)
-            .ThenByDescending(match => match.Length);
-        foreach (var match in matches)
+            .ThenByDescending(match => match.Length)
+            .Select(match => match.Groups["destination"]);
+        foreach (var destination in destinations)
         {
-            var destination = match.Groups["destination"];
             rewritten.Append(markdown, sourcePosition, destination.Index - sourcePosition);
             var rebasedDestination = IsInInlineCodeRange(destination.Index + sourceOffset, inlineCodeRanges)
                 ? destination.Value
