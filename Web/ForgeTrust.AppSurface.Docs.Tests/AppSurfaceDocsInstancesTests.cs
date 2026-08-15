@@ -1118,7 +1118,7 @@ public sealed class AppSurfaceDocsInstancesTests
             .Single();
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => preflight.StartAsync(CancellationToken.None));
+            () => preflight.StartedAsync(CancellationToken.None));
 
         Assert.Contains("Internal", exception.Message, StringComparison.Ordinal);
         Assert.Contains("DocsMarkdownReader", exception.Message, StringComparison.Ordinal);
@@ -1145,8 +1145,12 @@ public sealed class AppSurfaceDocsInstancesTests
             .OfType<AppSurfaceDocsNamedInstancePreflightService>()
             .Single();
 
+        await preflight.StartingAsync(CancellationToken.None);
         await preflight.StartAsync(CancellationToken.None);
+        await preflight.StartedAsync(CancellationToken.None);
+        await preflight.StoppingAsync(CancellationToken.None);
         await preflight.StopAsync(CancellationToken.None);
+        await preflight.StoppedAsync(CancellationToken.None);
     }
 
     [Fact]

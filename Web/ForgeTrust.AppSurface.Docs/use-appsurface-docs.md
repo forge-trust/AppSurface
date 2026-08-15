@@ -140,6 +140,14 @@ handles must be mapped on the same endpoint route builder. Host startup then run
 diagnostics exposure warnings, and harvest warmup/preflight for every finalized instance; an error identifies its
 owning instance.
 
+### Run the public/internal consumer proof
+
+The repository includes a real Kestrel-hosted [public and internal ConsumerFixture walkthrough](../ForgeTrust.AppSurface.Docs.ConsumerFixture/MULTI_INSTANCE_WALKTHROUGH.md).
+It compiles the same two registrations, one host-owned policy, two mappings, and one finalization call shown above.
+Its integration test proves anonymous public reading, an internal challenge, authenticated contributor reading,
+isolated search payloads, and distinct AppSurface/Graphite Docs themes in under five minutes. Treat the fixture header
+authentication mechanism as test-only: production hosts must register their own scheme, policies, and middleware.
+
 Named composition is strict and is not a second registration spelling for the legacy default surface:
 
 - Use either named composition or the legacy parameterless `AddAppSurfaceDocs()`/`AppSurfaceDocsWebModule` path for a
