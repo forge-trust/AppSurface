@@ -153,6 +153,7 @@ internal sealed class AppSurfaceDocsHarvestPathPolicySnapshotFactory
 /// </summary>
 /// <param name="RepositoryRoot">The absolute repository root that harvesters should scan.</param>
 /// <param name="PathPolicy">The path policy snapshot exposed through the harvester path-policy contract.</param>
+/// <param name="Progress">The optional safe progress session for one package-owned harvester.</param>
 /// <remarks>
 /// The context keeps harvesters on a single policy instance for consistent VCS ignore decisions. Consumers should treat
 /// <paramref name="PathPolicy"/> as the authority for traversal and file inclusion, and should not cache the context
@@ -160,4 +161,5 @@ internal sealed class AppSurfaceDocsHarvestPathPolicySnapshotFactory
 /// </remarks>
 internal sealed record DocHarvestContext(
     string RepositoryRoot,
-    IHarvestPathPolicy PathPolicy);
+    IHarvestPathPolicy PathPolicy,
+    AppSurfaceDocsHarvestProgressSession? Progress = null);

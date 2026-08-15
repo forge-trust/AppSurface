@@ -98,7 +98,7 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
     }
 
     [Fact]
-    public async Task WaitForCompletionAsync_WhenTestingDelayIsConfigured_DelaysHarvesterAfterPublishingProgress()
+    public async Task WaitForCompletionAsync_WhenTestingDelayIsConfigured_ContinuesAfterProgressPublicationStalls()
     {
         using var cache = new MemoryCache(new MemoryCacheOptions());
         var streamHub = new BlockingHarvesterStartedStreamHub();
@@ -107,35 +107,41 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
             .BuildServiceProvider();
         var harvester = new BlockingHarvester();
         var delay = TimeSpan.FromMilliseconds(250);
-        var tolerance = TimeSpan.FromMilliseconds(75);
+        var startBudget = TimeSpan.FromSeconds(3);
+        var perHarvesterDelayStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePerHarvesterDelay = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var coordinator = CreateCoordinator(
             harvester,
             cache,
             services,
-            configureOptions: options => options.Harvest.TestingDelayPerHarvesterMilliseconds = (int)delay.TotalMilliseconds);
+            configureOptions: options => options.Harvest.TestingDelayPerHarvesterMilliseconds = (int)delay.TotalMilliseconds,
+            testingPerHarvesterDelayAsync: async (configuredDelay, cancellationToken) =>
+            {
+                Assert.Equal(delay, configuredDelay);
+                perHarvesterDelayStarted.TrySetResult();
+                await releasePerHarvesterDelay.Task.WaitAsync(cancellationToken);
+            });
 
         try
         {
             Assert.False(await coordinator.WaitForCompletionAsync(TimeSpan.Zero, CancellationToken.None));
             await streamHub.HarvesterStartedPublished.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            await perHarvesterDelayStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
             Assert.False(harvester.Started.Task.IsCompleted);
             Assert.Equal(0, harvester.CallCount);
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            releasePerHarvesterDelay.TrySetResult();
+            await harvester.Started.Task.WaitAsync(startBudget);
+            Assert.Equal(1, harvester.CallCount);
 
             streamHub.ReleaseHarvesterStartedPublish();
-            await harvester.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            sw.Stop();
-
-            Assert.True(
-                sw.Elapsed >= delay - tolerance,
-                $"Harvester started after {sw.Elapsed.TotalMilliseconds} ms.");
             harvester.Complete(new DocNode("Ready", "README.md", "<p>Ready</p>"));
 
             Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.FromSeconds(3), CancellationToken.None));
-            Assert.Equal(1, harvester.CallCount);
         }
         finally
         {
+            releasePerHarvesterDelay.TrySetResult();
             streamHub.ReleaseHarvesterStartedPublish();
             harvester.Complete(new DocNode("Ready", "README.md", "<p>Ready</p>"));
         }
@@ -202,7 +208,7 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
     }
 
     [Fact]
-    public async Task WaitForCompletionAsync_WhenPerDocumentTestingDelayIsConfigured_PublishesDocumentCountsBeforeCompletion()
+    public async Task WaitForCompletionAsync_WhenPerDocumentTestingDelayIsConfigured_DoesNotSimulateCustomHarvesterOutput()
     {
         using var cache = new MemoryCache(new MemoryCacheOptions());
         await using var services = new ServiceCollection().BuildServiceProvider();
@@ -218,20 +224,12 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
             services,
             configureOptions: options => options.Harvest.TestingDelayPerDocumentMilliseconds = 500);
 
-        Assert.False(await coordinator.WaitForCompletionAsync(TimeSpan.Zero, CancellationToken.None));
-        var inProgressSnapshot = await WaitForProgressSnapshotAsync(
-            () => coordinator.CurrentProgress,
-            snapshot => snapshot.TotalDocs > 0 && snapshot.State == AppSurfaceDocsHarvestRunState.Running);
-
-        Assert.Equal(AppSurfaceDocsHarvestRunState.Running, inProgressSnapshot.State);
-        Assert.InRange(inProgressSnapshot.TotalDocs, 1, 2);
-        Assert.Contains(
-            inProgressSnapshot.Activity,
-            activity => activity.Message.Contains("processed", StringComparison.OrdinalIgnoreCase));
-
-        Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.FromSeconds(10), CancellationToken.None));
+        Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.FromSeconds(1), CancellationToken.None));
         Assert.Equal(AppSurfaceDocsHarvestRunState.Completed, coordinator.CurrentProgress.State);
         Assert.Equal(3, coordinator.CurrentProgress.TotalDocs);
+        Assert.DoesNotContain(
+            coordinator.CurrentProgress.Activity,
+            activity => activity.Message.Contains("processed", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -398,7 +396,8 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
         IAppSurfaceDocsHtmlSanitizer? sanitizer = null,
         TimeSpan? failureCacheDuration = null,
         Action<AppSurfaceDocsOptions>? configureOptions = null,
-        Func<TimeSpan, CancellationToken, Task>? testingPreHarvesterDelayAsync = null)
+        Func<TimeSpan, CancellationToken, Task>? testingPreHarvesterDelayAsync = null,
+        Func<TimeSpan, CancellationToken, Task>? testingPerHarvesterDelayAsync = null)
     {
         var environment = new TestWebHostEnvironment();
         if (sanitizer is null)
@@ -425,7 +424,8 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
             NullLogger<DocAggregator>.Instance,
             resolveGitLastUpdatedUtcAsync: null,
             harvestProgress: progress,
-            testingPreHarvesterDelayAsync: testingPreHarvesterDelayAsync);
+            testingPreHarvesterDelayAsync: testingPreHarvesterDelayAsync,
+            testingPerHarvesterDelayAsync: testingPerHarvesterDelayAsync);
 
         return new AppSurfaceDocsHarvestCoordinator(
             aggregator,

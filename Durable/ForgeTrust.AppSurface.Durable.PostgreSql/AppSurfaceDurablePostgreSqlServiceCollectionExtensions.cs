@@ -125,7 +125,10 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
         services.TryAddSingleton(static provider =>
         {
             var runtime = provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>();
-            return new PostgreSqlDurableWorkStore(runtime.RuntimeDataSource, runtime.WorkOptions.RuntimeEpoch);
+            return new PostgreSqlDurableWorkStore(
+                runtime.DispatcherDataSource,
+                runtime.RuntimeDataSource,
+                runtime.WorkOptions.RuntimeEpoch);
         });
         services.TryAddSingleton(static provider =>
         {
@@ -180,6 +183,7 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
             provider.GetRequiredService<PostgreSqlDurableFlowProcessor>(),
             provider.GetRequiredService<PostgreSqlDurableScheduleProcessor>(),
             provider.GetRequiredService<IDurableWorkRegistry>(),
+            new PostgreSqlDurableWorkContractSelection(provider.GetRequiredService<IDurableWorkRegistry>()),
             provider.GetRequiredService<IServiceScopeFactory>(),
             provider.GetRequiredService<IDurableRuntimeExecutionBoundary>(),
             provider.GetRequiredService<DurableRuntimeAdmissionGate>()));

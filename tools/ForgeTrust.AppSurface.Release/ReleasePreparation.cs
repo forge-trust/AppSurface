@@ -69,6 +69,10 @@ internal sealed class ReleasePreparation
         var date = options.Date ?? _clock.TodayUtc();
         var currentPointerSnapshot = await CaptureFileDigestAsync(_workspace.CurrentReleasePath, cancellationToken);
         var currentPointerSidecarSnapshot = await CaptureFileDigestAsync(_workspace.CurrentReleaseSidecarPath, cancellationToken);
+        var releaseNotePath = _workspace.ReleaseNotePath(options.Version);
+        var releaseSidecarPath = _workspace.ReleaseSidecarPath(options.Version);
+        var releaseManifestPath = _workspace.ReleaseManifestPath(options.Version);
+        var releaseEvidencePath = _workspace.ReleaseEvidencePath(options.Version);
         UnreleasedEntrySet unreleasedEntries;
         string unreleased;
         try
@@ -77,7 +81,8 @@ internal sealed class ReleasePreparation
             unreleasedEntries = await UnreleasedEntryComposer.LoadAsync(_workspace.UnreleasedEntriesDirectory, cancellationToken);
             unreleased = UnreleasedEntryComposer.Compose(
                 ReleaseNoteBuilder.StripResetOnlyTemplatePlaceholders(unreleasedTemplate),
-                unreleasedEntries.Entries);
+                unreleasedEntries.Entries,
+                releaseNotePath);
         }
         catch (UnreleasedEntryException ex)
         {
@@ -89,10 +94,6 @@ internal sealed class ReleasePreparation
         var packageSummary = await PackageIndexSummary.LoadAsync(_workspace.PackageIndexPath, cancellationToken);
         var generatedPaths = new List<string>();
         var archivedEntryPaths = new List<string>();
-        var releaseNotePath = _workspace.ReleaseNotePath(options.Version);
-        var releaseSidecarPath = _workspace.ReleaseSidecarPath(options.Version);
-        var releaseManifestPath = _workspace.ReleaseManifestPath(options.Version);
-        var releaseEvidencePath = _workspace.ReleaseEvidencePath(options.Version);
         var releasePath = $"releases/v{options.Version}.md";
         var currentReleasePath = _workspace.CurrentReleasePath;
 

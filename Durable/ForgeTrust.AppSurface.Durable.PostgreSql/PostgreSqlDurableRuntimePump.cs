@@ -19,6 +19,7 @@ internal sealed class PostgreSqlDurableRuntimePump : IDurableRuntimePump
     private readonly PostgreSqlDurableFlowProcessor _flowProcessor;
     private readonly PostgreSqlDurableScheduleProcessor _scheduleProcessor;
     private readonly IDurableWorkRegistry _workRegistry;
+    private readonly PostgreSqlDurableWorkContractSelection _workContractSelection;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IDurableRuntimeExecutionBoundary _executionBoundary;
     private readonly DurableRuntimeAdmissionGate _admission;
@@ -33,6 +34,7 @@ internal sealed class PostgreSqlDurableRuntimePump : IDurableRuntimePump
         PostgreSqlDurableFlowProcessor flowProcessor,
         PostgreSqlDurableScheduleProcessor scheduleProcessor,
         IDurableWorkRegistry workRegistry,
+        PostgreSqlDurableWorkContractSelection workContractSelection,
         IServiceScopeFactory scopeFactory,
         IDurableRuntimeExecutionBoundary executionBoundary,
         DurableRuntimeAdmissionGate admission)
@@ -44,6 +46,7 @@ internal sealed class PostgreSqlDurableRuntimePump : IDurableRuntimePump
         _flowProcessor = flowProcessor ?? throw new ArgumentNullException(nameof(flowProcessor));
         _scheduleProcessor = scheduleProcessor ?? throw new ArgumentNullException(nameof(scheduleProcessor));
         _workRegistry = workRegistry ?? throw new ArgumentNullException(nameof(workRegistry));
+        _workContractSelection = workContractSelection ?? throw new ArgumentNullException(nameof(workContractSelection));
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _executionBoundary = executionBoundary ?? throw new ArgumentNullException(nameof(executionBoundary));
         _admission = admission ?? throw new ArgumentNullException(nameof(admission));
@@ -156,7 +159,12 @@ internal sealed class PostgreSqlDurableRuntimePump : IDurableRuntimePump
 
     private async ValueTask<TurnOutcome> ProcessWorkTurnAsync(Counts counts, CancellationToken cancellationToken)
     {
-        var candidate = (await _workStore.DiscoverAsync(1, cancellationToken).ConfigureAwait(false)).FirstOrDefault();
+        if (_workContractSelection.IsEmpty)
+        {
+            return TurnOutcome.Empty;
+        }
+
+        var candidate = (await _workStore.DiscoverAsync(_workContractSelection, 1, cancellationToken).ConfigureAwait(false)).FirstOrDefault();
         if (candidate is null)
         {
             return TurnOutcome.Empty;

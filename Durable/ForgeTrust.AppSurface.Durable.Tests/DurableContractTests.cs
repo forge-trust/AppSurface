@@ -711,6 +711,69 @@ public sealed class DurableContractTests
     }
 
     [Fact]
+    public void Durable_work_contract_identity_rejects_invalid_identifiers_and_exposes_default_detection()
+    {
+        Assert.Throws<ArgumentException>(() => new DurableWorkContractIdentity("", "v1"));
+        Assert.Throws<ArgumentException>(() => new DurableWorkContractIdentity("test", ""));
+        Assert.Throws<ArgumentException>(() => new DurableWorkContractIdentity("not allowed", "v1"));
+        Assert.True(default(DurableWorkContractIdentity).IsDefault);
+        Assert.False(new DurableWorkContractIdentity("test", "v1").IsDefault);
+
+        var first = new DurableWorkContractIdentity("tenant", "v1");
+        Assert.Equal("tenant", first.WorkName);
+        Assert.Equal("v1", first.WorkVersion);
+        Assert.Equal("ASDUR119", DurableProblemCodes.WorkDiscoveryContractSelectionUnavailable);
+    }
+
+    [Fact]
+    public void Durable_work_contract_identity_uses_ordinal_equality_and_ordering()
+    {
+        var uppercase = new DurableWorkContractIdentity("Work", "v1");
+        var lowercase = new DurableWorkContractIdentity("work", "v1");
+
+        Assert.NotEqual(uppercase, lowercase);
+        Assert.False(string.Equals(uppercase.WorkName, lowercase.WorkName, StringComparison.Ordinal));
+
+        var contracts = new DurableWorkRegistry(
+        [
+            new DurableWorkRegistration<TestPayload, TestResult, CapturingExecutor>(
+                "beta",
+                "v2",
+                DurableProviderSafety.ProviderKeyed,
+                CreateCodec(_ => true),
+                CreateResultCodec()),
+            new DurableWorkRegistration<TestPayload, TestResult, CapturingExecutor>(
+                "alpha",
+                "v2",
+                DurableProviderSafety.ProviderKeyed,
+                CreateCodec(_ => true),
+                CreateResultCodec()),
+            new DurableWorkRegistration<TestPayload, TestResult, CapturingExecutor>(
+                "beta",
+                "v1",
+                DurableProviderSafety.ProviderKeyed,
+                CreateCodec(_ => true),
+                CreateResultCodec())
+        ]);
+
+        Assert.Equal(
+            new[]
+            {
+                new DurableWorkContractIdentity("alpha", "v2"),
+                new DurableWorkContractIdentity("beta", "v1"),
+                new DurableWorkContractIdentity("beta", "v2")
+            },
+            contracts.RegisteredContracts);
+
+        Assert.Throws<NotSupportedException>(() => ((IDurableWorkRegistry)new LegacyDurableWorkRegistry()).RegisteredContracts);
+    }
+
+    private sealed class LegacyDurableWorkRegistry : IDurableWorkRegistry
+    {
+        public DurableWorkRegistration GetRequired(string workName, string workVersion) => throw new NotSupportedException();
+    }
+
+    [Fact]
     public void Flow_query_contracts_validate_copy_and_normalize()
     {
         var scope = new DurableScopeId("scope");

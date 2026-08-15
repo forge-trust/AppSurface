@@ -280,7 +280,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     /// </remarks>
     public async Task<IReadOnlyList<DocNode>> HarvestAsync(string rootPath, CancellationToken cancellationToken = default)
     {
-        return (await HarvestWithSourceAsync(rootPath, _pathPolicy, cancellationToken)).Nodes;
+        return (await HarvestWithSourceAsync(rootPath, _pathPolicy, progress: null, cancellationToken)).Nodes;
     }
 
     /// <summary>
@@ -303,7 +303,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
             return await ((IDocHarvester)this).HarvestAsync(context.RepositoryRoot, cancellationToken);
         }
 
-        return (await HarvestWithSourceAsync(context.RepositoryRoot, context.PathPolicy, cancellationToken)).Nodes;
+        return (await HarvestWithSourceAsync(context.RepositoryRoot, context.PathPolicy, context.Progress, cancellationToken)).Nodes;
     }
 
     /// <summary>
@@ -330,12 +330,13 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                 new Dictionary<string, byte[]>(StringComparer.Ordinal));
         }
 
-        return await HarvestWithSourceAsync(context.RepositoryRoot, context.PathPolicy, cancellationToken);
+        return await HarvestWithSourceAsync(context.RepositoryRoot, context.PathPolicy, context.Progress, cancellationToken);
     }
 
     private async Task<MarkdownHarvestResult> HarvestWithSourceAsync(
         string rootPath,
         IHarvestPathPolicy pathPolicy,
+        AppSurfaceDocsHarvestProgressSession? progress,
         CancellationToken cancellationToken)
     {
         var nodes = new List<DocNode>();
@@ -345,6 +346,11 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         var sourceCaptureExceededBudget = false;
         try
         {
+            if (progress is not null)
+            {
+                await progress.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Discovering);
+            }
+
             var markdownOptions = _options.Harvest?.Markdown ?? new AppSurfaceDocsMarkdownHarvestOptions();
             var markdownDownloadOptions = _options.MarkdownDownload ?? new AppSurfaceDocsMarkdownDownloadOptions();
             foreach (var file in EnumerateMarkdownSourceFiles(rootPath, pathPolicy, cancellationToken))
@@ -356,6 +362,12 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                     if (!pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.Markdown))
                     {
                         continue;
+                    }
+
+                    if (progress is not null)
+                    {
+                        await progress.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Parsing);
+                        await progress.ReportSourceUnitAsync(0);
                     }
 
                     if (ShouldSkipOversizedMarkdownFile(file, relativePath, markdownOptions, diagnostics))
@@ -396,7 +408,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                         var entries = await UnreleasedEntryComposer.LoadAsync(
                             Path.Combine(rootPath, "releases", UnreleasedEntryComposer.EntriesDirectoryName),
                             cancellationToken);
-                        content = UnreleasedEntryComposer.Compose(content, entries.Entries);
+                        content = UnreleasedEntryComposer.Compose(content, entries.Entries, file);
                     }
 
                     var (markdownBody, frontMatterResult) = MarkdownFrontMatterParser.ExtractWithDiagnostics(content);
@@ -425,6 +437,10 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                     var outline = DocOutlinePolicy.Apply(ExtractOutline(document), metadata);
 
                     nodes.Add(new DocNode(resolvedTitle, relativePath, html, Metadata: metadata, Outline: outline));
+                    if (progress is not null)
+                    {
+                        await progress.ReportOutputOnlyAsync(1);
+                    }
 
                     if (sourceBytes is not null)
                     {
@@ -468,6 +484,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                                 "Use one plain top-level download_markdown: true value in inline front matter; paired sidecar metadata never enables source download."));
                         }
                     }
+
                 }
                 catch (OperationCanceledException)
                 {
@@ -477,6 +494,11 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                 {
                     _logger.LogError(ex, "Failed to process markdown file: {File}", file);
                 }
+            }
+
+            if (progress is not null)
+            {
+                await progress.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Finalizing);
             }
 
             return new MarkdownHarvestResult(

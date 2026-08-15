@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using Markdig;
+using Markdig.Syntax;
 
 namespace ForgeTrust.AppSurface.ReleaseContracts;
 
@@ -28,6 +30,21 @@ internal static class UnreleasedEntryComposer
     private static readonly Regex TopLevelHeadingPattern = new(
         "^(?: {0,3}#{1,2}(?!#)[ \\t]| {0,3}\\S.*\\r?\\n {0,3}(?:=+|-+)[ \\t]*\\r?$)",
         RegexOptions.Multiline | RegexOptions.CultureInvariant);
+    private static readonly Regex[] RelativeLinkDestinationPatterns =
+    [
+        new Regex(
+            @"(?<!\\)!?\[[^\]\r\n]*\]\([ \t]*(?<destination>(?!(?:[A-Za-z][A-Za-z0-9+.-]*:|/|#|\?))(?:[^()\s<>\r\n]+|\((?<destinationParenthesis>)|\)(?<-destinationParenthesis>))+(?(destinationParenthesis)(?!)))(?=[ \t]*(?:(?:(?:""[^""\r\n]*""))|(?:'[^'\r\n]*')|\([^\)\r\n]*\))?[ \t]*\))",
+            RegexOptions.CultureInvariant),
+        new Regex(
+            @"(?<!\\)!?\[[^\]\r\n]*\]\([ \t]*<(?<destination>(?!(?:[A-Za-z][A-Za-z0-9+.-]*:|/|#|\?))[^>\r\n]+)>",
+            RegexOptions.CultureInvariant),
+        new Regex(
+            @"^ {0,3}\[[^\]\r\n]+\]:[ \t]*(?<destination>(?!(?:[A-Za-z][A-Za-z0-9+.-]*:|/|#|\?))(?:[^()\s<>\r\n]+|\((?<destinationParenthesis>)|\)(?<-destinationParenthesis>))+(?(destinationParenthesis)(?!)))",
+            RegexOptions.Multiline | RegexOptions.CultureInvariant),
+        new Regex(
+            @"^ {0,3}\[[^\]\r\n]+\]:[ \t]*<(?<destination>(?!(?:[A-Za-z][A-Za-z0-9+.-]*:|/|#|\?))[^>\r\n]+)>",
+            RegexOptions.Multiline | RegexOptions.CultureInvariant)
+    ];
 
     /// <summary>
     /// Loads and validates every entry file in a flat entries directory.
@@ -98,12 +115,14 @@ internal static class UnreleasedEntryComposer
     /// </summary>
     /// <param name="template">Living-note template that contains one marker for each supported section.</param>
     /// <param name="entries">Validated entries to insert.</param>
+    /// <param name="destinationPath">Absolute path of the composed living or versioned release note.</param>
     /// <returns>The deterministic composed release note.</returns>
     /// <exception cref="UnreleasedEntryException">Thrown when the template does not have the expected marker shape.</exception>
-    internal static string Compose(string template, IEnumerable<UnreleasedEntry> entries)
+    internal static string Compose(string template, IEnumerable<UnreleasedEntry> entries, string destinationPath)
     {
         ArgumentNullException.ThrowIfNull(template);
         ArgumentNullException.ThrowIfNull(entries);
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
 
         var entryList = entries.ToArray();
         var entriesBySection = entryList
@@ -123,7 +142,7 @@ internal static class UnreleasedEntryComposer
             }
 
             var sectionContent = entriesBySection.TryGetValue(section, out var sectionEntries)
-                ? string.Join("\n\n", sectionEntries.Select(entry => entry.Markdown))
+                ? string.Join("\n\n", sectionEntries.Select(entry => RebaseRelativeLinkDestinations(entry.Markdown, entry.Path, destinationPath)))
                 : string.Empty;
             composed = composed.Replace(marker, sectionContent, StringComparison.Ordinal);
         }
@@ -135,6 +154,243 @@ internal static class UnreleasedEntryComposer
 
         return composed;
     }
+
+    /// <summary>
+    /// Rebases relative Markdown link destinations from an entry source into its composed release-note destination.
+    /// </summary>
+    /// <param name="markdown">Validated entry Markdown.</param>
+    /// <param name="entryPath">Absolute entry source path.</param>
+    /// <param name="destinationPath">Absolute composed document path.</param>
+    /// <returns>Entry Markdown whose relative inline and reference link destinations resolve from the composed document.</returns>
+    /// <remarks>
+    /// Entry files live one directory below both <c>releases/unreleased.md</c> and versioned release notes. The composer
+    /// therefore preserves each destination's target while recalculating its relative path from the composed document.
+    /// External, rooted, query-only, and fragment-only destinations remain unchanged. The transformation deliberately
+    /// excludes inline, fenced, and indented code so examples retain their original bytes.
+    /// </remarks>
+    private static string RebaseRelativeLinkDestinations(string markdown, string entryPath, string destinationPath)
+    {
+        var entryDirectory = Path.GetDirectoryName(entryPath);
+        var destinationDirectory = Path.GetDirectoryName(destinationPath);
+        if (string.IsNullOrWhiteSpace(entryDirectory) || string.IsNullOrWhiteSpace(destinationDirectory))
+        {
+            return markdown;
+        }
+
+        var rebased = new StringBuilder(markdown.Length);
+        var inlineCodeRanges = FindInlineCodeRanges(markdown);
+        var codeBlockRanges = FindCodeBlockRanges(markdown);
+        var lineStart = 0;
+        while (lineStart < markdown.Length)
+        {
+            var lineEnd = markdown.IndexOf('\n', lineStart);
+            var contentEnd = lineEnd < 0 ? markdown.Length : lineEnd;
+            var line = markdown.Substring(lineStart, contentEnd - lineStart);
+            if (IntersectsMarkdownRange(lineStart, contentEnd, codeBlockRanges))
+            {
+                rebased.Append(line);
+            }
+            else
+            {
+                rebased.Append(RewriteLinkDestinations(line, entryDirectory, destinationDirectory, lineStart, inlineCodeRanges));
+            }
+
+            if (lineEnd >= 0)
+            {
+                rebased.Append('\n');
+                lineStart = lineEnd + 1;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return rebased.ToString();
+    }
+
+    /// <summary>
+    /// Collects source-coordinate ranges for code blocks parsed from entry Markdown.
+    /// </summary>
+    /// <param name="markdown">Entry Markdown whose code blocks are excluded from rewriting.</param>
+    /// <returns>Half-open source ranges for every fenced or indented code block, including nested containers.</returns>
+    private static IReadOnlyList<MarkdownRange> FindCodeBlockRanges(string markdown)
+    {
+        var ranges = new List<MarkdownRange>();
+        AddCodeBlockRanges(Markdown.Parse(markdown), ranges);
+        return ranges;
+    }
+
+    /// <summary>
+    /// Recursively adds code-block spans from a Markdown block container.
+    /// </summary>
+    /// <param name="container">Container whose descendants may include code blocks.</param>
+    /// <param name="ranges">Collection receiving half-open source ranges.</param>
+    private static void AddCodeBlockRanges(ContainerBlock container, List<MarkdownRange> ranges)
+    {
+        foreach (var block in container)
+        {
+            if (block is CodeBlock)
+            {
+                ranges.Add(new MarkdownRange(block.Span.Start, block.Span.End + 1));
+            }
+
+            if (block is ContainerBlock childContainer)
+            {
+                AddCodeBlockRanges(childContainer, ranges);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Collects source-coordinate ranges delimited by inline-code backticks.
+    /// </summary>
+    /// <param name="markdown">Entry Markdown whose inline-code spans are excluded from rewriting.</param>
+    /// <returns>Half-open source ranges for matched inline-code delimiters and their contents.</returns>
+    private static IReadOnlyList<MarkdownRange> FindInlineCodeRanges(string markdown)
+    {
+        var ranges = new List<MarkdownRange>();
+        var position = 0;
+        while (position < markdown.Length)
+        {
+            var openingDelimiter = markdown.IndexOf('`', position);
+            if (openingDelimiter < 0)
+            {
+                break;
+            }
+
+            var openingDelimiterCount = CountRun(markdown, openingDelimiter, '`');
+            var delimiter = new string('`', openingDelimiterCount);
+            var closingDelimiter = markdown.IndexOf(delimiter, openingDelimiter + openingDelimiterCount, StringComparison.Ordinal);
+            if (closingDelimiter < 0)
+            {
+                position = openingDelimiter + openingDelimiterCount;
+                continue;
+            }
+
+            ranges.Add(new MarkdownRange(openingDelimiter, closingDelimiter + openingDelimiterCount));
+            position = closingDelimiter + openingDelimiterCount;
+        }
+
+        return ranges;
+    }
+
+    /// <summary>
+    /// Rewrites eligible link destinations from an immutable source line.
+    /// </summary>
+    /// <param name="markdown">One source line outside a Markdown code block.</param>
+    /// <param name="entryDirectory">Directory that resolves entry-relative destinations.</param>
+    /// <param name="destinationDirectory">Directory that must resolve the composed destinations.</param>
+    /// <param name="sourceOffset">Absolute offset of the source line in the entry Markdown.</param>
+    /// <param name="inlineCodeRanges">Inline-code ranges in the original entry Markdown.</param>
+    /// <returns>The line with eligible destination spans rebased without moving source coordinates.</returns>
+    private static string RewriteLinkDestinations(
+        string markdown,
+        string entryDirectory,
+        string destinationDirectory,
+        int sourceOffset,
+        IReadOnlyList<MarkdownRange> inlineCodeRanges)
+    {
+        var rewritten = new StringBuilder(markdown.Length);
+        var sourcePosition = 0;
+        var destinations = RelativeLinkDestinationPatterns
+            .SelectMany(pattern => pattern.Matches(markdown).Cast<Match>())
+            .OrderBy(match => match.Index)
+            .ThenByDescending(match => match.Length)
+            .Select(match => match.Groups["destination"]);
+        foreach (var destination in destinations)
+        {
+            rewritten.Append(markdown, sourcePosition, destination.Index - sourcePosition);
+            var rebasedDestination = IsInInlineCodeRange(destination.Index + sourceOffset, inlineCodeRanges)
+                ? destination.Value
+                : RebaseRelativeDestination(destination.Value, entryDirectory, destinationDirectory);
+            rewritten.Append(rebasedDestination);
+            sourcePosition = destination.Index + destination.Length;
+        }
+
+        rewritten.Append(markdown, sourcePosition, markdown.Length - sourcePosition);
+        return rewritten.ToString();
+    }
+
+    /// <summary>
+    /// Determines whether a source position belongs to an inline-code span.
+    /// </summary>
+    /// <param name="position">Zero-based source position.</param>
+    /// <param name="inlineCodeRanges">Inline-code ranges in the source Markdown.</param>
+    /// <returns><see langword="true"/> when the position is preserved as inline code.</returns>
+    private static bool IsInInlineCodeRange(int position, IReadOnlyList<MarkdownRange> inlineCodeRanges)
+    {
+        return IsInMarkdownRange(position, inlineCodeRanges);
+    }
+
+    /// <summary>
+    /// Determines whether a source position lies within any half-open Markdown range.
+    /// </summary>
+    /// <param name="position">Zero-based source position.</param>
+    /// <param name="ranges">Half-open ranges to inspect.</param>
+    /// <returns><see langword="true"/> when the position is contained by a range.</returns>
+    private static bool IsInMarkdownRange(int position, IReadOnlyList<MarkdownRange> ranges)
+    {
+        return ranges.Any(range => position >= range.Start && position < range.End);
+    }
+
+    /// <summary>
+    /// Determines whether a source line overlaps any half-open Markdown range.
+    /// </summary>
+    /// <param name="start">Inclusive line-start source position.</param>
+    /// <param name="end">Exclusive line-end source position.</param>
+    /// <param name="ranges">Half-open ranges to inspect.</param>
+    /// <returns><see langword="true"/> when the line and a range share source content.</returns>
+    private static bool IntersectsMarkdownRange(int start, int end, IReadOnlyList<MarkdownRange> ranges)
+    {
+        return ranges.Any(range => range.Start < end && start < range.End);
+    }
+
+    private static string RebaseRelativeDestination(string destination, string entryDirectory, string destinationDirectory)
+    {
+        var suffixStart = destination.IndexOfAny(['?', '#']);
+        var path = suffixStart < 0 ? destination : destination[..suffixStart];
+        var suffix = suffixStart < 0 ? string.Empty : destination[suffixStart..];
+        var normalizedPath = path.Replace('/', Path.DirectorySeparatorChar);
+        if (Path.IsPathRooted(normalizedPath) || path.StartsWith('\\'))
+        {
+            return destination;
+        }
+
+        var sourcePath = Path.GetFullPath(Path.Join(entryDirectory, normalizedPath));
+        var relativePath = Path.GetRelativePath(destinationDirectory, sourcePath).Replace(Path.DirectorySeparatorChar, '/');
+        if (path.EndsWith("/", StringComparison.Ordinal) && !relativePath.EndsWith("/", StringComparison.Ordinal))
+        {
+            relativePath += "/";
+        }
+
+        return relativePath + suffix;
+    }
+
+    /// <summary>
+    /// Counts consecutive occurrences of a character from a source position.
+    /// </summary>
+    /// <param name="value">Source text to inspect.</param>
+    /// <param name="start">Zero-based position where the candidate run begins.</param>
+    /// <param name="character">Character expected in the run.</param>
+    /// <returns>Number of consecutive matching characters.</returns>
+    private static int CountRun(string value, int start, char character)
+    {
+        var end = start;
+        while (end < value.Length && value[end] == character)
+        {
+            end++;
+        }
+
+        return end - start;
+    }
+
+    /// <summary>
+    /// Half-open source-coordinate range in an entry Markdown document.
+    /// </summary>
+    /// <param name="Start">Inclusive zero-based source position.</param>
+    /// <param name="End">Exclusive zero-based source position.</param>
+    private readonly record struct MarkdownRange(int Start, int End);
 
     /// <summary>
     /// Gets whether a repository-relative path can be an append-only unreleased entry.

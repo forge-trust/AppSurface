@@ -2017,6 +2017,10 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "packages"), defaults.ArtifactsInputPath);
         Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "package-artifact-manifest.json"), defaults.ArtifactManifestPath);
         Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "package-validation-report.md"), defaults.ReportPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "packages", "coverage-cli-consumer-proof"), defaults.CoverageProofWorkDirectory);
+        Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "packages", "coverage-cli-consumer-proof.md"), defaults.CoverageProofReportPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "packages", "docs-package-consumer-proof"), defaults.DocsProofWorkDirectory);
+        Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "packages", "docs-package-consumer-proof.md"), defaults.DocsProofReportPath);
         Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "package-publish-log.md"), defaults.PublishLogPath);
         Assert.Equal("https://api.nuget.org/v3/index.json", defaults.Source);
         Assert.Equal("NUGET_API_KEY", defaults.ApiKeyEnvironmentVariable);
@@ -2035,6 +2039,10 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 "--artifact-manifest", "artifact-manifest.json",
                 "--package-version", "0.0.0-ci.99",
                 "--report", "package-report.md",
+                "--coverage-proof-work-dir", "coverage-proof",
+                "--coverage-proof-report", "coverage-proof.md",
+                "--docs-proof-work-dir", "docs-proof",
+                "--docs-proof-report", "docs-proof.md",
                 "--publish-log", "publish-log.md",
                 "--source", "https://example.test/v3/index.json",
                 "--api-key-env", "CUSTOM_NUGET_KEY",
@@ -2051,6 +2059,10 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "packages-in")), parsed.ArtifactsInputPath);
         Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "artifact-manifest.json")), parsed.ArtifactManifestPath);
         Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "package-report.md")), parsed.ReportPath);
+        Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "coverage-proof")), parsed.CoverageProofWorkDirectory);
+        Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "coverage-proof.md")), parsed.CoverageProofReportPath);
+        Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "docs-proof")), parsed.DocsProofWorkDirectory);
+        Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "docs-proof.md")), parsed.DocsProofReportPath);
         Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "publish-log.md")), parsed.PublishLogPath);
         Assert.Equal("https://example.test/v3/index.json", parsed.Source);
         Assert.Equal("CUSTOM_NUGET_KEY", parsed.ApiKeyEnvironmentVariable);
@@ -2058,15 +2070,19 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "smoke-report.md")), parsed.SmokeReportPath);
         Assert.Equal("0.0.0-ci.99", parsed.PackageVersion);
 
-        var absoluteManifest = Path.Combine(_repositoryRoot, "abs", "manifest.yml");
-        var absoluteOutput = Path.Combine(_repositoryRoot, "abs", "chooser.md");
-        var absoluteArtifacts = Path.Combine(_repositoryRoot, "abs", "artifacts");
-        var absoluteArtifactsInput = Path.Combine(_repositoryRoot, "abs", "artifacts-in");
-        var absoluteArtifactManifest = Path.Combine(_repositoryRoot, "abs", "manifest.json");
-        var absoluteReport = Path.Combine(_repositoryRoot, "abs", "report.md");
-        var absolutePublishLog = Path.Combine(_repositoryRoot, "abs", "publish.md");
-        var absoluteSmokeWorkDirectory = Path.Combine(_repositoryRoot, "abs", "smoke");
-        var absoluteSmokeReport = Path.Combine(_repositoryRoot, "abs", "smoke.md");
+        var absoluteManifest = TestPathUtils.PathUnder(_repositoryRoot, "abs", "manifest.yml");
+        var absoluteOutput = TestPathUtils.PathUnder(_repositoryRoot, "abs", "chooser.md");
+        var absoluteArtifacts = TestPathUtils.PathUnder(_repositoryRoot, "abs", "artifacts");
+        var absoluteArtifactsInput = TestPathUtils.PathUnder(_repositoryRoot, "abs", "artifacts-in");
+        var absoluteArtifactManifest = TestPathUtils.PathUnder(_repositoryRoot, "abs", "manifest.json");
+        var absoluteReport = TestPathUtils.PathUnder(_repositoryRoot, "abs", "report.md");
+        var absoluteCoverageProofWorkDirectory = TestPathUtils.PathUnder(_repositoryRoot, "abs", "coverage-proof");
+        var absoluteCoverageProofReport = TestPathUtils.PathUnder(_repositoryRoot, "abs", "coverage-proof.md");
+        var absoluteDocsProofWorkDirectory = TestPathUtils.PathUnder(_repositoryRoot, "abs", "docs-proof");
+        var absoluteDocsProofReport = TestPathUtils.PathUnder(_repositoryRoot, "abs", "docs-proof.md");
+        var absolutePublishLog = TestPathUtils.PathUnder(_repositoryRoot, "abs", "publish.md");
+        var absoluteSmokeWorkDirectory = TestPathUtils.PathUnder(_repositoryRoot, "abs", "smoke");
+        var absoluteSmokeReport = TestPathUtils.PathUnder(_repositoryRoot, "abs", "smoke.md");
         var absolute = CommandLineOptions.Parse(
             [
                 "--manifest", absoluteManifest,
@@ -2075,6 +2091,10 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 "--artifacts-input", absoluteArtifactsInput,
                 "--artifact-manifest", absoluteArtifactManifest,
                 "--report", absoluteReport,
+                "--coverage-proof-work-dir", absoluteCoverageProofWorkDirectory,
+                "--coverage-proof-report", absoluteCoverageProofReport,
+                "--docs-proof-work-dir", absoluteDocsProofWorkDirectory,
+                "--docs-proof-report", absoluteDocsProofReport,
                 "--publish-log", absolutePublishLog,
                 "--smoke-work-dir", absoluteSmokeWorkDirectory,
                 "--smoke-report", absoluteSmokeReport
@@ -2088,6 +2108,10 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(absoluteArtifactsInput, absolute.ArtifactsInputPath);
         Assert.Equal(absoluteArtifactManifest, absolute.ArtifactManifestPath);
         Assert.Equal(absoluteReport, absolute.ReportPath);
+        Assert.Equal(absoluteCoverageProofWorkDirectory, absolute.CoverageProofWorkDirectory);
+        Assert.Equal(absoluteCoverageProofReport, absolute.CoverageProofReportPath);
+        Assert.Equal(absoluteDocsProofWorkDirectory, absolute.DocsProofWorkDirectory);
+        Assert.Equal(absoluteDocsProofReport, absolute.DocsProofReportPath);
         Assert.Equal(absolutePublishLog, absolute.PublishLogPath);
         Assert.Equal(absoluteSmokeWorkDirectory, absolute.SmokeWorkDirectory);
         Assert.Equal(absoluteSmokeReport, absolute.SmokeReportPath);
@@ -2115,10 +2139,15 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(request.ChooserOutputPath, request.OutputPath);
     }
 
-    [Fact]
-    public void CommandLineOptions_Parse_ThrowsWhenOptionValueIsMissing()
+    [Theory]
+    [InlineData("--manifest")]
+    [InlineData("--coverage-proof-work-dir")]
+    [InlineData("--coverage-proof-report")]
+    [InlineData("--docs-proof-work-dir")]
+    [InlineData("--docs-proof-report")]
+    public void CommandLineOptions_Parse_ThrowsWhenOptionValueIsMissing(string option)
     {
-        var error = Assert.Throws<PackageIndexException>(() => CommandLineOptions.Parse(["--manifest"], _repositoryRoot));
+        var error = Assert.Throws<PackageIndexException>(() => CommandLineOptions.Parse([option], _repositoryRoot));
 
         Assert.Contains("requires a value", error.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -2683,7 +2712,9 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 "--artifact-manifest", "reports/artifacts.json",
                 "--report", "reports/packages.md",
                 "--coverage-proof-work-dir", "reports/coverage-proof",
-                "--coverage-proof-report", "reports/coverage-proof.md"
+                "--coverage-proof-report", "reports/coverage-proof.md",
+                "--docs-proof-work-dir", "reports/docs-proof",
+                "--docs-proof-report", "reports/docs-proof.md"
             ],
             stdout,
             stderr,
@@ -2710,6 +2741,8 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(Path.Join(_repositoryRoot, "reports", "artifacts.json"), capturedRequest.ArtifactManifestPath);
         Assert.Equal(Path.Join(_repositoryRoot, "reports", "coverage-proof"), capturedRequest.CoverageProofWorkDirectory);
         Assert.Equal(Path.Join(_repositoryRoot, "reports", "coverage-proof.md"), capturedRequest.CoverageProofReportPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "reports", "docs-proof"), capturedRequest.DocsProofWorkDirectory);
+        Assert.Equal(Path.Join(_repositoryRoot, "reports", "docs-proof.md"), capturedRequest.DocsProofReportPath);
         Assert.Equal("https://api.nuget.org/v3/index.json", capturedRequest.Source);
         Assert.Equal("0.0.0-ci.99", capturedRequest.PackageVersion);
         Assert.Contains("Validated 1 package artifacts for 0.0.0-ci.99. Report: reports/packages.md.", stdout.ToString(), StringComparison.Ordinal);
