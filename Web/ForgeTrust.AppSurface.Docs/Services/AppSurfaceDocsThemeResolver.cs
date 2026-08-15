@@ -78,6 +78,7 @@ internal sealed class AppSurfaceDocsThemeResolver
 /// <param name="RootCssClass">CSS classes emitted on the document root.</param>
 /// <param name="CssVariables">Resolved CSS custom properties consumed by the package stylesheets.</param>
 /// <param name="CssVariableStyle">Serialized CSS custom property declarations suitable for a style attribute.</param>
+/// <param name="RootColorScheme">An optional Docs-owned color-scheme declaration emitted before package stylesheets.</param>
 /// <param name="UsesSharedTheme">Whether the root consumes the shared AppSurface semantic pair.</param>
 /// <param name="CriticalCss">Docs-owned critical CSS emitted before the package stylesheet when <paramref name="UsesSharedTheme"/> is <see langword="true"/>.</param>
 internal sealed record AppSurfaceDocsResolvedTheme(
@@ -90,6 +91,7 @@ internal sealed record AppSurfaceDocsResolvedTheme(
     string RootCssClass,
     IReadOnlyDictionary<string, string> CssVariables,
     string CssVariableStyle,
+    string? RootColorScheme = null,
     bool UsesSharedTheme = false,
     string? CriticalCss = null);
 
@@ -105,6 +107,7 @@ internal static class AppSurfaceDocsThemePolicy
 {
     private const double TextContrastRatio = 4.5d;
     private const double UserInterfaceContrastRatio = 3d;
+    private const double ActiveFillStrongOpacity = 0.34d;
 
     /// <summary>
     /// Normalizes mutable theme options in place.
@@ -148,7 +151,7 @@ internal static class AppSurfaceDocsThemePolicy
         if (!Enum.IsDefined(theme.Preset))
         {
             failures.Add(
-                $"AppSurfaceDocs:Theme:Preset has unsupported value '{theme.Preset}'. Allowed values are AppSurfaceDark and GraphiteDark.");
+                $"AppSurfaceDocs:Theme:Preset has unsupported value '{theme.Preset}'. Allowed values are AppSurfaceDark, GraphiteDark, and AppSurfaceLight.");
         }
 
         if (theme.Colors is null)
@@ -221,7 +224,8 @@ internal static class AppSurfaceDocsThemePolicy
             chromeAttribute,
             rootCssClass,
             cssVariables,
-            SerializeCssVariables(cssVariables));
+            SerializeCssVariables(cssVariables),
+            theme.Preset == AppSurfaceDocsThemePreset.AppSurfaceLight ? "light" : null);
     }
 
     /// <summary>
@@ -276,28 +280,69 @@ internal static class AppSurfaceDocsThemePolicy
             colors.AccentColor,
             TextContrastRatio,
             "text accent",
-            [canvas, raised]);
+            [canvas, raised],
+            canvas);
         AddContrastFailure(
             failures,
             "AppSurfaceDocs:Theme:Colors:AccentStrongColor",
             colors.AccentStrongColor,
             UserInterfaceContrastRatio,
             "focus and selected-state accent",
-            [canvas, raised]);
+            [canvas, raised],
+            canvas);
         AddContrastFailure(
             failures,
             "AppSurfaceDocs:Theme:Colors:LinkColor",
             colors.LinkColor,
             TextContrastRatio,
             "link text",
-            [canvas, raised]);
+            [canvas, raised, preset["--docs-color-surface-code"]],
+            canvas);
         AddContrastFailure(
             failures,
             "AppSurfaceDocs:Theme:Colors:VisitedLinkColor",
             colors.VisitedLinkColor,
             TextContrastRatio,
             "visited link text",
-            [canvas, raised]);
+            [canvas, raised, preset["--docs-color-surface-muted"]],
+            canvas);
+
+        if (theme.Preset == AppSurfaceDocsThemePreset.AppSurfaceLight)
+        {
+            ValidateSelectedSearchChipContrast(theme, failures, preset);
+        }
+    }
+
+    private static void ValidateSelectedSearchChipContrast(
+        AppSurfaceDocsThemeOptions theme,
+        List<string> failures,
+        Dictionary<string, string> preset)
+    {
+        var colors = theme.Colors;
+        var hasAccent = AppSurfaceDocsIdentityPath.TryNormalizeCssHexColor(colors.AccentColor, out _, out _);
+        var hasAccentStrong = AppSurfaceDocsIdentityPath.TryNormalizeCssHexColor(colors.AccentStrongColor, out _, out _);
+        if (!hasAccent && !hasAccentStrong)
+        {
+            return;
+        }
+
+        var variables = new Dictionary<string, string>(preset, StringComparer.Ordinal);
+        ApplyOverrides(variables, colors);
+        var foreground = variables["--docs-color-accent-soft"];
+        var activeFill = Composite(
+            ParseHexColor(variables["--docs-color-accent-strong"]),
+            ActiveFillStrongOpacity,
+            ParseHexColor(variables["--docs-color-surface-canvas"]));
+        var ratio = ContrastRatio(ParseHexColor(foreground), activeFill);
+        if (ratio >= TextContrastRatio)
+        {
+            return;
+        }
+
+        failures.Add(
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"AppSurfaceDocs:Theme:Colors:AccentColor and AppSurfaceDocs:Theme:Colors:AccentStrongColor render selected search-chip text with {ratio:0.##}:1 contrast against the combined active-fill context (requires {TextContrastRatio:0.#}:1). Choose darker or higher-contrast CSS hex colors."));
     }
 
     private static void AddContrastFailure(
@@ -306,7 +351,8 @@ internal static class AppSurfaceDocsThemePolicy
         string? value,
         double threshold,
         string role,
-        IReadOnlyList<string> backgroundColors)
+        IReadOnlyList<string> backgroundColors,
+        string canvasColor)
     {
         if (!AppSurfaceDocsIdentityPath.TryNormalizeCssHexColor(value, out var normalizedColor, out _)
             || normalizedColor is null)
@@ -316,7 +362,12 @@ internal static class AppSurfaceDocsThemePolicy
 
         foreach (var backgroundColor in backgroundColors)
         {
-            var ratio = ContrastRatio(normalizedColor, backgroundColor);
+            if (!TryParseCssColor(backgroundColor, canvasColor, out var parsedBackground))
+            {
+                continue;
+            }
+
+            var ratio = ContrastRatio(ParseHexColor(normalizedColor), parsedBackground);
             if (ratio >= threshold)
             {
                 continue;
@@ -332,9 +383,133 @@ internal static class AppSurfaceDocsThemePolicy
 
     private static Dictionary<string, string> BuildPreset(AppSurfaceDocsThemePreset preset)
     {
-        return preset == AppSurfaceDocsThemePreset.GraphiteDark
-            ? BuildGraphiteDarkPreset()
-            : BuildAppSurfaceDarkPreset();
+        return preset switch
+        {
+            AppSurfaceDocsThemePreset.GraphiteDark => BuildGraphiteDarkPreset(),
+            AppSurfaceDocsThemePreset.AppSurfaceLight => BuildAppSurfaceLightPreset(),
+            _ => BuildAppSurfaceDarkPreset()
+        };
+    }
+
+    private static Dictionary<string, string> BuildAppSurfaceLightPreset()
+    {
+        var variables = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["--docs-brand-navy"] = "#172554",
+            ["--docs-brand-blue"] = "#1e40af",
+            ["--docs-brand-teal"] = "#0f766e",
+            ["--docs-brand-violet"] = "#5b21b6",
+            ["--docs-brand-ice"] = "#eff6ff",
+            ["--docs-brand-violet-hot"] = "#7e22ce",
+            ["--docs-color-surface-canvas"] = "#f8fafc",
+            ["--docs-color-surface-canvas-mid"] = "#f1f5f9",
+            ["--docs-color-surface-canvas-deep"] = "#e2e8f0",
+            ["--docs-color-surface-raised"] = "#ffffff",
+            ["--docs-color-surface-muted"] = "#e2e8f0",
+            ["--docs-color-surface-panel"] = "rgba(255, 255, 255, 0.86)",
+            ["--docs-color-surface-panel-elevated"] = "rgba(255, 255, 255, 0.96)",
+            ["--docs-color-surface-panel-heavy"] = "rgba(255, 255, 255, 0.98)",
+            ["--docs-color-surface-panel-hover"] = "rgba(219, 234, 254, 0.72)",
+            ["--docs-color-surface-panel-hover-strong"] = "rgba(191, 219, 254, 0.76)",
+            ["--docs-color-surface-panel-raised"] = "rgba(255, 255, 255, 0.92)",
+            ["--docs-color-surface-panel-active"] = "rgba(219, 234, 254, 0.88)",
+            ["--docs-color-surface-panel-soft"] = "rgba(241, 245, 249, 0.78)",
+            ["--docs-color-surface-panel-faint"] = "rgba(241, 245, 249, 0.56)",
+            ["--docs-color-surface-panel-table"] = "rgba(255, 255, 255, 0.9)",
+            ["--docs-color-surface-panel-table-head"] = "rgba(226, 232, 240, 0.9)",
+            ["--docs-color-surface-overlay"] = "rgba(248, 250, 252, 0.82)",
+            ["--docs-color-surface-overlay-strong"] = "rgba(248, 250, 252, 0.96)",
+            ["--docs-color-surface-overlay-soft"] = "rgba(248, 250, 252, 0.72)",
+            ["--docs-color-surface-overlay-faint"] = "rgba(248, 250, 252, 0.42)",
+            ["--docs-color-surface-code"] = "#eff6ff",
+            ["--docs-color-surface-code-plain"] = "#f1f5f9",
+            ["--docs-color-syntax-keyword"] = "#9d174d",
+            ["--docs-color-syntax-string"] = "#166534",
+            ["--docs-color-syntax-comment"] = "#475569",
+            ["--docs-color-syntax-number"] = "#b91c1c",
+            ["--docs-color-syntax-type"] = "#1d4ed8",
+            ["--docs-color-syntax-member"] = "#0f172a",
+            ["--docs-color-syntax-parameter"] = "#854d0e",
+            ["--docs-color-syntax-operator"] = "#334155",
+            ["--docs-color-syntax-inserted"] = "#166534",
+            ["--docs-color-syntax-deleted"] = "#b91c1c",
+            ["--docs-color-border-muted"] = "#cbd5e1",
+            ["--docs-color-border-muted-heavy"] = "rgba(148, 163, 184, 0.78)",
+            ["--docs-color-border-code-plain"] = "#cbd5e1",
+            ["--docs-color-border-default"] = "#94a3b8",
+            ["--docs-color-border-default-strong"] = "rgba(100, 116, 139, 0.76)",
+            ["--docs-color-border-default-heavy"] = "rgba(100, 116, 139, 0.82)",
+            ["--docs-color-border-default-heavier"] = "rgba(71, 85, 105, 0.86)",
+            ["--docs-color-border-strong"] = "#64748b",
+            ["--docs-color-border-accent"] = "rgba(30, 64, 175, 0.42)",
+            ["--docs-color-border-accent-hover"] = "rgba(30, 58, 138, 0.56)",
+            ["--docs-color-border-accent-muted"] = "rgba(30, 64, 175, 0.34)",
+            ["--docs-color-border-accent-active"] = "rgba(30, 58, 138, 0.48)",
+            ["--docs-color-border-accent-subtle"] = "rgba(30, 64, 175, 0.22)",
+            ["--docs-color-border-accent-faint"] = "rgba(30, 64, 175, 0.12)",
+            ["--docs-color-border-accent-strong"] = "rgba(30, 58, 138, 0.7)",
+            ["--docs-color-border-accent-readable"] = "rgba(30, 58, 138, 0.62)",
+            ["--docs-color-text-strong"] = "#0f172a",
+            ["--docs-color-text-default"] = "#1e293b",
+            ["--docs-color-text-default-underline"] = "rgba(30, 41, 59, 0.78)",
+            ["--docs-color-text-muted"] = "#334155",
+            ["--docs-color-text-subtle"] = "#475569",
+            ["--docs-color-text-subtle-underline"] = "rgba(71, 85, 105, 0.6)",
+            ["--docs-color-text-faint"] = "#64748b",
+            ["--docs-color-text-prose"] = "#1e293b",
+            ["--docs-color-text-table"] = "#1e293b",
+            ["--docs-color-text-info"] = "#1e3a8a",
+            ["--docs-color-text-info-muted"] = "#334155",
+            ["--docs-color-text-mark"] = "#0f172a",
+            ["--docs-color-accent"] = "#1e3a8a",
+            ["--docs-color-accent-strong"] = "#1e40af",
+            ["--docs-color-accent-blue"] = "#1e40af",
+            ["--docs-color-accent-violet"] = "#5b21b6",
+            ["--docs-color-accent-soft"] = "#1e3a8a",
+            ["--docs-color-accent-muted"] = "#1e40af",
+            ["--docs-color-accent-glow"] = "rgba(30, 58, 138, 0.12)",
+            ["--docs-color-link"] = "#1e3a8a",
+            ["--docs-color-link-visited"] = "#5b21b6",
+            ["--docs-color-link-underline"] = "rgba(30, 58, 138, 0.5)",
+            ["--docs-color-accent-fill-soft"] = "rgba(30, 64, 175, 0.14)",
+            ["--docs-color-accent-mark-fill"] = "rgba(30, 58, 138, 0.28)",
+            ["--docs-color-accent-underline"] = "rgba(30, 58, 138, 0.5)",
+            ["--docs-color-accent-soft-underline"] = "rgba(30, 58, 138, 0.78)",
+            ["--docs-color-accent-soft-underline-muted"] = "rgba(30, 58, 138, 0.7)",
+            ["--docs-color-state-active-fill"] = "rgba(30, 64, 175, 0.24)",
+            ["--docs-color-state-active-fill-strong"] = "rgba(30, 64, 175, 0.34)",
+            ["--docs-color-state-link-fill"] = "rgba(30, 64, 175, 0.28)",
+            ["--docs-color-state-trust-fill-start"] = "rgba(30, 64, 175, 0.18)",
+            ["--docs-color-state-outline-fill"] = "rgba(30, 64, 175, 0.46)",
+            ["--docs-color-state-outline-fill-end"] = "rgba(255, 255, 255, 0.3)",
+            ["--docs-color-state-outline-rail-start"] = "rgba(30, 64, 175, 0.5)",
+            ["--docs-color-state-outline-rail-mid"] = "rgba(30, 58, 138, 0.22)",
+            ["--docs-color-state-outline-rail-end"] = "rgba(255, 255, 255, 0.18)",
+            ["--docs-color-state-outline-rail-hover-start"] = "rgba(30, 64, 175, 0.6)",
+            ["--docs-color-state-outline-rail-hover-mid"] = "rgba(30, 58, 138, 0.3)",
+            ["--docs-color-state-outline-rail-hover-end"] = "rgba(255, 255, 255, 0.24)",
+            ["--docs-color-skeleton-edge"] = "rgba(148, 163, 184, 0.72)",
+            ["--docs-color-skeleton-mid"] = "rgba(148, 163, 184, 0.45)",
+            ["--docs-color-page-wash"] = "rgba(30, 64, 175, 0.08)",
+            ["--docs-color-brand-blue-shadow"] = "rgba(30, 64, 175, 0.2)",
+            ["--docs-color-brand-blue-shadow-strong"] = "rgba(30, 64, 175, 0.22)",
+            ["--docs-color-brand-blue-wash"] = "rgba(30, 64, 175, 0.42)",
+            ["--docs-color-brand-teal-shadow"] = "rgba(15, 118, 110, 0.3)",
+            ["--docs-color-brand-teal-wash"] = "rgba(15, 118, 110, 0.08)",
+            ["--docs-color-brand-violet-shadow"] = "rgba(91, 33, 182, 0.34)",
+            ["--docs-color-brand-violet-wash"] = "rgba(91, 33, 182, 0.1)",
+            ["--docs-color-brand-ice-border"] = "rgba(15, 23, 42, 0.2)",
+            ["--docs-color-brand-ice-highlight"] = "rgba(255, 255, 255, 0.7)",
+            ["--docs-color-brand-panel-border"] = "rgba(100, 116, 139, 0.5)",
+            ["--docs-color-panel-depth-shadow"] = "rgba(15, 23, 42, 0.12)",
+            ["--docs-color-wordmark-edge-shadow"] = "rgba(255, 255, 255, 0.7)",
+            ["--docs-shadow-copy-feedback"] = "0 14px 34px rgba(15, 23, 42, 0.12)",
+            ["--docs-shadow-copy-fallback"] = "0 18px 46px rgba(15, 23, 42, 0.16)",
+            ["--docs-focus-ring-inset"] = "0 0 0 1px #1e40af inset",
+            ["--docs-focus-outline"] = "2px solid #1e40af"
+        };
+        AddDerivedAccentVariables(variables, requireExistingKeys: true);
+        return variables;
     }
 
     private static Dictionary<string, string> BuildAppSurfaceDarkPreset()
@@ -443,42 +618,56 @@ internal static class AppSurfaceDocsThemePolicy
         return variables;
     }
 
-    private static void AddDerivedAccentVariables(Dictionary<string, string> variables)
+    private static void AddDerivedAccentVariables(Dictionary<string, string> variables, bool requireExistingKeys = false)
     {
         var accent = variables["--docs-color-accent"];
         var accentStrong = variables["--docs-color-accent-strong"];
         var link = variables["--docs-color-link"];
         var raised = variables["--docs-color-surface-raised"];
 
-        variables["--docs-color-border-accent"] = ToRgba(accentStrong, 0.42);
-        variables["--docs-color-border-accent-hover"] = ToRgba(accent, 0.56);
-        variables["--docs-color-border-accent-muted"] = ToRgba(accentStrong, 0.34);
-        variables["--docs-color-border-accent-active"] = ToRgba(accent, 0.48);
-        variables["--docs-color-border-accent-subtle"] = ToRgba(accentStrong, 0.22);
-        variables["--docs-color-border-accent-faint"] = ToRgba(accentStrong, 0.12);
-        variables["--docs-color-border-accent-strong"] = ToRgba(accent, 0.7);
-        variables["--docs-color-border-accent-readable"] = ToRgba(accent, 0.62);
-        variables["--docs-color-link-underline"] = ToRgba(link, 0.5);
-        variables["--docs-color-accent-fill-soft"] = ToRgba(accentStrong, 0.14);
-        variables["--docs-color-accent-mark-fill"] = ToRgba(accent, 0.28);
-        variables["--docs-color-accent-underline"] = ToRgba(accent, 0.5);
-        variables["--docs-color-accent-soft-underline"] = ToRgba(variables["--docs-color-accent-soft"], 0.78);
-        variables["--docs-color-accent-soft-underline-muted"] = ToRgba(variables["--docs-color-accent-soft"], 0.7);
-        variables["--docs-color-state-active-fill"] = ToRgba(accentStrong, 0.24);
-        variables["--docs-color-state-active-fill-strong"] = ToRgba(accentStrong, 0.34);
-        variables["--docs-color-state-link-fill"] = ToRgba(accentStrong, 0.28);
-        variables["--docs-color-state-trust-fill-start"] = ToRgba(accentStrong, 0.18);
-        variables["--docs-color-state-outline-fill"] = ToRgba(accentStrong, 0.46);
-        variables["--docs-color-state-outline-fill-end"] = ToRgba(raised, 0.3);
-        variables["--docs-color-state-outline-rail-start"] = ToRgba(accentStrong, 0.5);
-        variables["--docs-color-state-outline-rail-mid"] = ToRgba(accent, 0.22);
-        variables["--docs-color-state-outline-rail-end"] = ToRgba(raised, 0.18);
-        variables["--docs-color-state-outline-rail-hover-start"] = ToRgba(accentStrong, 0.6);
-        variables["--docs-color-state-outline-rail-hover-mid"] = ToRgba(accent, 0.3);
-        variables["--docs-color-state-outline-rail-hover-end"] = ToRgba(raised, 0.24);
-        variables["--docs-color-accent-glow"] = ToRgba(accent, 0.12);
-        variables["--docs-focus-ring-inset"] = $"0 0 0 1px {accentStrong} inset";
-        variables["--docs-focus-outline"] = $"2px solid {accentStrong}";
+        SetDerivedVariable(variables, "--docs-color-border-accent", ToRgba(accentStrong, 0.42), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-border-accent-hover", ToRgba(accent, 0.56), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-border-accent-muted", ToRgba(accentStrong, 0.34), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-border-accent-active", ToRgba(accent, 0.48), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-border-accent-subtle", ToRgba(accentStrong, 0.22), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-border-accent-faint", ToRgba(accentStrong, 0.12), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-border-accent-strong", ToRgba(accent, 0.7), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-border-accent-readable", ToRgba(accent, 0.62), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-link-underline", ToRgba(link, 0.5), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-accent-fill-soft", ToRgba(accentStrong, 0.14), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-accent-mark-fill", ToRgba(accent, 0.28), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-accent-underline", ToRgba(accent, 0.5), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-accent-soft-underline", ToRgba(variables["--docs-color-accent-soft"], 0.78), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-accent-soft-underline-muted", ToRgba(variables["--docs-color-accent-soft"], 0.7), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-state-active-fill", ToRgba(accentStrong, 0.24), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-state-active-fill-strong", ToRgba(accentStrong, ActiveFillStrongOpacity), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-state-link-fill", ToRgba(accentStrong, 0.28), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-state-trust-fill-start", ToRgba(accentStrong, 0.18), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-state-outline-fill", ToRgba(accentStrong, 0.46), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-state-outline-fill-end", ToRgba(raised, 0.3), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-state-outline-rail-start", ToRgba(accentStrong, 0.5), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-state-outline-rail-mid", ToRgba(accent, 0.22), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-state-outline-rail-end", ToRgba(raised, 0.18), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-state-outline-rail-hover-start", ToRgba(accentStrong, 0.6), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-state-outline-rail-hover-mid", ToRgba(accent, 0.3), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-state-outline-rail-hover-end", ToRgba(raised, 0.24), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-color-accent-glow", ToRgba(accent, 0.12), requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-focus-ring-inset", $"0 0 0 1px {accentStrong} inset", requireExistingKeys);
+        SetDerivedVariable(variables, "--docs-focus-outline", $"2px solid {accentStrong}", requireExistingKeys);
+    }
+
+    private static void SetDerivedVariable(
+        Dictionary<string, string> variables,
+        string name,
+        string value,
+        bool requireExistingKeys)
+    {
+        if (requireExistingKeys && !variables.ContainsKey(name))
+        {
+            throw new InvalidOperationException($"The AppSurfaceLight token inventory is missing '{name}'.");
+        }
+
+        variables[name] = value;
     }
 
     private static void ApplyOverrides(Dictionary<string, string> variables, AppSurfaceDocsThemeColorOptions colors)
@@ -787,6 +976,7 @@ internal static class AppSurfaceDocsThemePolicy
         return preset switch
         {
             AppSurfaceDocsThemePreset.GraphiteDark => "graphite-dark",
+            AppSurfaceDocsThemePreset.AppSurfaceLight => "appsurface-light",
             _ => "appsurface-dark"
         };
     }
@@ -811,11 +1001,60 @@ internal static class AppSurfaceDocsThemePolicy
 
     private static double ContrastRatio(string foregroundHexColor, string backgroundHexColor)
     {
-        var foreground = RelativeLuminance(ParseHexColor(foregroundHexColor));
-        var background = RelativeLuminance(ParseHexColor(backgroundHexColor));
-        var light = Math.Max(foreground, background);
-        var dark = Math.Min(foreground, background);
+        return ContrastRatio(ParseHexColor(foregroundHexColor), ParseHexColor(backgroundHexColor));
+    }
+
+    private static double ContrastRatio(RgbColor foreground, RgbColor background)
+    {
+        var foregroundLuminance = RelativeLuminance(foreground);
+        var backgroundLuminance = RelativeLuminance(background);
+        var light = Math.Max(foregroundLuminance, backgroundLuminance);
+        var dark = Math.Min(foregroundLuminance, backgroundLuminance);
         return (light + 0.05d) / (dark + 0.05d);
+    }
+
+    private static RgbColor Composite(RgbColor foreground, double alpha, RgbColor background)
+    {
+        return new RgbColor(
+            (foreground.Red * alpha) + (background.Red * (1d - alpha)),
+            (foreground.Green * alpha) + (background.Green * (1d - alpha)),
+            (foreground.Blue * alpha) + (background.Blue * (1d - alpha)));
+    }
+
+    private static bool TryParseCssColor(string value, string canvasColor, out RgbColor color)
+    {
+        if (AppSurfaceDocsIdentityPath.TryNormalizeCssHexColor(value, out var normalizedHex, out _)
+            && normalizedHex is not null)
+        {
+            color = ParseHexColor(normalizedHex);
+            return true;
+        }
+
+        const string rgbaPrefix = "rgba(";
+        if (!value.StartsWith(rgbaPrefix, StringComparison.Ordinal)
+            || !value.EndsWith(')'))
+        {
+            color = default;
+            return false;
+        }
+
+        var values = value[rgbaPrefix.Length..^1].Split(',', StringSplitOptions.TrimEntries);
+        if (values.Length != 4
+            || !double.TryParse(values[0], NumberStyles.Number, CultureInfo.InvariantCulture, out var red)
+            || !double.TryParse(values[1], NumberStyles.Number, CultureInfo.InvariantCulture, out var green)
+            || !double.TryParse(values[2], NumberStyles.Number, CultureInfo.InvariantCulture, out var blue)
+            || !double.TryParse(values[3], NumberStyles.Number, CultureInfo.InvariantCulture, out var alpha)
+            || red is < 0d or > 255d
+            || green is < 0d or > 255d
+            || blue is < 0d or > 255d
+            || alpha is < 0d or > 1d)
+        {
+            color = default;
+            return false;
+        }
+
+        color = Composite(new RgbColor(red, green, blue), alpha, ParseHexColor(canvasColor));
+        return true;
     }
 
     private static double RelativeLuminance(RgbColor color)
@@ -825,7 +1064,7 @@ internal static class AppSurfaceDocsThemePolicy
                + (0.0722d * Linearize(color.Blue));
     }
 
-    private static double Linearize(int channel)
+    private static double Linearize(double channel)
     {
         var value = channel / 255d;
         return value <= 0.04045d
@@ -847,5 +1086,5 @@ internal static class AppSurfaceDocsThemePolicy
             int.Parse(value[4..6], NumberStyles.HexNumber, CultureInfo.InvariantCulture));
     }
 
-    private readonly record struct RgbColor(int Red, int Green, int Blue);
+    private readonly record struct RgbColor(double Red, double Green, double Blue);
 }

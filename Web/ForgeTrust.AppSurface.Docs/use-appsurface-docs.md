@@ -212,7 +212,37 @@ Add theme settings when the consuming repository should make the built-in docs s
 }
 ```
 
-The default theme is `AppSurfaceDark` with comfortable density and standard chrome. `GraphiteDark` is the second dark-family preset for lower-saturation surfaces; it stays a fixed Docs-local dark preset, not a shared pair. Blank color values use the selected preset default. Color overrides must be CSS hex colors and must meet startup contrast checks for their role; validation messages name the exact config key, bad value, required contrast ratio, tested preset background, and fix. The same keys work through environment variables, for example `AppSurfaceDocs__Theme__Preset=GraphiteDark` and `AppSurfaceDocs__Theme__Colors__AccentColor=#38bdf8`.
+The default theme is `AppSurfaceDark` with comfortable density and standard chrome. `GraphiteDark` is the second dark-family preset for lower-saturation surfaces; it stays a fixed Docs-local dark preset, not a shared pair. `AppSurfaceLight` is a complete fixed light presentation for hosts that need a first-party light Docs surface without taking ownership of package CSS. Blank color values use the selected preset default. Color overrides must be CSS hex colors and must meet startup contrast checks for their role; validation messages name the exact config key, bad value, required contrast ratio, tested preset background, and fix. The same keys work through environment variables, for example `AppSurfaceDocs__Theme__Preset=AppSurfaceLight` and `AppSurfaceDocs__Theme__Colors__AccentColor=#1e3a8a`.
+
+Use this complete, accessible AppSurface-light recipe as a starting point:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Theme": {
+      "Preset": "AppSurfaceLight",
+      "Colors": {
+        "AccentColor": "#1e3a8a",
+        "AccentStrongColor": "#1e40af",
+        "LinkColor": "#1e3a8a",
+        "VisitedLinkColor": "#5b21b6"
+      }
+    }
+  }
+}
+```
+
+The equivalent environment variables use ordinary .NET double-underscore binding and do not receive special package-level precedence:
+
+```text
+AppSurfaceDocs__Theme__Preset=AppSurfaceLight
+AppSurfaceDocs__Theme__Colors__AccentColor=#1e3a8a
+AppSurfaceDocs__Theme__Colors__AccentStrongColor=#1e40af
+AppSurfaceDocs__Theme__Colors__LinkColor=#1e3a8a
+AppSurfaceDocs__Theme__Colors__VisitedLinkColor=#5b21b6
+```
+
+Preset resolution is deterministic: Docs builds the complete selected package-owned palette, applies valid direct role values, then regenerates dependent focus, border, fill, and alpha tokens. `AppSurfaceLight` remains fixed for each request and static export: it does not enable a visitor switcher, cookie, local storage, preference bootstrap, or a second stylesheet. Use the [browser-local appearance choice](#optional-browser-local-appearance-choice) only when `AppSurfaceDark` intentionally bridges to a host-owned shared pair. Use the [deliberate whole-layout override boundary](#default-razor-layout-and-deliberate-host-overrides) instead of depending on undocumented `--docs-*` names when a host needs control beyond the four supported roles.
 
 The supported Docs configuration contract is intentionally narrow. Use `Preset`, `Colors`, `Density`, and `Chrome` for package-owned docs chrome. Do not rely on `--docs-*` custom property names as a public API, do not use theme settings for arbitrary surface/text/syntax-token overrides, and do not expect view replacement, layout slots, or external theme packages in v1. Static exports and published release archives freeze the resolved Docs configuration into their exported HTML; changing host config later does not rewrite already-exported archives.
 

@@ -7,7 +7,7 @@ using Microsoft.Playwright;
 namespace ForgeTrust.RazorWire.IntegrationTests;
 
 /// <summary>
-/// Compares a prepared AppSurface Docs page with a committed Graphite visual baseline.
+/// Compares a prepared AppSurface Docs page with a committed visual baseline.
 /// </summary>
 /// <remarks>
 /// Call this helper only after the test has navigated and waited for its route-specific ready selector. Baselines are
@@ -19,7 +19,7 @@ internal static partial class AppSurfaceDocsScreenshotBaseline
     /// <summary>Gets the explicit opt-in environment variable for refreshing committed visual baselines.</summary>
     internal const string UpdateEnvironmentVariable = "APPSURFACE_UPDATE_VISUAL_BASELINES";
 
-    private const string BaselineDirectory = "Web/ForgeTrust.RazorWire.IntegrationTests/VisualBaselines/AppSurfaceDocsGraphite";
+    private const string DefaultBaselineDirectory = "Web/ForgeTrust.RazorWire.IntegrationTests/VisualBaselines/AppSurfaceDocsGraphite";
 
     // Chromium can vary a handful of antialiased edge pixels by one channel value between otherwise identical renders.
     private const double MaximumRasterizationNoiseRatio = 0.0001;
@@ -30,8 +30,11 @@ internal static partial class AppSurfaceDocsScreenshotBaseline
     /// Disables non-deterministic visual effects and compares the current page with its named committed baseline.
     /// </summary>
     /// <param name="page">The page that has reached its route-specific ready state.</param>
-    /// <param name="baselineFileName">A PNG file name below the Graphite baseline directory.</param>
+    /// <param name="baselineFileName">A PNG file name below the selected baseline directory.</param>
     /// <param name="testResultsDirectory">Directory where mismatch artifacts are written.</param>
+    /// <param name="baselineDirectory">
+    /// Repository-relative baseline directory. Omit this value to use the existing Graphite baseline family.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token for screenshot and file operations.</param>
     /// <returns>A task that completes when the baseline matches or is explicitly refreshed.</returns>
     /// <exception cref="ArgumentException">The baseline name is not a safe PNG file name.</exception>
@@ -40,13 +43,14 @@ internal static partial class AppSurfaceDocsScreenshotBaseline
         IPage page,
         string baselineFileName,
         string testResultsDirectory,
+        string? baselineDirectory = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(page);
         ArgumentException.ThrowIfNullOrWhiteSpace(baselineFileName);
         ArgumentException.ThrowIfNullOrWhiteSpace(testResultsDirectory);
 
-        var baselinePath = ResolveBaselinePath(baselineFileName);
+        var baselinePath = ResolveBaselinePath(baselineFileName, baselineDirectory ?? DefaultBaselineDirectory);
         var actual = await CaptureAsync(page, cancellationToken);
 
         if (IsUpdateRequested())
@@ -75,7 +79,7 @@ internal static partial class AppSurfaceDocsScreenshotBaseline
 
         var expectedSha256 = expected is null ? "missing" : ComputeSha256(expected);
         throw new InvalidOperationException(
-            $"Graphite visual baseline mismatch. Baseline: '{baselinePath}'. Actual: '{actualPath}'. "
+            $"AppSurface Docs visual baseline mismatch. Baseline: '{baselinePath}'. Actual: '{actualPath}'. "
             + $"Expected SHA-256: {expectedSha256}. Actual SHA-256: {ComputeSha256(actual)}. "
             + $"{difference}. "
             + $"Review the artifact, then refresh deliberately with {UpdateEnvironmentVariable}=1.");
@@ -86,7 +90,7 @@ internal static partial class AppSurfaceDocsScreenshotBaseline
         await page.EvaluateAsync(
             """
             () => {
-              const id = 'appsurface-graphite-visual-baseline-stability';
+              const id = 'appsurface-docs-visual-baseline-stability';
               if (document.getElementById(id)) return;
               const style = document.createElement('style');
               style.id = id;
@@ -107,18 +111,20 @@ internal static partial class AppSurfaceDocsScreenshotBaseline
         });
     }
 
-    private static string ResolveBaselinePath(string baselineFileName)
+    private static string ResolveBaselinePath(string baselineFileName, string baselineDirectory)
     {
         if (!string.Equals(Path.GetFileName(baselineFileName), baselineFileName, StringComparison.Ordinal)
             || !baselineFileName.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException(
-                "Graphite visual baseline names must be a PNG file name without directory segments.",
+                "AppSurface Docs visual baseline names must be a PNG file name without directory segments.",
                 nameof(baselineFileName));
         }
 
+        ArgumentException.ThrowIfNullOrWhiteSpace(baselineDirectory);
+
         var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
-        var baselineRoot = PathUtils.PathUnder(repoRoot, BaselineDirectory);
+        var baselineRoot = PathUtils.PathUnder(repoRoot, baselineDirectory);
         return PathUtils.PathUnder(baselineRoot, baselineFileName);
     }
 
