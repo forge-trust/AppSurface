@@ -74,6 +74,36 @@ registered handle unmapped is a startup error. During host startup, each finaliz
 Markdown-policy validation, diagnostics warning, and harvest warmup/preflight behavior as a legacy single-instance
 Docs host; a failure identifies the owning instance.
 
+### Request-time runtime selection
+
+Named endpoint groups carry an `AppSurfaceDocsEndpointMetadata` record containing the normalized instance name.
+Request-time package code and host-owned extensions that need the active product should resolve the
+`IAppSurfaceDocsRequestRuntimeAccessor` service and call `GetRequiredRuntime()`; the accessor reads the selected
+endpoint metadata and never guesses from the request path. The returned `AppSurfaceDocsRuntime` exposes the
+instance's `Name`, immutable `Options` snapshot, and `DocsUrlBuilder`. Use those properties when adding
+instance-aware views or integrations so URLs and configuration remain inside the selected product boundary:
+
+```csharp
+public sealed class DocsNavigationViewComponent(
+    IAppSurfaceDocsRequestRuntimeAccessor runtimeAccessor) : ViewComponent
+{
+    public IViewComponentResult Invoke()
+    {
+        var runtime = runtimeAccessor.GetRequiredRuntime();
+        return View(new
+        {
+            runtime.Name,
+            SearchUrl = runtime.DocsUrlBuilder.BuildSearchUrl()
+        });
+    }
+}
+```
+
+`AppSurfaceDocsRuntime` is created from the configuration snapshot during finalization and implements idempotent
+`Dispose`; hosts should not construct or dispose runtimes themselves. Do not resolve unkeyed Docs services or infer
+an instance from a route prefix when named composition is enabled, because either approach can select the wrong
+product after a route rewrite or custom endpoint mapping.
+
 Named composition has strict coexistence and collision rules:
 
 - Do not combine it with parameterless `AddAppSurfaceDocs()` or `AppSurfaceDocsWebModule`; choose one legacy/default

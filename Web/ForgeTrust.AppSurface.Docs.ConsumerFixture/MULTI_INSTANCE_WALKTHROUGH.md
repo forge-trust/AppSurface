@@ -31,9 +31,8 @@ sequence over HTTP:
 4. The public and contributor search-index payloads contain only their own fixture marker.
 
 The test records the measured elapsed time in its test output and fails if the complete fixture walkthrough exceeds five
-minutes. The latest measured run on 2026-08-15 completed in 0.71 seconds. Because it is an existing `WebStartup`
-consumer host with real routing, middleware, MVC, and Kestrel, that five-minute gate also remains within the ten-minute
-existing-host integration target.
+minutes. Because it is an existing `WebStartup` consumer host with real routing, middleware, MVC, and Kestrel, that
+five-minute gate also remains within the ten-minute existing-host integration target.
 
 ## Adapt the shape
 

@@ -140,6 +140,14 @@ handles must be mapped on the same endpoint route builder. Host startup then run
 diagnostics exposure warnings, and harvest warmup/preflight for every finalized instance; an error identifies its
 owning instance.
 
+If host-owned views or extensions need the active named product, inject
+`IAppSurfaceDocsRequestRuntimeAccessor` and call `GetRequiredRuntime()` during the request. Named endpoints carry
+`AppSurfaceDocsEndpointMetadata` with the normalized product name, so the accessor selects the runtime from endpoint
+metadata instead of guessing from a URL prefix. The returned `AppSurfaceDocsRuntime` provides the product `Name`,
+immutable `Options`, and instance-aware `DocsUrlBuilder`; it is created during finalization and should not be
+constructed or disposed by the host. See the [package reference for request-time runtime selection](./README.md#request-time-runtime-selection)
+for the extension example and lifecycle details.
+
 ### Run the public/internal consumer proof
 
 The repository includes a real Kestrel-hosted [public and internal ConsumerFixture walkthrough](../ForgeTrust.AppSurface.Docs.ConsumerFixture/MULTI_INSTANCE_WALKTHROUGH.md).
