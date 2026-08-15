@@ -9,14 +9,15 @@ acceptance, process-loss recovery, exact effect permission, stable provider iden
 ## Success target and prerequisites
 
 - At most 5 minutes with PostgreSQL ready; at most 10 minutes cold with Docker.
-- .NET 10 SDK and either Docker or a dedicated PostgreSQL 17.5 connection in
+- .NET 10 SDK and either Docker or a dedicated PostgreSQL 16+ connection in
   `APPSURFACE_POSTGRES_TEST_CONNECTION`.
+- The current strict gate for this repository pins
+  `postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877`.
 - One filtered test command against real PostgreSQL. A skipped or zero-test run is not success.
 
-The Docker path uses the immutable multi-platform image
-`postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302`.
-Refreshing that digest is an explicit reviewed dependency change. The version check still requires
-`server_version_num=170005` after startup.
+Historically, this workload was also executed against
+`postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302` (`server_version_num=170005`).
+These manifests are preserved as historical proof and are not the active strict requirement.
 
 Use a disposable database. The workload applies forward-only schema and supplies no destructive down migration.
 
@@ -34,7 +35,8 @@ dotnet test \
   --logger "console;verbosity=normal"
 ```
 
-The fixture uses the connection environment variable when set; otherwise it starts the pinned Testcontainers image.
+The fixture uses the connection environment variable when set; otherwise it starts the pinned Testcontainers image used by the
+active `verify-postgresql.sh` configuration.
 `APPSURFACE_POSTGRES_TEST_ALLOW_SKIP=true` is a local-only escape hatch and is rejected when `CI=true`.
 
 To record classified Docker evidence, run cold before the pinned image exists locally, then warm after the cold run has
@@ -62,11 +64,13 @@ and passed six workload cases. The cold run, including the immutable image pull,
 600-second target; the warm run completed in 22 seconds against the 300-second target. Both manifests identify the
 Linux arm64 image and Darwin arm64 host, share the same SHA-256 source fingerprint, and bind the exact six freshly
 written scenario documents with a second SHA-256 fingerprint. Their scenario documents are the operation-level
-evidence; the base commit is lineage, not a claim that the tested working tree was already committed.
+evidence; the base commit is lineage, not a claim that the tested working tree was already committed. These JSON
+manifests are preserved unchanged as historical evidence.
 
 ## What the workload proves
 
-1. A migration owner checks status, applies two migrations, reads StoreId, and explicitly initializes the epoch.
+1. A migration owner checks status, applies reviewed migrations up through `0009_work_contract_discovery.sql`, reads
+   StoreId, and explicitly initializes the epoch.
 2. One caller-owned transaction changes a domain row and accepts registered Work. Rollback removes both; commit keeps both.
 3. A parent launches a helper process and force-terminates it after committed acceptance, claim, and effect permit, but
    before provider I/O or a terminal fact. The parent reconnects to the same store and treats the post-permit window as
@@ -80,6 +84,9 @@ evidence; the base commit is lineage, not a claim that the tested working tree w
 7. Final truth is an immutable exact-fence terminal fact or required safety suspension. Unknown post-permit outcomes are
    never failed terminal.
 8. An explicit scope-disable operator action commits its audit truth and blocks later acceptance for that scope.
+9. `0009_work_contract_discovery.sql` introduces registry-scoped discovery by using
+   [`appsurface_durable.discover_work_dispatch(text[], text[], integer)`](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/Migrations/0009_work_contract_discovery.sql)
+   instead of raw `dispatch` reads.
 
 ## Application sequence
 
@@ -99,8 +106,9 @@ Neither construction starts a worker. Writers never initialize/rotate epochs or 
 - Preflight/domain outcomes preserve caller transaction usability as specified by the
   [Work protocol](work-protocol-v1.md#caller-owned-transaction-contract).
 - PostgreSQL/connection failures may abort the transaction. Roll it back; never guess it remains usable.
-- `ASDUR102` means acceptance identities conflict; `ASDUR107` is a disabled permanent tombstone; `ASDUR109` means
-  historical execution material is unavailable.
+- `ASDUR102` means acceptance identities conflict; `ASDUR107` is a disabled permanent tombstone;
+  `ASDUR109` means historical execution material is unavailable; `ASDUR119` means PostgreSQL worker activation could not
+  snapshot a custom Work registry. Correct `RegisteredContracts` and restart the host.
 - `ASDUR400`-`ASDUR403` require deployment correction, not runtime DDL.
 - Ambiguous post-permit outcome is evidence to reconcile, not permission to retry.
 

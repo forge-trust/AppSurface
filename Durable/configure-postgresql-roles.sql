@@ -154,6 +154,9 @@ SELECT format(
     :'dispatcher_role',
     :'migration_owner_role') \gexec
 SELECT format(
+    'ALTER POLICY work_contract_discovery_owner ON appsurface_durable.work TO %I',
+    :'migration_owner_role') \gexec
+SELECT format(
     'ALTER POLICY runtime_heartbeat_runtime_role ON appsurface_durable.runtime_heartbeat TO %I',
     :'runtime_role') \gexec
 DROP POLICY IF EXISTS flow_dispatch_runtime_scope_select ON appsurface_durable.flow_dispatch;
@@ -183,6 +186,7 @@ SELECT format(
 SELECT format('REVOKE ALL ON TABLE appsurface_durable.schedule_dispatch FROM %I', :'dispatcher_role') \gexec
 SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.claim_schedule_dispatch(text, interval) FROM %I', :'dispatcher_role') \gexec
 SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.claim_schedule_dispatch(text, interval) FROM %I', :'runtime_role') \gexec
+SELECT format('REVOKE ALL ON TABLE appsurface_durable.dispatch FROM %I', :'dispatcher_role') \gexec
 
 SELECT NOT EXISTS
 (
@@ -386,6 +390,7 @@ WITH expected_policy(relation_name, policy_name, command_name, using_expression,
     ('scope_history', 'scope_history_isolation', '*',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('work', 'work_contract_discovery_owner', 'r', 'true', NULL::text),
     ('work', 'work_scope_isolation', '*',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
@@ -425,6 +430,8 @@ SELECT NOT EXISTS
     OR NOT
     (
         CASE
+            WHEN actual.policy_name = 'work_contract_discovery_owner' THEN actual.polroles = ARRAY[
+                (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'migration_owner_role')]
             WHEN actual.policy_name = 'flow_dispatch_global_discovery' THEN actual.polroles @> ARRAY[
                 (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'dispatcher_role'),
                 (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'migration_owner_role')]
@@ -491,11 +498,18 @@ durable_relation AS
 ),
 relation_privilege(privilege_name) AS
 (
-  VALUES
-    ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN'),
-    ('SELECT WITH GRANT OPTION'), ('INSERT WITH GRANT OPTION'), ('UPDATE WITH GRANT OPTION'),
-    ('DELETE WITH GRANT OPTION'), ('TRUNCATE WITH GRANT OPTION'), ('REFERENCES WITH GRANT OPTION'),
-    ('TRIGGER WITH GRANT OPTION'), ('MAINTAIN WITH GRANT OPTION')
+  SELECT privilege_name
+  FROM
+  (
+    VALUES
+      ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'),
+      ('SELECT WITH GRANT OPTION'), ('INSERT WITH GRANT OPTION'), ('UPDATE WITH GRANT OPTION'),
+      ('DELETE WITH GRANT OPTION'), ('TRUNCATE WITH GRANT OPTION'), ('REFERENCES WITH GRANT OPTION'),
+      ('TRIGGER WITH GRANT OPTION'),
+      ('MAINTAIN'), ('MAINTAIN WITH GRANT OPTION')
+  ) AS candidate(privilege_name)
+  WHERE pg_catalog.current_setting('server_version_num')::integer >= 170000
+     OR candidate.privilege_name NOT LIKE 'MAINTAIN%'
 )
 SELECT NOT EXISTS
 (
@@ -510,7 +524,7 @@ SELECT NOT EXISTS
    AND NOT
    (
      service.role_name = :'dispatcher_role'
-     AND relation.relname IN ('dispatch', 'flow_dispatch')
+     AND relation.relname = 'flow_dispatch'
      AND privilege.privilege_name = 'SELECT'
      OR service.role_name = :'runtime_role'
      AND
@@ -586,7 +600,7 @@ SELECT NOT EXISTS
    AND NOT
    (
      service.role_name = :'dispatcher_role'
-     AND column_value.relname IN ('dispatch', 'flow_dispatch')
+     AND column_value.relname = 'flow_dispatch'
      AND privilege.privilege_name = 'SELECT'
      OR service.role_name = :'runtime_role'
      AND
@@ -763,7 +777,11 @@ SELECT NOT EXISTS
     AND NOT
     (
       service.role_name = :'dispatcher_role'
-      AND routine.proname = 'claim_schedule_dispatch'
+      AND routine.oid IN
+      (
+        'appsurface_durable.claim_schedule_dispatch(text, interval)'::pg_catalog.regprocedure,
+        'appsurface_durable.discover_work_dispatch(text[], text[], integer)'::pg_catalog.regprocedure
+      )
       AND privilege.privilege_name = 'EXECUTE'
       OR service.role_name = :'runtime_role'
       AND routine.oid = 'appsurface_durable.runtime_due_dispatch_health(integer)'::pg_catalog.regprocedure
@@ -784,9 +802,9 @@ SELECT NOT EXISTS
 \endif
 
 SELECT format('GRANT USAGE ON SCHEMA appsurface_durable TO %I', :'dispatcher_role') \gexec
-SELECT format('GRANT SELECT ON appsurface_durable.dispatch TO %I', :'dispatcher_role') \gexec
 SELECT format('GRANT SELECT ON appsurface_durable.flow_dispatch TO %I', :'dispatcher_role') \gexec
 SELECT format('GRANT EXECUTE ON FUNCTION appsurface_durable.claim_schedule_dispatch(text, interval) TO %I', :'dispatcher_role') \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) TO %I', :'dispatcher_role') \gexec
 SELECT format('REVOKE ALL ON SCHEMA appsurface_durable FROM %I', :'retention_operator_role') \gexec
 SELECT format('REVOKE ALL ON ALL TABLES IN SCHEMA appsurface_durable FROM %I', :'retention_operator_role') \gexec
 SELECT format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA appsurface_durable FROM %I', :'retention_operator_role') \gexec

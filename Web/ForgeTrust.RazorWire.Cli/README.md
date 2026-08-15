@@ -4,16 +4,20 @@ The **RazorWire CLI** is a command-line tool for managing RazorWire projects. It
 
 The CLI uses AppSurface's command-first console mode. That means help and validation output are intentionally quiet, without Generic Host lifecycle banners, while real export runs still emit useful progress logs.
 
-## Start here: export the sample
+## Start here: export the package-only starter
 
-During repository development, the fastest confidence check is to export the RazorWire MVC sample from source:
+For the smallest install-shaped proof, use the [RazorWire brochure starter](https://github.com/forge-trust/AppSurface/tree/main/examples/razorwire-brochure-starter). It restores `ForgeTrust.RazorWire` from an explicitly selected package source and uses a local proof-only `ForgeTrust.RazorWire.Cli` tool package to export its six-page field-notes site in CDN mode. The sample has no Tailwind or RazorWire source-project references, and its contact form deliberately has no delivery endpoint.
+
+## Source development: export the advanced sample
+
+During repository development, the fastest mechanics confidence check is to export the advanced RazorWire MVC sample from source:
 
 ```bash
 dotnet run --project Web/ForgeTrust.RazorWire.Cli -- export -o ./dist -p ./examples/razorwire-mvc/RazorWireWebExample.csproj
 test -f ./dist/index.html
 ```
 
-A successful run publishes the sample, starts it on an ephemeral loopback URL, crawls the discovered pages, writes static files under `./dist`, and shuts the target app down automatically. Inspect `./dist/index.html` first; it proves the exporter emitted the root artifact.
+A successful run publishes the sample, starts it on an ephemeral loopback URL, crawls the discovered pages, writes static files under `./dist`, and shuts the target app down automatically. Inspect `./dist/index.html` first; it proves the exporter emitted the root artifact. Use this source-backed sample for islands, streams, form failures, and other advanced mechanics; use the [brochure starter](https://github.com/forge-trust/AppSurface/tree/main/examples/razorwire-brochure-starter) when validating the package-consumer shape.
 
 ## Installation
 
@@ -35,10 +39,10 @@ Do not publish the proof artifact merely because it restores and runs
 successfully. Its exclusion and `do_not_publish` decision remain authoritative
 in the [package registry](../../packages/README.md#not-in-the-direct-install-matrix);
 a future public tool release must first land the tracked packaging work and pass
-the normal package and stable-dependency gates, including the stable sanitizer
-pair tracked by [issue #682](https://github.com/forge-trust/AppSurface/issues/682).
+the normal package and stable-dependency gates, including the exact stable
+sanitizer graph established by [issue #682](https://github.com/forge-trust/AppSurface/issues/682).
 
-Run an exact proof or local package without permanently installing it. Until the package registry changes the CLI's publication decision, `<version>` means a package produced by the [#678 package-proof sequence](../../packages/README.md#issue-678-package-proof) or another explicitly supplied local proof source; it does not imply a supported public NuGet release:
+Run an exact proof or local package without permanently installing it. Until the package registry changes the CLI's publication decision, `<version>` means a package produced by the [#682 package-proof sequence](../../packages/README.md#issue-682-package-proof) or another explicitly supplied local proof source; it does not imply a supported public NuGet release:
 
 ```bash
 dnx ForgeTrust.RazorWire.Cli@<version> --yes --source ./artifacts/packages -- export -o ./dist -p ./examples/razorwire-mvc/RazorWireWebExample.csproj

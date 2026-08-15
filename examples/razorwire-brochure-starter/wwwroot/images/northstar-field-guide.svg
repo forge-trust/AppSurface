@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480" role="img" aria-labelledby="title desc">
+  <title id="title">Northstar field guide illustration</title>
+  <desc id="desc">A four-point compass rises over contour lines.</desc>
+  <rect width="640" height="480" fill="#dfe6d5"/>
+  <g fill="none" stroke="#839a79" stroke-width="3" opacity=".8">
+    <path d="M-20 380C110 250 145 440 290 330S500 315 670 175"/>
+    <path d="M-20 420C120 290 190 475 310 370S525 350 670 220"/>
+    <path d="M-20 330C105 200 165 395 280 285S490 275 670 125"/>
+    <path d="M-20 280C90 160 130 340 260 235S480 220 670 75"/>
+  </g>
+  <g transform="translate(320 202)">
+    <circle r="112" fill="#f8f3e8" stroke="#2f5d50" stroke-width="6"/>
+    <path d="M0-96 33 0 0 96-33 0Z" fill="#ba5a3c"/>
+    <path d="m0-96 33 96L0 0Z" fill="#2f5d50"/>
+    <path d="m0 96-33-96L0 0Z" fill="#d6b34b"/>
+    <circle r="15" fill="#f8f3e8" stroke="#2f5d50" stroke-width="5"/>
+  </g>
+  <g fill="#2f5d50" font-family="Georgia, serif" font-size="22" text-anchor="middle"><text x="320" y="66">N</text><text x="320" y="444">S</text><text x="82" y="210">W</text><text x="558" y="210">E</text></g>
+</svg>

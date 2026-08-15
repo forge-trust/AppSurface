@@ -693,6 +693,7 @@ public sealed class CoverageRunWatchdogTests
 
         await sink.WriteOutputAsync("message");
 
+        await WaitForWriteCountAsync(output, 1);
         Assert.Equal(1, output.WriteCount);
     }
 
@@ -1085,6 +1086,15 @@ public sealed class CoverageRunWatchdogTests
         }
     }
 
+    private static async Task WaitForWriteCountAsync(ThrowingWriteStream stream, int count)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        while (stream.WriteCount < count)
+        {
+            await Task.Delay(10, timeout.Token);
+        }
+    }
+
     private sealed class TestDirectory(string path) : IDisposable
     {
         public string Path { get; } = path;
@@ -1255,7 +1265,9 @@ public sealed class CoverageRunWatchdogTests
 
     private sealed class ThrowingWriteStream : Stream
     {
-        public int WriteCount { get; private set; }
+        private int _writeCount;
+
+        public int WriteCount => Volatile.Read(ref _writeCount);
 
         public override bool CanRead => false;
 
@@ -1283,13 +1295,13 @@ public sealed class CoverageRunWatchdogTests
 
         public override void Write(byte[] buffer, int offset, int count)
         {
-            WriteCount++;
+            Interlocked.Increment(ref _writeCount);
             throw new IOException("console unavailable");
         }
 
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            WriteCount++;
+            Interlocked.Increment(ref _writeCount);
             return ValueTask.FromException(new IOException("console unavailable"));
         }
     }

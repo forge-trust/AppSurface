@@ -21,7 +21,7 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
     private const string RetentionOperatorPassword = "durable-retention-test-password";
     private const string RoleRecipeContainerPath = "/tmp/configure-postgresql-roles.sql";
     private const string PostgreSqlImage =
-        "postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302";
+        "postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877";
 
     [Fact]
     public async Task Commands_bootstrap_and_verify_the_restricted_local_postgresql_proof()

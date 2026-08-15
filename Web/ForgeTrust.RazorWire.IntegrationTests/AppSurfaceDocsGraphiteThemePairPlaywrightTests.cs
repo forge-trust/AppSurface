@@ -378,10 +378,14 @@ public sealed class AppSurfaceDocsGraphitePlaywrightFixture : IAsyncLifetime
                 return;
             }
 
-            var exitCode = Microsoft.Playwright.Program.Main(["install", "chromium"]);
-            if (exitCode != 0)
+            using var playwright = await Playwright.CreateAsync();
+            if (!File.Exists(playwright.Chromium.ExecutablePath))
             {
-                throw new InvalidOperationException($"Playwright browser install failed with exit code {exitCode}.");
+                var exitCode = Microsoft.Playwright.Program.Main(["install", "chromium"]);
+                if (exitCode != 0)
+                {
+                    throw new InvalidOperationException($"Playwright browser install failed with exit code {exitCode}.");
+                }
             }
 
             _playwrightInstalled = true;

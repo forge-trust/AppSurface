@@ -52,7 +52,7 @@ internal static class ReleasePreparationChangePolicy
             return new ReleasePreparationChangePolicyResult(errors);
         }
 
-        var expectedPaths = new HashSet<string>(StringComparer.Ordinal)
+        var requiredPaths = new HashSet<string>(StringComparer.Ordinal)
         {
             $"releases/v{version}.md",
             $"releases/v{version}.md.yml",
@@ -60,9 +60,16 @@ internal static class ReleasePreparationChangePolicy
             $"releases/v{version}.evidence.json",
             "releases/current.md",
             "CHANGELOG.md",
-            "releases/unreleased.md",
+            "releases/unreleased.md"
+        };
+        // Resetting an already-canonical unreleased sidecar produces no Git diff. If it is present, it must remain an
+        // ordinary modification so release preparation cannot add, delete, or rename the next-cycle metadata.
+        var optionalModifiedPaths = new HashSet<string>(StringComparer.Ordinal)
+        {
             "releases/unreleased.md.yml"
         };
+        var expectedPaths = new HashSet<string>(requiredPaths, StringComparer.Ordinal);
+        expectedPaths.UnionWith(optionalModifiedPaths);
         var actualChanges = changes.ToArray();
         var declaredEntryPaths = (consumedUnreleasedEntryPaths ?? []).ToArray();
         var declaredEntryPathSet = new HashSet<string>(declaredEntryPaths, StringComparer.Ordinal);
@@ -136,13 +143,19 @@ internal static class ReleasePreparationChangePolicy
                 continue;
             }
 
+            if (optionalModifiedPaths.Contains(change.Path)
+                && !string.Equals(change.Status, "M", StringComparison.Ordinal))
+            {
+                errors.Add($"Optional release-preparation path must be M when present: {change.Path}.");
+            }
+
             if (!seenPaths.Add(change.Path))
             {
                 errors.Add($"Release-preparation path appears more than once: {change.Path}.");
             }
         }
 
-        foreach (var expectedPath in expectedPaths)
+        foreach (var expectedPath in requiredPaths)
         {
             if (!seenPaths.Contains(expectedPath))
             {
