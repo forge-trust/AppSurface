@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+    <!-- This sample proves a package-consumer restore, so it must not inherit the repository's central package table. -->
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <RazorWirePackageVersion Condition="'$(RazorWirePackageVersion)' == ''">0.1.0</RazorWirePackageVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ForgeTrust.RazorWire" Version="$(RazorWirePackageVersion)" />
+  </ItemGroup>
+
+</Project>
