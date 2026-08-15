@@ -687,6 +687,30 @@ internal sealed class CoverageRunWorkflow
             var projectResults = await RunScheduledProjectsAsync(request, resolution, schedulePlan, executionStates, outputDirectory, build.TestsShouldSkipBuild, supervisor, runConsole, supervisedCancellationToken);
             await ReplayLogsAsync(projectResults, runConsole, supervisedCancellationToken);
 
+            CoverageRunSlowTestDiagnosticsRun? diagnostics;
+            using (var operation = supervisor.Start("diagnostics"))
+            {
+                try
+                {
+                    diagnostics = await RunSlowTestDiagnosticsAsync(
+                        request,
+                        outputDirectory,
+                        projectResults,
+                        () => ElapsedSeconds(runStarted),
+                        supervisor.Commit,
+                        operation.Transition,
+                        runConsole,
+                        operation.ObserveBytes,
+                        supervisedCancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    supervisor.ThrowIfFailed();
+                    throw;
+                }
+            }
+            terminalDiagnostics = diagnostics;
+
             var artifactFailures = projectResults
                 .Where(result => result.ExitCode == 0
                     && !string.Equals(result.CoverageArtifactStatus, "produced", StringComparison.Ordinal))
@@ -711,7 +735,7 @@ internal sealed class CoverageRunWorkflow
                     coverageFiles.Length,
                     executionStates,
                     schedulePlan,
-                    diagnostics: null,
+                    diagnostics,
                     supervisor.Commit,
                     supervisedCancellationToken);
                 var failure = artifactFailures[0];
@@ -738,7 +762,7 @@ internal sealed class CoverageRunWorkflow
                     coverageFiles.Length,
                     executionStates,
                     schedulePlan,
-                    diagnostics: null,
+                    diagnostics,
                     supervisor.Commit,
                     supervisedCancellationToken);
                 throw CoverageRunDiagnostics.Create(
@@ -754,30 +778,6 @@ internal sealed class CoverageRunWorkflow
             {
                 ThrowNoCoverageFiles(request, projectResults);
             }
-
-            CoverageRunSlowTestDiagnosticsRun? diagnostics;
-            using (var operation = supervisor.Start("diagnostics"))
-            {
-                try
-                {
-                    diagnostics = await RunSlowTestDiagnosticsAsync(
-                        request,
-                        outputDirectory,
-                        projectResults,
-                        () => ElapsedSeconds(runStarted),
-                        supervisor.Commit,
-                        operation.Transition,
-                        runConsole,
-                        operation.ObserveBytes,
-                        supervisedCancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    supervisor.ThrowIfFailed();
-                    throw;
-                }
-            }
-            terminalDiagnostics = diagnostics;
 
             var mergeStarted = _timeProvider.GetTimestamp();
             // ReportGenerator uses fixed output names. Isolate every invocation so --no-clean

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Xml;
@@ -6,7 +7,7 @@ using System.Xml;
 namespace ForgeTrust.AppSurface.Cli;
 
 /// <summary>
-/// Writes best-effort slow-test diagnostic artifacts for <c>coverage run</c>.
+/// Writes bounded failure-first test results and best-effort slow-test diagnostic artifacts for <c>coverage run</c>.
 /// </summary>
 /// <remarks>
 /// The writer consumes AppSurface-managed JUnit files only. Parser problems are preserved as
@@ -16,6 +17,7 @@ namespace ForgeTrust.AppSurface.Cli;
 /// <item><description><c>WriteAsync</c> may write artifacts twice when aggregation timing changes during the initial write.</description></item>
 /// <item><description>Legacy or externally managed test-result files are not consumed.</description></item>
 /// <item><description>Missing files and parser failures are reported as warnings instead of failing coverage.</description></item>
+/// <item><description>Failure details and Markdown output are bounded so CI summaries remain within GitHub limits.</description></item>
 /// </list>
 /// </remarks>
 internal static class CoverageRunSlowTestDiagnosticsWriter
@@ -37,10 +39,15 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
 
     private const int MaxTopTests = 20;
     private const int MaxTopProjects = 20;
+    private const int MaxFailureDetails = 25;
+    private const int MaxFailureDetailCharacters = 1024;
     private const int MaxWarnings = 100;
+    private const int MaxTestResultSummaryBytes = 32 * 1024;
+    private const int MaxMarkdownBytes = 64 * 1024;
     private const int ProgressBatchSize = 256;
     private const int StagedTextChunkSize = 16 * 1024;
     private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
+    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     /// <summary>
     /// Parses managed JUnit files and builds a diagnostic report.
@@ -110,7 +117,9 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
             projects,
             testCaseSummaryResult.TestCaseCount,
             testCaseSummaryResult.FailedTestCaseCount,
+            testCaseSummaryResult.ErrorTestCaseCount,
             testCaseSummaryResult.SkippedTestCaseCount,
+            testCaseSummaryResult.FailedTestCases,
             testCaseSummaryResult.TopTestCases,
             warnings.Take(MaxWarnings).ToArray());
     }
@@ -244,6 +253,7 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
                 junitFiles = report.JunitFileCount,
                 testCases = report.TestCaseCount,
                 failedTestCases = report.FailedTestCaseCount,
+                errorTestCases = report.ErrorTestCaseCount,
                 skippedTestCases = report.SkippedTestCaseCount,
                 warnings = report.Warnings.Count,
             },
@@ -252,6 +262,7 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
                 .ThenBy(project => project.Project, StringComparer.Ordinal)
                 .Take(MaxTopProjects),
             topTestCases = report.TopTestCases,
+            failedTestDetails = report.FailedTestCases,
             warnings = report.Warnings,
         };
         var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
@@ -502,15 +513,15 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
             {
                 if (reader.Name == "failure")
                 {
-                    current.Status = "failed";
+                    current.SetStatus("failed", await ReadFailureDetailAsync(reader, cancellationToken));
                 }
                 else if (reader.Name == "error")
                 {
-                    current.Status = "error";
+                    current.SetStatus("error", await ReadFailureDetailAsync(reader, cancellationToken));
                 }
                 else if (reader.Name == "skipped")
                 {
-                    current.Status = "skipped";
+                    current.SetStatus("skipped", null);
                 }
             }
 
@@ -562,6 +573,49 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
         return new TestCaseBuilder(project, className, name, seconds);
     }
 
+    private static async Task<string> ReadFailureDetailAsync(XmlReader reader, CancellationToken cancellationToken)
+    {
+        var detail = new StringBuilder();
+        AppendFailureDetail(detail, reader.GetAttribute("message"));
+        if (reader.IsEmptyElement)
+        {
+            return detail.ToString();
+        }
+
+        var failureDepth = reader.Depth;
+        while (await reader.ReadAsync())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (reader.NodeType is XmlNodeType.Text or XmlNodeType.CDATA or XmlNodeType.SignificantWhitespace)
+            {
+                AppendFailureDetail(detail, reader.Value);
+            }
+
+            if (reader.NodeType == XmlNodeType.EndElement && reader.Depth == failureDepth)
+            {
+                break;
+            }
+        }
+
+        return detail.ToString();
+    }
+
+    private static void AppendFailureDetail(StringBuilder builder, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || builder.Length >= MaxFailureDetailCharacters)
+        {
+            return;
+        }
+
+        if (builder.Length > 0)
+        {
+            builder.AppendLine();
+        }
+
+        var remaining = MaxFailureDetailCharacters - builder.Length;
+        builder.Append(value.AsSpan(0, Math.Min(value.Length, remaining)));
+    }
+
     private static string RenderMarkdown(
         CoverageRunSlowTestDiagnosticsReport report,
         string markdownPath,
@@ -570,6 +624,8 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
         decimal aggregationPercent)
     {
         var builder = new StringBuilder();
+        builder.Append(RenderTestResultSummary(report));
+        builder.AppendLine();
         builder.AppendLine("# Slow test diagnostics");
         builder.AppendLine();
         builder.AppendLine("Managed test results: junit");
@@ -623,12 +679,142 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
             builder.AppendLine();
             foreach (var warning in report.Warnings)
             {
-                builder.AppendLine($"- {warning}");
+                builder.AppendLine($"- {EscapeMarkdown(warning)}");
             }
         }
 
+        return BoundMarkdown(
+            builder.ToString(),
+            MaxMarkdownBytes,
+            "\n> Slow-test diagnostics reached their output budget. Download the artifact for the complete JUnit XML and project logs.\n");
+    }
+
+    private static string RenderTestResultSummary(CoverageRunSlowTestDiagnosticsReport report)
+    {
+        var builder = new StringBuilder();
+        var errors = report.ErrorTestCaseCount;
+        var failures = report.FailedTestCaseCount - errors;
+        var passed = Math.Max(0, report.TestCaseCount - report.FailedTestCaseCount - report.SkippedTestCaseCount);
+        builder.AppendLine("# Test Results");
+        builder.AppendLine();
+        builder.AppendLine("This is a bounded failure-first view of the AppSurface-managed JUnit test results.");
+        builder.AppendLine("Download the `test-result-diagnostics` artifact for complete JUnit XML and per-project test logs.");
+        builder.AppendLine();
+        builder.AppendLine("| Test cases | Passed | Failed | Errors | Skipped |");
+        builder.AppendLine("| ---: | ---: | ---: | ---: | ---: |");
+        builder.AppendLine(FormattableString.Invariant(
+            $"| {report.TestCaseCount} | {passed} | {failures} | {errors} | {report.SkippedTestCaseCount} |"));
+        builder.AppendLine();
+        builder.AppendLine("## Projects with failed tests");
+        builder.AppendLine();
+        var failedProjects = report.Projects
+            .Where(project => project.ExitCode != 0)
+            .Select(project => project.Project)
+            .Concat(report.FailedTestCases.Select(testCase => testCase.Project))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(project => project, StringComparer.Ordinal)
+            .ToArray();
+        if (failedProjects.Length == 0)
+        {
+            builder.AppendLine("No failed or errored JUnit test cases were available.");
+        }
+        else
+        {
+            foreach (var project in failedProjects.Take(MaxFailureDetails))
+            {
+                builder.AppendLine($"- `{EscapeMarkdown(LimitText(project, 512))}`");
+            }
+
+            if (failedProjects.Length > MaxFailureDetails)
+            {
+                builder.AppendLine($"- {failedProjects.Length - MaxFailureDetails} additional project(s) are available in the artifact.");
+            }
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("## Failed test details");
+        builder.AppendLine();
+        var renderedFailures = 0;
+        foreach (var testCase in report.FailedTestCases)
+        {
+            var candidate = RenderFailureBlock(testCase);
+            if (Encoding.UTF8.GetByteCount(builder.ToString()) + Encoding.UTF8.GetByteCount(candidate) > MaxTestResultSummaryBytes - 512)
+            {
+                break;
+            }
+
+            builder.Append(candidate);
+            renderedFailures++;
+        }
+
+        if (report.FailedTestCaseCount == 0)
+        {
+            builder.AppendLine("No failed or errored JUnit test cases were available.");
+        }
+        else
+        {
+            builder.AppendLine(FormattableString.Invariant(
+                $"Showing {renderedFailures} of {report.FailedTestCaseCount} failed or errored test case(s). {report.FailedTestCaseCount - renderedFailures} additional failure detail(s) are available in the artifact."));
+        }
+
+        return BoundMarkdown(
+            builder.ToString(),
+            MaxTestResultSummaryBytes,
+            "\n> Test-result summary reached its output budget. Download `test-result-diagnostics` for complete details.\n");
+    }
+
+    private static string RenderFailureBlock(CoverageRunSlowTestCase testCase)
+    {
+        var label = $"{testCase.Status}: {testCase.Project} — {testCase.ClassName}.{testCase.Name}";
+        var detail = string.IsNullOrWhiteSpace(testCase.FailureDetail)
+            ? "No failure message or stack trace was included in the JUnit result."
+            : testCase.FailureDetail;
+        var builder = new StringBuilder();
+        builder.AppendLine("<details>");
+        builder.AppendLine($"<summary>{EscapeHtml(LimitText(label, 768))}</summary>");
+        builder.AppendLine();
+        builder.AppendLine($"Duration: `{EscapeHtml(FormatSeconds(testCase.Seconds))}`");
+        builder.AppendLine();
+        builder.AppendLine($"<pre>{EscapeHtml(LimitText(detail, MaxFailureDetailCharacters))}</pre>");
+        builder.AppendLine("</details>");
+        builder.AppendLine();
         return builder.ToString();
     }
+
+    private static string BoundMarkdown(string value, int maximumBytes, string truncationMessage)
+    {
+        if (Encoding.UTF8.GetByteCount(value) <= maximumBytes)
+        {
+            return value;
+        }
+
+        var suffixBytes = Encoding.UTF8.GetByteCount(truncationMessage);
+        var bytes = Encoding.UTF8.GetBytes(value);
+        var length = Math.Max(0, maximumBytes - suffixBytes);
+        while (length > 0)
+        {
+            try
+            {
+                return StrictUtf8.GetString(bytes, 0, length).TrimEnd() + truncationMessage;
+            }
+            catch (DecoderFallbackException)
+            {
+                length--;
+            }
+        }
+
+        return truncationMessage.TrimStart();
+    }
+
+    private static string LimitText(string value, int maximumCharacters)
+    {
+        var sanitized = new string(value.Where(character => character is '\n' or '\t' || character >= ' ').ToArray());
+        return sanitized.Length <= maximumCharacters
+            ? sanitized
+            : sanitized[..maximumCharacters].TrimEnd() + "…";
+    }
+
+    private static string EscapeHtml(string value) => WebUtility.HtmlEncode(value);
 
     private static string FormatSeconds(double? seconds)
     {
@@ -637,7 +823,10 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
 
     private static string EscapeMarkdown(string value)
     {
-        return value.Replace("|", "\\|", StringComparison.Ordinal).Replace("\r", " ", StringComparison.Ordinal).Replace("\n", " ", StringComparison.Ordinal);
+        return WebUtility.HtmlEncode(LimitText(value, 512))
+            .Replace("|", "\\|", StringComparison.Ordinal)
+            .Replace("\r", " ", StringComparison.Ordinal)
+            .Replace("\n", " ", StringComparison.Ordinal);
     }
 
     private static void AddWarning(List<string> warnings, string warning)
@@ -665,6 +854,22 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
 
         public string Status { get; set; } = "passed";
 
+        public string? FailureDetail { get; private set; }
+
+        public void SetStatus(string status, string? failureDetail)
+        {
+            if (GetStatusPriority(status) < GetStatusPriority(Status))
+            {
+                return;
+            }
+
+            Status = status;
+            if (!string.IsNullOrWhiteSpace(failureDetail))
+            {
+                FailureDetail = failureDetail;
+            }
+        }
+
         public CoverageRunSlowTestCase Build()
         {
             return new CoverageRunSlowTestCase(
@@ -673,15 +878,26 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
                 _seconds,
                 Status,
                 _project.Project,
-                _project.JunitFile ?? string.Empty);
+                _project.JunitFile ?? string.Empty,
+                FailureDetail);
         }
+
+        private static int GetStatusPriority(string status) => status switch
+        {
+            "error" => 3,
+            "failed" => 2,
+            "skipped" => 1,
+            _ => 0,
+        };
     }
 
     private sealed class CoverageRunSlowTestCaseSummaryBuilder(Action<int>? observeProgress)
     {
         private readonly List<CoverageRunSlowTestCase> _topTestCases = new(MaxTopTests);
+        private readonly List<CoverageRunSlowTestCase> _failedTestCases = new(MaxFailureDetails);
         private int _testCaseCount;
         private int _failedTestCaseCount;
+        private int _errorTestCaseCount;
         private int _skippedTestCaseCount;
 
         public void Add(CoverageRunSlowTestCase testCase)
@@ -690,6 +906,15 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
             if (testCase.Status is "failed" or "error")
             {
                 _failedTestCaseCount++;
+                if (testCase.Status == "error")
+                {
+                    _errorTestCaseCount++;
+                }
+
+                if (_failedTestCases.Count < MaxFailureDetails)
+                {
+                    _failedTestCases.Add(testCase);
+                }
             }
             else if (testCase.Status == "skipped")
             {
@@ -704,13 +929,28 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
         }
 
         public CoverageRunSlowTestCaseSummary Build()
-            => new(_testCaseCount, _failedTestCaseCount, _skippedTestCaseCount, _topTestCases);
+            => new(
+                _testCaseCount,
+                _failedTestCaseCount,
+                _errorTestCaseCount,
+                _skippedTestCaseCount,
+                _failedTestCases,
+                _topTestCases);
 
         public void Merge(CoverageRunSlowTestCaseSummary summary)
         {
             _testCaseCount += summary.TestCaseCount;
             _failedTestCaseCount += summary.FailedTestCaseCount;
+            _errorTestCaseCount += summary.ErrorTestCaseCount;
             _skippedTestCaseCount += summary.SkippedTestCaseCount;
+            foreach (var testCase in summary.FailedTestCases)
+            {
+                if (_failedTestCases.Count < MaxFailureDetails)
+                {
+                    _failedTestCases.Add(testCase);
+                }
+            }
+
             foreach (var testCase in summary.TopTestCases)
             {
                 InsertTopTestCase(_topTestCases, testCase);
@@ -721,7 +961,9 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
     private sealed record CoverageRunSlowTestCaseSummary(
         int TestCaseCount,
         int FailedTestCaseCount,
+        int ErrorTestCaseCount,
         int SkippedTestCaseCount,
+        IReadOnlyList<CoverageRunSlowTestCase> FailedTestCases,
         IReadOnlyList<CoverageRunSlowTestCase> TopTestCases);
 }
 
@@ -763,7 +1005,9 @@ internal sealed record CoverageRunSlowTestDiagnosticsRun(
 /// <param name="Projects">Per-project execution and parser metadata.</param>
 /// <param name="TestCaseCount">Total number of parsed JUnit test cases.</param>
 /// <param name="FailedTestCaseCount">Number of parsed test cases with failed or error status.</param>
+/// <param name="ErrorTestCaseCount">Number of parsed test cases with error status.</param>
 /// <param name="SkippedTestCaseCount">Number of parsed skipped test cases.</param>
+/// <param name="FailedTestCases">Bounded, stable failed and errored test-case details for CI triage.</param>
 /// <param name="TopTestCases">Bounded, descending-duration test-case list for rendered artifacts.</param>
 /// <param name="Warnings">Bounded diagnostics warnings encountered during aggregation.</param>
 internal sealed record CoverageRunSlowTestDiagnosticsReport(
@@ -774,7 +1018,9 @@ internal sealed record CoverageRunSlowTestDiagnosticsReport(
     IReadOnlyList<CoverageRunSlowTestProject> Projects,
     int TestCaseCount,
     int FailedTestCaseCount,
+    int ErrorTestCaseCount,
     int SkippedTestCaseCount,
+    IReadOnlyList<CoverageRunSlowTestCase> FailedTestCases,
     IReadOnlyList<CoverageRunSlowTestCase> TopTestCases,
     IReadOnlyList<string> Warnings);
 
@@ -797,12 +1043,20 @@ internal sealed record CoverageRunJunitReadResult(
     string ParserStatus);
 
 /// <summary>
-/// Parsed JUnit test case timing included in slow-test diagnostics.
+/// Parsed JUnit test case timing and bounded failure evidence included in diagnostics.
 /// </summary>
+/// <param name="ClassName">JUnit class name.</param>
+/// <param name="Name">JUnit test name.</param>
+/// <param name="Seconds">Optional parsed test duration.</param>
+/// <param name="Status">Parsed JUnit outcome.</param>
+/// <param name="Project">Solution-relative project that emitted the JUnit result.</param>
+/// <param name="JunitFile">Managed JUnit source file.</param>
+/// <param name="FailureDetail">Bounded failure message and stack trace for failed or errored tests.</param>
 internal sealed record CoverageRunSlowTestCase(
     string ClassName,
     string Name,
     double? Seconds,
     string Status,
     string Project,
-    string JunitFile);
+    string JunitFile,
+    string? FailureDetail);
