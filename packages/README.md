@@ -179,7 +179,29 @@ dotnet run --project "$APPSURFACE_REPO_ROOT/tools/ForgeTrust.AppSurface.PackageI
 unzip -p "$APPSURFACE_682_ARTIFACTS/ForgeTrust.AppSurface.Docs.$APPSURFACE_682_VERSION.nupkg" '*.nuspec'
 ```
 
-Inspect `ForgeTrust.AppSurface.Docs.$APPSURFACE_682_VERSION.nupkg` and its single `.nuspec` next. Every Docs dependency container must contain exact equality entries for `AngleSharp` `[1.7.1]`, `HtmlSanitizer` `[9.2.995]`, `AngleSharp.Css` `[1.0.1]`; a missing entry, duplicate, range, or different resolved graph fails the stable proof with `ASPKG139`. The same `verify-packages` run independently restores the selected packed Docs artifact into a fresh locked consumer and records its `project.assets.json`, lock file, mapped `NuGet.config`, and exact resolved graph in `docs-package-consumer-proof.md`. Do not use `VersionOverride` or a widened range to make an incompatible graph restore.
+The preview run proves the locked consumer restore and its exact resolved graph, but it deliberately does not evaluate the stable-only `ASPKG139` dependency-container contract.
+
+Before preparing the stable tag, repeat the proof with an unpublished stable candidate version so `ASPKG139` is exercised:
+
+```bash
+APPSURFACE_682_STABLE_WORK="$(mktemp -d "/tmp/appsurface-682-stable-work.XXXXXX")"
+APPSURFACE_682_STABLE_ARTIFACTS="$(mktemp -d "/tmp/appsurface-682-stable-artifacts.XXXXXX")"
+APPSURFACE_682_STABLE_VERSION="0.2.0"
+dotnet run --project "$APPSURFACE_REPO_ROOT/tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj" -- \
+  verify-packages \
+  --repo-root "$APPSURFACE_REPO_ROOT" \
+  --package-version "$APPSURFACE_682_STABLE_VERSION" \
+  --artifacts-output "$APPSURFACE_682_STABLE_ARTIFACTS" \
+  --artifact-manifest "$APPSURFACE_682_STABLE_ARTIFACTS/package-artifact-manifest.json" \
+  --report "$APPSURFACE_682_STABLE_ARTIFACTS/package-validation-report.md" \
+  --coverage-proof-work-dir "$APPSURFACE_682_STABLE_WORK/coverage-cli-consumer-proof" \
+  --coverage-proof-report "$APPSURFACE_682_STABLE_ARTIFACTS/coverage-cli-consumer-proof.md" \
+  --docs-proof-work-dir "$APPSURFACE_682_STABLE_WORK/docs-package-consumer-proof" \
+  --docs-proof-report "$APPSURFACE_682_STABLE_ARTIFACTS/docs-package-consumer-proof.md"
+unzip -p "$APPSURFACE_682_STABLE_ARTIFACTS/ForgeTrust.AppSurface.Docs.$APPSURFACE_682_STABLE_VERSION.nupkg" '*.nuspec'
+```
+
+Inspect both Docs `.nuspec` files next. Every Docs dependency container must contain exact equality entries for `AngleSharp` `[1.7.1]`, `HtmlSanitizer` `[9.2.995]`, `AngleSharp.Css` `[1.0.1]`. The preview artifact confirms the locked consumer restore; the stable candidate also evaluates `ASPKG139`, which rejects a missing entry, duplicate, range, or different resolved graph. Both `verify-packages` runs independently restore the selected packed Docs artifact into a fresh locked consumer and record its `project.assets.json`, lock file, mapped `NuGet.config`, and exact resolved graph in `docs-package-consumer-proof.md`. Neither local proof publishes a package. Do not use `VersionOverride` or a widened range to make an incompatible graph restore.
 
 Finally prove the excluded RazorWire tool explicitly; `verify-packages` does not select `do_not_publish` entries:
 

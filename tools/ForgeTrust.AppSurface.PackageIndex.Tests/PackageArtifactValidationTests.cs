@@ -5994,6 +5994,9 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Equal(["dotnet restore consumer", "dotnet restore consumer --locked-mode"], report.Commands.Select(command => command.OperationName));
         Assert.NotNull(report.GraphVerification);
         Assert.Equal(2, commandRunner.Requests.Count);
+        var consumerDirectory = Path.GetDirectoryName(report.ConsumerProjectPath)!;
+        Assert.Equal("<Project />\n", await File.ReadAllTextAsync(Path.Join(consumerDirectory, "Directory.Build.props")));
+        Assert.Equal("<Project />\n", await File.ReadAllTextAsync(Path.Join(consumerDirectory, "Directory.Build.targets")));
         Assert.All(commandRunner.Requests, request =>
         {
             Assert.Equal("dotnet", request.FileName);

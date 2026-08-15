@@ -32,7 +32,9 @@ internal interface IDocsPackageConsumerProofWorkflow
 /// The generated consumer is intentionally independent of the repository Docs consumer fixture, which uses project references.
 /// It has its own package lock file and configuration with a local-only mapping for first-party packages. The public source
 /// is restricted to the exact non-first-party package ids represented by the committed locks for the validated Docs
-/// first-party closure, so a newly published or unintended first-party package cannot satisfy the restore.
+/// first-party closure, so a newly published or unintended first-party package cannot satisfy the restore. Empty local
+/// <c>Directory.Build.props</c> and <c>Directory.Build.targets</c> files also prevent repository-wide build policy from
+/// affecting the generated consumer.
 /// </para>
 /// <para>
 /// The proof does not build an application: restoring and inspecting <c>project.assets.json</c> is the relevant package
@@ -44,6 +46,7 @@ internal sealed class DocsPackageConsumerProofWorkflow : IDocsPackageConsumerPro
 {
     internal const string DocsPackageId = StableDocsDependencyContract.DocsPackageId;
     internal const int DotNetCommandTimeoutMilliseconds = 180_000;
+    private const string EmptyMsBuildProject = "<Project />\n";
 
     private static readonly IReadOnlyList<ExpectedPackage> ExpectedPackages =
     [
@@ -131,6 +134,14 @@ internal sealed class DocsPackageConsumerProofWorkflow : IDocsPackageConsumerPro
                     selectedArtifact);
             }
 
+            await File.WriteAllTextAsync(
+                Path.Join(consumerDirectory, "Directory.Build.props"),
+                EmptyMsBuildProject,
+                cancellationToken);
+            await File.WriteAllTextAsync(
+                Path.Join(consumerDirectory, "Directory.Build.targets"),
+                EmptyMsBuildProject,
+                cancellationToken);
             await File.WriteAllTextAsync(
                 Path.Join(consumerDirectory, "Directory.Packages.props"),
                 RenderConsumerDirectoryPackagesProps(),
