@@ -2,6 +2,7 @@
 
 This directory contains sample applications that use **ForgeTrust.AppSurface**.
 
+- [RazorWire brochure starter](razorwire-brochure-starter/README.md) – a package-only MVC field-notes site that proves the smallest practical RazorWire and static-export path without source project references, Tailwind, or a delivery endpoint.
 - [Auth ASP.NET Core bridge example](auth-aspnetcore-bridge/README.md) – proves an ASP.NET Core host-owned auth stack can flow named policy results into AppSurface auth contracts.
 - [Auth ASP.NET Core DevAuth example](auth-aspnetcore-dev-auth/README.md) – retains the responsive selectable persona marker and pairs an in-process host regression with a staged real-loopback verifier that distinguishes build, child-process, Kestrel-readiness, and DevAuth HTTP failures while retaining only bounded safe evidence.
 - [Auth Aspire Keycloak AppHost proof](auth-aspire-keycloak-apphost/README.md) – starts real local Keycloak for AppSurface OIDC proof without making runtime web apps reference Keycloak packages.

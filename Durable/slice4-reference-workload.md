@@ -91,7 +91,7 @@ The compiled reference workload requires:
 - Preflight/domain outcomes preserve caller transaction usability as specified by the [Flow protocol](flow-protocol-v1.md).
 - `ASDUR200` means definition unavailable; `ASDUR201` means history/definition mismatch; `ASDUR203` means aggregate revision race lost; `ASDUR204` means duplicate event ID; `ASDUR206` means start conflict; `ASDUR207` means command or event identity conflict.
 - `ASDUR400`-`ASDUR403` require deployment correction via schema manager, not runtime DDL.
-- `ASDUR119` means PostgreSQL worker activation could not snapshot its custom Work registry; correct
+- [`ASDUR119`](../troubleshooting/durable-diagnostics.md#asdur119) means PostgreSQL worker activation could not snapshot its custom Work registry; correct
   `RegisteredContracts` and restart the host.
 
 See the [`diagnostics catalog`](../troubleshooting/durable-diagnostics.md),

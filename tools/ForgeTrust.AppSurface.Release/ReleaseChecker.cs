@@ -121,7 +121,7 @@ internal sealed class ReleaseChecker
             {
                 var unreleasedTemplate = await File.ReadAllTextAsync(_workspace.UnreleasedPath, cancellationToken);
                 var entries = await UnreleasedEntryComposer.LoadAsync(_workspace.UnreleasedEntriesDirectory, cancellationToken);
-                var unreleased = UnreleasedEntryComposer.Compose(unreleasedTemplate, entries.Entries);
+                var unreleased = UnreleasedEntryComposer.Compose(unreleasedTemplate, entries.Entries, _workspace.UnreleasedPath);
                 // Validate Markdown syntax; the syntax tree is intentionally discarded.
                 Markdown.Parse(unreleased);
                 AddNarrativeWarnings(unreleased, warnings);

@@ -348,7 +348,7 @@ internal sealed class ReleasePreparationDiffVerifier
         IReadOnlyList<string> consumedEntryPaths,
         List<ReleaseDiagnostic> diagnostics)
     {
-        var expected = new Dictionary<string, string>(StringComparer.Ordinal)
+        var required = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [$"releases/v{version}.md"] = "A",
             [$"releases/v{version}.md.yml"] = "A",
@@ -356,13 +356,19 @@ internal sealed class ReleasePreparationDiffVerifier
             [$"releases/v{version}.evidence.json"] = "A",
             ["releases/current.md"] = "M",
             ["CHANGELOG.md"] = "M",
-            ["releases/unreleased.md"] = "M",
+            ["releases/unreleased.md"] = "M"
+        };
+        // A canonical next-cycle sidecar can already match the base branch byte for byte. When it changes, it remains
+        // release-owned and must be a regular modification; when it does not, Git correctly omits it from the diff.
+        var optional = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
             ["releases/unreleased.md.yml"] = "M"
         };
         var consumed = new HashSet<string>(consumedEntryPaths, StringComparer.Ordinal);
         foreach (var change in changes)
         {
-            if (expected.TryGetValue(change.Path, out var requiredStatus))
+            if (required.TryGetValue(change.Path, out var requiredStatus)
+                || optional.TryGetValue(change.Path, out requiredStatus))
             {
                 if (!string.Equals(change.Status, requiredStatus, StringComparison.Ordinal))
                 {
@@ -393,7 +399,7 @@ internal sealed class ReleasePreparationDiffVerifier
                 $"'{change.Path}' with status {change.Status} is not part of the release-preparation contract.", "Move unrelated work to a separate pull request, or regenerate the approved release artifacts.");
         }
 
-        foreach (var expectedPath in expected.Where(expectedPath => !changes.Any(change => string.Equals(change.Path, expectedPath.Key, StringComparison.Ordinal))))
+        foreach (var expectedPath in required.Where(expectedPath => !changes.Any(change => string.Equals(change.Path, expectedPath.Key, StringComparison.Ordinal))))
         {
             Add(diagnostics, "release-prep-unexpected-path", "A required release-preparation artifact is missing.",
                 $"The complete diff does not contain '{expectedPath.Key}'.", "Regenerate the complete release artifact set with ./eng/release prepare.");
