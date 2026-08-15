@@ -55,19 +55,28 @@ those branches before enabling Release Prep: they are the trusted source of
 the release tooling the workflow executes. The first job uses a read-only
 `GITHUB_TOKEN` only to check out and fetch that base, without persisting
 credentials. It prepares the release commit, bundle, and report, then uploads
-those files as the `release-prep` artifact. That job never receives the
-organization-owned `appsurface-release-bot` GitHub App credentials.
+those files as the `release-prep` artifact. Before it runs base-ref-controlled
+release tooling, it verifies that the checkout is the current tip of the
+selected base. That job never receives the organization-owned
+`appsurface-release-bot` GitHub App credentials.
 
 After that job succeeds, a separate fresh runner downloads only the bundle and
-report. It does not check out or execute files from `base-ref`; it validates the
-artifact paths, mints a short-lived installation token, and uses the token only
-to verify and fetch an existing `release-bot/v<version>` branch, push the
-prepared branch, and create or update its release-preparation pull request. It
-does not use a personal access token. This runner boundary prevents
-base-ref-controlled release tooling from persisting command or environment state
-until the write token is present. Using a GitHub App token for the write step
-also avoids the downstream workflow behavior of pull requests created with
-`GITHUB_TOKEN`.
+report. It does not check out or execute files from `base-ref`; before it reads
+the App credentials, it fetches the selected protected base itself using its
+read-only workflow token, requires the bundled release commit and manifest to
+match that current base, rejects every changed path outside the
+release-preparation allowlist, and requires every added or modified artifact to
+be an ordinary Git file rather than a symlink or gitlink. Only then does it mint
+a short-lived installation token to verify and fetch an existing
+`release-bot/v<version>` branch, push the validated branch, and create or update
+its release-preparation pull request. Before it updates that branch, it refuses
+to overwrite a same-version branch that already backs an open pull request to a
+different base. It does not use a personal access token.
+This runner boundary prevents base-ref-controlled release tooling from
+persisting command or environment state until the write token is present, and
+prevents the token-bearing job from publishing arbitrary changes supplied by the
+artifact. Using a GitHub App token for the write step also avoids the downstream
+workflow behavior of pull requests created with `GITHUB_TOKEN`.
 
 The generated `release-bot/v<version>` branch namespace is intentionally
 separate from release source branches. A `release/*` branch-protection rule can

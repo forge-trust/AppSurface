@@ -149,6 +149,140 @@ jobs:
           name: release-prep
           path: ${{ runner.temp }}/release-prep
 
+      # Validate untrusted artifact content before this job reads App credentials.
+      - name: Validate prepared release artifact
+        env:
+          BASE_REF: ${{ inputs.base-ref }}
+          GITHUB_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          artifact_directory="${RUNNER_TEMP}/release-prep"
+          bundle_path="${artifact_directory}/release-prep.bundle"
+          report_path="${artifact_directory}/release-prep-report.md"
+          prepared_repository="${RUNNER_TEMP}/release-prep-validated.git"
+          if [[ ! "${BASE_REF:-}" =~ ^(main|release/[0-9]+\.[0-9]+\.[0-9]+)$ || -z "${GITHUB_TOKEN:-}" || ! -f "${bundle_path}" || -L "${bundle_path}" || ! -f "${report_path}" || -L "${report_path}" ]]; then
+            echo "Release Prep did not receive the expected regular bundle and report artifact files for a trusted release base." >&2
+            exit 1
+          fi
+          GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git init --bare "${prepared_repository}"
+          GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${prepared_repository}" fetch "${bundle_path}" "refs/heads/${RELEASE_BRANCH}:refs/heads/${RELEASE_BRANCH}"
+          GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${prepared_repository}" remote add origin "https://github.com/forge-trust/AppSurface.git"
+          read_token_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 | tr -d '\n')"
+          git_with_read_token() {
+            GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="${read_token_header}" \
+            GIT_CONFIG_GLOBAL=/dev/null \
+            GIT_CONFIG_NOSYSTEM=1 \
+            git -c core.hooksPath=/dev/null "$@"
+          }
+          git_with_read_token -C "${prepared_repository}" fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          verified_base="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${prepared_repository}" rev-parse "origin/${BASE_REF}^{commit}")"
+          if ! GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${prepared_repository}" cat-file -e "${verified_base}^{commit}"; then
+            echo "Release Prep bundle does not contain the current verified base commit ${verified_base}." >&2
+            exit 1
+          fi
+          release_commit="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${prepared_repository}" rev-parse "refs/heads/${RELEASE_BRANCH}^{commit}")"
+          release_parents="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${prepared_repository}" show -s --format=%P "${release_commit}")"
+          if [[ "${release_parents}" != "${verified_base}" ]]; then
+            echo "Release Prep bundle must contain exactly one release commit on current verified base ${verified_base}." >&2
+            exit 1
+          fi
+          has_release_notes=false
+          has_release_sidecar=false
+          has_release_manifest=false
+          has_release_evidence=false
+          has_current_release=false
+          has_changelog=false
+          has_unreleased=false
+          declare -A deleted_entry_paths=()
+          while IFS=$'\t' read -r status path; do
+            if [[ "${status}" == "A" && "${path}" == "releases/v${VERSION}.md" ]]; then
+              has_release_notes=true
+            elif [[ "${status}" == "A" && "${path}" == "releases/v${VERSION}.md.yml" ]]; then
+              has_release_sidecar=true
+            elif [[ "${status}" == "A" && "${path}" == "releases/v${VERSION}.release.json" ]]; then
+              has_release_manifest=true
+            elif [[ "${status}" == "A" && "${path}" == "releases/v${VERSION}.evidence.json" ]]; then
+              has_release_evidence=true
+            elif [[ "${status}" == "M" && "${path}" == "releases/current.md" ]]; then
+              has_current_release=true
+            elif [[ "${status}" == "M" && "${path}" == "CHANGELOG.md" ]]; then
+              has_changelog=true
+            elif [[ "${status}" == "M" && "${path}" == "releases/unreleased.md" ]]; then
+              has_unreleased=true
+            elif [[ "${status}" == "M" && "${path}" == "releases/unreleased.md.yml" ]]; then
+              :
+            elif [[ "${status}" == "D" && "${path}" == releases/unreleased.entries/*.md ]]; then
+              entry_name="${path#releases/unreleased.entries/}"
+              if [[ "${entry_name}" == */* || ! "${entry_name}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+(-[a-z0-9]+)*\.md$ ]]; then
+                echo "Release Prep bundle deletes an invalid unreleased entry path: ${path}." >&2
+                exit 1
+              fi
+              deleted_entry_paths["${path}"]=true
+            else
+              echo "Release Prep bundle contains an unexpected change: ${status} ${path}." >&2
+              exit 1
+            fi
+          done < <(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${prepared_repository}" diff --name-status --no-renames "${verified_base}" "${release_commit}")
+          if [[ "${has_release_notes}" != true || "${has_release_sidecar}" != true || "${has_release_manifest}" != true || "${has_release_evidence}" != true || "${has_current_release}" != true || "${has_changelog}" != true || "${has_unreleased}" != true ]]; then
+            echo "Release Prep bundle does not contain the complete expected release-preparation artifact set." >&2
+            exit 1
+          fi
+          while IFS= read -r changed_regular_path; do
+            tree_entry="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${prepared_repository}" ls-tree "${release_commit}" -- "${changed_regular_path}")"
+            tree_mode="${tree_entry%% *}"
+            if [[ "${tree_mode}" != "100644" ]]; then
+              echo "Release Prep bundle contains a non-regular release artifact: ${changed_regular_path} (${tree_mode:-missing})." >&2
+              exit 1
+            fi
+          done < <(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${prepared_repository}" diff --name-only --diff-filter=AM "${verified_base}" "${release_commit}")
+          manifest_entries_file="${RUNNER_TEMP}/release-prep-consumed-entries.json"
+          if ! GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${prepared_repository}" show "${release_commit}:releases/v${VERSION}.release.json" \
+            | jq -ce 'if (.preparationBaseCommit | type) != "string" or .preparationBaseCommit == "" or (.consumedUnreleasedEntryPaths | type) != "array" then error("invalid release-preparation manifest entry paths") elif any(.consumedUnreleasedEntryPaths[]; type != "string") then error("invalid release-preparation manifest entry paths") else . end' \
+              > "${manifest_entries_file}"; then
+            echo "Release Prep bundle does not contain a valid release-preparation manifest." >&2
+            exit 1
+          fi
+          preparation_base_commit="$(jq -r '.preparationBaseCommit' "${manifest_entries_file}")"
+          if [[ "${preparation_base_commit}" != "${verified_base}" ]]; then
+            echo "Release Prep manifest base commit does not match the verified base commit." >&2
+            exit 1
+          fi
+          declare -A declared_entry_paths=()
+          previous_declared_entry_path=""
+          while IFS= read -r declared_entry_path; do
+            entry_name="${declared_entry_path#releases/unreleased.entries/}"
+            if [[ "${entry_name}" == "${declared_entry_path}" || "${entry_name}" == */* || ! "${entry_name}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+(-[a-z0-9]+)*\.md$ ]]; then
+              echo "Release Prep manifest declares an invalid consumed unreleased entry path: ${declared_entry_path}." >&2
+              exit 1
+            fi
+            if [[ -n "${declared_entry_paths[${declared_entry_path}]:-}" ]]; then
+              echo "Release Prep manifest declares the same consumed unreleased entry path more than once: ${declared_entry_path}." >&2
+              exit 1
+            fi
+            if [[ -n "${previous_declared_entry_path}" && "${declared_entry_path}" < "${previous_declared_entry_path}" ]]; then
+              echo "Release Prep manifest consumed unreleased entry paths must be ordinally sorted." >&2
+              exit 1
+            fi
+            declared_entry_paths["${declared_entry_path}"]=true
+            previous_declared_entry_path="${declared_entry_path}"
+          done < <(jq -r '.consumedUnreleasedEntryPaths[]' "${manifest_entries_file}")
+          for deleted_entry_path in "${!deleted_entry_paths[@]}"; do
+            if [[ -z "${declared_entry_paths[${deleted_entry_path}]:-}" ]]; then
+              echo "Release Prep bundle deletes an unreleased entry not declared by its manifest: ${deleted_entry_path}." >&2
+              exit 1
+            fi
+          done
+          for declared_entry_path in "${!declared_entry_paths[@]}"; do
+            if [[ -z "${deleted_entry_paths[${declared_entry_path}]:-}" ]]; then
+              echo "Release Prep manifest declares an unreleased entry that the bundle does not delete: ${declared_entry_path}." >&2
+              exit 1
+            fi
+          done
+
       - name: Validate release bot app credentials
         env:
           RELEASE_BOT_APP_CLIENT_ID: ${{ secrets.RELEASE_BOT_APP_CLIENT_ID }}
@@ -183,14 +317,8 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          push_repository="${RUNNER_TEMP}/release-prep-push.git"
-          artifact_directory="${RUNNER_TEMP}/release-prep"
-          bundle_path="${artifact_directory}/release-prep.bundle"
-          report_path="${artifact_directory}/release-prep-report.md"
-          if [[ ! -f "${bundle_path}" || -L "${bundle_path}" || ! -f "${report_path}" || -L "${report_path}" ]]; then
-            echo "Release Prep did not receive the expected regular bundle and report artifact files." >&2
-            exit 1
-          fi
+          push_repository="${RUNNER_TEMP}/release-prep-validated.git"
+          report_path="${RUNNER_TEMP}/release-prep/release-prep-report.md"
           release_bot_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 | tr -d '\n')"
           git_with_release_bot_token() {
             GIT_CONFIG_COUNT=1 \
@@ -200,9 +328,11 @@ jobs:
             GIT_CONFIG_NOSYSTEM=1 \
             git -c core.hooksPath=/dev/null "$@"
           }
-          GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git init --bare "${push_repository}"
-          GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${push_repository}" fetch "${bundle_path}" "refs/heads/${RELEASE_BRANCH}:refs/heads/${RELEASE_BRANCH}"
-          GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${push_repository}" remote add origin "https://github.com/forge-trust/AppSurface.git"
+          other_base_pr="$(gh pr list --head "${RELEASE_BRANCH}" --state open --json number,headRefName,headRepositoryOwner,isCrossRepository,baseRefName --jq '[.[] | select(.headRefName == env.RELEASE_BRANCH and .headRepositoryOwner.login == "forge-trust" and .isCrossRepository == false and .baseRefName != env.BASE_REF)][0].number // ""')"
+          if [[ -n "${other_base_pr}" ]]; then
+            echo "Release Prep will not overwrite ${RELEASE_BRANCH}: it already backs open pull request #${other_base_pr} targeting a different base branch." >&2
+            exit 1
+          fi
           if git_with_release_bot_token -C "${push_repository}" fetch origin "+refs/heads/${RELEASE_BRANCH}:refs/remotes/origin/${RELEASE_BRANCH}"; then
             :
           else
@@ -219,7 +349,7 @@ jobs:
             fi
           fi
           git_with_release_bot_token -C "${push_repository}" push --force-with-lease origin "refs/heads/${RELEASE_BRANCH}:refs/heads/${RELEASE_BRANCH}"
-          existing_pr="$(gh pr list --head "${RELEASE_BRANCH}" --base "${BASE_REF}" --json number,headRefName,headRepositoryOwner,isCrossRepository,baseRefName --jq '[.[] | select(.headRefName == env.RELEASE_BRANCH and .headRepositoryOwner.login == "forge-trust" and .isCrossRepository == false and .baseRefName == env.BASE_REF)][0].number // ""')"
+          existing_pr="$(gh pr list --head "${RELEASE_BRANCH}" --base "${BASE_REF}" --state open --json number,headRefName,headRepositoryOwner,isCrossRepository,baseRefName --jq '[.[] | select(.headRefName == env.RELEASE_BRANCH and .headRepositoryOwner.login == "forge-trust" and .isCrossRepository == false and .baseRefName == env.BASE_REF)][0].number // ""')"
           if [[ -n "${existing_pr}" ]]; then
             gh pr edit "${existing_pr}" --title "chore(release): prepare v${VERSION}" --body-file "${report_path}"
           else
