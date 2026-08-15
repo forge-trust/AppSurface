@@ -2070,19 +2070,19 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "smoke-report.md")), parsed.SmokeReportPath);
         Assert.Equal("0.0.0-ci.99", parsed.PackageVersion);
 
-        var absoluteManifest = Path.Combine(_repositoryRoot, "abs", "manifest.yml");
-        var absoluteOutput = Path.Combine(_repositoryRoot, "abs", "chooser.md");
-        var absoluteArtifacts = Path.Combine(_repositoryRoot, "abs", "artifacts");
-        var absoluteArtifactsInput = Path.Combine(_repositoryRoot, "abs", "artifacts-in");
-        var absoluteArtifactManifest = Path.Combine(_repositoryRoot, "abs", "manifest.json");
-        var absoluteReport = Path.Combine(_repositoryRoot, "abs", "report.md");
-        var absoluteCoverageProofWorkDirectory = Path.Combine(_repositoryRoot, "abs", "coverage-proof");
-        var absoluteCoverageProofReport = Path.Combine(_repositoryRoot, "abs", "coverage-proof.md");
-        var absoluteDocsProofWorkDirectory = Path.Combine(_repositoryRoot, "abs", "docs-proof");
-        var absoluteDocsProofReport = Path.Combine(_repositoryRoot, "abs", "docs-proof.md");
-        var absolutePublishLog = Path.Combine(_repositoryRoot, "abs", "publish.md");
-        var absoluteSmokeWorkDirectory = Path.Combine(_repositoryRoot, "abs", "smoke");
-        var absoluteSmokeReport = Path.Combine(_repositoryRoot, "abs", "smoke.md");
+        var absoluteManifest = TestPathUtils.PathUnder(_repositoryRoot, "abs", "manifest.yml");
+        var absoluteOutput = TestPathUtils.PathUnder(_repositoryRoot, "abs", "chooser.md");
+        var absoluteArtifacts = TestPathUtils.PathUnder(_repositoryRoot, "abs", "artifacts");
+        var absoluteArtifactsInput = TestPathUtils.PathUnder(_repositoryRoot, "abs", "artifacts-in");
+        var absoluteArtifactManifest = TestPathUtils.PathUnder(_repositoryRoot, "abs", "manifest.json");
+        var absoluteReport = TestPathUtils.PathUnder(_repositoryRoot, "abs", "report.md");
+        var absoluteCoverageProofWorkDirectory = TestPathUtils.PathUnder(_repositoryRoot, "abs", "coverage-proof");
+        var absoluteCoverageProofReport = TestPathUtils.PathUnder(_repositoryRoot, "abs", "coverage-proof.md");
+        var absoluteDocsProofWorkDirectory = TestPathUtils.PathUnder(_repositoryRoot, "abs", "docs-proof");
+        var absoluteDocsProofReport = TestPathUtils.PathUnder(_repositoryRoot, "abs", "docs-proof.md");
+        var absolutePublishLog = TestPathUtils.PathUnder(_repositoryRoot, "abs", "publish.md");
+        var absoluteSmokeWorkDirectory = TestPathUtils.PathUnder(_repositoryRoot, "abs", "smoke");
+        var absoluteSmokeReport = TestPathUtils.PathUnder(_repositoryRoot, "abs", "smoke.md");
         var absolute = CommandLineOptions.Parse(
             [
                 "--manifest", absoluteManifest,
