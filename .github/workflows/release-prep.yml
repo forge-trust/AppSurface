@@ -31,21 +31,26 @@ permissions:
 
 jobs:
   prepare:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'forge-trust/AppSurface' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'forge-trust/AppSurface' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Keep generated pull-request branches outside the protected release/* source namespace.
+      RELEASE_BRANCH: release-bot/v${{ inputs.version }}
+    environment:
+      name: release-prep
+      deployment: false
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
 
     steps:
-      - name: Validate release bot token
+      - name: Validate trusted release base
         env:
-          RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+          BASE_REF: ${{ inputs.base-ref }}
         run: |
           set -euo pipefail
-          if [[ -z "${RELEASE_BOT_TOKEN}" ]]; then
-            echo "RELEASE_BOT_TOKEN is required so release preparation can push a branch and open a pull request." >&2
+          if [[ ! "${BASE_REF}" =~ ^(main|release/[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "Release Prep supports only main or a maintained release/<major>.<minor>.<patch> branch; configure those refs as protected. Received '${BASE_REF}'." >&2
             exit 1
           fi
 
@@ -54,7 +59,7 @@ jobs:
         with:
           ref: ${{ inputs.base-ref }}
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_BOT_TOKEN }}
+          persist-credentials: false
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -65,8 +70,13 @@ jobs:
       - name: Verify base is current
         env:
           BASE_REF: ${{ inputs.base-ref }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          github_token_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 | tr -d '\n')"
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+          GIT_CONFIG_VALUE_0="${github_token_header}" \
           git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           expected_base="$(git rev-parse "origin/${BASE_REF}")"
           actual_head="$(git rev-parse HEAD)"
@@ -86,17 +96,14 @@ jobs:
             --date "${RELEASE_DATE}" \
             --report "${RUNNER_TEMP}/release-prep-report.md"
 
-      - name: Create release pull request
+      - name: Commit release preparation
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
           VERSION: ${{ inputs.version }}
-          BASE_REF: ${{ inputs.base-ref }}
         run: |
           set -euo pipefail
-          branch="release/v${VERSION}"
           git config user.name "appsurface-release-bot"
           git config user.email "appsurface-release-bot@users.noreply.github.com"
-          git checkout -b "${branch}"
+          git -c core.hooksPath=/dev/null checkout -b "${RELEASE_BRANCH}"
           git add \
             "releases/v${VERSION}.md" \
             "releases/v${VERSION}.md.yml" \
@@ -109,15 +116,79 @@ jobs:
           if git ls-files --deleted -- releases/unreleased.entries | grep -q .; then
             git add -u -- releases/unreleased.entries
           fi
-          git commit -m "chore(release): prepare v${VERSION}"
-          git push --force-with-lease origin "${branch}"
-          existing_pr="$(gh pr list --head "${branch}" --json number --jq '.[0].number // ""')"
+          git -c core.hooksPath=/dev/null commit -m "chore(release): prepare v${VERSION}"
+          git bundle create "${RUNNER_TEMP}/release-prep.bundle" "${RELEASE_BRANCH}"
+
+      - name: Validate release bot app credentials
+        env:
+          RELEASE_BOT_APP_CLIENT_ID: ${{ secrets.RELEASE_BOT_APP_CLIENT_ID }}
+          RELEASE_BOT_APP_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${RELEASE_BOT_APP_CLIENT_ID}" ]]; then
+            echo "RELEASE_BOT_APP_CLIENT_ID is required to mint the release bot installation token." >&2
+            exit 1
+          fi
+          if [[ -z "${RELEASE_BOT_APP_PRIVATE_KEY}" ]]; then
+            echo "RELEASE_BOT_APP_PRIVATE_KEY is required to mint the release bot installation token." >&2
+            exit 1
+          fi
+
+      - name: Mint release bot installation token
+        id: release-bot-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_BOT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          owner: forge-trust
+          repositories: AppSurface
+          permission-contents: write
+          permission-pull-requests: write
+          skip-token-revoke: false
+
+      - name: Create release pull request
+        env:
+          GH_TOKEN: ${{ steps.release-bot-token.outputs.token }}
+          BASE_REF: ${{ inputs.base-ref }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          push_repository="${RUNNER_TEMP}/release-prep-push.git"
+          release_bot_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 | tr -d '\n')"
+          git_with_release_bot_token() {
+            GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="${release_bot_header}" \
+            GIT_CONFIG_GLOBAL=/dev/null \
+            GIT_CONFIG_NOSYSTEM=1 \
+            git -c core.hooksPath=/dev/null "$@"
+          }
+          GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git init --bare "${push_repository}"
+          GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${push_repository}" fetch "${RUNNER_TEMP}/release-prep.bundle" "refs/heads/${RELEASE_BRANCH}:refs/heads/${RELEASE_BRANCH}"
+          GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "${push_repository}" remote add origin "https://github.com/forge-trust/AppSurface.git"
+          if git_with_release_bot_token -C "${push_repository}" fetch origin "+refs/heads/${RELEASE_BRANCH}:refs/remotes/origin/${RELEASE_BRANCH}"; then
+            :
+          else
+            fetch_status=$?
+            if git_with_release_bot_token -C "${push_repository}" ls-remote --exit-code --heads origin "refs/heads/${RELEASE_BRANCH}" >/dev/null; then
+              echo "Release Prep could not safely fetch the existing ${RELEASE_BRANCH} branch (exit ${fetch_status})." >&2
+              exit "${fetch_status}"
+            else
+              remote_branch_status=$?
+            fi
+            if [[ "${remote_branch_status}" -ne 2 ]]; then
+              echo "Release Prep could not verify whether ${RELEASE_BRANCH} already exists (exit ${remote_branch_status})." >&2
+              exit "${remote_branch_status}"
+            fi
+          fi
+          git_with_release_bot_token -C "${push_repository}" push --force-with-lease origin "refs/heads/${RELEASE_BRANCH}:refs/heads/${RELEASE_BRANCH}"
+          existing_pr="$(gh pr list --head "${RELEASE_BRANCH}" --base "${BASE_REF}" --json number,headRefName,headRepositoryOwner,isCrossRepository,baseRefName --jq '[.[] | select(.headRefName == env.RELEASE_BRANCH and .headRepositoryOwner.login == "forge-trust" and .isCrossRepository == false and .baseRefName == env.BASE_REF)][0].number // ""')"
           if [[ -n "${existing_pr}" ]]; then
             gh pr edit "${existing_pr}" --title "chore(release): prepare v${VERSION}" --body-file "${RUNNER_TEMP}/release-prep-report.md"
           else
             gh pr create \
               --base "${BASE_REF}" \
-              --head "${branch}" \
+              --head "${RELEASE_BRANCH}" \
               --title "chore(release): prepare v${VERSION}" \
               --body-file "${RUNNER_TEMP}/release-prep-report.md"
           fi

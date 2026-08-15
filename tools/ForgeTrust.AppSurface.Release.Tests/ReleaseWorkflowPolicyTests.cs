@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace ForgeTrust.AppSurface.Release.Tests;
 
@@ -266,16 +267,19 @@ public sealed class ReleaseWorkflowPolicyTests
     public async Task ReleasePrepReviewUsesReadOnlyPullRequestTriggerWithoutSecrets()
     {
         var workflow = await ReadRepositoryFileAsync(".github/workflows/release-prep.yml");
+        var review = GetWorkflowJob(workflow, "release-prep-review");
 
         Assert.Contains("pull_request:", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("pull_request_target", workflow, StringComparison.Ordinal);
-        Assert.Contains("release-prep-review:", workflow, StringComparison.Ordinal);
-        Assert.Contains("contents: read", workflow, StringComparison.Ordinal);
-        Assert.Contains("pull-requests: read", workflow, StringComparison.Ordinal);
-        Assert.Contains("ref: ${{ github.event.pull_request.head.sha }}", workflow, StringComparison.Ordinal);
-        Assert.Contains("./eng/release verify-prep-diff", workflow, StringComparison.Ordinal);
-        Assert.Contains("--base-ref \"${GITHUB_BASE_REF}\"", workflow, StringComparison.Ordinal);
-        Assert.Contains("Publish release-preparation diff report", workflow, StringComparison.Ordinal);
+        Assert.Contains("contents: read", review, StringComparison.Ordinal);
+        Assert.Contains("pull-requests: read", review, StringComparison.Ordinal);
+        Assert.Contains("ref: ${{ github.event.pull_request.head.sha }}", review, StringComparison.Ordinal);
+        Assert.Contains("./eng/release verify-prep-diff", review, StringComparison.Ordinal);
+        Assert.Contains("--base-ref \"${GITHUB_BASE_REF}\"", review, StringComparison.Ordinal);
+        Assert.Contains("Publish release-preparation diff report", review, StringComparison.Ordinal);
+        Assert.DoesNotContain("secrets.", review, StringComparison.Ordinal);
+        Assert.DoesNotContain("create-github-app-token", review, StringComparison.Ordinal);
+        Assert.DoesNotContain("release-bot-token.outputs.token", review, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -301,13 +305,109 @@ public sealed class ReleaseWorkflowPolicyTests
     public async Task ReleaseWorkflowsDeclareConcurrencyAndAvoidEval()
     {
         var prep = await ReadRepositoryFileAsync(".github/workflows/release-prep.yml");
+        var prepare = GetWorkflowJob(prep, "prepare", "release-prep-review");
         var publish = await ReadRepositoryFileAsync(".github/workflows/release-publish.yml");
         var stablePublish = await ReadRepositoryFileAsync(".github/workflows/nuget-stable-publish.yml");
 
         Assert.Contains("concurrency:", prep, StringComparison.Ordinal);
         Assert.Contains("concurrency:", publish, StringComparison.Ordinal);
         Assert.Contains("concurrency:", stablePublish, StringComparison.Ordinal);
-        Assert.Contains("RELEASE_BOT_TOKEN", prep, StringComparison.Ordinal);
+        Assert.Contains("github.ref == 'refs/heads/main'", prepare, StringComparison.Ordinal);
+        Assert.Contains("environment:\n      name: release-prep\n      deployment: false", prepare, StringComparison.Ordinal);
+        Assert.Contains("RELEASE_BOT_APP_CLIENT_ID", prepare, StringComparison.Ordinal);
+        Assert.Contains("RELEASE_BOT_APP_PRIVATE_KEY", prepare, StringComparison.Ordinal);
+        Assert.Contains("actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0", prepare, StringComparison.Ordinal);
+        Assert.Contains("client-id: ${{ secrets.RELEASE_BOT_APP_CLIENT_ID }}", prepare, StringComparison.Ordinal);
+        Assert.Contains("private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}", prepare, StringComparison.Ordinal);
+        Assert.Contains("owner: forge-trust", prepare, StringComparison.Ordinal);
+        Assert.Contains("repositories: AppSurface", prepare, StringComparison.Ordinal);
+        Assert.Contains("permission-contents: write", prepare, StringComparison.Ordinal);
+        Assert.Contains("permission-pull-requests: write", prepare, StringComparison.Ordinal);
+        Assert.Contains("skip-token-revoke: false", prepare, StringComparison.Ordinal);
+        Assert.Contains("RELEASE_BRANCH: release-bot/v${{ inputs.version }}", prepare, StringComparison.Ordinal);
+        Assert.DoesNotContain("RELEASE_BRANCH: release/v${{ inputs.version }}", prepare, StringComparison.Ordinal);
+        Assert.Contains("GH_TOKEN: ${{ steps.release-bot-token.outputs.token }}", prepare, StringComparison.Ordinal);
+        Assert.DoesNotContain("RELEASE_BOT_TOKEN", prep, StringComparison.Ordinal);
+        var trustedBaseStepIndex = prepare.IndexOf("- name: Validate trusted release base", StringComparison.Ordinal);
+        var checkoutStepIndex = prepare.IndexOf("- name: Checkout base", StringComparison.Ordinal);
+        var prepareFilesStepIndex = prepare.IndexOf("- name: Prepare release files", StringComparison.Ordinal);
+        var commitPreparationStepIndex = prepare.IndexOf("- name: Commit release preparation", StringComparison.Ordinal);
+        var credentialsStepIndex = prepare.IndexOf("- name: Validate release bot app credentials", StringComparison.Ordinal);
+        var mintTokenStepIndex = prepare.IndexOf("- name: Mint release bot installation token", StringComparison.Ordinal);
+        Assert.True(trustedBaseStepIndex >= 0, "Release Prep must validate the base ref before checkout.");
+        Assert.True(checkoutStepIndex > trustedBaseStepIndex, "Release Prep must validate the base ref before checkout.");
+        Assert.True(prepareFilesStepIndex > checkoutStepIndex, "Release Prep must prepare release files only after checkout.");
+        Assert.True(commitPreparationStepIndex > prepareFilesStepIndex, "Release Prep must commit release files before reading App credentials.");
+        Assert.True(credentialsStepIndex >= 0, "Release Prep must validate its App credentials before minting a token.");
+        Assert.True(mintTokenStepIndex > credentialsStepIndex, "Release Prep must validate its App credentials before minting a token.");
+        Assert.True(credentialsStepIndex > commitPreparationStepIndex, "Release Prep must not read App credentials before release preparation is committed.");
+        const string trustedBasePattern = "^(main|release/[0-9]+\\.[0-9]+\\.[0-9]+)$";
+        Assert.Contains(trustedBasePattern, prepare, StringComparison.Ordinal);
+        Assert.Matches(trustedBasePattern, "main");
+        Assert.Matches(trustedBasePattern, "release/0.1.0");
+        Assert.DoesNotMatch(trustedBasePattern, "feature/release-prep");
+        Assert.DoesNotMatch(trustedBasePattern, "release/0.1");
+        Assert.DoesNotMatch(trustedBasePattern, "release/0.1.0-preview.1");
+        Assert.DoesNotMatch(trustedBasePattern, "release/0.1.0/repair");
+        Assert.DoesNotMatch(trustedBasePattern, "refs/heads/main");
+        Assert.DoesNotMatch(trustedBasePattern, "v0.1.0");
+        Assert.DoesNotMatch(trustedBasePattern, string.Empty);
+        Assert.Contains("persist-credentials: false", prepare, StringComparison.Ordinal);
+        Assert.DoesNotContain("token: ${{ steps.release-bot-token.outputs.token }}", prepare, StringComparison.Ordinal);
+        var credentialsStep = prepare[credentialsStepIndex..mintTokenStepIndex];
+        Assert.Contains("if [[ -z \"${RELEASE_BOT_APP_CLIENT_ID}\" ]]; then", credentialsStep, StringComparison.Ordinal);
+        Assert.Contains("if [[ -z \"${RELEASE_BOT_APP_PRIVATE_KEY}\" ]]; then", credentialsStep, StringComparison.Ordinal);
+        Assert.Equal(2, credentialsStep.Split("exit 1", StringSplitOptions.None).Length - 1);
+        var createPullRequestStepIndex = prepare.IndexOf("- name: Create release pull request", mintTokenStepIndex, StringComparison.Ordinal);
+        Assert.True(createPullRequestStepIndex > mintTokenStepIndex, "Release Prep must create its pull request only after minting the App token.");
+        var mintTokenStep = prepare[mintTokenStepIndex..createPullRequestStepIndex];
+        var commitPreparationStep = prepare[commitPreparationStepIndex..credentialsStepIndex];
+        var createPullRequestStep = prepare[createPullRequestStepIndex..];
+        Assert.Single(Regex.Matches(mintTokenStep, @"(?m)^\s+owner:"));
+        Assert.Single(Regex.Matches(mintTokenStep, @"(?m)^\s+owner:\s*forge-trust\s*$"));
+        Assert.Single(Regex.Matches(mintTokenStep, @"(?m)^\s+repositories:"));
+        Assert.Single(Regex.Matches(mintTokenStep, @"(?m)^\s+repositories:\s*AppSurface\s*$"));
+        Assert.Equal(2, Regex.Matches(mintTokenStep, @"(?m)^\s+permission-").Count);
+        Assert.Contains("git -c core.hooksPath=/dev/null checkout -b", commitPreparationStep, StringComparison.Ordinal);
+        Assert.Contains("checkout -b \"${RELEASE_BRANCH}\"", commitPreparationStep, StringComparison.Ordinal);
+        Assert.Contains("git -c core.hooksPath=/dev/null commit", commitPreparationStep, StringComparison.Ordinal);
+        Assert.Contains("git add", commitPreparationStep, StringComparison.Ordinal);
+        Assert.Contains("git bundle create \"${RUNNER_TEMP}/release-prep.bundle\" \"${RELEASE_BRANCH}\"", commitPreparationStep, StringComparison.Ordinal);
+        Assert.DoesNotContain("GH_TOKEN", commitPreparationStep, StringComparison.Ordinal);
+        Assert.DoesNotContain("git add", createPullRequestStep, StringComparison.Ordinal);
+        Assert.DoesNotContain("git commit", createPullRequestStep, StringComparison.Ordinal);
+        Assert.DoesNotContain("git checkout", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("VERSION: ${{ inputs.version }}", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("gh pr edit \"${existing_pr}\" --title \"chore(release): prepare v${VERSION}\"", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Equal(2, createPullRequestStep.Split("--title \"chore(release): prepare v${VERSION}\"", StringSplitOptions.None).Length - 1);
+        Assert.Contains("GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git init --bare \"${push_repository}\"", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("fetch \"${RUNNER_TEMP}/release-prep.bundle\" \"refs/heads/${RELEASE_BRANCH}:refs/heads/${RELEASE_BRANCH}\"", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("remote add origin \"https://github.com/forge-trust/AppSurface.git\"", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("push --force-with-lease origin \"refs/heads/${RELEASE_BRANCH}:refs/heads/${RELEASE_BRANCH}\"", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("gh pr list --head \"${RELEASE_BRANCH}\" --base \"${BASE_REF}\"", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("--json number,headRefName,headRepositoryOwner,isCrossRepository,baseRefName", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains(".headRepositoryOwner.login == \"forge-trust\"", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains(".isCrossRepository == false", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains(".baseRefName == env.BASE_REF", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("--head \"${RELEASE_BRANCH}\"", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("github_token_header=\"AUTHORIZATION: basic $(printf 'x-access-token:%s' \"${GITHUB_TOKEN}\"", prepare, StringComparison.Ordinal);
+        Assert.Contains("release_bot_header=\"AUTHORIZATION: basic $(printf 'x-access-token:%s' \"${GH_TOKEN}\"", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("git_with_release_bot_token() {", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("GIT_CONFIG_KEY_0=http.https://github.com/.extraheader", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("GIT_CONFIG_VALUE_0=\"${release_bot_header}\"", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("GIT_CONFIG_GLOBAL=/dev/null", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("GIT_CONFIG_NOSYSTEM=1", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("git -c core.hooksPath=/dev/null \"$@\"", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("git_with_release_bot_token -C \"${push_repository}\" fetch origin", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("git_with_release_bot_token -C \"${push_repository}\" ls-remote --exit-code --heads origin", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("else\n              remote_branch_status=$?\n            fi", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("[[ \"${remote_branch_status}\" -ne 2 ]]", createPullRequestStep, StringComparison.Ordinal);
+        Assert.Contains("git_with_release_bot_token -C \"${push_repository}\" push --force-with-lease origin", createPullRequestStep, StringComparison.Ordinal);
+        Assert.DoesNotContain("-c http.https://github.com/.extraheader=", prepare, StringComparison.Ordinal);
+        Assert.DoesNotContain("|| true", createPullRequestStep, StringComparison.Ordinal);
+        var hookableGitCommands = Regex.Matches(prepare, @"(?m)^\s+git .*(?:\bcheckout\b|\bcommit\b|\bpush\b).*$");
+        Assert.NotEmpty(hookableGitCommands);
+        Assert.All(hookableGitCommands, command => Assert.Contains("core.hooksPath=/dev/null", command.Value, StringComparison.Ordinal));
         Assert.DoesNotContain("eval ", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("eval ", publish, StringComparison.Ordinal);
         Assert.DoesNotContain("eval ", stablePublish, StringComparison.Ordinal);
@@ -453,6 +553,51 @@ public sealed class ReleaseWorkflowPolicyTests
     }
 
     [Fact]
+    public async Task ReleasePrepPushScriptHandlesNewExistingAndFailureBranchStates()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var workflow = await ReadRepositoryFileAsync(".github/workflows/release-prep.yml");
+        var prepare = GetWorkflowJob(workflow, "prepare", "release-prep-review");
+        var script = GetFinalWorkflowStepRun(prepare, "Create release pull request");
+        var cases = new[]
+        {
+            new { Name = "new", ExistingPullRequest = "", ExpectedExitCode = 0, ExpectedPullRequestCommand = "gh:pr create --base main --head release-bot/v0.2.0 --title chore(release): prepare v0.2.0 --body-file", ExpectsBranchLookup = true, ExpectsPush = true, ExpectsPullRequestList = true },
+            new { Name = "existing", ExistingPullRequest = "42", ExpectedExitCode = 0, ExpectedPullRequestCommand = "gh:pr edit 42 --title chore(release): prepare v0.2.0 --body-file", ExpectsBranchLookup = false, ExpectsPush = true, ExpectsPullRequestList = true },
+            new { Name = "existing-fetch-failure", ExistingPullRequest = "", ExpectedExitCode = 128, ExpectedPullRequestCommand = string.Empty, ExpectsBranchLookup = true, ExpectsPush = false, ExpectsPullRequestList = false },
+            new { Name = "lookup-failure", ExistingPullRequest = "", ExpectedExitCode = 128, ExpectedPullRequestCommand = string.Empty, ExpectsBranchLookup = true, ExpectsPush = false, ExpectsPullRequestList = false },
+            new { Name = "push-failure", ExistingPullRequest = "", ExpectedExitCode = 128, ExpectedPullRequestCommand = string.Empty, ExpectsBranchLookup = false, ExpectsPush = true, ExpectsPullRequestList = false },
+            new { Name = "list-failure", ExistingPullRequest = "", ExpectedExitCode = 128, ExpectedPullRequestCommand = string.Empty, ExpectsBranchLookup = false, ExpectsPush = true, ExpectsPullRequestList = true },
+            new { Name = "edit-failure", ExistingPullRequest = "42", ExpectedExitCode = 128, ExpectedPullRequestCommand = "gh:pr edit 42 --title chore(release): prepare v0.2.0 --body-file", ExpectsBranchLookup = false, ExpectsPush = true, ExpectsPullRequestList = true },
+            new { Name = "create-failure", ExistingPullRequest = "", ExpectedExitCode = 128, ExpectedPullRequestCommand = "gh:pr create --base main --head release-bot/v0.2.0 --title chore(release): prepare v0.2.0 --body-file", ExpectsBranchLookup = false, ExpectsPush = true, ExpectsPullRequestList = true }
+        };
+
+        foreach (var testCase in cases)
+        {
+            var result = await RunReleasePrepPushScriptAsync(script, testCase.Name, testCase.ExistingPullRequest);
+
+            Assert.True(
+                result.ExitCode == testCase.ExpectedExitCode,
+                $"{testCase.Name} exited {result.ExitCode}. stderr:{Environment.NewLine}{result.StandardError}");
+            Assert.Equal(testCase.ExpectsBranchLookup, result.Calls.Contains("git:ls-remote", StringComparison.Ordinal));
+            Assert.Equal(testCase.ExpectsPush, result.Calls.Contains("git:push", StringComparison.Ordinal));
+            Assert.Equal(testCase.ExpectsPullRequestList, result.Calls.Contains("gh:pr list", StringComparison.Ordinal));
+            if (!string.IsNullOrEmpty(testCase.ExpectedPullRequestCommand))
+            {
+                Assert.Contains(testCase.ExpectedPullRequestCommand, result.Calls, StringComparison.Ordinal);
+            }
+            else
+            {
+                Assert.DoesNotContain("gh:pr edit", result.Calls, StringComparison.Ordinal);
+                Assert.DoesNotContain("gh:pr create", result.Calls, StringComparison.Ordinal);
+            }
+        }
+    }
+
+    [Fact]
     public async Task StableNuGetPublishWorkflowUsesStablePolicy()
     {
         var workflow = await ReadRepositoryFileAsync(".github/workflows/nuget-stable-publish.yml");
@@ -544,5 +689,135 @@ public sealed class ReleaseWorkflowPolicyTests
     {
         var root = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         return await File.ReadAllTextAsync(TestPathUtils.PathUnder(root, relativePath));
+    }
+
+    private static string GetWorkflowJob(string workflow, string jobName, string? nextJobName = null)
+    {
+        var jobStart = workflow.IndexOf($"\n  {jobName}:", StringComparison.Ordinal);
+        Assert.True(jobStart >= 0, $"Workflow does not contain the '{jobName}' job.");
+
+        var jobEnd = nextJobName is null
+            ? workflow.Length
+            : workflow.IndexOf($"\n  {nextJobName}:", jobStart + 1, StringComparison.Ordinal);
+        Assert.True(jobEnd > jobStart, $"Workflow does not contain a valid end for the '{jobName}' job.");
+
+        return workflow[jobStart..jobEnd];
+    }
+
+    private static string GetFinalWorkflowStepRun(string workflowJob, string stepName)
+    {
+        var stepStart = workflowJob.IndexOf($"      - name: {stepName}\n", StringComparison.Ordinal);
+        Assert.True(stepStart >= 0, $"Workflow job does not contain the '{stepName}' step.");
+
+        const string runMarker = "        run: |\n";
+        var runStart = workflowJob.IndexOf(runMarker, stepStart, StringComparison.Ordinal);
+        Assert.True(runStart > stepStart, $"Workflow step '{stepName}' does not contain a shell script.");
+
+        var indentedScript = workflowJob[(runStart + runMarker.Length)..].TrimEnd();
+        return string.Join(
+            "\n",
+            indentedScript.Split('\n').Select(line => line.StartsWith("          ", StringComparison.Ordinal) ? line[10..] : line));
+    }
+
+    private static async Task<(int ExitCode, string Calls, string StandardError)> RunReleasePrepPushScriptAsync(
+        string script,
+        string scenario,
+        string existingPullRequest)
+    {
+        var temporaryDirectory = Path.Join(Path.GetTempPath(), $"appsurface-release-prep-push-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(temporaryDirectory);
+        var callLogPath = Path.Join(temporaryDirectory, "calls.log");
+
+        try
+        {
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "bash",
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false
+                }
+            };
+            process.StartInfo.ArgumentList.Add("-s");
+            process.StartInfo.Environment["BASE_REF"] = "main";
+            process.StartInfo.Environment["GH_TOKEN"] = "test-release-bot-token";
+            process.StartInfo.Environment["HARNESS_CALL_LOG"] = callLogPath;
+            process.StartInfo.Environment["HARNESS_EXISTING_PULL_REQUEST"] = existingPullRequest;
+            process.StartInfo.Environment["HARNESS_SCENARIO"] = scenario;
+            process.StartInfo.Environment["RELEASE_BRANCH"] = "release-bot/v0.2.0";
+            process.StartInfo.Environment["RUNNER_TEMP"] = temporaryDirectory;
+            process.StartInfo.Environment["VERSION"] = "0.2.0";
+            Assert.True(process.Start());
+
+            await process.StandardInput.WriteAsync(
+                """
+                git() {
+                  command_name=""
+                  remote_fetch=false
+                  for argument in "$@"; do
+                    case "${argument}" in
+                      init|fetch|remote|ls-remote|push) command_name="${argument}" ;;
+                      origin) remote_fetch=true ;;
+                    esac
+                  done
+                  printf 'git:%s %s\n' "${command_name}" "$*" >> "${HARNESS_CALL_LOG}"
+                  case "${command_name}" in
+                    fetch)
+                      if [[ "${remote_fetch}" == true ]]; then
+                        case "${HARNESS_SCENARIO}" in
+                          new|existing-fetch-failure|lookup-failure) return 128 ;;
+                        esac
+                      fi
+                      return 0
+                      ;;
+                    ls-remote)
+                      case "${HARNESS_SCENARIO}" in
+                        new) return 2 ;;
+                        existing-fetch-failure) return 0 ;;
+                        lookup-failure) return 128 ;;
+                      esac
+                      return 99
+                      ;;
+                    init|remote) return 0 ;;
+                    push)
+                      if [[ "${HARNESS_SCENARIO}" == push-failure ]]; then
+                        return 128
+                      fi
+                      return 0
+                      ;;
+                  esac
+                  return 99
+                }
+                gh() {
+                  printf 'gh:%s\n' "$*" >> "${HARNESS_CALL_LOG}"
+                  if [[ "$1" == pr && "$2" == list ]]; then
+                    if [[ "${HARNESS_SCENARIO}" == list-failure ]]; then
+                      return 128
+                    fi
+                    printf '%s' "${HARNESS_EXISTING_PULL_REQUEST}"
+                  elif [[ "$1" == pr && "$2" == edit && "${HARNESS_SCENARIO}" == edit-failure ]]; then
+                    return 128
+                  elif [[ "$1" == pr && "$2" == create && "${HARNESS_SCENARIO}" == create-failure ]]; then
+                    return 128
+                  fi
+                }
+
+                """);
+            await process.StandardInput.WriteAsync(script);
+            process.StandardInput.Close();
+
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = process.StandardError.ReadToEndAsync();
+            await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync());
+            var calls = File.Exists(callLogPath) ? await File.ReadAllTextAsync(callLogPath) : string.Empty;
+            return (process.ExitCode, calls, await errorTask);
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
     }
 }
