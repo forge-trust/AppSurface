@@ -1361,6 +1361,35 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.False(options.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.RazorWireFormFailed));
     }
 
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)]
+    [InlineData(false, false, false)]
+    public void AddNamedAppSurfaceDocs_ShouldEnableDocsExperimentalEventsOnlyForHostedMetricsCollection(
+        bool metricsEnabled,
+        bool hostedCollectionEnabled,
+        bool shouldEnableDocsEvents)
+    {
+        var services = new ServiceCollection();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["Docs:Metrics:Enabled"] = metricsEnabled.ToString(CultureInfo.InvariantCulture),
+                    ["Docs:Metrics:HostedCollection:Enabled"] = hostedCollectionEnabled.ToString(CultureInfo.InvariantCulture)
+                })
+            .Build();
+        services.AddAppSurfaceDocs("Public", configuration.GetSection("Docs"));
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceProductIntelligenceOptions>>().Value;
+
+        Assert.Equal(shouldEnableDocsEvents, options.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.DocsSearchSubmitted));
+        Assert.Equal(shouldEnableDocsEvents, options.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.DocsSearchFilterChanged));
+        Assert.Equal(shouldEnableDocsEvents, options.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.DocsSearchFrictionFeedbackSubmitted));
+        Assert.False(options.IsExperimentalEventEnabled(AppSurfaceProductEventRegistry.RazorWireFormFailed));
+    }
+
     [Fact]
     public void AddAppSurfaceDocs_ShouldNormalizeNullMetricsSubsections()
     {

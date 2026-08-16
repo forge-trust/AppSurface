@@ -44,6 +44,19 @@ public sealed class AppSurfaceDocsOperatorReadPolicyWarningServiceTests
     }
 
     [Fact]
+    public void Constructor_WhenHarvestProgressChannelIsBlank_Throws()
+    {
+        var exception = Assert.Throws<ArgumentException>(
+            () => new AppSurfaceDocsOperatorReadPolicyWarningService(
+                new AppSurfaceDocsOptions(),
+                new TestHostEnvironment { EnvironmentName = Environments.Production },
+                new RecordingLogger<AppSurfaceDocsOperatorReadPolicyWarningService>(),
+                " "));
+
+        Assert.Equal("harvestProgressChannel", exception.ParamName);
+    }
+
+    [Fact]
     public async Task StartAsync_WhenProductionDiagnosticsAreExposedWithoutOperatorReadPolicy_LogsStructuredWarning()
     {
         var logger = new RecordingLogger<AppSurfaceDocsOperatorReadPolicyWarningService>();
@@ -104,6 +117,31 @@ public sealed class AppSurfaceDocsOperatorReadPolicyWarningServiceTests
         var entry = Assert.Single(logger.Entries);
         Assert.Contains("_harvest", entry.Message, StringComparison.Ordinal);
         Assert.Contains("_health.json", entry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StartAsync_WhenNamedHarvestChannelIsExposed_LogsThatNamedChannel()
+    {
+        var logger = new RecordingLogger<AppSurfaceDocsOperatorReadPolicyWarningService>();
+        var service = new AppSurfaceDocsOperatorReadPolicyWarningService(
+            new AppSurfaceDocsOptions
+            {
+                Harvest = new AppSurfaceDocsHarvestOptions
+                {
+                    Health = new AppSurfaceDocsHarvestHealthOptions
+                    {
+                        ExposeRoutes = AppSurfaceDocsHarvestHealthExposure.Always
+                    }
+                }
+            },
+            new TestHostEnvironment { EnvironmentName = Environments.Production },
+            logger,
+            AppSurfaceDocsStreamAuthorization.GetHarvestProgressChannel("internal"));
+
+        await service.StartAsync(CancellationToken.None);
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Contains("appsurfacedocs-harvest-internal", entry.Message, StringComparison.Ordinal);
     }
 
     [Fact]

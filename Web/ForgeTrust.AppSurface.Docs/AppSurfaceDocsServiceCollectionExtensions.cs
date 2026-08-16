@@ -123,133 +123,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
 
         services.AddOptions<AppSurfaceDocsOptions>()
             .BindConfiguration(AppSurfaceDocsOptions.SectionName)
-            .PostConfigure(
-                options =>
-                {
-                    options.Identity ??= new AppSurfaceDocsIdentityOptions();
-                    options.Identity.Logo ??= new AppSurfaceDocsLogoOptions();
-                    options.Identity.Wordmark ??= new AppSurfaceDocsWordmarkOptions();
-                    options.Identity.Favicon ??= new AppSurfaceDocsFaviconOptions();
-                    options.Identity.BrandingAssets ??= new AppSurfaceDocsBrandingAssetsOptions();
-                    options.Source ??= new AppSurfaceDocsSourceOptions();
-                    options.Harvest ??= new AppSurfaceDocsHarvestOptions();
-                    options.MarkdownDownload ??= new AppSurfaceDocsMarkdownDownloadOptions();
-                    options.Harvest.Health ??= new AppSurfaceDocsHarvestHealthOptions();
-                    options.Diagnostics ??= new AppSurfaceDocsDiagnosticsOptions();
-                    options.Metrics ??= new AppSurfaceDocsMetricsOptions();
-                    options.Metrics.BrowserCollector ??= new AppSurfaceDocsBrowserMetricsCollectorOptions();
-                    options.Metrics.HostedCollection ??= new AppSurfaceDocsHostedMetricsCollectionOptions();
-                    options.Metrics.HostedReview ??= new AppSurfaceDocsHostedMetricsReviewOptions();
-                    options.Harvest.Paths ??= new AppSurfaceDocsHarvestPathOptions();
-                    options.Harvest.Paths.DefaultExclusions ??= new AppSurfaceDocsHarvestDefaultExclusionOptions();
-                    options.Harvest.Paths.VcsIgnore ??= new AppSurfaceDocsHarvestVcsIgnoreOptions();
-                    options.Harvest.Markdown ??= new AppSurfaceDocsMarkdownHarvestOptions();
-                    options.Harvest.Markdown.DefaultExclusions ??= new AppSurfaceDocsHarvestDefaultExclusionOptions();
-                    options.Harvest.CSharp ??= new AppSurfaceDocsCSharpHarvestOptions();
-                    options.Harvest.CSharp.DefaultExclusions ??= new AppSurfaceDocsHarvestDefaultExclusionOptions();
-                    options.Harvest.JavaScript ??= new AppSurfaceDocsJavaScriptHarvestOptions();
-                    options.Harvest.JavaScript.DefaultExclusions ??= new AppSurfaceDocsHarvestDefaultExclusionOptions();
-                    options.Bundle ??= new AppSurfaceDocsBundleOptions();
-                    options.Sidebar ??= new AppSurfaceDocsSidebarOptions();
-                    options.Contributor ??= new AppSurfaceDocsContributorOptions();
-                    options.Routing ??= new AppSurfaceDocsRoutingOptions();
-                    options.Versioning ??= new AppSurfaceDocsVersioningOptions();
-                    options.Localization ??= new AppSurfaceDocsLocalizationOptions();
-                    options.Sidebar.NamespacePrefixes ??= [];
-                    options.Localization.Locales ??= [];
-
-                    options.Identity.DisplayName = NormalizeOrNull(options.Identity.DisplayName);
-                    options.Identity.HomeHref = AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.HomeHref);
-                    options.Identity.Logo.Path = AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.Logo.Path);
-                    options.Identity.Logo.AltText = NormalizeOrNull(options.Identity.Logo.AltText);
-                    options.Identity.Wordmark.HighlightText = NormalizeOrNull(options.Identity.Wordmark.HighlightText);
-                    options.Identity.Wordmark.HighlightColor = AppSurfaceDocsIdentityPath.NormalizeCssHexColorOrNull(
-                        options.Identity.Wordmark.HighlightColor);
-                    options.Identity.Favicon.SvgPath = AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.Favicon.SvgPath);
-                    options.Identity.Favicon.IcoPath = AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.Favicon.IcoPath);
-                    options.Identity.Favicon.PngPath = AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.Favicon.PngPath);
-                    options.Identity.BrandingAssets.DirectoryPath = NormalizeOrNull(options.Identity.BrandingAssets.DirectoryPath);
-                    options.Identity.BrandingAssets.RequestPath =
-                        AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.BrandingAssets.RequestPath)
-                        ?? AppSurfaceDocsBrandingAssetsOptions.DefaultRequestPath;
-                    if (options.Theme?.Colors is not null && options.Theme.Layout is not null)
-                    {
-                        AppSurfaceDocsThemePolicy.Normalize(options.Theme);
-                    }
-                    options.Harvest.Paths.IncludeGlobs = NormalizeGlobArray(options.Harvest.Paths.IncludeGlobs);
-                    options.Harvest.Paths.ExcludeGlobs = NormalizeGlobArray(options.Harvest.Paths.ExcludeGlobs);
-                    options.Harvest.Paths.DefaultExclusions =
-                        NormalizeDefaultExclusions(options.Harvest.Paths.DefaultExclusions);
-                    options.Harvest.Paths.VcsIgnore.AllowGlobs = NormalizeGlobArray(options.Harvest.Paths.VcsIgnore.AllowGlobs);
-                    options.Harvest.Health.AuthorizationPolicy = NormalizeOrNull(options.Harvest.Health.AuthorizationPolicy);
-                    options.MarkdownDownload.AuthorizationPolicy = NormalizeOrNull(options.MarkdownDownload.AuthorizationPolicy);
-                    options.Diagnostics.OperatorReadPolicy = NormalizeOrNull(options.Diagnostics.OperatorReadPolicy);
-                    options.Diagnostics.OperatorWritePolicy = NormalizeOrNull(options.Diagnostics.OperatorWritePolicy);
-                    options.Diagnostics.SearchIndexRefreshPolicy = NormalizeOrNull(options.Diagnostics.SearchIndexRefreshPolicy);
-                    options.Metrics.BrowserCollector.EndpointUrl =
-                        AppSurfaceDocsOptionsValidator.NormalizeMetricsEndpointUrlOrNull(
-                            options.Metrics.BrowserCollector.EndpointUrl);
-                    options.Harvest.Markdown.IncludeGlobs = NormalizeGlobArray(options.Harvest.Markdown.IncludeGlobs);
-                    options.Harvest.Markdown.ExcludeGlobs = NormalizeGlobArray(options.Harvest.Markdown.ExcludeGlobs);
-                    options.Harvest.Markdown.DefaultExclusions =
-                        NormalizeDefaultExclusions(options.Harvest.Markdown.DefaultExclusions);
-                    options.Harvest.CSharp.IncludeGlobs = NormalizeGlobArray(options.Harvest.CSharp.IncludeGlobs);
-                    options.Harvest.CSharp.ExcludeGlobs = NormalizeGlobArray(options.Harvest.CSharp.ExcludeGlobs);
-                    options.Harvest.CSharp.DefaultExclusions =
-                        NormalizeDefaultExclusions(options.Harvest.CSharp.DefaultExclusions);
-                    options.Harvest.JavaScript.IncludeGlobs = NormalizeGlobArray(options.Harvest.JavaScript.IncludeGlobs);
-                    options.Harvest.JavaScript.ExcludeGlobs = NormalizeGlobArray(options.Harvest.JavaScript.ExcludeGlobs);
-                    options.Harvest.JavaScript.DefaultExclusions =
-                        NormalizeDefaultExclusions(options.Harvest.JavaScript.DefaultExclusions);
-                    options.Harvest.JavaScript.GroupNameRules =
-                        NormalizeJavaScriptGroupNameRules(options.Harvest.JavaScript.GroupNameRules);
-
-                    options.Source.RepositoryRoot = options.Source.RepositoryRoot?.Trim();
-                    options.Bundle.Path = NormalizeOrNull(options.Bundle.Path);
-                    options.Contributor.DefaultBranch = NormalizeOrNull(options.Contributor.DefaultBranch);
-                    options.Contributor.SourceUrlTemplate = NormalizeOrNull(options.Contributor.SourceUrlTemplate);
-                    options.Contributor.EditUrlTemplate = NormalizeOrNull(options.Contributor.EditUrlTemplate);
-                    var configuredDocsRootPath = options.Routing.DocsRootPath;
-                    var normalizedDocsRootPath = DocsUrlBuilder.NormalizeDocsRootPath(
-                        configuredDocsRootPath,
-                        options.Versioning.Enabled);
-                    options.Routing.RouteRootPath = DocsUrlBuilder.NormalizeRouteRootPath(
-                        options.Routing.RouteRootPath,
-                        normalizedDocsRootPath,
-                        options.Versioning.Enabled);
-                    options.Routing.DocsRootPath = string.IsNullOrWhiteSpace(configuredDocsRootPath)
-                        ? DocsUrlBuilder.ResolveDefaultDocsRootPath(options.Routing.RouteRootPath, options.Versioning.Enabled)
-                        : normalizedDocsRootPath;
-                    options.Routing.PublicOrigin =
-                        DocsUrlBuilder.TryNormalizePublicOrigin(options.Routing.PublicOrigin, out var normalizedPublicOrigin)
-                            ? normalizedPublicOrigin
-                            : NormalizeOrNull(options.Routing.PublicOrigin);
-
-                    options.Versioning.CatalogPath = NormalizeOrNull(options.Versioning.CatalogPath);
-                    options.Versioning.TrustedReleaseRootPath =
-                        NormalizeOrNull(options.Versioning.TrustedReleaseRootPath);
-                    options.Contributor.SymbolSourceUrlTemplate = NormalizeOrNull(options.Contributor.SymbolSourceUrlTemplate);
-                    options.Contributor.SourceRef = NormalizeOrNull(options.Contributor.SourceRef);
-                    options.Localization.DefaultLocale = NormalizeOrNull(options.Localization.DefaultLocale) ?? "en";
-                    foreach (var locale in options.Localization.Locales)
-                    {
-                        if (locale is null)
-                        {
-                            continue;
-                        }
-
-                        locale.Code = NormalizeOrNull(locale.Code) ?? string.Empty;
-                        locale.Label = NormalizeOrNull(locale.Label);
-                        locale.Lang = NormalizeOrNull(locale.Lang);
-                        locale.RoutePrefix = NormalizeOrNull(locale.RoutePrefix);
-                    }
-
-                    options.Sidebar.NamespacePrefixes = options.Sidebar.NamespacePrefixes
-                        .Where(prefix => !string.IsNullOrWhiteSpace(prefix))
-                        .Select(prefix => prefix.Trim())
-                        .Distinct(StringComparer.OrdinalIgnoreCase)
-                        .ToArray();
-                })
+            .PostConfigure(NormalizeOptions)
             .ValidateOnStart();
         services.AddOptions<AppSurfaceProductIntelligenceOptions>()
             .PostConfigure<AppSurfaceDocsOptions>(
@@ -258,13 +132,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     if (docsOptions.Metrics?.Enabled == true
                         && docsOptions.Metrics.HostedCollection?.Enabled == true)
                     {
-                        intelligenceOptions.EnableExperimentalEvents(
-                            AppSurfaceProductEventRegistry.DocsSearchSubmitted,
-                            AppSurfaceProductEventRegistry.DocsSearchReturnedZeroResults,
-                            AppSurfaceProductEventRegistry.DocsSearchResultSelected,
-                            AppSurfaceProductEventRegistry.DocsRecoveryLinkSelected,
-                            AppSurfaceProductEventRegistry.DocsSearchFilterChanged,
-                            AppSurfaceProductEventRegistry.DocsSearchFrictionFeedbackSubmitted);
+                        EnableDocsProductIntelligenceEvents(intelligenceOptions);
                     }
                 });
 
@@ -481,6 +349,27 @@ public static class AppSurfaceDocsServiceCollectionExtensions
             .ToArray();
     }
 
+    /// <summary>
+    /// Enables the Docs semantic-event allowlist used when hosted metrics collection is enabled.
+    /// </summary>
+    /// <param name="intelligenceOptions">The shared product-intelligence options to update.</param>
+    /// <remarks>
+    /// Both legacy and named Docs composition use this helper so a host receives the same event capture behavior without
+    /// coupling named products to the legacy unkeyed Docs options graph.
+    /// </remarks>
+    internal static void EnableDocsProductIntelligenceEvents(AppSurfaceProductIntelligenceOptions intelligenceOptions)
+    {
+        ArgumentNullException.ThrowIfNull(intelligenceOptions);
+
+        intelligenceOptions.EnableExperimentalEvents(
+            AppSurfaceProductEventRegistry.DocsSearchSubmitted,
+            AppSurfaceProductEventRegistry.DocsSearchReturnedZeroResults,
+            AppSurfaceProductEventRegistry.DocsSearchResultSelected,
+            AppSurfaceProductEventRegistry.DocsRecoveryLinkSelected,
+            AppSurfaceProductEventRegistry.DocsSearchFilterChanged,
+            AppSurfaceProductEventRegistry.DocsSearchFrictionFeedbackSubmitted);
+    }
+
     private static void EnsureNamedInstanceInfrastructure(IServiceCollection services)
     {
         EnsureThemePairServices(services);
@@ -489,6 +378,8 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         services.AddRazorWire();
         services.AddControllersWithViews().AddApplicationPart(typeof(Controllers.DocsController).Assembly);
         services.AddOptions<AppSurfaceProductIntelligenceOptions>();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IConfigureOptions<AppSurfaceProductIntelligenceOptions>, AppSurfaceDocsNamedProductIntelligenceOptionsSetup>());
         services.TryAddSingleton(AppSurfaceDocsAssetPathResolver.CreateDefault());
         services.TryAddSingleton<AppSurfaceDocsAssetVersioner>();
         services.TryAddSingleton<IAppSurfaceDocsHtmlSanitizer, AppSurfaceDocsHtmlSanitizer>();

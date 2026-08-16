@@ -73,7 +73,8 @@ internal sealed class AppSurfaceDocsNamedInstancePreflightService : IHostedLifec
                 await new AppSurfaceDocsOperatorReadPolicyWarningService(
                         runtime.Options,
                         _environment,
-                        _loggerFactory.CreateLogger<AppSurfaceDocsOperatorReadPolicyWarningService>())
+                        _loggerFactory.CreateLogger<AppSurfaceDocsOperatorReadPolicyWarningService>(),
+                        AppSurfaceDocsStreamAuthorization.GetHarvestProgressChannel(runtime.Name))
                     .StartAsync(cancellationToken);
                 await new AppSurfaceDocsHarvestFailurePreflightService(
                         runtime.Options,

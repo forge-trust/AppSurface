@@ -962,6 +962,36 @@ public sealed class AppSurfaceDocsInstancesTests
     }
 
     [Fact]
+    public async Task NamedHarvestStreamFilter_ShouldAllowASucceedingInternalHostPolicy()
+    {
+        using var fixture = BuildAppWithOptions(
+            services =>
+                services.AddAuthorization(
+                    options =>
+                        options.AddPolicy("DocsContributors", policy => policy.RequireAssertion(static _ => true))),
+            (
+                "Internal",
+                "/internal/docs",
+                "/source/internal",
+                new Dictionary<string, string>()));
+        var endpoints = (IEndpointRouteBuilder)fixture.App;
+        fixture.Instances[0].MapEndpoints(endpoints).RequireAuthorization("DocsContributors");
+        endpoints.FinalizeAppSurfaceDocsInstances();
+
+        var filter = fixture.App.Services
+            .GetServices<IRazorWireStreamAuthorizationFilter>()
+            .OfType<AppSurfaceDocsNamedHarvestStreamAuthorizationFilter>()
+            .Single();
+        var result = await filter.AuthorizeAsync(
+            new RazorWireStreamAuthorizationContext(
+                new DefaultHttpContext { RequestServices = fixture.App.Services },
+                AppSurfaceDocsStreamAuthorization.GetHarvestProgressChannel("Internal"),
+                RazorWireStreamAuthorizationMode.DenyAll));
+
+        Assert.Null(result);
+    }
+
+    [Fact]
     public async Task NamedHarvestStreamFilter_ShouldRequireEveryInternalHostPolicy()
     {
         using var fixture = BuildApp(
@@ -1315,6 +1345,13 @@ public sealed class AppSurfaceDocsInstancesTests
     private static NamedDocsApp BuildAppWithOptions(
         params (string Name, string DocsRootPath, string? RepositoryRoot, IReadOnlyDictionary<string, string> Options)[] instances)
     {
+        return BuildAppWithOptions(configureServices: null, instances);
+    }
+
+    private static NamedDocsApp BuildAppWithOptions(
+        Action<IServiceCollection>? configureServices,
+        params (string Name, string DocsRootPath, string? RepositoryRoot, IReadOnlyDictionary<string, string> Options)[] instances)
+    {
         var builder = WebApplication.CreateBuilder(
             new WebApplicationOptions
             {
@@ -1339,6 +1376,7 @@ public sealed class AppSurfaceDocsInstancesTests
             handles.Add(builder.Services.AddAppSurfaceDocs(name, configuration.GetSection("Docs")));
         }
 
+        configureServices?.Invoke(builder.Services);
         builder.Services.AddLogging();
         return new NamedDocsApp(builder.Build(), handles);
     }

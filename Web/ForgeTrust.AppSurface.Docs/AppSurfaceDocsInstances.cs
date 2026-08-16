@@ -243,6 +243,11 @@ public sealed class AppSurfaceDocsRuntime : IDisposable
 
 internal sealed class AppSurfaceDocsInstanceDeclaration
 {
+    /// <summary>
+    /// The maximum number of ASCII identifier characters accepted in a named Docs product name.
+    /// </summary>
+    internal const int MaximumNameLength = 64;
+
     private readonly object _gate = new();
     private readonly List<Action<EndpointBuilder>> _conventions = [];
     private IEndpointRouteBuilder? _mappedEndpoints;
@@ -340,7 +345,7 @@ internal sealed class AppSurfaceDocsInstanceDeclaration
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
         var normalized = name.Trim();
-        if (normalized.Length > 64
+        if (normalized.Length > MaximumNameLength
             || !normalized.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_'))
         {
             throw new ArgumentException(
@@ -499,7 +504,7 @@ internal sealed class AppSurfaceDocsInstanceRegistry : IDisposable
                         });
                 }
 
-                _runtimes = runtimes;
+                Volatile.Write(ref _runtimes, runtimes);
                 _finalized = true;
             }
             catch
@@ -517,32 +522,30 @@ internal sealed class AppSurfaceDocsInstanceRegistry : IDisposable
 
     public AppSurfaceDocsRuntime GetRequiredRuntime(string? name)
     {
-        lock (_gate)
+        ThrowIfDisposed();
+
+        var runtimes = Volatile.Read(ref _runtimes);
+        if (_hasLegacyDefault)
         {
-            ThrowIfDisposed();
-
-            if (_hasLegacyDefault)
-            {
-                return _runtimes![LegacyDefaultName];
-            }
-
-            if (!_finalized)
-            {
-                throw new InvalidOperationException(
-                    "AppSurface Docs endpoint mapping is incomplete: the registry was not finalized. "
-                    + "Call FinalizeAppSurfaceDocsInstances() after mapping all instances.");
-            }
-
-            if (string.IsNullOrWhiteSpace(name)
-                || !_runtimes!.TryGetValue(name, out var runtime))
-            {
-                throw new InvalidOperationException(
-                    "The current endpoint does not identify an AppSurface Docs runtime. "
-                    + "Ensure the endpoint was mapped by an AppSurfaceDocsInstance handle.");
-            }
-
-            return runtime;
+            return runtimes![LegacyDefaultName];
         }
+
+        if (runtimes is null)
+        {
+            throw new InvalidOperationException(
+                "AppSurface Docs endpoint mapping is incomplete: the registry was not finalized. "
+                + "Call FinalizeAppSurfaceDocsInstances() after mapping all instances.");
+        }
+
+        if (string.IsNullOrWhiteSpace(name)
+            || !runtimes.TryGetValue(name, out var runtime))
+        {
+            throw new InvalidOperationException(
+                "The current endpoint does not identify an AppSurface Docs runtime. "
+                + "Ensure the endpoint was mapped by an AppSurfaceDocsInstance handle.");
+        }
+
+        return runtime;
     }
 
     internal IReadOnlyList<AppSurfaceDocsRuntime> GetFinalizedRuntimes()
@@ -919,6 +922,48 @@ internal sealed class AppSurfaceDocsInstanceRegistry : IDisposable
 internal sealed class LegacyAppSurfaceDocsRegistrationMarker;
 
 internal sealed class NamedAppSurfaceDocsRegistrationMarker;
+
+/// <summary>
+/// Enables Docs product-intelligence events when any named Docs product opts into hosted metrics collection.
+/// </summary>
+/// <remarks>
+/// Named products own configuration snapshots rather than the legacy unkeyed <see cref="AppSurfaceDocsOptions"/>
+/// pipeline. This setup restores the legacy metrics contract without creating an ambient default Docs runtime.
+/// </remarks>
+internal sealed class AppSurfaceDocsNamedProductIntelligenceOptionsSetup
+    : IConfigureOptions<AppSurfaceProductIntelligenceOptions>
+{
+    private readonly IEnumerable<AppSurfaceDocsInstanceDeclaration> _declarations;
+
+    public AppSurfaceDocsNamedProductIntelligenceOptionsSetup(
+        IEnumerable<AppSurfaceDocsInstanceDeclaration> declarations)
+    {
+        _declarations = declarations ?? throw new ArgumentNullException(nameof(declarations));
+    }
+
+    /// <inheritdoc />
+    public void Configure(AppSurfaceProductIntelligenceOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        foreach (var declaration in _declarations)
+        {
+            var docsOptions = declaration.ConfigurationSection.Get<AppSurfaceDocsOptions>();
+            if (docsOptions is null)
+            {
+                continue;
+            }
+
+            AppSurfaceDocsServiceCollectionExtensions.NormalizeOptions(docsOptions);
+            if (docsOptions.Metrics?.Enabled == true
+                && docsOptions.Metrics.HostedCollection?.Enabled == true)
+            {
+                AppSurfaceDocsServiceCollectionExtensions.EnableDocsProductIntelligenceEvents(options);
+                return;
+            }
+        }
+    }
+}
 
 internal sealed class AppSurfaceDocsNamedHarvestStreamAuthorizationFilter : IRazorWireStreamAuthorizationFilter
 {

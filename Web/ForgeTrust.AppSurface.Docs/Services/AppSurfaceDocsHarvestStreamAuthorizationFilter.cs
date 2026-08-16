@@ -42,7 +42,7 @@ internal sealed class AppSurfaceDocsHarvestStreamAuthorizationFilter : IRazorWir
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (!AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(context.Channel)
+        if (!AppSurfaceDocsStreamAuthorization.IsLegacyHarvestProgressChannel(context.Channel)
             || IsNormalDocsWrapperActive(context))
         {
             return null;

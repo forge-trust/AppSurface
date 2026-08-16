@@ -736,11 +736,26 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
     [InlineData(null, false)]
     [InlineData("", false)]
     [InlineData("appsurfacedocs-harvest", true)]
+    [InlineData("appsurfacedocs-harvest-internal_docs", true)]
     [InlineData("AppSurfaceDocs-Harvest", false)]
     [InlineData("host-channel", false)]
-    public void IsHarvestProgressChannel_ShouldMatchOnlyExactHarvestChannel(string? channel, bool expected)
+    public void IsHarvestProgressChannel_ShouldMatchLegacyAndValidNamedHarvestChannels(string? channel, bool expected)
     {
         Assert.Equal(expected, AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(channel));
+    }
+
+    [Fact]
+    public async Task StreamAuthorizeAsync_WhenLegacyHostUsesANamedLookingChannel_DelegatesToItsHostAuthorizer()
+    {
+        var authorizer = new AppSurfaceDocsHarvestStreamAuthorizer(
+            Options(AppSurfaceDocsHarvestHealthExposure.Never),
+            new TestHostEnvironment { EnvironmentName = Environments.Production },
+            new TestStreamAuthorizer(AppSurfaceAuthResult.Allowed()));
+
+        var result = await authorizer.AuthorizeAsync(
+            Context(AppSurfaceDocsStreamAuthorization.GetHarvestProgressChannel("internal")));
+
+        Assert.True(result.IsAllowed);
     }
 
     [Theory]
@@ -759,6 +774,25 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
 
         Assert.Equal(expected, matched);
         Assert.Equal(expectedInstanceName, instanceName);
+    }
+
+    [Fact]
+    public void NamedHarvestProgressChannelHelpers_ShouldUseTheNamedInstanceNameContract()
+    {
+        var channel = AppSurfaceDocsStreamAuthorization.GetHarvestProgressChannel(" Internal_Docs ");
+
+        Assert.Equal("appsurfacedocs-harvest-internal_docs", channel);
+        Assert.True(AppSurfaceDocsStreamAuthorization.TryGetNamedInstanceFromHarvestProgressChannel(channel, out var instanceName));
+        Assert.Equal("internal_docs", instanceName);
+        Assert.False(AppSurfaceDocsStreamAuthorization.TryGetNamedInstanceFromHarvestProgressChannel(
+            "appsurfacedocs-harvest-Internal_Docs",
+            out _));
+        Assert.False(AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(
+            $"appsurfacedocs-harvest-{new string('a', 65)}"));
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => AppSurfaceDocsStreamAuthorization.GetHarvestProgressChannel(new string('a', 65)));
+        Assert.Equal("instanceName", exception.ParamName);
     }
 
     private static AppSurfaceDocsOptions Options(

@@ -35,6 +35,8 @@ public sealed class AppSurfaceDocsMultiInstanceConsumerFixtureTests
             anonymousClient,
             "/docs/search-index.json",
             "Public fixture search marker");
+        using var anonymousInternalSearchIndexResponse = await anonymousClient.GetAsync("/internal/docs/search-index.json");
+        var anonymousInternalSearchIndex = await anonymousInternalSearchIndexResponse.Content.ReadAsStringAsync();
         var internalSearchIndex = await WaitForSearchIndexAsync(
             contributorClient,
             "/internal/docs/search-index.json",
@@ -52,6 +54,9 @@ public sealed class AppSurfaceDocsMultiInstanceConsumerFixtureTests
         Assert.Contains("data-docs-theme-preset=\"appsurface-dark\"", publicHtml, StringComparison.Ordinal);
         Assert.DoesNotContain("Contributor Docs", publicHtml, StringComparison.Ordinal);
         Assert.DoesNotContain("Internal fixture search marker", publicSearchIndex, StringComparison.Ordinal);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousInternalSearchIndexResponse.StatusCode);
+        Assert.DoesNotContain("Internal fixture search marker", anonymousInternalSearchIndex, StringComparison.Ordinal);
 
         Assert.Equal(HttpStatusCode.Unauthorized, anonymousInternalResponse.StatusCode);
         Assert.DoesNotContain("Contributor Docs", anonymousInternalHtml, StringComparison.Ordinal);
