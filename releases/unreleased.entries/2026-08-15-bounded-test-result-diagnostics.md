@@ -1,3 +1,0 @@
-<!-- appsurface:unreleased-entry section="taking-shape" -->
-
-- [`appsurface coverage run --slow-test-diagnostics`](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) now writes a bounded, failure-first test-result summary before slow-test timings. Repository CI publishes it separately from the full JUnit XML and project logs in the `test-result-diagnostics` artifact, so broad coverage runs retain actionable failure evidence without overflowing GitHub’s step summary. Missing or malformed JUnit evidence remains a diagnostics warning and never replaces the original test result.
