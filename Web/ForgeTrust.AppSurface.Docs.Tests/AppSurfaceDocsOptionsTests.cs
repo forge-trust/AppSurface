@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Config;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
@@ -13,6 +14,37 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public sealed class AppSurfaceDocsOptionsTests
 {
+    [Theory]
+    [InlineData("#1e3a8a", true)]
+    [InlineData("rgb(1, 2, 3)", false)]
+    [InlineData("rgba(1, 2, 3", false)]
+    [InlineData("rgba(1, 2, 3)", false)]
+    [InlineData("rgba(x, 2, 3, 0.5)", false)]
+    [InlineData("rgba(1, x, 3, 0.5)", false)]
+    [InlineData("rgba(1, 2, x, 0.5)", false)]
+    [InlineData("rgba(1, 2, 3, x)", false)]
+    [InlineData("rgba(-1, 2, 3, 0.5)", false)]
+    [InlineData("rgba(1, 2, 3, 1.5)", false)]
+    [InlineData("rgba(1, 2, 3, 0.5)", true)]
+    public void ThemePolicy_ShouldParseOnlySupportedCssColorForms(string value, bool expected)
+    {
+        Assert.Equal(expected, AppSurfaceDocsThemePolicy.CanParseCssColorForTesting(value, "#f8fafc"));
+    }
+
+    [Fact]
+    public void ThemePolicy_ShouldEnforceDerivedTokenInventoryWhenRequested()
+    {
+        var variables = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            AppSurfaceDocsThemePolicy.SetDerivedVariableForTesting(variables, "--docs-test", "value", true));
+
+        AppSurfaceDocsThemePolicy.SetDerivedVariableForTesting(variables, "--docs-test", "value", false);
+        AppSurfaceDocsThemePolicy.SetDerivedVariableForTesting(variables, "--docs-test", "next", true);
+
+        Assert.Equal("next", variables["--docs-test"]);
+    }
+
     [Fact]
     public void PublicEnums_ShouldPreserveNumericContracts()
     {
@@ -47,6 +79,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(1, (int)AppSurfaceDocsTextDirection.Rtl);
         Assert.Equal(0, (int)AppSurfaceDocsThemePreset.AppSurfaceDark);
         Assert.Equal(1, (int)AppSurfaceDocsThemePreset.GraphiteDark);
+        Assert.Equal(2, (int)AppSurfaceDocsThemePreset.AppSurfaceLight);
         Assert.Equal(0, (int)AppSurfaceDocsThemeDensity.Comfortable);
         Assert.Equal(1, (int)AppSurfaceDocsThemeDensity.Compact);
         Assert.Equal(0, (int)AppSurfaceDocsThemeChrome.Standard);
@@ -315,6 +348,212 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
+    public void AddAppSurfaceDocs_ShouldBindTheAccessibleAppSurfaceLightRecipe()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Theme:Preset"] = "AppSurfaceLight",
+                        ["AppSurfaceDocs:Theme:Colors:AccentColor"] = "#1e3a8a",
+                        ["AppSurfaceDocs:Theme:Colors:AccentStrongColor"] = "#1e40af",
+                        ["AppSurfaceDocs:Theme:Colors:LinkColor"] = "#1e3a8a",
+                        ["AppSurfaceDocs:Theme:Colors:VisitedLinkColor"] = "#5b21b6"
+                    })
+                .Build());
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+        var resolved = provider.GetRequiredService<AppSurfaceDocsThemeResolver>().Theme;
+
+        Assert.Equal(AppSurfaceDocsThemePreset.AppSurfaceLight, options.Theme.Preset);
+        Assert.Equal("#1e3a8a", options.Theme.Colors.AccentColor);
+        Assert.Equal("#1e40af", options.Theme.Colors.AccentStrongColor);
+        Assert.Equal("#1e3a8a", options.Theme.Colors.LinkColor);
+        Assert.Equal("#5b21b6", options.Theme.Colors.VisitedLinkColor);
+        Assert.Equal("appsurface-light", resolved.PresetAttribute);
+        Assert.Equal("light", resolved.RootColorScheme);
+        Assert.False(resolved.UsesSharedTheme);
+        Assert.Null(resolved.CriticalCss);
+        Assert.Equal("#f8fafc", resolved.CssVariables["--docs-color-surface-canvas"]);
+        Assert.Equal("#1e3a8a", resolved.CssVariables["--docs-color-accent"]);
+        Assert.Equal("#1e40af", resolved.CssVariables["--docs-color-accent-strong"]);
+        Assert.Equal("rgba(30, 64, 175, 0.34)", resolved.CssVariables["--docs-color-state-active-fill-strong"]);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldBindTheAccessibleAppSurfaceLightRecipeFromEnvironmentVariables()
+    {
+        const string environmentPrefix = "APPSURFACE_DOCS_LIGHT_TEST_";
+        var values = new Dictionary<string, string?>
+        {
+            ["AppSurfaceDocs__Theme__Preset"] = "AppSurfaceLight",
+            ["AppSurfaceDocs__Theme__Colors__AccentColor"] = "#1e3a8a",
+            ["AppSurfaceDocs__Theme__Colors__AccentStrongColor"] = "#1e40af",
+            ["AppSurfaceDocs__Theme__Colors__LinkColor"] = "#1e3a8a",
+            ["AppSurfaceDocs__Theme__Colors__VisitedLinkColor"] = "#5b21b6"
+        };
+        var originalValues = values.Keys.ToDictionary(
+            key => environmentPrefix + key,
+            Environment.GetEnvironmentVariable,
+            StringComparer.Ordinal);
+
+        try
+        {
+            foreach (var (key, value) in values)
+            {
+                Environment.SetEnvironmentVariable(environmentPrefix + key, value);
+            }
+
+            var services = new ServiceCollection();
+            services.AddSingleton<IConfiguration>(
+                new ConfigurationBuilder()
+                    .AddEnvironmentVariables(environmentPrefix)
+                    .Build());
+            services.AddAppSurfaceDocs();
+
+            using var provider = services.BuildServiceProvider();
+            var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+            var resolved = provider.GetRequiredService<AppSurfaceDocsThemeResolver>().Theme;
+
+            Assert.Equal(AppSurfaceDocsThemePreset.AppSurfaceLight, options.Theme.Preset);
+            Assert.Equal("#1e3a8a", options.Theme.Colors.AccentColor);
+            Assert.Equal("#1e40af", options.Theme.Colors.AccentStrongColor);
+            Assert.Equal("#1e3a8a", options.Theme.Colors.LinkColor);
+            Assert.Equal("#5b21b6", options.Theme.Colors.VisitedLinkColor);
+            Assert.Equal("light", resolved.RootColorScheme);
+            Assert.Equal("rgba(30, 64, 175, 0.34)", resolved.CssVariables["--docs-color-state-active-fill-strong"]);
+        }
+        finally
+        {
+            foreach (var (key, value) in originalValues)
+            {
+                Environment.SetEnvironmentVariable(key, value);
+            }
+        }
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldResolveAppSurfaceLightDefaultsThroughTheOptionsPipeline()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Theme:Preset"] = "AppSurfaceLight"
+                    })
+                .Build());
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+        var resolved = provider.GetRequiredService<AppSurfaceDocsThemeResolver>().Theme;
+
+        Assert.Equal(AppSurfaceDocsThemePreset.AppSurfaceLight, options.Theme.Preset);
+        Assert.Null(options.Theme.Colors.AccentColor);
+        Assert.Equal("#1e3a8a", resolved.CssVariables["--docs-color-accent"]);
+        Assert.Equal("#1e40af", resolved.CssVariables["--docs-color-accent-strong"]);
+        Assert.Equal("#5b21b6", resolved.CssVariables["--docs-color-link-visited"]);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldApplyOneAppSurfaceLightOverrideThroughTheOptionsPipeline()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Theme:Preset"] = "AppSurfaceLight",
+                        ["AppSurfaceDocs:Theme:Colors:AccentColor"] = "#0f172a"
+                    })
+                .Build());
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var resolved = provider.GetRequiredService<AppSurfaceDocsThemeResolver>().Theme;
+
+        Assert.Equal("#0f172a", resolved.CssVariables["--docs-color-accent"]);
+        Assert.Equal("#0f172a", resolved.CssVariables["--docs-color-accent-soft"]);
+        Assert.Equal("#1e40af", resolved.CssVariables["--docs-color-accent-strong"]);
+        Assert.Equal("rgba(15, 23, 42, 0.12)", resolved.CssVariables["--docs-color-accent-glow"]);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldValidateSelectedSearchChipWhenOnlyAccentStrongIsOverridden()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Theme:Preset"] = "AppSurfaceLight",
+                        ["AppSurfaceDocs:Theme:Colors:AccentStrongColor"] = "#1e40af"
+                    })
+                .Build());
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var resolved = provider.GetRequiredService<AppSurfaceDocsThemeResolver>().Theme;
+
+        Assert.Equal("#1e3a8a", resolved.CssVariables["--docs-color-accent"]);
+        Assert.Equal("#1e40af", resolved.CssVariables["--docs-color-accent-strong"]);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsThemeResolver_ShouldEmitTheCompleteLightCssTokenInventory()
+    {
+        var repositoryRoot = ForgeTrust.AppSurface.Core.PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
+        var appCss = File.ReadAllText(
+            Path.Join(repositoryRoot, "Web", "ForgeTrust.AppSurface.Docs", "wwwroot", "css", "app.css"));
+        var searchCss = File.ReadAllText(
+            Path.Join(repositoryRoot, "Web", "ForgeTrust.AppSurface.Docs", "wwwroot", "docs", "search.css"));
+        var generatedSiteCss = File.ReadAllText(
+            Path.Join(repositoryRoot, "Web", "ForgeTrust.AppSurface.Docs", "wwwroot", "css", "site.gen.css"));
+        var rootBlock = Regex.Match(appCss, @"^:root\s*\{(?<declarations>.*?)^\}", RegexOptions.Multiline | RegexOptions.Singleline);
+        Assert.True(rootBlock.Success);
+
+        var expectedTokens = Regex.Matches(
+                rootBlock.Groups["declarations"].Value,
+                @"^\s*(--docs-(?:brand|color|shadow|focus)-[a-z0-9-]+):",
+                RegexOptions.Multiline)
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+        Assert.Equal(111, expectedTokens.Length);
+        Assert.Equal(expectedTokens.Length, expectedTokens.Distinct(StringComparer.Ordinal).Count());
+        Assert.All(expectedTokens, token => Assert.Contains($"{token}:", generatedSiteCss, StringComparison.Ordinal));
+
+        var resolved = new AppSurfaceDocsThemeResolver(
+            new AppSurfaceDocsOptions
+            {
+                Theme = new AppSurfaceDocsThemeOptions { Preset = AppSurfaceDocsThemePreset.AppSurfaceLight }
+            }).Theme;
+        var expectedOrdered = expectedTokens.Append("--docs-color-accent-glow").Order(StringComparer.Ordinal).ToArray();
+        var actualOrdered = resolved.CssVariables.Keys.Order(StringComparer.Ordinal).ToArray();
+
+        Assert.Equal(expectedOrdered, actualOrdered);
+        Assert.Equal(expectedOrdered, resolved.CssVariableStyle.Split(';', StringSplitOptions.RemoveEmptyEntries)
+            .Select(declaration => declaration[..declaration.IndexOf(':')])
+            .ToArray());
+
+        var searchAliasTargets = Regex.Matches(
+                searchCss,
+                @"^\s*--docs-search-[a-z0-9-]+:\s*var\((--docs-[a-z0-9-]+),",
+                RegexOptions.Multiline)
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+        Assert.Equal(34, searchAliasTargets.Length);
+        Assert.All(searchAliasTargets, target => Assert.Contains(target, actualOrdered, StringComparer.Ordinal));
+    }
+
+    [Fact]
     public void AddAppSurfaceDocs_ShouldRejectNullServiceCollection()
     {
         IServiceCollection services = null!;
@@ -511,7 +750,7 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Theory]
-    [InlineData("AppSurfaceDocs:Theme:Preset", "99", "Allowed values are AppSurfaceDark and GraphiteDark")]
+    [InlineData("AppSurfaceDocs:Theme:Preset", "99", "Allowed values are AppSurfaceDark, GraphiteDark, and AppSurfaceLight")]
     [InlineData("AppSurfaceDocs:Theme:Layout:Density", "99", "Allowed values are Comfortable and Compact")]
     [InlineData("AppSurfaceDocs:Theme:Layout:Chrome", "99", "Allowed values are Standard and Compact")]
     public void AddAppSurfaceDocs_ShouldRejectUnsupportedThemeEnums(
@@ -596,6 +835,31 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.Contains(ex.Failures, failure => failure.Contains(key, StringComparison.OrdinalIgnoreCase));
         Assert.Contains(ex.Failures, failure => failure.Contains(expectedFailureFragment, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldRejectLightSelectedSearchChipColorsThatFailCombinedContrast()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Theme:Preset"] = "AppSurfaceLight",
+                        ["AppSurfaceDocs:Theme:Colors:AccentColor"] = "#2563eb",
+                        ["AppSurfaceDocs:Theme:Colors:AccentStrongColor"] = "#2563eb"
+                    })
+                .Build());
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var exception = Assert.Throws<OptionsValidationException>(
+            () => _ = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value);
+
+        Assert.Contains(exception.Failures, failure => failure.Contains("AccentColor and AppSurfaceDocs:Theme:Colors:AccentStrongColor", StringComparison.Ordinal));
+        Assert.Contains(exception.Failures, failure => failure.Contains("selected search-chip", StringComparison.Ordinal));
+        Assert.Contains(exception.Failures, failure => failure.Contains("4.5:1", StringComparison.Ordinal));
     }
 
     [Fact]
