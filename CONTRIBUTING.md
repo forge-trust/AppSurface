@@ -96,6 +96,21 @@ It deliberately accepts no project-selection, filter, output, or merge arguments
 [`appsurface coverage` commands](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run)
 when a contributor needs a focused run or a shard merge.
 
+### CI test-result diagnostics
+
+The GitHub Actions full-solution coverage lane publishes a bounded, failure-first test summary from
+the AppSurface-managed JUnit output. The CLI owns this report alongside its slow-test diagnostics:
+it names failed projects and test cases, includes safely truncated failure detail, and never exceeds
+the GitHub step-summary limit. This summary deliberately replaces the per-project GitHub Actions
+test logger in the broad coverage lane, which can exceed that limit as the suite grows. Download the
+`test-result-diagnostics` artifact for the complete JUnit XML and per-project `dotnet test` logs,
+especially for fork pull requests where [Codecov test-result reporting](https://docs.codecov.com/docs/test-analytics)
+is unavailable without a repository token.
+
+The coverage run treats missing or malformed JUnit evidence as a diagnostics warning, never as a
+replacement failure for the original test result; use the artifact and the coverage-step log to
+diagnose that condition.
+
 The wrapper requires a non-sandboxed host by default and fails before discovery, cleanup, build,
 or tests when an explicit sandbox marker is enabled. Set `COVERAGE_REQUIRE_NON_SANDBOX=false` only
 when a restricted run is intentional. The check does not classify generic CI or container hosts as sandboxes; see the

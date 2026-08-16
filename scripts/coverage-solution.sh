@@ -83,7 +83,6 @@ dotnet_run_args+=(
   --exclusive-test-project ForgeTrust.AppSurface.Web.Tailwind.Tests.csproj
   --test-results junit
   --slow-test-diagnostics
-  --logger "GitHubActions;report-warnings=false"
 )
 
 if [[ "${BUILD_NO_RESTORE:-false}" == "true" ]]; then
