@@ -269,6 +269,7 @@ public sealed class AppSurfaceThemeWebIntegrationTests
         Assert.Equal("color-scheme: light;", output.Attributes["style"]?.Value);
         Assert.Null(output.Attributes["data-as-theme"]);
         Assert.Null(output.Attributes["data-as-theme-mode"]);
+        Assert.Null(output.Attributes["data-as-theme-schema"]);
         Assert.Null(output.Attributes["data-as-theme-color-scheme-conflict"]);
     }
 

@@ -3,13 +3,15 @@ using Microsoft.AspNetCore.Razor.TagHelpers;
 
 namespace ForgeTrust.AppSurface.Web.TagHelpers;
 
-/// <summary>Applies safe AppSurface theme identity and color-scheme metadata to an HTML root.</summary>
+/// <summary>Applies safe AppSurface theme identity and color-scheme metadata to an opted-in HTML root.</summary>
 /// <remarks>
 /// Use <c>&lt;html appsurface-theme-root&gt;</c> after explicitly registering
 /// <see cref="AppSurfaceWebThemingServiceCollectionExtensions.AddAppSurfaceWebTheming(Microsoft.Extensions.DependencyInjection.IServiceCollection)"/>
 /// or <see cref="AppSurfaceWebThemingServiceCollectionExtensions.AddAppSurfaceWebThemeSelection(Microsoft.Extensions.DependencyInjection.IServiceCollection)"/>.
 /// Existing attributes are preserved. An existing <c>style</c> attribute retains its declarations and receives the
 /// generated color-scheme declaration only when it does not already name <c>color-scheme</c>.
+/// Set <c>appsurface-theme-root="false"</c> when the embedding layout owns a fixed color-scheme and must not emit
+/// host theme metadata.
 /// </remarks>
 [HtmlTargetElement("html", Attributes = AttributeName)]
 public sealed class AppSurfaceThemeRootTagHelper : TagHelper
@@ -18,7 +20,7 @@ public sealed class AppSurfaceThemeRootTagHelper : TagHelper
     public const string AttributeName = "appsurface-theme-root";
 
     /// <summary>
-    /// Gets or sets whether the opt-in root marker should apply the registered theme document.
+    /// Gets or sets whether the opt-in root marker should apply the registered theme document. Defaults to <see langword="true"/>.
     /// </summary>
     /// <remarks>
     /// Set this to <see langword="false"/> when an embedding layout owns a complete fixed color-scheme contract and

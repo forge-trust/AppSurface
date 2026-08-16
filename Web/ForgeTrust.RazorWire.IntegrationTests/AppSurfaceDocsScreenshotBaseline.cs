@@ -30,10 +30,11 @@ internal static partial class AppSurfaceDocsScreenshotBaseline
     /// Disables non-deterministic visual effects and compares the current page with its named committed baseline.
     /// </summary>
     /// <param name="page">The page that has reached its route-specific ready state.</param>
-    /// <param name="baselineFileName">A PNG file name below the selected baseline directory.</param>
+    /// <param name="baselineFileName">A safe PNG file name resolved below the selected baseline directory.</param>
     /// <param name="testResultsDirectory">Directory where mismatch artifacts are written.</param>
     /// <param name="baselineDirectory">
-    /// Repository-relative baseline directory. Omit this value to use the existing Graphite baseline family.
+    /// Repository-relative baseline directory for a non-default baseline family. Omit this value to use the existing
+    /// Graphite family; provide it only when selecting another family. The named PNG must remain beneath this directory.
     /// </param>
     /// <param name="cancellationToken">Cancellation token for screenshot and file operations.</param>
     /// <returns>A task that completes when the baseline matches or is explicitly refreshed.</returns>

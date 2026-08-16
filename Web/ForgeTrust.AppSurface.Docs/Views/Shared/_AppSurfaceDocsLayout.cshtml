@@ -83,13 +83,14 @@
     var docsThemeStyle = docsTheme.UsesSharedTheme
         ? "scrollbar-gutter: stable;"
         : $"scrollbar-gutter: stable; {docsTheme.CssVariableStyle}";
-    if (!string.IsNullOrWhiteSpace(docsTheme.RootColorScheme))
+    var ownsFixedColorScheme = !string.IsNullOrWhiteSpace(docsTheme.RootColorScheme);
+    if (ownsFixedColorScheme)
     {
         docsThemeStyle = $"color-scheme: {docsTheme.RootColorScheme}; {docsThemeStyle}";
     }
 }
 <!DOCTYPE html>
-<html appsurface-theme-root="@(docsTheme.Preset != ForgeTrust.AppSurface.Docs.AppSurfaceDocsThemePreset.AppSurfaceLight)"
+<html appsurface-theme-root="@(!ownsFixedColorScheme)"
       lang="en"
       class="@docsThemeRootClass"
       style="@docsThemeStyle"
@@ -100,7 +101,7 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>@ViewData["Title"] - @docsIdentity.DisplayName</title>
-    @if (docsTheme.RootColorScheme is null)
+    @if (!ownsFixedColorScheme)
     {
         <appsurface-theme-head nonce="@themeCspNonce" />
     }
