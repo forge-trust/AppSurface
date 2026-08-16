@@ -458,7 +458,7 @@ jobs:
               {
                 echo
                 echo
-                echo "> Slow-test diagnostics were truncated in this summary (${diagnostics_bytes} bytes total). Download the \`test-result-diagnostics\` artifact for the complete report."
+                echo "> Test-result and slow-test diagnostics were truncated in this summary (${diagnostics_bytes} bytes total). Download the \`test-result-diagnostics\` artifact for the complete report."
               } >> "$GITHUB_STEP_SUMMARY"
             fi
           else

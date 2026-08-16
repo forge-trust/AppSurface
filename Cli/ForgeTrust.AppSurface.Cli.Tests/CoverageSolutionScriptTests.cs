@@ -79,6 +79,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("TestResults/coverage-merged/timings.json", workflow, StringComparison.Ordinal);
         Assert.Contains("TestResults/coverage-merged/junit-*.xml", workflow, StringComparison.Ordinal);
         Assert.Contains("TestResults/coverage-merged/projects/**/dotnet-test.log", workflow, StringComparison.Ordinal);
+        Assert.Contains("Test-result and slow-test diagnostics were truncated in this summary", workflow, StringComparison.Ordinal);
         Assert.Contains("Download the \\`test-result-diagnostics\\` artifact for the complete report.", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("render-junit-test-summary.py", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("TEST_RESULT_SUMMARY", workflow, StringComparison.Ordinal);

@@ -607,12 +607,19 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
             return;
         }
 
+        var remaining = MaxFailureDetailCharacters - builder.Length;
         if (builder.Length > 0)
         {
-            builder.AppendLine();
+            var separator = Environment.NewLine;
+            if (remaining <= separator.Length)
+            {
+                return;
+            }
+
+            builder.Append(separator);
+            remaining -= separator.Length;
         }
 
-        var remaining = MaxFailureDetailCharacters - builder.Length;
         builder.Append(value.AsSpan(0, Math.Min(value.Length, remaining)));
     }
 
@@ -734,15 +741,18 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
         builder.AppendLine();
         builder.AppendLine("## Failed test details");
         builder.AppendLine();
+        var renderedSummaryBytes = Encoding.UTF8.GetByteCount(builder.ToString());
         var renderedFailures = 0;
         foreach (var candidate in report.FailedTestCases.Select(RenderFailureBlock))
         {
-            if (Encoding.UTF8.GetByteCount(builder.ToString()) + Encoding.UTF8.GetByteCount(candidate) > MaxTestResultSummaryBytes - 512)
+            var candidateBytes = Encoding.UTF8.GetByteCount(candidate);
+            if (renderedSummaryBytes + candidateBytes > MaxTestResultSummaryBytes - 512)
             {
                 break;
             }
 
             builder.Append(candidate);
+            renderedSummaryBytes += candidateBytes;
             renderedFailures++;
         }
 
@@ -768,9 +778,12 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
         var detail = string.IsNullOrWhiteSpace(testCase.FailureDetail)
             ? "No failure message or stack trace was included in the JUnit result."
             : testCase.FailureDetail;
+        var summaryLabel = LimitText(label, 768)
+            .Replace("\r", " ", StringComparison.Ordinal)
+            .Replace("\n", " ", StringComparison.Ordinal);
         var builder = new StringBuilder();
         builder.AppendLine("<details>");
-        builder.AppendLine($"<summary>{EscapeHtml(LimitText(label, 768))}</summary>");
+        builder.AppendLine($"<summary>{EscapeHtml(summaryLabel)}</summary>");
         builder.AppendLine();
         builder.AppendLine($"Duration: `{EscapeHtml(FormatSeconds(testCase.Seconds))}`");
         builder.AppendLine();

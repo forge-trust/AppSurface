@@ -2011,6 +2011,8 @@ public sealed class CoverageRunTests
         Assert.Contains("error trace", markdown, StringComparison.Ordinal);
         Assert.Contains("attribute-only", markdown, StringComparison.Ordinal);
         Assert.Contains("Pipe\\|Class.Fail Name", markdown, StringComparison.Ordinal);
+        Assert.Contains("<summary>failed: tests/Sample.Tests/Sample.Tests.csproj — Pipe|Class.Fail Name</summary>", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("Pipe|Class.Fail\nName</summary>", markdown, StringComparison.Ordinal);
         Assert.Contains("| 3 | failed |", markdown, StringComparison.Ordinal);
         Assert.Contains("| 2 | error |", markdown, StringComparison.Ordinal);
         Assert.Contains("| 1 | skipped |", markdown, StringComparison.Ordinal);
@@ -2052,6 +2054,23 @@ public sealed class CoverageRunTests
         Assert.Equal(
             report.Warnings,
             root.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()));
+    }
+
+    [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldPreserveBoundedFailureMessageWhenNoRoomRemainsForBody()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var message = new string('m', 1023);
+        var junit = repo.WriteFile(
+            "junit.xml",
+            $"<testsuite><testcase classname=\"SampleTests\" name=\"Failure\" time=\"1\"><failure message=\"{message}\">failure body</failure></testcase></testsuite>");
+
+        var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync(
+            [CreateProjectRunResult(repo.Path, junit)],
+            CancellationToken.None);
+
+        var failure = Assert.Single(report.FailedTestCases);
+        Assert.Equal(message, failure.FailureDetail);
     }
 
     [Fact]
