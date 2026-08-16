@@ -670,6 +670,13 @@ internal static class AppSurfaceDocsThemePolicy
         variables[name] = value;
     }
 
+    /// <summary>Exercises the derived-token inventory guard through the supported internal test seam.</summary>
+    internal static void SetDerivedVariableForTesting(
+        Dictionary<string, string> variables,
+        string name,
+        string value,
+        bool requireExistingKeys) => SetDerivedVariable(variables, name, value, requireExistingKeys);
+
     private static void ApplyOverrides(Dictionary<string, string> variables, AppSurfaceDocsThemeColorOptions colors)
     {
         if (AppSurfaceDocsIdentityPath.TryNormalizeCssHexColor(colors.AccentColor, out var accentColor, out _)
@@ -1056,6 +1063,10 @@ internal static class AppSurfaceDocsThemePolicy
         color = Composite(new RgbColor(red, green, blue), alpha, ParseHexColor(canvasColor));
         return true;
     }
+
+    /// <summary>Exercises CSS-color parsing branches without exposing the parsed implementation type.</summary>
+    internal static bool CanParseCssColorForTesting(string value, string canvasColor) =>
+        TryParseCssColor(value, canvasColor, out _);
 
     private static double RelativeLuminance(RgbColor color)
     {
