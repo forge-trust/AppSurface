@@ -1971,9 +1971,10 @@ public sealed class CoverageRunTests
         var junit = repo.WriteFile(
             "junit.xml",
             """
-            <testsuite tests="5" failures="1" errors="1" skipped="1">
+            <testsuite tests="6" failures="2" errors="1" skipped="1">
               <testcase classname="Pipe|Class" name="Fail&#10;Name" time="3"><failure message="summary failure">failure trace</failure></testcase>
               <testcase classname="ErrorClass" name="ErrorName" time="2"><error>error trace</error></testcase>
+              <testcase classname="EmptyFailureClass" name="EmptyFailureName" time="1.5"><failure message="attribute-only" /></testcase>
               <testcase classname="SkipClass" name="SkipName" time="1"><skipped /></testcase>
               <testcase time="-1" />
               <testcase classname="BadTime" name="Nan" time="NaN" />
@@ -2004,10 +2005,11 @@ public sealed class CoverageRunTests
         Assert.Contains(report.Warnings, warning => warning.Contains("invalid time 'NaN'", StringComparison.Ordinal));
         var markdown = File.ReadAllText(stagedMarkdownPath);
         Assert.Contains("# Test Results", markdown, StringComparison.Ordinal);
-        Assert.Contains("| 5 | 2 | 1 | 1 | 1 |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| 6 | 2 | 2 | 1 | 1 |", markdown, StringComparison.Ordinal);
         Assert.Contains("summary failure", markdown, StringComparison.Ordinal);
         Assert.Contains("failure trace", markdown, StringComparison.Ordinal);
         Assert.Contains("error trace", markdown, StringComparison.Ordinal);
+        Assert.Contains("attribute-only", markdown, StringComparison.Ordinal);
         Assert.Contains("Pipe\\|Class.Fail Name", markdown, StringComparison.Ordinal);
         Assert.Contains("| 3 | failed |", markdown, StringComparison.Ordinal);
         Assert.Contains("| 2 | error |", markdown, StringComparison.Ordinal);
@@ -2080,6 +2082,83 @@ public sealed class CoverageRunTests
         Assert.Contains("Showing 25 of 30 failed or errored test case(s).", markdown, StringComparison.Ordinal);
         Assert.Contains("&lt;script&gt;", markdown, StringComparison.Ordinal);
         Assert.DoesNotContain("<script>", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldBoundLargeFailureAndWarningReports()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var projects = Enumerable.Range(0, 30)
+            .Select(index => new CoverageRunSlowTestProject(
+                $"tests/{new string('p', 1024)}-{index}.Tests.csproj",
+                Exclusive: false,
+                Seconds: index,
+                ExitCode: 1,
+                JunitFile: null,
+                ParserStatus: "notRequested",
+                LogFile: Path.Join(repo.Path, $"project-{index}.log")))
+            .ToArray();
+        var failedTestCases = Enumerable.Range(0, 25)
+            .Select(index => new CoverageRunSlowTestCase(
+                new string('n', 2048),
+                $"Failure{index}",
+                index,
+                "failed",
+                projects[index].Project,
+                $"junit-{index}.xml",
+                index == 0 ? null : new string('x', 4096)))
+            .ToArray();
+        var report = new CoverageRunSlowTestDiagnosticsReport(
+            CoverageRunSlowTestDiagnosticsWriter.SchemaVersion,
+            DateTimeOffset.UtcNow,
+            MetadataComplete: false,
+            JunitFileCount: 0,
+            projects,
+            TestCaseCount: 30,
+            FailedTestCaseCount: 30,
+            ErrorTestCaseCount: 0,
+            SkippedTestCaseCount: 0,
+            failedTestCases,
+            TopTestCases: [],
+            Warnings: Enumerable.Range(0, 100)
+                .Select(index => $"{new string('a', index)}{string.Concat(Enumerable.Repeat("😀", 1024))}")
+                .ToArray());
+        var stagedMarkdownPath = TestPathUtils.PathUnder(repo.Path, $".{CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName}.{Guid.NewGuid():N}.tmp");
+        var stagedJsonPath = TestPathUtils.PathUnder(repo.Path, $".{CoverageRunSlowTestDiagnosticsWriter.JsonFileName}.{Guid.NewGuid():N}.tmp");
+
+        await CoverageRunSlowTestDiagnosticsWriter.WriteAsync(
+            stagedMarkdownPath,
+            stagedJsonPath,
+            repo.Path,
+            report,
+            () => 0,
+            _ => 0,
+            CancellationToken.None);
+
+        var markdown = File.ReadAllText(stagedMarkdownPath);
+        Assert.True(Encoding.UTF8.GetByteCount(markdown) <= 64 * 1024);
+        Assert.Contains("5 additional project(s) are available in the artifact.", markdown, StringComparison.Ordinal);
+        Assert.Contains("No failure message or stack trace was included in the JUnit result.", markdown, StringComparison.Ordinal);
+        Assert.Contains("Showing ", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("Showing 25 of 30", markdown, StringComparison.Ordinal);
+        Assert.Contains("Slow-test diagnostics reached their output budget.", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldPreserveHigherPriorityFailureStatus()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var junit = repo.WriteFile(
+            "junit.xml",
+            "<testsuite><testcase classname=\"SampleTests\" name=\"Priority\" time=\"1\"><error>higher-priority evidence</error><failure>lower-priority evidence</failure></testcase></testsuite>");
+        var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync(
+            [CreateProjectRunResult(repo.Path, junit)],
+            CancellationToken.None);
+
+        var failure = Assert.Single(report.FailedTestCases);
+        Assert.Equal("error", failure.Status);
+        Assert.Contains("higher-priority evidence", failure.FailureDetail, StringComparison.Ordinal);
+        Assert.DoesNotContain("lower-priority evidence", failure.FailureDetail, StringComparison.Ordinal);
     }
 
     [Fact]

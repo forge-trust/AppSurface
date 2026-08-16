@@ -735,9 +735,8 @@ internal static class CoverageRunSlowTestDiagnosticsWriter
         builder.AppendLine("## Failed test details");
         builder.AppendLine();
         var renderedFailures = 0;
-        foreach (var testCase in report.FailedTestCases)
+        foreach (var candidate in report.FailedTestCases.Select(RenderFailureBlock))
         {
-            var candidate = RenderFailureBlock(testCase);
             if (Encoding.UTF8.GetByteCount(builder.ToString()) + Encoding.UTF8.GetByteCount(candidate) > MaxTestResultSummaryBytes - 512)
             {
                 break;
