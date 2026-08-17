@@ -793,6 +793,10 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
         var exception = Assert.Throws<ArgumentException>(
             () => AppSurfaceDocsStreamAuthorization.GetHarvestProgressChannel(new string('a', 65)));
         Assert.Equal("instanceName", exception.ParamName);
+
+        var blankException = Assert.Throws<ArgumentException>(
+            () => AppSurfaceDocsStreamAuthorization.GetHarvestProgressChannel(" "));
+        Assert.Equal("instanceName", blankException.ParamName);
     }
 
     private static AppSurfaceDocsOptions Options(

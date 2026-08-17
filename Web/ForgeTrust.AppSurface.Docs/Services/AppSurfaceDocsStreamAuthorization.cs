@@ -60,7 +60,7 @@ public static class AppSurfaceDocsStreamAuthorization
     /// <exception cref="ArgumentException">Thrown when <paramref name="instanceName"/> is blank or is not a valid Docs product name.</exception>
     public static string GetHarvestProgressChannel(string instanceName)
     {
-        return $"{HarvestProgressChannel}-{AppSurfaceDocsInstanceDeclaration.NormalizeName(instanceName).ToLowerInvariant()}";
+        return $"{HarvestProgressChannel}-{AppSurfaceDocsInstanceDeclaration.NormalizeName(instanceName, nameof(instanceName)).ToLowerInvariant()}";
     }
 
     /// <summary>

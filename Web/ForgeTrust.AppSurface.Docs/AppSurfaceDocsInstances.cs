@@ -340,9 +340,15 @@ internal sealed class AppSurfaceDocsInstanceDeclaration
         }
     }
 
-    internal static string NormalizeName(string name)
+    /// <summary>
+    /// Normalizes and validates a named Docs product identifier.
+    /// </summary>
+    /// <param name="name">The identifier to validate.</param>
+    /// <param name="parameterName">The public API parameter to identify when validation fails.</param>
+    /// <returns>The trimmed identifier.</returns>
+    internal static string NormalizeName(string name, string parameterName = "name")
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name, parameterName);
 
         var normalized = name.Trim();
         if (normalized.Length > MaximumNameLength
@@ -350,7 +356,7 @@ internal sealed class AppSurfaceDocsInstanceDeclaration
         {
             throw new ArgumentException(
                 "AppSurface Docs instance names must be 1-64 ASCII letters, digits, hyphens, or underscores.",
-                nameof(name));
+                parameterName);
         }
 
         return normalized;

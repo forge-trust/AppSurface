@@ -46,7 +46,7 @@ public class AppSurfaceDocsViewsTests
         var layout = ReadLayoutMarkup();
         Assert.Contains("id=\"docs-search-input\"", layout);
         Assert.Contains("id=\"docs-search-results\"", layout);
-        Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"search.css\")", layout);
+        Assert.Contains("assetVersioner.BuildVersionedDocsAssetUrl(docsUrlBuilder, \"search.css\")", layout);
         Assert.Contains("docsSearchIndexUrl", layout);
         Assert.Contains("var isSearchPage = string.Equals(", layout);
         Assert.Contains("crossorigin=\"use-credentials\"", layout);
@@ -54,9 +54,9 @@ public class AppSurfaceDocsViewsTests
         Assert.DoesNotContain("src=\"~/docs/outline-client.js\"", layout);
         Assert.Contains("window.__appSurfaceDocsConfig", layout);
         Assert.Contains("rel=\"icon\" type=\"image/svg+xml\" href=\"@docsBrandIconUrl\"", layout);
-        Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"search-client.js\")", layout);
-        Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"minisearch.min.js\")", layout);
-        Assert.Contains("ThemeResolver.Theme", layout);
+        Assert.Contains("assetVersioner.BuildVersionedDocsAssetUrl(docsUrlBuilder, \"search-client.js\")", layout);
+        Assert.Contains("assetVersioner.BuildVersionedDocsAssetUrl(docsUrlBuilder, \"minisearch.min.js\")", layout);
+        Assert.Contains("themeResolver.Theme", layout);
         Assert.Contains("data-docs-theme-preset", layout);
         Assert.Contains("data-docs-density", layout);
         Assert.Contains("data-docs-chrome", layout);
