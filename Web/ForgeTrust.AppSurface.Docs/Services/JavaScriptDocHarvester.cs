@@ -677,8 +677,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 HeadingLevel = 3,
                 TopLevelDeclarationStartLine = classDeclaration.Location.Start.Line,
                 DeclarationOrdinal = ordinal,
-                DeclaringClassName = className,
-                ClassMemberKind = shape.Kind
+                DeclaringClassName = className
             };
 
             members.Add(item);
@@ -1085,14 +1084,13 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         var name = declarator.Id is Identifier identifier ? identifier.Name : null;
         if (declarator.Init is ClassExpression classExpression)
         {
-            ClaimDirectClassMemberComments(comments, attachedCommentStarts, source, classExpression.Body);
-            AddUnsupportedAttachedItem(
+            AddUnsupportedClassExpression(
                 comments,
                 attachedCommentStarts,
                 source,
                 relativePath,
                 attachmentNode,
-                "JavaScript class expressions are not supported by JavaScript API harvesting.",
+                classExpression,
                 diagnostics);
             return;
         }
@@ -3768,13 +3766,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
         public string? DeclaringClassName { get; init; }
 
-        public JavaScriptClassMemberKind? ClassMemberKind { get; init; }
-
-        public string DisplayName => DeclaringClassName is null
-            ? Name
-            : ClassMemberKind == JavaScriptClassMemberKind.Constructor
-                ? $"{DeclaringClassName}.constructor"
-                : Name;
+        public string DisplayName => Name;
     }
 
     private sealed record JavaScriptApiLifecycle(

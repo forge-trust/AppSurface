@@ -2027,7 +2027,7 @@ Pitfalls:
 - Do not attach one public doclet to `const first = ..., second = ...`; split public JavaScript API constants or functions into one declaration statement per doclet.
 - Do not rely on automatic event inference from `dispatchEvent(new CustomEvent(...))`. V1 documents explicit public doclets only.
 - Do not pair `@detail none` with `@property detail.*`; either the event has no payload or its payload shape is documented.
-- Do not put `@public` on classes, default exports, or CommonJS exports until a later harvester slice supports those shapes.
+- Do not put `@public` on default exports, CommonJS exports, derived classes, class expressions, or classes with unsupported members. Named, non-derived class declarations support their own `@public` doclets and separately annotated methods or accessors.
 - Do not treat Acornima as a runtime JavaScript execution engine. AppSurface Docs uses it only to parse configured source for documentation, and `ForgeTrust.AppSurface.Docs` carries `THIRD-PARTY-NOTICES.md` for the redistributed package.
 
 ### Published version catalog

@@ -1367,11 +1367,11 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         var harvester = CreateHarvester(CreateEnabledOptions("src/unsupported-class.js"));
 
         var docs = await harvester.HarvestAsync(_testRoot);
+        Assert.Empty(docs);
         var diagnostic = Assert.Single(
             GetDiagnostics(harvester),
             diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape);
 
-        Assert.Empty(docs);
         Assert.Contains(expectedCause, diagnostic.Cause, StringComparison.OrdinalIgnoreCase);
     }
 

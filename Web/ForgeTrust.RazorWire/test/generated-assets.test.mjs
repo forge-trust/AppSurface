@@ -105,6 +105,7 @@ test('section copy manager source markers fence the runtime class exactly once a
   const classIndex = source.indexOf('class SectionCopyManager', beginIndex);
   const endIndex = source.indexOf(endMarker, classIndex);
   const managerSource = source.slice(classIndex, endIndex);
+  const classCloseIndex = managerSource.search(/\n {4}}\s*$/);
   const runtimeMethods = managerSource
     .split('\n')
     .map(line => line.trim())
@@ -115,6 +116,7 @@ test('section copy manager source markers fence the runtime class exactly once a
 
   assert.ok(beginIndex < classIndex);
   assert.ok(classIndex < endIndex);
+  assert.ok(classCloseIndex > managerSource.lastIndexOf('clearDiagnostics('));
   assert.deepEqual(runtimeMethods, ['scan', 'prune', 'getDiagnostics', 'clearDiagnostics']);
 });
 
@@ -134,12 +136,18 @@ test('section copy public contract documents the singleton without an executable
     [...doclet.matchAll(/^\s*\*\s+@property \{Function\} (\w+)/gm)].map(match => match[1]);
   const singletonContract = getDoclet('@config window.RazorWire.sectionCopyManager');
   const managerTypedef = getDoclet('@typedef {Object} SectionCopyManager');
+  const diagnosticTypedef = getDoclet('@typedef {Object} RazorWireSectionCopyDiagnostic');
 
   assert.match(contracts, /@config window\.RazorWire\.behaviors\n \* @type \{object\}/);
   assert.match(singletonContract, /@config window\.RazorWire\.sectionCopyManager\n \* @type \{SectionCopyManager\}/);
   assert.deepEqual(getFunctionProperties(singletonContract), ['scan', 'prune', 'getDiagnostics', 'clearDiagnostics']);
   assert.match(managerTypedef, /@typedef \{Object\} SectionCopyManager/);
   assert.deepEqual(getFunctionProperties(managerTypedef), ['scan', 'prune', 'getDiagnostics', 'clearDiagnostics']);
+  assert.match(diagnosticTypedef, /@typedef \{Object\} RazorWireSectionCopyDiagnostic/);
+  assert.match(diagnosticTypedef, /@property \{string\} message/);
+  assert.match(diagnosticTypedef, /@property \{string\} impact/);
+  assert.match(diagnosticTypedef, /@property \{string\} fix/);
+  assert.match(diagnosticTypedef, /@property \{string\} docs/);
   assert.doesNotMatch(contracts, /class SectionCopyManager\s*\{/);
   assert.doesNotMatch(contracts, /@method\s+(scan|prune|getDiagnostics|clearDiagnostics)/);
 });
