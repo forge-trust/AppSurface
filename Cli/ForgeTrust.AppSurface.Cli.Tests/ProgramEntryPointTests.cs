@@ -48,10 +48,25 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("docs", result.AllText, StringComparison.Ordinal);
         Assert.Contains("docs export", result.AllText, StringComparison.Ordinal);
         Assert.Contains("coverage", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("coverage clean", result.AllText, StringComparison.Ordinal);
         Assert.Contains("secrets", result.AllText, StringComparison.Ordinal);
         Assert.Contains("durable", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EntryPoint_Should_Print_CoverageClean_Help_Without_Lifecycle_Noise()
+    {
+        var result = await InvokeEntryPointAsync(["coverage", "clean", "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Preview or explicitly clean AppSurface coverage artifacts", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--output", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--all", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--root", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--apply", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
     }
 
     [Fact]

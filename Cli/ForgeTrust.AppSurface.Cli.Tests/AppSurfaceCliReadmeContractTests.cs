@@ -185,6 +185,26 @@ public sealed class AppSurfaceCliReadmeContractTests
     }
 
     [Fact]
+    public void Readme_Should_Document_CoverageCleanup_GoldenPath_AndSafetyBoundary()
+    {
+        var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());
+
+        Assert.Contains("### `appsurface coverage clean`", readme, StringComparison.Ordinal);
+        Assert.Contains("appsurface coverage clean --apply", readme, StringComparison.Ordinal);
+        Assert.Contains("appsurface coverage clean --all --root .", readme, StringComparison.Ordinal);
+        Assert.Contains("appsurface coverage clean --all --root . --apply", readme, StringComparison.Ordinal);
+        Assert.Contains("`--apply` is required", readme, StringComparison.Ordinal);
+        Assert.Contains("The root itself is never deleted", readme, StringComparison.Ordinal);
+        Assert.Contains("does not traverse symbolic links or reparse points", readme, StringComparison.Ordinal);
+        Assert.Contains("its target is never read or removed", readme, StringComparison.Ordinal);
+        Assert.Contains("AppSurface-owned coverage artifacts", readme, StringComparison.Ordinal);
+        Assert.Contains("`ASTEST101`", readme, StringComparison.Ordinal);
+        Assert.Contains("`ASTEST102`", readme, StringComparison.Ordinal);
+        Assert.Contains("`ASTEST103`", readme, StringComparison.Ordinal);
+        Assert.Contains("`ASTEST104`", readme, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RepositoryLockFiles_ShouldNotRetainDirectMsbuildCoverageReferences()
     {
         var repositoryRoot = GetRepositoryRoot();
