@@ -49,8 +49,12 @@ public static class AppSurfaceDevAuthMarker
         var markerOptions = new AppSurfaceDevAuthMarkerOptions();
         configure?.Invoke(markerOptions);
         var classPrefix = NormalizeCssClassPrefix(markerOptions.CssClassPrefix);
-        var returnUrl = AppSurfaceDevAuthEndpointRouteBuilderExtensions.NormalizeLocalReturnUrl(
-            markerOptions.ReturnUrl ?? CreateCurrentReturnUrl(httpContext));
+        var explicitReturnUrl = markerOptions.ReturnUrl is null
+            ? null
+            : AppSurfaceDevAuthEndpointRouteBuilderExtensions.NormalizeLocalReturnUrl(markerOptions.ReturnUrl);
+        var currentReturnUrl = markerOptions.ReturnUrl is null
+            ? AppSurfaceDevAuthEndpointRouteBuilderExtensions.NormalizeLocalReturnUrl(CreateCurrentReturnUrl(httpContext))
+            : null;
         var devAuthOptions = options.Value;
         var status = AppSurfaceDevAuthEndpointRouteBuilderExtensions.BuildStatus(
             httpContext,
@@ -63,7 +67,7 @@ public static class AppSurfaceDevAuthMarker
             return string.Empty;
         }
 
-        return RenderMarker(status, devAuthOptions, markerOptions, classPrefix, returnUrl);
+        return RenderMarker(status, devAuthOptions, markerOptions, classPrefix, explicitReturnUrl, currentReturnUrl);
     }
 
     private static string RenderMarker(
@@ -71,7 +75,8 @@ public static class AppSurfaceDevAuthMarker
         AppSurfaceDevAuthOptions options,
         AppSurfaceDevAuthMarkerOptions markerOptions,
         string classPrefix,
-        string returnUrl)
+        string? explicitReturnUrl,
+        string? currentReturnUrl)
     {
         var html = HtmlEncoder.Default;
         var additionalCssClass = NormalizeCssClassList(markerOptions.AdditionalCssClass);
@@ -102,6 +107,10 @@ public static class AppSurfaceDevAuthMarker
             foreach (var persona in options.Users.Personas.Values)
             {
                 var selected = string.Equals(status.PersonaId, persona.Id, StringComparison.Ordinal);
+                var returnUrl = AppSurfaceDevAuthLocalReturnUrl.ResolveSelectTarget(
+                    explicitReturnUrl,
+                    persona.LandingUrl,
+                    currentReturnUrl);
                 var action = AppSurfaceDevAuthEndpointRouteBuilderExtensions.BuildMutationUrl(
                     options.PathPrefix,
                     "select/" + persona.Id,
@@ -112,7 +121,7 @@ public static class AppSurfaceDevAuthMarker
             var clearAction = AppSurfaceDevAuthEndpointRouteBuilderExtensions.BuildMutationUrl(
                 options.PathPrefix,
                 "clear",
-                returnUrl);
+                explicitReturnUrl ?? currentReturnUrl);
             builder.AppendLine($"<form method=\"post\" action=\"{html.Encode(clearAction)}\"><button class=\"{classPrefix}__button\">Clear</button></form>");
             builder.AppendLine("</div>");
         }

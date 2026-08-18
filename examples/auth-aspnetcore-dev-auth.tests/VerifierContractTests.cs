@@ -172,6 +172,7 @@ public sealed class VerifierContractTests
         fixture.AssertFirstCurlFollowsListenEvidence();
         Assert.Contains("/_appsurface/dev-auth/status", fixture.ReadEvents(), StringComparison.Ordinal);
         Assert.Contains("/_appsurface/dev-auth/select/viewer", fixture.ReadEvents(), StringComparison.Ordinal);
+        Assert.Contains("/viewer", fixture.ReadEvents(), StringComparison.Ordinal);
         Assert.Contains("/api/auth-proof", fixture.ReadEvents(), StringComparison.Ordinal);
         fixture.AssertNoChildrenRemain();
         Assert.Empty(fixture.FindEvidenceDirectories());
@@ -953,6 +954,7 @@ public sealed class VerifierContractTests
         status='200'
         body=''
         set_cookie=''
+        location=''
         case "$method $path" in
           'GET /')
             body='<meta name="viewport" content="width=device-width, initial-scale=1">
@@ -963,8 +965,14 @@ public sealed class VerifierContractTests
             [[ "$mode" == "http-contract-failure" || "$mode" == "sensitive-http-failure" ]] && body='wrong root body'
             ;;
           'GET /_appsurface/dev-auth/') body='AppSurface Dev Auth [FAKE LOCAL AUTH]' ;;
-          'POST /_appsurface/dev-auth/select/admin') body='Local Admin'; set_cookie='Set-Cookie: .AppSurface.DevAuth.Persona=fixture-cookie; Path=/' ;;
-          'POST /_appsurface/dev-auth/select/viewer') body='Local Viewer'; set_cookie='Set-Cookie: .AppSurface.DevAuth.Persona=viewer-cookie; Path=/' ;;
+          'POST /_appsurface/dev-auth/select/admin') status='302'; location='Location: /'; set_cookie='Set-Cookie: .AppSurface.DevAuth.Persona=fixture-cookie; Path=/' ;;
+          'POST /_appsurface/dev-auth/select/viewer') status='302'; location='Location: /viewer'; set_cookie='Set-Cookie: .AppSurface.DevAuth.Persona=viewer-cookie; Path=/' ;;
+          'GET /viewer')
+            case "$cookie" in
+              *viewer-cookie*) body='Viewer landing page' ;;
+              *) status='401'; body='{"appsurfaceAuthOutcome":"Challenge"}' ;;
+            esac
+            ;;
           'GET /api/auth-proof')
             case "$cookie" in
               *viewer-cookie*) status='403'; body='{"appsurfaceAuthOutcome":"Forbid"}' ;;
@@ -995,7 +1003,7 @@ public sealed class VerifierContractTests
         esac
 
         if [[ -n "$headers" ]]; then
-          printf 'HTTP/1.1 %s Fixture\r\n%s\r\n\r\n' "$status" "$set_cookie" > "$headers"
+          printf 'HTTP/1.1 %s Fixture\r\n%s\r\n%s\r\n\r\n' "$status" "$set_cookie" "$location" > "$headers"
         fi
         if [[ -n "$cookie_jar" && -n "$set_cookie" ]]; then
           printf '%s' "$set_cookie" > "$cookie_jar"

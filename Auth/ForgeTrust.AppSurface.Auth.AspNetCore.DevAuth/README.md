@@ -122,22 +122,48 @@ To return to a host page after selecting or clearing a persona, open the control
 /_appsurface/dev-auth/?returnUrl=%2Fprotected%3Ftab%3Dauth
 ```
 
-DevAuth carries a safe rooted local path through every select and clear form action, then returns through the existing local redirect after the mutation. An explicit `/` is valid. Missing, blank, non-rooted, absolute, protocol-relative, backslash-containing, or control-character values are omitted from the forms; submitting then leaves the browser on the normal updated DevAuth control response. Rejected targets do not produce a diagnostic because omission is the fail-closed fallback.
+DevAuth carries a safe rooted local path through every select and clear form action, then returns through the existing local redirect after the mutation. An explicit `/` is valid. Missing, blank, non-rooted, absolute, protocol-relative, backslash-containing, or control-character request values are omitted from the forms; submitting then leaves the browser on the normal updated DevAuth control response. Rejected request targets do not produce a diagnostic because omission is the fail-closed fallback.
 
-The control page lets you select a seeded persona, clear the persona cookie, inspect safe local claims, and copy a visible marker such as `DEV AUTH: Local Admin (AppSurface.DevAuth)`. For a persistent in-app indicator, render `AppSurfaceDevAuthMarker` from your local layout or proof page. The renderer returns an empty string when the current environment is not in `AllowedEnvironmentNames`, so layouts do not need their own `environment.IsDevelopment()` guard. With default styles, the marker is a fixed bottom-right overlay above 640 CSS pixels and participates in normal document flow at widths up to and including 640 CSS pixels. It starts collapsed, keeps the active fake persona visible, and expands to POST-only persona controls that return to the current page after selection.
+### Persona Landing URLs
+
+When a fake persona should recover to a page it can use after selection, configure a safe local landing URL on that persona:
+
+```csharp
+dev.Users.Add(
+    "viewer",
+    user => user
+        .DisplayName("Local Viewer")
+        .Subject("viewer-1")
+        .Claim("role", "viewer")
+        .LandingUrl("/viewer"));
+```
+
+DevAuth resolves a successful persona selection in this order:
+
+| Target | Use it when | Invalid-value behavior |
+| --- | --- | --- |
+| Explicit host `returnUrl` | The control-page request or marker explicitly names a safe target | Request values are omitted. |
+| Selected persona `LandingUrl` | No explicit safe host target exists | Registration fails with `ASDEV007`; DevAuth never silently normalizes configured landing metadata to `/`. |
+| Source fallback | Neither target exists | The control page renders its updated response; the marker returns to the current host path and query. |
+
+`LandingUrl` is local-proof navigation metadata, not authorization policy. DevAuth does not verify that a persona can access the configured page. Keep the landing path rooted and local, and let the host own authorization. Clearing a persona never uses its prior landing URL.
+
+The control page lets you select a seeded persona, clear the persona cookie, inspect safe local claims, and copy a visible marker such as `DEV AUTH: Local Admin (AppSurface.DevAuth)`. For a persistent in-app indicator, render `AppSurfaceDevAuthMarker` from your local layout or proof page. The renderer returns an empty string when the current environment is not in `AllowedEnvironmentNames`, so layouts do not need their own `environment.IsDevelopment()` guard. With default styles, the marker is a fixed bottom-right overlay above 640 CSS pixels and participates in normal document flow at widths up to and including 640 CSS pixels. It starts collapsed, keeps the active fake persona visible, and expands to POST-only persona controls that prefer the selected persona's landing URL over the marker's implicit current-page fallback.
 
 The host must provide `<meta name="viewport" content="width=device-width, initial-scale=1">` so the 640 CSS-pixel breakpoint tracks the device width. Render the marker after persistent application chrome and before `<main>` (or the equivalent primary content container). At narrow widths, that host-owned location becomes the marker's in-flow position, so opening the disclosure pushes following content rather than covering it. The host also owns outer spacing and the containing layout.
 
 ## API Reference
 
 - `AddAppSurfaceDevAuth(IHostEnvironment environment, Action<AppSurfaceDevAuthOptions> configure)` registers the named DevAuth authentication scheme and startup safety validation. The `configure` callback is evaluated once during registration, and the same validated options are used for both scheme registration and runtime DevAuth behavior.
-- `MapAppSurfaceDevAuth(this IEndpointRouteBuilder endpoints)` maps the local-only control page, status JSON, select persona endpoint, and clear persona endpoint. The control-page GET accepts an optional safe rooted local `returnUrl`, carries it through every select and clear form action, and returns through a local redirect after successful mutation. Missing or rejected targets are omitted, so mutations render the updated control page normally. Control and mutation endpoints return not found when the active environment is not allowed; status remains read-only and reports `enabled: false`. The control page root always includes a static-auditable DevAuth control-page marker attribute so static export audits can reject DevAuth UI before it is written to disk.
+- `MapAppSurfaceDevAuth(this IEndpointRouteBuilder endpoints)` maps the local-only control page, status JSON, select persona endpoint, and clear persona endpoint. The control-page GET accepts an optional safe rooted local `returnUrl`, carries it through every select and clear form action, and preserves it after successful mutation. Without an explicit safe target, selecting a persona uses its configured `LandingUrl` when present; otherwise selection renders the updated control response. Clear does not use persona landing metadata. Rejected request targets are omitted. Control and mutation endpoints return not found when the active environment is not allowed; status remains read-only and reports `enabled: false`. The control page root always includes a static-auditable DevAuth control-page marker attribute so static export audits can reject DevAuth UI before it is written to disk.
 - `AppSurfaceDevAuthMarker.Render(HttpContext, IHostEnvironment, IOptions<AppSurfaceDevAuthOptions>, IDataProtectionProvider, Action<AppSurfaceDevAuthMarkerOptions>?)` returns safe HTML for an explicit in-app DevAuth state marker. It returns `string.Empty` when the active environment is not allowed. With default styles, the marker is fixed above 640 CSS pixels and in flow at or below 640 CSS pixels. The marker root always includes a static-auditable DevAuth marker attribute so static export audits can reject DevAuth UI even when the CSS class prefix is customized.
 - `AppSurfaceDevAuthDefaults.AuthenticationScheme` is `AppSurface.DevAuth`.
 - `AppSurfaceDevAuthDefaults.PathPrefix` is `/_appsurface/dev-auth`.
 - `AppSurfaceDevAuthDefaults.CookieName` is `.AppSurface.DevAuth.Persona`.
 - `AppSurfaceDevAuthDefaults.SubjectClaimType` is `sub`.
 - `AppSurfaceDevAuthOptions.Users` contains seeded local personas.
+- `AppSurfaceDevAuthUserBuilder.LandingUrl(string landingUrl)` configures a selected persona's optional safe local fallback after selection. It is validated during registration and throws `ASDEV007` for blank, non-rooted, absolute, protocol-relative, backslash-containing, or control-character values.
+- `AppSurfaceDevAuthPersona.LandingUrl` exposes the immutable nullable configured landing URL. It is navigation metadata only; it is not a claim, cookie payload, status field, or authorization decision.
 - `AppSurfaceDevAuthOptions.SchemeName` overrides the registered authentication scheme. It defaults to `AppSurfaceDevAuthDefaults.AuthenticationScheme`.
 - `AppSurfaceDevAuthOptions.PathPrefix` overrides the local control-page and status endpoint path prefix. It defaults to `AppSurfaceDevAuthDefaults.PathPrefix`.
 - `AppSurfaceDevAuthOptions.CookieName` overrides the selected-persona cookie name. It defaults to `AppSurfaceDevAuthDefaults.CookieName`.
@@ -151,7 +177,7 @@ The host must provide `<meta name="viewport" content="width=device-width, initia
 - `AppSurfaceDevAuthMarkerOptions.IncludeDefaultStyles` is on by default. Disable it to skin and position the marker entirely with host CSS.
 - `AppSurfaceDevAuthMarkerOptions.ShowPersonaControls` is on by default. Disable it when a page should show state but send persona changes through the full control page.
 - `AppSurfaceDevAuthMarkerOptions.StartExpanded` is off by default to keep the fixed desktop overlay compact. Enable it when a proof page should show controls immediately; at narrow widths, the default-styled expanded marker remains in flow.
-- `AppSurfaceDevAuthMarkerOptions.ReturnUrl` overrides the local page that marker POSTs return to. When unset, DevAuth returns to the current request path and query.
+- `AppSurfaceDevAuthMarkerOptions.ReturnUrl` is an explicit host-owned target that overrides persona landing URLs. When unset, marker selection uses a configured persona landing URL first and otherwise returns to the current request path and query.
 
 Persona IDs must be route-safe local identifiers containing only ASCII letters, digits, `.`, `_`, or `-`. The dot-segment IDs `.` and `..` are not allowed, and ids that look like tokens, secrets, passwords, keys, credentials, or emails are rejected. Persona IDs are used in the selection endpoint path and stored as the protected cookie payload.
 
@@ -302,6 +328,7 @@ DevAuth diagnostics use `Problem:`, `Cause:`, `Fix:`, and `Docs:` wording and th
 | `ASDEV004` | A selected persona did not contain the configured subject claim. |
 | `ASDEV005` | The reserved path prefix was invalid or conflicted with the local control surface. |
 | `ASDEV006` | A persona id was invalid, unknown, stale, duplicated, or tampered. |
+| `ASDEV007` | A configured persona `LandingUrl` was blank or not a safe rooted local path. |
 
 Diagnostics, HTML, and status JSON do not include raw tokens, secrets, passwords, raw emails, or unbounded identity-provider payloads.
 
@@ -312,6 +339,7 @@ Diagnostics, HTML, and status JSON do not include raw tokens, secrets, passwords
 - Call `MapAppSurfaceDevAuth()` so the persona lab and status JSON exist.
 - Add `AppSurfaceDevAuthDefaults.AuthenticationScheme` to policies that should evaluate DevAuth personas.
 - Use simple route-safe persona IDs such as `admin`, `viewer`, or `qa.local_1`; dot segments, sensitive-looking ids, query strings, fragments, encoded slashes, spaces, and other punctuation are rejected with `ASDEV006`.
+- Configure `LandingUrl(...)` only with a safe rooted local path. Unlike a request `returnUrl`, an unsafe configured landing URL stops registration with `ASDEV007`; DevAuth does not silently redirect it to `/`.
 - Call `Subject(...)` for every persona and keep it aligned with `AddAppSurfaceAspNetCoreAuth(options => options.MapSubjectClaim(...))`.
 - Keep the DevAuth marker visible in local sample pages so fake auth is impossible to miss.
 - Prefer `AppSurfaceDevAuthMarker.Render(...)` over copying the generated control-page HTML. Use `StartExpanded = true` when the marker should show controls immediately, and use `IncludeDefaultStyles = false`, `CssClassPrefix`, and `AdditionalCssClass` when the marker needs to match a consumer app.
@@ -319,8 +347,11 @@ Diagnostics, HTML, and status JSON do not include raw tokens, secrets, passwords
 - DevAuth does not automatically inject a marker into arbitrary responses. Add it explicitly to the pages or local layout where the fake-auth state should be visible; the renderer self-suppresses outside allowed environments.
 - If persona selection returns a same-origin 403, make sure custom local UI posts from the same scheme, host, and port as the mapped DevAuth endpoints.
 - If persona selection leaves you in the persona lab, verify that the initial control-page URL contained a URI-encoded, rooted local `returnUrl`. Inspect the rendered form action when debugging; rejected values are intentionally omitted rather than diagnosed or redirected to `/`.
+- If a lower-privilege persona returns to an unusable page from the marker, leave `AppSurfaceDevAuthMarkerOptions.ReturnUrl` unset and configure that persona's `LandingUrl(...)`. Set the marker option only when the host deliberately owns the destination for every persona.
 
 ## Upgrade And Removal
+
+`LandingUrl` is an additive opt-in feature. Existing DevAuth hosts that do not configure it keep their current control-page and marker fallback behavior. Hosts that add it should verify the landing page in local proof, but no cookie, endpoint, status-JSON, or production-auth migration is required.
 
 Remove DevAuth before deploying a host:
 

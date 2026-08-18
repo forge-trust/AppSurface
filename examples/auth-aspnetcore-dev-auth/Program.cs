@@ -14,6 +14,12 @@ builder.Services.AddAuthorization(options =>
             .AddAuthenticationSchemes(AppSurfaceDevAuthDefaults.AuthenticationScheme)
             .RequireAuthenticatedUser()
             .RequireClaim("role", "operator"));
+    options.AddAppSurfacePolicy(
+        "ViewersOnly",
+        policy => policy
+            .AddAuthenticationSchemes(AppSurfaceDevAuthDefaults.AuthenticationScheme)
+            .RequireAuthenticatedUser()
+            .RequireClaim("role", "viewer"));
 });
 
 builder.Services.AddAppSurfaceAspNetCoreAuth(options => options.MapSubjectClaim("sub"));
@@ -25,14 +31,16 @@ builder.Services.AddAppSurfaceDevAuth(builder.Environment, dev =>
             .DisplayName("Local Admin")
             .Subject("admin-1")
             .Claim("role", "operator")
-            .Claim("tenant", "local-demo"));
+            .Claim("tenant", "local-demo")
+            .LandingUrl("/"));
     dev.Users.Add(
         "viewer",
         user => user
             .DisplayName("Local Viewer")
             .Subject("viewer-1")
             .Claim("role", "viewer")
-            .Claim("tenant", "local-demo"));
+            .Claim("tenant", "local-demo")
+            .LandingUrl("/viewer"));
 });
 
 var app = builder.Build();
@@ -82,6 +90,50 @@ app.MapGet("/", (
     """,
         "text/html");
 });
+
+app.MapGet("/viewer", (
+    HttpContext httpContext,
+    IHostEnvironment environment,
+    IOptions<AppSurfaceDevAuthOptions> devAuthOptions,
+    IDataProtectionProvider dataProtectionProvider) =>
+{
+    var marker = AppSurfaceDevAuthMarker.Render(
+        httpContext,
+        environment,
+        devAuthOptions,
+        dataProtectionProvider,
+        options => options.AdditionalCssClass = "demo-dev-auth");
+
+    return Results.Content(
+        $$"""
+    <!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>AppSurface DevAuth Viewer Landing</title>
+      <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; color: #111827; background: #f8fafc; }
+        header { padding: 16px 32px; background: #0f172a; color: #fff; font-weight: 700; }
+        main { max-width: 760px; padding: 32px; }
+        .proof { display: inline-block; margin-top: 12px; color: #1d4ed8; }
+        @media (max-width: 640px) { .demo-dev-auth { margin: 12px 16px; } }
+      </style>
+    </head>
+    <body>
+      <header>AppSurface local proof</header>
+      {{marker}}
+      <main>
+        <h1>Viewer landing page</h1>
+        <p>This local proof page is a safe recovery destination for the Local Viewer persona.</p>
+        <a class="proof" href="/api/auth-proof">Verify that the operator-only proof remains forbidden</a>
+      </main>
+    </body>
+    </html>
+    """,
+        "text/html");
+})
+    .RequireSurfacePolicy("ViewersOnly");
 
 app.MapGet(
         "/api/auth-proof",
