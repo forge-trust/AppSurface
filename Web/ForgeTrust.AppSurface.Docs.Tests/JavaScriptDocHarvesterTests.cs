@@ -4,6 +4,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -873,6 +874,530 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Contains(docs, doc => doc.Path.EndsWith("#typedef-formfailuredetail", StringComparison.Ordinal));
         Assert.Contains(docs, doc => doc.Path.EndsWith("#global-window-razorwire", StringComparison.Ordinal));
         Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldHarvestAnnotatedNamedClassesIntoHierarchicalSearchableContracts()
+    {
+        await WriteAsync(
+            "src/class-contract.js",
+            """
+            /**
+             * Copy manager contract.
+             * @public
+             * @namespace RazorWire
+             */
+            export class SectionCopyManager {
+              /**
+               * Creates an isolated copy manager.
+               * @public
+               * @param {Document} document - Document to scan.
+               */
+              constructor(document) {}
+
+              /**
+               * Scans section-copy markup.
+               * @public
+               * @namespace ConflictingGroup
+               * @param {Document} document - Document to scan.
+               * @returns {void}
+               */
+              scan() {}
+
+              /**
+               * Resets all section-copy roots.
+               * @public
+               */
+              static reset() {}
+
+              /**
+               * Current sample value.
+               * @public
+               */
+              get value() { return 1; }
+
+              /**
+               * Updates the sample value.
+               * @public
+               * @param {number} value - New value.
+               */
+              set value(value) {}
+
+              /**
+               * Static sample value.
+               * @public
+               */
+              static get sample() { return 1; }
+
+              /**
+               * Updates the static sample value.
+               * @public
+               * @param {number} sample - New static value.
+               */
+              static set sample(sample) {}
+
+              /**
+               * Deliberately not public.
+               */
+              privateHelper() {}
+            }
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/class-contract.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var page = Assert.Single(docs, doc => doc.Path == "api/javascript/razorwire");
+        Assert.Contains(page.Outline!, item => item.Id == "class-section-copy-manager" && item.Level == 2 && item.Title == "SectionCopyManager");
+        Assert.Contains(page.Outline!, item => item.Id == "constructor-section-copy-manager" && item.Level == 3 && item.Title == "SectionCopyManager.constructor");
+        Assert.Contains(page.Outline!, item => item.Id == "method-instance-section-copy-manager-scan" && item.Level == 3 && item.Title == "SectionCopyManager.scan");
+        Assert.Contains(page.Outline!, item => item.Id == "method-static-section-copy-manager-reset" && item.Level == 3 && item.Title == "SectionCopyManager.reset");
+        Assert.Contains(page.Outline!, item => item.Id == "getter-instance-section-copy-manager-value" && item.Level == 3 && item.Title == "SectionCopyManager.value");
+        Assert.Contains(page.Outline!, item => item.Id == "setter-instance-section-copy-manager-value" && item.Level == 3 && item.Title == "SectionCopyManager.value");
+        Assert.Contains(page.Outline!, item => item.Id == "getter-static-section-copy-manager-sample" && item.Level == 3 && item.Title == "SectionCopyManager.sample");
+        Assert.Contains(page.Outline!, item => item.Id == "setter-static-section-copy-manager-sample" && item.Level == 3 && item.Title == "SectionCopyManager.sample");
+        Assert.Contains("<h3>SectionCopyManager</h3>", page.Content, StringComparison.Ordinal);
+        Assert.Contains("<h4>SectionCopyManager.scan</h4>", page.Content, StringComparison.Ordinal);
+        Assert.Contains("<h5>Parameters</h5>", page.Content, StringComparison.Ordinal);
+        Assert.Contains(
+            page.SymbolSourceProvenance!,
+            provenance => provenance.AnchorId == "method-instance-section-copy-manager-scan"
+                          && provenance.SourcePath == "src/class-contract.js"
+                          && provenance.StartLine > 0);
+        Assert.DoesNotContain("privateHelper", page.Content, StringComparison.Ordinal);
+
+        var scanStub = Assert.Single(docs, doc => doc.Path == "api/javascript/razorwire#method-instance-section-copy-manager-scan");
+        Assert.Equal("javascript-method", scanStub.Metadata?.PageType);
+        Assert.Contains(scanStub.Outline!, item => item.Id == "method-instance-section-copy-manager-scan" && item.Level == 3);
+        Assert.Contains("SectionCopyManager.scan(document)", scanStub.Content, StringComparison.Ordinal);
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldPublishClassOutputAndProgressThroughHarvestContext()
+    {
+        await WriteAsync(
+            "src/class-contract.js",
+            """
+            /**
+             * Copy manager contract.
+             * @public
+             * @namespace RazorWire
+             */
+            export class SectionCopyManager {
+              /**
+               * Scans section-copy markup.
+               * @public
+               * @param {Document} document - Document to scan.
+               * @returns {void}
+               */
+              scan() {}
+
+              /**
+               * Resets all section-copy roots.
+               * @public
+               */
+              static reset() {}
+            }
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/class-contract.js"));
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+        var progressId = nameof(JavaScriptDocHarvester);
+        var runId = await reporter.BeginRunAsync(
+        [
+            new AppSurfaceDocsHarvesterRegistration(
+                progressId,
+                nameof(JavaScriptDocHarvester),
+                IsBuiltInProgressHarvester: true)
+        ]);
+        var context = new DocHarvestContext(
+            _testRoot,
+            CreatePathPolicySnapshot(),
+            reporter.CreateSession(runId, progressId));
+
+        var docs = await harvester.HarvestAsync(context);
+
+        var page = Assert.Single(docs, doc => doc.Path == "api/javascript/razorwire");
+        Assert.Contains(page.Outline!, item => item.Id == "class-section-copy-manager" && item.Level == 2 && item.Title == "SectionCopyManager");
+        Assert.Contains(page.Outline!, item => item.Id == "method-instance-section-copy-manager-scan" && item.Level == 3 && item.Title == "SectionCopyManager.scan");
+        Assert.Contains(page.Outline!, item => item.Id == "method-static-section-copy-manager-reset" && item.Level == 3 && item.Title == "SectionCopyManager.reset");
+        Assert.Contains(docs, doc => doc.Path == "api/javascript/razorwire#method-instance-section-copy-manager-scan");
+        Assert.Contains("SectionCopyManager.scan(document)", page.Content, StringComparison.Ordinal);
+
+        var progress = Assert.Single(reporter.CurrentSnapshot.Harvesters, item => item.ProgressId == progressId);
+        Assert.Equal(AppSurfaceDocsHarvestProgressPhase.Finalizing, progress.Phase);
+        Assert.Equal(1, progress.SourceUnitsProcessed);
+        Assert.Equal(docs.Count, progress.DocCount);
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldApplyLifecycleValidationToClassContractsAndMembers()
+    {
+        await WriteAsync(
+            "src/class-lifecycle-contract.js",
+            """
+            /**
+             * Alpha class contract.
+             * @public
+             * @namespace RazorWire
+             * @alpha
+             */
+            class LifecycleContract {
+              /**
+               * Beta operation.
+               * @public
+               * @beta
+               * @deprecated Use stableOperation instead.
+               */
+              operation() {}
+
+              /**
+               * Conflicting operation lifecycle.
+               * @public
+               * @alpha
+               * @beta
+               */
+              invalidOperation() {}
+            }
+
+            /**
+             * Conflicting class lifecycle.
+             * @public
+             * @namespace RazorWire
+             * @alpha
+             * @beta
+             */
+            class InvalidLifecycleContract {}
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/class-lifecycle-contract.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+        var diagnostics = GetDiagnostics(harvester);
+
+        var classStub = Assert.Single(docs, doc => doc.Path.EndsWith("#class-lifecycle-contract", StringComparison.Ordinal));
+        var memberStub = Assert.Single(docs, doc => doc.Path.EndsWith("#method-instance-lifecycle-contract-operation", StringComparison.Ordinal));
+        Assert.Equal(new DocGeneratedApiSymbol("alpha", "Alpha", false), classStub.GeneratedApiSymbol);
+        Assert.Equal(new DocGeneratedApiSymbol("beta", "Beta", true), memberStub.GeneratedApiSymbol);
+        Assert.Contains("Deprecated. Use stableOperation instead.", memberStub.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain(docs, doc => doc.Path.Contains("invalid-operation", StringComparison.Ordinal));
+        Assert.DoesNotContain(docs, doc => doc.Path.Contains("invalid-lifecycle-contract", StringComparison.Ordinal));
+        Assert.Equal(2, diagnostics.Count(diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldRequirePublicOnEveryClassMemberAndAvoidNestedClassOrphans()
+    {
+        await WriteAsync(
+            "src/class-visibility.js",
+            """
+            /**
+             * Public outer class.
+             * @public
+             * @namespace RazorWire
+             */
+            class Outer {
+              /**
+               * Public member.
+               * @public
+               */
+              visible() {}
+
+              /**
+               * Non-public member.
+               */
+              hidden() {}
+
+              build() {
+                /**
+                 * Nested classes are not top-level contracts.
+                 * @public
+                 * @namespace RazorWire
+                 */
+                class Nested {
+                  /**
+                   * Nested member must not become an orphan contract.
+                   * @public
+                   */
+                  scan() {}
+                }
+
+                return new Nested();
+              }
+            }
+
+            /**
+             * Unpublished class.
+             * @namespace RazorWire
+             */
+            class Unpublished {
+              /**
+               * Must not publish without a public class doclet.
+               * @public
+               */
+              escape() {}
+            }
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/class-visibility.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#method-instance-outer-visible", StringComparison.Ordinal));
+        Assert.DoesNotContain(docs, doc => doc.Path.Contains("hidden", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(docs, doc => doc.Path.Contains("nested", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(docs, doc => doc.Path.Contains("escape", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldHarvestClassContractsWithoutPublicTagsWhenConfigured()
+    {
+        await WriteAsync(
+            "src/loose-class-contract.js",
+            """
+            /**
+             * Host-approved loose class contract.
+             * @namespace RazorWire
+             */
+            class LooseContract {
+              /**
+               * Runs the loose contract.
+               * @method run
+               */
+              run() {}
+            }
+            """);
+        var options = CreateEnabledOptions("src/loose-class-contract.js");
+        options.Harvest.JavaScript.RequirePublicTag = false;
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#class-loose-contract", StringComparison.Ordinal));
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#method-instance-loose-contract-run", StringComparison.Ordinal));
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldKeepStandaloneContractsAttachedToClassMethods()
+    {
+        await WriteAsync(
+            "src/class-standalone-contract.js",
+            """
+            /**
+             * Class contract.
+             * @public
+             * @namespace RazorWire
+             */
+            class Contract {
+              /**
+               * A public event contract.
+               * @public
+               * @namespace RazorWire
+               * @event razorwire:contract:changed
+               * @target document
+               * @firesWhen the class emits a change event.
+               * @detail none
+               */
+              changed() {}
+            }
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/class-standalone-contract.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#class-contract", StringComparison.Ordinal));
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#event-razorwire-contract-changed", StringComparison.Ordinal));
+        Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#method-instance-contract-changed", StringComparison.Ordinal));
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldKeepStandaloneContractsAttachedToNestedClasses()
+    {
+        await WriteAsync(
+            "src/nested-class-standalone-contract.js",
+            """
+            (() => {
+              /**
+               * A standalone nested event contract.
+               * @public
+               * @namespace RazorWire
+               * @event razorwire:nested:changed
+               * @target document
+               * @firesWhen a nested contract changes.
+               * @detail none
+               */
+              class NestedContract {}
+            })();
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/nested-class-standalone-contract.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#event-razorwire-nested-changed", StringComparison.Ordinal));
+        Assert.DoesNotContain(docs, doc => doc.Path.Contains("nested-contract", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldPreserveNestedFunctionAndVariableContracts()
+    {
+        await WriteAsync(
+            "src/nested-runtime.js",
+            """
+            (() => {
+              /**
+               * Nested public helper.
+               * @public
+               * @namespace RazorWire
+               */
+              function nestedHelper() {}
+
+              /**
+               * Nested public value.
+               * @public
+               * @namespace RazorWire
+               */
+              const nestedValue = true;
+            })();
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/nested-runtime.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#function-nestedhelper", StringComparison.Ordinal));
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#constant-nestedvalue", StringComparison.Ordinal));
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldPreserveIdentifierWordBoundariesInClassAnchors()
+    {
+        await WriteAsync(
+            "src/word-boundaries.js",
+            """
+            /**
+             * XML HTTP request contract.
+             * @public
+             * @namespace RazorWire
+             */
+            class XMLHttpRequest {
+              /**
+               * Finds a URL parser.
+               * @public
+               */
+              findURLParser() {}
+            }
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/word-boundaries.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#class-xml-http-request", StringComparison.Ordinal));
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#method-instance-xml-http-request-find-url-parser", StringComparison.Ordinal));
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSuffixDuplicateNormalizedClassMemberAnchorsDeterministically()
+    {
+        await WriteAsync(
+            "src/duplicate-class-member-anchors.js",
+            """
+            /**
+             * First normalized class contract.
+             * @public
+             * @namespace RazorWire
+             */
+            class XMLParser {
+              /** @public */
+              parseURL() {}
+            }
+
+            /**
+             * Second normalized class contract.
+             * @public
+             * @namespace RazorWire
+             */
+            class XmlParser {
+              /** @public */
+              parseUrl() {}
+            }
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/duplicate-class-member-anchors.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+        var diagnostics = GetDiagnostics(harvester);
+
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#class-xml-parser", StringComparison.Ordinal));
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#class-xml-parser-2", StringComparison.Ordinal));
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#method-instance-xml-parser-parse-url", StringComparison.Ordinal));
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#method-instance-xml-parser-parse-url-2", StringComparison.Ordinal));
+        Assert.Equal(2, diagnostics.Count(diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor));
+    }
+
+    [Theory]
+    [InlineData("export default class NamedDefault {}", "Default-exported")]
+    [InlineData("export default class {}", "Default-exported")]
+    [InlineData("export default (class NamedDefault {});", "Default-exported")]
+    [InlineData("const Contract = class {};", "class expressions")]
+    [InlineData("(class Contract {});", "class expressions")]
+    [InlineData("window.RazorWireContract = class Contract {};", "class expressions")]
+    [InlineData("class Derived extends Base {}", "Derived")]
+    [InlineData("class Fields { ready = true; }", "fields")]
+    [InlineData("class Computed { ['scan']() {} }", "non-computed")]
+    [InlineData("class Async { async scan() {} }", "Async")]
+    [InlineData("class Generator { *scan() {} }", "generator")]
+    [InlineData("class Blocks { static {} }", "static blocks")]
+    public async Task HarvestAsync_ShouldRejectUnsupportedPublicClassGraphs(string declaration, string expectedCause)
+    {
+        await WriteAsync(
+            "src/unsupported-class.js",
+            $"""
+            /**
+             * Unsupported class contract.
+             * @public
+             * @namespace RazorWire
+             */
+            {declaration}
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/unsupported-class.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+        Assert.Empty(docs);
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape);
+
+        Assert.Contains(expectedCause, diagnostic.Cause, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldRejectPublicClassExpressionsNestedInFunctionBodies()
+    {
+        await WriteAsync(
+            "src/nested-class-expression.js",
+            """
+            const createContract = () =>
+                /**
+                 * Unsupported nested class expression.
+                 * @public
+                 * @namespace RazorWire
+                 */
+                class Contract {};
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/nested-class-expression.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape);
+
+        Assert.Empty(docs);
+        Assert.Contains("class expressions", diagnostic.Cause, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -2200,6 +2725,10 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Contains("css-hook-data-rw-form-error-generated-true", page.Content, StringComparison.Ordinal);
         Assert.Contains("css-custom-property-rw-form-error-text", page.Content, StringComparison.Ordinal);
         Assert.Contains("global-window-razorwire", page.Content, StringComparison.Ordinal);
+        Assert.Contains("config-window-razorwire-sectioncopymanager", page.Content, StringComparison.Ordinal);
+        Assert.Contains("typedef-sectioncopymanager", page.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("class-section-copy-manager", page.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("method-instance-section-copy-manager", page.Content, StringComparison.Ordinal);
         Assert.Contains("{&quot;load&quot;|&quot;idle&quot;|&quot;visible&quot;|&quot;only&quot;}", page.Content, StringComparison.Ordinal);
         Assert.DoesNotContain("{&quot;load&quot;|&quot;idle&quot;|&quot;visible&quot;|&quot;immediate&quot;}", page.Content, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
@@ -2263,11 +2792,11 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             "src/unsupported.js",
             """
             /**
-             * Public class.
+             * Unsupported class field.
              * @public
              * @namespace RazorWire
              */
-            class FailureView {}
+            class FailureView { ready = true; }
 
             /**
              * Missing event name.
@@ -3044,8 +3573,10 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         var docs = await harvester.HarvestAsync(_testRoot);
         var diagnostics = GetDiagnostics(harvester);
 
-        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape
-            && diagnostic.Cause.Contains("CommonJS", StringComparison.Ordinal));
+        Assert.Single(
+            diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape
+                          && diagnostic.Cause.Contains("CommonJS", StringComparison.Ordinal));
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet
             && diagnostic.Cause.Contains("unnamed declaration", StringComparison.Ordinal));
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet
@@ -4240,6 +4771,16 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
                 }
             }
         };
+    }
+
+    private AppSurfaceDocsHarvestPathPolicySnapshot CreatePathPolicySnapshot()
+    {
+        return new AppSurfaceDocsHarvestPathPolicySnapshot(
+            AppSurfaceDocsHarvestPathPolicy.CreateDefault(),
+            new AppSurfaceDocsHarvestVcsIgnorePolicy(
+                _testRoot,
+                new AppSurfaceDocsHarvestVcsIgnoreOptions(),
+                NullLogger.Instance));
     }
 
     private static IReadOnlyList<DocHarvestDiagnostic> GetDiagnostics(JavaScriptDocHarvester harvester)

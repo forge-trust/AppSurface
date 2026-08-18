@@ -22,6 +22,10 @@
 - Revisit asynchronous selection only when a supported host context cannot be resolved before rendering without I/O. Keep tenant lookup and caching upstream from the Web rendering path by default.
 - Consider an explicit compatible-provider/decorator marker only if enterprise adopters demonstrate that the strict custom-provider escape path blocks legitimate instrumentation or resilience wrappers.
 
+## JavaScript class harvesting follow-ups (#301)
+
+- Define derived-class and inherited-member documentation semantics only when a package author needs them. The follow-up must decide source identity, rendered hierarchy, stable anchors, search behavior, and diagnostics before locally declared derived-class members can be harvested; do not partially publish an inheritance model.
+
 ## Fine-grained harvest observatory follow-ups (#343)
 
 - **What:** Consider development-only file/relative-path progress labels only after a real maintainer workflow proves aggregate parser phases and counts are insufficient. **Why:** Source identity materially expands the privacy boundary without improving the default #343 proof surface. **Pros:** Gives a future troubleshooting workflow more local context. **Cons:** Requires explicit opt-in, operator authorization, and a fresh redaction review. **Context:** #343 deliberately publishes only phase, source-unit counts, documents, and a rolling built-in rate; source identity must never become the default live-stream payload. **Depends on / blocked by:** Evidence from an adopter that aggregate progress is insufficient.
