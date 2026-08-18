@@ -267,6 +267,16 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.Contains("./artifacts/issue-728-test-efficiency/", readme, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void RepositoryReadme_ShouldDocumentBoundedTestResultDiagnostics()
+    {
+        var readme = File.ReadAllText(GetRepositoryReadmePath());
+
+        Assert.Contains("bounded, failure-first test-result and slow-test diagnostics", readme, StringComparison.Ordinal);
+        Assert.Contains("safely truncated failure evidence", readme, StringComparison.Ordinal);
+        Assert.Contains("managed JUnit XML and per-project logs retain the complete details", readme, StringComparison.Ordinal);
+    }
+
     private static bool HasDirectMsbuildCoverageReference(string path)
     {
         using var document = JsonDocument.Parse(File.ReadAllText(path));

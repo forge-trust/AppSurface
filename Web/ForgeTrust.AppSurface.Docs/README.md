@@ -1356,7 +1356,7 @@ static web assets.
 - `AppSurfaceDocs:Theme:Preset`
   - Optional compatibility preset for package-owned docs chrome.
   - Defaults to `AppSurfaceDark`.
-  - Supported values are `AppSurfaceDark` and `GraphiteDark`.
+  - Supported values are `AppSurfaceDark`, `GraphiteDark`, and `AppSurfaceLight`.
   - Unknown enum values fail startup validation and list the supported values.
 - `AppSurfaceDocs:Theme:Colors:AccentColor`
   - Optional CSS hex color for primary accent text, active states, and highlights.
@@ -1417,11 +1417,33 @@ Full v1 theme configuration:
 }
 ```
 
-Environment variable spelling follows the normal double-underscore configuration convention, such as `AppSurfaceDocs__Theme__Preset=GraphiteDark`, `AppSurfaceDocs__Theme__Colors__AccentColor=#38bdf8`, and `AppSurfaceDocs__Theme__Layout__Density=Compact`.
+Environment variable spelling follows the normal double-underscore configuration convention, such as `AppSurfaceDocs__Theme__Preset=GraphiteDark`, `AppSurfaceDocs__Theme__Colors__AccentColor=#38bdf8`, and `AppSurfaceDocs__Theme__Layout__Density=Compact`. A complete fixed-light configuration uses `AppSurfaceDocs__Theme__Preset=AppSurfaceLight`, `AppSurfaceDocs__Theme__Colors__AccentColor=#1e3a8a`, `AppSurfaceDocs__Theme__Colors__AccentStrongColor=#1e40af`, `AppSurfaceDocs__Theme__Colors__LinkColor=#1e3a8a`, and `AppSurfaceDocs__Theme__Colors__VisitedLinkColor=#5b21b6`.
 
 Theme validation is part of the public contract. `Theme`, `Theme:Colors`, and `Theme:Layout` must not be null. Color values must be CSS hex colors, not CSS functions, variables, color names, or style declarations. Contrast failures name the config path, configured value, required ratio, tested preset background, and a fix hint so maintainers can correct the value without inspecting generated CSS.
 
-Use theme options when the host wants branded docs without owning views. `AppSurfaceDark` is the default Docs-local preset and also the bridge to a registered shared AppSurface theme pair; see [Theme pairs migration](#theme-pairs-migration). `GraphiteDark` remains a separate Docs-local fixed-dark preset. Do not use these options for arbitrary text or surface overrides, selector-level CSS compatibility, external theme packages, or a bespoke documentation template. Static exports and published release archives freeze the resolved theme variables in exported HTML, so host config changes do not rewrite already-exported archives.
+Use theme options when the host wants branded docs without owning views. `AppSurfaceDark` is the default Docs-local preset and also the bridge to a registered shared AppSurface theme pair; see [Theme pairs migration](#theme-pairs-migration). `GraphiteDark` remains a separate Docs-local fixed-dark preset. `AppSurfaceLight` is an additive fixed light preset with the same four validated color roles and no visitor-controlled appearance behavior. Do not use these options for arbitrary text or surface overrides, selector-level CSS compatibility, external theme packages, or a bespoke documentation template. Static exports and published release archives freeze the resolved theme variables in exported HTML, so host config changes do not rewrite already-exported archives.
+
+### Fixed AppSurfaceLight configuration
+
+Use this contrast-validated light recipe when a host needs a fixed light Docs surface without replacing package views or CSS:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Theme": {
+      "Preset": "AppSurfaceLight",
+      "Colors": {
+        "AccentColor": "#1e3a8a",
+        "AccentStrongColor": "#1e40af",
+        "LinkColor": "#1e3a8a",
+        "VisitedLinkColor": "#5b21b6"
+      }
+    }
+  }
+}
+```
+
+Docs resolves the selected preset into its complete package-owned token graph, applies only the four supported direct roles, and then regenerates dependent fills, borders, and focus treatment. `AppSurfaceLight` is fixed: it does not enable a visitor switcher, a cookie, local storage, a preference bootstrap script, or an additional stylesheet. It serializes `color-scheme: light` and the resolved package variables before `site.gen.css` and `search.css`, so live pages and static exports freeze the same configuration. The preset name, role coverage, validation behavior, and deterministic output are stable; exact package-owned palette values may evolve intentionally with release notes and visual verification. Do not treat raw `--docs-*` variables as an external override surface. Choose the [theme-pairs migration](#theme-pairs-migration) for host-owned System/Light/Dark preferences, or the [deliberate whole-layout override boundary](#default-razor-layout-and-deliberate-host-overrides) when a host needs broader surface or syntax control.
 
 ### Theme pairs migration
 
@@ -1463,6 +1485,7 @@ This keeps one canonical page and one static tree per Docs version. It is origin
 | --- | --- |
 | `AppSurfaceDark` produced only the established dark Docs variable graph. | It remains the default Docs preset and maps Docs-owned surfaces, code tokens, search states, tables, archive/status pages, and focus treatment to the shared Graphite System/Light/Dark semantic branch while keeping Docs variables internal. |
 | `GraphiteDark` was a dark preset. | It remains a Docs-local dark compatibility preset; it is not a shared pair. |
+| No fixed Docs-local light preset was available. | `AppSurfaceLight` is an additive fixed light preset with the existing four validated semantic role overrides. It does not use the shared preference bridge. |
 | `#rgb` color overrides were accepted. | They remain accepted and apply only to the supported Docs accent/link roles. Shared role values remain strict `#RRGGBB`. When a rendered branch cannot meet the documented contrast threshold, Docs keeps the safe semantic pair role instead of emitting the override; browser-local preferences therefore validate every Light and Dark branch, even if the host default is fixed. |
 
 Docs preserves density, chrome, layout override behavior, and the default dark experience when no shared resolver is registered. The package layout emits the Web root/head opt-ins plus a Docs-critical variable mapping before the package stylesheet. Published-tree rewriting preserves that root metadata and both critical styles, so static archives match live output apart from a host-request CSP nonce.
@@ -2910,13 +2933,13 @@ trust:
 
 The coordinated response to [GHSA-pgww-w46g-26qg](https://github.com/advisories/GHSA-pgww-w46g-26qg) upgrades the HTML parsing and sanitization graph without changing the AppSurface Docs public API, registration sequence, configuration, or consumer usage. The package restores these exact versions from the repository's [central package version catalog](../../Directory.Packages.props):
 
-- `AngleSharp` `[1.5.2]`
-- `HtmlSanitizer` `[9.1.949-beta]`
-- `AngleSharp.Css` `[1.0.0-beta.216]`
+- `AngleSharp` `[1.7.1]`
+- `HtmlSanitizer` `[9.2.995]`
+- `AngleSharp.Css` `[1.0.1]`
 
-The exact pins are intentional: `HtmlSanitizer` and `AngleSharp.Css` must be upgraded as a compatible pair, and the brackets prevent NuGet from silently selecting a different dependency graph. Their beta versions are acceptable only while AppSurface packages are themselves preview releases. The [package artifact verification workflow](../../packages/README.md#maintainer-notes) requires all three dependencies for a stable Docs package, rejects missing or malformed ranges and AngleSharp lower bounds below 1.5.2, and blocks prerelease `HtmlSanitizer` or `AngleSharp.Css`; [issue #682](https://github.com/forge-trust/AppSurface/issues/682) tracks replacing the pair with compatible stable releases as a stable-release prerequisite, not a reason to loosen the exact pins.
+The exact pins are intentional: `HtmlSanitizer` and `AngleSharp.Css` must be upgraded as a compatible pair, and the brackets prevent NuGet from silently selecting a different dependency graph. The [package artifact verification workflow](../../packages/README.md#maintainer-notes) requires every Docs dependency container in a stable package to contain all three exact identities once, rejecting missing, duplicate, versionless, prerelease, or ranged entries. It also restores the freshly packed Docs artifact in an independent locked consumer and records its mapped source configuration, lock file, assets graph, and SHA-512 evidence. [Issue #682](https://github.com/forge-trust/AppSurface/issues/682) landed this stable graph; it is not permission to loosen the pins.
 
-If an adopter's central package policy conflicts with any of these versions, do not use `VersionOverride`, remove the equality brackets, or widen only one dependency. Align the application's entire trio to the exact graph above, or remain on the prior AppSurface preview until a coordinated compatible graph is available. A locally successful restore with a loosened range is not supported compatibility evidence. Maintainers proving the packed graph must follow the [#678 package-proof sequence](../../packages/README.md#issue-678-package-proof).
+If an adopter's central package policy conflicts with any of these versions, do not use `VersionOverride`, remove the equality brackets, or widen only one dependency. Align the application's entire trio to the exact graph above. A locally successful restore with a loosened range is not supported compatibility evidence. Maintainers proving the packed graph must follow the [#682 package-proof sequence](../../packages/README.md#issue-682-package-proof).
 
 `IAppSurfaceDocsHtmlSanitizer` protects rendered package-documentation fragments before AppSurface Docs includes them in its UI. It is not a general untrusted-user-content sanitizer, a whole-document security boundary, or a substitute for a host Content Security Policy. Applications accepting general UGC must define and verify their own sanitization policy, and hosts remain responsible for CSP and the rest of their response-hardening policy. Do not widen the Docs allowlist merely to make unrelated application HTML render.
 

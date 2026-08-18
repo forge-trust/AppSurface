@@ -117,6 +117,49 @@ public sealed class AppSurfaceDocsThemePairStaticExportTests
     }
 
     [Fact]
+    public void PublishedTreeRewrite_ShouldPreserveTheConfiguredFixedLightThemePayload()
+    {
+        var docsTheme = new AppSurfaceDocsThemeResolver(
+            new AppSurfaceDocsOptions
+            {
+                Theme = new AppSurfaceDocsThemeOptions
+                {
+                    Preset = AppSurfaceDocsThemePreset.AppSurfaceLight,
+                    Colors = new AppSurfaceDocsThemeColorOptions
+                    {
+                        AccentColor = "#1e3a8a",
+                        AccentStrongColor = "#1e40af",
+                        LinkColor = "#1e3a8a",
+                        VisitedLinkColor = "#5b21b6"
+                    }
+                }
+            }).Theme;
+        var liveHtml = $"""
+            <!DOCTYPE html><html class="{docsTheme.RootCssClass}" style="color-scheme: {docsTheme.RootColorScheme}; scrollbar-gutter: stable; {docsTheme.CssVariableStyle}" data-docs-theme-preset="{docsTheme.PresetAttribute}" data-docs-density="{docsTheme.DensityAttribute}" data-docs-chrome="{docsTheme.ChromeAttribute}"><head><link rel="stylesheet" href="/css/site.gen.css" /><link rel="stylesheet" href="/docs/search.css" /></head><body><a href="/docs/getting-started">Start</a></body></html>
+            """;
+
+        var staticHtml = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(liveHtml, "/docs/v/1.2.3");
+        var parser = new HtmlParser();
+        var live = parser.ParseDocument(liveHtml);
+        var archived = parser.ParseDocument(staticHtml);
+
+        foreach (var attribute in new[] { "class", "style", "data-docs-theme-preset", "data-docs-density", "data-docs-chrome" })
+        {
+            Assert.Equal(live.DocumentElement?.GetAttribute(attribute), archived.DocumentElement?.GetAttribute(attribute));
+        }
+
+        var tokenNames = docsTheme.CssVariableStyle.Split(';', StringSplitOptions.RemoveEmptyEntries)
+            .Select(declaration => declaration[..declaration.IndexOf(':')])
+            .ToArray();
+        Assert.Equal(tokenNames.Length, tokenNames.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(112, tokenNames.Length);
+        Assert.Contains("--docs-color-accent-glow", tokenNames, StringComparer.Ordinal);
+        Assert.Equal("appsurface-light", archived.DocumentElement?.GetAttribute("data-docs-theme-preset"));
+        Assert.Contains("color-scheme: light;", archived.DocumentElement?.GetAttribute("style"), StringComparison.Ordinal);
+        Assert.Contains("href=\"/docs/v/1.2.3/getting-started\"", staticHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PublishedTreeRewrite_ShouldKeepTheVerifiedPreferenceBootstrapAndRemoveItsRequestNonce()
     {
         var services = new ServiceCollection();

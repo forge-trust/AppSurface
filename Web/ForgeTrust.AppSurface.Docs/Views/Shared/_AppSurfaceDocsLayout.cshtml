@@ -83,9 +83,14 @@
     var docsThemeStyle = docsTheme.UsesSharedTheme
         ? "scrollbar-gutter: stable;"
         : $"scrollbar-gutter: stable; {docsTheme.CssVariableStyle}";
+    var ownsFixedColorScheme = !string.IsNullOrWhiteSpace(docsTheme.RootColorScheme);
+    if (ownsFixedColorScheme)
+    {
+        docsThemeStyle = $"color-scheme: {docsTheme.RootColorScheme}; {docsThemeStyle}";
+    }
 }
 <!DOCTYPE html>
-<html appsurface-theme-root
+<html appsurface-theme-root="@(!ownsFixedColorScheme)"
       lang="en"
       class="@docsThemeRootClass"
       style="@docsThemeStyle"
@@ -96,7 +101,14 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>@ViewData["Title"] - @docsIdentity.DisplayName</title>
-    <appsurface-theme-head nonce="@themeCspNonce" />
+    @if (!ownsFixedColorScheme)
+    {
+        <appsurface-theme-head nonce="@themeCspNonce" />
+    }
+    else
+    {
+        <meta name="color-scheme" content="@docsTheme.RootColorScheme" />
+    }
     @if (docsTheme.UsesSharedTheme && !string.IsNullOrWhiteSpace(docsTheme.CriticalCss))
     {
         <style data-docs-theme-critical nonce="@themeCspNonce">@Html.Raw(docsTheme.CriticalCss)</style>

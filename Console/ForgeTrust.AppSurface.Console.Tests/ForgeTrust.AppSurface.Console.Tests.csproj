@@ -28,6 +28,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj" />
+    <ProjectReference Include="../../Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj" />
     <ProjectReference Include="../../examples/console-app/ConsoleAppExample.csproj" />
     <ProjectReference Include="../../examples/local-secrets/LocalSecretsExample.csproj" />
   </ItemGroup>

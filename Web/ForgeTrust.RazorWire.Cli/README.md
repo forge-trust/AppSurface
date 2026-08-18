@@ -39,10 +39,10 @@ Do not publish the proof artifact merely because it restores and runs
 successfully. Its exclusion and `do_not_publish` decision remain authoritative
 in the [package registry](../../packages/README.md#not-in-the-direct-install-matrix);
 a future public tool release must first land the tracked packaging work and pass
-the normal package and stable-dependency gates, including the stable sanitizer
-pair tracked by [issue #682](https://github.com/forge-trust/AppSurface/issues/682).
+the normal package and stable-dependency gates, including the exact stable
+sanitizer graph established by [issue #682](https://github.com/forge-trust/AppSurface/issues/682).
 
-Run an exact proof or local package without permanently installing it. Until the package registry changes the CLI's publication decision, `<version>` means a package produced by the [#678 package-proof sequence](../../packages/README.md#issue-678-package-proof) or another explicitly supplied local proof source; it does not imply a supported public NuGet release:
+Run an exact proof or local package without permanently installing it. Until the package registry changes the CLI's publication decision, `<version>` means a package produced by the [#682 package-proof sequence](../../packages/README.md#issue-682-package-proof) or another explicitly supplied local proof source; it does not imply a supported public NuGet release:
 
 ```bash
 dnx ForgeTrust.RazorWire.Cli@<version> --yes --source ./artifacts/packages -- export -o ./dist -p ./examples/razorwire-mvc/RazorWireWebExample.csproj

@@ -418,15 +418,19 @@ jobs:
           path: ${{ runner.temp }}/docs-outline-layout-evidence
           if-no-files-found: warn
 
-      - name: Upload slow-test diagnostics
+      - name: Upload test-result diagnostics
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ always() && !cancelled() }}
         with:
-          name: slow-test-diagnostics
+          name: test-result-diagnostics
           path: |
             TestResults/coverage-merged/slow-test-diagnostics.md
             TestResults/coverage-merged/slow-test-diagnostics.json
+            TestResults/coverage-merged/timings.json
+            TestResults/coverage-merged/junit-*.xml
+            TestResults/coverage-merged/projects/**/dotnet-test.log
           if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload coverage gate reports
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -440,7 +444,7 @@ jobs:
             TestResults/coverage-merged/coverage-patch-targets.md
           if-no-files-found: warn
 
-      - name: Publish slow-test diagnostics summary
+      - name: Publish bounded test-result and slow-test diagnostics summary
         if: ${{ always() && !cancelled() }}
         run: |
           diagnostics_markdown="TestResults/coverage-merged/slow-test-diagnostics.md"
@@ -454,7 +458,7 @@ jobs:
               {
                 echo
                 echo
-                echo "> Slow-test diagnostics were truncated in this summary (${diagnostics_bytes} bytes total). Download the \`slow-test-diagnostics\` artifact for the complete report."
+                echo "> Test-result and slow-test diagnostics were truncated in this summary (${diagnostics_bytes} bytes total). Download the \`test-result-diagnostics\` artifact for the complete report."
               } >> "$GITHUB_STEP_SUMMARY"
             fi
           else
