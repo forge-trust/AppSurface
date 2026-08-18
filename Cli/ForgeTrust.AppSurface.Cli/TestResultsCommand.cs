@@ -419,12 +419,14 @@ internal sealed class TestResultsCleanupWorkflow
         string fix,
         Exception? exception = null)
     {
+        var diagnosticCause = exception is null
+            ? cause
+            : $"{cause} ({exception.GetType().Name}): {exception.Message}";
         var message = $"{code}: {problem}{Environment.NewLine}" +
-                      $"Cause: {cause}{Environment.NewLine}" +
+                      $"Cause: {diagnosticCause}{Environment.NewLine}" +
                       $"Fix: {fix}{Environment.NewLine}" +
                       $"Docs: {DocumentationAnchor}";
-        _ = exception;
-        return new CommandException(message);
+        return new CommandException(message, innerException: exception);
     }
 
     private sealed record DiscoveryResult(IReadOnlyList<string> Directories, long EstimatedBytes, int ReparsePointsSkipped);

@@ -160,6 +160,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         }
 
         var artifacts = state.Snapshot
+            .Where(entry => string.IsNullOrEmpty(Path.GetDirectoryName(entry.RelativePath)))
             .Where(entry => IsKnownOutputEntry(entry) || IsPatternOutputEntry(entry))
             .Select(entry => entry.RelativePath)
             .OrderBy(path => path, StringComparer.Ordinal)

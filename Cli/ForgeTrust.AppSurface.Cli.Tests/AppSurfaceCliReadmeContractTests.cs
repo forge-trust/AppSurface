@@ -199,6 +199,8 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.Contains("its target is never read or removed", readme, StringComparison.Ordinal);
         Assert.Contains("AppSurface-owned coverage artifacts", readme, StringComparison.Ordinal);
         Assert.Contains("`ASTEST101`", readme, StringComparison.Ordinal);
+        Assert.Contains("`ASTEST102`", readme, StringComparison.Ordinal);
+        Assert.Contains("`ASTEST103`", readme, StringComparison.Ordinal);
         Assert.Contains("`ASTEST104`", readme, StringComparison.Ordinal);
     }
 

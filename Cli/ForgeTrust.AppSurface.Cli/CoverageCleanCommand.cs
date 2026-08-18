@@ -16,10 +16,13 @@ namespace ForgeTrust.AppSurface.Cli;
 /// <c>--apply</c> before changing the filesystem.
 /// </remarks>
 [Command("coverage clean", Description = "Preview or explicitly clean AppSurface coverage artifacts; use --all for every TestResults directory.")]
-internal sealed partial class CoverageCleanCommand(TestResultsCleanupWorkflow testResultsWorkflow) : ICommand
+internal sealed partial class CoverageCleanCommand(
+    TestResultsCleanupWorkflow testResultsWorkflow,
+    Func<string>? getCurrentDirectory = null) : ICommand
 {
     private static readonly string DefaultOutputDirectory = Path.Join("TestResults", "coverage-merged");
     private readonly TestResultsCleanupWorkflow _testResultsWorkflow = testResultsWorkflow ?? throw new ArgumentNullException(nameof(testResultsWorkflow));
+    private readonly Func<string> _getCurrentDirectory = getCurrentDirectory ?? Directory.GetCurrentDirectory;
 
     /// <summary>
     /// Gets or sets the AppSurface coverage output directory cleaned by the default mode.
@@ -84,7 +87,8 @@ internal sealed partial class CoverageCleanCommand(TestResultsCleanupWorkflow te
             throw new CommandException("--root is available only with --all. Omit --root to clean AppSurface-owned coverage artifacts, or pass --all to scan a worktree.");
         }
 
-        var result = CoverageRunOutputGuard.CleanExistingOwnedOutput(OutputDirectory ?? DefaultOutputDirectory, Apply);
+        var outputDirectory = OutputDirectory ?? Path.Join(_getCurrentDirectory(), DefaultOutputDirectory);
+        var result = CoverageRunOutputGuard.CleanExistingOwnedOutput(outputDirectory, Apply);
         await WriteOwnedCoverageResultAsync(console, result, cancellationToken);
     }
 

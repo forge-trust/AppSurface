@@ -109,13 +109,37 @@ public sealed class CoverageCleanCommandTests
     }
 
     [Fact]
-    public async Task Clean_default_mode_uses_the_standard_output_when_no_output_is_supplied()
+    public async Task Clean_default_mode_reports_a_nested_known_artifact_with_its_top_level_parent_once()
     {
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("TestResults/coverage-merged");
+        root.WriteFile("TestResults/coverage-merged/.appsurface-coverage-output", MarkerContents + Environment.NewLine);
+        root.WriteFile("TestResults/coverage-merged/projects/example/coverage.json", "{}");
         using var console = new FakeInMemoryConsole();
 
-        await new CoverageCleanCommand(new TestResultsCleanupWorkflow()).ExecuteAsync(console, CancellationToken.None);
+        await new CoverageCleanCommand(new TestResultsCleanupWorkflow())
+        {
+            OutputDirectory = output,
+        }.ExecuteAsync(console, CancellationToken.None);
 
-        Assert.Contains("Coverage output:", console.ReadOutputString(), StringComparison.Ordinal);
+        var preview = console.ReadOutputString();
+        Assert.Contains("Found 1 AppSurface coverage artifact.", preview, StringComparison.Ordinal);
+        Assert.Contains("  projects", preview, StringComparison.Ordinal);
+        Assert.DoesNotContain("projects/example/coverage.json", preview, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Clean_default_mode_uses_the_standard_output_when_no_output_is_supplied()
+    {
+        using var root = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+
+        await new CoverageCleanCommand(new TestResultsCleanupWorkflow(), () => root.Path).ExecuteAsync(console, CancellationToken.None);
+
+        Assert.Contains(
+            $"Coverage output: {CoverageRunOutputLease.NormalizePlatformPath(Path.Join(root.Path, "TestResults", "coverage-merged"))}",
+            console.ReadOutputString(),
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -147,10 +171,7 @@ public sealed class CoverageCleanCommandTests
         using var root = TestDirectory.Create();
         var external = root.CreateDirectory("external-output");
         var linkedOutput = Path.Join(root.Path, "linked-output");
-        if (!TryCreateDirectoryLink(linkedOutput, external))
-        {
-            return;
-        }
+        TestFileSystem.CreateDirectoryLinkOrSkip(linkedOutput, external);
 
         var error = Assert.Throws<CommandException>(() => CoverageRunOutputGuard.CleanExistingOwnedOutput(linkedOutput, apply: false));
 
@@ -223,59 +244,4 @@ public sealed class CoverageCleanCommandTests
         Assert.Contains("--output cannot be used with --all", error.Message, StringComparison.Ordinal);
     }
 
-    private static bool TryCreateDirectoryLink(string link, string target)
-    {
-        try
-        {
-            Directory.CreateSymbolicLink(link, target);
-            return true;
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-        catch (PlatformNotSupportedException)
-        {
-            return false;
-        }
-    }
-
-    private sealed class TestDirectory(string path) : IDisposable
-    {
-        public string Path { get; } = path;
-
-        public static TestDirectory Create()
-        {
-            var path = System.IO.Path.Join(System.IO.Path.GetTempPath(), "appsurface-coverage-clean-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(path);
-            return new TestDirectory(path);
-        }
-
-        public string CreateDirectory(string relativePath)
-        {
-            var path = TestPathUtils.PathUnder(Path, relativePath);
-            Directory.CreateDirectory(path);
-            return path;
-        }
-
-        public string WriteFile(string relativePath, string contents)
-        {
-            var path = TestPathUtils.PathUnder(Path, relativePath);
-            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, contents);
-            return path;
-        }
-
-        public void Dispose()
-        {
-            if (Directory.Exists(Path))
-            {
-                Directory.Delete(Path, recursive: true);
-            }
-        }
-    }
 }

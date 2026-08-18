@@ -94,10 +94,7 @@ public sealed class TestResultsCleanCommandTests
         var external = root.CreateDirectory("outside/TestResults");
         root.WriteFile("outside/TestResults/keep.txt", "linked target remains");
         var link = Path.Join(scanRoot, "linked-worktree");
-        if (!TryCreateDirectoryLink(link, Path.GetDirectoryName(external)!))
-        {
-            return;
-        }
+        TestFileSystem.CreateDirectoryLinkOrSkip(link, Path.GetDirectoryName(external)!);
 
         using var console = new FakeInMemoryConsole();
         var result = await new TestResultsCleanupWorkflow().CleanAsync(
@@ -120,10 +117,7 @@ public sealed class TestResultsCleanCommandTests
         var external = root.CreateDirectory("external-data");
         root.WriteFile("external-data/keep.txt", "linked target remains");
         var link = Path.Join(results, "linked-data");
-        if (!TryCreateDirectoryLink(link, external))
-        {
-            return;
-        }
+        TestFileSystem.CreateDirectoryLinkOrSkip(link, external);
 
         using var console = new FakeInMemoryConsole();
         var result = await new TestResultsCleanupWorkflow().CleanAsync(
@@ -166,7 +160,8 @@ public sealed class TestResultsCleanCommandTests
         Assert.Contains("ASTEST103", error.Message, StringComparison.Ordinal);
         Assert.Contains("after removing 1 of 2", error.Message, StringComparison.Ordinal);
         Assert.Contains("Close processes holding files", error.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("sentinel deletion failure", error.Message, StringComparison.Ordinal);
+        Assert.Contains("(IOException): sentinel deletion failure", error.Message, StringComparison.Ordinal);
+        Assert.IsType<IOException>(error.InnerException);
     }
 
     [Theory]
@@ -254,10 +249,7 @@ public sealed class TestResultsCleanCommandTests
         var external = root.CreateDirectory("external");
         root.WriteFile("external/TestResults/keep.txt", "linked target remains");
         var linkedRoot = Path.Join(root.Path, "linked-root");
-        if (!TryCreateDirectoryLink(linkedRoot, external))
-        {
-            return;
-        }
+        TestFileSystem.CreateDirectoryLinkOrSkip(linkedRoot, external);
 
         using var console = new FakeInMemoryConsole();
         var error = await Assert.ThrowsAsync<CommandException>(async () =>
@@ -277,10 +269,7 @@ public sealed class TestResultsCleanCommandTests
         var external = root.CreateDirectory("external");
         var sentinel = root.WriteFile("external/keep.txt", "target remains");
         var link = Path.Join(root.Path, "TestResults");
-        if (!TryCreateDirectoryLink(link, external))
-        {
-            return;
-        }
+        TestFileSystem.CreateDirectoryLinkOrSkip(link, external);
 
         TestResultsCleanupWorkflow.DeleteDirectoryTree(link, CancellationToken.None);
 
@@ -294,10 +283,7 @@ public sealed class TestResultsCleanCommandTests
         using var root = TestDirectory.Create();
         var results = root.CreateDirectory("TestResults");
         var external = root.WriteFile("external/keep.txt", "target remains");
-        if (!TryCreateFileLink(Path.Join(results, "linked-file.txt"), external))
-        {
-            return;
-        }
+        TestFileSystem.CreateFileLinkOrSkip(Path.Join(results, "linked-file.txt"), external);
 
         using var console = new FakeInMemoryConsole();
         await new TestResultsCleanupWorkflow().CleanAsync(
@@ -350,10 +336,7 @@ public sealed class TestResultsCleanCommandTests
         var external = root.CreateDirectory("external");
         var sentinel = root.WriteFile("external/TestResults/keep.txt", "target remains");
         var capabilityProbe = Path.Join(root.Path, "link-capability-probe");
-        if (!TryCreateDirectoryLink(capabilityProbe, external))
-        {
-            return;
-        }
+        TestFileSystem.CreateDirectoryLinkOrSkip(capabilityProbe, external);
 
         Directory.Delete(capabilityProbe);
         using var console = new FakeInMemoryConsole();
@@ -464,48 +447,6 @@ public sealed class TestResultsCleanCommandTests
         Assert.Throws<ArgumentNullException>(() => new TestResultsCleanupWorkflow(null!));
     }
 
-    private static bool TryCreateDirectoryLink(string link, string target)
-    {
-        try
-        {
-            Directory.CreateSymbolicLink(link, target);
-            return true;
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-        catch (PlatformNotSupportedException)
-        {
-            return false;
-        }
-    }
-
-    private static bool TryCreateFileLink(string link, string target)
-    {
-        try
-        {
-            File.CreateSymbolicLink(link, target);
-            return true;
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-        catch (PlatformNotSupportedException)
-        {
-            return false;
-        }
-    }
-
     private static Exception CreateDeletionException(int exceptionKind) => exceptionKind switch
     {
         0 => new IOException("simulated IO failure"),
@@ -514,38 +455,4 @@ public sealed class TestResultsCleanCommandTests
         _ => throw new ArgumentOutOfRangeException(nameof(exceptionKind)),
     };
 
-    private sealed class TestDirectory(string path) : IDisposable
-    {
-        public string Path { get; } = path;
-
-        public static TestDirectory Create()
-        {
-            var path = System.IO.Path.Join(System.IO.Path.GetTempPath(), "appsurface-test-results-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(path);
-            return new TestDirectory(path);
-        }
-
-        public string CreateDirectory(string relativePath)
-        {
-            var path = TestPathUtils.PathUnder(Path, relativePath);
-            Directory.CreateDirectory(path);
-            return path;
-        }
-
-        public string WriteFile(string relativePath, string contents)
-        {
-            var path = TestPathUtils.PathUnder(Path, relativePath);
-            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, contents);
-            return path;
-        }
-
-        public void Dispose()
-        {
-            if (Directory.Exists(Path))
-            {
-                Directory.Delete(Path, recursive: true);
-            }
-        }
-    }
 }

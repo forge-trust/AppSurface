@@ -3584,49 +3584,22 @@ internal static class CoverageRunOutputGuard
         string solutionDirectory,
         IReadOnlyList<CoverageRunProject> projects)
     {
-        if (string.IsNullOrWhiteSpace(outputDirectory))
-        {
-            throw CoverageRunDiagnostics.Create(
+        EnsureOutputWasSupplied(
+            outputDirectory,
+            () => CoverageRunDiagnostics.Create(
                 "ASCOV109",
                 "--output must point to a coverage artifact directory.",
                 "The output path was blank.",
                 "Pass a dedicated output directory such as TestResults/coverage-merged.",
-                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
-        }
+                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics"));
 
         var output = CoverageRunOutputLease.NormalizePlatformPath(Path.GetFullPath(outputDirectory));
-        if (File.Exists(output))
-        {
-            throw UnsafeOutput($"--output points to a file: {output}");
-        }
-
-        RejectReparsePoint(output, "--output");
+        var (trimmedOutput, comparison) = ValidateCommonOutputPath(output);
         var projectsDirectory = Path.Join(output, "projects");
         RejectReparsePoint(projectsDirectory, "the projects artifact directory");
         foreach (var project in projects)
         {
             RejectReparsePoint(Path.Join(projectsDirectory, project.Slug), $"the artifact directory for {project.RelativePath}");
-        }
-
-        var comparison = GetPathComparison();
-        var trimmedOutput = Trim(output);
-        var root = Path.GetPathRoot(output);
-        if (!string.IsNullOrWhiteSpace(root) && string.Equals(trimmedOutput, Trim(root), comparison))
-        {
-            throw UnsafeOutput("--output must not be a filesystem root.");
-        }
-
-        var current = Trim(CoverageRunOutputLease.NormalizePlatformPath(Path.GetFullPath(Directory.GetCurrentDirectory())));
-        if (string.Equals(trimmedOutput, current, comparison))
-        {
-            throw UnsafeOutput("--output must not be the current working directory.");
-        }
-
-        var home = CoverageRunOutputLease.NormalizePlatformPath(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
-        if (!string.IsNullOrWhiteSpace(home) && string.Equals(trimmedOutput, Trim(home), comparison))
-        {
-            throw UnsafeOutput("--output must not be the user home directory.");
         }
 
         var solution = Trim(CoverageRunOutputLease.NormalizePlatformPath(Path.GetFullPath(solutionDirectory)));
@@ -3658,10 +3631,7 @@ internal static class CoverageRunOutputGuard
 
     private static string ResolveCleanupOutputDirectory(string outputDirectory)
     {
-        if (string.IsNullOrWhiteSpace(outputDirectory))
-        {
-            throw UnsafeOutput("--output must point to a coverage artifact directory.");
-        }
+        EnsureOutputWasSupplied(outputDirectory, () => UnsafeOutput("--output must point to a coverage artifact directory."));
 
         string output;
         try
@@ -3673,11 +3643,26 @@ internal static class CoverageRunOutputGuard
             throw UnsafeOutput($"--output could not be normalized ({exception.GetType().Name}).");
         }
 
+        _ = ValidateCommonOutputPath(output);
+        return output;
+    }
+
+    private static void EnsureOutputWasSupplied(string outputDirectory, Func<CommandException> createException)
+    {
+        if (string.IsNullOrWhiteSpace(outputDirectory))
+        {
+            throw createException();
+        }
+    }
+
+    private static (string TrimmedOutput, StringComparison Comparison) ValidateCommonOutputPath(string output)
+    {
         if (File.Exists(output))
         {
             throw UnsafeOutput($"--output points to a file: {output}");
         }
 
+        RejectReparsePoint(output, "--output");
         var comparison = GetPathComparison();
         var trimmedOutput = Trim(output);
         var root = Path.GetPathRoot(output) ?? string.Empty;
@@ -3694,13 +3679,12 @@ internal static class CoverageRunOutputGuard
 
         var home = CoverageRunOutputLease.NormalizePlatformPath(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
-        if (string.Equals(trimmedOutput, Trim(home), comparison))
+        if (!string.IsNullOrWhiteSpace(home) && string.Equals(trimmedOutput, Trim(home), comparison))
         {
             throw UnsafeOutput("--output must not be the user home directory.");
         }
 
-        RejectReparsePoint(output, "--output");
-        return output;
+        return (trimmedOutput, comparison);
     }
 
     private static void RejectReparsePoint(string path, string description)
