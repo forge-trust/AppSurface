@@ -132,14 +132,14 @@ public sealed class CoverageCleanCommandTests
 
         public string CreateDirectory(string relativePath)
         {
-            var path = System.IO.Path.Join(Path, relativePath);
+            var path = TestPathUtils.PathUnder(Path, relativePath);
             Directory.CreateDirectory(path);
             return path;
         }
 
         public string WriteFile(string relativePath, string contents)
         {
-            var path = System.IO.Path.Join(Path, relativePath);
+            var path = TestPathUtils.PathUnder(Path, relativePath);
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
             File.WriteAllText(path, contents);
             return path;
