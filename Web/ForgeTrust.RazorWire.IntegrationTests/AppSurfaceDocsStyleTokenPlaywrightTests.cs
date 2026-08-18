@@ -1,5 +1,9 @@
+using System.Buffers.Binary;
+using ForgeTrust.AppSurface.Docs;
+using ForgeTrust.AppSurface.Testing;
 using ForgeTrust.AppSurface.Theming;
 using ForgeTrust.AppSurface.Web.Theming;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 
 namespace ForgeTrust.RazorWire.IntegrationTests;
@@ -8,11 +12,234 @@ namespace ForgeTrust.RazorWire.IntegrationTests;
 [Trait("Category", "Integration")]
 public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
 {
+    private const string AppSurfaceLightBaselineDirectory = "Web/ForgeTrust.RazorWire.IntegrationTests/VisualBaselines/AppSurfaceDocsLight";
+
     private readonly AppSurfaceDocsPlaywrightFixture _fixture;
 
     public AppSurfaceDocsStyleTokenPlaywrightTests(AppSurfaceDocsPlaywrightFixture fixture)
     {
         _fixture = fixture;
+    }
+
+    [Theory]
+    [InlineData(ColorScheme.Light)]
+    [InlineData(ColorScheme.Dark)]
+    public async Task FixedAppSurfaceLightPreset_ShouldRemainLightWithoutPreferenceBootstrap(ColorScheme browserColorScheme)
+    {
+        await using var host = await StartAppSurfaceLightHostAsync();
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ColorScheme = browserColorScheme,
+            ViewportSize = new ViewportSize { Width = 1440, Height = 1000 }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{host.BaseUrl}/docs/search");
+        await page.WaitForSelectorAsync("#docs-search-page-input", new PageWaitForSelectorOptions
+        {
+            State = WaitForSelectorState.Visible,
+            Timeout = 60_000
+        });
+        await page.FocusAsync("#docs-search-page-input");
+
+        var values = await page.EvaluateAsync<string[]>(
+            """
+            () => {
+              const root = document.documentElement;
+              const rootStyle = getComputedStyle(root);
+              const inputStyle = getComputedStyle(document.getElementById('docs-search-page-input'));
+              const amberSample = document.createElement('span');
+              amberSample.className = 'text-amber-100';
+              const emeraldSample = document.createElement('span');
+              emeraldSample.className = 'text-emerald-100';
+              const roseSample = document.createElement('span');
+              roseSample.className = 'text-rose-100';
+              const skySample = document.createElement('span');
+              skySample.className = 'text-sky-100';
+              const tealSample = document.createElement('span');
+              tealSample.className = 'text-teal-100';
+              const exampleBadge = document.createElement('span');
+              exampleBadge.className = 'docs-page-badge docs-page-badge--example';
+              const apiBadge = document.createElement('span');
+              apiBadge.className = 'docs-page-badge docs-page-badge--api-reference';
+              const internalsBadge = document.createElement('span');
+              internalsBadge.className = 'docs-page-badge docs-page-badge--internals';
+              document.body.append(
+                amberSample,
+                emeraldSample,
+                roseSample,
+                skySample,
+                tealSample,
+                exampleBadge,
+                apiBadge,
+                internalsBadge);
+              const amberColor = getComputedStyle(amberSample).color;
+              const emeraldColor = getComputedStyle(emeraldSample).color;
+              const roseColor = getComputedStyle(roseSample).color;
+              const skyColor = getComputedStyle(skySample).color;
+              const tealColor = getComputedStyle(tealSample).color;
+              const exampleBadgeColor = getComputedStyle(exampleBadge).color;
+              const apiBadgeColor = getComputedStyle(apiBadge).color;
+              const internalsBadgeColor = getComputedStyle(internalsBadge).color;
+              amberSample.remove();
+              emeraldSample.remove();
+              roseSample.remove();
+              skySample.remove();
+              tealSample.remove();
+              exampleBadge.remove();
+              apiBadge.remove();
+              internalsBadge.remove();
+              return [
+                root.dataset.docsThemePreset ?? '',
+                rootStyle.colorScheme,
+                rootStyle.getPropertyValue('--docs-color-surface-canvas').trim(),
+                rootStyle.getPropertyValue('--docs-color-link').trim(),
+                String(document.querySelectorAll('script[data-as-theme-preference-bootstrap]').length),
+                String(document.querySelectorAll('fieldset[data-as-theme-preference-control]').length),
+                inputStyle.backgroundColor,
+                inputStyle.color,
+                inputStyle.boxShadow,
+                amberColor,
+                emeraldColor,
+                roseColor,
+                skyColor,
+                tealColor,
+                rootStyle.getPropertyValue('--color-amber-950').trim(),
+                rootStyle.getPropertyValue('--color-emerald-950').trim(),
+                rootStyle.getPropertyValue('--color-rose-950').trim(),
+                rootStyle.getPropertyValue('--color-sky-950').trim(),
+                exampleBadgeColor,
+                apiBadgeColor,
+                internalsBadgeColor,
+                String(root.hasAttribute('appsurface-theme-root')),
+                root.getAttribute('data-as-theme') ?? '',
+                root.getAttribute('data-as-theme-mode') ?? '',
+                root.getAttribute('data-as-theme-color-scheme-conflict') ?? ''
+              ];
+            }
+            """);
+
+        Assert.Equal("appsurface-light", values[0]);
+        Assert.Equal("light", values[1]);
+        Assert.Equal("#f8fafc", values[2]);
+        Assert.Equal("#1e3a8a", values[3]);
+        Assert.Equal("0", values[4]);
+        Assert.Equal("0", values[5]);
+        AssertCssColor(values[6], "248, 250, 252");
+        AssertCssColor(values[7], "30, 41, 59");
+        Assert.Contains("30, 64, 175", values[8], StringComparison.Ordinal);
+        AssertCssColor(values[9], "133, 77, 14");
+        AssertCssColor(values[10], "22, 101, 52");
+        AssertCssColor(values[11], "185, 28, 28");
+        AssertCssColor(values[12], "29, 78, 216");
+        AssertCssColor(values[13], "15, 118, 110");
+        Assert.Equal("rgba(241, 245, 249, 0.56)", values[14]);
+        Assert.Equal("rgba(241, 245, 249, 0.56)", values[15]);
+        Assert.Equal("rgba(241, 245, 249, 0.56)", values[16]);
+        Assert.Equal("rgba(241, 245, 249, 0.56)", values[17]);
+        AssertCssColor(values[18], "22, 101, 52");
+        AssertCssColor(values[19], "29, 78, 216");
+        AssertCssColor(values[20], "133, 77, 14");
+        Assert.Equal("false", values[21]);
+        Assert.Equal(string.Empty, values[22]);
+        Assert.Equal(string.Empty, values[23]);
+        Assert.Equal(string.Empty, values[24]);
+    }
+
+    [Fact]
+    public void FixedAppSurfaceLightPreset_ShouldCommitTheExpectedVisualBaselineManifest()
+    {
+        var expected = new[]
+        {
+            new AppSurfaceLightBaselineManifestEntry("home-desktop-1440x1000.png", 1440),
+            new AppSurfaceLightBaselineManifestEntry("search-desktop-1440x1000.png", 1440),
+            new AppSurfaceLightBaselineManifestEntry("detail-desktop-1440x1000.png", 1440),
+            new AppSurfaceLightBaselineManifestEntry("packages-desktop-1440x1000.png", 1440),
+            new AppSurfaceLightBaselineManifestEntry("release-desktop-1440x1000.png", 1440),
+            new AppSurfaceLightBaselineManifestEntry("home-mobile-390x844.png", 390),
+            new AppSurfaceLightBaselineManifestEntry("search-mobile-390x844.png", 390),
+            new AppSurfaceLightBaselineManifestEntry("detail-mobile-390x844.png", 390)
+        };
+        var configured = GetAppSurfaceLightBaselineViewports()
+            .SelectMany(
+                viewport => GetAppSurfaceLightBaselineRoutes(viewport.Name)
+                    .Select(route => new AppSurfaceLightBaselineManifestEntry(route.BaselineFileName, viewport.Width)))
+            .ToArray();
+
+        Assert.Equal(expected, configured);
+
+        var repositoryRoot = ForgeTrust.AppSurface.Core.PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
+        var baselineDirectory = TestPathUtils.PathUnder(
+            repositoryRoot,
+            "Web",
+            "ForgeTrust.RazorWire.IntegrationTests",
+            "VisualBaselines",
+            "AppSurfaceDocsLight");
+        ReadOnlySpan<byte> pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+        ReadOnlySpan<byte> pngHeader = [73, 72, 68, 82];
+        foreach (var baseline in expected)
+        {
+            var baselinePath = TestPathUtils.PathUnder(baselineDirectory, baseline.FileName);
+            var bytes = File.ReadAllBytes(baselinePath);
+
+            Assert.True(bytes.Length >= 24, $"Baseline '{baseline.FileName}' is too short to be a PNG.");
+            Assert.True(bytes.AsSpan(0, pngSignature.Length).SequenceEqual(pngSignature), $"Baseline '{baseline.FileName}' has an invalid PNG signature.");
+            Assert.True(bytes.AsSpan(12, pngHeader.Length).SequenceEqual(pngHeader), $"Baseline '{baseline.FileName}' does not begin with an IHDR chunk.");
+            Assert.Equal(baseline.ViewportWidth, BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(16, sizeof(int))));
+            Assert.True(
+                BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(20, sizeof(int))) > 0,
+                $"Baseline '{baseline.FileName}' has no rendered content height.");
+        }
+    }
+
+    [Fact]
+    public async Task FixedAppSurfaceLightPreset_ShouldMatchCommittedMacVisualBaselines()
+    {
+        // The committed screenshots are reviewed macOS Chromium captures. Unit, rendered-layout, export, and
+        // browser-contract tests keep the fixed light preset covered on every platform.
+        if (!OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        await using var host = await StartAppSurfaceLightHostAsync();
+        var docsUrl = $"{host.BaseUrl}/docs";
+        await WaitForAppSurfaceLightDocsReadyAsync(host);
+
+        foreach (var viewport in GetAppSurfaceLightBaselineViewports())
+        {
+            await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+            {
+                ColorScheme = ColorScheme.Dark,
+                ViewportSize = new ViewportSize { Width = viewport.Width, Height = viewport.Height }
+            });
+
+            foreach (var route in GetAppSurfaceLightBaselineRoutes(viewport.Name))
+            {
+                var page = await context.NewPageAsync();
+                await page.GotoAsync($"{docsUrl}{route.Path}");
+                await page.WaitForSelectorAsync(route.ReadySelector, new PageWaitForSelectorOptions
+                {
+                    State = WaitForSelectorState.Visible,
+                    Timeout = 60_000
+                });
+                await page.WaitForFunctionAsync(
+                    "() => document.documentElement.dataset.docsThemePreset === 'appsurface-light'",
+                    null,
+                    new PageWaitForFunctionOptions { Timeout = 60_000 });
+                if (route.IsSearch)
+                {
+                    await WaitForVisualBaselineSearchReadyAsync(page);
+                }
+
+                await AppSurfaceDocsScreenshotBaseline.AssertMatchesAsync(
+                    page,
+                    route.BaselineFileName,
+                    Path.Join(AppContext.BaseDirectory, "TestResults", "AppSurfaceDocsLight"),
+                    AppSurfaceLightBaselineDirectory);
+                await page.CloseAsync();
+            }
+        }
     }
 
     [Fact]
@@ -611,6 +838,81 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
             new PageWaitForFunctionOptions { Timeout = 30_000 });
     }
 
+    private static async Task WaitForVisualBaselineSearchReadyAsync(IPage page)
+    {
+        await page.WaitForFunctionAsync(
+            """
+            () => document.getElementById('docs-search-page-status')?.textContent ===
+                'Search is ready. Try a starter query or browse by filter.'
+              && document.getElementById('docs-search-page-results')?.getAttribute('aria-busy') === 'false'
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 60_000 });
+    }
+
+    private static Task<AppSurfaceDocsInProcessHost> StartAppSurfaceLightHostAsync()
+    {
+        return AppSurfaceDocsInProcessHost.StartAsync(
+            "http://127.0.0.1:0",
+            services => services.PostConfigure<AppSurfaceDocsOptions>(options =>
+            {
+                options.Theme = new AppSurfaceDocsThemeOptions
+                {
+                    Preset = AppSurfaceDocsThemePreset.AppSurfaceLight,
+                    Colors = new AppSurfaceDocsThemeColorOptions
+                    {
+                        AccentColor = "#1e3a8a",
+                        AccentStrongColor = "#1e40af",
+                        LinkColor = "#1e3a8a",
+                        VisitedLinkColor = "#5b21b6"
+                    }
+                };
+            }));
+    }
+
+    private static async Task WaitForAppSurfaceLightDocsReadyAsync(AppSurfaceDocsInProcessHost host)
+    {
+        using var client = new HttpClient();
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(60);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            using var response = await client.GetAsync($"{host.BaseUrl}/docs");
+            response.EnsureSuccessStatusCode();
+            var html = await response.Content.ReadAsStringAsync();
+            if (!html.Contains("id=\"docs-harvest-page\"", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            await Task.Delay(100);
+        }
+
+        throw new TimeoutException("The fixed AppSurfaceLight Docs host did not complete its initial harvest within 60 seconds.");
+    }
+
+    private static IEnumerable<AppSurfaceLightBaselineViewport> GetAppSurfaceLightBaselineViewports()
+    {
+        yield return new AppSurfaceLightBaselineViewport("desktop", 1440, 1000);
+        yield return new AppSurfaceLightBaselineViewport("mobile", 390, 844);
+    }
+
+    private static IEnumerable<AppSurfaceLightBaselineRoute> GetAppSurfaceLightBaselineRoutes(string viewportName)
+    {
+        if (string.Equals(viewportName, "desktop", StringComparison.Ordinal))
+        {
+            yield return new AppSurfaceLightBaselineRoute("", "main h1", "home-desktop-1440x1000.png", false);
+            yield return new AppSurfaceLightBaselineRoute("/search", ".docs-gradient-title", "search-desktop-1440x1000.png", true);
+            yield return new AppSurfaceLightBaselineRoute("/examples/razorwire-mvc", "#docs-page-outline", "detail-desktop-1440x1000.png", false);
+            yield return new AppSurfaceLightBaselineRoute("/packages", "main h1", "packages-desktop-1440x1000.png", false);
+            yield return new AppSurfaceLightBaselineRoute("/releases/unreleased", ".docs-trust-bar", "release-desktop-1440x1000.png", false);
+            yield break;
+        }
+
+        yield return new AppSurfaceLightBaselineRoute("", "main h1", "home-mobile-390x844.png", false);
+        yield return new AppSurfaceLightBaselineRoute("/search", ".docs-gradient-title", "search-mobile-390x844.png", true);
+        yield return new AppSurfaceLightBaselineRoute("/examples/razorwire-mvc", "#docs-page-outline", "detail-mobile-390x844.png", false);
+    }
+
     private static void AssertCssColor(string actual, string expectedRgbChannels)
     {
         Assert.Contains(expectedRgbChannels, actual, StringComparison.Ordinal);
@@ -623,4 +925,14 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
         Assert.NotEqual("transparent", actual);
         Assert.NotEqual("none", actual);
     }
+
+    private sealed record AppSurfaceLightBaselineViewport(string Name, int Width, int Height);
+
+    private sealed record AppSurfaceLightBaselineManifestEntry(string FileName, int ViewportWidth);
+
+    private sealed record AppSurfaceLightBaselineRoute(
+        string Path,
+        string ReadySelector,
+        string BaselineFileName,
+        bool IsSearch);
 }

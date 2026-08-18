@@ -33,6 +33,7 @@ interface SectionCopyBinding {
 
     const markerSelector = '[data-rw-section-copy], [data-rw-section-copy-target]';
 
+    // appsurface:source-marker id="razorwire-section-copy-manager" position="begin"
     class SectionCopyManager {
         controllers = new Map<Element, SectionCopyController>();
         diagnostics: SectionCopyDiagnostic[] = [];
@@ -133,6 +134,7 @@ interface SectionCopyBinding {
             return markers.some(marker => !explicitRoots.some(root => root.contains(marker)));
         }
     }
+    // appsurface:source-marker id="razorwire-section-copy-manager" position="end"
 
     class SectionCopyController {
         private bindings: SectionCopyBinding[] = [];

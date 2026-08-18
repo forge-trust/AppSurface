@@ -951,8 +951,12 @@ public class DocAggregatorTests : IDisposable
             localEnv,
             _memo,
             new AppSurfaceDocsHtmlSanitizer(),
-            _loggerFake);
+            _loggerFake,
+            resolveGitLastUpdatedUtcAsync: null,
+            harvesterTimeout: TimeSpan.FromMinutes(2));
 
+        // This full-repository integration assertion checks static-export link shaping, not the production
+        // per-harvester timeout. Allow the Markdown scan to complete when the test host is contended.
         var docs = await aggregator.GetDocsAsync();
         var guide = Assert.Single(docs, document => document.Path == "tools/ForgeTrust.AppSurface.PackageIndex/README.md");
 
