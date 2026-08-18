@@ -7,6 +7,8 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 /// <summary>Verifies narrow owned-artifact cleanup and the explicit broad TestResults mode.</summary>
 public sealed class CoverageCleanCommandTests
 {
+    private const string MarkerContents = "AppSurface coverage output directory";
+
     [Fact]
     public async Task Clean_default_mode_previews_then_removes_only_known_AppSurface_coverage_artifacts()
     {
@@ -90,6 +92,108 @@ public sealed class CoverageCleanCommandTests
     }
 
     [Fact]
+    public async Task Clean_default_mode_reports_a_single_owned_artifact()
+    {
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("TestResults/coverage-merged");
+        root.WriteFile("TestResults/coverage-merged/.appsurface-coverage-output", MarkerContents + Environment.NewLine);
+        root.WriteFile("TestResults/coverage-merged/coverage.cobertura.xml", "<coverage />");
+        using var console = new FakeInMemoryConsole();
+
+        await new CoverageCleanCommand(new TestResultsCleanupWorkflow())
+        {
+            OutputDirectory = output,
+        }.ExecuteAsync(console, CancellationToken.None);
+
+        Assert.Contains("Found 1 AppSurface coverage artifact.", console.ReadOutputString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Clean_default_mode_uses_the_standard_output_when_no_output_is_supplied()
+    {
+        using var console = new FakeInMemoryConsole();
+
+        await new CoverageCleanCommand(new TestResultsCleanupWorkflow()).ExecuteAsync(console, CancellationToken.None);
+
+        Assert.Contains("Coverage output:", console.ReadOutputString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Clean_default_mode_rejects_unsafe_output_values()
+    {
+        using var root = TestDirectory.Create();
+        var file = root.WriteFile("output.txt", "not a directory");
+        string[] unsafeOutputs =
+        [
+            " ",
+            "\0",
+            file,
+            Path.GetPathRoot(root.Path)!,
+            Directory.GetCurrentDirectory(),
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ];
+
+        foreach (var output in unsafeOutputs)
+        {
+            var error = Assert.Throws<CommandException>(() => CoverageRunOutputGuard.CleanExistingOwnedOutput(output, apply: false));
+
+            Assert.Contains("ASCOV109", error.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void Clean_default_mode_rejects_a_linked_output_directory()
+    {
+        using var root = TestDirectory.Create();
+        var external = root.CreateDirectory("external-output");
+        var linkedOutput = Path.Join(root.Path, "linked-output");
+        if (!TryCreateDirectoryLink(linkedOutput, external))
+        {
+            return;
+        }
+
+        var error = Assert.Throws<CommandException>(() => CoverageRunOutputGuard.CleanExistingOwnedOutput(linkedOutput, apply: false));
+
+        Assert.Contains("ASCOV109", error.Message, StringComparison.Ordinal);
+        Assert.Contains("symbolic link or reparse point", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Clean_default_mode_wraps_acquisition_failures_in_the_safe_output_diagnostic()
+    {
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("TestResults/coverage-merged");
+
+        var error = Assert.Throws<CommandException>(() =>
+            CoverageRunOutputGuard.CleanExistingOwnedOutput(
+                output,
+                apply: false,
+                _ => throw new IOException("simulated acquisition failure")));
+
+        Assert.Contains("ASCOV109", error.Message, StringComparison.Ordinal);
+        Assert.Contains("existing artifact tree", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("simulated acquisition failure", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Clean_default_mode_rejects_a_null_acquisition_operation()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            CoverageRunOutputGuard.CleanExistingOwnedOutput("coverage", apply: false, null!));
+    }
+
+    [Fact]
+    public void Clean_existing_lease_rejects_a_file_path_without_retaining_resources()
+    {
+        using var root = TestDirectory.Create();
+        var file = root.WriteFile("not-a-directory", "file remains");
+
+        Assert.ThrowsAny<IOException>(() => CoverageRunOutputLease.AcquireExisting(file));
+
+        Assert.Equal("file remains", File.ReadAllText(file));
+    }
+
+    [Fact]
     public async Task Clean_rejects_root_without_the_explicit_all_mode()
     {
         using var root = TestDirectory.Create();
@@ -117,6 +221,27 @@ public sealed class CoverageCleanCommandTests
             await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("--output cannot be used with --all", error.Message, StringComparison.Ordinal);
+    }
+
+    private static bool TryCreateDirectoryLink(string link, string target)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(link, target);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
     }
 
     private sealed class TestDirectory(string path) : IDisposable

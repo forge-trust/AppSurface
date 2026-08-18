@@ -3495,11 +3495,29 @@ internal static class CoverageRunOutputGuard
     /// or projects directory. A populated unmarked directory fails closed; an empty unmarked directory is a no-op.
     /// </remarks>
     internal static CoverageOwnedCleanupResult CleanExistingOwnedOutput(string outputDirectory, bool apply)
+        => CleanExistingOwnedOutput(outputDirectory, apply, CoverageRunOutputLease.AcquireExisting);
+
+    /// <summary>
+    /// Inspects an existing AppSurface coverage output directory through an explicit acquisition operation.
+    /// </summary>
+    /// <param name="outputDirectory">Coverage output directory to inspect without following links.</param>
+    /// <param name="apply">Whether known AppSurface-owned artifacts should be removed.</param>
+    /// <param name="acquireExisting">Operation that acquires the existing output directory without creating it.</param>
+    /// <returns>The output existence, ownership, selected artifacts, and applied state.</returns>
+    /// <remarks>
+    /// This overload is intentionally internal so tests can verify that filesystem acquisition failures retain the
+    /// public <c>ASCOV109</c> diagnostic contract without relying on platform-specific permission failures.
+    /// </remarks>
+    internal static CoverageOwnedCleanupResult CleanExistingOwnedOutput(
+        string outputDirectory,
+        bool apply,
+        Func<string, CoverageRunOutputLease?> acquireExisting)
     {
+        ArgumentNullException.ThrowIfNull(acquireExisting);
         var output = ResolveCleanupOutputDirectory(outputDirectory);
         try
         {
-            using var lease = CoverageRunOutputLease.AcquireExisting(output);
+            using var lease = acquireExisting(output);
             if (lease is null)
             {
                 return new CoverageOwnedCleanupResult(output, OutputExists: false, IsOwned: false, [], Applied: false);
@@ -3662,8 +3680,8 @@ internal static class CoverageRunOutputGuard
 
         var comparison = GetPathComparison();
         var trimmedOutput = Trim(output);
-        var root = Path.GetPathRoot(output);
-        if (!string.IsNullOrWhiteSpace(root) && string.Equals(trimmedOutput, Trim(root), comparison))
+        var root = Path.GetPathRoot(output) ?? string.Empty;
+        if (string.Equals(trimmedOutput, Trim(root), comparison))
         {
             throw UnsafeOutput("--output must not be a filesystem root.");
         }
@@ -3676,7 +3694,7 @@ internal static class CoverageRunOutputGuard
 
         var home = CoverageRunOutputLease.NormalizePlatformPath(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
-        if (!string.IsNullOrWhiteSpace(home) && string.Equals(trimmedOutput, Trim(home), comparison))
+        if (string.Equals(trimmedOutput, Trim(home), comparison))
         {
             throw UnsafeOutput("--output must not be the user home directory.");
         }

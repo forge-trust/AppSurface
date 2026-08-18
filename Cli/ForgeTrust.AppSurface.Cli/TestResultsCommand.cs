@@ -39,6 +39,8 @@ internal sealed class TestResultsCleanupWorkflow
 {
     private const string DocumentationAnchor = "Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-clean";
     private readonly Action<string, CancellationToken> _deleteDirectory;
+    private readonly Action<string>? _afterRootExists;
+    private readonly Action<string>? _beforeDiscovery;
 
     /// <summary>
     /// Initializes a workflow that uses the safe recursive deletion implementation.
@@ -52,9 +54,16 @@ internal sealed class TestResultsCleanupWorkflow
     /// Initializes a workflow with an explicit deletion operation for deterministic tests.
     /// </summary>
     /// <param name="deleteDirectory">Action that deletes one validated directory without following links.</param>
-    internal TestResultsCleanupWorkflow(Action<string, CancellationToken> deleteDirectory)
+    /// <param name="afterRootExists">Optional test seam invoked after the root existence check and before root inspection.</param>
+    /// <param name="beforeDiscovery">Optional test seam invoked after root inspection and before directory discovery.</param>
+    internal TestResultsCleanupWorkflow(
+        Action<string, CancellationToken> deleteDirectory,
+        Action<string>? afterRootExists = null,
+        Action<string>? beforeDiscovery = null)
     {
         _deleteDirectory = deleteDirectory ?? throw new ArgumentNullException(nameof(deleteDirectory));
+        _afterRootExists = afterRootExists;
+        _beforeDiscovery = beforeDiscovery;
     }
 
     /// <summary>
@@ -73,7 +82,8 @@ internal sealed class TestResultsCleanupWorkflow
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(console);
 
-        var rootDirectory = ResolveRootDirectory(request.RootDirectory);
+        var rootDirectory = ResolveRootDirectory(request.RootDirectory, _afterRootExists);
+        _beforeDiscovery?.Invoke(rootDirectory);
         var discovery = Discover(rootDirectory, cancellationToken);
         var result = new TestResultsCleanupResult(
             rootDirectory,
@@ -119,7 +129,7 @@ internal sealed class TestResultsCleanupWorkflow
         return result;
     }
 
-    private static string ResolveRootDirectory(string? requestedRoot)
+    private static string ResolveRootDirectory(string? requestedRoot, Action<string>? afterRootExists)
     {
         var value = string.IsNullOrWhiteSpace(requestedRoot) ? Directory.GetCurrentDirectory() : requestedRoot.Trim();
         string rootDirectory;
@@ -155,6 +165,7 @@ internal sealed class TestResultsCleanupWorkflow
                 "Pass one repository or worktree directory with --root.");
         }
 
+        afterRootExists?.Invoke(rootDirectory);
         try
         {
             EnsureDirectoryIsNotReparsePoint(rootDirectory, "cleanup root");
@@ -276,7 +287,16 @@ internal sealed class TestResultsCleanupWorkflow
         return new MeasurementResult(bytes, reparsePointsSkipped);
     }
 
-    private static void DeleteDirectoryTree(string directory, CancellationToken cancellationToken)
+    /// <summary>
+    /// Removes one validated <c>TestResults</c> directory without traversing linked entries.
+    /// </summary>
+    /// <param name="directory">Directory or linked directory entry to remove.</param>
+    /// <param name="cancellationToken">Cancellation token observed between directory entries.</param>
+    /// <remarks>
+    /// This internal test seam covers the race-safe final link check: a directory that is replaced by a link after
+    /// discovery is unlinked instead of traversing its target.
+    /// </remarks>
+    internal static void DeleteDirectoryTree(string directory, CancellationToken cancellationToken)
     {
         if (IsReparsePoint(directory))
         {
@@ -353,14 +373,9 @@ internal sealed class TestResultsCleanupWorkflow
     private static bool IsReparsePoint(string path) =>
         (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
 
-    private static bool IsFilesystemRoot(string path)
+    internal static bool IsFilesystemRoot(string path)
     {
-        var root = Path.GetPathRoot(path);
-        if (string.IsNullOrEmpty(root))
-        {
-            return false;
-        }
-
+        var root = Path.GetPathRoot(path) ?? string.Empty;
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         return string.Equals(
             Path.TrimEndingDirectorySeparator(path),
@@ -368,10 +383,12 @@ internal sealed class TestResultsCleanupWorkflow
             comparison);
     }
 
-    private static long SaturatingAdd(long current, long next) =>
+    /// <summary>Returns the non-negative sum without exceeding <see cref="long.MaxValue"/>.</summary>
+    internal static long SaturatingAdd(long current, long next) =>
         long.MaxValue - current < next ? long.MaxValue : current + next;
 
-    private static string FormatBytes(long bytes)
+    /// <summary>Formats a non-negative regular-file byte count for cleanup output.</summary>
+    internal static string FormatBytes(long bytes)
     {
         string[] units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
         var value = (double)bytes;
@@ -387,7 +404,8 @@ internal sealed class TestResultsCleanupWorkflow
             : $"{value.ToString("0.##", CultureInfo.InvariantCulture)} {units[unitIndex]}";
     }
 
-    private static string Pluralize(string singular, int count) =>
+    /// <summary>Formats a singular noun for one or more cleanup entries.</summary>
+    internal static string Pluralize(string singular, int count) =>
         count == 1
             ? singular
             : singular.EndsWith('y')

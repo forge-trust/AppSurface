@@ -171,6 +171,13 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
 
         VerifyBinding();
         EnsureOwnershipUnchanged(state, ValidateOwnedTree());
+        DeleteKnownEntries(state);
+
+        return new CoverageOwnedCleanupPlan(IsOwned: true, artifacts);
+    }
+
+    private void DeleteKnownEntries(OwnershipState state)
+    {
         if (OperatingSystem.IsWindows())
         {
             DeleteKnownWindowsEntries(BuildAuthorizedChildren(state.Snapshot));
@@ -181,8 +188,6 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
                 _outputHandle!.DangerousGetHandle().ToInt32(),
                 BuildAuthorizedChildren(state.Snapshot));
         }
-
-        return new CoverageOwnedCleanupPlan(IsOwned: true, artifacts);
     }
 
     /// <summary>
