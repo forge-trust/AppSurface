@@ -33,7 +33,7 @@ The result is a docs surface with:
 
 - section-first navigation such as Start Here, Examples, Releases, Troubleshooting, and API Reference
 - source-derived C# API pages
-- annotation-first JavaScript public API pages for browser events, globals, attributes, config, module contracts, and CSS hooks
+- annotation-first JavaScript public API pages for browser events, globals, attributes, config, module contracts, declaration-only class contracts, and CSS hooks
 - a search index that includes titles, summaries, headings, aliases, keywords, and page types
 - optional trust bars for release notes, policies, and provenance-heavy pages
 - optional `Source of truth` links back to the exact files readers should inspect or edit
@@ -510,6 +510,8 @@ Once the first pages render, improve the docs in layers:
 5. Add release notes and trust metadata when adoption depends on upgrade confidence.
 6. Add localization metadata when users need more than one language.
 7. Add versioned published trees only after the live source-backed docs are useful.
+
+For a browser singleton with a class-shaped implementation, start with the [JavaScript class authoring template and decision table](./README.md#five-minute-class-contract-recipe). Publish the singleton `@config` as the consumer entry point, keep the declaration-only class and each public method independently documented, and put a stable begin/end source marker around the real implementation. The harvester accepts the declaration-only JavaScript class contract; it intentionally does not parse TypeScript implementations or generated bundles.
 
 That order matters. A beautiful archive of weak docs is still weak docs.
 
