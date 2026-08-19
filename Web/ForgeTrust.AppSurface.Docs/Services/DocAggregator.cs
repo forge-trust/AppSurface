@@ -2329,7 +2329,9 @@ public class DocAggregator
                         + entryPointSearchText);
                     var snippet = TruncateSnippetAtWordBoundary(bodyText, SearchSnippetMaxLength);
                     var title = ResolveSearchIndexTitle(d);
-                    var summary = d.Metadata?.Summary ?? snippet;
+                    var summary = ShouldUseSearchSnippetForRichAuthoringSummary(content, d.Metadata?.Summary)
+                        ? snippet
+                        : d.Metadata?.Summary ?? snippet;
                     var summaryPresentation = DocsSearchSummaryPresentationProjector.Project(summary);
 
                     var headings = (d.Outline ?? [])
@@ -2447,6 +2449,30 @@ public class DocAggregator
     {
         var decoded = WebUtility.HtmlDecode(text ?? string.Empty);
         return MultiSpaceRegex.Replace(decoded, " ").Trim();
+    }
+
+    /// <summary>
+    /// Determines whether a rendered rich-authoring page must use its reader-facing snippet instead of a raw Markdown summary.
+    /// </summary>
+    /// <param name="content">The sanitized, rendered document HTML.</param>
+    /// <param name="summary">The metadata summary derived from source Markdown, when present.</param>
+    /// <returns>
+    /// <see langword="true"/> when the summary contains rich-authoring fence syntax for content that rendered successfully;
+    /// otherwise, <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// Invalid directives intentionally render as literal source and retain their authored markers. This guard therefore requires
+    /// both a raw fence in the summary and package-rendered rich markup before it substitutes the already normalized snippet.
+    /// </remarks>
+    private static bool ShouldUseSearchSnippetForRichAuthoringSummary(string content, string? summary)
+    {
+        if (string.IsNullOrWhiteSpace(summary) || !summary.Contains(":::", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return content.Contains("data-appsurfacedocs-rich=\"callout\"", StringComparison.Ordinal)
+               || content.Contains("data-appsurfacedocs-rich=\"tabs\"", StringComparison.Ordinal);
     }
 
     /// <summary>
