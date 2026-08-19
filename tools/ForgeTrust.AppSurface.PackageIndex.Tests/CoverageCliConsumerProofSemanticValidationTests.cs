@@ -22,6 +22,7 @@ public sealed class CoverageCliConsumerProofSemanticValidationTests
     [Theory]
     [InlineData("missing-manifest", "CPV001")]
     [InlineData("malformed-manifest", "CPV002")]
+    [InlineData("oversized-manifest", "CPV002")]
     [InlineData("unsupported-schema", "CPV004")]
     [InlineData("wrong-package", "CPV005")]
     [InlineData("wrong-class", "CPV006")]
@@ -300,6 +301,9 @@ public sealed class CoverageCliConsumerProofSemanticValidationTests
                     break;
                 case "malformed-manifest":
                     File.WriteAllText(ManifestPath, "{");
+                    break;
+                case "oversized-manifest":
+                    File.WriteAllText(ManifestPath, new string(' ', 16 * 1024 + 1));
                     break;
                 case "unsupported-schema":
                     File.WriteAllText(CoveragePath, "<coverage><unexpected /></coverage>");

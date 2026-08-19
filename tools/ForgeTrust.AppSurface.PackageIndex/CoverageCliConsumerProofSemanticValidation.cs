@@ -20,6 +20,7 @@ internal static class CoverageCliConsumerProofSemanticValidator
     internal const string ManifestFileName = "coverage-project.json";
     internal const string CoverageFileName = "coverage.cobertura.xml";
     private const int ManifestSchemaVersion = 1;
+    private const int MaxManifestBytes = 16 * 1024;
     private const int MaxCharactersInDocument = 1_048_576;
     private const int MaxDepth = 32;
     private const int MaxElements = 10_000;
@@ -321,6 +322,11 @@ internal static class CoverageCliConsumerProofSemanticValidator
     {
         try
         {
+            if (new FileInfo(path).Length > MaxManifestBytes)
+            {
+                return null;
+            }
+
             using var document = JsonDocument.Parse(File.ReadAllText(path));
             if (document.RootElement.ValueKind != JsonValueKind.Object
                 || !document.RootElement.TryGetProperty("schemaVersion", out var schemaVersion)
