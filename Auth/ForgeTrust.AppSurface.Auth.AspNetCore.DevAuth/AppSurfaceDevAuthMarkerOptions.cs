@@ -62,12 +62,13 @@ public sealed class AppSurfaceDevAuthMarkerOptions
     public bool StartExpanded { get; set; }
 
     /// <summary>
-    /// Gets or sets the local URL to return to after a marker persona mutation.
+    /// Gets or sets the explicit local URL to return to after a marker persona mutation.
     /// </summary>
     /// <remarks>
-    /// Leave this unset to return to the current request path and query. The marker normalizes blank, non-rooted,
-    /// external, protocol-relative, backslash-containing, and control-character values to the site root before
-    /// constructing its mutation actions.
+    /// This host-owned target takes precedence over the selected persona's configured landing URL. Leave it unset to
+    /// let a selected persona landing URL win; when that persona has no landing URL, the marker returns to the current
+    /// request path and query. The marker normalizes blank, non-rooted, external, protocol-relative,
+    /// backslash-containing, and control-character values to the site root before constructing its mutation actions.
     /// </remarks>
     public string? ReturnUrl { get; set; }
 }

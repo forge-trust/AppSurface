@@ -164,6 +164,39 @@ public sealed class AppSurfaceDevAuthEndpointTests
     }
 
     [Fact]
+    public async Task ControlPage_WithoutExplicitReturnUrl_UsesEachPersonaLandingUrl()
+    {
+        await using var app = BuildApp(AddPersonasWithViewerLandingUrl);
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/", HttpMethods.Get);
+        var context = CreateContext(app.Services);
+
+        await endpoint.RequestDelegate!(context);
+
+        var html = await ReadBodyAsync(context);
+
+        Assert.Contains("action=\"/_appsurface/dev-auth/select/admin\"", html, StringComparison.Ordinal);
+        Assert.Contains("action=\"/_appsurface/dev-auth/select/viewer?returnUrl=%2Fviewer%3Ftab%3Dproof\"", html, StringComparison.Ordinal);
+        Assert.Contains("action=\"/_appsurface/dev-auth/clear\"", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ControlPage_WithRejectedExplicitReturnUrl_UsesPersonaLandingUrl()
+    {
+        await using var app = BuildApp(AddPersonasWithViewerLandingUrl);
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/", HttpMethods.Get);
+        var context = CreateContext(app.Services);
+        context.Request.QueryString = new QueryString("?returnUrl=https%3A%2F%2Fexample.com%2F");
+
+        await endpoint.RequestDelegate!(context);
+
+        var html = await ReadBodyAsync(context);
+
+        Assert.Contains("action=\"/_appsurface/dev-auth/select/admin\"", html, StringComparison.Ordinal);
+        Assert.Contains("action=\"/_appsurface/dev-auth/select/viewer?returnUrl=%2Fviewer%3Ftab%3Dproof\"", html, StringComparison.Ordinal);
+        Assert.Contains("action=\"/_appsurface/dev-auth/clear\"", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ControlPage_WithCustomPathPrefixAndSafeReturnUrl_ComposesExactActions()
     {
         await using var app = BuildApp(options =>
@@ -244,6 +277,43 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Contains("/_appsurface/dev-auth/select/viewer?returnUrl=%2F", html, StringComparison.Ordinal);
         Assert.Contains("/_appsurface/dev-auth/clear?returnUrl=%2F", html, StringComparison.Ordinal);
         Assert.DoesNotContain("example.com", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Marker_WithoutExplicitReturnUrl_UsesPersonaLandingUrlBeforeCurrentPageFallback()
+    {
+        using var app = BuildApp(AddPersonasWithViewerLandingUrl);
+        var context = CreateContext(app.Services);
+        context.Request.Path = "/operator-proof";
+        context.Request.QueryString = new QueryString("?tab=auth");
+
+        var html = AppSurfaceDevAuthMarker.Render(
+            context,
+            app.Services.GetRequiredService<IHostEnvironment>(),
+            app.Services.GetRequiredService<IOptions<AppSurfaceDevAuthOptions>>(),
+            app.Services.GetRequiredService<IDataProtectionProvider>());
+
+        Assert.Contains("/_appsurface/dev-auth/select/admin?returnUrl=%2Foperator-proof%3Ftab%3Dauth", html, StringComparison.Ordinal);
+        Assert.Contains("/_appsurface/dev-auth/select/viewer?returnUrl=%2Fviewer%3Ftab%3Dproof", html, StringComparison.Ordinal);
+        Assert.Contains("/_appsurface/dev-auth/clear?returnUrl=%2Foperator-proof%3Ftab%3Dauth", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Marker_WithExplicitReturnUrl_TakesPrecedenceOverPersonaLandingUrl()
+    {
+        using var app = BuildApp(AddPersonasWithViewerLandingUrl);
+        var context = CreateContext(app.Services);
+
+        var html = AppSurfaceDevAuthMarker.Render(
+            context,
+            app.Services.GetRequiredService<IHostEnvironment>(),
+            app.Services.GetRequiredService<IOptions<AppSurfaceDevAuthOptions>>(),
+            app.Services.GetRequiredService<IDataProtectionProvider>(),
+            options => options.ReturnUrl = "/host-proof?tab=auth");
+
+        Assert.Contains("/_appsurface/dev-auth/select/admin?returnUrl=%2Fhost-proof%3Ftab%3Dauth", html, StringComparison.Ordinal);
+        Assert.Contains("/_appsurface/dev-auth/select/viewer?returnUrl=%2Fhost-proof%3Ftab%3Dauth", html, StringComparison.Ordinal);
+        Assert.Contains("/_appsurface/dev-auth/clear?returnUrl=%2Fhost-proof%3Ftab%3Dauth", html, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -564,6 +634,50 @@ public sealed class AppSurfaceDevAuthEndpointTests
     }
 
     [Fact]
+    public async Task SelectPersona_WithoutExplicitReturnUrl_RedirectsToPersonaLandingUrl()
+    {
+        await using var app = BuildApp(AddPersonasWithViewerLandingUrl);
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
+        var context = CreateContext(app.Services);
+        context.Request.RouteValues["personaId"] = "viewer";
+
+        await endpoint.RequestDelegate!(context);
+
+        Assert.Equal(StatusCodes.Status302Found, context.Response.StatusCode);
+        Assert.Equal("/viewer?tab=proof", context.Response.Headers.Location);
+    }
+
+    [Fact]
+    public async Task SelectPersona_WithExplicitReturnUrl_TakesPrecedenceOverPersonaLandingUrl()
+    {
+        await using var app = BuildApp(AddPersonasWithViewerLandingUrl);
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
+        var context = CreateContext(app.Services);
+        context.Request.RouteValues["personaId"] = "viewer";
+        context.Request.QueryString = new QueryString("?returnUrl=%2Fhost-proof%3Ftab%3Dauth");
+
+        await endpoint.RequestDelegate!(context);
+
+        Assert.Equal(StatusCodes.Status302Found, context.Response.StatusCode);
+        Assert.Equal("/host-proof?tab=auth", context.Response.Headers.Location);
+    }
+
+    [Fact]
+    public async Task SelectPersona_WithExternalReturnUrl_UsesPersonaLandingUrl()
+    {
+        await using var app = BuildApp(AddPersonasWithViewerLandingUrl);
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
+        var context = CreateContext(app.Services);
+        context.Request.RouteValues["personaId"] = "viewer";
+        context.Request.QueryString = new QueryString("?returnUrl=https%3A%2F%2Fexample.com%2F");
+
+        await endpoint.RequestDelegate!(context);
+
+        Assert.Equal(StatusCodes.Status302Found, context.Response.StatusCode);
+        Assert.Equal("/viewer?tab=proof", context.Response.Headers.Location);
+    }
+
+    [Fact]
     public async Task SelectPersona_OnHttps_SetsSecureCookie()
     {
         await using var app = BuildApp();
@@ -780,6 +894,21 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.True(context.Response.Headers.Location.Count == 0, "External return URLs must not redirect.");
         Assert.Contains("DEV AUTH: Anonymous (AppSurface.DevAuth)", html, StringComparison.Ordinal);
         Assert.DoesNotContain("returnUrl=", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ClearPersona_WithConfiguredLandingUrls_RendersAnonymousControlPage()
+    {
+        await using var app = BuildApp(AddPersonasWithViewerLandingUrl);
+        var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/clear", HttpMethods.Post);
+        var context = CreateContext(app.Services);
+
+        await endpoint.RequestDelegate!(context);
+
+        var html = await ReadBodyAsync(context);
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Contains("DEV AUTH: Anonymous (AppSurface.DevAuth)", html, StringComparison.Ordinal);
+        Assert.True(context.Response.Headers.Location.Count == 0, "Clear must not use a persona landing URL.");
     }
 
     [Fact]
@@ -1084,6 +1213,23 @@ public sealed class AppSurfaceDevAuthEndpointTests
                 .DisplayName("Local Viewer")
                 .Subject("viewer-1")
                 .Claim("role", "viewer"));
+    }
+
+    private static void AddPersonasWithViewerLandingUrl(AppSurfaceDevAuthOptions options)
+    {
+        options.Users.Add(
+            "admin",
+            user => user
+                .DisplayName("Local Admin")
+                .Subject("admin-1")
+                .Claim("role", "operator"));
+        options.Users.Add(
+            "viewer",
+            user => user
+                .DisplayName("Local Viewer")
+                .Subject("viewer-1")
+                .Claim("role", "viewer")
+                .LandingUrl("/viewer?tab=proof"));
     }
 
     private static AppSurfaceDevAuthOptions CreateOptions(Action<AppSurfaceDevAuthOptions> configure)
