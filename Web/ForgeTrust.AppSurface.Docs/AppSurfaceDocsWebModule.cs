@@ -335,7 +335,8 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// root, adds the archive surface below that route root, and serves preview-surface assets from either the live web
     /// root or the packaged Razor Class Library depending on whether published-tree mounts can shadow the stable docs root.
     /// Asset routes are built with <see cref="DocsUrlBuilder.BuildAssetUrl(string)"/> for <c>search.css</c>,
-    /// <c>minisearch.min.js</c>, <c>search-client.js</c>, and the page-local <c>outline-client.js</c>. The packaged
+    /// <c>minisearch.min.js</c>, <c>search-client.js</c>, and the page-local <c>outline-client.js</c> and
+    /// <c>rich-authoring-client.js</c>. The packaged
     /// AppSurface brand icon is also served from an embedded fallback so static exports that disable static-web-assets
     /// can still validate the layout image. Consumer-owned branding assets can be served from a configured filesystem
     /// directory, including directories outside AppSurface Docs packaged static web assets, under a dedicated request
@@ -408,6 +409,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         MapEmbeddedAssetFallback(endpoints, $"{AppSurfaceDocsStaticAssetBasePath}/minisearch.min.js", "docs/minisearch.min.js");
         MapEmbeddedAssetFallback(endpoints, $"{AppSurfaceDocsStaticAssetBasePath}/search-client.js", "docs/search-client.js");
         MapEmbeddedAssetFallback(endpoints, $"{AppSurfaceDocsStaticAssetBasePath}/outline-client.js", "docs/outline-client.js");
+        MapEmbeddedAssetFallback(endpoints, $"{AppSurfaceDocsStaticAssetBasePath}/rich-authoring-client.js", "docs/rich-authoring-client.js");
         MapBrandingAssetDirectory(endpoints, docsOptions);
 
         if (ShouldPreserveRootStylesheetPath(context))
@@ -438,6 +440,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             MapWebRootAsset(endpoints, docsUrlBuilder.BuildAssetUrl("minisearch.min.js"), "docs/minisearch.min.js");
             MapWebRootAsset(endpoints, docsUrlBuilder.BuildAssetUrl("search-client.js"), "docs/search-client.js");
             MapWebRootAsset(endpoints, docsUrlBuilder.BuildAssetUrl("outline-client.js"), "docs/outline-client.js");
+            MapWebRootAsset(endpoints, docsUrlBuilder.BuildAssetUrl("rich-authoring-client.js"), "docs/rich-authoring-client.js");
         }
         else
         {
@@ -448,6 +451,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             MapLegacyAssetRedirect(endpoints, docsUrlBuilder.BuildAssetUrl("minisearch.min.js"), $"{searchAssetBasePath}/minisearch.min.js");
             MapLegacyAssetRedirect(endpoints, docsUrlBuilder.BuildAssetUrl("search-client.js"), $"{searchAssetBasePath}/search-client.js");
             MapLegacyAssetRedirect(endpoints, docsUrlBuilder.BuildAssetUrl("outline-client.js"), $"{searchAssetBasePath}/outline-client.js");
+            MapLegacyAssetRedirect(endpoints, docsUrlBuilder.BuildAssetUrl("rich-authoring-client.js"), $"{searchAssetBasePath}/rich-authoring-client.js");
         }
 
         if (docsOptions.Versioning?.Enabled == true)

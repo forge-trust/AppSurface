@@ -3,7 +3,9 @@ using FakeItEasy;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using Markdig;
+using Markdig.Extensions.CustomContainers;
 using Markdig.Helpers;
+using Markdig.Renderers.Html;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 using Microsoft.Extensions.Logging;
@@ -1156,6 +1158,406 @@ public class MarkdownHarvesterTests : IDisposable
         var block = Assert.Single(highlighter.Blocks);
         Assert.Equal("csharp", block.Language);
         Assert.Equal("public class Demo { }", Assert.IsType<string>(block.Code).Trim());
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldRenderBoundedRichAuthoringWithAVisibleTabsBaseline()
+    {
+        await WriteMarkdownAsync(
+            "Rich.md",
+            """
+            # Rich authoring
+
+            :::callout warning
+            Keep application DDL out of startup.
+            :::
+
+            :::tabs "Which environment are you preparing?"
+            :::tab "Local proof"
+            ## Run locally
+
+            ```bash
+            dotnet test
+            ```
+            :::
+            :::tab "Production"
+            Use the reviewed deployment runbook.
+            :::
+            :::
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+
+        Assert.Contains("docs-rich-callout--warning", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("data-appsurfacedocs-rich=\"tabs\"", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("Which environment are you preparing?", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("All paths are available below.", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("Local proof", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("Production", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("Run locally", doc.Content, StringComparison.Ordinal);
+        var tabsToken = Assert.Single(doc.RichAuthoringTabsTokens!);
+        Assert.Matches("^[a-f0-9]{64}$", tabsToken);
+        Assert.Contains($"data-appsurfacedocs-rich-tabs-token=\"{tabsToken}\"", doc.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("aria-hidden", doc.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain(" hidden", doc.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldRenderEveryValidTabsBlockWithOneSharedTrustedToken()
+    {
+        await WriteMarkdownAsync(
+            "MultipleTabs.md",
+            """
+            # Multiple choices
+
+            :::tabs "Where are you running?"
+            :::tab "Local"
+            Run locally.
+            :::
+            :::tab "Production"
+            Deploy deliberately.
+            :::
+            :::
+
+            The choices are independent.
+
+            :::tabs "Which runtime are you using?"
+            :::tab "Container"
+            Use the container image.
+            :::
+            :::tab "Process"
+            Use the supervised host.
+            :::
+            :::
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+        var token = Assert.Single(doc.RichAuthoringTabsTokens!);
+
+        Assert.Equal(2, doc.Content.Split("data-appsurfacedocs-rich=\"tabs\"", StringSplitOptions.None).Length - 1);
+        Assert.Equal(2, doc.Content.Split($"data-appsurfacedocs-rich-tabs-token=\"{token}\"", StringSplitOptions.None).Length - 1);
+        Assert.Contains("The choices are independent.", doc.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("appsurface-rich-tabs-", doc.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldNamespaceGeneratedTabsIdsBySourcePath()
+    {
+        const string tabs = """
+            :::tabs "Choose a path"
+            :::tab "First"
+            First.
+            :::
+            :::tab "Second"
+            Second.
+            :::
+            :::
+            """;
+        await WriteMarkdownAsync("First.md", tabs);
+        await WriteMarkdownAsync("Second.md", tabs);
+
+        var docs = await _harvester.HarvestAsync(_testRoot);
+        var promptIds = docs
+            .Select(doc => System.Text.RegularExpressions.Regex.Match(doc.Content, "docs-rich-tabs-[a-f0-9]+-1-prompt"))
+            .Select(match => match.Value)
+            .ToArray();
+
+        Assert.Equal(2, promptIds.Length);
+        Assert.All(promptIds, promptId => Assert.NotEmpty(promptId));
+        Assert.Equal(2, promptIds.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public void RichAuthoringPipeline_ShouldRenderTheSupportedDirectiveShape()
+    {
+        var pipeline = new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()
+            .Use(new AppSurfaceDocsRichAuthoringMarkdownExtension())
+            .Build();
+
+        var markdown = "::: {.appsurface-rich-callout data-appsurface-rich-argument=\"bm90ZQ\"}\nReadable body.\n:::\n";
+        var document = Markdown.Parse(markdown, pipeline);
+        var container = Assert.IsType<CustomContainer>(Assert.Single(document));
+
+        var attributes = container.TryGetAttributes();
+        Assert.NotNull(attributes);
+        Assert.Contains("appsurface-rich-callout", attributes.Classes!);
+        Assert.Contains(
+            attributes.Properties!,
+            property => property.Key == "data-appsurface-rich-argument" && property.Value == "bm90ZQ");
+        Assert.Equal("callout", AppSurfaceDocsRichAuthoringSyntax.GetDirectiveName(container));
+        Assert.Equal("note", AppSurfaceDocsRichAuthoringSyntax.GetDirectiveArguments(container));
+
+        var html = Markdown.ToHtml(document, pipeline);
+
+        Assert.Contains("docs-rich-callout--note", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RichAuthoringPipeline_ShouldPreserveGenericMarkdigCustomContainers()
+    {
+        const string markdown = "::: {.legacy-box}\nCompatible content.\n:::\n";
+        var genericPipeline = new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()
+            .Build();
+        var richAuthoringPipeline = new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()
+            .Use(new AppSurfaceDocsRichAuthoringMarkdownExtension())
+            .Build();
+
+        var expectedHtml = Markdown.ToHtml(markdown, genericPipeline);
+        var actualHtml = Markdown.ToHtml(markdown, richAuthoringPipeline);
+
+        Assert.Equal(expectedHtml, actualHtml);
+    }
+
+    [Fact]
+    public void RichAuthoringTabsRenderResult_ShouldReplaceKnownPlaceholdersInOnePass()
+    {
+        var renderResult = new AppSurfaceDocsRichAuthoringTabsRenderResult(
+            "before <!--appsurface-rich-tabs-1-token--> between <!--appsurface-rich-tabs-2-token--> after",
+            [
+                new AppSurfaceDocsRichAuthoringTabsReplacement("<!--appsurface-rich-tabs-1-token-->", "<section>First</section>"),
+                new AppSurfaceDocsRichAuthoringTabsReplacement("<!--appsurface-rich-tabs-2-token-->", "<section>Second</section>")
+            ],
+            ["token"]);
+
+        var rendered = renderResult.ReplacePlaceholders(renderResult.Markdown);
+
+        Assert.Equal("before <section>First</section> between <section>Second</section> after", rendered);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldKeepDirectiveExamplesInsideTabsCodeFencesLiteral()
+    {
+        await WriteMarkdownAsync(
+            "TabsWithSyntaxExample.md",
+            """
+            # Syntax example
+
+            :::tabs "How should I write it?"
+            :::tab "Example"
+            ```markdown
+            :::callout note
+            This is source text.
+            :::
+            ```
+            :::
+            :::tab "Explanation"
+            The fenced example remains source text.
+            :::
+            :::
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+
+        Assert.Contains(":::callout note", doc.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("docs-rich-callout--note", doc.Content, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(1, false)]
+    [InlineData(2, true)]
+    [InlineData(4, true)]
+    [InlineData(5, false)]
+    public async Task HarvestAsync_ShouldEnforceTabsPanelCountBounds(int panelCount, bool expectedToRender)
+    {
+        var panels = string.Join(
+            Environment.NewLine,
+            Enumerable.Range(1, panelCount)
+                .Select(index => $":::tab \"Option {index}\"{Environment.NewLine}Body {index}.{Environment.NewLine}:::"));
+        await WriteMarkdownAsync(
+            "PanelCount.md",
+            $"# Panel count{Environment.NewLine}{Environment.NewLine}:::tabs \"Choose a path\"{Environment.NewLine}{panels}{Environment.NewLine}:::");
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(_harvester).GetHarvestDiagnostics();
+
+        Assert.Equal(expectedToRender, doc.Content.Contains("data-appsurfacedocs-rich=\"tabs\"", StringComparison.Ordinal));
+        Assert.Equal(!expectedToRender, diagnostics.Any(diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.RichAuthoringInvalidTabs));
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, true)]
+    [InlineData(80, true)]
+    [InlineData(81, false)]
+    public async Task HarvestAsync_ShouldEnforceTabsLabelRuneBounds(int labelRunes, bool expectedToRender)
+    {
+        var label = new string('x', labelRunes);
+        await WriteMarkdownAsync(
+            "LabelLength.md",
+            $"# Label length{Environment.NewLine}{Environment.NewLine}:::tabs \"Choose a path\"{Environment.NewLine}:::tab \"{label}\"{Environment.NewLine}First.{Environment.NewLine}:::{Environment.NewLine}:::tab \"Second\"{Environment.NewLine}Second.{Environment.NewLine}:::{Environment.NewLine}:::");
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(_harvester).GetHarvestDiagnostics();
+
+        Assert.Equal(expectedToRender, doc.Content.Contains("data-appsurfacedocs-rich=\"tabs\"", StringComparison.Ordinal));
+        Assert.Equal(!expectedToRender, diagnostics.Any(diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.RichAuthoringInvalidTabs));
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, true)]
+    [InlineData(160, true)]
+    [InlineData(161, false)]
+    public async Task HarvestAsync_ShouldEnforceTabsPromptRuneBounds(int promptRunes, bool expectedToRender)
+    {
+        var prompt = new string('x', promptRunes);
+        await WriteMarkdownAsync(
+            "PromptLength.md",
+            $"# Prompt length{Environment.NewLine}{Environment.NewLine}:::tabs \"{prompt}\"{Environment.NewLine}:::tab \"First\"{Environment.NewLine}First.{Environment.NewLine}:::{Environment.NewLine}:::tab \"Second\"{Environment.NewLine}Second.{Environment.NewLine}:::{Environment.NewLine}:::");
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(_harvester).GetHarvestDiagnostics();
+
+        Assert.Equal(expectedToRender, doc.Content.Contains("data-appsurfacedocs-rich=\"tabs\"", StringComparison.Ordinal));
+        Assert.Equal(!expectedToRender, diagnostics.Any(diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.RichAuthoringInvalidTabs));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldKeepInvalidRichAuthoringReadableAndEmitStableDiagnostics()
+    {
+        await WriteMarkdownAsync(
+            "Invalid.md",
+            """
+            # Invalid rich authoring
+
+            :::callout urgent
+            This should remain readable.
+            :::
+
+            :::tabs "Pick one"
+            :::tab "Duplicate"
+            First.
+            :::
+            :::tab "Duplicate"
+            Second.
+            :::
+            :::
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(_harvester).GetHarvestDiagnostics();
+
+        Assert.Contains(":::callout urgent", doc.Content, StringComparison.Ordinal);
+        Assert.Contains(":::tabs", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("This should remain readable.", doc.Content, StringComparison.Ordinal);
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.RichAuthoringInvalidCallout);
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.RichAuthoringInvalidTabs);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldTreatRichLookingTextInsideCodeFencesAsCode()
+    {
+        await WriteMarkdownAsync(
+            "Literal.md",
+            """
+            # Literal
+
+            ```markdown
+            :::callout danger
+            This is documentation for the syntax.
+            :::
+            ```
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(_harvester).GetHarvestDiagnostics();
+
+        Assert.DoesNotContain("data-appsurfacedocs-rich", doc.Content, StringComparison.Ordinal);
+        Assert.Contains(":::callout danger", doc.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Code.StartsWith("appsurfacedocs.rich_authoring.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldTreatTabsLookingTextInsideCodeFencesAsCode()
+    {
+        await WriteMarkdownAsync(
+            "TabsLiteral.md",
+            """
+            # Literal tabs
+
+            ```markdown
+            :::tabs "Which environment are you preparing?"
+            :::tab "Local proof"
+            Run locally.
+            :::
+            :::tab "Production"
+            Deploy deliberately.
+            :::
+            :::
+            ```
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(_harvester).GetHarvestDiagnostics();
+
+        Assert.Contains(":::tabs", doc.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-appsurfacedocs-rich", doc.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Code.StartsWith("appsurfacedocs.rich_authoring.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldTreatTabsLookingTextInsideTildeCodeFencesAsCode()
+    {
+        await WriteMarkdownAsync(
+            "TildeTabsLiteral.md",
+            """
+            # Literal tabs
+
+            ~~~markdown
+            :::tabs "Which environment are you preparing?"
+            :::tab "Local proof"
+            Run locally.
+            :::
+            :::tab "Production"
+            Deploy deliberately.
+            :::
+            :::
+            ~~~
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(_harvester).GetHarvestDiagnostics();
+
+        Assert.Contains(":::tabs", doc.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-appsurfacedocs-rich", doc.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Code.StartsWith("appsurfacedocs.rich_authoring.", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(80, true)]
+    [InlineData(81, false)]
+    public async Task HarvestAsync_ShouldMeasureTabsLabelLimitsInUnicodeRunes(int labelRunes, bool expectedToRender)
+    {
+        var label = string.Concat(Enumerable.Repeat("😀", labelRunes));
+        await WriteMarkdownAsync(
+            "UnicodeLabelLength.md",
+            $"# Unicode label length{Environment.NewLine}{Environment.NewLine}:::tabs \"Choose a path\"{Environment.NewLine}:::tab \"{label}\"{Environment.NewLine}First.{Environment.NewLine}:::{Environment.NewLine}:::tab \"Second\"{Environment.NewLine}Second.{Environment.NewLine}:::{Environment.NewLine}:::");
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(_harvester).GetHarvestDiagnostics();
+
+        Assert.Equal(expectedToRender, doc.Content.Contains("data-appsurfacedocs-rich=\"tabs\"", StringComparison.Ordinal));
+        Assert.Equal(!expectedToRender, diagnostics.Any(diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.RichAuthoringInvalidTabs));
+    }
+
+    [Theory]
+    [InlineData(160, true)]
+    [InlineData(161, false)]
+    public async Task HarvestAsync_ShouldMeasureTabsPromptLimitsInUnicodeRunes(int promptRunes, bool expectedToRender)
+    {
+        var prompt = string.Concat(Enumerable.Repeat("😀", promptRunes));
+        await WriteMarkdownAsync(
+            "UnicodePromptLength.md",
+            $"# Unicode prompt length{Environment.NewLine}{Environment.NewLine}:::tabs \"{prompt}\"{Environment.NewLine}:::tab \"First\"{Environment.NewLine}First.{Environment.NewLine}:::{Environment.NewLine}:::tab \"Second\"{Environment.NewLine}Second.{Environment.NewLine}:::{Environment.NewLine}:::");
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(_harvester).GetHarvestDiagnostics();
+
+        Assert.Equal(expectedToRender, doc.Content.Contains("data-appsurfacedocs-rich=\"tabs\"", StringComparison.Ordinal));
+        Assert.Equal(!expectedToRender, diagnostics.Any(diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.RichAuthoringInvalidTabs));
     }
 
     [Fact]

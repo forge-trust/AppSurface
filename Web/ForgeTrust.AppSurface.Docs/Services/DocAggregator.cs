@@ -314,6 +314,10 @@ public class DocAggregator
         "<[^>]+>",
         RegexOptions.NonBacktracking);
 
+    private static readonly Regex RichAuthoringGeneratedChromeRegex = new(
+        "<p\\b[^>]*\\bclass=\\\"[^\\\"]*docs-rich-(?:callout__label|tabs__baseline)[^\\\"]*\\\"[^>]*>[\\s\\S]*?</p>",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.NonBacktracking);
+
     private static readonly Regex MultiSpaceRegex = new(
         "\\s+",
         RegexOptions.NonBacktracking);
@@ -1015,7 +1019,10 @@ public class DocAggregator
                                        null,
                                        n.Metadata,
                                        n.Outline,
-                                       n.SymbolSourceProvenance);
+                                       n.SymbolSourceProvenance)
+                                   {
+                                       RichAuthoringTabsTokens = n.RichAuthoringTabsTokens
+                                   };
                                })
                            .ToList();
 
@@ -1044,7 +1051,10 @@ public class DocAggregator
                                        : null,
                                    n.Metadata,
                                    n.Outline,
-                                   n.SymbolSourceProvenance);
+                                   n.SymbolSourceProvenance)
+                                   {
+                                       RichAuthoringTabsTokens = n.RichAuthoringTabsTokens
+                                   };
                                    if (markdownSourceOwnerIndexes.Contains(index))
                                    {
                                        markdownSourceOwnerNodes.Add(rewrittenNode);
@@ -2310,7 +2320,11 @@ public class DocAggregator
                                     }
                                     .Concat(entry.Keywords))));
                     var bodyText = NormalizeSearchText(
-                        TagRegex.Replace(ScriptOrStyleRegex.Replace(searchableContent, string.Empty), " ")
+                        TagRegex.Replace(
+                            ScriptOrStyleRegex.Replace(
+                                RichAuthoringGeneratedChromeRegex.Replace(searchableContent, string.Empty),
+                                string.Empty),
+                            " ")
                         + " "
                         + entryPointSearchText);
                     var snippet = TruncateSnippetAtWordBoundary(bodyText, SearchSnippetMaxLength);
@@ -2792,7 +2806,13 @@ public class DocAggregator
                     namespaceNode.CanonicalPath,
                     mergedMetadata,
                     CombineOutlines(readmeNode.Outline, namespaceNode.Outline),
-                    namespaceNode.SymbolSourceProvenance);
+                    namespaceNode.SymbolSourceProvenance)
+                {
+                    RichAuthoringTabsTokens = (namespaceNode.RichAuthoringTabsTokens ?? [])
+                        .Concat(readmeNode.RichAuthoringTabsTokens ?? [])
+                        .Distinct(StringComparer.Ordinal)
+                        .ToArray()
+                };
 
                 var namespaceIndex = nodes.FindIndex(n => string.Equals(n.Path, namespaceNode.Path, StringComparison.OrdinalIgnoreCase));
                 if (namespaceIndex >= 0)

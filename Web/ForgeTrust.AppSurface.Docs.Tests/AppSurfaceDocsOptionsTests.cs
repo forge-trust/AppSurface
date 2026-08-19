@@ -1161,6 +1161,7 @@ public sealed class AppSurfaceDocsOptionsTests
     [InlineData("search.css")]
     [InlineData("search-client.js")]
     [InlineData("outline-client.js")]
+    [InlineData("rich-authoring-client.js")]
     [InlineData("minisearch.min.js")]
     [InlineData("fr/docs")]
     [InlineData("..")]

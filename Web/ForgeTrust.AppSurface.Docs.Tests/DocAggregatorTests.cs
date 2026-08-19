@@ -471,7 +471,16 @@ public class DocAggregatorTests : IDisposable
         // Arrange
         var unsafeHtml = "<script>alert('xss')</script><p>Safe</p>";
         var safeHtml = "<p>Safe</p>";
-        var harvestedDocs = new List<DocNode> { new DocNode("Title", "path", unsafeHtml) };
+        var harvestedDocs = new List<DocNode>
+        {
+            new DocNode(
+                "Title",
+                "path",
+                unsafeHtml)
+            {
+                RichAuthoringTabsTokens = ["trusted-tabs-token"]
+            }
+        };
 
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
         A.CallTo(() => _sanitizerFake.Sanitize(unsafeHtml))
@@ -483,6 +492,7 @@ public class DocAggregatorTests : IDisposable
         // Assert
         Assert.Single(result);
         Assert.Equal(safeHtml, result.First().Content);
+        Assert.Equal(["trusted-tabs-token"], result.First().RichAuthoringTabsTokens);
     }
 
     [Fact]
@@ -3263,6 +3273,34 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetSearchIndexPayloadAsync_ShouldOmitGeneratedRichAuthoringChrome()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Guide",
+                "guides/guide.md",
+                """
+                <section class="docs-rich-callout"><p class="docs-rich-callout__label">Note</p><div>Author callout.</div></section>
+                <section class="docs-rich-tabs"><p>Choose an environment.</p><p class="docs-rich-tabs__baseline">All paths are available below.</p><section><h3>Local proof</h3><p>Run the local proof.</p></section><section><h3>Production</h3><p>Use the production workflow.</p></section></section>
+                """)
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var payload = await _aggregator.GetSearchIndexPayloadAsync();
+
+        var indexedDocument = Assert.Single(payload.Documents);
+        Assert.Contains("Author callout.", indexedDocument.BodyText, StringComparison.Ordinal);
+        Assert.Contains("Choose an environment.", indexedDocument.BodyText, StringComparison.Ordinal);
+        Assert.Contains("Local proof", indexedDocument.BodyText, StringComparison.Ordinal);
+        Assert.Contains("Run the local proof.", indexedDocument.BodyText, StringComparison.Ordinal);
+        Assert.Contains("Production", indexedDocument.BodyText, StringComparison.Ordinal);
+        Assert.Contains("Use the production workflow.", indexedDocument.BodyText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Note", indexedDocument.BodyText, StringComparison.Ordinal);
+        Assert.DoesNotContain("All paths are available below.", indexedDocument.BodyText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetSearchIndexPayloadAsync_ShouldProjectGeneratedCodeLanguage()
     {
         var harvestedDocs = new List<DocNode>
@@ -3748,6 +3786,31 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetHarvestHealthAsync_ShouldPublishTerminalProgress_WhenHarvesterObservesTimeoutTokenFirst()
+    {
+        var harvester = new BlockingUntilCanceledHarvester();
+        var services = A.Fake<IServiceProvider>();
+        A.CallTo(() => services.GetService(typeof(IRazorWireStreamHub))).Returns(null);
+        var progress = new AppSurfaceDocsHarvestProgressReporter(
+            services,
+            A.Fake<ILogger<AppSurfaceDocsHarvestProgressReporter>>());
+        var aggregator = CreateHarvestHealthAggregator(
+            [harvester],
+            harvesterTimeout: TimeSpan.FromMilliseconds(10),
+            harvestProgress: progress);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+        var progressSnapshot = progress.CurrentSnapshot;
+
+        Assert.Equal(DocHarvestHealthStatus.Failed, health.Status);
+        Assert.Equal(AppSurfaceDocsHarvestRunState.Failed, progressSnapshot.State);
+        var progressHarvester = Assert.Single(progressSnapshot.Harvesters);
+        Assert.Equal(nameof(BlockingUntilCanceledHarvester), progressHarvester.HarvesterType);
+        Assert.Equal(DocHarvesterHealthStatus.TimedOut.ToString(), progressHarvester.Status);
+        Assert.Equal(1, progressSnapshot.CompletedHarvesters);
+    }
+
+    [Fact]
     public async Task GetHarvestHealthAsync_ShouldRecordTimedOutHarvester_WhenHarvesterIgnoresCancellation()
     {
         var harvester = new NonCancelingHarvester();
@@ -4129,6 +4192,35 @@ public class DocAggregatorTests : IDisposable
         Assert.Equal("ForgeTrust-Web-Type", provenance.AnchorId);
         Assert.Equal("src/Type.cs", provenance.SourcePath);
         Assert.Equal(10, provenance.StartLine);
+    }
+
+    [Fact]
+    public async Task GetDocsAsync_ShouldPreserveAndCombineRichAuthoringTabsTokens_WhenNamespaceReadmeIsMerged()
+    {
+        var namespaceContent = "<section class='doc-namespace-groups'><h4>Namespaces</h4></section><section class='doc-type'>Type body</section>";
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Web",
+                "Namespaces/ForgeTrust.Web",
+                namespaceContent)
+            {
+                RichAuthoringTabsTokens = ["namespace-token", "shared-token"]
+            },
+            new(
+                "README",
+                "docs/ForgeTrust.Web/README.md",
+                "<p>Namespace intro</p>")
+            {
+                RichAuthoringTabsTokens = ["readme-token", "shared-token"]
+            }
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var docs = await _aggregator.GetDocsAsync();
+
+        var namespaceDoc = docs.Single(doc => doc.Path == "Namespaces/ForgeTrust.Web");
+        Assert.Equal(["namespace-token", "shared-token", "readme-token"], namespaceDoc.RichAuthoringTabsTokens);
     }
 
     [Fact]

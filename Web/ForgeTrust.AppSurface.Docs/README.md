@@ -287,6 +287,62 @@ Supported normalized languages render highlighted output when the bundled TextMa
 - Do not use Shiki or Expressive Code line-marker syntax yet. V1 ignores code-fence metadata after the language.
 - Do not style highlighter output outside the AppSurface Docs package stylesheet. Code block styling belongs under `.docs-content` in `wwwroot/css/app.css`.
 
+## Rich authoring
+
+AppSurface Docs also supports two deliberately bounded Markdown primitives for content that benefits from a semantic
+signal rather than a custom HTML component: callouts for a risk or decision, and tabs for two to four mutually
+exclusive reader paths. Both render complete server HTML. A page stays readable in static export, with JavaScript
+disabled, and if the optional tabs enhancement cannot load.
+
+Start with a callout:
+
+```markdown
+:::callout danger
+Application startup must never apply database DDL.
+:::
+```
+
+The supported kinds are `note`, `tip`, `warning`, and `danger`. A callout can contain ordinary Markdown, lists, links,
+and fenced code blocks. It is a short signpost, not a replacement for a troubleshooting or operations section.
+
+Use tabs only when the reader must choose one genuine alternative. The opening line has a required contextual prompt;
+each panel has a required, unique quoted label, and the group has two through four panels:
+
+```markdown
+:::tabs "Which environment are you preparing?"
+:::tab "Local proof"
+Run the disposable local transcript.
+:::
+:::tab "Production"
+Follow the reviewed deployment workflow.
+:::
+:::
+```
+
+The server renders the prompt and every panel in source order with the honest baseline text “All paths are available
+below.” When the package-owned `rich-authoring-client.js` loads, it atomically replaces that baseline with manual WAI
+tabs: arrow keys move focus, while Enter, Space, or a pointer selects a panel. A direct fragment inside a panel opens
+its owner panel before scrolling. Tabs are not outline headings, and search indexes the authored prompt, labels, and
+panel bodies once; it excludes generated labels and progressive-enhancement status chrome.
+
+The client enhances only tabs emitted by this Markdown grammar. Hand-authored HTML that resembles a tabs component
+remains ordinary visible content, so raw markup cannot hide authored documentation or impersonate package output.
+
+### Choose the smallest primitive
+
+| Reader need | Use | Avoid |
+| --- | --- | --- |
+| A sequence where every step matters | Normal Markdown headings and lists | Tabs; hiding sequential work makes recovery harder. |
+| A compact risk, limit, or decision | `:::callout` | A callout for ordinary emphasis. |
+| One of a small number of distinct environments or paths | `:::tabs` | Tabs for long tutorials, chronological operations, or five-plus choices. |
+
+Keep the closing `:::` fences exact. `tabs` cannot be nested; labels and prompts must be non-empty quoted text,
+labels are limited to 80 Unicode characters, and prompts to 160. Invalid rich directives do not disappear or become
+best-effort UI: AppSurface Docs renders their source markers and body visibly, then reports one of
+`appsurfacedocs.rich_authoring.invalid_callout`, `appsurfacedocs.rich_authoring.invalid_tabs`, or
+`appsurfacedocs.rich_authoring.invalid_tab` in harvest health with a problem, cause, and fix. This makes mixed package
+versions and copy-paste mistakes recoverable without a migration.
+
 ## Harvest Health
 
 `DocAggregator.GetHarvestHealthAsync(CancellationToken)` returns structured health for the same cached harvest snapshot used by docs pages, public sections, and the search index. Hosts should use this API when they need to report whether source-backed docs are healthy, empty by configuration, partially degraded, or unavailable because every harvester failed.
@@ -1121,7 +1177,7 @@ Default route behavior:
 - Generated API docs and other non-Markdown docs keep the existing `.html` route shape, such as `{DocsRootPath}/Namespaces/ForgeTrust.AppSurface.Web.html`.
 - Fragments stay fragments. A harvested source path like `guides/intro.md#setup` publishes as `{DocsRootPath}/guides/intro#setup`.
 
-AppSurface Docs reserves document routes that belong to chrome, diagnostics, health, harvest operations, search, sections, versions, and assets. The reserved set includes the docs home, `search`, `search-index.json`, `_harvest`, `_harvest/rebuild`, `_health`, `_health.json`, `_routes`, `_routes.json`, `search.css`, `search-client.js`, `outline-client.js`, `minisearch.min.js`, `versions`, and the `sections/`, `_harvest/`, and `v/` route prefixes. Docs that resolve to reserved routes remain internally available for source lookup, but they are not public document winners and emit route diagnostics.
+AppSurface Docs reserves document routes that belong to chrome, diagnostics, health, harvest operations, search, sections, versions, and assets. The reserved set includes the docs home, `search`, `search-index.json`, `_harvest`, `_harvest/rebuild`, `_health`, `_health.json`, `_routes`, `_routes.json`, `search.css`, `search-client.js`, `outline-client.js`, `rich-authoring-client.js`, `minisearch.min.js`, `versions`, and the `sections/`, `_harvest/`, and `v/` route prefixes. Docs that resolve to reserved routes remain internally available for source lookup, but they are not public document winners and emit route diagnostics.
 
 Markdown route segments are normalized deterministically: Unicode is folded where possible, non-spacing marks are removed, ASCII letters are lower-cased, dots are preserved, and unsafe separators become hyphens. When that conversion is lossy, AppSurface Docs emits `DocLossySlugNormalization` so authors can decide whether to set an explicit route.
 
@@ -2031,6 +2087,7 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
 - `search.css` at the tree root. The bundled search stylesheet carries search-local fallbacks for the shared style tokens so exact release search controls remain styled even when a historical/static export does not include `site.gen.css`.
 - `search-client.js` at the tree root
 - `outline-client.js` at the tree root for outline-aware exports whose HTML references the page-local outline runtime
+- `rich-authoring-client.js` at the tree root for exports whose HTML references the page-local tabs enhancement
 - `/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js` when exported HTML contains RazorWire page-navigation roots. The standard RazorWire scripts output lazy-loads this runtime from an inline detector, so static exports must materialize the package asset even though it is not a literal `<script src>` in the original HTML.
 - `minisearch.min.js` at the tree root
 - any section, detail, partial, and asset routes that belong to the exported docs surface for that release
@@ -2043,7 +2100,7 @@ AppSurface Docs does not regenerate these trees at request time. It resolves ext
 
 Use the limit for exported `.html` pages and the root `search-index.json` only. It is not a general docs file-size policy, it does not cap source harvesting, and it does not block images, fonts, CSS, JavaScript, or other streamed assets. When AppSurface Docs rejects an oversized rewritten artifact, diagnostics include the artifact type, observed size, configured limit, `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes`, the failure outcome, and this section name. Remediate by shrinking or re-exporting the artifact, or by setting a larger explicit limit within the supported range.
 
-When the hidden frozen route manifest is present, mounted archives also use it before file lookup to redirect archived source-shaped Markdown aliases and declared redirect aliases to the mount-local canonical route. For example, a manifest alias of `packages/README.md` with canonical route `packages` redirects to `/docs/v/1.2.3/packages` when the tree is mounted at `/docs/v/1.2.3`, or to `/foo/bar/packages` when the recommended release is mounted at a custom route root. Redirects preserve query strings; request fragments cannot be preserved because browsers do not send them to the server, but a manifest canonical route may still include its own fragment such as `guide#advanced`. Exporters should validate `.appsurface-docs-route-manifest.json`, `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, the RazorWire page-navigation runtime when page-navigation roots are present, and, for outline-aware exports, `outline-client.js` before publishing because a missing required runtime asset or a malformed search payload keeps that release unavailable or incomplete until the artifact is fixed. The version catalog intentionally does not crawl historical HTML to infer optional outline support; old exact archives stay immutable, and any future modernization should be an explicit rebuild from source into a new self-contained tree. Use the [RazorWire CLI](../ForgeTrust.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
+When the hidden frozen route manifest is present, mounted archives also use it before file lookup to redirect archived source-shaped Markdown aliases and declared redirect aliases to the mount-local canonical route. For example, a manifest alias of `packages/README.md` with canonical route `packages` redirects to `/docs/v/1.2.3/packages` when the tree is mounted at `/docs/v/1.2.3`, or to `/foo/bar/packages` when the recommended release is mounted at a custom route root. Redirects preserve query strings; request fragments cannot be preserved because browsers do not send them to the server, but a manifest canonical route may still include its own fragment such as `guide#advanced`. Exporters should validate `.appsurface-docs-route-manifest.json`, `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, the RazorWire page-navigation runtime when page-navigation roots are present, and, for outline-aware or rich-authoring exports, `outline-client.js` or `rich-authoring-client.js` before publishing because a missing required runtime asset or a malformed search payload keeps that release unavailable or incomplete until the artifact is fixed. The version catalog intentionally does not crawl historical HTML to infer optional runtimes; old exact archives stay immutable, and any future modernization should be an explicit rebuild from source into a new self-contained tree. Use the [RazorWire CLI](../ForgeTrust.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
 
 If a strict search-index path failure appears after upgrade, inspect the affected tree's `search-index.json`, find the reported `documents[index]`, and rewrite valid docs pages back to canonical `/docs/...` paths. For example, replace `https://docs.example.com/foo/bar/guide.html`, `/some-base/docs/guide.html`, or `/foo/bar/guide.html` with `/docs/guide.html` before rebuilding or republishing the archive. Do not repair unsafe rows by pointing them at external sites or operational docs endpoints; those entries should be removed or regenerated from a valid docs route.
 
