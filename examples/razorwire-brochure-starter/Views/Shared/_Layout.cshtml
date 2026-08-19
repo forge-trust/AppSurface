@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Northstar Field Guide — steady practices for small teams." />
+    <title>@ViewData["Title"] · Northstar Field Guide</title>
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    @await RenderSectionAsync("Head", required: false)
+</head>
+<body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <header class="site-header">
+        <nav class="site-nav" aria-label="Primary navigation">
+            <a class="wordmark" href="/">Northstar <span>Field Guide</span></a>
+            <div class="nav-links">
+                <a href="/services">Services</a>
+                <a href="/journal">Journal</a>
+                <a href="/contact">Write to us</a>
+            </div>
+        </nav>
+    </header>
+    <main id="main-content">
+        @RenderBody()
+    </main>
+    <footer class="site-footer">
+        <p>Northstar Field Guide · practical notes for clear work.</p>
+        <a href="/contact">Start a conversation</a>
+    </footer>
+</body>
+</html>

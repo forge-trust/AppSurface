@@ -687,6 +687,30 @@ internal sealed class CoverageRunWorkflow
             var projectResults = await RunScheduledProjectsAsync(request, resolution, schedulePlan, executionStates, outputDirectory, build.TestsShouldSkipBuild, supervisor, runConsole, supervisedCancellationToken);
             await ReplayLogsAsync(projectResults, runConsole, supervisedCancellationToken);
 
+            CoverageRunSlowTestDiagnosticsRun? diagnostics;
+            using (var operation = supervisor.Start("diagnostics"))
+            {
+                try
+                {
+                    diagnostics = await RunSlowTestDiagnosticsAsync(
+                        request,
+                        outputDirectory,
+                        projectResults,
+                        () => ElapsedSeconds(runStarted),
+                        supervisor.Commit,
+                        operation.Transition,
+                        runConsole,
+                        operation.ObserveBytes,
+                        supervisedCancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    supervisor.ThrowIfFailed();
+                    throw;
+                }
+            }
+            terminalDiagnostics = diagnostics;
+
             var artifactFailures = projectResults
                 .Where(result => result.ExitCode == 0
                     && !string.Equals(result.CoverageArtifactStatus, "produced", StringComparison.Ordinal))
@@ -711,7 +735,7 @@ internal sealed class CoverageRunWorkflow
                     coverageFiles.Length,
                     executionStates,
                     schedulePlan,
-                    diagnostics: null,
+                    diagnostics,
                     supervisor.Commit,
                     supervisedCancellationToken);
                 var failure = artifactFailures[0];
@@ -738,7 +762,7 @@ internal sealed class CoverageRunWorkflow
                     coverageFiles.Length,
                     executionStates,
                     schedulePlan,
-                    diagnostics: null,
+                    diagnostics,
                     supervisor.Commit,
                     supervisedCancellationToken);
                 throw CoverageRunDiagnostics.Create(
@@ -754,30 +778,6 @@ internal sealed class CoverageRunWorkflow
             {
                 ThrowNoCoverageFiles(request, projectResults);
             }
-
-            CoverageRunSlowTestDiagnosticsRun? diagnostics;
-            using (var operation = supervisor.Start("diagnostics"))
-            {
-                try
-                {
-                    diagnostics = await RunSlowTestDiagnosticsAsync(
-                        request,
-                        outputDirectory,
-                        projectResults,
-                        () => ElapsedSeconds(runStarted),
-                        supervisor.Commit,
-                        operation.Transition,
-                        runConsole,
-                        operation.ObserveBytes,
-                        supervisedCancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    supervisor.ThrowIfFailed();
-                    throw;
-                }
-            }
-            terminalDiagnostics = diagnostics;
 
             var mergeStarted = _timeProvider.GetTimestamp();
             // ReportGenerator uses fixed output names. Isolate every invocation so --no-clean
@@ -3485,6 +3485,58 @@ internal sealed class ReportGeneratorPackageLocator : IReportGeneratorPackageLoc
 internal static class CoverageRunOutputGuard
 {
     /// <summary>
+    /// Inspects an existing AppSurface coverage output directory and optionally removes only its known owned artifacts.
+    /// </summary>
+    /// <param name="outputDirectory">Coverage output directory to inspect without following links.</param>
+    /// <param name="apply">Whether known AppSurface-owned artifacts should be removed.</param>
+    /// <returns>The output existence, ownership, selected artifacts, and applied state.</returns>
+    /// <remarks>
+    /// Unlike <see cref="Prepare"/>, this explicit maintenance path never creates a missing output directory, marker,
+    /// or projects directory. A populated unmarked directory fails closed; an empty unmarked directory is a no-op.
+    /// </remarks>
+    internal static CoverageOwnedCleanupResult CleanExistingOwnedOutput(string outputDirectory, bool apply)
+        => CleanExistingOwnedOutput(outputDirectory, apply, CoverageRunOutputLease.AcquireExisting);
+
+    /// <summary>
+    /// Inspects an existing AppSurface coverage output directory through an explicit acquisition operation.
+    /// </summary>
+    /// <param name="outputDirectory">Coverage output directory to inspect without following links.</param>
+    /// <param name="apply">Whether known AppSurface-owned artifacts should be removed.</param>
+    /// <param name="acquireExisting">Operation that acquires the existing output directory without creating it.</param>
+    /// <returns>The output existence, ownership, selected artifacts, and applied state.</returns>
+    /// <remarks>
+    /// This overload is intentionally internal so tests can verify that filesystem acquisition failures retain the
+    /// public <c>ASCOV109</c> diagnostic contract without relying on platform-specific permission failures.
+    /// </remarks>
+    internal static CoverageOwnedCleanupResult CleanExistingOwnedOutput(
+        string outputDirectory,
+        bool apply,
+        Func<string, CoverageRunOutputLease?> acquireExisting)
+    {
+        ArgumentNullException.ThrowIfNull(acquireExisting);
+        var output = ResolveCleanupOutputDirectory(outputDirectory);
+        try
+        {
+            using var lease = acquireExisting(output);
+            if (lease is null)
+            {
+                return new CoverageOwnedCleanupResult(output, OutputExists: false, IsOwned: false, [], Applied: false);
+            }
+
+            var plan = lease.CleanKnownOwnedArtifacts(apply);
+            return new CoverageOwnedCleanupResult(output, OutputExists: true, plan.IsOwned, plan.Artifacts, apply && plan.IsOwned);
+        }
+        catch (CommandException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            throw UnsafeOutput($"the existing artifact tree could not be safely inspected or cleaned ({exception.GetType().Name}): {output}");
+        }
+    }
+
+    /// <summary>
     /// Verifies that a coverage output path is safe and, when it exists, is owned by AppSurface.
     /// </summary>
     /// <param name="outputDirectory">The proposed coverage output directory.</param>
@@ -3532,49 +3584,22 @@ internal static class CoverageRunOutputGuard
         string solutionDirectory,
         IReadOnlyList<CoverageRunProject> projects)
     {
-        if (string.IsNullOrWhiteSpace(outputDirectory))
-        {
-            throw CoverageRunDiagnostics.Create(
+        EnsureOutputWasSupplied(
+            outputDirectory,
+            () => CoverageRunDiagnostics.Create(
                 "ASCOV109",
                 "--output must point to a coverage artifact directory.",
                 "The output path was blank.",
                 "Pass a dedicated output directory such as TestResults/coverage-merged.",
-                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
-        }
+                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics"));
 
         var output = CoverageRunOutputLease.NormalizePlatformPath(Path.GetFullPath(outputDirectory));
-        if (File.Exists(output))
-        {
-            throw UnsafeOutput($"--output points to a file: {output}");
-        }
-
-        RejectReparsePoint(output, "--output");
+        var (trimmedOutput, comparison) = ValidateCommonOutputPath(output);
         var projectsDirectory = Path.Join(output, "projects");
         RejectReparsePoint(projectsDirectory, "the projects artifact directory");
         foreach (var project in projects)
         {
             RejectReparsePoint(Path.Join(projectsDirectory, project.Slug), $"the artifact directory for {project.RelativePath}");
-        }
-
-        var comparison = GetPathComparison();
-        var trimmedOutput = Trim(output);
-        var root = Path.GetPathRoot(output);
-        if (!string.IsNullOrWhiteSpace(root) && string.Equals(trimmedOutput, Trim(root), comparison))
-        {
-            throw UnsafeOutput("--output must not be a filesystem root.");
-        }
-
-        var current = Trim(CoverageRunOutputLease.NormalizePlatformPath(Path.GetFullPath(Directory.GetCurrentDirectory())));
-        if (string.Equals(trimmedOutput, current, comparison))
-        {
-            throw UnsafeOutput("--output must not be the current working directory.");
-        }
-
-        var home = CoverageRunOutputLease.NormalizePlatformPath(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
-        if (!string.IsNullOrWhiteSpace(home) && string.Equals(trimmedOutput, Trim(home), comparison))
-        {
-            throw UnsafeOutput("--output must not be the user home directory.");
         }
 
         var solution = Trim(CoverageRunOutputLease.NormalizePlatformPath(Path.GetFullPath(solutionDirectory)));
@@ -3602,6 +3627,64 @@ internal static class CoverageRunOutputGuard
         {
             throw UnsafeOutput($"the existing artifact tree contains a symbolic link or reparse point, or cannot be safely inspected ({ex.GetType().Name}): {output}");
         }
+    }
+
+    private static string ResolveCleanupOutputDirectory(string outputDirectory)
+    {
+        EnsureOutputWasSupplied(outputDirectory, () => UnsafeOutput("--output must point to a coverage artifact directory."));
+
+        string output;
+        try
+        {
+            output = CoverageRunOutputLease.NormalizePlatformPath(Path.GetFullPath(outputDirectory));
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or NotSupportedException or UnauthorizedAccessException)
+        {
+            throw UnsafeOutput($"--output could not be normalized ({exception.GetType().Name}).");
+        }
+
+        _ = ValidateCommonOutputPath(output);
+        return output;
+    }
+
+    private static void EnsureOutputWasSupplied(string outputDirectory, Func<CommandException> createException)
+    {
+        if (string.IsNullOrWhiteSpace(outputDirectory))
+        {
+            throw createException();
+        }
+    }
+
+    private static (string TrimmedOutput, StringComparison Comparison) ValidateCommonOutputPath(string output)
+    {
+        if (File.Exists(output))
+        {
+            throw UnsafeOutput($"--output points to a file: {output}");
+        }
+
+        RejectReparsePoint(output, "--output");
+        var comparison = GetPathComparison();
+        var trimmedOutput = Trim(output);
+        var root = Path.GetPathRoot(output) ?? string.Empty;
+        if (string.Equals(trimmedOutput, Trim(root), comparison))
+        {
+            throw UnsafeOutput("--output must not be a filesystem root.");
+        }
+
+        var current = Trim(CoverageRunOutputLease.NormalizePlatformPath(Path.GetFullPath(Directory.GetCurrentDirectory())));
+        if (string.Equals(trimmedOutput, current, comparison))
+        {
+            throw UnsafeOutput("--output must not be the current working directory.");
+        }
+
+        var home = CoverageRunOutputLease.NormalizePlatformPath(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        if (!string.IsNullOrWhiteSpace(home) && string.Equals(trimmedOutput, Trim(home), comparison))
+        {
+            throw UnsafeOutput("--output must not be the user home directory.");
+        }
+
+        return (trimmedOutput, comparison);
     }
 
     private static void RejectReparsePoint(string path, string description)
@@ -3632,6 +3715,28 @@ internal static class CoverageRunOutputGuard
             : StringComparison.Ordinal;
     }
 }
+
+/// <summary>
+/// Describes the result of an explicit cleanup of one AppSurface coverage output directory.
+/// </summary>
+/// <param name="OutputDirectory">Canonical absolute coverage output directory.</param>
+/// <param name="OutputExists">Whether the output directory was present.</param>
+/// <param name="IsOwned">Whether the existing output carried a valid AppSurface ownership marker.</param>
+/// <param name="Artifacts">Relative AppSurface-owned entries selected for cleanup.</param>
+/// <param name="Applied">Whether selected entries were deleted.</param>
+internal sealed record CoverageOwnedCleanupResult(
+    string OutputDirectory,
+    bool OutputExists,
+    bool IsOwned,
+    IReadOnlyList<string> Artifacts,
+    bool Applied);
+
+/// <summary>
+/// Describes the marker-ownership state and known entries selected through a retained coverage output lease.
+/// </summary>
+/// <param name="IsOwned">Whether a valid AppSurface ownership marker was present.</param>
+/// <param name="Artifacts">Relative entries known to be owned by AppSurface coverage commands.</param>
+internal sealed record CoverageOwnedCleanupPlan(bool IsOwned, IReadOnlyList<string> Artifacts);
 
 /// <summary>
 /// Detects explicit sandbox environment markers when callers require non-sandboxed coverage execution.

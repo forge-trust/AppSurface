@@ -129,20 +129,39 @@ window.RazorWire = window.RazorWire || {};
  */
 
 /**
- * Section copy manager for framework-neutral section permalink buttons, generated copy controls, clipboard fallback UI, and lifecycle-safe rebinding.
+ * Singleton section-copy manager for framework-neutral section permalink buttons, generated copy controls, clipboard fallback UI, and lifecycle-safe rebinding.
+ * Consumers use `window.RazorWire.sectionCopyManager`; do not construct `SectionCopyManager`.
  * @public
  * @namespace RazorWire
  * @config window.RazorWire.sectionCopyManager
- * @type {object}
+ * @type {SectionCopyManager}
  * @source <rw:scripts /> with rendered `[data-rw-section-copy]` or `[data-rw-section-copy-target]` markup
  * @property {Function} scan - Re-scans the document for section-copy roots and markers after custom DOM updates.
- * @property {Function} prune - Removes controllers for disconnected roots.
- * @property {Function} getDiagnostics - Returns an array of stable section-copy diagnostic objects recorded since startup.
- * @property {string} getDiagnostics[].message - Required reader-facing problem statement for the invalid marker or runtime state.
- * @property {string} getDiagnostics[].impact - Required explanation of the behavior RazorWire skipped, changed, or could not guarantee.
- * @property {string} getDiagnostics[].fix - Required remediation guidance suitable for docs, tests, and development diagnostics.
- * @property {string} getDiagnostics[].docs - Required repository documentation path for the related troubleshooting guidance.
- * @property {Function} clearDiagnostics - Clears recorded section copy diagnostics.
+ * @property {Function} prune - Removes controllers for disconnected section-copy roots.
+ * @property {Function} getDiagnostics - Returns stable section-copy diagnostics recorded since startup.
+ * @property {Function} clearDiagnostics - Clears recorded section-copy diagnostics.
+ */
+
+/**
+ * Declaration-only object shape for the section-copy manager singleton.
+ * @public
+ * @namespace RazorWire
+ * @typedef {Object} SectionCopyManager
+ * @property {Function} scan - Re-scans the document for section-copy roots and markers after custom DOM updates.
+ * @property {Function} prune - Removes controllers for disconnected section-copy roots.
+ * @property {Function} getDiagnostics - Returns stable section-copy diagnostics recorded since startup.
+ * @property {Function} clearDiagnostics - Clears recorded section-copy diagnostics.
+ */
+
+/**
+ * Diagnostic returned by the RazorWire section-copy manager.
+ * @public
+ * @namespace RazorWire
+ * @typedef {Object} RazorWireSectionCopyDiagnostic
+ * @property {string} message - Required reader-facing problem statement for the invalid marker or runtime state.
+ * @property {string} impact - Required explanation of the behavior RazorWire skipped, changed, or could not guarantee.
+ * @property {string} fix - Required remediation guidance suitable for docs, tests, and development diagnostics.
+ * @property {string} docs - Required repository documentation path for the related troubleshooting guidance.
  */
 
 /**

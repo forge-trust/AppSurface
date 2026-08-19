@@ -1472,7 +1472,7 @@ static web assets.
 - `AppSurfaceDocs:Theme:Preset`
   - Optional compatibility preset for package-owned docs chrome.
   - Defaults to `AppSurfaceDark`.
-  - Supported values are `AppSurfaceDark` and `GraphiteDark`.
+  - Supported values are `AppSurfaceDark`, `GraphiteDark`, and `AppSurfaceLight`.
   - Unknown enum values fail startup validation and list the supported values.
 - `AppSurfaceDocs:Theme:Colors:AccentColor`
   - Optional CSS hex color for primary accent text, active states, and highlights.
@@ -1533,11 +1533,33 @@ Full v1 theme configuration:
 }
 ```
 
-Environment variable spelling follows the normal double-underscore configuration convention, such as `AppSurfaceDocs__Theme__Preset=GraphiteDark`, `AppSurfaceDocs__Theme__Colors__AccentColor=#38bdf8`, and `AppSurfaceDocs__Theme__Layout__Density=Compact`.
+Environment variable spelling follows the normal double-underscore configuration convention, such as `AppSurfaceDocs__Theme__Preset=GraphiteDark`, `AppSurfaceDocs__Theme__Colors__AccentColor=#38bdf8`, and `AppSurfaceDocs__Theme__Layout__Density=Compact`. A complete fixed-light configuration uses `AppSurfaceDocs__Theme__Preset=AppSurfaceLight`, `AppSurfaceDocs__Theme__Colors__AccentColor=#1e3a8a`, `AppSurfaceDocs__Theme__Colors__AccentStrongColor=#1e40af`, `AppSurfaceDocs__Theme__Colors__LinkColor=#1e3a8a`, and `AppSurfaceDocs__Theme__Colors__VisitedLinkColor=#5b21b6`.
 
 Theme validation is part of the public contract. `Theme`, `Theme:Colors`, and `Theme:Layout` must not be null. Color values must be CSS hex colors, not CSS functions, variables, color names, or style declarations. Contrast failures name the config path, configured value, required ratio, tested preset background, and a fix hint so maintainers can correct the value without inspecting generated CSS.
 
-Use theme options when the host wants branded docs without owning views. `AppSurfaceDark` is the default Docs-local preset and also the bridge to a registered shared AppSurface theme pair; see [Theme pairs migration](#theme-pairs-migration). `GraphiteDark` remains a separate Docs-local fixed-dark preset. Do not use these options for arbitrary text or surface overrides, selector-level CSS compatibility, external theme packages, or a bespoke documentation template. Static exports and published release archives freeze the resolved theme variables in exported HTML, so host config changes do not rewrite already-exported archives.
+Use theme options when the host wants branded docs without owning views. `AppSurfaceDark` is the default Docs-local preset and also the bridge to a registered shared AppSurface theme pair; see [Theme pairs migration](#theme-pairs-migration). `GraphiteDark` remains a separate Docs-local fixed-dark preset. `AppSurfaceLight` is an additive fixed light preset with the same four validated color roles and no visitor-controlled appearance behavior. Do not use these options for arbitrary text or surface overrides, selector-level CSS compatibility, external theme packages, or a bespoke documentation template. Static exports and published release archives freeze the resolved theme variables in exported HTML, so host config changes do not rewrite already-exported archives.
+
+### Fixed AppSurfaceLight configuration
+
+Use this contrast-validated light recipe when a host needs a fixed light Docs surface without replacing package views or CSS:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Theme": {
+      "Preset": "AppSurfaceLight",
+      "Colors": {
+        "AccentColor": "#1e3a8a",
+        "AccentStrongColor": "#1e40af",
+        "LinkColor": "#1e3a8a",
+        "VisitedLinkColor": "#5b21b6"
+      }
+    }
+  }
+}
+```
+
+Docs resolves the selected preset into its complete package-owned token graph, applies only the four supported direct roles, and then regenerates dependent fills, borders, and focus treatment. `AppSurfaceLight` is fixed: it does not enable a visitor switcher, a cookie, local storage, a preference bootstrap script, or an additional stylesheet. It serializes `color-scheme: light` and the resolved package variables before `site.gen.css` and `search.css`, so live pages and static exports freeze the same configuration. The preset name, role coverage, validation behavior, and deterministic output are stable; exact package-owned palette values may evolve intentionally with release notes and visual verification. Do not treat raw `--docs-*` variables as an external override surface. Choose the [theme-pairs migration](#theme-pairs-migration) for host-owned System/Light/Dark preferences, or the [deliberate whole-layout override boundary](#default-razor-layout-and-deliberate-host-overrides) when a host needs broader surface or syntax control.
 
 ### Theme pairs migration
 
@@ -1579,6 +1601,7 @@ This keeps one canonical page and one static tree per Docs version. It is origin
 | --- | --- |
 | `AppSurfaceDark` produced only the established dark Docs variable graph. | It remains the default Docs preset and maps Docs-owned surfaces, code tokens, search states, tables, archive/status pages, and focus treatment to the shared Graphite System/Light/Dark semantic branch while keeping Docs variables internal. |
 | `GraphiteDark` was a dark preset. | It remains a Docs-local dark compatibility preset; it is not a shared pair. |
+| No fixed Docs-local light preset was available. | `AppSurfaceLight` is an additive fixed light preset with the existing four validated semantic role overrides. It does not use the shared preference bridge. |
 | `#rgb` color overrides were accepted. | They remain accepted and apply only to the supported Docs accent/link roles. Shared role values remain strict `#RRGGBB`. When a rendered branch cannot meet the documented contrast threshold, Docs keeps the safe semantic pair role instead of emitting the override; browser-local preferences therefore validate every Light and Dark branch, even if the host default is fixed. |
 
 Docs preserves density, chrome, layout override behavior, and the default dark experience when no shared resolver is registered. The package layout emits the Web root/head opt-ins plus a Docs-critical variable mapping before the package stylesheet. Published-tree rewriting preserves that root metadata and both critical styles, so static archives match live output apart from a host-request CSP nonce.
@@ -1914,6 +1937,7 @@ Supported public shapes:
 - attached `const name = (...) => ...` and `const name = function (...) { ... }` doclets, with one declarator per statement
 - attached `const name = value` doclets, with one declarator per statement
 - attached `window.Name = ...` or `window["Name"] = ...` doclets
+- attached named `class Name { ... }` and `export class Name { ... }` doclets, with an independently annotated constructor, method, getter, or setter for every member that should publish
 - standalone `@event event:name` doclets
 - standalone `@typedef {Type} Name` doclets
 - standalone `@attribute name` doclets for package-owned HTML or `data-*` attributes
@@ -1958,6 +1982,53 @@ Every valid generated JavaScript API symbol has the reader-facing lifecycle labe
 The built-in search index projects `apiLifecycle`, `apiLifecycleLabel`, `isDeprecated`, and `isGeneratedApiSymbol` only for validated generated JavaScript API fragments. The search client uses lifecycle values as searchable terms and ranks matching symbol fragments ahead of aggregate API group-body matches. Custom search clients should treat the fields as optional additions to the v1 payload and should not infer lifecycle from ordinary page metadata. Custom harvesters retain the public model shape, but lifecycle values are projected only when the built-in JavaScript harvester has recorded internal provenance and the fragment meets the canonical lifecycle contract.
 
 Invalid combinations skip only the affected item and emit structured diagnostics: repeated or mixed `@alpha`/`@beta` modifiers and conflicting nonblank `@deprecated` messages use `DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict`; modifiers with content use `DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle`. These diagnostics remain warnings in best-effort discovery and become errors when `AppSurfaceDocs:Harvest:JavaScript:StrictHealth=true`. A configured JavaScript include boundary still makes either lifecycle diagnostic fail aggregate strict health, even when the individual diagnostic remains warning-severity.
+
+#### Five-minute class contract recipe
+
+Use a declaration-only class contract when the runtime is class-shaped but consumers receive a package-owned singleton. Keep the singleton config as the first thing readers discover, and document each public method independently:
+
+```js
+/**
+ * Singleton manager exposed to browser consumers.
+ * Consumers use `window.RazorWire.sectionCopyManager`; do not construct `SectionCopyManager`.
+ * @public
+ * @namespace RazorWire
+ * @config window.RazorWire.sectionCopyManager
+ * @type {SectionCopyManager}
+ */
+
+/**
+ * Declaration-only class contract for the singleton.
+ * @public
+ * @namespace RazorWire
+ * @class SectionCopyManager
+ */
+class SectionCopyManager {
+  /** @public @method scan */
+  scan() {}
+
+  /** @public @method prune */
+  prune() {}
+
+  /** @public @method getDiagnostics
+   * @returns {RazorWireSectionCopyDiagnostic[]}
+   */
+  getDiagnostics() {}
+
+  /** @public @method clearDiagnostics */
+  clearDiagnostics() {}
+}
+```
+
+Do not add a constructor to a singleton contract. The harvester renders the declaration-only class and only those methods or accessors that carry their own `@public` annotation; the docs-only manifest remains the authoritative contract because generated bundles and TypeScript source are intentionally not harvest inputs. For the real TypeScript implementation, add one exact begin/end source marker around the class and test marker uniqueness/order without parsing TypeScript or comparing method signatures.
+
+| Decision | Author this shape | Avoid this shape |
+| --- | --- | --- |
+| Consumers access one package-owned runtime instance | `@config window.RazorWire.sectionCopyManager` plus a declaration-only class | A public constructor example or a second manager instance |
+| Consumers need a named object payload | Same-group `@typedef` with `@property` fields | Repeating a large anonymous object in every method or event |
+| Consumers call stable operations | One independently `@public` method doclet per operation | One class-level property list that duplicates method contracts |
+| A method returns reusable diagnostics | Same-group typedef, referenced from `@returns` | An undocumented `object[]` or a second diagnostic schema |
+| Runtime code is TypeScript or generated JavaScript | Docs-only `.js` contract plus a source marker around authored implementation | Harvesting minified output or assuming TypeScript is parsed |
 
 Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`, and detail payload fields through `@property detail.name` or an exact payload reference such as `@property {FormFailureDetail} detail`. Use `@detail none` only when the event deliberately carries no payload. Add `@example` when the event needs consumption guidance beyond the contract fields.
 
@@ -2064,7 +2135,7 @@ Browser-contract doclets should carry enough fields for readers to use them with
  */
 ```
 
-Unsupported public classes, CommonJS export inference, malformed public doclets, invalid lifecycle combinations, incomplete event contracts, missing or ambiguous exact typedef references, oversized files, parse failures, missing exact includes, configured reparse-point includes, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially. The strict event diagnostic code is `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`). The configured-link diagnostic is `DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped` (`appsurfacedocs.javascript.reparse_point_skipped`); its problem, cause, and fix are redacted to repository-relative include paths and do not reveal the symlink target.
+Named, non-derived class declarations are supported when the class and every published constructor, method, or accessor have their own `@public` annotation; unnamed/default-exported classes, class expressions, fields, private or computed members, async/generator methods, static blocks, and derived classes are skipped with a `DocHarvestDiagnostic`. CommonJS export inference, malformed public doclets, invalid lifecycle combinations, incomplete event contracts, missing or ambiguous exact typedef references, oversized files, parse failures, missing exact includes, configured reparse-point includes, and duplicate normalized anchors follow the same diagnostic path. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially. The strict event diagnostic code is `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`). The configured-link diagnostic is `DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped` (`appsurfacedocs.javascript.reparse_point_skipped`); its problem, cause, and fix are redacted to repository-relative include paths and do not reveal the symlink target.
 
 The event-dispatch verifier emits `DocHarvestDiagnosticCodes.JavaScriptEventDocletDispatchMissing` (`appsurfacedocs.javascript.event_doclet_dispatch_missing`) when a public `@event` doclet has no matching literal dispatch evidence, and `DocHarvestDiagnosticCodes.JavaScriptEventDispatchDocletMissing` (`appsurfacedocs.javascript.event_dispatch_doclet_missing`) when a literal `CustomEvent` dispatch has no matching public doclet. Both are warning diagnostics. They appear in health responses and successful `docs verify-health` warning output, but they are intentionally not strict blocking diagnostics.
 
@@ -2095,7 +2166,7 @@ Pitfalls:
 - Do not attach one public doclet to `const first = ..., second = ...`; split public JavaScript API constants or functions into one declaration statement per doclet.
 - Do not rely on automatic event inference from `dispatchEvent(new CustomEvent(...))`. V1 documents explicit public doclets only.
 - Do not pair `@detail none` with `@property detail.*`; either the event has no payload or its payload shape is documented.
-- Do not put `@public` on classes, default exports, or CommonJS exports until a later harvester slice supports those shapes.
+- Do not put `@public` on default exports, CommonJS exports, derived classes, class expressions, or classes with unsupported members. Named, non-derived class declarations support their own `@public` doclets and separately annotated constructors, methods, or accessors.
 - Do not treat Acornima as a runtime JavaScript execution engine. AppSurface Docs uses it only to parse configured source for documentation, and `ForgeTrust.AppSurface.Docs` carries `THIRD-PARTY-NOTICES.md` for the redistributed package.
 
 ### Published version catalog
@@ -3026,13 +3097,13 @@ trust:
 
 The coordinated response to [GHSA-pgww-w46g-26qg](https://github.com/advisories/GHSA-pgww-w46g-26qg) upgrades the HTML parsing and sanitization graph without changing the AppSurface Docs public API, registration sequence, configuration, or consumer usage. The package restores these exact versions from the repository's [central package version catalog](../../Directory.Packages.props):
 
-- `AngleSharp` `[1.5.2]`
-- `HtmlSanitizer` `[9.1.949-beta]`
-- `AngleSharp.Css` `[1.0.0-beta.216]`
+- `AngleSharp` `[1.7.1]`
+- `HtmlSanitizer` `[9.2.995]`
+- `AngleSharp.Css` `[1.0.1]`
 
-The exact pins are intentional: `HtmlSanitizer` and `AngleSharp.Css` must be upgraded as a compatible pair, and the brackets prevent NuGet from silently selecting a different dependency graph. Their beta versions are acceptable only while AppSurface packages are themselves preview releases. The [package artifact verification workflow](../../packages/README.md#maintainer-notes) requires all three dependencies for a stable Docs package, rejects missing or malformed ranges and AngleSharp lower bounds below 1.5.2, and blocks prerelease `HtmlSanitizer` or `AngleSharp.Css`; [issue #682](https://github.com/forge-trust/AppSurface/issues/682) tracks replacing the pair with compatible stable releases as a stable-release prerequisite, not a reason to loosen the exact pins.
+The exact pins are intentional: `HtmlSanitizer` and `AngleSharp.Css` must be upgraded as a compatible pair, and the brackets prevent NuGet from silently selecting a different dependency graph. The [package artifact verification workflow](../../packages/README.md#maintainer-notes) requires every Docs dependency container in a stable package to contain all three exact identities once, rejecting missing, duplicate, versionless, prerelease, or ranged entries. It also restores the freshly packed Docs artifact in an independent locked consumer and records its mapped source configuration, lock file, assets graph, and SHA-512 evidence. [Issue #682](https://github.com/forge-trust/AppSurface/issues/682) landed this stable graph; it is not permission to loosen the pins.
 
-If an adopter's central package policy conflicts with any of these versions, do not use `VersionOverride`, remove the equality brackets, or widen only one dependency. Align the application's entire trio to the exact graph above, or remain on the prior AppSurface preview until a coordinated compatible graph is available. A locally successful restore with a loosened range is not supported compatibility evidence. Maintainers proving the packed graph must follow the [#678 package-proof sequence](../../packages/README.md#issue-678-package-proof).
+If an adopter's central package policy conflicts with any of these versions, do not use `VersionOverride`, remove the equality brackets, or widen only one dependency. Align the application's entire trio to the exact graph above. A locally successful restore with a loosened range is not supported compatibility evidence. Maintainers proving the packed graph must follow the [#682 package-proof sequence](../../packages/README.md#issue-682-package-proof).
 
 `IAppSurfaceDocsHtmlSanitizer` protects rendered package-documentation fragments before AppSurface Docs includes them in its UI. It is not a general untrusted-user-content sanitizer, a whole-document security boundary, or a substitute for a host Content Security Policy. Applications accepting general UGC must define and verify their own sanitization policy, and hosts remain responsible for CSP and the rest of their response-hardening policy. Do not widen the Docs allowlist merely to make unrelated application HTML render.
 

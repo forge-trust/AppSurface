@@ -26,7 +26,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("--exclusive-test-project ForgeTrust.AppSurface.Web.Tailwind.Tests.csproj", script, StringComparison.Ordinal);
         Assert.Contains("--test-results junit", script, StringComparison.Ordinal);
         Assert.Contains("--slow-test-diagnostics", script, StringComparison.Ordinal);
-        Assert.Contains("--logger \"GitHubActions;report-warnings=false\"", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("--logger \"GitHubActions;report-warnings=false\"", script, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_GATE_DIFF_BASE", script, StringComparison.Ordinal);
         Assert.Contains("coverage\n  gate", script, StringComparison.Ordinal);
         Assert.Contains("--min-line 95", script, StringComparison.Ordinal);
@@ -74,6 +74,15 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("COVERAGE_PARALLELISM: 2", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}", workflow, StringComparison.Ordinal);
         Assert.Contains("./scripts/coverage-solution.sh", workflow, StringComparison.Ordinal);
+        Assert.Contains("Publish bounded test-result and slow-test diagnostics summary", workflow, StringComparison.Ordinal);
+        Assert.Contains("test-result-diagnostics", workflow, StringComparison.Ordinal);
+        Assert.Contains("TestResults/coverage-merged/timings.json", workflow, StringComparison.Ordinal);
+        Assert.Contains("TestResults/coverage-merged/junit-*.xml", workflow, StringComparison.Ordinal);
+        Assert.Contains("TestResults/coverage-merged/projects/**/dotnet-test.log", workflow, StringComparison.Ordinal);
+        Assert.Contains("Test-result and slow-test diagnostics were truncated in this summary", workflow, StringComparison.Ordinal);
+        Assert.Contains("Download the \\`test-result-diagnostics\\` artifact for the complete report.", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("render-junit-test-summary.py", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("TEST_RESULT_SUMMARY", workflow, StringComparison.Ordinal);
         Assert.Contains(
             "files: 'TestResults/coverage-merged/coverage.cobertura.xml'\n          disable_search: true",
             workflow,
@@ -760,7 +769,7 @@ public sealed class CoverageSolutionScriptTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains(
-            "--logger\nGitHubActions;report-warnings=false\n--no-restore",
+            "--slow-test-diagnostics\n--no-restore",
             result.DotnetInvocations,
             StringComparison.Ordinal);
     }

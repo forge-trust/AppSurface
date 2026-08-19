@@ -4,7 +4,9 @@ RazorWire lets ASP.NET Core MVC apps update UI by returning Razor fragments from
 
 ## 60-Second Quickstart
 
-AppSurface has not published the public `v0.1` package set yet, so the copy-paste path today is repo-local:
+For a small package-consumer MVC site, begin with the [RazorWire brochure starter](https://github.com/forge-trust/AppSurface/tree/main/examples/razorwire-brochure-starter). It keeps the application dependency surface to `ForgeTrust.RazorWire`, explains how to point restore at an explicit package source, and proves a CDN export without copying source-project references.
+
+AppSurface has not published the public `v0.1` package set yet, so the advanced, source-backed mechanics demo remains repo-local:
 
 1. Clone this repository and use the .NET 10 SDK.
 1. Run the MVC sample:
@@ -17,7 +19,7 @@ dotnet run --project examples/razorwire-mvc/RazorWireWebExample.csproj
 
 Wait for the `Permanent Island` card to load, then click the `+` button. The `Instance Score` and `Session Score` update in place without a full-page reload.
 
-When consuming package builds from a configured feed, reference `ForgeTrust.RazorWire` first and then continue at [Add the Module](#add-the-module). Public NuGet install commands will replace this note when the `v0.1` publishing path is live.
+When consuming package builds from a configured feed, reference `ForgeTrust.RazorWire` first, use the [brochure starter](https://github.com/forge-trust/AppSurface/tree/main/examples/razorwire-brochure-starter) for the package-only baseline, and continue at [Add the Module](#add-the-module) for module-level options. Public NuGet install commands will replace this note when the `v0.1` publishing path is live.
 
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
@@ -255,7 +257,7 @@ Use RazorWire section copy when long-form pages need "copy link to this section"
 </button>
 ```
 
-RazorWire resolves ids document-wide, writes copied/fallback state through stable `data-rw-section-copy*` hooks, announces feedback through an optional live status region, and renders an inline readonly-input fallback when clipboard writes are unavailable. See the full contract in [Section Copy](Docs/section-copy.md).
+RazorWire resolves ids document-wide, writes copied/fallback state through stable `data-rw-section-copy*` hooks, announces feedback through an optional live status region, and renders an inline readonly-input fallback when clipboard writes are unavailable. The runtime exposes one manager at `window.RazorWire.sectionCopyManager`; use its `scan()`, `prune()`, and diagnostic methods rather than constructing a manager. See the full singleton-first contract and recovery recipe in [Section Copy](Docs/section-copy.md), and the source/manifest boundary in [Runtime Contract Pipeline](Docs/runtime-contract-pipeline.md).
 
 ## Generated UI Design Contract
 

@@ -12,7 +12,7 @@ appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3
 
 `appsurface docs` runs the same AppSurface Docs standalone host used by CI and integration tests. It forwards AppSurface Docs configuration into that host instead of duplicating harvesting, routing, static web asset, or MVC setup in the CLI. `appsurface docs export` starts that same host in-process, binds an internal loopback listener, and delegates static crawling plus CDN validation to the RazorWire export engine. `appsurface docs verify-archive` checks one catalog-pinned exact release tree locally before deploy.
 
-The CLI also includes public coverage commands for private-by-default CI coverage enforcement. `appsurface coverage run` discovers or accepts instrumented .NET test projects, writes local coverage artifacts, and merges Cobertura through the package-owned ReportGenerator dependency in the same command. `appsurface coverage merge` fans in existing Cobertura shards from matrix or custom test workflows without reading a consumer tool manifest. `appsurface coverage gate` evaluates the merged local Cobertura XML, writes JSON and Markdown reports, and can append the same Markdown to GitHub Actions step summaries without uploading coverage data to a hosted coverage service.
+The CLI also includes public coverage commands for private-by-default CI coverage enforcement. `appsurface coverage run` discovers or accepts instrumented .NET test projects, writes local coverage artifacts, and merges Cobertura through the package-owned ReportGenerator dependency in the same command. `appsurface coverage merge` fans in existing Cobertura shards from matrix or custom test workflows without reading a consumer tool manifest. `appsurface coverage gate` evaluates the merged local Cobertura XML, writes JSON and Markdown reports, and can append the same Markdown to GitHub Actions step summaries without uploading coverage data to a hosted coverage service. `appsurface coverage clean` previews or explicitly removes those private artifacts; its default ownership-marker mode is narrow, while [`--all`](#appsurface-coverage-clean) provides a deliberate worktree-wide `TestResults` sweep.
 
 `appsurface secrets` manages the first-secret workflow for `ForgeTrust.AppSurface.Config.LocalSecrets`: initialize a local namespace, set one key, verify presence without printing the value, list names, explicitly migrate retained macOS Keychain records to v2, delete keys, and run doctor diagnostics for platform availability.
 
@@ -447,6 +447,48 @@ Use `--dry-run` before the first real CI run to confirm project discovery, colle
 capability, exclusive scheduling, and artifact paths without running tests or cleaning
 the output directory.
 
+### `appsurface coverage clean`
+
+The default mode cleans only AppSurface-owned coverage output. It uses the `.appsurface-coverage-output` ownership marker, removes only known AppSurface-owned coverage artifacts that a normal `coverage run` refreshes, preserves unrecognized files beside them, and never creates a missing output directory. Preview the standard output first:
+
+```bash
+appsurface coverage clean
+```
+
+When the listed coverage artifacts are expected, explicitly delete them:
+
+```bash
+appsurface coverage clean --apply
+```
+
+`--apply` is required: omitting it changes no files. `--output ./TestResults/coverage-merged` is the default, but a different existing AppSurface-owned output can be selected with `--output`. A populated output without the valid ownership marker fails closed with `ASCOV109`; an absent or empty unmarked directory is a no-op. This narrow default is the right choice for normal coverage maintenance because it never treats a generic folder name as proof that AppSurface owns its contents.
+
+For a one-time worktree reclamation sweep, use the explicit broader mode:
+
+```bash
+appsurface coverage clean --all --root .
+appsurface coverage clean --all --root . --apply
+```
+
+`--all` scans descendant directory names equal to `TestResults` without regard to case, reports the approximate regular-file bytes, and does not delete nearby names such as `TestResults-old`, `bin`, `obj`, or arbitrary artifacts. The root itself is never deleted, even when it is named `TestResults`; pass its parent directory to remove that folder. Point `--root` at one worktree—its default is the current directory—and do not run cleanup while tests or coverage collection are writing into the same tree.
+
+For a bounded local-trust boundary, `--all` rejects a filesystem root and linked scan root, and does not traverse symbolic links or reparse points. A link inside a removed `TestResults` tree is unlinked with that tree, but its target is never read or removed. The displayed reclaimed total is an estimate measured before deletion, excludes linked content, and may differ if a process changes files between preview and apply. Deletion stops at the first filesystem failure; directories removed before that failure remain removed, so close the process holding the named path and rerun the command. Neither mode cleans `bin`, `obj`, package caches, Git worktrees, or remote artifacts.
+
+| Option | Default | Behavior |
+| --- | --- | --- |
+| `--output <directory>` | `TestResults/coverage-merged` | AppSurface coverage output inspected by the default marker-owned mode. Cannot be combined with `--all`. |
+| `--all` | Off | Scan every descendant `TestResults` directory below `--root` instead of only known AppSurface coverage artifacts. |
+| `--root <directory>` | Current directory | Existing physical worktree scan boundary for `--all`; it is never deleted. Invalid without `--all`. |
+| `--apply` | Off | Deletes the entries discovered for the current invocation; otherwise the command is a preview. |
+
+| Diagnostic | Meaning | Operator action |
+| --- | --- | --- |
+| `ASCOV109` | The default coverage output path is unsafe or is not AppSurface-owned. | Use a dedicated output created by `coverage run` or `coverage merge`. |
+| `ASTEST101` | The `--all` cleanup root is invalid, missing, or cannot be inspected. | Pass an existing readable worktree directory such as `--root .`. |
+| `ASTEST102` | The `--all` root is a filesystem root, symbolic link, or reparse point. | Choose one physical non-root worktree directory. |
+| `ASTEST103` | A `--all` discovered directory could not be deleted. | Close file handles for the reported path and retry `--apply`; already-removed directories stay removed. |
+| `ASTEST104` | The `--all` worktree could not be enumerated or measured completely. | Restore readable filesystem access and retry before applying cleanup. |
+
 #### Add Coverlet First
 
 ```bash
@@ -505,7 +547,7 @@ Options:
 - `--logger`: Repeatable `dotnet test` logger value forwarded as `--logger:<value>`.
 - `--test-argument`: Repeatable extra argument token appended to every `dotnet test` invocation.
 - `--test-results`: Managed test-result format. Use `junit` to write AppSurface-owned top-level JUnit files. Other values fail before tests run.
-- `--slow-test-diagnostics`: Writes `slow-test-diagnostics.md` and `.json` from managed JUnit results. This implies `--test-results junit`.
+- `--slow-test-diagnostics`: Writes `slow-test-diagnostics.md` and `.json` from managed JUnit results. The Markdown starts with a bounded, failure-first test summary (counts, failed projects, and safely truncated failure evidence), then records slow-test timing diagnostics. This implies `--test-results junit`.
 - `--no-clean`: Preserves existing AppSurface-owned output instead of cleaning known coverage artifacts first. Existing patch-target files therefore remain until a later gate refreshes them or runs without a patch source.
 - `--verbosity`: `dotnet test` verbosity. Defaults to `minimal`.
 - `--heartbeat-interval`: Heartbeat interval. Defaults to `30s`; exact `0` disables heartbeats.
@@ -560,7 +602,7 @@ Artifacts are local and private by default:
 - `timings.json`: Machine-readable build, test, merge, schedule, managed test-result, diagnostics, artifact, log, and exit-code data. Per-project entries include both `originalIndex` for stable artifact naming and `executionIndex` for the actual launch order. `executionStatus` is `pending`, `running`, `completed`, `terminated`, or `skipped-after-terminal`; `coverageArtifactStatus` is `produced`, `missing`, `multiple`, `unreadable`, `escaping`, `malformed`, or `skipped-after-terminal`. `coverageCleanupLog` and `coverageCleanupDiagnostic` record a non-fatal staged-file cleanup warning and its dedicated log-append result; the path is `null` if the log append failed. `coverageFile` is non-null only when the current invocation produced and normalized that artifact, so `--no-clean` cannot make a retained stale file look current. Terminal failures write a best-effort snapshot after launched projects are drained so automation can distinguish work that failed from work that never started.
 - `reportgenerator-summary.txt`: Text summary from the package-owned ReportGenerator merge when available.
 - `junit-coverage-<index>-<project-name-hash>.xml`: AppSurface-managed JUnit test results when `--test-results junit` or `--slow-test-diagnostics` is used.
-- `slow-test-diagnostics.md` and `slow-test-diagnostics.json`: Slow-test evidence, parser warnings, metadata completeness, and diagnostic overhead when `--slow-test-diagnostics` is used. The command writes them through private same-directory staging files; a later normal clean run removes only GUID-named staging or backup remnants from an interrupted publication, while `--no-clean` preserves existing output.
+- `slow-test-diagnostics.md` and `slow-test-diagnostics.json`: A bounded failure-first test-result summary, slow-test evidence, parser warnings, metadata completeness, and diagnostic overhead when `--slow-test-diagnostics` is used. The Markdown summary caps failed-test detail and total size for GitHub Actions; use the managed JUnit XML and project logs for complete evidence. The command writes these files through private same-directory staging files; a later normal clean run removes only GUID-named staging or backup remnants from an interrupted publication, while `--no-clean` preserves existing output.
 - `projects/<project-name-hash>/coverage.cobertura.xml`: Per-project Coverlet Cobertura output.
 - `projects/<project-name-hash>/collector-results/<run-id>/`: Unique raw collector attachment tree retained for diagnosis.
 - `projects/<project-name-hash>/dotnet-test.log`: Full `dotnet test` output for that project.

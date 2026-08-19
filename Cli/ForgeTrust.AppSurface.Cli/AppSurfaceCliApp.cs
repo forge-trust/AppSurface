@@ -87,6 +87,7 @@ internal static class AppSurfaceCliApp
         services.AddTransient<CanaryPollWorkflow>();
         services.AddTransient<CoverageRunWorkflow>();
         services.AddTransient<CoverageMergeWorkflow>();
+        services.AddTransient<TestResultsCleanupWorkflow>();
         services.AddSingleton<IDurableSchemaCommandService, DurableSchemaCommandService>();
         AddExportEngineServices(services);
         services.AddHttpClient<IAppSurfaceDocsHealthHttpClient, AppSurfaceDocsHealthHttpClient>(

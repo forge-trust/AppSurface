@@ -13,7 +13,6 @@ namespace ForgeTrust.AppSurface.PackageIndex;
 internal sealed class PackageArtifactValidator
 {
     private const string RequiredPackageProjectUrl = "https://appsurface.dev";
-    private const string DocsPackageId = "ForgeTrust.AppSurface.Docs";
     private const string TailwindRuntimePackagePrefix = "ForgeTrust.AppSurface.Web.Tailwind.Runtime.";
     private const int MaxNoticeBytes = 256 * 1024;
 
@@ -25,14 +24,6 @@ internal sealed class PackageArtifactValidator
             ["osx-arm64"] = "tailwindcss-macos-arm64",
             ["osx-x64"] = "tailwindcss-macos-x64",
             ["win-x64"] = "tailwindcss-windows-x64.exe"
-        };
-
-    private static readonly IReadOnlyDictionary<string, Version?> StableDocsDependencies =
-        new Dictionary<string, Version?>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["AngleSharp"] = new Version(1, 5, 2),
-            ["AngleSharp.Css"] = null,
-            ["HtmlSanitizer"] = null
         };
 
     /// <summary>
@@ -957,6 +948,7 @@ internal sealed class PackageArtifactValidator
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToArray(),
                 StringComparer.OrdinalIgnoreCase);
+        var dependencyContainerInspection = InspectDependencyContainers(metadata, ns);
         var firstPartyAssemblyVersions = archive.Entries
             .Where(entry => IsFirstPartyAssemblyEntry(entry, packageIds))
             .Select(ReadAssemblyVersion)
@@ -1004,6 +996,8 @@ internal sealed class PackageArtifactValidator
             GetElementValue(metadata, ns, "readme"),
             packageTypes,
             dependencies,
+            dependencyContainerInspection.Containers,
+            dependencyContainerInspection.HasMixedRootAndGroups,
             entryPaths,
             firstPartyAssemblyVersions,
             toolCommandNames,
@@ -1086,93 +1080,160 @@ internal sealed class PackageArtifactValidator
             || string.Equals(dependencyVersion, $"[{packageVersion},)", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static DependencyContainerInspection InspectDependencyContainers(XElement metadata, XNamespace ns)
+    {
+        var dependencies = metadata.Element(ns + "dependencies");
+        if (dependencies is null)
+        {
+            return new DependencyContainerInspection(
+                [new InspectedDependencyContainer("root/default", null, IsGroup: false, [])],
+                HasMixedRootAndGroups: false);
+        }
+
+        var rootDependencies = dependencies
+            .Elements(ns + "dependency")
+            .Select(ReadDependency)
+            .ToArray();
+        var groupElements = dependencies.Elements(ns + "group").ToArray();
+        var hasMixedRootAndGroups = rootDependencies.Length > 0 && groupElements.Length > 0;
+        if (groupElements.Length == 0)
+        {
+            return new DependencyContainerInspection(
+                [new InspectedDependencyContainer("root/default", null, IsGroup: false, rootDependencies)],
+                HasMixedRootAndGroups: false);
+        }
+
+        var containers = groupElements
+            .Select(group =>
+            {
+                var targetFrameworkAttribute = group.Attribute("targetFramework");
+                var targetFramework = targetFrameworkAttribute?.Value;
+                return new InspectedDependencyContainer(
+                    FormatDependencyContainerLabel(targetFramework),
+                    targetFramework,
+                    IsGroup: true,
+                    group.Elements(ns + "dependency").Select(ReadDependency).ToArray());
+            })
+            .ToArray();
+        return new DependencyContainerInspection(containers, hasMixedRootAndGroups);
+    }
+
+    private static InspectedDependency ReadDependency(XElement dependency)
+    {
+        return new InspectedDependency(
+            dependency.Attribute("id")?.Value,
+            dependency.Attribute("version")?.Value);
+    }
+
+    private static string FormatDependencyContainerLabel(string? targetFramework)
+    {
+        var renderedTargetFramework = string.IsNullOrWhiteSpace(targetFramework)
+            ? "<missing>"
+            : targetFramework;
+        return $"group[targetFramework=\"{renderedTargetFramework}\"]";
+    }
+
     private static void ValidateStableDocsDependencies(InspectedPackage inspected, string packageVersion)
     {
-        if (!string.Equals(inspected.PackageId, DocsPackageId, StringComparison.OrdinalIgnoreCase)
+        if (!string.Equals(inspected.PackageId, StableDocsDependencyContract.DocsPackageId, StringComparison.OrdinalIgnoreCase)
             || packageVersion.Contains('-', StringComparison.Ordinal))
         {
             return;
         }
 
-        var unsafeDependencies = StableDocsDependencies
-            .SelectMany(requiredDependency =>
+        var violations = new List<StableDocsDependencyViolation>();
+        if (inspected.HasMixedRootAndGroups)
+        {
+            violations.Add(
+                new StableDocsDependencyViolation(
+                    "metadata/dependencies",
+                    "<container-shape>",
+                    "<mixed-root-and-group>",
+                    "one root/default container or target-framework groups"));
+        }
+
+        var duplicateTargetFrameworks = inspected.DependencyContainers
+            .Where(container => !string.IsNullOrWhiteSpace(container.TargetFramework))
+            .GroupBy(container => container.TargetFramework!, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var container in inspected.DependencyContainers)
+        {
+            if (container.IsGroup && string.IsNullOrWhiteSpace(container.TargetFramework))
             {
-                if (!inspected.Dependencies.TryGetValue(requiredDependency.Key, out var versions)
-                    || versions.Count == 0)
+                violations.Add(
+                    new StableDocsDependencyViolation(
+                        container.Label,
+                        "<targetFramework>",
+                        "<missing>",
+                        "a non-empty target framework"));
+            }
+            else if (container.IsGroup
+                && !string.IsNullOrWhiteSpace(container.TargetFramework)
+                && duplicateTargetFrameworks.Contains(container.TargetFramework))
+            {
+                violations.Add(
+                    new StableDocsDependencyViolation(
+                        container.Label,
+                        "<targetFramework>",
+                        container.TargetFramework,
+                        "a unique target framework"));
+            }
+
+            foreach (var requiredDependency in StableDocsDependencyContract.Dependencies.OrderBy(dependency => dependency.Id, StringComparer.OrdinalIgnoreCase))
+            {
+                var matches = container.Dependencies
+                    .Where(dependency => string.Equals(dependency.Id, requiredDependency.Id, StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                if (matches.Length == 0)
                 {
-                    return [(DependencyId: requiredDependency.Key, Version: "<missing>")];
+                    violations.Add(
+                        new StableDocsDependencyViolation(
+                            container.Label,
+                            requiredDependency.Id,
+                            "<missing>",
+                            StableDocsDependencyContract.ExactVersionRange(requiredDependency)));
+                    continue;
                 }
 
-                return versions
-                    .Where(version => !TryReadStableDependencyLowerBound(version, out var lowerBound)
-                        || (requiredDependency.Value is not null && lowerBound < requiredDependency.Value))
-                    .Select(version => (DependencyId: requiredDependency.Key, Version: string.IsNullOrWhiteSpace(version) ? "<versionless>" : version));
-            })
-            .OrderBy(dependency => dependency.DependencyId, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(dependency => dependency.Version, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        if (unsafeDependencies.Length == 0)
+                if (matches.Length != 1)
+                {
+                    violations.Add(
+                        new StableDocsDependencyViolation(
+                            container.Label,
+                            requiredDependency.Id,
+                            $"<duplicate:{matches.Length}>",
+                            StableDocsDependencyContract.ExactVersionRange(requiredDependency)));
+                    continue;
+                }
+
+                var observedVersion = matches[0].Version;
+                var expectedVersionRange = StableDocsDependencyContract.ExactVersionRange(requiredDependency);
+                if (!string.Equals(observedVersion, expectedVersionRange, StringComparison.Ordinal))
+                {
+                    violations.Add(
+                        new StableDocsDependencyViolation(
+                            container.Label,
+                            requiredDependency.Id,
+                            string.IsNullOrWhiteSpace(observedVersion) ? "<versionless>" : observedVersion,
+                            expectedVersionRange));
+                }
+            }
+        }
+
+        if (violations.Count == 0)
         {
             return;
         }
 
         var dependencySummary = string.Join(
             ", ",
-            unsafeDependencies.Select(dependency => $"'{dependency.DependencyId}' at '{dependency.Version}'"));
+            violations.Select(violation =>
+                $"container '{violation.ContainerLabel}' declares '{violation.DependencyId}' at '{violation.Observed}' (expected '{violation.Expected}')"));
         throw new PackageIndexException(
-            $"ASPKG139 {DocsPackageId}: stable package version '{packageVersion}' contains missing or unsafe dependencies {dependencySummary}. Problem: a stable AppSurface Docs package must expose a complete, stable advisory-safe parser and sanitizer graph. Cause: the packed dependency graph omits a required dependency, contains a prerelease or malformed range, or allows AngleSharp below 1.5.2. Fix: declare stable AngleSharp, AngleSharp.Css, and HtmlSanitizer dependencies, keep AngleSharp at 1.5.2 or newer, and satisfy the v0.2.0 stable-exit requirement before packing the stable AppSurface Docs release. Docs: https://github.com/forge-trust/AppSurface/issues/682.");
-    }
-
-    private static bool TryReadStableDependencyLowerBound(string dependencyVersion, out Version lowerBound)
-    {
-        lowerBound = new Version();
-        var value = dependencyVersion.Trim();
-        if (value.Length == 0 || value.Contains('-', StringComparison.Ordinal) || value.Contains('+', StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        if (value.Contains(',', StringComparison.Ordinal))
-        {
-            if ((value[0] != '[' && value[0] != '(') || (value[^1] != ']' && value[^1] != ')'))
-            {
-                return false;
-            }
-
-            var bounds = value[1..^1].Split(',', StringSplitOptions.TrimEntries);
-            if (bounds.Length != 2 || !TryReadStableVersion(bounds[0], out lowerBound))
-            {
-                return false;
-            }
-
-            return bounds[1].Length == 0
-                || (TryReadStableVersion(bounds[1], out var upperBound) && lowerBound <= upperBound);
-        }
-
-        if (value[0] == '[' || value[^1] == ']')
-        {
-            if (value[0] != '[' || value[^1] != ']')
-            {
-                return false;
-            }
-
-            value = value[1..^1].Trim();
-        }
-        else if (value[0] == '(' || value[^1] == ')')
-        {
-            return false;
-        }
-
-        return TryReadStableVersion(value, out lowerBound);
-    }
-
-    private static bool TryReadStableVersion(string value, out Version version)
-    {
-        version = new Version();
-        var coreParts = value.Split('.');
-        return coreParts.Length is >= 2 and <= 4
-            && coreParts.All(part => part.Length > 0 && part.All(char.IsAsciiDigit))
-            && Version.TryParse(value, out version!);
+            $"ASPKG139 {StableDocsDependencyContract.DocsPackageId}: stable package version '{packageVersion}' contains a non-exact parser and sanitizer graph: {dependencySummary}. Problem: a stable AppSurface Docs package must expose the exact reviewed parser and sanitizer identities in every dependency container. Cause: the packed dependency graph omits, duplicates, ranges, or changes a required dependency, or uses ambiguous dependency containers. Fix: align your Central Package Management catalog to {StableDocsDependencyContract.PlainTextDependencyList}, remove VersionOverride and open ranges, restore in locked mode, then repack. Docs: https://github.com/forge-trust/AppSurface/issues/682.");
     }
 
     private static bool IsFirstPartyAssemblyEntry(ZipArchiveEntry entry, IReadOnlySet<string> packageIds)
@@ -1328,10 +1389,12 @@ internal static class PackageArtifactReportRenderer
     /// </summary>
     /// <param name="report">Validation report to render.</param>
     /// <param name="coverageProofReport">Optional packaged coverage CLI proof details to append.</param>
+    /// <param name="docsProofReport">Optional packed Docs consumer proof details to append.</param>
     /// <returns>Markdown report content.</returns>
     internal static string RenderMarkdown(
         PackageArtifactValidationReport report,
-        CoverageCliConsumerProofReport? coverageProofReport = null)
+        CoverageCliConsumerProofReport? coverageProofReport = null,
+        DocsPackageConsumerProofReport? docsProofReport = null)
     {
         var builder = new StringBuilder();
         builder.AppendLine("# Package artifact validation");
@@ -1378,6 +1441,14 @@ internal static class PackageArtifactReportRenderer
             builder.AppendLine("## Coverage CLI consumer proof");
             builder.AppendLine();
             CoverageCliConsumerProofReportRenderer.RenderSection(builder, coverageProofReport);
+        }
+
+        if (docsProofReport is not null)
+        {
+            builder.AppendLine();
+            builder.AppendLine("## Docs package consumer proof");
+            builder.AppendLine();
+            DocsPackageConsumerProofReportRenderer.RenderSection(builder, docsProofReport);
         }
 
         return builder.ToString().TrimEnd() + Environment.NewLine;
@@ -1594,6 +1665,8 @@ internal sealed record PackagePayloadValidationResult(
 /// <param name="Readme">Nuspec README path, or <c>null</c> when absent.</param>
 /// <param name="PackageTypes">Declared nuspec package type names such as <c>DotnetTool</c>.</param>
 /// <param name="Dependencies">Dependency ids mapped to all distinct nuspec versions observed across dependency groups.</param>
+/// <param name="DependencyContainers">Raw nuspec dependency containers retained in document order for package-specific validation.</param>
+/// <param name="HasMixedRootAndGroups">Whether the nuspec declares both root dependencies and target-framework groups.</param>
 /// <param name="EntryPaths">Normalized archive entry paths contained in the package.</param>
 /// <param name="FirstPartyAssemblyVersions">First-party implementation assemblies and their informational versions.</param>
 /// <param name="ToolCommandNames">Command names declared by any <c>DotnetToolSettings.xml</c> files.</param>
@@ -1611,10 +1684,54 @@ internal sealed record InspectedPackage(
     string? Readme,
     IReadOnlyList<string> PackageTypes,
     IReadOnlyDictionary<string, IReadOnlyList<string>> Dependencies,
+    IReadOnlyList<InspectedDependencyContainer> DependencyContainers,
+    bool HasMixedRootAndGroups,
     IReadOnlyList<string> EntryPaths,
     IReadOnlyList<InspectedAssemblyVersion> FirstPartyAssemblyVersions,
     IReadOnlyList<string> ToolCommandNames,
     IReadOnlyList<InspectedToolSettingsFile> ToolSettingsFiles);
+
+/// <summary>
+/// One dependency container preserved from a package nuspec.
+/// </summary>
+/// <param name="Label">Deterministic label used in diagnostics.</param>
+/// <param name="TargetFramework">Raw target framework value for a group, or <c>null</c> for root dependencies.</param>
+/// <param name="IsGroup">Whether this container originated from a nuspec <c>group</c> element.</param>
+/// <param name="Dependencies">Raw dependency occurrences in source order.</param>
+internal sealed record InspectedDependencyContainer(
+    string Label,
+    string? TargetFramework,
+    bool IsGroup,
+    IReadOnlyList<InspectedDependency> Dependencies);
+
+/// <summary>
+/// One raw dependency occurrence preserved from a package nuspec.
+/// </summary>
+/// <param name="Id">Raw dependency id, or <c>null</c> when omitted.</param>
+/// <param name="Version">Raw dependency version, or <c>null</c> when omitted.</param>
+internal sealed record InspectedDependency(string? Id, string? Version);
+
+/// <summary>
+/// Dependency-container facts collected from a package nuspec.
+/// </summary>
+/// <param name="Containers">Containers in declaration order.</param>
+/// <param name="HasMixedRootAndGroups">Whether root dependencies and groups coexist.</param>
+internal sealed record DependencyContainerInspection(
+    IReadOnlyList<InspectedDependencyContainer> Containers,
+    bool HasMixedRootAndGroups);
+
+/// <summary>
+/// One stable Docs dependency-contract violation.
+/// </summary>
+/// <param name="ContainerLabel">Dependency container label.</param>
+/// <param name="DependencyId">Required dependency or metadata field.</param>
+/// <param name="Observed">Observed artifact value.</param>
+/// <param name="Expected">Exact required value.</param>
+internal sealed record StableDocsDependencyViolation(
+    string ContainerLabel,
+    string DependencyId,
+    string Observed,
+    string Expected);
 
 /// <summary>
 /// Tool command declarations found in one packaged <c>DotnetToolSettings.xml</c> file.
