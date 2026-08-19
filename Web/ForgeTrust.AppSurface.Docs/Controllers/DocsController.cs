@@ -197,10 +197,10 @@ public class DocsController : Controller
             options,
             environment,
             logger,
+            AppSurfaceDocsStreamAuthorization.HarvestProgressChannel,
             harvestCoordinator,
             searchQualityReadModel,
-            productIntelligence,
-            AppSurfaceDocsStreamAuthorization.HarvestProgressChannel)
+            productIntelligence)
     {
     }
 
@@ -234,10 +234,10 @@ public class DocsController : Controller
         AppSurfaceDocsOptions options,
         IWebHostEnvironment environment,
         ILogger<DocsController> logger,
+        string harvestProgressChannel,
         AppSurfaceDocsHarvestCoordinator? harvestCoordinator = null,
         AppSurfaceDocsSearchQualityReadModel? searchQualityReadModel = null,
-        IAppSurfaceProductIntelligence? productIntelligence = null,
-        string harvestProgressChannel = "")
+        IAppSurfaceProductIntelligence? productIntelligence = null)
     {
         _aggregator = aggregator ?? throw new ArgumentNullException(nameof(aggregator));
         _docsUrlBuilder = docsUrlBuilder ?? throw new ArgumentNullException(nameof(docsUrlBuilder));
@@ -670,6 +670,7 @@ public class DocsController : Controller
                 ReturnUrl = safeReturnUrl,
                 CompletionNavigationDelayMilliseconds = _harvestCoordinator.CompletionDelay,
                 CanUseLiveProgress = await CanUseLiveHarvestProgressAsync(),
+                HarvestProgressChannel = _harvestProgressChannel,
                 RebuildRequestResult = ParseHarvestRebuildRequestResult(rebuild)
             });
     }

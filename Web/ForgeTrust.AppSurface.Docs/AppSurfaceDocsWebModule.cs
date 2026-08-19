@@ -739,23 +739,23 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             MapNamedPublishedTreeEndpoints(endpoints, urls, runtime.PublishedTreeHandler, applyInstanceConventions);
         }
 
-        MapNamedBrandingAssetDirectory(endpoints, options, applyInstanceConventions);
-        MapNamedLegacyAssetRedirect(
+        MapBrandingAssetDirectory(endpoints, options, applyInstanceConventions);
+        MapLegacyAssetRedirect(
             endpoints,
             urls.BuildAssetUrl("search.css"),
             $"{AppSurfaceDocsStaticAssetBasePath}/search.css",
             applyInstanceConventions);
-        MapNamedLegacyAssetRedirect(
+        MapLegacyAssetRedirect(
             endpoints,
             urls.BuildAssetUrl("minisearch.min.js"),
             $"{AppSurfaceDocsStaticAssetBasePath}/minisearch.min.js",
             applyInstanceConventions);
-        MapNamedLegacyAssetRedirect(
+        MapLegacyAssetRedirect(
             endpoints,
             urls.BuildAssetUrl("search-client.js"),
             $"{AppSurfaceDocsStaticAssetBasePath}/search-client.js",
             applyInstanceConventions);
-        MapNamedLegacyAssetRedirect(
+        MapLegacyAssetRedirect(
             endpoints,
             urls.BuildAssetUrl("outline-client.js"),
             $"{AppSurfaceDocsStaticAssetBasePath}/outline-client.js",
@@ -807,13 +807,26 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             harvest,
             "Harvest",
             applyInstanceConventions);
-        ApplyNamedPolicy(namedHarvest, ResolveHarvestReadAuthorizationPolicyName(options, endpoints.ServiceProvider));
-        applyInstanceConventions(endpoints.MapMethods(
-            harvestRebuild,
-            [HttpMethods.Delete, HttpMethods.Get, HttpMethods.Head, HttpMethods.Options, HttpMethods.Patch, HttpMethods.Put],
-            RejectHarvestRebuildUnsupportedMethodAsync));
-        MapNamedControllerRoute(endpoints, routeNamePrefix, "harvest_rebuild", harvestRebuild, "RebuildHarvest", applyInstanceConventions)
-            .WithMetadata(new HttpMethodMetadata([HttpMethods.Post]));
+        var harvestRoutesHidden = AreHarvestRoutesHidden(options, endpoints.ServiceProvider);
+        ApplyNamedPolicy(
+            namedHarvest,
+            ResolveHarvestReadAuthorizationPolicyName(options, endpoints.ServiceProvider),
+            bypassFallbackAuthorizationWhenNoPolicy: harvestRoutesHidden);
+        if (harvestRoutesHidden)
+        {
+            var hiddenHarvestRebuild = endpoints.Map(harvestRebuild, ReturnNotFoundAsync);
+            applyInstanceConventions(hiddenHarvestRebuild);
+            AllowAnonymousFallbackBypass(hiddenHarvestRebuild);
+        }
+        else
+        {
+            applyInstanceConventions(endpoints.MapMethods(
+                harvestRebuild,
+                [HttpMethods.Delete, HttpMethods.Get, HttpMethods.Head, HttpMethods.Options, HttpMethods.Patch, HttpMethods.Put],
+                RejectHarvestRebuildUnsupportedMethodAsync));
+            MapNamedControllerRoute(endpoints, routeNamePrefix, "harvest_rebuild", harvestRebuild, "RebuildHarvest", applyInstanceConventions)
+                .WithMetadata(new HttpMethodMetadata([HttpMethods.Post]));
+        }
         var namedHealth = MapNamedControllerRoute(
             endpoints,
             routeNamePrefix,
@@ -829,8 +842,8 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             "HarvestHealthJson",
             applyInstanceConventions);
         var healthPolicy = ResolveHealthAuthorizationPolicyName(options, endpoints.ServiceProvider);
-        ApplyNamedPolicy(namedHealth, healthPolicy);
-        ApplyNamedPolicy(namedHealthJson, healthPolicy);
+        ApplyNamedPolicy(namedHealth, healthPolicy, bypassFallbackAuthorizationWhenNoPolicy: harvestRoutesHidden);
+        ApplyNamedPolicy(namedHealthJson, healthPolicy, bypassFallbackAuthorizationWhenNoPolicy: harvestRoutesHidden);
 
         var namedRouteInspector = MapNamedControllerRoute(
             endpoints,
@@ -847,8 +860,15 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             "RouteInspectorJson",
             applyInstanceConventions);
         var routeInspectorPolicy = ResolveRouteInspectorAuthorizationPolicyName(options, endpoints.ServiceProvider);
-        ApplyNamedPolicy(namedRouteInspector, routeInspectorPolicy);
-        ApplyNamedPolicy(namedRouteInspectorJson, routeInspectorPolicy);
+        var routeInspectorRoutesHidden = AreRouteInspectorRoutesHidden(options, endpoints.ServiceProvider);
+        ApplyNamedPolicy(
+            namedRouteInspector,
+            routeInspectorPolicy,
+            bypassFallbackAuthorizationWhenNoPolicy: routeInspectorRoutesHidden);
+        ApplyNamedPolicy(
+            namedRouteInspectorJson,
+            routeInspectorPolicy,
+            bypassFallbackAuthorizationWhenNoPolicy: routeInspectorRoutesHidden);
 
         if (ShouldMapHostedMetricsCollection(options))
         {
@@ -871,10 +891,6 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             [HttpMethods.Delete, HttpMethods.Connect, HttpMethods.Options, HttpMethods.Patch, HttpMethods.Post, HttpMethods.Put, HttpMethods.Trace],
             RejectMarkdownDownloadUnsupportedMethodAsync);
         applyInstanceConventions(namedMarkdownUnsupportedMethods);
-        if (options.MarkdownDownload?.Enabled == true)
-        {
-            namedMarkdownUnsupportedMethods.RequireAuthorization(options.MarkdownDownload.AuthorizationPolicy!);
-        }
         var namedMarkdownDownload = MapNamedControllerRoute(
                 endpoints,
                 routeNamePrefix,
@@ -887,7 +903,41 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         {
             namedMarkdownDownload.RequireAuthorization(options.MarkdownDownload.AuthorizationPolicy!);
         }
+        else
+        {
+            AllowAnonymousFallbackBypass(namedMarkdownDownload);
+        }
         MapNamedControllerRoute(endpoints, routeNamePrefix, "doc", details, "Details", applyInstanceConventions);
+    }
+
+    /// <summary>
+    /// Maps the shared packaged search assets required by all named Docs products.
+    /// </summary>
+    /// <remarks>
+    /// These fallback routes intentionally map on the common finalized route builder rather than an individual product
+    /// group. A single package asset URL must not inherit one product's endpoint metadata or authorization convention.
+    /// </remarks>
+    /// <param name="endpoints">The common route builder supplied to named-instance finalization.</param>
+    internal static void MapNamedSharedPackagedSearchAssetFallbacks(IEndpointRouteBuilder endpoints)
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+
+        MapEmbeddedAssetFallback(
+            endpoints,
+            $"{AppSurfaceDocsStaticAssetBasePath}/search.css",
+            "docs/search.css");
+        MapEmbeddedAssetFallback(
+            endpoints,
+            $"{AppSurfaceDocsStaticAssetBasePath}/minisearch.min.js",
+            "docs/minisearch.min.js");
+        MapEmbeddedAssetFallback(
+            endpoints,
+            $"{AppSurfaceDocsStaticAssetBasePath}/search-client.js",
+            "docs/search-client.js");
+        MapEmbeddedAssetFallback(
+            endpoints,
+            $"{AppSurfaceDocsStaticAssetBasePath}/outline-client.js",
+            "docs/outline-client.js");
     }
 
     private static void MapNamedPublishedTreeEndpoints(
@@ -939,13 +989,22 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         return endpoint;
     }
 
-    private static void ApplyNamedPolicy(IEndpointConventionBuilder endpoint, string? policyName)
+    private static void ApplyNamedPolicy(
+        IEndpointConventionBuilder endpoint,
+        string? policyName,
+        bool bypassFallbackAuthorizationWhenNoPolicy)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
 
         if (!string.IsNullOrWhiteSpace(policyName))
         {
             endpoint.RequireAuthorization(policyName);
+            return;
+        }
+
+        if (bypassFallbackAuthorizationWhenNoPolicy)
+        {
+            AllowAnonymousFallbackBypass(endpoint);
         }
     }
 
@@ -1098,30 +1157,12 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         endpoint.WithMetadata(new AllowAnonymousAttribute());
     }
 
-    private static void MapLegacyAssetRedirect(IEndpointRouteBuilder endpoints, string route, string targetPath)
-    {
-        endpoints.MapMethods(
-            route,
-            [HttpMethods.Get, HttpMethods.Head],
-            context =>
-            {
-                var redirectPath = BuildLegacyAssetRedirectPath(
-                    context.Request.PathBase,
-                    targetPath,
-                    context.Request.QueryString);
-
-                return Results.LocalRedirect(redirectPath, permanent: false).ExecuteAsync(context);
-            });
-    }
-
-    private static void MapNamedLegacyAssetRedirect(
+    private static void MapLegacyAssetRedirect(
         IEndpointRouteBuilder endpoints,
         string route,
         string targetPath,
-        Action<IEndpointConventionBuilder> applyInstanceConventions)
+        Action<IEndpointConventionBuilder>? applyConventions = null)
     {
-        ArgumentNullException.ThrowIfNull(applyInstanceConventions);
-
         var endpoint = endpoints.MapMethods(
             route,
             [HttpMethods.Get, HttpMethods.Head],
@@ -1134,7 +1175,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
 
                 return Results.LocalRedirect(redirectPath, permanent: false).ExecuteAsync(context);
             });
-        applyInstanceConventions(endpoint);
+        applyConventions?.Invoke(endpoint);
     }
 
     /// <summary>
@@ -1379,7 +1420,10 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
 
     [ExcludeFromCodeCoverage(
         Justification = "Private endpoint closure for configured branding assets; integration coverage verifies successful and rejected asset requests.")]
-    private static void MapBrandingAssetDirectory(IEndpointRouteBuilder endpoints, AppSurfaceDocsOptions options)
+    private static void MapBrandingAssetDirectory(
+        IEndpointRouteBuilder endpoints,
+        AppSurfaceDocsOptions options,
+        Action<IEndpointConventionBuilder>? applyConventions = null)
     {
         var directoryPath = ResolveBrandingAssetsDirectoryPath(endpoints.ServiceProvider, options);
         if (directoryPath is null)
@@ -1402,7 +1446,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         var provider = CreateLifetimeOwnedBrandingAssetProvider(endpoints.ServiceProvider, directoryPath);
         var allowSvgAssets = options.Identity?.BrandingAssets?.AllowSvgAssets == true;
 
-        endpoints.MapMethods(
+        var endpoint = endpoints.MapMethods(
             $"{requestPath}/{{*assetPath}}",
             [HttpMethods.Get, HttpMethods.Head],
             async context =>
@@ -1436,73 +1480,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
 
                 await context.Response.SendFileAsync(fileInfo, context.RequestAborted);
             });
-    }
-
-    private static void MapNamedBrandingAssetDirectory(
-        IEndpointRouteBuilder endpoints,
-        AppSurfaceDocsOptions options,
-        Action<IEndpointConventionBuilder> applyInstanceConventions)
-    {
-        ArgumentNullException.ThrowIfNull(endpoints);
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(applyInstanceConventions);
-
-        var directoryPath = ResolveBrandingAssetsDirectoryPath(endpoints.ServiceProvider, options);
-        if (directoryPath is null)
-        {
-            return;
-        }
-
-        if (!Directory.Exists(directoryPath))
-        {
-            throw new DirectoryNotFoundException(
-                $"Configured AppSurfaceDocs:Identity:BrandingAssets:DirectoryPath does not exist: '{directoryPath}'.");
-        }
-
-        var requestPath = ResolveBrandingAssetsRequestPath(options);
-        if (requestPath is null)
-        {
-            return;
-        }
-
-        var provider = CreateLifetimeOwnedBrandingAssetProvider(endpoints.ServiceProvider, directoryPath);
-        var allowSvgAssets = options.Identity?.BrandingAssets?.AllowSvgAssets == true;
-        var endpoint = endpoints.MapMethods(
-            $"{requestPath}/{{*assetPath}}",
-            [HttpMethods.Get, HttpMethods.Head],
-            async context =>
-            {
-                if (!TryResolveSafeBrandingAssetPath(
-                        context.Request.RouteValues["assetPath"],
-                        allowSvgAssets,
-                        out var assetPath))
-                {
-                    context.Response.StatusCode = StatusCodes.Status404NotFound;
-                    return;
-                }
-
-                var fileInfo = provider.GetFileInfo(assetPath);
-                if (!fileInfo.Exists || fileInfo.IsDirectory)
-                {
-                    context.Response.StatusCode = StatusCodes.Status404NotFound;
-                    return;
-                }
-
-                context.Response.StatusCode = StatusCodes.Status200OK;
-                context.Response.ContentType = ResolveContentType(assetPath);
-                context.Response.ContentLength = fileInfo.Length;
-                context.Response.Headers.LastModified = fileInfo.LastModified
-                    .ToUniversalTime()
-                    .ToString("R", CultureInfo.InvariantCulture);
-                if (HttpMethods.IsHead(context.Request.Method))
-                {
-                    return;
-                }
-
-                await using var fileStream = fileInfo.CreateReadStream();
-                await fileStream.CopyToAsync(context.Response.Body, context.RequestAborted);
-            });
-        applyInstanceConventions(endpoint);
+        applyConventions?.Invoke(endpoint);
     }
 
     [ExcludeFromCodeCoverage(

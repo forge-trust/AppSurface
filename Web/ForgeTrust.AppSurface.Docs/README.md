@@ -47,18 +47,18 @@ app.UseEndpoints(endpoints =>
 {
     // One shared RazorWire transport serves the isolated Docs progress channels.
     endpoints.MapRazorWire();
-    publicDocs.MapEndpoints(endpoints);
+    publicDocs.MapEndpoints(endpoints).AllowAnonymous();
     internalDocs.MapEndpoints(endpoints)
         .RequireAuthorization("InternalDocs");
     endpoints.FinalizeAppSurfaceDocsInstances();
 });
 ```
 
-The public handle above has no endpoint convention and is therefore the public/default audience. The internal handle
-uses a host-owned ASP.NET Core policy; register `InternalDocs` and the host's authentication middleware yourself.
-`MapEndpoints` returns a deferred convention builder, so `RequireAuthorization` applies to every endpoint owned by that
-Docs product, including its operational endpoints. AppSurface Docs does not create identities, authentication handlers,
-or authorization policies. See the [ASP.NET Core authorization guidance](https://learn.microsoft.com/aspnet/core/security/authorization/introduction)
+The public handle explicitly uses `AllowAnonymous` so the Docs product remains public when its host configures a fallback
+authorization policy. The internal handle uses a host-owned ASP.NET Core policy; register `InternalDocs` and the host's
+authentication middleware yourself. `MapEndpoints` returns a deferred convention builder, so each convention applies to
+every endpoint owned by that Docs product, including its operational endpoints. AppSurface Docs does not create
+identities, authentication handlers, or authorization policies. See the [ASP.NET Core authorization guidance](https://learn.microsoft.com/aspnet/core/security/authorization/introduction)
 and the [consumer setup and authorization example](./use-appsurface-docs.md#run-multiple-independent-docs-products).
 
 Named registration adds RazorWire services for the live harvest observatory, but the host still maps its one shared

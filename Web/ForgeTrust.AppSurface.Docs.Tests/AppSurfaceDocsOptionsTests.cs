@@ -1629,6 +1629,7 @@ public sealed class AppSurfaceDocsOptionsTests
     [InlineData(true, true, true)]
     [InlineData(true, false, false)]
     [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
     public void AddNamedAppSurfaceDocs_ShouldEnableDocsExperimentalEventsOnlyForHostedMetricsCollection(
         bool metricsEnabled,
         bool hostedCollectionEnabled,

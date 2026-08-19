@@ -232,6 +232,16 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         return new AppSurfaceDocsInstance(declaration);
     }
 
+    /// <summary>
+    /// Normalizes a bound AppSurface Docs options instance in place.
+    /// </summary>
+    /// <param name="options">The bound options instance to normalize.</param>
+    /// <remarks>
+    /// This rehydrates absent nested option blocks, trims nullable string settings, normalizes route and public-origin
+    /// values, normalizes glob and locale collections, and removes duplicate sidebar namespace prefixes. Callers must
+    /// invoke this before validation so legacy post-configuration and named-runtime construction share the same route,
+    /// source, and origin contract.
+    /// </remarks>
     internal static void NormalizeOptions(AppSurfaceDocsOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);

@@ -158,12 +158,12 @@ public sealed class AppSurfaceDocsRuntime : IDisposable
         AppSurfaceDocsIdentityResolver identityResolver,
         AppSurfaceDocsThemeResolver themeResolver,
         AppSurfaceDocsVersionCatalogService versionCatalogService,
-        AppSurfaceDocsSearchQualityReadModel searchQualityReadModel,
+        AppSurfaceDocsSearchQualityReadModel? searchQualityReadModel,
         AppSurfaceDocsHarvestPathPolicy harvestPathPolicy,
         DocFeaturedPageResolver featuredPageResolver,
         AppSurfaceDocsHarvestProgressReporter harvestProgressReporter,
         DocAggregator aggregator,
-        AppSurfaceDocsHarvestCoordinator harvestCoordinator,
+        AppSurfaceDocsHarvestCoordinator? harvestCoordinator,
         AppSurfaceDocsAssetVersioner assetVersioner,
         AppSurfaceDocsPublishedTreeHandler? publishedTreeHandler = null,
         IDisposable? ownedResources = null)
@@ -175,12 +175,12 @@ public sealed class AppSurfaceDocsRuntime : IDisposable
         IdentityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
         ThemeResolver = themeResolver ?? throw new ArgumentNullException(nameof(themeResolver));
         VersionCatalogService = versionCatalogService ?? throw new ArgumentNullException(nameof(versionCatalogService));
-        SearchQualityReadModel = searchQualityReadModel ?? throw new ArgumentNullException(nameof(searchQualityReadModel));
+        SearchQualityReadModel = searchQualityReadModel;
         HarvestPathPolicy = harvestPathPolicy ?? throw new ArgumentNullException(nameof(harvestPathPolicy));
         FeaturedPageResolver = featuredPageResolver ?? throw new ArgumentNullException(nameof(featuredPageResolver));
         HarvestProgressReporter = harvestProgressReporter ?? throw new ArgumentNullException(nameof(harvestProgressReporter));
         Aggregator = aggregator ?? throw new ArgumentNullException(nameof(aggregator));
-        HarvestCoordinator = harvestCoordinator ?? throw new ArgumentNullException(nameof(harvestCoordinator));
+        HarvestCoordinator = harvestCoordinator;
         AssetVersioner = assetVersioner ?? throw new ArgumentNullException(nameof(assetVersioner));
         PublishedTreeHandler = publishedTreeHandler;
         _ownedResources = ownedResources;
@@ -203,7 +203,7 @@ public sealed class AppSurfaceDocsRuntime : IDisposable
 
     internal AppSurfaceDocsVersionCatalogService VersionCatalogService { get; }
 
-    internal AppSurfaceDocsSearchQualityReadModel SearchQualityReadModel { get; }
+    internal AppSurfaceDocsSearchQualityReadModel? SearchQualityReadModel { get; }
 
     internal AppSurfaceDocsHarvestPathPolicy HarvestPathPolicy { get; }
 
@@ -223,7 +223,7 @@ public sealed class AppSurfaceDocsRuntime : IDisposable
 
     internal DocAggregator Aggregator { get; }
 
-    internal AppSurfaceDocsHarvestCoordinator HarvestCoordinator { get; }
+    internal AppSurfaceDocsHarvestCoordinator? HarvestCoordinator { get; }
 
     internal AppSurfaceDocsAssetVersioner AssetVersioner { get; }
 
@@ -491,6 +491,8 @@ internal sealed class AppSurfaceDocsInstanceRegistry : IDisposable
                     declaration.MarkFinalized(endpoints);
                 }
 
+                AppSurfaceDocsWebModule.MapNamedSharedPackagedSearchAssetFallbacks(endpoints);
+
                 // Route groups collect metadata and conventions before the concrete endpoint builders materialize. The mapper
                 // then publishes each product's complete, fixed route family in the same order as the legacy mapper.
                 foreach (var declaration in _declarations)
@@ -648,12 +650,12 @@ internal sealed class AppSurfaceDocsInstanceRegistry : IDisposable
             services.GetRequiredService<AppSurfaceDocsIdentityResolver>(),
             services.GetRequiredService<AppSurfaceDocsThemeResolver>(),
             services.GetRequiredService<AppSurfaceDocsVersionCatalogService>(),
-            services.GetRequiredService<AppSurfaceDocsSearchQualityReadModel>(),
+            services.GetService<AppSurfaceDocsSearchQualityReadModel>(),
             services.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>(),
             services.GetRequiredService<DocFeaturedPageResolver>(),
             services.GetRequiredService<AppSurfaceDocsHarvestProgressReporter>(),
             services.GetRequiredService<DocAggregator>(),
-            services.GetRequiredService<AppSurfaceDocsHarvestCoordinator>(),
+            services.GetService<AppSurfaceDocsHarvestCoordinator>(),
             services.GetRequiredService<AppSurfaceDocsAssetVersioner>());
     }
 
@@ -882,20 +884,14 @@ internal sealed class AppSurfaceDocsInstanceRegistry : IDisposable
 
     private static string? NormalizePhysicalPath(string? path)
     {
-        return string.IsNullOrWhiteSpace(path) ? null : Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        return string.IsNullOrWhiteSpace(path)
+            ? null
+            : AppSurfaceDocsTrustedReleasePathGuard.NormalizePhysicalPath(path);
     }
 
     private static bool IsSameOrDescendantPhysicalPath(string candidate, string root)
     {
-        if (string.Equals(candidate, root, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var prefix = root.EndsWith(Path.DirectorySeparatorChar)
-            ? root
-            : root + Path.DirectorySeparatorChar;
-        return candidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+        return AppSurfaceDocsTrustedReleasePathGuard.IsSameOrDescendant(root, candidate);
     }
 
     private static IReadOnlyList<IAuthorizeData> ResolveAuthorizationData(AppSurfaceDocsInstanceDeclaration declaration)

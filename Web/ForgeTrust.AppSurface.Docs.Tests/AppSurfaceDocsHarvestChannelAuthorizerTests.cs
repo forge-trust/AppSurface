@@ -694,6 +694,33 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
         Assert.True(result.IsAllowed);
     }
 
+    [Theory]
+    [InlineData("alice", "docs.read", "operator", AppSurfaceAuthOutcome.Allowed)]
+    [InlineData("alice", "docs.read", null, AppSurfaceAuthOutcome.Forbid)]
+    [InlineData("alice", "other", "operator", AppSurfaceAuthOutcome.Forbid)]
+    [InlineData(null, null, null, AppSurfaceAuthOutcome.Challenge)]
+    public async Task OperatorReadPolicyEvaluator_WhenNamedEndpointUsesDefaultPolicyRolesAndSchemes_PreservesEveryRequirement(
+        string? userName,
+        string? scope,
+        string? role,
+        AppSurfaceAuthOutcome expectedOutcome)
+    {
+        await using var services = CreateReadPolicyServices();
+
+        var result = await AppSurfaceDocsOperatorReadPolicyEvaluator.AuthorizeAsync(
+            Context("host-channel", services, userName, scope, role).HttpContext,
+            [
+                new AuthorizeAttribute(),
+                new AuthorizeAttribute
+                {
+                    Roles = "operator",
+                    AuthenticationSchemes = HeaderAuthenticationHandler.SchemeName
+                }
+            ]);
+
+        Assert.Equal(expectedOutcome, result.Outcome);
+    }
+
     [Fact]
     public async Task OperatorReadPolicyEvaluator_WhenNamedEndpointPolicyProviderIsMissing_ReturnsSetupFailure()
     {
@@ -852,6 +879,10 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
         services.AddAuthorization(
             options =>
             {
+                options.DefaultPolicy = new AuthorizationPolicyBuilder(HeaderAuthenticationHandler.SchemeName)
+                    .RequireAuthenticatedUser()
+                    .RequireClaim("scope", "docs.read")
+                    .Build();
                 options.AddPolicy(
                     "DocsRead",
                     policy => policy.AddAuthenticationSchemes(HeaderAuthenticationHandler.SchemeName)
@@ -912,7 +943,8 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
         string channel,
         IServiceProvider? requestServices = null,
         string? userName = null,
-        string? scope = null)
+        string? scope = null,
+        string? role = null)
     {
         var httpContext = new DefaultHttpContext();
         if (requestServices is not null)
@@ -928,6 +960,11 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
         if (!string.IsNullOrWhiteSpace(scope))
         {
             httpContext.Request.Headers[HeaderAuthenticationHandler.ScopeHeaderName] = scope;
+        }
+
+        if (!string.IsNullOrWhiteSpace(role))
+        {
+            httpContext.Request.Headers[HeaderAuthenticationHandler.RoleHeaderName] = role;
         }
 
         return new RazorWireStreamAuthorizationContext(
@@ -960,6 +997,7 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
         public const string SchemeName = "HeaderTest";
         public const string UserHeaderName = "X-Test-User";
         public const string ScopeHeaderName = "X-Test-Scope";
+        public const string RoleHeaderName = "X-Test-Role";
 
         public HeaderAuthenticationHandler(
             IOptionsMonitor<AuthenticationSchemeOptions> options,
@@ -989,6 +1027,14 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
                     scopeValues
                         .SelectMany(value => value?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [])
                         .Select(scope => new Claim("scope", scope)));
+            }
+
+            if (Request.Headers.TryGetValue(RoleHeaderName, out var roleValues))
+            {
+                claims.AddRange(
+                    roleValues
+                        .SelectMany(value => value?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [])
+                        .Select(role => new Claim(ClaimTypes.Role, role)));
             }
 
             var identity = new ClaimsIdentity(claims, SchemeName);

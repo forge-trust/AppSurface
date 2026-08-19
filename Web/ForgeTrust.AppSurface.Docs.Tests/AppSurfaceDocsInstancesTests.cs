@@ -1,6 +1,7 @@
 using ForgeTrust.AppSurface.Auth;
 using ForgeTrust.AppSurface.Docs;
 using ForgeTrust.AppSurface.Docs.Services;
+using ForgeTrust.AppSurface.Docs.ViewComponents;
 using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Authorization;
@@ -10,6 +11,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Routing.Patterns;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -18,6 +20,13 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public sealed class AppSurfaceDocsInstancesTests
 {
+    private static string DocsBrandingAssetDirectory => Path.Join(
+        TestPathUtils.FindRepoRoot(AppContext.BaseDirectory),
+        "Web",
+        "ForgeTrust.AppSurface.Docs",
+        "wwwroot",
+        "docs");
+
     [Fact]
     public void NamedAndLegacyComposition_ShouldFailInEitherRegistrationOrder()
     {
@@ -392,6 +401,22 @@ public sealed class AppSurfaceDocsInstancesTests
     }
 
     [Fact]
+    public async Task LegacyInstanceRegistry_ShouldAllowControllerOptionalRuntimeServicesToBeRemoved()
+    {
+        await using var app = BuildLegacyApp(
+            services =>
+            {
+                services.RemoveAll<AppSurfaceDocsHarvestCoordinator>();
+                services.RemoveAll<AppSurfaceDocsSearchQualityReadModel>();
+            });
+
+        var runtime = app.Services.GetRequiredService<AppSurfaceDocsInstanceRegistry>().GetRequiredRuntime(null);
+
+        Assert.Null(runtime.HarvestCoordinator);
+        Assert.Null(runtime.SearchQualityReadModel);
+    }
+
+    [Fact]
     public void NamedInstanceRegistry_ShouldRejectFinalizationWithoutDeclarations()
     {
         using var fixture = BuildApp(("Public", "/docs"));
@@ -494,6 +519,94 @@ public sealed class AppSurfaceDocsInstancesTests
     }
 
     [Fact]
+    public void NamedInstance_ShouldApplyAllowAnonymousConventionToEveryOwnedEndpoint()
+    {
+        using var fixture = BuildApp(("Public", "/docs"));
+        var endpoints = (IEndpointRouteBuilder)fixture.App;
+
+        fixture.Instances[0].MapEndpoints(endpoints).AllowAnonymous();
+        endpoints.FinalizeAppSurfaceDocsInstances();
+
+        Assert.All(
+            GetDocsRouteEndpoints(fixture.App),
+            endpoint => Assert.NotNull(endpoint.Metadata.GetMetadata<IAllowAnonymous>()));
+    }
+
+    [Fact]
+    public async Task NamedInstance_ShouldPreserveAnonymousHiddenRouteResponses()
+    {
+        using var fixture = BuildAppWithOptions(
+            (
+                "Public",
+                "/docs",
+                "/source/public",
+                new Dictionary<string, string>
+                {
+                    ["Harvest:Health:ExposeRoutes"] = "Never",
+                    ["Diagnostics:ExposeRouteInspector"] = "Never"
+                }));
+        var endpoints = (IEndpointRouteBuilder)fixture.App;
+        fixture.Instances[0].MapEndpoints(endpoints);
+        endpoints.FinalizeAppSurfaceDocsInstances();
+
+        var routeEndpoints = GetDocsRouteEndpoints(fixture.App);
+        var mappedPatterns = string.Join(
+            ", ",
+            routeEndpoints.Select(endpoint => endpoint.RoutePattern.RawText));
+        var hiddenPatterns = new[]
+        {
+            "/docs/_harvest",
+            "/docs/_health",
+            "/docs/_health.json",
+            "/docs/_routes",
+            "/docs/_routes.json",
+            "/docs/_markdown/{*path}"
+        };
+        foreach (var pattern in hiddenPatterns)
+        {
+            Assert.True(
+                routeEndpoints.Any(
+                    endpoint => endpoint.RoutePattern.RawText == pattern
+                                && endpoint.Metadata.GetMetadata<IAllowAnonymous>() is not null),
+                $"No anonymous endpoint matched '{pattern}'. Mapped patterns: {mappedPatterns}");
+        }
+
+        var rebuildEndpoint = routeEndpoints.Single(endpoint => endpoint.RoutePattern.RawText == "/docs/_harvest/rebuild");
+        Assert.NotNull(rebuildEndpoint.Metadata.GetMetadata<IAllowAnonymous>());
+        var context = new DefaultHttpContext { RequestServices = fixture.App.Services };
+        context.Request.Method = HttpMethods.Get;
+        await rebuildEndpoint.RequestDelegate!(context);
+        Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public void SidebarViewComponent_ShouldUseTheNamedRuntimeThroughDependencyInjectionActivation()
+    {
+        using var fixture = BuildApp(("Public", "/docs"));
+        var endpoints = (IEndpointRouteBuilder)fixture.App;
+        fixture.Instances[0].MapEndpoints(endpoints);
+        endpoints.FinalizeAppSurfaceDocsInstances();
+
+        using var scope = fixture.App.Services.CreateScope();
+        var context = new DefaultHttpContext { RequestServices = scope.ServiceProvider };
+        context.SetEndpoint(
+            GetDocsRouteEndpoints(fixture.App)
+                .First(endpoint => endpoint.Metadata.GetMetadata<AppSurfaceDocsEndpointMetadata>()?.Name == "Public"));
+        var accessor = fixture.App.Services.GetRequiredService<IHttpContextAccessor>();
+        accessor.HttpContext = context;
+        try
+        {
+            var factory = ActivatorUtilities.CreateFactory(typeof(SidebarViewComponent), Type.EmptyTypes);
+
+            Assert.IsType<SidebarViewComponent>(factory(scope.ServiceProvider, []));
+        }
+        finally
+        {
+            accessor.HttpContext = null;
+        }
+    }
+
+    [Fact]
     public void NamedInstanceConvention_ShouldAuthorizeOnlyTheInternalDocsEndpoint()
     {
         using var fixture = BuildApp(
@@ -593,9 +706,7 @@ public sealed class AppSurfaceDocsInstancesTests
                 "/source/public",
                 new Dictionary<string, string>
                 {
-                    ["Identity:BrandingAssets:DirectoryPath"] = Path.GetFullPath(
-                        "../../../../ForgeTrust.AppSurface.Docs/wwwroot/docs",
-                        AppContext.BaseDirectory),
+                    ["Identity:BrandingAssets:DirectoryPath"] = DocsBrandingAssetDirectory,
                     ["Identity:BrandingAssets:RequestPath"] = "/assets",
                     ["Identity:BrandingAssets:AllowSvgAssets"] = "true"
                 }),
@@ -706,9 +817,7 @@ public sealed class AppSurfaceDocsInstancesTests
                 "/source/public",
                 new Dictionary<string, string>
                 {
-                    ["Identity:BrandingAssets:DirectoryPath"] = Path.GetFullPath(
-                        "../../../../ForgeTrust.AppSurface.Docs/wwwroot/docs",
-                        AppContext.BaseDirectory),
+                    ["Identity:BrandingAssets:DirectoryPath"] = DocsBrandingAssetDirectory,
                     ["Identity:BrandingAssets:RequestPath"] = "/assets",
                     ["Identity:BrandingAssets:AllowSvgAssets"] = "true"
                 }));
@@ -763,6 +872,39 @@ public sealed class AppSurfaceDocsInstancesTests
         Assert.Equal(
             "/host/_content/ForgeTrust.AppSurface.Docs/docs/search.css?cache=abc",
             context.Response.Headers.Location);
+    }
+
+    [Fact]
+    public async Task NamedInstances_ShouldMapOneEmbeddedFallbackForEveryPackagedSearchAsset()
+    {
+        using var fixture = BuildApp(
+            ("Public", "/docs"),
+            ("Internal", "/internal/docs"));
+        var endpoints = (IEndpointRouteBuilder)fixture.App;
+        fixture.Instances[0].MapEndpoints(endpoints);
+        fixture.Instances[1].MapEndpoints(endpoints);
+        endpoints.FinalizeAppSurfaceDocsInstances();
+
+        var routeEndpoints = GetRouteEndpoints(fixture.App);
+        foreach (var route in new[]
+                 {
+                     "/_content/ForgeTrust.AppSurface.Docs/docs/search.css",
+                     "/_content/ForgeTrust.AppSurface.Docs/docs/minisearch.min.js",
+                     "/_content/ForgeTrust.AppSurface.Docs/docs/search-client.js",
+                     "/_content/ForgeTrust.AppSurface.Docs/docs/outline-client.js"
+                 })
+        {
+            var endpoint = Assert.Single(routeEndpoints, candidate => candidate.RoutePattern.RawText == route);
+            Assert.Null(endpoint.Metadata.GetMetadata<AppSurfaceDocsEndpointMetadata>());
+            var context = new DefaultHttpContext { RequestServices = fixture.App.Services };
+            context.Request.Method = HttpMethods.Get;
+            context.Response.Body = new MemoryStream();
+
+            await endpoint.RequestDelegate!(context);
+
+            Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+            Assert.True(context.Response.Body.Length > 0);
+        }
     }
 
     [Fact]
@@ -1239,13 +1381,19 @@ public sealed class AppSurfaceDocsInstancesTests
         AssertRuntimeConstructorNullArgument("identityResolver", (arguments with { IdentityResolver = null }).Create);
         AssertRuntimeConstructorNullArgument("themeResolver", (arguments with { ThemeResolver = null }).Create);
         AssertRuntimeConstructorNullArgument("versionCatalogService", (arguments with { VersionCatalogService = null }).Create);
-        AssertRuntimeConstructorNullArgument("searchQualityReadModel", (arguments with { SearchQualityReadModel = null }).Create);
         AssertRuntimeConstructorNullArgument("harvestPathPolicy", (arguments with { HarvestPathPolicy = null }).Create);
         AssertRuntimeConstructorNullArgument("featuredPageResolver", (arguments with { FeaturedPageResolver = null }).Create);
         AssertRuntimeConstructorNullArgument("harvestProgressReporter", (arguments with { HarvestProgressReporter = null }).Create);
         AssertRuntimeConstructorNullArgument("aggregator", (arguments with { Aggregator = null }).Create);
-        AssertRuntimeConstructorNullArgument("harvestCoordinator", (arguments with { HarvestCoordinator = null }).Create);
         AssertRuntimeConstructorNullArgument("assetVersioner", (arguments with { AssetVersioner = null }).Create);
+
+        using var runtimeWithLegacyOptionalServices = (arguments with
+        {
+            SearchQualityReadModel = null,
+            HarvestCoordinator = null
+        }).Create();
+        Assert.Null(runtimeWithLegacyOptionalServices.SearchQualityReadModel);
+        Assert.Null(runtimeWithLegacyOptionalServices.HarvestCoordinator);
     }
 
     private static void AssertRuntimeConstructorNullArgument(string expectedParameterName, Func<AppSurfaceDocsRuntime> create)
@@ -1281,10 +1429,16 @@ public sealed class AppSurfaceDocsInstancesTests
 
     private static IReadOnlyList<RouteEndpoint> GetDocsRouteEndpoints(IEndpointRouteBuilder endpoints)
     {
+        return GetRouteEndpoints(endpoints)
+            .Where(endpoint => endpoint.Metadata.GetMetadata<AppSurfaceDocsEndpointMetadata>() is not null)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<RouteEndpoint> GetRouteEndpoints(IEndpointRouteBuilder endpoints)
+    {
         return endpoints.DataSources
             .SelectMany(dataSource => dataSource.Endpoints)
             .OfType<RouteEndpoint>()
-            .Where(endpoint => endpoint.Metadata.GetMetadata<AppSurfaceDocsEndpointMetadata>() is not null)
             .ToArray();
     }
 
@@ -1393,7 +1547,7 @@ public sealed class AppSurfaceDocsInstancesTests
             .Build();
     }
 
-    private static WebApplication BuildLegacyApp()
+    private static WebApplication BuildLegacyApp(Action<IServiceCollection>? configureServices = null)
     {
         var builder = WebApplication.CreateBuilder(
             new WebApplicationOptions
@@ -1408,6 +1562,7 @@ public sealed class AppSurfaceDocsInstancesTests
             });
         builder.Services.AddControllersWithViews();
         builder.Services.AddAppSurfaceDocs();
+        configureServices?.Invoke(builder.Services);
 
         return builder.Build();
     }

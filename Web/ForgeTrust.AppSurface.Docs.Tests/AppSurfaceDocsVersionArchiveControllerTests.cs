@@ -118,6 +118,31 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
     }
 
     [Fact]
+    public void VersionEntry_ShouldRedirectToPathBaseAwareRecommendedExactRelease()
+    {
+        var versionTree = CreateExactTree("2.0.0");
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                RecommendedVersion = "2.0.0",
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "2.0.0",
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, versionTree),
+                        SupportState = AppSurfaceDocsVersionSupportState.Current
+                    }
+                ]
+            });
+        var controller = CreateController(catalogPath, pathBase: "/some-base");
+
+        var redirect = Assert.IsType<RedirectResult>(controller.VersionEntry());
+
+        Assert.Equal("/some-base/docs/v/2.0.0", redirect.Url);
+    }
+
+    [Fact]
     public void VersionEntry_ShouldRenderPathBaseAwareAvailabilityMessage_WhenRecommendedVersionIsUnavailable()
     {
         var brokenTree = Path.Combine(_tempDirectory, "broken-path-base");

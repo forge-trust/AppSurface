@@ -6348,6 +6348,7 @@ public class DocsControllerTests : IDisposable
         var model = Assert.IsType<AppSurfaceDocsHarvestingViewModel>(viewResult.Model);
         Assert.Equal(expectedReturnUrl, model.ReturnUrl);
         Assert.Equal(canUseLiveProgress, model.CanUseLiveProgress);
+        Assert.Equal(AppSurfaceDocsStreamAuthorization.HarvestProgressChannel, model.HarvestProgressChannel);
         Assert.Equal(expectedRebuildRequestResult, model.RebuildRequestResult);
     }
 

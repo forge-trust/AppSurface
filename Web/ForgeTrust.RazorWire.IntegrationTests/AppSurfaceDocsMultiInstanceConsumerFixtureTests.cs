@@ -115,7 +115,15 @@ public sealed class AppSurfaceDocsMultiInstanceConsumerFixtureTests
                     $"The ConsumerFixture search index at '{path}' did not expose '{expectedMarker}' within {ReadinessTimeout.TotalSeconds:F0} seconds.");
             }
 
-            await Task.Delay(ReadinessPollInterval, timeout.Token);
+            try
+            {
+                await Task.Delay(ReadinessPollInterval, timeout.Token);
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    $"The ConsumerFixture search index at '{path}' did not expose '{expectedMarker}' within {ReadinessTimeout.TotalSeconds:F0} seconds.");
+            }
         }
     }
 }
