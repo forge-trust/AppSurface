@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace ForgeTrust.AppSurface.PackageIndex;
 
 /// <summary>
@@ -166,6 +168,14 @@ internal sealed class PackageArtifactWorkflow
             request.CoverageProofReportPath,
             CoverageCliConsumerProofReportRenderer.RenderMarkdown(coverageProofReport),
             cancellationToken);
+        var coverageProofEvidencePath = Path.Join(
+            Path.GetDirectoryName(request.CoverageProofReportPath)!,
+            "coverage-cli-consumer-proof.evidence.json");
+        await WriteCoverageProofEvidenceAsync(
+            coverageProofEvidencePath,
+            CoverageCliConsumerProofEvidenceRenderer.RenderJson(coverageProofReport),
+            request.ArtifactsOutputPath,
+            cancellationToken);
 
         var docsProofReport = await _docsProofWorkflow.RunAsync(
             new DocsPackageConsumerProofRequest(
@@ -326,6 +336,88 @@ internal sealed class PackageArtifactWorkflow
         if (!string.IsNullOrWhiteSpace(directory))
         {
             Directory.CreateDirectory(directory);
+        }
+    }
+
+    /// <summary>
+    /// Atomically publishes scrubbed coverage proof evidence without following an existing symbolic-link destination.
+    /// </summary>
+    /// <param name="evidencePath">Final evidence path below the trusted artifact output directory.</param>
+    /// <param name="contents">Already-scrubbed JSON payload.</param>
+    /// <param name="trustedRootDirectory">Regular artifact output directory that bounds every evidence directory component.</param>
+    /// <param name="cancellationToken">Cancellation token for temporary-file creation.</param>
+    /// <returns>A task that completes after the temporary file has replaced a regular destination.</returns>
+    internal static async Task WriteCoverageProofEvidenceAsync(
+        string evidencePath,
+        string contents,
+        string trustedRootDirectory,
+        CancellationToken cancellationToken)
+    {
+        var parentDirectory = Path.GetDirectoryName(evidencePath)
+            ?? throw new PackageIndexException("Coverage proof evidence path does not have a parent directory.");
+        EnsureRegularDirectoryChain(trustedRootDirectory, parentDirectory);
+        EnsureRegularOrAbsentFile(evidencePath);
+        var temporaryPath = Path.Join(parentDirectory, $".{Path.GetFileName(evidencePath)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await using (var stream = new System.IO.FileStream(
+                temporaryPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 4096,
+                options: FileOptions.Asynchronous))
+            {
+                await stream.WriteAsync(Encoding.UTF8.GetBytes(contents), cancellationToken);
+            }
+
+            EnsureRegularDirectoryChain(trustedRootDirectory, parentDirectory);
+            EnsureRegularOrAbsentFile(evidencePath);
+            File.Move(temporaryPath, evidencePath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    private static void EnsureRegularDirectoryChain(string trustedRootDirectory, string directoryPath)
+    {
+        var root = new DirectoryInfo(Path.GetFullPath(trustedRootDirectory));
+        if (!root.Exists || root.LinkTarget is not null)
+        {
+            throw new PackageIndexException($"Coverage proof evidence root '{root.FullName}' must be a regular existing directory.");
+        }
+
+        var relative = Path.GetRelativePath(root.FullName, Path.GetFullPath(directoryPath));
+        if (Path.IsPathRooted(relative)
+            || relative == ".."
+            || relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+            || relative.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal))
+        {
+            throw new PackageIndexException($"Coverage proof evidence directory '{directoryPath}' must be contained by artifact output '{root.FullName}'.");
+        }
+
+        var current = root;
+        foreach (var component in relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = new DirectoryInfo(Path.Join(current.FullName, component));
+            if (!current.Exists || current.LinkTarget is not null)
+            {
+                throw new PackageIndexException($"Coverage proof evidence directory '{current.FullName}' must be a regular existing directory.");
+            }
+        }
+    }
+
+    private static void EnsureRegularOrAbsentFile(string path)
+    {
+        var file = new FileInfo(path);
+        if (file.LinkTarget is not null)
+        {
+            throw new PackageIndexException($"Coverage proof evidence destination '{path}' must not be a symbolic link.");
         }
     }
 }

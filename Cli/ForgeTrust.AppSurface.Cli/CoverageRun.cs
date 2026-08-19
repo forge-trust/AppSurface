@@ -1725,6 +1725,11 @@ internal sealed class CoverageRunWorkflow
         var index = entry.OriginalIndex;
         var projectOutputDirectory = Path.Join(outputDirectory, "projects", project.Slug);
         Directory.CreateDirectory(projectOutputDirectory);
+        await CoverageProjectManifest.WriteAsync(
+            projectOutputDirectory,
+            resolution.SolutionDirectory,
+            project,
+            cancellationToken);
         var logFile = Path.Join(projectOutputDirectory, "dotnet-test.log");
         var cleanupLogFile = Path.Join(projectOutputDirectory, "coverage-normalization.log");
         var started = _timeProvider.GetTimestamp();

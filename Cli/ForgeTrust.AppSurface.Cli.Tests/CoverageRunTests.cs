@@ -518,6 +518,15 @@ public sealed class CoverageRunTests
         Assert.True(File.Exists(Path.Join(repo.Path, "TestResults", "coverage-merged", "coverage.cobertura.xml")));
         Assert.True(File.Exists(Path.Join(repo.Path, "TestResults", "coverage-merged", "summary.txt")));
         Assert.True(File.Exists(Path.Join(repo.Path, "TestResults", "coverage-merged", "timings.json")));
+        var manifestPath = Directory.EnumerateFiles(
+                Path.Join(repo.Path, "TestResults", "coverage-merged", "projects"),
+                CoverageProjectManifest.FileName,
+                SearchOption.AllDirectories)
+            .Single();
+        using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(manifestPath));
+        Assert.Equal(1, manifest.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.EndsWith("tests/Sample.Tests/Sample.Tests.csproj", Assert.IsType<string>(manifest.RootElement.GetProperty("projectPath").GetString()), StringComparison.Ordinal);
+        Assert.Matches("Sample.Tests-[0-9a-f]{8}", Assert.IsType<string>(manifest.RootElement.GetProperty("slug").GetString()));
         Assert.Single(reportGenerator.CoverageFiles);
         var testCommand = Assert.Single(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
         Assert.Contains("--logger:trx", testCommand.Arguments);
@@ -1225,6 +1234,7 @@ public sealed class CoverageRunTests
     [InlineData(".appsurface-coverage-output")]
     [InlineData("projects/sample-tests/dotnet-test.log")]
     [InlineData("projects/sample-tests/coverage-normalization.log")]
+    [InlineData("projects/sample-tests/coverage-project.json")]
     [InlineData("projects/sample-tests/coverage.cobertura.xml")]
     public void OutputGuard_ShouldRejectExistingFixedArtifactSymlink(string relativePath)
     {
