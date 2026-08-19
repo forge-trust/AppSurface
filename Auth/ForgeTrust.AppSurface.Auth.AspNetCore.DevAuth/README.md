@@ -122,7 +122,7 @@ To return to a host page after selecting or clearing a persona, open the control
 /_appsurface/dev-auth/?returnUrl=%2Fprotected%3Ftab%3Dauth
 ```
 
-DevAuth carries a safe rooted local path through every select and clear form action, then returns through the existing local redirect after the mutation. An explicit `/` is valid. Missing, blank, non-rooted, absolute, protocol-relative, backslash-containing, or control-character request values are omitted from the forms; submitting then leaves the browser on the normal updated DevAuth control response. Rejected request targets do not produce a diagnostic because omission is the fail-closed fallback.
+DevAuth carries a safe rooted local path through every select and clear form action, then returns through the existing local redirect after the mutation. An explicit `/` is valid. Missing, blank, non-rooted, absolute, protocol-relative, backslash-containing, or control-character request values are omitted from the forms. Clearing then leaves the browser on the normal updated DevAuth control response; selecting instead uses the selected persona's configured `LandingUrl` when present and otherwise leaves the browser on that response. Rejected request targets do not produce a diagnostic because omission is the fail-closed fallback.
 
 ### Persona Landing URLs
 
@@ -346,7 +346,7 @@ Diagnostics, HTML, and status JSON do not include raw tokens, secrets, passwords
 - Include the standard viewport meta tag and render the marker after persistent application chrome and before main content. The package cannot reserve safe space when a host puts the marker inside a fixed, absolute, clipped, or overlapping container.
 - DevAuth does not automatically inject a marker into arbitrary responses. Add it explicitly to the pages or local layout where the fake-auth state should be visible; the renderer self-suppresses outside allowed environments.
 - If persona selection returns a same-origin 403, make sure custom local UI posts from the same scheme, host, and port as the mapped DevAuth endpoints.
-- If persona selection leaves you in the persona lab, verify that the initial control-page URL contained a URI-encoded, rooted local `returnUrl`. Inspect the rendered form action when debugging; rejected values are intentionally omitted rather than diagnosed or redirected to `/`.
+- If persona selection leaves you in the persona lab, verify that the initial control-page URL contained a URI-encoded, rooted local `returnUrl` or that the selected persona has a `LandingUrl`. When neither target is configured, the control-page response is expected. Inspect the rendered form action when debugging; rejected values are intentionally omitted rather than diagnosed or redirected to `/`.
 - If a lower-privilege persona returns to an unusable page from the marker, leave `AppSurfaceDevAuthMarkerOptions.ReturnUrl` unset and configure that persona's `LandingUrl(...)`. Set the marker option only when the host deliberately owns the destination for every persona.
 
 ## Upgrade And Removal
