@@ -1,0 +1,39 @@
+title: EvidenceHost: risk-mediated CI
+summary: Plan and verify CI evidence by changed-risk profile so meaningful changes are tested visibly while explicitly low-risk changes avoid coverage theater.
+page_type: guide
+nav_group: Start Here
+sequence_key: evidencehost
+order: 60
+aliases:
+  - EvidenceHost
+  - evidence
+  - coverage gate
+  - E2E evidence
+keywords:
+  - ForgeTrust.AppSurface.Evidence.Contracts
+  - ForgeTrust.AppSurface.Evidence.Planner
+  - ForgeTrust.AppSurface.Evidence.Aspire
+  - appsurface evidence
+  - CI evidence
+  - coverage
+  - browser E2E
+breadcrumbs:
+  - Start Here
+  - EvidenceHost
+related_pages:
+  - guides/evidencehost-cookbook.md
+  - Cli/ForgeTrust.AppSurface.Cli/README.md
+  - Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md
+  - Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md
+  - Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md
+trust:
+  status: public preview CI evidence guide
+  summary: EvidenceHost resolves only checked-in policy and explicit changed paths; it does not infer test completeness or silently promote observations into gates.
+  freshness: Keep aligned with Evidence package READMEs and the appsurface evidence command surface.
+  change_scope: Policy planning, producer lifecycle, and claims only. Consumer tests, resources, thresholds, and release decisions remain consumer-owned.
+  archive: v1 does not provide independent artifact attestation, cross-job aggregation, a semantic low-value-line classifier, or a hosted dashboard.
+  sources:
+    - Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md
+    - Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md
+    - Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md
+    - Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md

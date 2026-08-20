@@ -4,6 +4,8 @@ using CliFx;
 using ForgeTrust.AppSurface.Config.GoogleSecretManager;
 using ForgeTrust.AppSurface.Console;
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Evidence.Cli;
+using ForgeTrust.AppSurface.Evidence.Planner;
 using ForgeTrust.RazorWire.Cli;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -87,6 +89,8 @@ internal static class AppSurfaceCliApp
         services.AddTransient<CanaryPollWorkflow>();
         services.AddTransient<CoverageRunWorkflow>();
         services.AddTransient<CoverageMergeWorkflow>();
+        services.AddSingleton<EvidencePlanner>();
+        services.AddTransient<EvidenceCliWorkflow>();
         services.AddTransient<TestResultsCleanupWorkflow>();
         services.AddSingleton<IDurableSchemaCommandService, DurableSchemaCommandService>();
         AddExportEngineServices(services);

@@ -608,6 +608,7 @@
           "ForgeTrust.AppSurface.Core": "[0.1.0, )",
           "ForgeTrust.AppSurface.Docs.Standalone": "[0.1.0, )",
           "ForgeTrust.AppSurface.Durable.PostgreSql": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Cli": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "ForgeTrust.RazorWire.Cli": "[0.1.0, )",
           "Npgsql": "[10.0.3, )",
@@ -705,6 +706,22 @@
         "type": "Project",
         "dependencies": {
           "ForgeTrust.AppSurface.Durable": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.evidence.cli": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Planner": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.evidence.contracts": {
+        "type": "Project"
+      },
+      "forgetrust.appsurface.evidence.planner": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.flow": {
