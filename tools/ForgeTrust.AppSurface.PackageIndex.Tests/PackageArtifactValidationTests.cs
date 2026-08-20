@@ -426,6 +426,25 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
     [Fact]
     [Trait("Category", "Integration")]
+    public async Task DocsPublishPlan_IncludesReleaseContractsTransitivePackage()
+    {
+        var repositoryRoot = GetRepositoryRoot();
+        var manifestPath = CombineSafeChildPath(repositoryRoot, "packages/package-index.yml");
+        var plan = await new PackagePublishPlanResolver(
+            new PackageProjectScanner(),
+            new DotNetProjectMetadataProvider(),
+            new PackageManifestLoader()).ResolveAsync(repositoryRoot, manifestPath, CancellationToken.None);
+
+        var releaseContracts = Assert.Single(plan.Entries, entry =>
+            entry.PackageId == "ForgeTrust.AppSurface.ReleaseContracts");
+        Assert.Equal(PackagePublishDecision.SupportPublish, releaseContracts.Decision);
+
+        var docs = Assert.Single(plan.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Docs");
+        Assert.Contains("ForgeTrust.AppSurface.ReleaseContracts", docs.ExpectedDependencyPackageIds, StringComparer.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
     public async Task DurablePublicationHold_FocusedResolverOmitsHeldPackages()
     {
 

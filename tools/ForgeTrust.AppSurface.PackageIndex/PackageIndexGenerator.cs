@@ -2365,12 +2365,15 @@ internal sealed record PackageProjectMetadata(
 /// Discovers candidate projects that should be classified by the package chooser manifest.
 /// </summary>
 /// <remarks>
-/// The scanner intentionally excludes tests, examples, tooling, generated directories, and hidden local cache
-/// directories so the manifest only needs to classify packages that are meaningful to external adopters or
-/// package-surface maintainers.
+/// The scanner intentionally excludes tests, examples, executable tooling, generated directories, and hidden local
+/// cache directories so the manifest only needs to classify packages that are meaningful to external adopters or
+/// package-surface maintainers. <c>ForgeTrust.AppSurface.ReleaseContracts</c> is the one transitive support package
+/// stored below <c>tools</c>; it remains discoverable because published Docs consumers restore it as a dependency.
 /// </remarks>
 internal sealed class PackageProjectScanner
 {
+    private const string ReleaseContractsProjectPath = "/tools/forgetrust.appsurface.releasecontracts/forgetrust.appsurface.releasecontracts.csproj";
+
     /// <summary>
     /// Enumerates candidate project files under the repository root.
     /// </summary>
@@ -2397,13 +2400,22 @@ internal sealed class PackageProjectScanner
         var normalizedPath = relativePath.Replace('\\', '/').Trim('/');
         var normalizedPathLower = "/" + normalizedPath.ToLowerInvariant();
         var projectName = Path.GetFileNameWithoutExtension(relativePath).ToLowerInvariant();
+        var isReleaseContractsPackage = string.Equals(
+            normalizedPathLower,
+            ReleaseContractsProjectPath,
+            StringComparison.Ordinal);
 
         if (HasHiddenDirectorySegment(normalizedPath)
             || normalizedPathLower.StartsWith("/artifacts/", StringComparison.Ordinal)
             || normalizedPathLower.Contains("/bin/", StringComparison.Ordinal)
             || normalizedPathLower.Contains("/obj/", StringComparison.Ordinal)
-            || normalizedPathLower.Contains("/node_modules/", StringComparison.Ordinal)
-            || normalizedPathLower.Contains("/tools/", StringComparison.Ordinal))
+            || normalizedPathLower.Contains("/node_modules/", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (normalizedPathLower.Contains("/tools/", StringComparison.Ordinal)
+            && !isReleaseContractsPackage)
         {
             return false;
         }

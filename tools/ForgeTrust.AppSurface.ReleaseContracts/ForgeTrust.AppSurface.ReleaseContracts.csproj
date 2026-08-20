@@ -4,7 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <IsPackable>false</IsPackable>
+    <PackageDescription>Release metadata contracts used transitively by AppSurface Docs and release tooling.</PackageDescription>
+    <PackageTags>appsurface;release;contracts;metadata</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

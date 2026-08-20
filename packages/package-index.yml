@@ -632,6 +632,15 @@ packages:
     release_notes_path: releases/unreleased.md
     order: 115
     note: Private compiled MSBuild task used by `ForgeTrust.AppSurface.Web.Tailwind`; consume it only through the packed Tailwind package.
+  - project: tools/ForgeTrust.AppSurface.ReleaseContracts/ForgeTrust.AppSurface.ReleaseContracts.csproj
+    classification: support
+    publish_decision: support_publish
+    product_family: internal_support
+    release_status: support_runtime
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 190
+    note: Transitive release metadata contracts used by `ForgeTrust.AppSurface.Docs` and repository release tooling. Restore it through those packages rather than installing it directly.
   - project: Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj
     classification: proof_host
     publish_decision: support_publish
@@ -649,6 +658,7 @@ packages:
       - ForgeTrust.AppSurface.Caching
       - ForgeTrust.AppSurface.Config
       - ForgeTrust.AppSurface.Intelligence
+      - ForgeTrust.AppSurface.ReleaseContracts
       - ForgeTrust.AppSurface.Theming
       - ForgeTrust.AppSurface.Web
       - ForgeTrust.AppSurface.Web.Tailwind

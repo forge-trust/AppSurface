@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 48
-- Evidence status: manifest evidence complete: 35; transitive package evidence complete: 5; proof-host evidence complete: 2; excluded by publish decision: 6
-- Product families: AppSurface: 33; Forge Trust: 2; Internal support: 10; RazorWire: 3
+- Packages: 49
+- Evidence status: manifest evidence complete: 35; transitive package evidence complete: 6; proof-host evidence complete: 2; excluded by publish decision: 6
+- Product families: AppSurface: 33; Forge Trust: 2; Internal support: 11; RazorWire: 3
 
 ## Package evidence matrix
 
@@ -53,7 +53,8 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | AppSurface | `ForgeTrust.AppSurface.Web.Tailwind` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Web` | `ForgeTrust.AppSurface.Core`<br />`ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64`<br />`ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64`<br />`ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64`<br />`ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64`<br />`ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64` | [README](../Web/ForgeTrust.AppSurface.Web.Tailwind/README.md) | [notes](../releases/current.md) |
 | Internal support | `ForgeTrust.AppSurface.Web.Tailwind.Tasks` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Cli` | public | publish | manifest evidence complete | None | None | None | [AppSurface CLI README](../Cli/ForgeTrust.AppSurface.Cli/README.md) | [notes](../releases/current.md) |
-| Forge Trust | `ForgeTrust.AppSurface.Docs` | proof host | support publish | proof-host evidence complete | None | None | `ForgeTrust.AppSurface.Auth`<br />`ForgeTrust.AppSurface.Caching`<br />`ForgeTrust.AppSurface.Config`<br />`ForgeTrust.AppSurface.Intelligence`<br />`ForgeTrust.AppSurface.Theming`<br />`ForgeTrust.AppSurface.Web`<br />`ForgeTrust.AppSurface.Web.Tailwind`<br />`ForgeTrust.RazorWire` | [AppSurface Docs README](../Web/ForgeTrust.AppSurface.Docs/README.md) | [notes](../releases/unreleased.md) |
+| Internal support | `ForgeTrust.AppSurface.ReleaseContracts` | support | support publish | transitive package evidence complete | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
+| Forge Trust | `ForgeTrust.AppSurface.Docs` | proof host | support publish | proof-host evidence complete | None | None | `ForgeTrust.AppSurface.Auth`<br />`ForgeTrust.AppSurface.Caching`<br />`ForgeTrust.AppSurface.Config`<br />`ForgeTrust.AppSurface.Intelligence`<br />`ForgeTrust.AppSurface.ReleaseContracts`<br />`ForgeTrust.AppSurface.Theming`<br />`ForgeTrust.AppSurface.Web`<br />`ForgeTrust.AppSurface.Web.Tailwind`<br />`ForgeTrust.RazorWire` | [AppSurface Docs README](../Web/ForgeTrust.AppSurface.Docs/README.md) | [notes](../releases/unreleased.md) |
 | Forge Trust | `ForgeTrust.AppSurface.Docs.Standalone` | proof host | do not publish | proof-host evidence complete | None | None | None | [Standalone host README](../Web/ForgeTrust.AppSurface.Docs.Standalone/README.md) | [notes](../releases/unreleased.md) |
 | Internal support | `ForgeTrust.AppSurface.Docs.ConsumerFixture` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | Internal support | `ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64` | support | support publish | transitive package evidence complete | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
