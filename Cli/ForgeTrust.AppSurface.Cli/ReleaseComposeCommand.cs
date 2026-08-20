@@ -139,11 +139,6 @@ internal sealed partial class ReleaseComposeCommand(Func<string>? getCurrentDire
                 throw InvalidUsage($"The output directory for '{DisplayPath(rootDirectory, outputPath!)}' does not exist.");
             }
 
-            if (File.Exists(outputPath!) && (File.GetAttributes(outputPath!) & FileAttributes.ReparsePoint) != 0)
-            {
-                throw InvalidUsage($"The output path '{DisplayPath(rootDirectory, outputPath!)}' must not be a symbolic link, junction, or other reparse point.");
-            }
-
             // Recheck immediately before the write so a pre-existing linked ancestor cannot redirect the output after validation.
             EnsureExistingPathComponentsArePhysical(rootDirectory, outputPath!, "--output");
             await File.WriteAllTextAsync(outputPath!, composed, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
@@ -164,10 +159,6 @@ internal sealed partial class ReleaseComposeCommand(Func<string>? getCurrentDire
         catch (ArgumentException exception)
         {
             throw InvalidUsage($"One of the selected release-note paths is invalid: {exception.Message}");
-        }
-        catch (NotSupportedException exception)
-        {
-            throw InvalidUsage($"One of the selected release-note paths is not supported: {exception.Message}");
         }
     }
 
@@ -235,11 +226,6 @@ internal sealed partial class ReleaseComposeCommand(Func<string>? getCurrentDire
             return true;
         }
         catch (FileNotFoundException)
-        {
-            attributes = default;
-            return false;
-        }
-        catch (DirectoryNotFoundException)
         {
             attributes = default;
             return false;

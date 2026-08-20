@@ -398,6 +398,15 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public void UnreleasedEntryComposerRejectsATemplateWithoutCompositionMarkers()
+    {
+        var exception = Assert.Throws<UnreleasedEntryException>(
+            () => UnreleasedEntryComposer.Compose("# Unreleased", [], "/releases/unreleased.md"));
+
+        Assert.Contains("must contain at least one append-only entry marker", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task UnreleasedEntryComposerAcceptsUtf8BomAndHonorsCancellation()
     {
         var entriesDirectory = RepositoryPath("releases/unreleased.entries");

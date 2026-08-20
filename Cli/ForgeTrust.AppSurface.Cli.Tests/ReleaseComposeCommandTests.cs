@@ -311,4 +311,92 @@ public sealed class ReleaseComposeCommandTests
         Assert.Contains("selected release-note paths is invalid", error.Message, StringComparison.Ordinal);
         Assert.Contains("Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-release-compose", error.Message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Compose_rejects_an_output_that_would_overwrite_an_append_only_entry_source()
+    {
+        using var root = TestDirectory.Create();
+        root.WriteFile("releases/unreleased.md", "<!-- appsurface:unreleased-entries section=\"included\" -->");
+        root.WriteFile(
+            "releases/unreleased.entries/2026-08-20-entry.md",
+            "<!-- appsurface:unreleased-entry section=\"included\" -->\n- Source entry.");
+        using var console = new FakeInMemoryConsole();
+        var command = new ReleaseComposeCommand(() => root.Path)
+        {
+            OutputPath = "releases/unreleased.entries/2026-08-20-entry.md",
+        };
+
+        var error = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("--output must not overwrite an append-only entry source", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Compose_rejects_an_existing_linked_output_file_without_following_it()
+    {
+        using var root = TestDirectory.Create();
+        root.WriteFile("releases/unreleased.md", "<!-- appsurface:unreleased-entries section=\"included\" -->");
+        var externalOutput = root.WriteFile("external.md", "External sentinel.");
+        var linkedOutput = Path.Join(root.Path, "releases", "v1.0.0.md");
+        TestFileSystem.CreateFileLinkOrSkip(linkedOutput, externalOutput);
+        using var console = new FakeInMemoryConsole();
+        var command = new ReleaseComposeCommand(() => root.Path)
+        {
+            OutputPath = "releases/v1.0.0.md",
+            Apply = true,
+        };
+
+        var error = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("--output must not traverse a symbolic link", error.Message, StringComparison.Ordinal);
+        Assert.Equal("External sentinel.", File.ReadAllText(externalOutput));
+    }
+
+    [Fact]
+    public async Task Compose_rejects_a_linked_project_root_and_a_blank_path_with_documented_errors()
+    {
+        using var root = TestDirectory.Create();
+        root.WriteFile("releases/unreleased.md", "<!-- appsurface:unreleased-entries section=\"included\" -->");
+        var linkedRoot = Path.Join(root.Path, "linked-root");
+        TestFileSystem.CreateDirectoryLinkOrSkip(linkedRoot, root.Path);
+        using var console = new FakeInMemoryConsole();
+        var linkedRootCommand = new ReleaseComposeCommand(() => root.Path)
+        {
+            RootDirectory = linkedRoot,
+        };
+
+        var linkedRootError = await Assert.ThrowsAsync<CommandException>(
+            async () => await linkedRootCommand.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("--root must not be a symbolic link", linkedRootError.Message, StringComparison.Ordinal);
+
+        var blankPathCommand = new ReleaseComposeCommand(() => root.Path)
+        {
+            TemplatePath = " ",
+        };
+        var blankPathError = await Assert.ThrowsAsync<CommandException>(
+            async () => await blankPathCommand.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("--template must name a path below --root", blankPathError.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Compose_translates_a_directory_write_failure_to_a_documented_command_error()
+    {
+        using var root = TestDirectory.Create();
+        root.WriteFile("releases/unreleased.md", "<!-- appsurface:unreleased-entries section=\"included\" -->");
+        using var console = new FakeInMemoryConsole();
+        var command = new ReleaseComposeCommand(() => root.Path)
+        {
+            OutputPath = "releases",
+            Apply = true,
+        };
+
+        var error = await Assert.ThrowsAsync<CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("Could not access the selected release-note files", error.Message, StringComparison.Ordinal);
+    }
 }

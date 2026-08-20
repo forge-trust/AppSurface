@@ -307,12 +307,6 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             return BuildReport(context, commands, artifacts);
         }
 
-        artifacts.Add(CheckArtifact(releaseOutputPath, "composed consumer release note"));
-        if (artifacts.Any(artifact => !artifact.Exists))
-        {
-            return BuildReport(context, commands, artifacts);
-        }
-
         if (!await RunRequiredAsync(ToolCommand(
             context,
             ["canary", "poll", "--help"],

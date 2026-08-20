@@ -4397,7 +4397,6 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains(
             report.Artifacts,
             artifact => artifact.Description == "excluded project 'Smoke.Browser.Tests' produced no coverage artifacts" && artifact.Exists);
-        Assert.Contains(report.Artifacts, artifact => artifact.Description == "composed consumer release note" && artifact.Exists);
         var releasePreview = report.Commands.Single(command => command.OperationName == "appsurface release compose preview");
         var releaseApply = report.Commands.Single(command => command.OperationName == "appsurface release compose apply");
         Assert.Contains("Preview only. Would write releases/v1.4.0.md", releasePreview.StandardOutput, StringComparison.Ordinal);
@@ -4449,6 +4448,49 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains(report.Artifacts, artifact => artifact.Description == "patch-target gate Markdown structure and uncovered target" && artifact.Exists);
         Assert.Contains(report.Artifacts, artifact => artifact.Description == "nonpatch gate removes patch-target JSON" && artifact.Exists);
         Assert.Contains(report.Artifacts, artifact => artifact.Description == "nonpatch gate removes patch-target Markdown" && artifact.Exists);
+    }
+
+    [Theory]
+    [InlineData("version")]
+    [InlineData("preview")]
+    [InlineData("apply")]
+    [InlineData("content")]
+    public async Task CoverageCliConsumerProofWorkflow_FailsWhenPackagedReleaseCompositionCannotBeVerified(string failureMode)
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            reportedPackageVersion: failureMode == "version" ? "0.0.0-wrong" : null,
+            releasePreviewOutput: failureMode == "preview" ? "unexpected preview" : null,
+            releaseApplyOutput: failureMode == "apply" ? "unexpected apply" : null,
+            releaseOutputContents: failureMode == "content" ? "# Invalid composed release note" : null);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, $"coverage-proof-release-{failureMode}"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains(
+            failureMode switch
+            {
+                "version" => "Expected 'appsurface --version'",
+                "preview" => "Expected packaged release composition to preview",
+                "apply" => "Expected packaged release composition to confirm",
+                _ => "Expected packaged release composition to write the consumer entry",
+            },
+            report.FirstFailure,
+            StringComparison.Ordinal);
     }
 
     [Theory]
@@ -8911,6 +8953,10 @@ public sealed class PackageArtifactValidationTests : IDisposable
         private readonly string? _patchTargetMarkdown;
         private readonly string? _stalePatchTargetDirectoryName;
         private readonly bool _sendCanaryRequests;
+        private readonly string _reportedPackageVersion;
+        private readonly string _releasePreviewOutput;
+        private readonly string _releaseApplyOutput;
+        private readonly string _releaseOutputContents;
 
         public CoverageProofRecordingCommandRunner(
             string packageVersion,
@@ -8931,7 +8977,11 @@ public sealed class PackageArtifactValidationTests : IDisposable
             string? patchTargetJson = null,
             string? patchTargetMarkdown = null,
             string? stalePatchTargetDirectoryName = null,
-            bool sendCanaryRequests = true)
+            bool sendCanaryRequests = true,
+            string? reportedPackageVersion = null,
+            string? releasePreviewOutput = null,
+            string? releaseApplyOutput = null,
+            string? releaseOutputContents = null)
         {
             _packageVersion = packageVersion;
             _createFailingGateReports = createFailingGateReports;
@@ -8952,6 +9002,10 @@ public sealed class PackageArtifactValidationTests : IDisposable
             _patchTargetMarkdown = patchTargetMarkdown;
             _stalePatchTargetDirectoryName = stalePatchTargetDirectoryName;
             _sendCanaryRequests = sendCanaryRequests;
+            _reportedPackageVersion = reportedPackageVersion ?? packageVersion;
+            _releasePreviewOutput = releasePreviewOutput ?? "Preview only. Would write releases/v1.4.0.md; re-run with --apply to make that change.";
+            _releaseApplyOutput = releaseApplyOutput ?? "Wrote composed release note to releases/v1.4.0.md.";
+            _releaseOutputContents = releaseOutputContents ?? "# Composed consumer release note\n\n- The packaged tool composes consumer release notes.\n";
         }
 
         public List<ExternalCommandRequest> Requests { get; } = [];
@@ -8970,22 +9024,22 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
             if (request.OperationName == "appsurface --version")
             {
-                return Task.FromResult(new ExternalCommandResult(0, _packageVersion, string.Empty));
+                return Task.FromResult(new ExternalCommandResult(0, _reportedPackageVersion, string.Empty));
             }
 
             if (request.OperationName == "appsurface release compose preview")
             {
-                return Task.FromResult(new ExternalCommandResult(0, "Preview only. Would write releases/v1.4.0.md; re-run with --apply to make that change.", string.Empty));
+                return Task.FromResult(new ExternalCommandResult(0, _releasePreviewOutput, string.Empty));
             }
 
             if (request.OperationName == "appsurface release compose apply")
             {
                 var rootDirectory = ReadOption(request.Arguments, "--root");
                 var outputPath = ReadOption(request.Arguments, "--output");
-                var path = Path.Join(rootDirectory, outputPath);
+                var path = TestPathUtils.PathUnder(rootDirectory, outputPath);
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                File.WriteAllText(path, "# Composed consumer release note\n\n- The packaged tool composes consumer release notes.\n");
-                return Task.FromResult(new ExternalCommandResult(0, "Wrote composed release note to releases/v1.4.0.md.", string.Empty));
+                File.WriteAllText(path, _releaseOutputContents);
+                return Task.FromResult(new ExternalCommandResult(0, _releaseApplyOutput, string.Empty));
             }
 
             if (request.OperationName == "appsurface canary poll --help")
