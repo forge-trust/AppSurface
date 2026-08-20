@@ -4528,6 +4528,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         Assert.False(report.Succeeded);
         Assert.Contains(report.SemanticProof!.Failures, failure => failure.Code == "CPV008" && failure.Scope == "merged");
+        Assert.Contains("Calculator.Sign line 7", report.FirstFailure, StringComparison.Ordinal);
         Assert.Contains(commandRunner.Requests, request => request.OperationName == "appsurface coverage merge");
         Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName.StartsWith("appsurface coverage gate", StringComparison.Ordinal));
     }
@@ -4984,6 +4985,36 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.False(report.Succeeded);
         Assert.Contains("coverage run merged Cobertura", report.FirstFailure, StringComparison.Ordinal);
         Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage run merged Cobertura" && !artifact.Exists);
+        Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface coverage merge");
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_FailsWhenMsbuildCoverageRunArtifactsAreMissing()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            createCoverageMsbuildRunArtifacts: false);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("coverage run msbuild merged Cobertura", report.FirstFailure, StringComparison.Ordinal);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage run msbuild merged Cobertura" && !artifact.Exists);
+        Assert.Contains(commandRunner.Requests, request => request.OperationName == "appsurface coverage run msbuild");
         Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface coverage merge");
     }
 
@@ -6688,6 +6719,64 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         Assert.Contains("regular existing directory", writeException.Message, StringComparison.Ordinal);
         Assert.False(File.Exists(CombineSafeChildPath(redirectedDirectory, "coverage-cli-consumer-proof.evidence.json")));
+    }
+
+    [Fact]
+    public async Task CoverageProofEvidenceWriter_RejectsMissingTrustedRoot()
+    {
+        var missingRoot = CombineSafeChildPath(_repositoryRoot, "missing-artifacts");
+        var evidencePath = CombineSafeChildPath(missingRoot, "coverage-cli-consumer-proof.evidence.json");
+
+        var writeException = await Assert.ThrowsAsync<PackageIndexException>(
+            () => PackageArtifactWorkflow.WriteCoverageProofEvidenceAsync(evidencePath, "{}", missingRoot, CancellationToken.None));
+
+        Assert.Contains("regular existing directory", writeException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CoverageProofEvidenceWriter_RejectsEvidenceOutsideTrustedRoot()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        var outsideDirectory = CombineSafeChildPath(_repositoryRoot, "outside");
+        Directory.CreateDirectory(artifactDirectory);
+        Directory.CreateDirectory(outsideDirectory);
+        var evidencePath = CombineSafeChildPath(outsideDirectory, "coverage-cli-consumer-proof.evidence.json");
+
+        var writeException = await Assert.ThrowsAsync<PackageIndexException>(
+            () => PackageArtifactWorkflow.WriteCoverageProofEvidenceAsync(evidencePath, "{}", artifactDirectory, CancellationToken.None));
+
+        Assert.Contains("must be contained", writeException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CoverageProofEvidenceWriter_RejectsMissingDirectoryBelowTrustedRoot()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var evidencePath = CombineSafeChildPath(
+            CombineSafeChildPath(artifactDirectory, "missing"),
+            "coverage-cli-consumer-proof.evidence.json");
+
+        var writeException = await Assert.ThrowsAsync<PackageIndexException>(
+            () => PackageArtifactWorkflow.WriteCoverageProofEvidenceAsync(evidencePath, "{}", artifactDirectory, CancellationToken.None));
+
+        Assert.Contains("regular existing directory", writeException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CoverageProofEvidenceWriter_CleansTemporaryFileWhenCanceled()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var evidencePath = CombineSafeChildPath(artifactDirectory, "coverage-cli-consumer-proof.evidence.json");
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => PackageArtifactWorkflow.WriteCoverageProofEvidenceAsync(evidencePath, "{}", artifactDirectory, cancellation.Token));
+
+        Assert.Empty(Directory.EnumerateFiles(artifactDirectory, ".coverage-cli-consumer-proof.evidence.json.*.tmp", SearchOption.TopDirectoryOnly));
+        Assert.False(File.Exists(evidencePath));
     }
 
     [Fact]
@@ -9038,6 +9127,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         private readonly string _packageVersion;
         private readonly bool _createFailingGateReports;
         private readonly bool _createCoverageRunArtifacts;
+        private readonly bool _createCoverageMsbuildRunArtifacts;
         private readonly bool _createCoverageMergeArtifacts;
         private readonly bool _createPassingGateReports;
         private readonly string? _failOperationName;
@@ -9062,6 +9152,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             string packageVersion,
             bool createFailingGateReports,
             bool createCoverageRunArtifacts = true,
+            bool createCoverageMsbuildRunArtifacts = true,
             bool createCoverageMergeArtifacts = true,
             bool createPassingGateReports = true,
             string? failOperationName = null,
@@ -9085,6 +9176,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             _packageVersion = packageVersion;
             _createFailingGateReports = createFailingGateReports;
             _createCoverageRunArtifacts = createCoverageRunArtifacts;
+            _createCoverageMsbuildRunArtifacts = createCoverageMsbuildRunArtifacts;
             _createCoverageMergeArtifacts = createCoverageMergeArtifacts;
             _createPassingGateReports = createPassingGateReports;
             _failOperationName = failOperationName;
@@ -9171,7 +9263,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             if (request.OperationName == "appsurface coverage run msbuild")
             {
                 var outputDirectory = ReadOption(request.Arguments, "--output");
-                if (_createCoverageRunArtifacts)
+                if (_createCoverageMsbuildRunArtifacts)
                 {
                     CreateCoverageRunArtifacts(outputDirectory, createExcludedProjectArtifacts: false, projectName: "Smoke.Msbuild.Tests");
                 }

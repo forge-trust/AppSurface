@@ -735,7 +735,9 @@ internal static class CoverageCliConsumerProofSemanticValidator
         => !string.IsNullOrWhiteSpace(path)
             && !Path.IsPathRooted(path)
             && !path.Contains('\\')
-            && path.Split('/', StringSplitOptions.None).All(segment => segment.Length > 0 && segment is not "." and not "..");
+            && path.Split('/', StringSplitOptions.None).All(segment => segment.Length > 0
+                && segment is not "." and not ".."
+                && !segment.Any(char.IsControl));
 
     private static bool IsSafeSlug(string? slug)
         => !string.IsNullOrWhiteSpace(slug)

@@ -102,8 +102,9 @@ internal static class CoverageCliConsumerProofEvidenceRenderer
     private static bool IsSafeRelativePath(string path)
         => !string.IsNullOrWhiteSpace(path)
             && !Path.IsPathRooted(path)
-            && !path.StartsWith("../", StringComparison.Ordinal)
-            && path != "..";
+            && path.Split('/', StringSplitOptions.None).All(segment => segment.Length > 0
+                && segment is not "." and not ".."
+                && !segment.Any(char.IsControl));
 
     private sealed record CoverageCliConsumerProofEvidence(
         int SchemaVersion,
