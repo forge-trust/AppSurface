@@ -65,7 +65,7 @@ Each major item should answer the reader's next question without making them ins
 
 Use internal feature names only after the reader-facing behavior is clear. For example, introduce [RazorWire auth projection](../Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md) as rendering allowed, forbidden, and anonymous UI from host-owned ASP.NET Core policies before relying on the phrase "passive auth projection." When a change ships with a guide or example, link that path from the release note next to the feature summary.
 
-Release notes should also connect related concepts instead of only naming them. If an item mentions a package, guide, example, workflow, policy, diagnostic family, CLI command, or cross-package concept, link the first meaningful mention to the canonical page a consumer should read next. Prefer durable start-here links, package READMEs, guides, examples, and public docs routes over transient PRs or maintainer-only notes.
+Release notes should also connect related concepts instead of only naming them. If an item mentions a package, guide, example, workflow, policy, diagnostic family, CLI command, or cross-package concept, link the first meaningful mention to the canonical page a consumer should read next. Prefer durable start-here links, package READMEs, guides, examples, and public docs routes over transient PRs or maintainer-only notes. Consumer projects that have concurrent release-note authors can use [`appsurface release compose`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-release-compose) instead of making every change edit one shared changelog.
 
 ### Safety second
 

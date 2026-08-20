@@ -8,7 +8,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="UnreleasedEntryComposer.cs" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Docs" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Docs.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Release" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Release.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Markdig" />
+  </ItemGroup>
 </Project>

@@ -4370,6 +4370,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 "dotnet new tool-manifest",
                 "dotnet tool install",
                 "appsurface --version",
+                "appsurface release compose preview",
+                "appsurface release compose apply",
                 "appsurface canary poll --help",
                 "appsurface canary poll pass",
                 "appsurface canary poll non-pass",
@@ -4382,7 +4384,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 "appsurface coverage gate"
             ],
             commandRunner.Requests
-                .Where(request => request.OperationName is "dotnet new tool-manifest" or "dotnet tool install" or "appsurface --version" or "appsurface canary poll --help" or "appsurface canary poll pass" or "appsurface canary poll non-pass" or "appsurface coverage run" or "appsurface coverage run msbuild" or "appsurface coverage merge" or "appsurface coverage gate" or "appsurface coverage gate patch targets" or "appsurface coverage gate patch-target cleanup")
+                .Where(request => request.OperationName is "dotnet new tool-manifest" or "dotnet tool install" or "appsurface --version" or "appsurface release compose preview" or "appsurface release compose apply" or "appsurface canary poll --help" or "appsurface canary poll pass" or "appsurface canary poll non-pass" or "appsurface coverage run" or "appsurface coverage run msbuild" or "appsurface coverage merge" or "appsurface coverage gate" or "appsurface coverage gate patch targets" or "appsurface coverage gate patch-target cleanup")
                 .Select(request => request.OperationName)
                 .ToArray());
         var coverageRunRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface coverage run");
@@ -4395,6 +4397,11 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains(
             report.Artifacts,
             artifact => artifact.Description == "excluded project 'Smoke.Browser.Tests' produced no coverage artifacts" && artifact.Exists);
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "composed consumer release note" && artifact.Exists);
+        var releasePreview = report.Commands.Single(command => command.OperationName == "appsurface release compose preview");
+        var releaseApply = report.Commands.Single(command => command.OperationName == "appsurface release compose apply");
+        Assert.Contains("Preview only. Would write releases/v1.4.0.md", releasePreview.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("Wrote composed release note to releases/v1.4.0.md.", releaseApply.StandardOutput, StringComparison.Ordinal);
         var canaryPassRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface canary poll pass");
         var canaryNonPassRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface canary poll non-pass");
         Assert.All(
@@ -5032,6 +5039,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [InlineData("dotnet new tool-manifest", null)]
     [InlineData("dotnet tool install", null)]
     [InlineData("appsurface --version", null)]
+    [InlineData("appsurface release compose preview", null)]
+    [InlineData("appsurface release compose apply", null)]
     [InlineData("appsurface canary poll --help", null)]
     [InlineData("appsurface canary poll pass", null)]
     [InlineData("appsurface canary poll non-pass", null)]
@@ -8962,6 +8971,21 @@ public sealed class PackageArtifactValidationTests : IDisposable
             if (request.OperationName == "appsurface --version")
             {
                 return Task.FromResult(new ExternalCommandResult(0, _packageVersion, string.Empty));
+            }
+
+            if (request.OperationName == "appsurface release compose preview")
+            {
+                return Task.FromResult(new ExternalCommandResult(0, "Preview only. Would write releases/v1.4.0.md; re-run with --apply to make that change.", string.Empty));
+            }
+
+            if (request.OperationName == "appsurface release compose apply")
+            {
+                var rootDirectory = ReadOption(request.Arguments, "--root");
+                var outputPath = ReadOption(request.Arguments, "--output");
+                var path = Path.Join(rootDirectory, outputPath);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, "# Composed consumer release note\n\n- The packaged tool composes consumer release notes.\n");
+                return Task.FromResult(new ExternalCommandResult(0, "Wrote composed release note to releases/v1.4.0.md.", string.Empty));
             }
 
             if (request.OperationName == "appsurface canary poll --help")

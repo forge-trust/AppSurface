@@ -49,10 +49,27 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("docs export", result.AllText, StringComparison.Ordinal);
         Assert.Contains("coverage", result.AllText, StringComparison.Ordinal);
         Assert.Contains("coverage clean", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("release", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("release compose", result.AllText, StringComparison.Ordinal);
         Assert.Contains("secrets", result.AllText, StringComparison.Ordinal);
         Assert.Contains("durable", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EntryPoint_Should_Print_ReleaseCompose_Help_Without_Lifecycle_Noise()
+    {
+        var result = await InvokeEntryPointAsync(["release", "compose", "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("deterministic release note from isolated append-only entries", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--root", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--entries", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--template", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--output", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--apply", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
     }
 
     [Fact]

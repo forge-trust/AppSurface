@@ -246,7 +246,7 @@ public sealed class ReleaseToolTests : IDisposable
             FakeCommandRunner.WithSourceCommit("abc123"));
 
         Assert.Equal(1, result.ExitCode);
-        Assert.Contains("uses unsupported section", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("not declared by the living-note template", result.Stdout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -376,20 +376,21 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
-    public void UnreleasedEntryComposerRejectsUnsupportedTemplateMarkerAndPaths()
+    public void UnreleasedEntryComposerSupportsTemplateOwnedSectionsAndRejectsMalformedMarkersAndPaths()
     {
-        var unsupportedMarker = """
+        var malformedMarker = """
             # Unreleased
             <!-- appsurface:unreleased-entries section="taking-shape" -->
             <!-- appsurface:unreleased-entries section="included" -->
             <!-- appsurface:unreleased-entries section="migration-watch" -->
-            <!-- appsurface:unreleased-entries section="future" -->
+            <!-- appsurface:unreleased-entries section="future section" -->
             """;
 
         var templateException = Assert.Throws<UnreleasedEntryException>(
-            () => UnreleasedEntryComposer.Compose(unsupportedMarker, [], "/releases/unreleased.md"));
-        Assert.Contains("no unsupported entry markers", templateException.Message, StringComparison.Ordinal);
-        Assert.Throws<ArgumentOutOfRangeException>(() => UnreleasedEntryComposer.MarkerFor("future"));
+            () => UnreleasedEntryComposer.Compose(malformedMarker, [], "/releases/unreleased.md"));
+        Assert.Contains("unsupported or malformed", templateException.Message, StringComparison.Ordinal);
+        Assert.Equal("<!-- appsurface:unreleased-entries section=\"future\" -->", UnreleasedEntryComposer.MarkerFor("future"));
+        Assert.Throws<ArgumentException>(() => UnreleasedEntryComposer.MarkerFor("future section"));
         Assert.True(UnreleasedEntryComposer.IsEntryPath("releases\\unreleased.entries\\2026-08-08-valid-entry.md"));
         Assert.False(UnreleasedEntryComposer.IsEntryPath("releases/unreleased.entries/nested/2026-08-08-valid-entry.md"));
         Assert.False(UnreleasedEntryComposer.IsEntryPath("releases/unreleased.entries/not-an-entry.md"));
