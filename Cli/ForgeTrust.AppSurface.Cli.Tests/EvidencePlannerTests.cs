@@ -50,6 +50,25 @@ public sealed class EvidencePlannerTests
     }
 
     [Fact]
+    public void Resolve_ShouldCanonicalizeChangedPathsAndRenameProvenance()
+    {
+        var plan = new EvidencePlanner().Resolve(
+            CreatePolicy(),
+            [
+                new NormalizedDiffPath("src/Feature.cs", "renamed", "src/Previous-Z.cs"),
+                new NormalizedDiffPath("docs/readme.md"),
+                new NormalizedDiffPath("src/Feature.cs", "renamed", "src/Previous-A.cs"),
+            ]);
+
+        Assert.Equal("coverage", plan.Profile.Id);
+        Assert.Collection(
+            plan.ChangedPaths,
+            path => Assert.Equal("docs/readme.md", path.Path),
+            path => Assert.Equal("src/Previous-A.cs", path.PreviousPath),
+            path => Assert.Equal("src/Previous-Z.cs", path.PreviousPath));
+    }
+
+    [Fact]
     public void Resolve_ShouldRejectAmbiguousOverlappingProfiles()
     {
         var policy = CreatePolicy() with
@@ -219,6 +238,8 @@ public sealed class EvidencePlannerTests
         Assert.True(await writer.VerifyWrittenArtifactsAsync());
         await File.WriteAllTextAsync(Path.Join(directory.Path, "coverage", "result.txt"), "changed");
         Assert.False(await writer.VerifyWrittenArtifactsAsync());
+        File.Delete(Path.Join(directory.Path, "coverage", "result.txt"));
+        Assert.False(await writer.VerifyWrittenArtifactsAsync());
     }
 
     [Fact]
@@ -256,6 +277,374 @@ public sealed class EvidencePlannerTests
         var exception = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.InitializeAsync(root, force: true, CancellationToken.None));
 
         Assert.Contains("ASEVD201", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CliWorkflow_ShouldDescribeExternalAndTrustedPrerequisitesForAReleaseProfile()
+    {
+        using var directory = TestDirectory.Create();
+        var policyPath = Path.Join(directory.Path, "evidence.policy.json");
+        var profile = new EvidenceProfile(
+            "release",
+            EvidenceProfileScope.Release,
+            [],
+            [
+                new EvidenceProducerDeclaration("database", "postgres-integration", "1", [], ["database/assertion@1"], [], 60),
+                new EvidenceProducerDeclaration("browser", "playwright-browser", "1", [], ["browser/assertion@1"], [], 60),
+            ],
+            [
+                new EvidenceObligation("database", "database", "Database behavior changed.", ["database"], "database/assertion@1"),
+                new EvidenceObligation("browser", "browser", "Browser behavior changed.", ["browser"], "browser/assertion@1"),
+            ]);
+        await File.WriteAllBytesAsync(policyPath, EvidenceCanonicalJson.Serialize(new EvidencePolicy("release-policy", "1", "release", [profile], [])));
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
+
+        var report = await workflow.DoctorAsync(new EvidencePlanningRequest(policyPath, ["src/Feature.cs"], null), CancellationToken.None);
+
+        Assert.Contains(report.Checks, check => check.Id == "docker:database");
+        Assert.Contains(report.Checks, check => check.Id == "browser:browser");
+        Assert.Contains(report.Checks, check => check.Id == "trusted-envelope");
+        Assert.Contains(report.Checks, check => check.NextAction is not null);
+    }
+
+    [Fact]
+    public async Task CliWorkflow_ShouldRejectMissingMalformedAndMismatchedEvidenceInputs()
+    {
+        using var directory = TestDirectory.Create();
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
+        var missingPolicy = Path.Join(directory.Path, "missing.policy.json");
+
+        var missingPolicyException = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.ExplainAsync(new EvidencePlanningRequest(missingPolicy, ["src/Feature.cs"], null), CancellationToken.None));
+        Assert.Contains("ASEVD204", missingPolicyException.Message, StringComparison.Ordinal);
+
+        var malformedPolicy = Path.Join(directory.Path, "malformed.policy.json");
+        await File.WriteAllTextAsync(malformedPolicy, "not-json");
+        var malformedPolicyException = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.ExplainAsync(new EvidencePlanningRequest(malformedPolicy, ["src/Feature.cs"], null), CancellationToken.None));
+        Assert.Contains("ASEVD205", malformedPolicyException.Message, StringComparison.Ordinal);
+
+        var policyPath = Path.Join(directory.Path, "policy.json");
+        await File.WriteAllBytesAsync(policyPath, EvidenceCanonicalJson.Serialize(CreatePolicy()));
+        var noPathException = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.ExplainAsync(new EvidencePlanningRequest(policyPath, [], null), CancellationToken.None));
+        var missingDiffException = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.ExplainAsync(new EvidencePlanningRequest(policyPath, [], Path.Join(directory.Path, "missing.diff")), CancellationToken.None));
+        Assert.Contains("ASEVD207", noPathException.Message, StringComparison.Ordinal);
+        Assert.Contains("ASEVD206", missingDiffException.Message, StringComparison.Ordinal);
+
+        var diffPath = Path.Join(directory.Path, "change.diff");
+        await File.WriteAllTextAsync(diffPath, "--- a/docs/Old.md\n+++ b/docs/New.md\n");
+        var diffPlan = await workflow.ExplainAsync(new EvidencePlanningRequest(policyPath, [], diffPath), CancellationToken.None);
+        Assert.Equal("no-evidence", diffPlan.Profile.Id);
+        Assert.Equal("docs/New.md", Assert.Single(diffPlan.ChangedPaths).Path);
+
+        var plan = await workflow.ExplainAsync(new EvidencePlanningRequest(policyPath, ["docs/readme.md"], null), CancellationToken.None);
+        var output = Path.Join(directory.Path, "output");
+        await workflow.WritePlanAsync(plan, output, CancellationToken.None);
+        await workflow.WriteManifestAsync(EvidenceManifestBuilder.Build(plan, []), output, CancellationToken.None);
+        await File.WriteAllTextAsync(Path.Join(output, "evidence-manifest.json"), "not-json");
+
+        var malformedManifestException = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.VerifyAsync(Path.Join(output, "evidence-plan.json"), Path.Join(output, "evidence-manifest.json"), CancellationToken.None));
+        Assert.Contains("ASEVD209", malformedManifestException.Message, StringComparison.Ordinal);
+
+        var missingEvidenceException = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.VerifyAsync(Path.Join(output, "missing-plan.json"), Path.Join(output, "missing-manifest.json"), CancellationToken.None));
+        Assert.Contains("ASEVD208", missingEvidenceException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CliWorkflow_ShouldPermitIntentionalReplacementOfItsOwnStarterAndRejectTamperedPlans()
+    {
+        using var directory = TestDirectory.Create();
+        var root = Path.Join(directory.Path, "evidence");
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
+
+        await workflow.InitializeAsync(root, force: false, CancellationToken.None);
+        var replacement = await workflow.InitializeAsync(root, force: true, CancellationToken.None);
+        Assert.Equal(3, replacement.CreatedFiles.Count);
+
+        var policyPath = Path.Join(root, "evidence.policy.json");
+        var plan = await workflow.ExplainAsync(new EvidencePlanningRequest(policyPath, ["docs/readme.md"], null), CancellationToken.None);
+        var output = Path.Join(directory.Path, "output");
+        await workflow.WritePlanAsync(plan with { PolicySnapshot = null }, output, CancellationToken.None);
+        await workflow.WriteManifestAsync(EvidenceManifestBuilder.Build(plan, []), output, CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.VerifyAsync(Path.Join(output, "evidence-plan.json"), Path.Join(output, "evidence-manifest.json"), CancellationToken.None));
+        Assert.Contains("ASEVD203", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CliWorkflow_ShouldRejectUnresolvableSnapshotsAndMismatchedPlanBindings()
+    {
+        using var directory = TestDirectory.Create();
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
+        var policyPath = Path.Join(directory.Path, "policy.json");
+        await File.WriteAllBytesAsync(policyPath, EvidenceCanonicalJson.Serialize(CreatePolicy()));
+        var plan = await workflow.ExplainAsync(new EvidencePlanningRequest(policyPath, ["docs/readme.md"], null), CancellationToken.None);
+        var output = Path.Join(directory.Path, "output");
+
+        var unresolvable = plan with { PolicySnapshot = new EvidencePolicy("invalid", "1", "missing", [], []) };
+        await workflow.WritePlanAsync(unresolvable, output, CancellationToken.None);
+        await workflow.WriteManifestAsync(EvidenceManifestBuilder.Build(unresolvable, []), output, CancellationToken.None);
+        var snapshotException = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.VerifyAsync(Path.Join(output, "evidence-plan.json"), Path.Join(output, "evidence-manifest.json"), CancellationToken.None));
+        Assert.Contains("ASEVD203", snapshotException.Message, StringComparison.Ordinal);
+
+        await workflow.WritePlanAsync(plan with { PlanDigest = "tampered-plan-digest" }, output, CancellationToken.None);
+        await workflow.WriteManifestAsync(EvidenceManifestBuilder.Build(plan, []), output, CancellationToken.None);
+        var bindingException = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.VerifyAsync(Path.Join(output, "evidence-plan.json"), Path.Join(output, "evidence-manifest.json"), CancellationToken.None));
+        Assert.Contains("ASEVD203", bindingException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Planner_ShouldRejectUntruthfulOrUnboundedPolicyDeclarations()
+    {
+        var planner = new EvidencePlanner();
+
+        Assert.Throws<EvidencePlanningException>(() => planner.Resolve(CreatePolicy(), []));
+        Assert.Throws<EvidencePlanningException>(() => planner.Resolve(CreatePolicy(), [new NormalizedDiffPath("./src/Feature.cs")]));
+        Assert.Throws<EvidencePlanningException>(() => EvidencePlanner.ValidatePolicy(CreatePolicy() with { Profiles = [] }));
+        Assert.Throws<EvidencePlanningException>(() => EvidencePlanner.ValidatePolicy(CreatePolicy() with { ConservativeProfileId = "missing" }));
+
+        var invalidResource = CreateCoverageProfile(EvidenceProfileScope.Targeted) with
+        {
+            Resources = [new EvidenceResourceDeclaration("postgres", "unknown", 1, [])],
+        };
+        Assert.Throws<EvidencePlanningException>(() => EvidencePlanner.ValidatePolicy(new EvidencePolicy("policy", "1", "coverage", [invalidResource], [])));
+
+        var invalidProducer = CreateCoverageProfile(EvidenceProfileScope.Targeted) with
+        {
+            Producers =
+            [
+                new EvidenceProducerDeclaration(
+                    "coverage",
+                    "coverage",
+                    "1",
+                    [],
+                    ["appsurface/coverage/behavioral-patch@1"],
+                    [new EvidenceArtifactSlot("report", "../outside", "text/plain", false, 1)],
+                    0,
+                    new EvidenceCoverageGateRequirements(101, 85)),
+            ],
+        };
+        Assert.Throws<EvidencePlanningException>(() => EvidencePlanner.ValidatePolicy(new EvidencePolicy("policy", "1", "coverage", [invalidProducer], [])));
+
+        var invalidObligation = CreateCoverageProfile(EvidenceProfileScope.Targeted) with
+        {
+            Obligations = [new EvidenceObligation("behavior", "risk", "why", [], "missing")],
+        };
+        Assert.Throws<EvidencePlanningException>(() => EvidencePlanner.ValidatePolicy(new EvidencePolicy("policy", "1", "coverage", [invalidObligation], [])));
+    }
+
+    [Fact]
+    public async Task ArtifactWriter_ShouldRejectUndeclaredDuplicateAndOversizedWrites()
+    {
+        using var directory = TestDirectory.Create();
+        var producer = new EvidenceProducerDeclaration(
+            "coverage",
+            "coverage",
+            "1",
+            [],
+            [],
+            [new EvidenceArtifactSlot("report", "coverage", "text/plain", false, 1)],
+            1);
+        var writer = new EvidenceArtifactWriter(producer, directory.Path);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => writer.WriteAsync("missing", "coverage/report.txt", Array.Empty<byte>()).AsTask());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => writer.WriteAsync("report", "coverage/report.txt", "too-large"u8.ToArray()).AsTask());
+        await writer.WriteAsync("report", "coverage/report.txt", "x"u8.ToArray());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => writer.WriteAsync("report", "coverage/again.txt", "x"u8.ToArray()).AsTask());
+
+        Assert.False(EvidenceArtifactValidation.AreValid(producer, [new EvidenceArtifactResult("report", "outside.txt", "text/plain", 1, new string('a', 64))]));
+        Assert.Throws<ArgumentException>(() => EvidenceArtifactValidation.NormalizeRelativePath("coverage/../outside.txt"));
+    }
+
+    [Fact]
+    public void Planner_ShouldFailClosedForEveryConnectedPolicyDeclaration()
+    {
+        var validProfile = CreateCoverageProfile(EvidenceProfileScope.Targeted);
+
+        AssertPolicyCode(CreatePolicy() with { Profiles = [validProfile, validProfile] }, "ASEVD103");
+        AssertPolicyCode(CreatePolicy() with { Rules = [new EvidencePolicyRule("unknown", "src/**", "missing")] }, "ASEVD106");
+        AssertPolicyCode(CreatePolicy() with
+        {
+            Profiles = [validProfile with { Resources = Enumerable.Range(0, 17).Select(index => new EvidenceResourceDeclaration($"resource-{index}", "aspire_health", 1, [])).ToArray() }],
+        }, "ASEVD122");
+        AssertPolicyCode(CreatePolicy() with
+        {
+            Profiles = [validProfile with { Producers = [validProfile.Producers[0], validProfile.Producers[0]] }],
+        }, "ASEVD107");
+        AssertPolicyCode(CreatePolicy() with
+        {
+            Profiles = [validProfile with { Resources = [new EvidenceResourceDeclaration("resource", "aspire_health", 1, []), new EvidenceResourceDeclaration("resource", "aspire_health", 1, [])] }],
+        }, "ASEVD108");
+        AssertPolicyCode(CreatePolicy() with
+        {
+            Profiles = [validProfile with { Resources = [new EvidenceResourceDeclaration("resource", "aspire_health", 0, [])] }],
+        }, "ASEVD109");
+        AssertPolicyCode(CreatePolicy() with
+        {
+            Profiles = [validProfile with { Resources = [new EvidenceResourceDeclaration("resource", "completion", 1, ["missing"])] }],
+        }, "ASEVD124");
+        AssertPolicyCode(CreatePolicy() with
+        {
+            Profiles = [validProfile with { Producers = [validProfile.Producers[0] with { TimeoutSeconds = 0 }] }],
+        }, "ASEVD110");
+        AssertPolicyCode(CreatePolicy() with
+        {
+            Profiles = [validProfile with
+            {
+                Producers = [validProfile.Producers[0] with { ArtifactSlots = [new EvidenceArtifactSlot("slot", "artifacts", "text/plain", false, 1), new EvidenceArtifactSlot("slot", "artifacts", "text/plain", false, 1)] }],
+            }],
+        }, "ASEVD125");
+        AssertPolicyCode(CreatePolicy() with
+        {
+            Profiles = [validProfile with
+            {
+                Producers = [validProfile.Producers[0] with { ArtifactSlots = [new EvidenceArtifactSlot("slot", "../outside", "", false, -1)] }],
+            }],
+        }, "ASEVD126");
+        AssertPolicyCode(CreatePolicy() with
+        {
+            Profiles = [validProfile with
+            {
+                Producers = [validProfile.Producers[0] with { ArtifactSlots = [new EvidenceArtifactSlot("slot", "../outside", "text/plain", false, 1)] }],
+            }],
+        }, "ASEVD126");
+        AssertPolicyCode(CreatePolicy() with
+        {
+            Profiles = [validProfile with
+            {
+                Producers = [validProfile.Producers[0] with { RequiredResources = ["missing"] }],
+            }],
+        }, "ASEVD111");
+        AssertPolicyCode(CreatePolicy() with
+        {
+            Profiles = [validProfile with { Obligations = [validProfile.Obligations[0], validProfile.Obligations[0]] }],
+        }, "ASEVD112");
+        AssertPolicyCode(CreatePolicy() with
+        {
+            Profiles = [validProfile with { Obligations = [validProfile.Obligations[0] with { RequiredProducerIds = ["missing"] }] }],
+        }, "ASEVD114");
+        AssertPolicyCode(CreatePolicy() with
+        {
+            Profiles = [validProfile with { Obligations = [validProfile.Obligations[0] with { RequiredAssertionId = "missing/assertion@1" }] }],
+        }, "ASEVD115");
+        AssertPolicyCode(new EvidencePolicy("policy", "1", "coverage", [validProfile, new EvidenceProfile("release-empty", EvidenceProfileScope.Release, [], [], [])], []), "ASEVD116");
+        AssertPolicyCode(CreatePolicy() with { Id = new string('x', 129) }, "ASEVD121");
+        AssertPolicyCode(CreatePolicy() with
+        {
+            Profiles = [validProfile with { Producers = [validProfile.Producers[0] with { CoverageGate = new EvidenceCoverageGateRequirements(-1, 101, PatchLineMode: "unknown") }] }],
+        }, "ASEVD127");
+    }
+
+    [Fact]
+    public void Planner_ShouldAcceptExplicitlyDeclaredResourceDependencies()
+    {
+        var profile = CreateCoverageProfile(EvidenceProfileScope.Targeted) with
+        {
+            Resources =
+            [
+                new EvidenceResourceDeclaration("database", "aspire_health", 1, []),
+                new EvidenceResourceDeclaration("migrations", "completion", 1, ["database"]),
+            ],
+            Producers = [CreateCoverageProfile(EvidenceProfileScope.Targeted).Producers[0] with { RequiredResources = ["migrations"] }],
+        };
+        var policy = CreatePolicy() with { Profiles = [CreateNoEvidenceProfile(), profile] };
+
+        var plan = new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("src/Feature.cs")]);
+
+        Assert.Equal(["database", "migrations"], plan.Profile.Resources.Select(resource => resource.Id));
+        Assert.Equal(["migrations"], Assert.Single(plan.Profile.Producers).RequiredResources);
+    }
+
+    [Fact]
+    public void Planner_ShouldKeepRenamesAndUnmatchedGlobsConservativeAndStable()
+    {
+        var planner = new EvidencePlanner();
+        var renamed = planner.Resolve(CreatePolicy(), [new NormalizedDiffPath("docs/readme.md", "renamed", "src/Feature.cs")]);
+
+        Assert.Equal("coverage", renamed.Profile.Id);
+        Assert.Contains("docs", renamed.MatchedRuleIds, StringComparer.Ordinal);
+        Assert.Contains("conservative:coverage", renamed.MatchedRuleIds, StringComparer.Ordinal);
+        Assert.Equal("renamed", Assert.Single(renamed.ChangedPaths).Kind);
+
+        var whitespaceException = Assert.Throws<EvidencePlanningException>(() => planner.Resolve(CreatePolicy(), [new NormalizedDiffPath(" src/Feature.cs ")]));
+        var emptyException = Assert.Throws<EvidencePlanningException>(() => planner.Resolve(CreatePolicy(), [new NormalizedDiffPath(" ")]));
+        Assert.Contains("ASEVD118", whitespaceException.Message, StringComparison.Ordinal);
+        Assert.Contains("ASEVD119", emptyException.Message, StringComparison.Ordinal);
+
+        var noMatch = planner.Resolve(CreatePolicy() with { Rules = [new EvidencePolicyRule("nonmatch", "docs/*z", "no-evidence")] }, [new NormalizedDiffPath("docs/readme.md")]);
+        Assert.Equal("coverage", noMatch.Profile.Id);
+        Assert.Empty(EvidenceUnifiedDiffReader.Read("--- /dev/null\n+++ /dev/null\n"));
+    }
+
+    [Fact]
+    public void Contracts_ShouldFailClosedForInvalidArtifactMetadataAndManifestBindings()
+    {
+        var producer = new EvidenceProducerDeclaration(
+            "coverage",
+            "coverage",
+            "1",
+            [],
+            ["coverage/assertion@1"],
+            [new EvidenceArtifactSlot("report", "coverage", "text/plain", Required: true, MaximumBytes: EvidenceArtifactWriter.MaximumTotalArtifactBytes + 1)],
+            1);
+        var validArtifact = new EvidenceArtifactResult("report", "coverage/report.txt", "text/plain", 1, new string('a', 64));
+
+        Assert.False(EvidenceArtifactValidation.AreValid(producer with { ArtifactSlots = [producer.ArtifactSlots[0], producer.ArtifactSlots[0]] }, [validArtifact]));
+        Assert.False(EvidenceArtifactValidation.AreValid(producer, [validArtifact, validArtifact with { LogicalName = "second" }]));
+        Assert.False(EvidenceArtifactValidation.AreValid(producer, [validArtifact with { MediaType = "application/json" }]));
+        Assert.False(EvidenceArtifactValidation.AreValid(producer, [validArtifact with { LengthBytes = EvidenceArtifactWriter.MaximumTotalArtifactBytes + 1 }]));
+        Assert.Throws<ArgumentException>(() => EvidenceArtifactValidation.NormalizeRelativePath(" "));
+
+        var plan = new EvidencePlanner().Resolve(CreatePolicy(), [new NormalizedDiffPath("src/Feature.cs")]);
+        var validResult = new EvidenceProducerResult("coverage", EvidenceProducerOutcome.Passed, ["appsurface/coverage/behavioral-patch@1"]);
+        var duplicateResult = EvidenceManifestBuilder.Build(plan, [validResult, validResult]);
+        var unexpectedProducer = EvidenceManifestBuilder.Build(plan, [validResult, new EvidenceProducerResult("unexpected", EvidenceProducerOutcome.Passed, [])]);
+        var unknownResource = EvidenceManifestBuilder.Build(plan, [validResult], resourceResults: [new EvidenceResourceResult("unexpected", EvidenceResourceOutcome.Ready, 0)]);
+
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, duplicateResult.ExecutionVerdict);
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, unexpectedProducer.ExecutionVerdict);
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, unknownResource.ExecutionVerdict);
+        Assert.False(EvidenceManifestBuilder.Verify(plan with { PolicySnapshot = null }, EvidenceManifestBuilder.Build(plan, [validResult])));
+        Assert.False(EvidenceManifestBuilder.Verify(plan, EvidenceManifestBuilder.Build(plan, [validResult]) with { ManifestDigest = "tampered" }));
+    }
+
+    [Fact]
+    public void CliWorkflow_Summaries_ShouldExplainTargetedObservationAndReleaseClaims()
+    {
+        var targetPlan = new EvidencePlanner().Resolve(CreatePolicy(), [new NormalizedDiffPath("src/Feature.cs")]);
+        var targetResult = new EvidenceProducerResult("coverage", EvidenceProducerOutcome.Passed, ["appsurface/coverage/behavioral-patch@1"]);
+        var targeted = EvidenceManifestBuilder.Build(targetPlan, [targetResult]);
+        var observation = EvidenceManifestBuilder.Build(targetPlan, [targetResult], observationOnly: true);
+        var releasePolicy = CreatePolicy() with
+        {
+            Profiles = [CreateCoverageProfile(EvidenceProfileScope.Release)],
+            Rules = [],
+        };
+        var releasePlan = new EvidencePlanner().Resolve(releasePolicy, [new NormalizedDiffPath("src/Feature.cs")]);
+        var release = EvidenceManifestBuilder.Build(releasePlan, [targetResult], envelopeStatus: EvidenceEnvelopeStatus.ValidatedNotAttested);
+
+        Assert.Contains("Required producers: coverage", EvidenceCliWorkflow.FormatSummary(targetPlan), StringComparison.Ordinal);
+        Assert.Contains("Targeted evidence is complete", EvidenceCliWorkflow.FormatSummary(targeted), StringComparison.Ordinal);
+        Assert.Contains("Observation recorded", EvidenceCliWorkflow.FormatSummary(observation), StringComparison.Ordinal);
+        Assert.Contains("Release evidence is complete", EvidenceCliWorkflow.FormatSummary(release), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CliWorkflow_Diagnostics_ShouldExposeStableCodeAndRecoveryAction()
+    {
+        var diagnostic = new EvidenceCliException("ASEVD999", "Evidence input is invalid.", "Correct the input and rerun.");
+
+        Assert.Equal("ASEVD999", diagnostic.Code);
+        Assert.Equal("Correct the input and rerun.", diagnostic.Fix);
+    }
+
+    private static void AssertPolicyCode(EvidencePolicy policy, string code)
+    {
+        if (!string.Equals(code, "ASEVD106", StringComparison.Ordinal))
+        {
+            policy = policy with { Rules = [] };
+        }
+
+        var exception = Assert.Throws<EvidencePlanningException>(() => EvidencePlanner.ValidatePolicy(policy));
+        Assert.Contains(code, exception.Message, StringComparison.Ordinal);
     }
 
     private static EvidencePolicy CreatePolicy() => new(

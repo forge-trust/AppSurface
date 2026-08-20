@@ -126,18 +126,24 @@ public sealed class EvidencePlanner
             throw new EvidencePlanningException("ASEVD122", $"Profile '{profile.Id}' exceeds v1 EvidenceHost declaration limits.", "Split the profile into bounded evidence obligations.");
         }
 
-        var producers = profile.Producers.ToDictionary(static producer => producer.Id, StringComparer.Ordinal);
-        if (producers.Count != profile.Producers.Count)
+        var duplicateProducer = profile.Producers
+            .GroupBy(static producer => producer.Id, StringComparer.Ordinal)
+            .FirstOrDefault(static group => group.Count() > 1);
+        if (duplicateProducer is not null)
         {
-            throw new EvidencePlanningException("ASEVD107", $"Profile '{profile.Id}' declares duplicate producer ids.", "Use one declaration for each producer id.");
+            throw new EvidencePlanningException("ASEVD107", $"Profile '{profile.Id}' declares producer '{duplicateProducer.Key}' more than once.", "Use one declaration for each producer id.");
+        }
+
+        var producers = profile.Producers.ToDictionary(static producer => producer.Id, StringComparer.Ordinal);
+        var duplicateResource = profile.Resources
+            .GroupBy(static resource => resource.Id, StringComparer.Ordinal)
+            .FirstOrDefault(static group => group.Count() > 1);
+        if (duplicateResource is not null)
+        {
+            throw new EvidencePlanningException("ASEVD108", $"Profile '{profile.Id}' declares resource '{duplicateResource.Key}' more than once.", "Use one declaration for each resource id.");
         }
 
         var resources = profile.Resources.ToDictionary(static resource => resource.Id, StringComparer.Ordinal);
-        if (resources.Count != profile.Resources.Count)
-        {
-            throw new EvidencePlanningException("ASEVD108", $"Profile '{profile.Id}' declares duplicate resource ids.", "Use one declaration for each resource id.");
-        }
-
         foreach (var resource in profile.Resources)
         {
             RequireIdentifier(resource.Id, "resource id");
@@ -208,12 +214,15 @@ public sealed class EvidencePlanner
             }
         }
 
-        var obligations = profile.Obligations.ToDictionary(static obligation => obligation.Id, StringComparer.Ordinal);
-        if (obligations.Count != profile.Obligations.Count)
+        var duplicateObligation = profile.Obligations
+            .GroupBy(static obligation => obligation.Id, StringComparer.Ordinal)
+            .FirstOrDefault(static group => group.Count() > 1);
+        if (duplicateObligation is not null)
         {
-            throw new EvidencePlanningException("ASEVD112", $"Profile '{profile.Id}' declares duplicate obligation ids.", "Use one declaration for each obligation id.");
+            throw new EvidencePlanningException("ASEVD112", $"Profile '{profile.Id}' declares obligation '{duplicateObligation.Key}' more than once.", "Use one declaration for each obligation id.");
         }
 
+        var obligations = profile.Obligations.ToDictionary(static obligation => obligation.Id, StringComparer.Ordinal);
         foreach (var obligation in profile.Obligations)
         {
             RequireIdentifier(obligation.Id, "obligation id");

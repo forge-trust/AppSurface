@@ -350,6 +350,10 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
                     results,
                     FailureForEveryProducer(EvidenceProducerOutcome.Unavailable, $"Resource '{resource.Id}' did not become ready before its {resource.DeadlineSeconds}-second deadline."));
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception exception)
             {
                 results.Add(new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.Unavailable, timer.ElapsedMilliseconds, $"Resource '{resource.Id}' readiness failed with {exception.GetType().Name}."));
@@ -390,6 +394,10 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 results.Add(new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.TimedOut, [], $"Producer '{declaration.Id}' exceeded its {declaration.TimeoutSeconds}-second deadline.", ElapsedMilliseconds: timer.ElapsedMilliseconds));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception exception)
             {
