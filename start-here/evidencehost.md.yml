@@ -1,4 +1,4 @@
-title: EvidenceHost: risk-mediated CI
+title: "EvidenceHost: risk-mediated CI"
 summary: Plan and verify CI evidence by changed-risk profile so meaningful changes are tested visibly while explicitly low-risk changes avoid coverage theater.
 page_type: guide
 nav_group: Start Here
