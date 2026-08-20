@@ -207,6 +207,7 @@ jobs:
           path: |
             ${{ runner.temp }}/package-artifacts/package-validation-report.md
             ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof.md
+            ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof.evidence.json
             ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof/NuGet.tool.config
             ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof/consumer/NuGet.config
             ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof/consumer/.config/dotnet-tools.json
