@@ -119,6 +119,52 @@ public sealed class CoverageMergeTests
     }
 
     [Fact]
+    public async Task MergeAsync_ShouldSkipAmbiguousSourceClassesAndLines()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-merge-");
+        const string input = """
+            <coverage>
+              <packages><package name="Smoke"><classes>
+                <class name="Smoke.Ambiguous" filename="Smoke/Ambiguous.cs"><lines>
+                  <line number="7" hits="1" branch="True" condition-coverage="100% (2/2)" />
+                </lines></class>
+                <class name="Smoke.Ambiguous" filename="Smoke/Ambiguous.cs"><lines>
+                  <line number="7" hits="2" branch="True" condition-coverage="0% (0/2)" />
+                </lines></class>
+                <class name="Smoke.Unique" filename="Smoke/Unique.cs"><lines>
+                  <line number="7" hits="1" branch="True" condition-coverage="100% (2/2)" />
+                  <line number="7" hits="2" branch="True" condition-coverage="0% (0/2)" />
+                </lines></class>
+              </classes></package></packages>
+            </coverage>
+            """;
+        const string reportGeneratorOutput = """
+            <coverage>
+              <packages><package name="Smoke"><classes>
+                <class name="Smoke.Ambiguous" filename="Smoke/Ambiguous.cs"><lines><line number="7" hits="1" /></lines></class>
+                <class name="Smoke.Unique" filename="Smoke/Unique.cs"><lines><line number="7" hits="1" /></lines></class>
+              </classes></package></packages>
+            </coverage>
+            """;
+        repo.WriteFile("shards/coverage.cobertura.xml", input);
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = CreateWorkflow(new RecordingReportGenerator { MergedCoverage = reportGeneratorOutput });
+        using var console = new FakeInMemoryConsole();
+
+        var result = await workflow.MergeAsync(new CoverageMergeRequest("shards", "merged", Clean: true), console, CancellationToken.None);
+
+        var classes = System.Xml.Linq.XDocument.Load(result.CoveragePath)
+            .Descendants("class")
+            .ToDictionary(
+                coverageClass => coverageClass.Attribute("name")!.Value,
+                coverageClass => Assert.Single(coverageClass.Descendants("line")));
+        Assert.DoesNotContain("branch", classes["Smoke.Ambiguous"].Attributes().Select(attribute => attribute.Name.LocalName));
+        Assert.DoesNotContain("condition-coverage", classes["Smoke.Ambiguous"].Attributes().Select(attribute => attribute.Name.LocalName));
+        Assert.DoesNotContain("branch", classes["Smoke.Unique"].Attributes().Select(attribute => attribute.Name.LocalName));
+        Assert.DoesNotContain("condition-coverage", classes["Smoke.Unique"].Attributes().Select(attribute => attribute.Name.LocalName));
+    }
+
+    [Fact]
     public async Task MergeAsync_ShouldUseAbsoluteDisplayPathForOutputOutsideCurrentDirectory()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-merge-");

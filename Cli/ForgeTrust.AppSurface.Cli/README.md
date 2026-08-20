@@ -540,7 +540,7 @@ Each executed project writes `coverage-project.json` beside its per-project `cov
 }
 ```
 
-`projectPath` is the normalized solution-relative test-project path; `slug` is the CLI-owned artifact-directory identity. PackageIndex consumes this manifest instead of inferring identity from a directory name or recursively searching for an arbitrary XML file. A packaged proof must find exactly one manifest for `Smoke.Tests/Smoke.Tests.csproj` and a regular sibling `coverage.cobertura.xml`; missing, malformed, unsafe, duplicate, or mismatched manifests fail closed.
+`projectPath` is the normalized solution-relative test-project path; `slug` is the CLI-owned artifact-directory identity. The manifest is capped at 16 KiB of UTF-8 JSON, and consumers must reject larger files before parsing. PackageIndex consumes this manifest instead of inferring identity from a directory name or recursively searching for an arbitrary XML file. A packaged proof must find exactly one manifest for `Smoke.Tests/Smoke.Tests.csproj` and a regular sibling `coverage.cobertura.xml`; missing, malformed, oversized, unsafe, duplicate, or mismatched manifests fail closed.
 
 The PackageIndex semantic parser accepts only the bounded Coverlet/ReportGenerator Cobertura shape needed by the owned proof: `coverage`, `sources`, `source`, `packages`, `package`, `classes`, `class`, `methods`, `method`, `lines`, `line`, `conditions`, and `condition`. It prohibits DTDs and entities, uses a null XML resolver, caps each document at 1 MiB, and enforces maximum depth 32 and 10,000 elements. Unsupported required shapes, missing identity attributes, unsafe filenames, duplicate identities, or invalid numeric fields are tool-compatibility failures. A valid shape with missing or zero expected semantics is a coverage defect.
 
@@ -870,7 +870,7 @@ Every `ASCOV###` diagnostic includes the problem, likely cause, exact fix, docs 
 | `ASCOV114` | The package-owned ReportGenerator dependency was not found. | Restore or reinstall `ForgeTrust.AppSurface.Cli` so its package dependencies are present. |
 | `ASCOV115` | Collector output was missing, multiple, malformed, or escaped its invocation directory. | Inspect the project log and raw collector results, fix the producer, and rerun. |
 | `ASCOV116` | `--require-non-sandbox` found an enabled sandbox marker. | Run coverage outside the sandbox or omit the option when the restriction is intentional. |
-| `ASCOV120` | One or more test, merge, or artifact steps failed. | Open `timings.json` and per-project logs listed above, fix failing tests, then rerun. |
+| `ASCOV120` | One or more test, merge, manifest, or artifact steps failed. | Open `timings.json` and per-project logs listed above, fix the reported failure, then rerun. |
 | `ASCOV121` | Fail-mode watchdog termination claimed the run. | Inspect the reported watchdog artifact path and project logs; if the path is unavailable, use the ASCOV122 detail, then fix the stall or tune the timeout and rerun. |
 | `ASCOV122` | A bounded watchdog artifact write or promotion failed. | Use a writable dedicated output directory; the process cancellation outcome remains authoritative. |
 | `ASCOV123` | A failed collector-artifact normalization also left its staged temporary file behind. | Inspect the project's `coverageCleanupLog` in `timings.json`, then remove the `.coverage.*.tmp` file after confirming no coverage run is active. |

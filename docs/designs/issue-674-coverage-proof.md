@@ -83,7 +83,7 @@ The default proof selects exactly one VSTest project: `Smoke.Tests`; `Smoke.Msbu
 
 Before finalizing parser assertions, run the existing generated fixture once in an isolated local proof directory and preserve the bounded raw and merged `Smoke.Calculator` XML fragments as test input. The supported subset below must match that observed collector/ReportGenerator shape. If the observed supported version differs, update the exact expected structural contract before implementation proceeds; do not silently broaden acceptance. This local contract-capture step is part of the owned fixture work, not an external release dependency.
 
-Parse each file with `XmlReaderSettings` that sets `DtdProcessing=Prohibit`, `XmlResolver=null`, `MaxCharactersInDocument=1_048_576`, and a maximum element depth of 32 and element count of 10,000 enforced by the reader loop. Accept the supported Coverlet/ReportGenerator subset only: `coverage`, `sources`, `source`, `packages`, `package`, `classes`, `class`, `methods`, `method`, `lines`, `line`, `conditions`, and `condition`. Safely ignore unrelated attributes but reject unsupported required shapes, DTDs, entities, missing required identity attributes, or invalid numeric fields with an `unsupported Cobertura schema` diagnostic.
+Parse each file with `XmlReaderSettings` that sets `DtdProcessing=Prohibit` and `XmlResolver=null`, wrapped in a character-bounded reader that permits at most 1,048,576 input characters; enforce a maximum element depth of 32 and element count of 10,000 in the reader loop. The regular `coverage-project.json` manifest is separately capped at 16 KiB and is rejected when missing, nonregular, oversized, malformed, or ambiguous. Accept the supported Coverlet/ReportGenerator subset only: `coverage`, `sources`, `source`, `packages`, `package`, `classes`, `class`, `methods`, `method`, `lines`, `line`, `conditions`, and `condition`. Apply the documented per-element attribute allowlist strictly; reject unsupported attributes or shapes, DTDs, entities, missing required identity attributes, or invalid numeric fields with an `unsupported Cobertura schema` diagnostic.
 
 The semantic validator must require, in both reports:
 
@@ -514,7 +514,7 @@ release evidence [renderer tests]
   |- no root paths, credentials, raw XML, commands, output excerpts
 ```
 
-The current recording runner must stop creating only `<coverage />` files for successful semantic paths. It needs fixed, bounded raw and merged Cobertura samples captured from one isolated generated fixture run. Existing command-sequencing, excluded sentinel, explicit MSBuild artifact, gate, patch-target, and canary tests remain. New tests cover each `CPV001` through `CPV011`, including an unrelated valid project report, so a real false-positive cannot regress silently.
+The current recording runner must stop creating only `<coverage />` files for successful semantic paths. It needs to use fixed, bounded raw and merged Cobertura samples captured from one isolated generated fixture run. Existing command-sequencing, excluded sentinel, explicit MSBuild artifact, gate, patch-target, and canary tests remain. New tests cover each `CPV001` through `CPV011`, including an unrelated valid project report, so a real false-positive cannot regress silently.
 
 ### 4. Performance and operations review
 
@@ -693,13 +693,13 @@ The manifest and evidence schemas use additive, versioned evolution. Schema `1` 
 
 ### DX implementation checklist
 
-- [ ] The first CLI coverage example distinguishes local readiness from packaged-consumer semantic proof in three commands or fewer per path.
-- [ ] `coverage-cli-consumer-proof.evidence.json` schema `1` contains only allowlisted fields and is uploaded with existing package-proof artifacts.
-- [ ] Every CPV result has a deterministic code, `raw`/`merged` scope, cause, next action, and artifact-relative evidence path.
-- [ ] The evidence summary presents runner, integration, direct coverage packages, and assurance level before failure detail.
-- [ ] Docs provide the collector/MSBuild/merge/`--no-clean`/MTP decision tree and name each guarantee.
-- [ ] Docs specify schema evolution, supported Cobertura subset capture, and package-upgrade verification.
-- [ ] A maintainer follows the recipe from a clean checkout and records whether choosing the correct proof level took less than two minutes.
+- [x] The first CLI coverage example distinguishes local readiness from packaged-consumer semantic proof in three commands or fewer per path.
+- [x] `coverage-cli-consumer-proof.evidence.json` schema `1` contains only allowlisted fields and is uploaded with existing package-proof artifacts.
+- [x] Every CPV result has a deterministic code, `raw`/`merged` scope, cause, next action, and artifact-relative evidence path.
+- [x] The evidence summary presents runner, integration, direct coverage packages, and assurance level before failure detail.
+- [x] Docs provide the collector/MSBuild/merge/`--no-clean`/MTP decision tree and name each guarantee.
+- [x] Docs specify schema evolution, supported Cobertura subset capture, and package-upgrade verification.
+- [ ] Post-implementation verification pending: a maintainer follows the recipe from a clean checkout and records whether choosing the correct proof level took less than two minutes.
 
 ### DX independent voice and consensus
 

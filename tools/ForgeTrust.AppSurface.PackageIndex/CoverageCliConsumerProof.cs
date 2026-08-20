@@ -363,7 +363,29 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         }
 
         var coverageShardsDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-shards");
-        var copiedShardPath = CopyCoverageShard(semanticProof.RawArtifact!, coverageShardsDirectory);
+        string copiedShardPath;
+        try
+        {
+            copiedShardPath = CopyCoverageShard(semanticProof.RawArtifact!, coverageShardsDirectory);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            semanticProof = semanticProof with
+            {
+                Failures =
+                [
+                    ..semanticProof.Failures,
+                    new CoverageCliConsumerProofFailure(
+                        "CPV011",
+                        "raw-to-merged",
+                        $"The selected Smoke.Tests raw report could not be copied into the merge input: {exception.Message}",
+                        "Regenerate the proof and verify that the coverage fan-in directory is writable.",
+                        "coverage-shards/Smoke.Tests/coverage.cobertura.xml")
+                ]
+            };
+            return BuildReport(context, commands, artifacts, semanticProof);
+        }
+
         var coverageFanInDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-fan-in");
         if (!await RunRequiredAsync(ToolCommand(
             context,
@@ -375,17 +397,12 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         }
 
         artifacts.AddRange(CheckCoverageMergeArtifacts(coverageFanInDirectory));
-        if (artifacts.Any(artifact => !artifact.Exists))
-        {
-            return BuildReport(context, commands, artifacts, semanticProof);
-        }
-
         var mergedCoveragePath = Path.Join(coverageFanInDirectory, "coverage.cobertura.xml");
         semanticProof = CoverageCliConsumerProofSemanticValidator.ValidateMerged(
             semanticProof,
             copiedShardPath,
             mergedCoveragePath);
-        if (!semanticProof.Succeeded)
+        if (!semanticProof.Succeeded || artifacts.Any(artifact => !artifact.Exists))
         {
             return BuildReport(context, commands, artifacts, semanticProof);
         }

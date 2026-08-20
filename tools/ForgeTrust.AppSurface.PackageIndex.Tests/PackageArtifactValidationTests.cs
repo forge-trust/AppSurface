@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text;
+using System.Text.Json;
 using System.Xml.Linq;
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests;
@@ -4471,6 +4472,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains(report.SemanticProof!.Failures, failure => failure.Code == "CPV008" && failure.Scope == "raw");
         Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface coverage run msbuild");
         Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface coverage merge");
+        Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName.StartsWith("appsurface coverage gate", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -4501,6 +4503,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage run Smoke.Tests manifest" && artifact.Exists);
         Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage run Smoke.Tests Cobertura" && !artifact.Exists);
         Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface coverage run msbuild");
+        Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName.StartsWith("appsurface coverage gate", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -4530,6 +4533,65 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains(report.SemanticProof!.Failures, failure => failure.Code == "CPV008" && failure.Scope == "merged");
         Assert.Contains("Calculator.Sign line 7", report.FirstFailure, StringComparison.Ordinal);
         Assert.Contains(commandRunner.Requests, request => request.OperationName == "appsurface coverage merge");
+        Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName.StartsWith("appsurface coverage gate", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_RecordsMissingMergedArtifactAsSemanticCpv003BeforeGates()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            createCoverageMergeArtifacts: false);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains(report.SemanticProof!.Failures, failure => failure.Code == "CPV003" && failure.Scope == "merged");
+        Assert.Contains(report.Artifacts, artifact => artifact.Description == "coverage merge Cobertura" && !artifact.Exists);
+        Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName.StartsWith("appsurface coverage gate", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_ReportsShardCopyIoFailureAsStructuredCpv011()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            createShardDirectoryFile: true);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains(report.SemanticProof!.Failures, failure => failure.Code == "CPV011" && failure.Scope == "raw-to-merged");
+        Assert.Contains("could not be copied", report.FirstFailure, StringComparison.Ordinal);
+        Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface coverage merge");
         Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName.StartsWith("appsurface coverage gate", StringComparison.Ordinal));
     }
 
@@ -6311,6 +6373,62 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void CoverageCliConsumerProofEvidenceRenderer_RendersOutcomesAndRepresentativeFailureCodes()
+    {
+        var semanticProof = new CoverageCliConsumerProofSemanticProof(
+            null,
+            new CoverageCliConsumerProofSemanticOutcome(
+                "passed",
+                "/tmp/work/consumer/TestResults/coverage-merged/projects/Smoke.Tests-123/coverage.cobertura.xml",
+                "raw-sha",
+                ["raw invariant"],
+                null),
+            new CoverageCliConsumerProofSemanticOutcome(
+                "passed",
+                "/tmp/work/consumer/TestResults/coverage-fan-in/coverage.cobertura.xml",
+                null,
+                ["merged invariant"],
+                null),
+            [
+                new CoverageCliConsumerProofFailure(
+                    "CPV011",
+                    "raw-to-merged",
+                    "copy failed",
+                    "repair the fan-in input",
+                    "coverage-shards/Smoke.Tests/coverage.cobertura.xml"),
+                new CoverageCliConsumerProofFailure(
+                    "CPV003",
+                    "merged",
+                    "merged artifact missing",
+                    "rerun merge",
+                    "coverage-fan-in/coverage.cobertura.xml")
+            ]);
+        var report = new CoverageCliConsumerProofReport(
+            PackageVersion,
+            "/tmp/work",
+            "https://api.nuget.org/v3/index.json",
+            null,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            [],
+            [],
+            "copy failed",
+            string.Empty,
+            semanticProof);
+
+        using var document = JsonDocument.Parse(CoverageCliConsumerProofEvidenceRenderer.RenderJson(report));
+        var root = document.RootElement;
+
+        Assert.Equal("failed", root.GetProperty("verdict").GetString());
+        Assert.Equal("passed", root.GetProperty("raw").GetProperty("outcome").GetString());
+        Assert.Equal("passed", root.GetProperty("merged").GetProperty("outcome").GetString());
+        Assert.Equal(
+            ["CPV011", "CPV003"],
+            root.GetProperty("failures").EnumerateArray().Select(failure => failure.GetProperty("code").GetString()!).ToArray());
+    }
+
+    [Fact]
     public async Task PackageArtifactManifestReader_RejectsArtifactFileNamesWithDirectorySegments()
     {
         var manifestPath = CombineSafeChildPath(_repositoryRoot, "manifest.json");
@@ -6597,7 +6715,20 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("Docs package consumer proof", await File.ReadAllTextAsync(reportPath), StringComparison.Ordinal);
         var coverageEvidencePath = CombineSafeChildPath(artifactDirectory, "coverage-cli-consumer-proof.evidence.json");
         Assert.True(File.Exists(coverageEvidencePath), $"Expected public-safe evidence at {coverageEvidencePath}.");
-        Assert.Contains("\"schemaVersion\": 1", await File.ReadAllTextAsync(coverageEvidencePath), StringComparison.Ordinal);
+        using var evidenceDocument = JsonDocument.Parse(await File.ReadAllTextAsync(coverageEvidencePath));
+        Assert.Equal(
+            ["schemaVersion", "verdict", "packageVersion", "packageArtifactDigest", "driverBoundary", "raw", "merged", "failures"],
+            evidenceDocument.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.Equal(
+            ["runner", "integration", "directPackages", "assuranceLevel"],
+            evidenceDocument.RootElement.GetProperty("driverBoundary").EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.Equal(
+            ["outcome", "invariants"],
+            evidenceDocument.RootElement.GetProperty("raw").EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.Equal(
+            ["outcome", "invariants"],
+            evidenceDocument.RootElement.GetProperty("merged").EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.Equal(1, evidenceDocument.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.True(File.Exists(artifactManifestPath), $"Expected artifact manifest at {artifactManifestPath}.");
     }
 
@@ -6734,6 +6865,19 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public async Task CoverageProofEvidenceWriter_RejectsBareEvidenceFileName()
+    {
+        var writeException = await Assert.ThrowsAsync<PackageIndexException>(
+            () => PackageArtifactWorkflow.WriteCoverageProofEvidenceAsync(
+                "coverage-cli-consumer-proof.evidence.json",
+                "{}",
+                _repositoryRoot,
+                CancellationToken.None));
+
+        Assert.Contains("does not have a parent directory", writeException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CoverageProofEvidenceWriter_RejectsEvidenceOutsideTrustedRoot()
     {
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
@@ -6746,6 +6890,21 @@ public sealed class PackageArtifactValidationTests : IDisposable
             () => PackageArtifactWorkflow.WriteCoverageProofEvidenceAsync(evidencePath, "{}", artifactDirectory, CancellationToken.None));
 
         Assert.Contains("must be contained", writeException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CoverageProofEvidenceWriter_RejectsExistingDirectoryDestination()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var evidencePath = CombineSafeChildPath(artifactDirectory, "coverage-cli-consumer-proof.evidence.json");
+        Directory.CreateDirectory(evidencePath);
+
+        var writeException = await Assert.ThrowsAsync<PackageIndexException>(
+            () => PackageArtifactWorkflow.WriteCoverageProofEvidenceAsync(evidencePath, "{}", artifactDirectory, CancellationToken.None));
+
+        Assert.Contains("must be a regular file or absent", writeException.Message, StringComparison.Ordinal);
+        Assert.Contains("directory already exists", writeException.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -6776,6 +6935,33 @@ public sealed class PackageArtifactValidationTests : IDisposable
             () => PackageArtifactWorkflow.WriteCoverageProofEvidenceAsync(evidencePath, "{}", artifactDirectory, cancellation.Token));
 
         Assert.Empty(Directory.EnumerateFiles(artifactDirectory, ".coverage-cli-consumer-proof.evidence.json.*.tmp", SearchOption.TopDirectoryOnly));
+        Assert.False(File.Exists(evidencePath));
+    }
+
+    [Fact]
+    public async Task CoverageProofEvidenceWriter_CleansTemporaryFileWhenCanceledAfterCreation()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var evidencePath = CombineSafeChildPath(artifactDirectory, "coverage-cli-consumer-proof.evidence.json");
+        using var cancellation = new CancellationTokenSource();
+        string? temporaryPath = null;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => PackageArtifactWorkflow.WriteCoverageProofEvidenceAsync(
+                evidencePath,
+                "{}",
+                artifactDirectory,
+                cancellation.Token,
+                path =>
+                {
+                    temporaryPath = path;
+                    Assert.True(File.Exists(path));
+                    cancellation.Cancel();
+                }));
+
+        Assert.NotNull(temporaryPath);
+        Assert.False(File.Exists(temporaryPath));
         Assert.False(File.Exists(evidencePath));
     }
 
@@ -9147,6 +9333,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         private readonly bool _createInvalidRawCoverage;
         private readonly bool _createMergedCoverageLoss;
         private readonly bool _createMissingSelectedRawCoverage;
+        private readonly bool _createShardDirectoryFile;
 
         public CoverageProofRecordingCommandRunner(
             string packageVersion,
@@ -9171,7 +9358,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
             bool sendCanaryRequests = true,
             bool createInvalidRawCoverage = false,
             bool createMergedCoverageLoss = false,
-            bool createMissingSelectedRawCoverage = false)
+            bool createMissingSelectedRawCoverage = false,
+            bool createShardDirectoryFile = false)
         {
             _packageVersion = packageVersion;
             _createFailingGateReports = createFailingGateReports;
@@ -9196,6 +9384,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             _createInvalidRawCoverage = createInvalidRawCoverage;
             _createMergedCoverageLoss = createMergedCoverageLoss;
             _createMissingSelectedRawCoverage = createMissingSelectedRawCoverage;
+            _createShardDirectoryFile = createShardDirectoryFile;
         }
 
         public List<ExternalCommandRequest> Requests { get; } = [];
@@ -9247,6 +9436,14 @@ public sealed class PackageArtifactValidationTests : IDisposable
                             ? SmokeCobertura.Replace("number=\"7\" hits=\"2\"", "number=\"7\" hits=\"0\"", StringComparison.Ordinal)
                             : SmokeCobertura,
                         createProjectCoverageReport: !_createMissingSelectedRawCoverage);
+                }
+
+                if (_createShardDirectoryFile)
+                {
+                    File.WriteAllText(
+                        CombineSafeChildPath(Path.GetDirectoryName(outputDirectory)!, "coverage-shards"),
+                        "not a directory",
+                        Encoding.UTF8);
                 }
 
                 return Task.FromResult(new ExternalCommandResult(

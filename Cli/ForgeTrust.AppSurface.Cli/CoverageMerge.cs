@@ -353,10 +353,18 @@ internal sealed class CoverageMergeWorkflow
             .Where(item => item.Key is not null)
             .GroupBy(item => item.Key!.Value)
             .ToDictionary(group => group.Key, group => group.Select(item => item.Candidate).ToArray());
+        var sourceClasses = source
+            .Descendants("class")
+            .Select(candidate => (Candidate: candidate, Key: GetClassIdentity(candidate)))
+            .Where(item => item.Key is not null)
+            .GroupBy(item => item.Key!.Value)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.Candidate).ToArray());
         foreach (var sourceClass in source.Descendants("class"))
         {
             var sourceIdentity = GetClassIdentity(sourceClass);
             if (sourceIdentity is null
+                || !sourceClasses.TryGetValue(sourceIdentity.Value, out var matchingSourceClasses)
+                || matchingSourceClasses.Length != 1
                 || !mergedClasses.TryGetValue(sourceIdentity.Value, out var matchingMergedClasses)
                 || matchingMergedClasses.Length != 1)
             {
@@ -371,10 +379,17 @@ internal sealed class CoverageMergeWorkflow
                 .GroupBy(item => item.Number!, StringComparer.Ordinal)
                 .ToDictionary(group => group.Key, group => group.Select(item => item.Candidate).ToArray(), StringComparer.Ordinal)
                 ?? new Dictionary<string, XElement[]>(StringComparer.Ordinal);
+            var sourceLines = (sourceClass.Element("lines")?.Elements("line") ?? [])
+                .Select(candidate => (Candidate: candidate, Number: candidate.Attribute("number")?.Value))
+                .Where(item => !string.IsNullOrWhiteSpace(item.Number))
+                .GroupBy(item => item.Number!, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.Select(item => item.Candidate).ToArray(), StringComparer.Ordinal);
             foreach (var sourceLine in sourceClass.Element("lines")?.Elements("line") ?? [])
             {
                 var number = sourceLine.Attribute("number")?.Value;
                 if (string.IsNullOrWhiteSpace(number)
+                    || !sourceLines.TryGetValue(number, out var matchingSourceLines)
+                    || matchingSourceLines.Length != 1
                     || !mergedLines.TryGetValue(number, out var matchingMergedLines)
                     || matchingMergedLines.Length != 1)
                 {

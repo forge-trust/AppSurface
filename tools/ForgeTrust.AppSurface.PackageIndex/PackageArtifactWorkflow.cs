@@ -346,15 +346,22 @@ internal sealed class PackageArtifactWorkflow
     /// <param name="contents">Already-scrubbed JSON payload.</param>
     /// <param name="trustedRootDirectory">Regular artifact output directory that bounds every evidence directory component.</param>
     /// <param name="cancellationToken">Cancellation token for temporary-file creation.</param>
+    /// <param name="temporaryFileCreated">
+    /// Optional narrow test seam invoked after the temporary file is closed and before the destination is replaced.
+    /// </param>
     /// <returns>A task that completes after the temporary file has replaced a regular destination.</returns>
     internal static async Task WriteCoverageProofEvidenceAsync(
         string evidencePath,
         string contents,
         string trustedRootDirectory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<string>? temporaryFileCreated = null)
     {
-        var parentDirectory = Path.GetDirectoryName(evidencePath)
-            ?? throw new PackageIndexException("Coverage proof evidence path does not have a parent directory.");
+        var parentDirectory = Path.GetDirectoryName(evidencePath);
+        if (string.IsNullOrWhiteSpace(parentDirectory))
+        {
+            throw new PackageIndexException("Coverage proof evidence path does not have a parent directory.");
+        }
         EnsureRegularDirectoryChain(trustedRootDirectory, parentDirectory);
         EnsureRegularOrAbsentFile(evidencePath);
         var temporaryPath = Path.Join(parentDirectory, $".{Path.GetFileName(evidencePath)}.{Guid.NewGuid():N}.tmp");
@@ -371,6 +378,8 @@ internal sealed class PackageArtifactWorkflow
                 await stream.WriteAsync(Encoding.UTF8.GetBytes(contents), cancellationToken);
             }
 
+            temporaryFileCreated?.Invoke(temporaryPath);
+            cancellationToken.ThrowIfCancellationRequested();
             EnsureRegularDirectoryChain(trustedRootDirectory, parentDirectory);
             EnsureRegularOrAbsentFile(evidencePath);
             File.Move(temporaryPath, evidencePath, overwrite: true);
@@ -414,6 +423,12 @@ internal sealed class PackageArtifactWorkflow
 
     private static void EnsureRegularOrAbsentFile(string path)
     {
+        if (Directory.Exists(path))
+        {
+            throw new PackageIndexException(
+                $"Coverage proof evidence destination '{path}' must be a regular file or absent; a directory already exists at that path.");
+        }
+
         var file = new FileInfo(path);
         if (file.LinkTarget is not null)
         {

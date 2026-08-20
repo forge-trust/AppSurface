@@ -19,6 +19,93 @@ public sealed class CoverageCliConsumerProofSemanticValidationTests
         Assert.Contains("branch:Calculator.Sign@7:100% (2/2):jump", proof.Raw.Invariants);
     }
 
+    [Fact]
+    public void ValidateRaw_AllowsUnderscoresInProducerSlugs()
+    {
+        using var fixture = SemanticFixture.Create("Smoke_Tests-123");
+
+        var proof = CoverageCliConsumerProofSemanticValidator.ValidateRaw(fixture.CoverageRunDirectory);
+
+        Assert.True(proof.CanMerge);
+        Assert.Empty(proof.Failures);
+    }
+
+    [Fact]
+    public void ValidateRaw_TreatsBranchAttributeCaseInsensitively()
+    {
+        using var fixture = SemanticFixture.Create();
+        fixture.Apply("lowercase-branch");
+
+        var proof = CoverageCliConsumerProofSemanticValidator.ValidateRaw(fixture.CoverageRunDirectory);
+
+        Assert.True(proof.CanMerge);
+        Assert.Empty(proof.Failures);
+    }
+
+    [Fact]
+    public void ValidateRaw_StillRequiresConditionCoverageForLowercaseBranch()
+    {
+        using var fixture = SemanticFixture.Create();
+        fixture.Apply("lowercase-branch-without-condition-coverage");
+
+        var proof = CoverageCliConsumerProofSemanticValidator.ValidateRaw(fixture.CoverageRunDirectory);
+
+        Assert.Contains(proof.Failures, failure => failure.Code == "CPV004");
+    }
+
+    [Fact]
+    public void ValidateRaw_CountsJumpConditionsSeparatelyFromAllConditions()
+    {
+        using var fixture = SemanticFixture.Create();
+        fixture.Apply("nonjump-sign-condition");
+
+        var proof = CoverageCliConsumerProofSemanticValidator.ValidateRaw(fixture.CoverageRunDirectory);
+
+        Assert.Contains(proof.Failures, failure => failure.Code == "CPV009");
+        Assert.Equal(1, proof.Raw.Facts!.SignConditionCount);
+        Assert.Equal(0, proof.Raw.Facts.SignJumpConditionCount);
+    }
+
+    [Fact]
+    public void ValidateRaw_AcceptsCoberturaAtTheCharacterLimit()
+    {
+        using var fixture = SemanticFixture.Create();
+        fixture.Apply("character-limit-boundary");
+
+        var proof = CoverageCliConsumerProofSemanticValidator.ValidateRaw(fixture.CoverageRunDirectory);
+
+        Assert.DoesNotContain(proof.Failures, failure => failure.Cause.Contains("character limit", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ValidateRaw_AcceptsManifestAtTheByteLimit()
+    {
+        using var fixture = SemanticFixture.Create();
+        fixture.Apply("manifest-byte-limit-boundary");
+
+        var proof = CoverageCliConsumerProofSemanticValidator.ValidateRaw(fixture.CoverageRunDirectory);
+
+        Assert.True(proof.CanMerge);
+        Assert.Empty(proof.Failures);
+    }
+
+    [Theory]
+    [InlineData("malformed-cobertura", "CPV002", "malformed")]
+    [InlineData("dtd-cobertura", "CPV004", "DTD")]
+    [InlineData("dtd-entity-expansion", "CPV004", "DTD")]
+    [InlineData("character-limit", "CPV004", "character limit")]
+    public void ValidateRaw_ClassifiesXmlSafetyFailuresIndependently(string scenario, string expectedCode, string expectedCause)
+    {
+        using var fixture = SemanticFixture.Create();
+        fixture.Apply(scenario);
+
+        var proof = CoverageCliConsumerProofSemanticValidator.ValidateRaw(fixture.CoverageRunDirectory);
+
+        Assert.Contains(proof.Failures, failure =>
+            failure.Code == expectedCode
+            && failure.Cause.Contains(expectedCause, StringComparison.OrdinalIgnoreCase));
+    }
+
     [Theory]
     [InlineData("missing-manifest", "CPV001")]
     [InlineData("manifest-directory", "CPV001")]
@@ -52,6 +139,7 @@ public sealed class CoverageCliConsumerProofSemanticValidationTests
     [InlineData("zero-condition-total", "CPV004")]
     [InlineData("invalid-condition-coverage-syntax", "CPV004")]
     [InlineData("dtd-cobertura", "CPV004")]
+    [InlineData("character-limit", "CPV004")]
     [InlineData("wrong-package", "CPV005")]
     [InlineData("wrong-class", "CPV006")]
     [InlineData("wrong-filename", "CPV007")]
@@ -523,11 +611,11 @@ public sealed class CoverageCliConsumerProofSemanticValidationTests
 
     private sealed class SemanticFixture : IDisposable
     {
-        private SemanticFixture(string root)
+        private SemanticFixture(string root, string slug)
         {
             Root = root;
             CoverageRunDirectory = Path.Join(root, "consumer", "TestResults", "coverage-merged");
-            ProjectDirectory = Path.Join(CoverageRunDirectory, "projects", "Smoke.Tests-123");
+            ProjectDirectory = Path.Join(CoverageRunDirectory, "projects", slug);
         }
 
         internal const string ValidCobertura = """
@@ -565,15 +653,15 @@ public sealed class CoverageCliConsumerProofSemanticValidationTests
 
         internal string RawCoveragePath => CoveragePath;
 
-        internal static SemanticFixture Create()
+        internal static SemanticFixture Create(string slug = "Smoke.Tests-123")
         {
             var root = TestPathUtils.PathUnder(Path.GetTempPath(), "CoverageCliConsumerProofSemanticValidationTests", Guid.NewGuid().ToString("N"));
-            var fixture = new SemanticFixture(root);
+            var fixture = new SemanticFixture(root, slug);
             Directory.CreateDirectory(fixture.ProjectDirectory);
             File.WriteAllText(
                 fixture.ManifestPath,
-                """
-                { "schemaVersion": 1, "projectPath": "Smoke.Tests/Smoke.Tests.csproj", "slug": "Smoke.Tests-123" }
+                $$"""
+                { "schemaVersion": 1, "projectPath": "Smoke.Tests/Smoke.Tests.csproj", "slug": "{{slug}}" }
                 """);
             File.WriteAllText(fixture.CoveragePath, ValidCobertura);
             return fixture;
@@ -665,6 +753,16 @@ public sealed class CoverageCliConsumerProofSemanticValidationTests
                 case "branch-without-condition-coverage":
                     File.WriteAllText(CoveragePath, ValidCobertura.Replace(" condition-coverage=\"100% (2/2)\"", string.Empty, StringComparison.Ordinal));
                     break;
+                case "lowercase-branch":
+                    File.WriteAllText(CoveragePath, ValidCobertura.Replace("branch=\"True\"", "branch=\"true\"", StringComparison.Ordinal));
+                    break;
+                case "lowercase-branch-without-condition-coverage":
+                    File.WriteAllText(
+                        CoveragePath,
+                        ValidCobertura
+                            .Replace("branch=\"True\"", "branch=\"true\"", StringComparison.Ordinal)
+                            .Replace(" condition-coverage=\"100% (2/2)\"", string.Empty, StringComparison.Ordinal));
+                    break;
                 case "invalid-condition-grammar":
                     File.WriteAllText(CoveragePath, ValidCobertura.Replace("coverage=\"100%\"", "coverage=\"101%\"", StringComparison.Ordinal));
                     break;
@@ -679,6 +777,21 @@ public sealed class CoverageCliConsumerProofSemanticValidationTests
                     break;
                 case "dtd-cobertura":
                     File.WriteAllText(CoveragePath, "<!DOCTYPE coverage []><coverage />");
+                    break;
+                case "dtd-entity-expansion":
+                    File.WriteAllText(CoveragePath, "<!DOCTYPE coverage [<!ENTITY bomb \"expanded\">]><coverage>&bomb;</coverage>");
+                    break;
+                case "character-limit":
+                    File.WriteAllText(CoveragePath, $"<coverage><sources><source>{new string('x', 1_048_577)}</source></sources></coverage>");
+                    break;
+                case "character-limit-boundary":
+                    const string prefix = "<coverage><!--";
+                    const string suffix = "--></coverage>";
+                    File.WriteAllText(CoveragePath, $"{prefix}{new string(' ', 1_048_576 - prefix.Length - suffix.Length)}{suffix}");
+                    break;
+                case "manifest-byte-limit-boundary":
+                    var manifest = File.ReadAllText(ManifestPath);
+                    File.WriteAllText(ManifestPath, manifest + new string(' ', 16_384 - System.Text.Encoding.UTF8.GetByteCount(manifest)));
                     break;
                 case "wrong-package":
                     File.WriteAllText(CoveragePath, ValidCobertura.Replace("name=\"Smoke\"", "name=\"Other\"", StringComparison.Ordinal));

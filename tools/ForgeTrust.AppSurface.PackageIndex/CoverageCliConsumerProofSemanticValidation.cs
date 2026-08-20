@@ -296,7 +296,8 @@ internal static class CoverageCliConsumerProofSemanticValidator
 
         var validation = ValidateFacts(parsed.Facts!, "merged");
         failures.AddRange(validation.Failures);
-        if (!Equivalent(rawProof.Raw.Facts, parsed.Facts!))
+        var equivalent = Equivalent(rawProof.Raw.Facts, parsed.Facts!);
+        if (!equivalent)
         {
             failures.Add(new CoverageCliConsumerProofFailure(
                 "CPV011",
@@ -309,7 +310,7 @@ internal static class CoverageCliConsumerProofSemanticValidator
         return rawProof with
         {
             Merged = new CoverageCliConsumerProofSemanticOutcome(
-                validation.Failures.Count == 0 && Equivalent(rawProof.Raw.Facts, parsed.Facts!) ? "passed" : "failed",
+                validation.Failures.Count == 0 && equivalent ? "passed" : "failed",
                 mergedCoveragePath,
                 null,
                 validation.Invariants,
@@ -322,12 +323,14 @@ internal static class CoverageCliConsumerProofSemanticValidator
     {
         try
         {
-            if (new FileInfo(path).Length > MaxManifestBytes)
+            using var stream = File.OpenRead(path);
+            using var boundedStream = new BoundedReadStream(stream, MaxManifestBytes);
+            using var document = JsonDocument.Parse(boundedStream);
+            if (boundedStream.HasExceededLimit())
             {
                 return null;
             }
 
-            using var document = JsonDocument.Parse(File.ReadAllText(path));
             if (document.RootElement.ValueKind != JsonValueKind.Object
                 || !document.RootElement.TryGetProperty("schemaVersion", out var schemaVersion)
                 || !schemaVersion.TryGetInt32(out var version)
@@ -364,12 +367,11 @@ internal static class CoverageCliConsumerProofSemanticValidator
         try
         {
             using var reader = XmlReader.Create(
-                path,
+                new DtdDetectingTextReader(new CharacterLimitTextReader(File.OpenText(path), MaxCharactersInDocument)),
                 new XmlReaderSettings
                 {
                     DtdProcessing = DtdProcessing.Prohibit,
                     XmlResolver = null,
-                    MaxCharactersInDocument = MaxCharactersInDocument,
                     IgnoreComments = true,
                     IgnoreProcessingInstructions = true,
                 });
@@ -438,7 +440,7 @@ internal static class CoverageCliConsumerProofSemanticValidator
                         activeLine = new CoberturaLine(
                             int.Parse(attributes["number"], System.Globalization.CultureInfo.InvariantCulture),
                             int.Parse(attributes["hits"], System.Globalization.CultureInfo.InvariantCulture),
-                            attributes.TryGetValue("branch", out var branch) && string.Equals(branch, "True", StringComparison.Ordinal),
+                            attributes.TryGetValue("branch", out var branch) && string.Equals(branch, "True", StringComparison.OrdinalIgnoreCase),
                             attributes.TryGetValue("condition-coverage", out var coverage) ? coverage : null,
                             []);
                         classes.Peek().Lines.Add(activeLine);
@@ -475,12 +477,17 @@ internal static class CoverageCliConsumerProofSemanticValidator
 
             return new CoberturaParseResult(CreateFacts(discoveredPackages, discoveredClasses), null);
         }
-        catch (XmlException exception)
+        catch (XmlException)
         {
-            return exception.Message.Contains("DTD", StringComparison.OrdinalIgnoreCase)
-                || exception.Message.Contains("maximum", StringComparison.OrdinalIgnoreCase)
-                ? CoberturaParseResult.Unsupported(scope, "The Cobertura XML exceeds the supported parser safety boundary.")
-                : CoberturaParseResult.Malformed(scope, "The Cobertura XML is malformed.");
+            return CoberturaParseResult.Malformed(scope, "The Cobertura XML is malformed.");
+        }
+        catch (DtdDetectedException)
+        {
+            return CoberturaParseResult.Unsupported(scope, "The Cobertura document contains a DTD, which is outside the supported safety boundary.");
+        }
+        catch (CharacterLimitExceededException)
+        {
+            return CoberturaParseResult.Unsupported(scope, "The Cobertura document exceeds the supported character limit.");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or FormatException or OverflowException)
         {
@@ -555,7 +562,7 @@ internal static class CoverageCliConsumerProofSemanticValidator
 
         if (element == "line"
             && attributes.TryGetValue("branch", out var isBranch)
-            && isBranch == "True"
+            && string.Equals(isBranch, "True", StringComparison.OrdinalIgnoreCase)
             && !attributes.ContainsKey("condition-coverage"))
         {
             error = "A branch line must include condition-coverage.";
@@ -625,17 +632,17 @@ internal static class CoverageCliConsumerProofSemanticValidator
         var signLines = selected?.Lines.Where(line => line.Number == 7).ToArray() ?? [];
         var sign = signLines.Length == 1 ? signLines[0] : null;
         return new CoverageCliConsumerProofCoverageFacts(
-            matchingPackages,
-            matchingClasses.Length,
-            selected?.Filename,
-            selected?.Lines.Count(line => line.Hits > 0) ?? 0,
-            signLines.Length,
-            sign?.Hits ?? 0,
-            sign?.Branch == true,
-            sign?.ConditionCoverage,
-            sign?.Conditions.Count ?? 0,
-            sign?.Conditions.Count ?? 0,
-            sign?.Conditions.Count(condition => string.Equals(condition.Type, "jump", StringComparison.Ordinal)
+            SmokePackageCount: matchingPackages,
+            SmokeCalculatorClassCount: matchingClasses.Length,
+            CalculatorFilename: selected?.Filename,
+            CoveredCalculatorLineCount: selected?.Lines.Count(line => line.Hits > 0) ?? 0,
+            SignLineCount: signLines.Length,
+            SignHits: sign?.Hits ?? 0,
+            SignBranch: sign?.Branch == true,
+            SignConditionCoverage: sign?.ConditionCoverage,
+            SignConditionCount: sign?.Conditions.Count ?? 0,
+            SignJumpConditionCount: sign?.Conditions.Count(condition => string.Equals(condition.Type, "jump", StringComparison.Ordinal)) ?? 0,
+            CoveredSignJumpConditionCount: sign?.Conditions.Count(condition => string.Equals(condition.Type, "jump", StringComparison.Ordinal)
                 && string.Equals(condition.Coverage, "100%", StringComparison.Ordinal)) ?? 0);
     }
 
@@ -741,7 +748,7 @@ internal static class CoverageCliConsumerProofSemanticValidator
 
     private static bool IsSafeSlug(string? slug)
         => !string.IsNullOrWhiteSpace(slug)
-            && slug.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '-');
+            && slug.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '-' or '_');
 
     private static bool IsRegularFile(string path)
     {
@@ -778,6 +785,131 @@ internal static class CoverageCliConsumerProofSemanticValidator
 
     private static string RelativeProjectEvidence(string projectsDirectory, string path)
         => Path.Join("projects", Path.GetRelativePath(projectsDirectory, path).Replace('\\', '/'));
+
+    private sealed class BoundedReadStream(Stream inner, int maximumBytes) : Stream
+    {
+        private int bytesRead;
+        private bool exceededLimit;
+
+        internal bool HasExceededLimit()
+        {
+            var buffer = new byte[4096];
+            while (bytesRead < maximumBytes)
+            {
+                var read = Read(buffer, 0, Math.Min(buffer.Length, maximumBytes - bytesRead));
+                if (read == 0)
+                {
+                    break;
+                }
+            }
+
+            exceededLimit = exceededLimit || inner.ReadByte() != -1;
+            return exceededLimit;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (bytesRead == maximumBytes)
+            {
+                exceededLimit = inner.ReadByte() != -1;
+                return 0;
+            }
+
+            var read = inner.Read(buffer, offset, Math.Min(count, maximumBytes - bytesRead));
+            bytesRead += read;
+            return read;
+        }
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class CharacterLimitTextReader(TextReader inner, int maximumCharacters) : TextReader
+    {
+        private int charactersRead;
+
+        public override int Read(char[] buffer, int index, int count)
+        {
+            if (count == 0)
+            {
+                return 0;
+            }
+
+            if (charactersRead == maximumCharacters)
+            {
+                if (inner.Read() == -1)
+                {
+                    return 0;
+                }
+
+                throw new CharacterLimitExceededException();
+            }
+
+            var read = inner.Read(buffer, index, Math.Min(count, maximumCharacters - charactersRead));
+            charactersRead += read;
+            return read;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                inner.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class DtdDetectingTextReader(TextReader inner) : TextReader
+    {
+        private const string DtdPrefix = "<!DOCTYPE";
+        private int matchedPrefixLength;
+
+        public override int Read(char[] buffer, int index, int count)
+        {
+            var read = inner.Read(buffer, index, count);
+            for (var offset = 0; offset < read; offset++)
+            {
+                var character = buffer[index + offset];
+                if (character == DtdPrefix[matchedPrefixLength])
+                {
+                    matchedPrefixLength++;
+                    if (matchedPrefixLength == DtdPrefix.Length)
+                    {
+                        throw new DtdDetectedException();
+                    }
+                }
+                else
+                {
+                    matchedPrefixLength = character == DtdPrefix[0] ? 1 : 0;
+                }
+            }
+
+            return read;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                inner.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class DtdDetectedException : Exception;
+
+    private sealed class CharacterLimitExceededException : Exception;
 
     private sealed record CoverageProjectManifest(string Path, string ProjectPath, string Slug);
 
