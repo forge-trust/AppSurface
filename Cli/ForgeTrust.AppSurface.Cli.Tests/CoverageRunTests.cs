@@ -500,7 +500,8 @@ public sealed class CoverageRunTests
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
         repo.WriteFile("Sample.slnx", "<Solution />");
-        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        var project = "tests/Sample.Tests/Sample.Tests.csproj";
         using var current = PushCurrentDirectory(repo.Path);
         var runner = new RecordingCoverageRunProcessRunner();
         var reportGenerator = new RecordingReportGenerator();
@@ -518,6 +519,15 @@ public sealed class CoverageRunTests
         Assert.True(File.Exists(Path.Join(repo.Path, "TestResults", "coverage-merged", "coverage.cobertura.xml")));
         Assert.True(File.Exists(Path.Join(repo.Path, "TestResults", "coverage-merged", "summary.txt")));
         Assert.True(File.Exists(Path.Join(repo.Path, "TestResults", "coverage-merged", "timings.json")));
+        var manifestPath = Directory.EnumerateFiles(
+                Path.Join(repo.Path, "TestResults", "coverage-merged", "projects"),
+                CoverageProjectManifest.FileName,
+                SearchOption.AllDirectories)
+            .Single();
+        using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(manifestPath));
+        Assert.Equal(1, manifest.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("tests/Sample.Tests/Sample.Tests.csproj", manifest.RootElement.GetProperty("projectPath").GetString());
+        Assert.Matches(@"\ASample\.Tests-[0-9a-f]{8}\z", Assert.IsType<string>(manifest.RootElement.GetProperty("slug").GetString()));
         Assert.Single(reportGenerator.CoverageFiles);
         var testCommand = Assert.Single(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
         Assert.Contains("--logger:trx", testCommand.Arguments);
@@ -1225,6 +1235,7 @@ public sealed class CoverageRunTests
     [InlineData(".appsurface-coverage-output")]
     [InlineData("projects/sample-tests/dotnet-test.log")]
     [InlineData("projects/sample-tests/coverage-normalization.log")]
+    [InlineData("projects/sample-tests/coverage-project.json")]
     [InlineData("projects/sample-tests/coverage.cobertura.xml")]
     public void OutputGuard_ShouldRejectExistingFixedArtifactSymlink(string relativePath)
     {
@@ -2528,6 +2539,28 @@ public sealed class CoverageRunTests
             CancellationToken.None));
 
         Assert.True(Directory.Exists(timingsPath));
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldClassifyProjectManifestWriteFailure()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = new CoverageRunWorkflow(
+            new RecordingCoverageRunProcessRunner(),
+            new RecordingReportGenerator(),
+            TimeProvider.System,
+            writeProjectManifest: (_, _, _, _) => throw new IOException("manifest destination is unavailable"));
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project]),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("ASCOV120", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("project manifest could not be written", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

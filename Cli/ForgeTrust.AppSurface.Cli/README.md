@@ -14,6 +14,27 @@ appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3
 
 The CLI also includes public coverage commands for private-by-default CI coverage enforcement. `appsurface coverage run` discovers or accepts instrumented .NET test projects, writes local coverage artifacts, and merges Cobertura through the package-owned ReportGenerator dependency in the same command. `appsurface coverage merge` fans in existing Cobertura shards from matrix or custom test workflows without reading a consumer tool manifest. `appsurface coverage gate` evaluates the merged local Cobertura XML, writes JSON and Markdown reports, and can append the same Markdown to GitHub Actions step summaries without uploading coverage data to a hosted coverage service. `appsurface coverage clean` previews or explicitly removes those private artifacts; its default ownership-marker mode is narrow, while [`--all`](#appsurface-coverage-clean) provides a deliberate worktree-wide `TestResults` sweep.
 
+### Coverage proof levels and driver boundary
+
+There are two different coverage questions, and they have different commands:
+
+| Need | Sequence | What it proves |
+| --- | --- | --- |
+| Validate a repository's local coverage setup | `coverage run --dry-run` → `coverage run` → `coverage gate` | The selected VSTest projects can produce the normal AppSurface artifacts and satisfy the repository's thresholds. |
+| Validate a packed CLI candidate before publication | PackageIndex `verify-packages` | The owned `Smoke.Tests` collector fixture executes `Smoke.Calculator` and retains its class, line, and branch facts from the selected raw report through the merged report. |
+
+Start local readiness with `coverage run --dry-run`. It checks discovery, collector capability, scheduling, and artifact paths without running tests or cleaning output. Run `coverage run` next, then run `coverage gate` against its merged `coverage.cobertura.xml`. That local sequence is the normal consumer workflow; it does not claim semantic raw-to-merged proof for an arbitrary application graph.
+
+The packaged proof is a release-validation workflow, not a replacement for that local sequence. PackageIndex installs the packed CLI in a clean fixture, selects exactly one manifest-bound `Smoke.Tests` report, validates the owned `Smoke.Calculator` class/line/branch invariants in the raw report, copies and hashes that shard, merges it, and independently validates the same invariants in merged Cobertura. The proof also retains the existing artifact, gate, excluded-project, patch-target, and canary checks. It is an owned fixture guard, not a certification of every consumer application.
+
+Keep the assurance boundary explicit:
+
+- The default `collector` driver is the semantic proof path for the packaged fixture and the supported VSTest integration for local runs.
+- `--coverage-driver msbuild` is an explicit VSTest compatibility path for projects that directly reference `coverlet.msbuild`. It proves artifact compatibility only; it is not equivalent to the packaged collector's semantic raw-to-merged proof.
+- `coverage merge` is fan-in only. Use it for externally produced Cobertura shards, then use `coverage gate`; it does not prove that AppSurface's collector observed an owned consumer.
+- `--no-clean` is an intentional retention escape hatch. Preserved reports and patch-target files can be stale until a later gate refreshes them or a nonpatch gate removes them.
+- Native Microsoft Testing Platform (MTP) execution is a separate runner/integration boundary. The v1 collector path rejects MTP rather than switching drivers to satisfy a proof. Capture the runner and direct coverage-package classification, then use a separate MTP path or issue when MTP is selected or the facts conflict.
+
 `appsurface secrets` manages the first-secret workflow for `ForgeTrust.AppSurface.Config.LocalSecrets`: initialize a local namespace, set one key, verify presence without printing the value, list names, explicitly migrate retained macOS Keychain records to v2, delete keys, and run doctor diagnostics for platform availability.
 
 `appsurface pwa verify` checks install metadata or the optional server-known push-readiness surface served by `ForgeTrust.AppSurface.Web`. Push readiness includes worker/helper evidence and may report an optional VAPID-backed rail as `not-configured` on a no-provider sample. Install verification remains the default schema-v2 contract. Push verification is additive schema v3 evidence and keeps browser support, installation state, permission, subscription, notification display, and delivery outside the verifier's claims.
@@ -507,6 +528,33 @@ Use `--coverage-driver msbuild` only as an explicit compatibility path for a pro
 
 Collector mode owns `--collect`, `--results-directory`, the `--` runsettings separator, coverage runsettings, and `--settings`/`-s`. MSBuild mode owns the Coverlet `/p:` properties. Passing conflicting tokens through `--test-argument` fails before discovery or output mutation. `--include` and `--exclude` map to the selected driver's native configuration.
 
+#### Project manifests and packaged semantic proof
+
+Each executed project writes `coverage-project.json` beside its per-project `coverage.cobertura.xml`. Schema version 1 is intentionally small and dependency-free:
+
+```json
+{
+  "schemaVersion": 1,
+  "projectPath": "tests/MyApp.Tests/MyApp.Tests.csproj",
+  "slug": "MyApp.Tests-0123abcd"
+}
+```
+
+`projectPath` is the normalized solution-relative test-project path; `slug` is the CLI-owned artifact-directory identity. The manifest is capped at 16 KiB of UTF-8 JSON, and consumers must reject larger files before parsing. PackageIndex consumes this manifest instead of inferring identity from a directory name or recursively searching for an arbitrary XML file. A packaged proof must find exactly one manifest for `Smoke.Tests/Smoke.Tests.csproj` and a regular sibling `coverage.cobertura.xml`; missing, malformed, oversized, unsafe, duplicate, or mismatched manifests fail closed.
+
+The PackageIndex semantic parser accepts only the bounded Coverlet/ReportGenerator Cobertura shape needed by the owned proof: `coverage`, `sources`, `source`, `packages`, `package`, `classes`, `class`, `methods`, `method`, `lines`, `line`, `conditions`, and `condition`. It prohibits DTDs and entities, uses a null XML resolver, caps each document at 1 MiB, and enforces maximum depth 32 and 10,000 elements. Unsupported required shapes, missing identity attributes, unsafe filenames, duplicate identities, or invalid numeric fields are tool-compatibility failures. A valid shape with missing or zero expected semantics is a coverage defect.
+
+For both raw and merged reports, the owned fixture requires one `Smoke` package, one `Smoke.Calculator` class with a normalized filename ending in `Smoke/Calculator.cs`, an executed line with positive hits, and `Sign` line 7 with positive hits plus `branch="True"`, `condition-coverage="100% (2/2)"`, and one `jump` condition at `100%`. The proof compares these semantic facts, not XML bytes; ReportGenerator may legitimately change document structure during merge.
+
+PackageIndex writes the public-safe `coverage-cli-consumer-proof.evidence.json` beside the existing private `coverage-cli-consumer-proof.md`. Evidence schema version 1 contains only `verdict`, `packageVersion`, optional `packageArtifactDigest`, `driverBoundary { runner, integration, directPackages, assuranceLevel }`, `raw { outcome, optional artifactRelativePath, optional sha256, invariants[] }`, `merged { outcome, optional artifactRelativePath, invariants[] }`, and `failures[] { code, scope, cause, nextAction, evidenceRelativePath }`; every unavailable optional field is omitted rather than emitted as `null`. The driver-boundary runner is a configured proof identifier; the raw and merged outcomes state whether semantic validation actually ran. Evidence excludes command arguments and full invocation traces, working directories, NuGet sources/configuration, absolute paths, raw XML, credentials, and arbitrary output excerpts. `CPV` codes describe packaged semantic proof; `ASCOV` codes remain authoritative for the public CLI run, merge, and gate.
+
+Manifest and evidence schemas evolve additively and by version. Schema-1 readers reject unknown required structure and unsupported major versions with an actionable incompatibility result. When upgrading Coverlet, ReportGenerator, or the runner:
+
+1. Capture one isolated generated-fixture raw and merged report.
+2. Confirm it stays within the documented Cobertura subset and preserves the owned class/line/branch invariants.
+3. Run the focused PackageIndex fixture suite and `verify-packages`.
+4. Update the versioned schema/subset documentation and evidence consumers together if the contract changed; do not silently broaden the parser.
+
 #### Coverage Run Watchdog
 
 Every discovery, capability preflight, build, test, merge, diagnostics, and artifact phase has its own monotonic progress clock. Positive child-process output bytes and explicit phase transitions count as progress; output from one parallel project never resets another project's clock. `--heartbeat-interval` defaults to `30s` and accepts `0` to disable heartbeats. `--no-progress-timeout` defaults to `10m`. Durations use exactly `0` or a positive lowercase integer followed by `ms`, `s`, `m`, or `h`, with a 30-day maximum; zero is valid only for the heartbeat interval.
@@ -604,6 +652,7 @@ Artifacts are local and private by default:
 - `junit-coverage-<index>-<project-name-hash>.xml`: AppSurface-managed JUnit test results when `--test-results junit` or `--slow-test-diagnostics` is used.
 - `slow-test-diagnostics.md` and `slow-test-diagnostics.json`: A bounded failure-first test-result summary, slow-test evidence, parser warnings, metadata completeness, and diagnostic overhead when `--slow-test-diagnostics` is used. The Markdown summary caps failed-test detail and total size for GitHub Actions; use the managed JUnit XML and project logs for complete evidence. The command writes these files through private same-directory staging files; a later normal clean run removes only GUID-named staging or backup remnants from an interrupted publication, while `--no-clean` preserves existing output.
 - `projects/<project-name-hash>/coverage.cobertura.xml`: Per-project Coverlet Cobertura output.
+- `projects/<project-name-hash>/coverage-project.json`: Schema-versioned project identity manifest consumed by PackageIndex proof; it contains the normalized solution-relative project path and CLI-owned slug.
 - `projects/<project-name-hash>/collector-results/<run-id>/`: Unique raw collector attachment tree retained for diagnosis.
 - `projects/<project-name-hash>/dotnet-test.log`: Full `dotnet test` output for that project.
 - `projects/<project-name-hash>/coverage-normalization.log`: Secondary collector-artifact cleanup diagnostics that are intentionally not replayed to the console.
@@ -710,6 +759,8 @@ appsurface coverage merge \
 ```
 
 Use `coverage merge` when a CI matrix, custom test harness, or non-AppSurface test producer already writes Cobertura files and you only need AppSurface's package-owned fan-in plus `coverage gate` artifacts. Use `coverage run -> coverage gate` for normal package-consuming .NET repositories where AppSurface should discover projects, invoke `dotnet test`, and merge the Coverlet output. In this repository, the default no-argument `./scripts/coverage-solution.sh` lane runs that pair with repository thresholds; focused selection and shard fan-in always use the public CLI commands above.
+
+When `coverage merge` receives exactly one validated shard, it still runs the package-owned ReportGenerator dependency and writes its normal summary/timings artifacts. Its final merged Cobertura starts from the validated ReportGenerator output, then restores only the staged source's direct class-line branch/condition details that ReportGenerator can omit during a no-op transformation; the resulting report remains gate-compatible and has no external DTD. With two or more shards, the merged Cobertura comes from ReportGenerator as usual.
 
 The v1 source contract is intentionally narrow. `--source` must point to an existing directory. The command recursively selects files named exactly `coverage.cobertura.xml`, sorts them by ordinal path, validates that each selected file has a Cobertura `<coverage>` root, and prints the discovered count plus the first few relative paths. A single shard is valid. Files named `Cobertura.xml`, arbitrary `*.xml`, or non-Cobertura XML are not accepted by v1; rename or copy producer artifacts to `coverage.cobertura.xml` before merging.
 
@@ -819,7 +870,7 @@ Every `ASCOV###` diagnostic includes the problem, likely cause, exact fix, docs 
 | `ASCOV114` | The package-owned ReportGenerator dependency was not found. | Restore or reinstall `ForgeTrust.AppSurface.Cli` so its package dependencies are present. |
 | `ASCOV115` | Collector output was missing, multiple, malformed, or escaped its invocation directory. | Inspect the project log and raw collector results, fix the producer, and rerun. |
 | `ASCOV116` | `--require-non-sandbox` found an enabled sandbox marker. | Run coverage outside the sandbox or omit the option when the restriction is intentional. |
-| `ASCOV120` | One or more test, merge, or artifact steps failed. | Open `timings.json` and per-project logs listed above, fix failing tests, then rerun. |
+| `ASCOV120` | One or more test, merge, manifest, or artifact steps failed. | Open `timings.json` and per-project logs listed above, fix the reported failure, then rerun. |
 | `ASCOV121` | Fail-mode watchdog termination claimed the run. | Inspect the reported watchdog artifact path and project logs; if the path is unavailable, use the ASCOV122 detail, then fix the stall or tune the timeout and rerun. |
 | `ASCOV122` | A bounded watchdog artifact write or promotion failed. | Use a writable dedicated output directory; the process cancellation outcome remains authoritative. |
 | `ASCOV123` | A failed collector-artifact normalization also left its staged temporary file behind. | Inspect the project's `coverageCleanupLog` in `timings.json`, then remove the `.coverage.*.tmp` file after confirming no coverage run is active. |
