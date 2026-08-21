@@ -764,6 +764,11 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             urls.BuildAssetUrl("outline-client.js"),
             $"{AppSurfaceDocsStaticAssetBasePath}/outline-client.js",
             applyInstanceConventions);
+        MapLegacyAssetRedirect(
+            endpoints,
+            urls.BuildAssetUrl("rich-authoring-client.js"),
+            $"{AppSurfaceDocsStaticAssetBasePath}/rich-authoring-client.js",
+            applyInstanceConventions);
 
         if (options.Versioning?.Enabled == true)
         {
@@ -942,6 +947,10 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             endpoints,
             $"{AppSurfaceDocsStaticAssetBasePath}/outline-client.js",
             "docs/outline-client.js");
+        MapEmbeddedAssetFallback(
+            endpoints,
+            $"{AppSurfaceDocsStaticAssetBasePath}/rich-authoring-client.js",
+            "docs/rich-authoring-client.js");
     }
 
     private static void MapNamedPublishedTreeEndpoints(

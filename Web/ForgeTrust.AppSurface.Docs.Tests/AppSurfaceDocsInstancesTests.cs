@@ -851,8 +851,10 @@ public sealed class AppSurfaceDocsInstancesTests
         Assert.Equal(0, headContext.Response.Body.Length);
     }
 
-    [Fact]
-    public async Task NamedLegacyAssetRedirect_ShouldPreservePathBaseAndQueryString()
+    [Theory]
+    [InlineData("search.css")]
+    [InlineData("rich-authoring-client.js")]
+    public async Task NamedLegacyAssetRedirect_ShouldPreservePathBaseAndQueryString(string assetName)
     {
         using var fixture = BuildApp(("Public", "/docs"));
         var endpoints = (IEndpointRouteBuilder)fixture.App;
@@ -860,7 +862,7 @@ public sealed class AppSurfaceDocsInstancesTests
         endpoints.FinalizeAppSurfaceDocsInstances();
 
         var endpoint = GetDocsRouteEndpoints(fixture.App)
-            .Single(route => route.RoutePattern.RawText == "/docs/search.css");
+            .Single(route => route.RoutePattern.RawText == $"/docs/{assetName}");
         var context = new DefaultHttpContext { RequestServices = fixture.App.Services };
         context.Request.Method = HttpMethods.Get;
         context.Request.PathBase = "/host";
@@ -870,7 +872,7 @@ public sealed class AppSurfaceDocsInstancesTests
 
         Assert.Equal(StatusCodes.Status302Found, context.Response.StatusCode);
         Assert.Equal(
-            "/host/_content/ForgeTrust.AppSurface.Docs/docs/search.css?cache=abc",
+            $"/host/_content/ForgeTrust.AppSurface.Docs/docs/{assetName}?cache=abc",
             context.Response.Headers.Location);
     }
 
@@ -891,7 +893,8 @@ public sealed class AppSurfaceDocsInstancesTests
                      "/_content/ForgeTrust.AppSurface.Docs/docs/search.css",
                      "/_content/ForgeTrust.AppSurface.Docs/docs/minisearch.min.js",
                      "/_content/ForgeTrust.AppSurface.Docs/docs/search-client.js",
-                     "/_content/ForgeTrust.AppSurface.Docs/docs/outline-client.js"
+                     "/_content/ForgeTrust.AppSurface.Docs/docs/outline-client.js",
+                     "/_content/ForgeTrust.AppSurface.Docs/docs/rich-authoring-client.js"
                  })
         {
             var endpoint = Assert.Single(routeEndpoints, candidate => candidate.RoutePattern.RawText == route);
