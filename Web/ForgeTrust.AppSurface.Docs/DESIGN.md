@@ -50,9 +50,9 @@ Default rule:
 2. If a color represents a repeated state such as focus, active, muted, raised, loading, or default border, use or add a token.
 3. If a color is local to syntax highlighting, generated API signature colorization, or a one-off semantic badge family, keep it local and document the category.
 
-These tokens are not a public theming API yet. Hosts should not rely on overriding `--docs-*` names until a future theming feature explicitly documents that contract. Inside AppSurface Docs, though, shared package chrome and search-specific UI should consume the same root token layer so future theming can change the system deliberately. Search CSS may route through `--docs-search-*` aliases with fallbacks because exact published release trees can serve `search.css` without the generated package stylesheet.
+These tokens are not a public theming API. Hosts should use the documented `AppSurfaceDocs:Theme` preset, bounded color-role, density, and chrome settings instead of overriding `--docs-*` names. Inside AppSurface Docs, shared package chrome and search-specific UI consume the same root token layer so built-in presets such as `AppSurfaceLight` can change the system deliberately while keeping that implementation detail private. Search CSS may route through `--docs-search-*` aliases with fallbacks because exact published release trees can serve `search.css` without the generated package stylesheet.
 
-When a host uses a shared semantic pair such as Graphite through the [theme-pairs bridge](README.md#theme-pairs-migration), it may vary the rendered semantic colors without changing this editorial layout, information hierarchy, or Docs-owned `--docs-*` boundary. The `GraphiteDark` option remains the separate fixed-dark compatibility preset rather than an alternate layout or a shared pair selector.
+When a host uses a shared semantic pair such as Graphite through the [theme-pairs bridge](README.md#theme-pairs-migration), it may vary the rendered semantic colors without changing this editorial layout, information hierarchy, or Docs-owned `--docs-*` boundary. `GraphiteDark` and `AppSurfaceLight` remain separate fixed Docs-local presets rather than alternate layouts or shared-pair selectors. Use the [layout override boundary](README.md#default-razor-layout-and-deliberate-host-overrides) when a product needs control beyond the supported Docs theme roles.
 
 ### Surfaces
 
@@ -91,7 +91,7 @@ Use this order when deciding where a new style belongs:
 
 Classes such as `docs-page-badge` and `docs-metadata-chip` are not a failure of utility-first styling. They are the right tool when a repeated package component needs one stable contract across multiple views and stylesheets.
 
-Shared reusable primitives belong in the Tailwind entry stylesheet at `wwwroot/css/app.css`, which generates the package stylesheet loaded on every AppSurface Docs page. Search-specific state and result styling belongs in `wwwroot/docs/search.css`; do not make non-search pages depend on search assets for badges, metadata chips, or trust/provenance chrome.
+Shared reusable primitives belong in the Tailwind entry stylesheet at `wwwroot/css/app.css`, which generates the package stylesheet loaded on every AppSurface Docs page. Search-specific state and result styling belongs in `wwwroot/docs/search.css`; do not make non-search pages depend on search assets for badges, metadata chips, or trust/provenance chrome. Generated JavaScript API lifecycle badges (`Public API`, `Alpha`, `Beta`, and `Deprecated`) are symbol-scoped shared primitives: use the shared lifecycle badge selector on rendered API fragments, and reuse the existing search-result badge component for their search chrome. Do not put a lifecycle badge on an aggregate API group page, because its symbols can have different maturity states.
 
 #### Search workspace hooks
 

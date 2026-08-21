@@ -1,6 +1,6 @@
 # Durable PostgreSQL local tutorial
 
-This public-preview tutorial proves the current [`ForgeTrust.AppSurface.Durable.PostgreSql`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) adoption path on a disposable PostgreSQL 17 database. It is a local composition reference, not production operations guidance. Application startup never applies DDL.
+This public-preview tutorial proves the current [`ForgeTrust.AppSurface.Durable.PostgreSql`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) adoption path on a disposable PostgreSQL 16+ database. It is a local composition reference, not production operations guidance. Application startup never applies DDL.
 
 The [AppSurface CLI](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands) owns migration status, reviewed scripts, preflight, and guarded apply. This example owns only two local-proof commands:
 
@@ -61,7 +61,7 @@ APPSURFACE_DURABLE_PREREQUISITE_PORT="$APPSURFACE_DURABLE_LOCAL_PORT" \
 The checked-in script uses Bash's loopback TCP probe, so it fails closed when the selected port is occupied without
 requiring optional host PostgreSQL tools.
 
-## Ten-minute PostgreSQL 17 transcript
+## Ten-minute PostgreSQL transcript
 
 In Terminal 1, run a disposable database:
 
@@ -69,7 +69,7 @@ In Terminal 1, run a disposable database:
 docker run --rm --name appsurface-durable-postgres \
   -e POSTGRES_HOST_AUTH_METHOD=trust \
   -e POSTGRES_DB=appsurface_durable_example \
-  -p "127.0.0.1:${APPSURFACE_DURABLE_LOCAL_PORT}:5432" postgres:17
+  -p "127.0.0.1:${APPSURFACE_DURABLE_LOCAL_PORT}:5432" postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877
 ```
 
 In Terminal 2, wait at most 30 seconds before any migration operation:
@@ -147,9 +147,9 @@ the temporary passfile, never a password; `--connection-env` names a variable an
 
 ```console
 export APPSURFACE_DURABLE_MIGRATION_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_owner;Passfile=$APPSURFACE_DURABLE_PASSFILE"
-dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
+  dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
   durable schema apply --connection-env APPSURFACE_DURABLE_MIGRATION_CONNECTION --apply
-# Expected: Durable schema: 0 -> 8; applied: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008.
+# Expected: Durable schema: 0 -> 9; applied: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009.
 ```
 
 Apply the reviewed role recipe after migrations with the disposable container's bootstrap administrator, then configure
@@ -169,7 +169,7 @@ export APPSURFACE_DURABLE_RUNTIME_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DU
 export APPSURFACE_DURABLE_RUNTIME_EPOCH='<stable UUID supplied by deployment>'
 ```
 
-The development-only bootstrap initializes the active epoch exactly once. It requires `DOTNET_ENVIRONMENT=Development`, `APPSURFACE_DURABLE_LOCAL_PROOF=1`, a `localhost`, `127.0.0.1`, or `::1` target, and the `appsurface_durable_owner` role before it opens the durable schema. It rejects invalid UUID values, inactive schema, and an already active epoch:
+The development-only bootstrap initializes the active epoch exactly once. It requires `DOTNET_ENVIRONMENT=Development`, `APPSURFACE_DURABLE_LOCAL_PROOF=1`, a `localhost`, `127.0.0.1`, or `::1` target, and the `appsurface_durable_owner` role before it opens the durable schema. It rejects invalid UUID values, inactive schema, and an already active epoch. For proof parity with production defaults, prefer the same 16+ migration floor when choosing local dependencies.
 
 ```console
 DOTNET_ENVIRONMENT=Development APPSURFACE_DURABLE_LOCAL_PROOF=1 \
@@ -203,5 +203,6 @@ DOTNET_ENVIRONMENT=Development APPSURFACE_DURABLE_LOCAL_PROOF=1 \
 1. Run `appsurface durable schema status --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION` and `appsurface durable schema preflight --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION` with a scoped read-only deployment connection, such as the runtime connection in this tutorial, to identify the authoritative state. Reserve the migration-owner variable for reviewed apply and epoch operations.
 2. Correct role setup or review a forward-only script generated from the installed version.
 3. Apply through the explicit migration-owner workflow, rerun the canonical role recipe after migrations, then retry preflight and the local proof.
+4. For rollout safety, disable the local host (`.AddWorkerHost` off), complete migration+role recipe reconciliation, verify status/epoch coherence, then re-enable host.
 
 Never delete `appsurface_durable.schema_migration` rows, edit migration checksums, or run destructive down-migrations. A failed migration rolls back its own transaction; regenerate the correct forward script and retry from the last committed version. A runtime epoch rotation is an authorized restore operation documented in the [PostgreSQL package README](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#explicit-schema-and-epoch-deployment), not a tutorial command.

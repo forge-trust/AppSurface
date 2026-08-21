@@ -48,6 +48,26 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
     }
 
     [Fact]
+    public void PassiveRegistration_FailsClosedWhenCustomRegistryCannotEnumerateWorkContracts()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = CreateDataSource();
+        var services = new ServiceCollection();
+        services.AddSingleton<IDurableWorkRegistry, LegacyWorkRegistry>();
+        services.AddAppSurfaceDurablePostgreSql(
+            dispatcher,
+            runtime,
+            new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+            new PostgreSqlDurableScheduleOptions("durable_runtime"));
+
+        using var provider = services.BuildServiceProvider();
+
+        var exception = Assert.Throws<InvalidOperationException>(() => provider.GetRequiredService<IDurableRuntimePump>());
+
+        Assert.StartsWith(DurableProblemCodes.WorkDiscoveryContractSelectionUnavailable, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FlowRetentionRegistration_RequiresPassiveStorageAndAThirdDataSource()
     {
         using var dispatcher = CreateDataSource();
@@ -918,6 +938,12 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
 
     private static NpgsqlDataSource CreateDataSource() => NpgsqlDataSource.Create(
         "Host=localhost;Port=5432;Database=durable_registration;Username=durable;Password=not-opened");
+
+    private sealed class LegacyWorkRegistry : IDurableWorkRegistry
+    {
+        public DurableWorkRegistration GetRequired(string workName, string workVersion) =>
+            throw new NotSupportedException();
+    }
 
     private sealed class EmptyPump : IDurableRuntimePump
     {

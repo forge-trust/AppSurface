@@ -349,12 +349,16 @@ public sealed class AppSurfaceDocsPublishedTreeContentRewriterTests
     [Fact]
     public void RewriteSearchIndexJson_ShouldRebaseDocumentPaths()
     {
-        const string json = "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\"}]}";
+        const string json = "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\",\"apiLifecycle\":\"beta\",\"apiLifecycleLabel\":\"Beta\",\"isDeprecated\":true,\"isGeneratedApiSymbol\":true}]}";
 
         var rewritten = AppSurfaceDocsPublishedTreeContentRewriter.RewriteSearchIndexJson(json, "/docs/v/1.2.3");
         var unchanged = AppSurfaceDocsPublishedTreeContentRewriter.RewriteSearchIndexJson(json, "/docs");
 
         Assert.Contains("\"path\":\"/docs/v/1.2.3/guide.html\"", rewritten);
+        Assert.Contains("\"apiLifecycle\":\"beta\"", rewritten);
+        Assert.Contains("\"apiLifecycleLabel\":\"Beta\"", rewritten);
+        Assert.Contains("\"isDeprecated\":true", rewritten);
+        Assert.Contains("\"isGeneratedApiSymbol\":true", rewritten);
         Assert.Equal(json, unchanged);
     }
 

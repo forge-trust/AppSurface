@@ -68,6 +68,10 @@ internal sealed record DocsSearchIndexMetadata(
 /// <param name="Language">Normalized programming language for generated API documentation.</param>
 /// <param name="LanguageLabel">Reader-facing programming language label for generated API documentation.</param>
 /// <param name="SummaryPresentation">Optional bounded, display-only rich presentation for the raw summary.</param>
+/// <param name="ApiLifecycle">Optional generated-symbol lifecycle: <c>public</c>, <c>alpha</c>, or <c>beta</c>. Omitted for all other documents.</param>
+/// <param name="ApiLifecycleLabel">Optional reader-facing label paired with <paramref name="ApiLifecycle"/>: <c>Public API</c>, <c>Alpha</c>, or <c>Beta</c>. Omitted for all other documents.</param>
+/// <param name="IsDeprecated">Optional deprecation flag. <c>true</c> is emitted only with generated-symbol metadata; <c>false</c> and missing values are omitted for other documents.</param>
+/// <param name="IsGeneratedApiSymbol">Optional <c>true</c> marker emitted only for validated, provenanced JavaScript API fragments. Consumers must not infer lifecycle from ordinary page metadata.</param>
 internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("path")] string Path,
@@ -105,7 +109,19 @@ internal sealed record DocsSearchIndexDocument(
     string? LanguageLabel = null,
     [property: JsonPropertyName("summaryPresentation")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<DocsSearchSummaryPresentationNode>? SummaryPresentation = null);
+    IReadOnlyList<DocsSearchSummaryPresentationNode>? SummaryPresentation = null,
+    [property: JsonPropertyName("apiLifecycle")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? ApiLifecycle = null,
+    [property: JsonPropertyName("apiLifecycleLabel")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? ApiLifecycleLabel = null,
+    [property: JsonPropertyName("isDeprecated")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    bool? IsDeprecated = null,
+    [property: JsonPropertyName("isGeneratedApiSymbol")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    bool? IsGeneratedApiSymbol = null);
 
 /// <summary>
 /// A bounded, display-only Markdown projection for a docs search-result summary.
@@ -292,6 +308,7 @@ public class DocAggregator
     private readonly AppSurfaceDocsHarvestPathPolicySnapshotFactory _pathPolicySnapshotFactory;
     private readonly Func<string, CancellationToken, Task<DateTimeOffset?>> _resolveGitLastUpdatedUtcAsync;
     private readonly Func<TimeSpan, CancellationToken, Task> _testingPreHarvesterDelayAsync;
+    private readonly Func<TimeSpan, CancellationToken, Task> _testingPerHarvesterDelayAsync;
     private readonly TimeSpan _harvesterTimeout;
     private readonly TimeSpan _contributorFreshnessTimeout;
     private readonly CachePolicy _docsCachePolicy;
@@ -440,6 +457,10 @@ public class DocAggregator
     /// Optional test seam for the configured pre-harvester delay. When <see langword="null"/>, the aggregator uses
     /// <see cref="Task.Delay(TimeSpan, CancellationToken)"/>.
     /// </param>
+    /// <param name="testingPerHarvesterDelayAsync">
+    /// Optional test seam for the configured per-harvester delay. When <see langword="null"/>, the aggregator uses
+    /// <see cref="Task.Delay(TimeSpan, CancellationToken)"/>.
+    /// </param>
     internal DocAggregator(
         IEnumerable<IDocHarvester> harvesters,
         AppSurfaceDocsOptions options,
@@ -452,7 +473,8 @@ public class DocAggregator
         TimeSpan? contributorFreshnessTimeout = null,
         Func<DateTimeOffset>? utcNow = null,
         AppSurfaceDocsHarvestProgressReporter? harvestProgress = null,
-        Func<TimeSpan, CancellationToken, Task>? testingPreHarvesterDelayAsync = null)
+        Func<TimeSpan, CancellationToken, Task>? testingPreHarvesterDelayAsync = null,
+        Func<TimeSpan, CancellationToken, Task>? testingPerHarvesterDelayAsync = null)
         : this(
             harvesters,
             options,
@@ -466,7 +488,8 @@ public class DocAggregator
             contributorFreshnessTimeout,
             utcNow,
             harvestProgress,
-            testingPreHarvesterDelayAsync)
+            testingPreHarvesterDelayAsync,
+            testingPerHarvesterDelayAsync)
     {
     }
 
@@ -543,6 +566,10 @@ public class DocAggregator
     /// Optional test seam for the configured pre-harvester delay. When <see langword="null"/>, the aggregator uses
     /// <see cref="Task.Delay(TimeSpan, CancellationToken)"/>.
     /// </param>
+    /// <param name="testingPerHarvesterDelayAsync">
+    /// Optional test seam for the configured per-harvester delay. When <see langword="null"/>, the aggregator uses
+    /// <see cref="Task.Delay(TimeSpan, CancellationToken)"/>.
+    /// </param>
     /// <remarks>
     /// Contributor freshness is resolved during snapshot generation, not during Razor view rendering. Callers that inject
     /// <paramref name="resolveGitLastUpdatedUtcAsync"/> should respect the supplied <see cref="CancellationToken"/>, because
@@ -568,7 +595,8 @@ public class DocAggregator
         TimeSpan? contributorFreshnessTimeout = null,
         Func<DateTimeOffset>? utcNow = null,
         AppSurfaceDocsHarvestProgressReporter? harvestProgress = null,
-        Func<TimeSpan, CancellationToken, Task>? testingPreHarvesterDelayAsync = null)
+        Func<TimeSpan, CancellationToken, Task>? testingPreHarvesterDelayAsync = null,
+        Func<TimeSpan, CancellationToken, Task>? testingPerHarvesterDelayAsync = null)
     {
         ArgumentNullException.ThrowIfNull(harvesters);
         ArgumentNullException.ThrowIfNull(options);
@@ -597,6 +625,7 @@ public class DocAggregator
         _contributorFreshnessTimeout = contributorFreshnessTimeout ?? ContributorFreshnessTimeout;
         _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
         _testingPreHarvesterDelayAsync = testingPreHarvesterDelayAsync ?? Task.Delay;
+        _testingPerHarvesterDelayAsync = testingPerHarvesterDelayAsync ?? Task.Delay;
         _repositoryRoot = options.Mode switch
         {
             AppSurfaceDocsMode.Source => ResolveRepositoryRoot(
@@ -938,6 +967,7 @@ public class DocAggregator
         var localizationOptions = _localizationOptions;
         var harvestProgress = _harvestProgress;
         var testingPreHarvesterDelayAsync = _testingPreHarvesterDelayAsync;
+        var testingPerHarvesterDelayAsync = _testingPerHarvesterDelayAsync;
         var testingPreHarvestDelayMilliseconds = Math.Max(
             0,
             _harvestOptions.TestingPreHarvestDelayMilliseconds);
@@ -953,10 +983,10 @@ public class DocAggregator
                    generation,
                    async (_, _, _) =>
                    {
+                       var harvesterRegistrations = CreateHarvesterRegistrations(harvesters);
                        var runId = harvestProgress is null
                            ? string.Empty
-                           : await harvestProgress.BeginRunAsync(
-                               harvesters.Select(harvester => harvester.GetType().Name).ToArray());
+                           : await harvestProgress.BeginRunAsync(harvesterRegistrations);
                        var sw = System.Diagnostics.Stopwatch.StartNew();
                        var harvestPathPolicy = _pathPolicySnapshotFactory.Create(repositoryRoot);
                        var harvestContext = new DocHarvestContext(repositoryRoot, harvestPathPolicy);
@@ -974,181 +1004,195 @@ public class DocAggregator
                                CancellationToken.None);
                        }
 
-                       var harvesterResults = await RunHarvestersAsync(
-                           harvesters,
-                           harvestContext,
-                           harvesterTimeout,
-                           logger,
-                           harvestProgress,
-                           runId,
-                           testingDelayPerHarvesterMilliseconds,
-                           testingDelayPerDocumentMilliseconds);
-                       var allNodes = new List<DocNode>();
-                       var markdownSourceOwnerIndexes = new HashSet<int>();
-                       foreach (var harvesterResult in harvesterResults)
+                       try
                        {
-                           foreach (var node in harvesterResult.Docs)
+                           var harvesterResults = await RunHarvestersAsync(
+                               harvesters,
+                               harvestContext,
+                               harvesterTimeout,
+                               logger,
+                               testingPerHarvesterDelayAsync,
+                               harvestProgress,
+                               runId,
+                               harvesterRegistrations,
+                               testingDelayPerHarvesterMilliseconds,
+                               testingDelayPerDocumentMilliseconds);
+                           var allNodes = new List<DocNode>();
+                           var markdownSourceOwnerIndexes = new HashSet<int>();
+                           foreach (var harvesterResult in harvesterResults)
                            {
-                               if (harvesterResult.MarkdownDownloadSourcesByPath?.ContainsKey(node.Path) == true)
+                               foreach (var node in harvesterResult.Docs)
                                {
-                                   markdownSourceOwnerIndexes.Add(allNodes.Count);
-                               }
-
-                               allNodes.Add(node);
-                           }
-                       }
-
-                       var nodesWithSymbolSourceLinks = allNodes
-                           .Select(n => n with { Content = ReplaceSymbolSourcePlaceholders(n) })
-                           .ToList();
-
-                       var sanitizedNodes = nodesWithSymbolSourceLinks
-                           .Select(
-                               n =>
-                               {
-                                   var sanitizedContent = string.IsNullOrEmpty(n.Content)
-                                       ? string.Empty
-                                       : sanitizer.Sanitize(n.Content) ?? string.Empty;
-
-                                   return new DocNode(
-                                       n.Title,
-                                       n.Path,
-                                       sanitizedContent,
-                                       n.ParentPath,
-                                       n.IsDirectory,
-                                       null,
-                                       n.Metadata,
-                                       n.Outline,
-                                       n.SymbolSourceProvenance)
+                                   if (harvesterResult.MarkdownDownloadSourcesByPath?.ContainsKey(node.Path) == true)
                                    {
-                                       RichAuthoringTabsTokens = n.RichAuthoringTabsTokens
-                                   };
-                               })
-                           .ToList();
-
-                       var targetNodes = sanitizedNodes.ToList();
-                       MergeNamespaceReadmes(targetNodes, repositoryRoot, renderEntryPointPanel: false, logger);
-                       var routeIdentityCatalog = DocRouteIdentityCatalog.Create(targetNodes, _docsUrlBuilder);
-                       // Rewrite before the real namespace merge so README-relative links keep their source path
-                       // context, while the manifest still reflects only final published docs targets.
-                       var markdownSourceOwnerNodes = new HashSet<DocNode>(ReferenceEqualityComparer.Instance);
-                       var rewrittenNodes = sanitizedNodes
-                           .Select(
-                               (n, index) =>
-                               {
-                                   var rewrittenNode = new DocNode(
-                                   n.Title,
-                                   n.Path,
-                                       DocContentLinkRewriter.RewriteInternalDocLinks(
-                                           n.Path,
-                                           n.Content,
-                                           _docsUrlBuilder.CurrentDocsRootPath,
-                                           routeIdentityCatalog),
-                                   n.ParentPath,
-                                   n.IsDirectory,
-                                   routeIdentityCatalog.TryGetPublicRoutePath(n.Path, out var publicRoutePath)
-                                       ? publicRoutePath
-                                       : null,
-                                   n.Metadata,
-                                   n.Outline,
-                                   n.SymbolSourceProvenance)
-                                   {
-                                       RichAuthoringTabsTokens = n.RichAuthoringTabsTokens
-                                   };
-                                   if (markdownSourceOwnerIndexes.Contains(index))
-                                   {
-                                       markdownSourceOwnerNodes.Add(rewrittenNode);
+                                       markdownSourceOwnerIndexes.Add(allNodes.Count);
                                    }
 
-                                   return rewrittenNode;
-                               })
-                           .ToList();
+                                   allNodes.Add(node);
+                               }
+                           }
 
-                       var namespaceReadmeDiagnostics = MergeNamespaceReadmes(
-                           rewrittenNodes,
-                           repositoryRoot,
-                           renderEntryPointPanel: true,
-                           logger);
+                           var nodesWithSymbolSourceLinks = allNodes
+                               .Select(n => n with { Content = ReplaceSymbolSourcePlaceholders(n) })
+                               .ToList();
 
-                       var docsByPath = rewrittenNodes
+                           var sanitizedNodes = nodesWithSymbolSourceLinks
+                               .Select(
+                                   n =>
+                                   {
+                                       var sanitizedContent = string.IsNullOrEmpty(n.Content)
+                                           ? string.Empty
+                                           : sanitizer.Sanitize(n.Content) ?? string.Empty;
+
+                                       return new DocNode(
+                                           n.Title,
+                                           n.Path,
+                                           sanitizedContent,
+                                           n.ParentPath,
+                                           n.IsDirectory,
+                                           null,
+                                           n.Metadata,
+                                           n.Outline,
+                                       n.SymbolSourceProvenance)
+                                       {
+                                           RichAuthoringTabsTokens = n.RichAuthoringTabsTokens,
+                                           GeneratedApiSymbol = n.GeneratedApiSymbol,
+                                           HasJavaScriptApiLifecycleProvenance = n.HasJavaScriptApiLifecycleProvenance
+                                       };
+                                   })
+                               .ToList();
+
+                           var targetNodes = sanitizedNodes.ToList();
+                           MergeNamespaceReadmes(targetNodes, repositoryRoot, renderEntryPointPanel: false, logger);
+                           var routeIdentityCatalog = DocRouteIdentityCatalog.Create(targetNodes, _docsUrlBuilder);
+                           // Rewrite before the real namespace merge so README-relative links keep their source path
+                           // context, while the manifest still reflects only final published docs targets.
+                           var markdownSourceOwnerNodes = new HashSet<DocNode>(ReferenceEqualityComparer.Instance);
+                           var rewrittenNodes = sanitizedNodes
+                               .Select(
+                                   (n, index) =>
+                                   {
+                                       var rewrittenNode = new DocNode(
+                                           n.Title,
+                                           n.Path,
+                                           DocContentLinkRewriter.RewriteInternalDocLinks(
+                                               n.Path,
+                                               n.Content,
+                                               _docsUrlBuilder.CurrentDocsRootPath,
+                                               routeIdentityCatalog),
+                                           n.ParentPath,
+                                           n.IsDirectory,
+                                           routeIdentityCatalog.TryGetPublicRoutePath(n.Path, out var publicRoutePath)
+                                               ? publicRoutePath
+                                               : null,
+                                           n.Metadata,
+                                           n.Outline,
+                                           n.SymbolSourceProvenance)
+                                       {
+                                           RichAuthoringTabsTokens = n.RichAuthoringTabsTokens,
+                                           GeneratedApiSymbol = n.GeneratedApiSymbol,
+                                           HasJavaScriptApiLifecycleProvenance = n.HasJavaScriptApiLifecycleProvenance
+                                       };
+                                       if (markdownSourceOwnerIndexes.Contains(index))
+                                       {
+                                           markdownSourceOwnerNodes.Add(rewrittenNode);
+                                       }
+
+                                       return rewrittenNode;
+                                   })
+                               .ToList();
+
+                           var namespaceReadmeDiagnostics = MergeNamespaceReadmes(
+                               rewrittenNodes,
+                               repositoryRoot,
+                               renderEntryPointPanel: true,
+                               logger);
+
+                           var docsByPath = rewrittenNodes
                            .GroupBy(n => n.Path)
                            .Select(g =>
-                           {
-                               var first = g.First();
-                               if (g.Skip(1).Any())
                                {
-                                   logger.LogWarning(
-                                       "Duplicate doc path detected: {Path}. Keeping first occurrence.",
-                                       g.Key);
-                               }
+                                   var first = g.First();
+                                   if (g.Skip(1).Any())
+                                   {
+                                       logger.LogWarning(
+                                           "Duplicate doc path detected: {Path}. Keeping first occurrence.",
+                                           g.Key);
+                                   }
 
-                               return first;
-                           })
-                           .ToDictionary(n => n.Path, n => n);
-                       var markdownDownloadSourceOwnerPaths = docsByPath.Values
-                           .Where(markdownSourceOwnerNodes.Contains)
-                           .Select(node => node.Path)
-                           .ToHashSet(StringComparer.Ordinal);
-                       var finalRouteIdentityCatalog = DocRouteIdentityCatalog.Create(docsByPath.Values, _docsUrlBuilder);
-                       var (markdownDownloadSources, markdownDownloadDiagnostic) = BuildMarkdownDownloadSources(
-                           harvesterResults,
-                           docsByPath,
-                           markdownDownloadSourceOwnerPaths,
-                           _markdownDownloadOptions);
-                       var pathResolver = DocPathResolver.Create(docsByPath.Values);
-                       var localizedGraph = new LocalizedDocsGraphBuilder(localizationOptions).Build(
-                           docsByPath.Values,
-                           finalRouteIdentityCatalog);
+                                   return first;
+                               })
+                               .ToDictionary(n => n.Path, n => n);
+                           var markdownDownloadSourceOwnerPaths = docsByPath.Values
+                               .Where(markdownSourceOwnerNodes.Contains)
+                               .Select(node => node.Path)
+                               .ToHashSet(StringComparer.Ordinal);
+                           var finalRouteIdentityCatalog = DocRouteIdentityCatalog.Create(docsByPath.Values, _docsUrlBuilder);
+                           var (markdownDownloadSources, markdownDownloadDiagnostic) = BuildMarkdownDownloadSources(
+                               harvesterResults,
+                               docsByPath,
+                               markdownDownloadSourceOwnerPaths,
+                               _markdownDownloadOptions);
+                           var pathResolver = DocPathResolver.Create(docsByPath.Values);
+                           var localizedGraph = new LocalizedDocsGraphBuilder(localizationOptions).Build(
+                               docsByPath.Values,
+                               finalRouteIdentityCatalog);
 
-                       var publicSections = BuildPublicSections(docsByPath.Values, logger);
-                       var contributorProvenanceByPath = await BuildContributorProvenanceByPathAsync(
-                           docsByPath.Values,
-                           CancellationToken.None);
-                       var (searchIndexPayload, searchRecordCount) = BuildSearchIndexPayload(
-                           docsByPath.Values,
-                           publicSections,
-                           finalRouteIdentityCatalog);
-                       var searchIndexProjections = new DocsSearchIndexProjectionCache(searchIndexPayload, localizedGraph);
-                       var routeManifest = finalRouteIdentityCatalog.BuildRouteManifest();
-                       var harvestHealth = BuildHarvestHealthSnapshot(
-                           harvesterResults,
-                           routeManifest.Diagnostics
-                               .Concat(localizedGraph.Diagnostics)
-                               .Concat(namespaceReadmeDiagnostics)
-                               .Concat(markdownDownloadDiagnostic is null ? [] : [markdownDownloadDiagnostic])
-                               .ToArray(),
-                           docsByPath.Count,
-                           repositoryRoot,
-                           utcNow(),
-                           harvestPathPolicy.CreateVcsIgnoreHealthDiagnostics(),
-                           logger);
-                       if (harvestProgress is not null)
-                       {
-                           await harvestProgress.CompleteRunAsync(runId, harvestHealth);
+                           var publicSections = BuildPublicSections(docsByPath.Values, logger);
+                           var contributorProvenanceByPath = await BuildContributorProvenanceByPathAsync(
+                               docsByPath.Values,
+                               CancellationToken.None);
+                           var (searchIndexPayload, searchRecordCount) = BuildSearchIndexPayload(
+                               docsByPath.Values,
+                               publicSections,
+                               finalRouteIdentityCatalog);
+                           var searchIndexProjections = new DocsSearchIndexProjectionCache(searchIndexPayload, localizedGraph);
+                           var routeManifest = finalRouteIdentityCatalog.BuildRouteManifest();
+                           var harvestHealth = BuildHarvestHealthSnapshot(
+                               harvesterResults,
+                               routeManifest.Diagnostics
+                                   .Concat(localizedGraph.Diagnostics)
+                                   .Concat(namespaceReadmeDiagnostics)
+                                   .Concat(markdownDownloadDiagnostic is null ? [] : [markdownDownloadDiagnostic])
+                                   .ToArray(),
+                               docsByPath.Count,
+                               repositoryRoot,
+                               utcNow(),
+                               harvestPathPolicy.CreateVcsIgnoreHealthDiagnostics(),
+                               logger);
+                           if (harvestProgress is not null)
+                           {
+                               await harvestProgress.CompleteRunAsync(runId, harvestHealth);
+                           }
+
+                           sw.Stop();
+                           logger.LogInformation(
+                               "Generated docs snapshot in {ElapsedMs} ms with {DocCount} docs and {SearchRecordCount} search records. Cache TTL: {CacheMinutes} minutes.",
+                               sw.ElapsedMilliseconds,
+                               docsByPath.Count,
+                               searchRecordCount,
+                               snapshotCacheDuration.TotalMinutes);
+
+                           var markdownDownloadSourceSnapshot = new MarkdownDownloadSourceSnapshot(markdownDownloadSources);
+                           var snapshot = new CachedDocsSnapshot(
+                               docsByPath,
+                               pathResolver,
+                               finalRouteIdentityCatalog,
+                               routeManifest,
+                               localizedGraph,
+                               publicSections,
+                               searchIndexProjections,
+                               contributorProvenanceByPath,
+                               harvestHealth,
+                               markdownDownloadSourceSnapshot);
+                           PublishMarkdownDownloadSources(generation, markdownDownloadSourceSnapshot);
+                           return snapshot;
                        }
-
-                       sw.Stop();
-                       logger.LogInformation(
-                           "Generated docs snapshot in {ElapsedMs} ms with {DocCount} docs and {SearchRecordCount} search records. Cache TTL: {CacheMinutes} minutes.",
-                           sw.ElapsedMilliseconds,
-                           docsByPath.Count,
-                           searchRecordCount,
-                           snapshotCacheDuration.TotalMinutes);
-
-                       var markdownDownloadSourceSnapshot = new MarkdownDownloadSourceSnapshot(markdownDownloadSources);
-                       var snapshot = new CachedDocsSnapshot(
-                           docsByPath,
-                           pathResolver,
-                           finalRouteIdentityCatalog,
-                           routeManifest,
-                           localizedGraph,
-                           publicSections,
-                           searchIndexProjections,
-                           contributorProvenanceByPath,
-                           harvestHealth,
-                           markdownDownloadSourceSnapshot);
-                       PublishMarkdownDownloadSources(generation, markdownDownloadSourceSnapshot);
-                       return snapshot;
+                       catch (Exception ex) when (harvestProgress is not null && !IsFatalException(ex))
+                       {
+                           await harvestProgress.FailRunAsync(runId);
+                           throw;
+                       }
                    },
                    docsCachePolicy,
                    cancellationToken: CancellationToken.None);
@@ -1238,8 +1282,10 @@ public class DocAggregator
         DocHarvestContext context,
         TimeSpan harvesterTimeout,
         ILogger logger,
+        Func<TimeSpan, CancellationToken, Task> testingPerHarvesterDelayAsync,
         AppSurfaceDocsHarvestProgressReporter? harvestProgress = null,
         string runId = "",
+        IReadOnlyList<AppSurfaceDocsHarvesterRegistration>? harvesterRegistrations = null,
         int testingDelayPerHarvesterMilliseconds = 0,
         int testingDelayPerDocumentMilliseconds = 0)
     {
@@ -1249,13 +1295,15 @@ public class DocAggregator
         }
 
         var tasks = harvesters.Select(
-            harvester => RunHarvesterAsync(
+            (harvester, index) => RunHarvesterAsync(
                 harvester,
                 context,
                 harvesterTimeout,
                 logger,
+                testingPerHarvesterDelayAsync,
                 harvestProgress,
                 runId,
+                harvesterRegistrations?[index].ProgressId ?? harvester.GetType().Name,
                 testingDelayPerHarvesterMilliseconds,
                 testingDelayPerDocumentMilliseconds));
         return await Task.WhenAll(tasks);
@@ -1266,13 +1314,29 @@ public class DocAggregator
         return harvester is not IDocHarvesterActivation activation || activation.IsEnabled;
     }
 
+    private static IReadOnlyList<AppSurfaceDocsHarvesterRegistration> CreateHarvesterRegistrations(
+        IReadOnlyList<IDocHarvester> harvesters)
+    {
+        var registrations = AppSurfaceDocsHarvesterRegistration.Create(
+            harvesters.Select(harvester => harvester.GetType().Name).ToArray());
+        return registrations
+            .Select(
+                (registration, index) => registration with
+                {
+                    IsBuiltInProgressHarvester = IsBuiltInProgressHarvester(harvesters[index])
+                })
+            .ToArray();
+    }
+
     private static async Task<HarvesterRunResult> RunHarvesterAsync(
         IDocHarvester harvester,
         DocHarvestContext context,
         TimeSpan harvesterTimeout,
         ILogger logger,
+        Func<TimeSpan, CancellationToken, Task> testingPerHarvesterDelayAsync,
         AppSurfaceDocsHarvestProgressReporter? harvestProgress = null,
         string runId = "",
+        string progressId = "",
         int testingDelayPerHarvesterMilliseconds = 0,
         int testingDelayPerDocumentMilliseconds = 0)
     {
@@ -1283,25 +1347,37 @@ public class DocAggregator
         {
             if (harvestProgress is not null)
             {
-                await harvestProgress.HarvesterStartedAsync(runId, harvesterType);
+                await harvestProgress.HarvesterStartedAsync(runId, progressId);
             }
 
             if (testingDelayPerHarvesterMilliseconds > 0)
             {
-                await Task.Delay(
+                await testingPerHarvesterDelayAsync(
                     TimeSpan.FromMilliseconds(testingDelayPerHarvesterMilliseconds),
-                    CancellationToken.None);
+                    timeoutCts.Token);
             }
 
             IReadOnlyList<DocNode> docs;
+            var harvesterContext = context;
+            if (harvestProgress is not null && IsBuiltInProgressHarvester(harvester))
+            {
+                harvesterContext = context with
+                {
+                    Progress = harvestProgress.CreateSession(
+                        runId,
+                        progressId,
+                        testingDelayPerDocumentMilliseconds,
+                        timeoutCts.Token)
+                };
+            }
             IReadOnlyDictionary<string, byte[]>? markdownDownloadSources = null;
             long markdownDownloadEligibleSourceBytes = 0;
             var markdownDownloadSourceCaptureExceededBudget = false;
             if (harvester is MarkdownHarvester markdownHarvester)
             {
-                var markdownResult = await markdownHarvester
-                    .HarvestWithSourceAsync(context, timeoutCts.Token)
-                    .WaitAsync(harvesterTimeout);
+                var markdownResult = await AwaitHarvesterResultOrTimeoutAsync(
+                    markdownHarvester.HarvestWithSourceAsync(harvesterContext, timeoutCts.Token),
+                    timeoutCts.Token);
                 docs = markdownResult.Nodes ?? [];
                 markdownDownloadSources = markdownResult.SourceByPath;
                 markdownDownloadEligibleSourceBytes = markdownResult.EligibleSourceBytes;
@@ -1309,15 +1385,10 @@ public class DocAggregator
             }
             else
             {
-                var harvestTask = HarvestWithContextAsync(harvester, context, timeoutCts.Token);
-                docs = await harvestTask.WaitAsync(harvesterTimeout) ?? [];
+                var harvestTask = HarvestWithContextAsync(harvester, harvesterContext, timeoutCts.Token);
+                docs = await AwaitHarvesterResultOrTimeoutAsync(harvestTask, timeoutCts.Token) ?? [];
             }
-            await PublishDocumentDelayAsync(
-                harvestProgress,
-                runId,
-                harvesterType,
-                docs.Count,
-                testingDelayPerDocumentMilliseconds);
+
             var additionalDiagnostics = CollectHarvestDiagnostics(harvester, harvesterType, logger);
             var blockingDiagnostic = FindStrictBlockingDiagnostic(harvester, additionalDiagnostics);
             var supplementalDiagnostics = blockingDiagnostic is null
@@ -1332,7 +1403,7 @@ public class DocAggregator
                                              || blockingDiagnostic?.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet;
             if (harvestProgress is not null)
             {
-                await harvestProgress.HarvesterCompletedAsync(runId, harvesterType, status, docs.Count);
+                await harvestProgress.HarvesterCompletedAsync(runId, progressId, status, docs.Count);
             }
 
             return new HarvesterRunResult(
@@ -1359,7 +1430,7 @@ public class DocAggregator
             var result = CreateTimedOutHarvesterRunResult(harvesterType, ParticipatesInStrictHealth(harvester));
             if (harvestProgress is not null)
             {
-                await harvestProgress.HarvesterCompletedAsync(runId, harvesterType, result.Status, result.Docs.Count);
+                await harvestProgress.HarvesterCompletedAsync(runId, progressId, result.Status, result.Docs.Count);
             }
 
             return result;
@@ -1376,7 +1447,7 @@ public class DocAggregator
             var result = CreateTimedOutHarvesterRunResult(harvesterType, ParticipatesInStrictHealth(harvester));
             if (harvestProgress is not null)
             {
-                await harvestProgress.HarvesterCompletedAsync(runId, harvesterType, result.Status, result.Docs.Count);
+                await harvestProgress.HarvesterCompletedAsync(runId, progressId, result.Status, result.Docs.Count);
             }
 
             return result;
@@ -1403,7 +1474,7 @@ public class DocAggregator
                 ParticipatesInStrictHealth: ParticipatesInStrictHealth(harvester));
             if (harvestProgress is not null)
             {
-                await harvestProgress.HarvesterCompletedAsync(runId, harvesterType, result.Status, result.Docs.Count);
+                await harvestProgress.HarvesterCompletedAsync(runId, progressId, result.Status, result.Docs.Count);
             }
 
             return result;
@@ -1430,36 +1501,46 @@ public class DocAggregator
                 ParticipatesInStrictHealth: ParticipatesInStrictHealth(harvester));
             if (harvestProgress is not null)
             {
-                await harvestProgress.HarvesterCompletedAsync(runId, harvesterType, result.Status, result.Docs.Count);
+                await harvestProgress.HarvesterCompletedAsync(runId, progressId, result.Status, result.Docs.Count);
             }
 
             return result;
         }
     }
 
-    private static async Task PublishDocumentDelayAsync(
-        AppSurfaceDocsHarvestProgressReporter? harvestProgress,
-        string runId,
-        string harvesterType,
-        int docCount,
-        int testingDelayPerDocumentMilliseconds)
+    /// <summary>
+    /// Awaits one harvester task while giving a completed result precedence when it races the timeout cancellation.
+    /// </summary>
+    /// <remarks>
+    /// The shared timeout token cancels both the harvester and this wait. Once the wait returns a result, callers must
+    /// preserve it rather than re-reading the timeout token: that token can transition after a valid result crossed the
+    /// boundary. A task that has not completed when cancellation wins is classified by the caller as timed out.
+    /// </remarks>
+    internal static async Task<T> AwaitHarvesterResultOrTimeoutAsync<T>(Task<T> harvesterTask, CancellationToken timeoutToken)
     {
-        if (docCount <= 0 || testingDelayPerDocumentMilliseconds <= 0)
+        ArgumentNullException.ThrowIfNull(harvesterTask);
+
+        if (harvesterTask.IsCompleted)
         {
-            return;
+            return await harvesterTask;
         }
 
-        for (var currentDocCount = 1; currentDocCount <= docCount; currentDocCount++)
+        var timeoutTask = Task.Delay(Timeout.InfiniteTimeSpan, timeoutToken);
+        await Task.WhenAny(harvesterTask, timeoutTask);
+        if (harvesterTask.IsCompleted)
         {
-            if (harvestProgress is not null)
-            {
-                await harvestProgress.HarvesterDocumentCountUpdatedAsync(runId, harvesterType, currentDocCount);
-            }
-
-            await Task.Delay(
-                TimeSpan.FromMilliseconds(testingDelayPerDocumentMilliseconds),
-                CancellationToken.None);
+            return await harvesterTask;
         }
+
+        throw new OperationCanceledException(timeoutToken);
+    }
+
+    private static bool IsBuiltInProgressHarvester(IDocHarvester harvester)
+    {
+        var harvesterType = harvester.GetType();
+        return harvesterType == typeof(MarkdownHarvester)
+               || harvesterType == typeof(CSharpDocHarvester)
+               || harvesterType == typeof(JavaScriptDocHarvester);
     }
 
     private static bool ParticipatesInStrictHealth(IDocHarvester harvester)
@@ -1490,7 +1571,9 @@ public class DocAggregator
             or DocHarvestDiagnosticCodes.JavaScriptParseFailed
             or DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped
             or DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape
-            or DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet);
+            or DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet
+            or DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict
+            or DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle);
     }
 
     private static Task<IReadOnlyList<DocNode>> HarvestWithContextAsync(
@@ -2344,6 +2427,7 @@ public class DocAggregator
                     var codeLanguage = DocMetadataPresentation.ResolveCodeLanguageValue(d.Metadata?.CodeLanguage);
                     var codeLanguageLabel = DocMetadataPresentation.ResolveCodeLanguageLabel(codeLanguage);
                     var hasPublicSection = DocPublicSectionCatalog.TryResolve(d.Metadata?.NavGroup, out var publicSection);
+                    var generatedApiSymbol = GetGeneratedApiSymbolForSearch(d);
 
                     return new DocsSearchIndexDocument(
                         publicRoutePath,
@@ -2374,7 +2458,11 @@ public class DocAggregator
                         entryPoints,
                         codeLanguage,
                         codeLanguageLabel,
-                        summaryPresentation);
+                        summaryPresentation,
+                        generatedApiSymbol?.ApiLifecycle,
+                        generatedApiSymbol?.ApiLifecycleLabel,
+                        generatedApiSymbol?.IsDeprecated,
+                        generatedApiSymbol is null ? null : true);
                 })
             .Where(r => r is not null)
             .Select(r => r!)
@@ -2392,6 +2480,34 @@ public class DocAggregator
             records);
 
         return (payload, records.Count);
+    }
+
+    private static DocGeneratedApiSymbol? GetGeneratedApiSymbolForSearch(DocNode node)
+    {
+        var marker = node.GeneratedApiSymbol;
+        if (marker is null
+            || !node.HasJavaScriptApiLifecycleProvenance
+            || string.IsNullOrWhiteSpace(node.ParentPath)
+            || !node.Path.StartsWith("api/javascript/", StringComparison.Ordinal)
+            || !node.Path.StartsWith($"{node.ParentPath}#", StringComparison.Ordinal)
+            || node.Metadata?.PageType?.StartsWith("javascript-", StringComparison.Ordinal) != true
+            || !IsCanonicalGeneratedApiSymbol(marker))
+        {
+            return null;
+        }
+
+        return marker;
+    }
+
+    private static bool IsCanonicalGeneratedApiSymbol(DocGeneratedApiSymbol marker)
+    {
+        return (marker.ApiLifecycle, marker.ApiLifecycleLabel) switch
+        {
+            ("public", "Public API") => true,
+            ("alpha", "Alpha") => true,
+            ("beta", "Beta") => true,
+            _ => false
+        };
     }
 
     private static IReadOnlyList<DocsSearchIndexEntryPoint>? BuildSearchIndexEntryPoints(
@@ -2837,7 +2953,9 @@ public class DocAggregator
                     RichAuthoringTabsTokens = (namespaceNode.RichAuthoringTabsTokens ?? [])
                         .Concat(readmeNode.RichAuthoringTabsTokens ?? [])
                         .Distinct(StringComparer.Ordinal)
-                        .ToArray()
+                        .ToArray(),
+                    GeneratedApiSymbol = namespaceNode.GeneratedApiSymbol,
+                    HasJavaScriptApiLifecycleProvenance = namespaceNode.HasJavaScriptApiLifecycleProvenance
                 };
 
                 var namespaceIndex = nodes.FindIndex(n => string.Equals(n.Path, namespaceNode.Path, StringComparison.OrdinalIgnoreCase));

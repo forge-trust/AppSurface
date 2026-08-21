@@ -1,4 +1,4 @@
-export const searchFields = ['title', 'aliases', 'keywords', 'summary', 'headings', 'bodyText', 'entryPoints', 'languageSearchText'];
+export const searchFields = ['title', 'aliases', 'keywords', 'summary', 'headings', 'bodyText', 'entryPoints', 'languageSearchText', 'apiLifecycleSearchText'];
 
 export const storeFields = [
   'id',
@@ -16,7 +16,11 @@ export const storeFields = [
   'languageLabel',
   'audience',
   'status',
-  'navGroup'
+  'navGroup',
+  'apiLifecycle',
+  'apiLifecycleLabel',
+  'isDeprecated',
+  'isGeneratedApiSymbol'
 ];
 
 const summaryPresentationLeafKinds = new Set(['text', 'code']);
@@ -28,7 +32,7 @@ const maxSummaryPresentationTextLength = 1024;
 export const defaultSearchOptions = {
   prefix: true,
   fuzzy: 0.1,
-  boost: { title: 6, aliases: 4, headings: 3, keywords: 2, summary: 2, entryPoints: 2, languageSearchText: 2, bodyText: 1 }
+  boost: { title: 6, aliases: 4, headings: 3, keywords: 2, summary: 2, entryPoints: 2, languageSearchText: 2, apiLifecycleSearchText: 2, bodyText: 1 }
 };
 
 export function createMiniSearchConfiguration() {
@@ -45,6 +49,7 @@ export function createMiniSearchConfiguration() {
 export function normalizeSearchDocument(doc: any) {
   const orderValue = Number.parseInt(String(doc?.order ?? ''), 10);
   const summaryPresentation = normalizeSummaryPresentation(doc?.summaryPresentation);
+  const isGeneratedApiSymbol = doc?.isGeneratedApiSymbol === true;
 
   const normalized: any = {
     id: String(doc?.id ?? doc?.path ?? ''),
@@ -61,6 +66,10 @@ export function normalizeSearchDocument(doc: any) {
     component: normalizeFacetValue(doc?.component),
     language: normalizeCodeLanguage(doc?.language),
     languageLabel: normalizeCodeLanguageLabel(doc?.language, doc?.languageLabel),
+    apiLifecycle: isGeneratedApiSymbol ? normalizeApiLifecycle(doc?.apiLifecycle) : '',
+    apiLifecycleLabel: isGeneratedApiSymbol ? String(doc?.apiLifecycleLabel ?? '').trim() : '',
+    isDeprecated: isGeneratedApiSymbol && doc?.isDeprecated === true,
+    isGeneratedApiSymbol,
     aliases: toStringArray(doc?.aliases),
     keywords: toStringArray(doc?.keywords),
     entryPoints: flattenEntryPoints(doc?.entryPoints),
@@ -76,6 +85,8 @@ export function normalizeSearchDocument(doc: any) {
     breadcrumbs: toStringArray(doc?.breadcrumbs),
     sourcePath: String(doc?.sourcePath ?? '').trim()
   };
+
+  normalized.apiLifecycleSearchText = buildApiLifecycleSearchText(normalized);
 
   if (summaryPresentation) {
     normalized.summaryPresentation = summaryPresentation;
@@ -93,6 +104,7 @@ export function createMiniSearchDocument(doc: any) {
     keywords: doc.keywords.join(' '),
     entryPoints: doc.entryPoints,
     languageSearchText: buildLanguageSearchText(doc.language, doc.languageLabel),
+    apiLifecycleSearchText: doc.apiLifecycleSearchText,
     summary: doc.summary,
     headings: doc.headings.join(' '),
     bodyText: doc.bodyText,
@@ -104,6 +116,10 @@ export function createMiniSearchDocument(doc: any) {
     component: doc.component,
     language: doc.language,
     languageLabel: doc.languageLabel ?? '',
+    apiLifecycle: doc.apiLifecycle,
+    apiLifecycleLabel: doc.apiLifecycleLabel ?? '',
+    isDeprecated: doc.isDeprecated,
+    isGeneratedApiSymbol: doc.isGeneratedApiSymbol,
     audience: doc.audience,
     status: doc.status,
     navGroup: doc.navGroup,
@@ -242,6 +258,7 @@ export function explainSearchResultRanking(candidates: any[] = [], options: any 
       exactMatch: signals.exactMatch,
       aliasOrKeywordMatch: signals.aliasOrKeywordMatch,
       entryPointMatch: signals.entryPointMatch,
+      lifecycleSymbolMatch: signals.lifecycleSymbolMatch,
       broadTaskBoost: signals.broadTaskBoost,
       internalDemotion: signals.internalDemotion,
       internalOrContributor: signals.internalOrContributor,
@@ -625,13 +642,16 @@ function analyzeRankingQuery(query: string) {
     .split(' ')
     .filter((token) => token.length > 1)
     .slice(0, 8);
+  const lifecycleTokens = tokens.filter((token) => ['public', 'alpha', 'beta', 'deprecated'].includes(token));
 
   return {
     raw: query,
     normalized,
     tokens,
     isInternalIntent: /\b(internal|internals|contributor|contributors|maintainer|maintainers)\b/.test(normalized),
-    isTaskIntent: isTaskIntentQuery(normalized, tokens)
+    isTaskIntent: isTaskIntentQuery(normalized, tokens),
+    lifecycleTokens,
+    hasLifecycleIntent: lifecycleTokens.length > 0
   };
 }
 
@@ -664,6 +684,9 @@ function classifyRankingSignals(doc: any, queryInfo: any, filterIntent: any) {
   }
 
   const filterOverride = filterIntent.api || filterIntent.internal;
+  const lifecycleSymbolMatch = queryInfo.hasLifecycleIntent
+    && doc?.isGeneratedApiSymbol === true
+    && queryInfo.lifecycleTokens.some((token: string) => doc?.apiLifecycleSearchText?.includes(token));
   const filterMismatch = filterIntent.hasActiveFilters && !matchesRankingFilters(doc, filterIntent.filters);
   const explicitInternalIntent = filterIntent.internal || queryInfo.isInternalIntent;
   const exactInternalIntent = internalOrContributor
@@ -682,6 +705,7 @@ function classifyRankingSignals(doc: any, queryInfo: any, filterIntent: any) {
     exactInternalIntent,
     aliasOrKeywordMatch,
     entryPointMatch,
+    lifecycleSymbolMatch,
     broadTaskBoost,
     internalDemotion,
     internalOrContributor,
@@ -699,23 +723,27 @@ function getRankingPriority(signals: any) {
     return 6;
   }
 
-  if (signals.exactInternalIntent) {
+  if (signals.lifecycleSymbolMatch && !signals.internalDemotion) {
     return 5;
   }
 
-  if ((signals.aliasOrKeywordMatch || signals.entryPointMatch) && !signals.internalDemotion) {
+  if (signals.exactInternalIntent) {
     return 4;
   }
 
-  if (signals.broadTaskBoost) {
+  if ((signals.aliasOrKeywordMatch || signals.entryPointMatch) && !signals.internalDemotion) {
     return 3;
+  }
+
+  if (signals.broadTaskBoost) {
+    return 2;
   }
 
   if (signals.internalDemotion) {
     return 0;
   }
 
-  return 2;
+  return 1;
 }
 
 function compareRankingExplanations(left: any, right: any) {
@@ -913,6 +941,32 @@ export function buildLanguageSearchText(language: any, label: any) {
 
   if (normalized === 'javascript') {
     terms.push('javascript', 'JavaScript', 'js');
+  }
+
+  return [...new Set(terms.map((term) => String(term ?? '').trim()).filter(Boolean))].join(' ');
+}
+
+// Normalizes generated-symbol lifecycle input to public, alpha, or beta; all other values are excluded from search metadata.
+export function normalizeApiLifecycle(value: any) {
+  const normalized = normalizeFacetValue(value).toLowerCase();
+  return ['public', 'alpha', 'beta'].includes(normalized) ? normalized : '';
+}
+
+// Builds lifecycle search terms only for trusted generated symbols. Public API adds its reader-facing synonym; deprecated symbols add the deprecated term.
+export function buildApiLifecycleSearchText(doc: any) {
+  if (doc?.isGeneratedApiSymbol !== true) {
+    return '';
+  }
+
+  const lifecycle = normalizeApiLifecycle(doc.apiLifecycle);
+  const label = String(doc.apiLifecycleLabel ?? '').trim();
+  const terms = [lifecycle, label];
+  if (lifecycle === 'public') {
+    terms.push('Public API');
+  }
+
+  if (doc.isDeprecated) {
+    terms.push('deprecated');
   }
 
   return [...new Set(terms.map((term) => String(term ?? '').trim()).filter(Boolean))].join(' ');

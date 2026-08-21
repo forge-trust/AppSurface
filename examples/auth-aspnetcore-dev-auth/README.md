@@ -6,7 +6,7 @@ DevAuth is local tooling. It is not production authentication, OIDC, ASP.NET Ide
 
 Use the [AppSurface Auth adoption ladder](../../start-here/auth-adoption-ladder.md) when deciding whether this local persona proof, Auth.Testing, OIDC, or raw ASP.NET Core authentication is the right next step.
 
-The root page renders `AppSurfaceDevAuthMarker` without wrapping it in an environment check. The renderer returns an empty string outside allowed environments, so host layouts can call it unconditionally. With default styles, the marker is a fixed bottom-right overlay above 640 CSS pixels and participates in normal document flow at widths up to and including 640 CSS pixels. It starts collapsed, then expands when you need to select `Local Admin`, `Local Viewer`, or `Clear`. Those controls post to the DevAuth control endpoints and return to the same page, so the fake auth state remains visible while you use the app.
+The root page renders `AppSurfaceDevAuthMarker` without wrapping it in an environment check. The renderer returns an empty string outside allowed environments, so host layouts can call it unconditionally. With default styles, the marker is a fixed bottom-right overlay above 640 CSS pixels and participates in normal document flow at widths up to and including 640 CSS pixels. It starts collapsed, then expands when you need to select `Local Admin`, `Local Viewer`, or `Clear`. The personas each declare a safe rooted [`LandingUrl`](../../Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md#persona-landing-urls): Admin returns to `/` and Viewer returns to `/viewer`. This prevents a switch from reloading a page that the newly selected persona cannot access. An explicit host `returnUrl` still takes precedence over either target.
 
 The example supplies the host-owned viewport meta tag and renders the marker after the page header but before `<main>`. That location lets the narrow-screen marker reserve space and push application content instead of covering it. The example also supplies narrow-screen outer margin through `AdditionalCssClass`; AppSurface cannot choose spacing that fits every host layout. Consumers can use the same option for a higher-specificity placement override, or set `IncludeDefaultStyles = false` and own the complete skin and responsive behavior. Fixed, absolutely positioned, clipped, or overriding host containers are outside the default non-obstruction guarantee. See the package's [responsive placement and customization guidance](../../Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md#responsive-placement-and-customization) for recipes and troubleshooting.
 
@@ -48,16 +48,19 @@ Or prove the flow with curl:
 ```bash
 cookie="$(curl -is -X POST http://127.0.0.1:5058/_appsurface/dev-auth/select/admin | awk 'tolower($0) ~ /^set-cookie: \.appsurface\.devauth\.persona=/{sub(/^[^:]*: /,""); sub(/;.*/,""); print; exit}')"
 curl -s -H "Cookie: $cookie" http://127.0.0.1:5058/api/auth-proof
-cookie="$(curl -is -X POST http://127.0.0.1:5058/_appsurface/dev-auth/select/viewer | awk 'tolower($0) ~ /^set-cookie: \.appsurface\.devauth\.persona=/{sub(/^[^:]*: /,""); sub(/;.*/,""); print; exit}')"
+viewer_response="$(curl -is -X POST http://127.0.0.1:5058/_appsurface/dev-auth/select/viewer)"
+printf '%s\n' "$viewer_response" | awk 'tolower($0) ~ /^location:[[:space:]]*\/viewer[[:space:]]*$/ { found=1 } END { exit !found }'
+cookie="$(printf '%s\n' "$viewer_response" | awk 'tolower($0) ~ /^set-cookie: \.appsurface\.devauth\.persona=/{sub(/^[^:]*: /,""); sub(/;.*/,""); print; exit}')"
+curl -s -H "Cookie: $cookie" http://127.0.0.1:5058/viewer
 curl -s -H "Cookie: $cookie" http://127.0.0.1:5058/api/auth-proof
 ```
 
 Expected outcomes:
 
-| State | `/api/auth-proof` outcome |
+| State | Expected outcome |
 | --- | --- |
 | `admin` selected | HTTP 200 with `{"result":"allowed","subject":"admin-1"}` |
-| `viewer` selected | HTTP 403 AppSurface ProblemDetails with `Forbid` / `Forbidden` |
+| `viewer` selected | Local `302 Location: /viewer`, followed by a 200 Viewer landing page; `/api/auth-proof` remains HTTP 403 AppSurface ProblemDetails with `Forbid` / `Forbidden` |
 | persona cleared | HTTP 401 AppSurface ProblemDetails with `Challenge` / `Unauthenticated` |
 
 Run the verifier:
@@ -66,7 +69,7 @@ Run the verifier:
 bash examples/auth-aspnetcore-dev-auth/verify.sh
 ```
 
-The verifier is a real-socket acceptance proof. It launches the already-built example on `127.0.0.1`, waits for that child process to report its configured Kestrel address, and then checks the viewport tag, the recommended header-marker-main ordering, the package responsive declarations, and the DevAuth persona flow over HTTP. Persona state stays in a verifier-private curl cookie jar instead of a manually constructed cookie header. The verifier ignores user curl configuration, bypasses proxies for the loopback proof, and does not follow redirects: any `3xx` response fails the named HTTP contract, preventing a persona cookie from crossing to another listener through a same-host, different-port redirect. Each request has a five-second connect timeout and a fifteen-second total timeout.
+The verifier is a real-socket acceptance proof. It launches the already-built example on `127.0.0.1`, waits for that child process to report its configured Kestrel address, and then checks the viewport tag, the recommended header-marker-main ordering, the package responsive declarations, and the DevAuth persona flow over HTTP. Persona state stays in a verifier-private curl cookie jar instead of a manually constructed cookie header. The verifier ignores user curl configuration, bypasses proxies for the loopback proof, and never follows redirects. It asserts the viewer's exact local `302 Location: /viewer` response before issuing a separate request to that route, preventing a persona cookie from crossing to another listener through a same-host, different-port redirect. Each request has a five-second connect timeout and a fifteen-second total timeout.
 
 ## What the verifier proves
 

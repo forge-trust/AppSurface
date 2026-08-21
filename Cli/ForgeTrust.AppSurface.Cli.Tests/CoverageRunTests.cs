@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.Versioning;
+using System.Text;
 using System.Text.Json;
 using CliFx;
 using CliFx.Infrastructure;
@@ -499,7 +500,8 @@ public sealed class CoverageRunTests
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
         repo.WriteFile("Sample.slnx", "<Solution />");
-        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        var project = "tests/Sample.Tests/Sample.Tests.csproj";
         using var current = PushCurrentDirectory(repo.Path);
         var runner = new RecordingCoverageRunProcessRunner();
         var reportGenerator = new RecordingReportGenerator();
@@ -517,6 +519,15 @@ public sealed class CoverageRunTests
         Assert.True(File.Exists(Path.Join(repo.Path, "TestResults", "coverage-merged", "coverage.cobertura.xml")));
         Assert.True(File.Exists(Path.Join(repo.Path, "TestResults", "coverage-merged", "summary.txt")));
         Assert.True(File.Exists(Path.Join(repo.Path, "TestResults", "coverage-merged", "timings.json")));
+        var manifestPath = Directory.EnumerateFiles(
+                Path.Join(repo.Path, "TestResults", "coverage-merged", "projects"),
+                CoverageProjectManifest.FileName,
+                SearchOption.AllDirectories)
+            .Single();
+        using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(manifestPath));
+        Assert.Equal(1, manifest.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("tests/Sample.Tests/Sample.Tests.csproj", manifest.RootElement.GetProperty("projectPath").GetString());
+        Assert.Matches(@"\ASample\.Tests-[0-9a-f]{8}\z", Assert.IsType<string>(manifest.RootElement.GetProperty("slug").GetString()));
         Assert.Single(reportGenerator.CoverageFiles);
         var testCommand = Assert.Single(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
         Assert.Contains("--logger:trx", testCommand.Arguments);
@@ -652,6 +663,34 @@ public sealed class CoverageRunTests
         Assert.Contains("\"warningCount\": 0", timings, StringComparison.Ordinal);
         Assert.Contains("\"metadataComplete\": true", timings, StringComparison.Ordinal);
         Assert.Contains("\"aggregationSeconds\"", timings, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_SlowTestDiagnostics_ShouldWriteFailureFirstSummaryBeforeCoverageFailure()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner
+        {
+            TestExitCode = 1,
+            WriteCoverageFiles = false,
+            JunitContent = """
+                <testsuite><testcase classname="SampleTests" name="Fails"><failure message="expected">stack trace</failure></testcase></testsuite>
+                """,
+        };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = CreateRequest(TestProjects: [project], SlowTestDiagnostics: true);
+
+        var exception = await Assert.ThrowsAsync<CommandException>(
+            () => workflow.RunAsync(request, console, CancellationToken.None));
+
+        Assert.Contains("ASCOV120", exception.Message, StringComparison.Ordinal);
+        var markdown = File.ReadAllText(Path.Join(repo.Path, "TestResults", "coverage-merged", "slow-test-diagnostics.md"));
+        Assert.Contains("# Test Results", markdown, StringComparison.Ordinal);
+        Assert.Contains("SampleTests.Fails", markdown, StringComparison.Ordinal);
+        Assert.Contains("stack trace", markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1196,6 +1235,7 @@ public sealed class CoverageRunTests
     [InlineData(".appsurface-coverage-output")]
     [InlineData("projects/sample-tests/dotnet-test.log")]
     [InlineData("projects/sample-tests/coverage-normalization.log")]
+    [InlineData("projects/sample-tests/coverage-project.json")]
     [InlineData("projects/sample-tests/coverage.cobertura.xml")]
     public void OutputGuard_ShouldRejectExistingFixedArtifactSymlink(string relativePath)
     {
@@ -1942,9 +1982,10 @@ public sealed class CoverageRunTests
         var junit = repo.WriteFile(
             "junit.xml",
             """
-            <testsuite tests="5" failures="1" errors="1" skipped="1">
-              <testcase classname="Pipe|Class" name="Fail&#10;Name" time="3"><failure /></testcase>
-              <testcase classname="ErrorClass" name="ErrorName" time="2"><error /></testcase>
+            <testsuite tests="6" failures="2" errors="1" skipped="1">
+              <testcase classname="Pipe|Class" name="Fail&#10;Name" time="3"><failure message="summary failure">failure trace</failure></testcase>
+              <testcase classname="ErrorClass" name="ErrorName" time="2"><error>error trace</error></testcase>
+              <testcase classname="EmptyFailureClass" name="EmptyFailureName" time="1.5"><failure message="attribute-only" /></testcase>
               <testcase classname="SkipClass" name="SkipName" time="1"><skipped /></testcase>
               <testcase time="-1" />
               <testcase classname="BadTime" name="Nan" time="NaN" />
@@ -1974,7 +2015,15 @@ public sealed class CoverageRunTests
         Assert.Contains(report.Warnings, warning => warning.Contains("invalid time '-1'", StringComparison.Ordinal));
         Assert.Contains(report.Warnings, warning => warning.Contains("invalid time 'NaN'", StringComparison.Ordinal));
         var markdown = File.ReadAllText(stagedMarkdownPath);
+        Assert.Contains("# Test Results", markdown, StringComparison.Ordinal);
+        Assert.Contains("| 6 | 2 | 2 | 1 | 1 |", markdown, StringComparison.Ordinal);
+        Assert.Contains("summary failure", markdown, StringComparison.Ordinal);
+        Assert.Contains("failure trace", markdown, StringComparison.Ordinal);
+        Assert.Contains("error trace", markdown, StringComparison.Ordinal);
+        Assert.Contains("attribute-only", markdown, StringComparison.Ordinal);
         Assert.Contains("Pipe\\|Class.Fail Name", markdown, StringComparison.Ordinal);
+        Assert.Contains("<summary>failed: tests/Sample.Tests/Sample.Tests.csproj — Pipe|Class.Fail Name</summary>", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("Pipe|Class.Fail\nName</summary>", markdown, StringComparison.Ordinal);
         Assert.Contains("| 3 | failed |", markdown, StringComparison.Ordinal);
         Assert.Contains("| 2 | error |", markdown, StringComparison.Ordinal);
         Assert.Contains("| 1 | skipped |", markdown, StringComparison.Ordinal);
@@ -1995,6 +2044,7 @@ public sealed class CoverageRunTests
         Assert.Equal(report.JunitFileCount, totals.GetProperty("junitFiles").GetInt32());
         Assert.Equal(report.TestCaseCount, totals.GetProperty("testCases").GetInt32());
         Assert.Equal(report.FailedTestCaseCount, totals.GetProperty("failedTestCases").GetInt32());
+        Assert.Equal(report.ErrorTestCaseCount, totals.GetProperty("errorTestCases").GetInt32());
         Assert.Equal(report.SkippedTestCaseCount, totals.GetProperty("skippedTestCases").GetInt32());
         Assert.Equal(report.Warnings.Count, totals.GetProperty("warnings").GetInt32());
         var topProject = Assert.Single(root.GetProperty("topProjects").EnumerateArray());
@@ -2009,9 +2059,136 @@ public sealed class CoverageRunTests
         Assert.Equal(report.TopTestCases[0].Status, firstTestCase.GetProperty("Status").GetString());
         Assert.Equal(report.TopTestCases[0].Project, firstTestCase.GetProperty("Project").GetString());
         Assert.Equal(report.TopTestCases[0].JunitFile, firstTestCase.GetProperty("JunitFile").GetString());
+        var failedTestDetails = root.GetProperty("failedTestDetails");
+        Assert.Equal(report.FailedTestCases.Count, failedTestDetails.GetArrayLength());
+        Assert.Contains("failure trace", failedTestDetails[0].GetProperty("FailureDetail").GetString() ?? string.Empty, StringComparison.Ordinal);
         Assert.Equal(
             report.Warnings,
             root.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()));
+    }
+
+    [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldPreserveBoundedFailureMessageWhenNoRoomRemainsForBody()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var message = new string('m', 1023);
+        var junit = repo.WriteFile(
+            "junit.xml",
+            $"<testsuite><testcase classname=\"SampleTests\" name=\"Failure\" time=\"1\"><failure message=\"{message}\">failure body</failure></testcase></testsuite>");
+
+        var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync(
+            [CreateProjectRunResult(repo.Path, junit)],
+            CancellationToken.None);
+
+        var failure = Assert.Single(report.FailedTestCases);
+        Assert.Equal(message, failure.FailureDetail);
+    }
+
+    [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldBoundAndEscapeFailureFirstSummary()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var failures = string.Concat(Enumerable.Range(0, 30).Select(index =>
+            $"<testcase classname=\"&lt;script&gt;\" name=\"Failure{index}\" time=\"{index}\"><failure>{new string('x', 4096)}</failure></testcase>"));
+        var junit = repo.WriteFile("junit.xml", $"<testsuite>{failures}</testsuite>");
+        var result = CreateProjectRunResult(repo.Path, junit);
+        var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync([result], CancellationToken.None);
+        var stagedMarkdownPath = TestPathUtils.PathUnder(repo.Path, $".{CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName}.{Guid.NewGuid():N}.tmp");
+        var stagedJsonPath = TestPathUtils.PathUnder(repo.Path, $".{CoverageRunSlowTestDiagnosticsWriter.JsonFileName}.{Guid.NewGuid():N}.tmp");
+
+        await CoverageRunSlowTestDiagnosticsWriter.WriteAsync(
+            stagedMarkdownPath,
+            stagedJsonPath,
+            repo.Path,
+            report,
+            () => 0,
+            _ => 0,
+            CancellationToken.None);
+
+        var markdown = File.ReadAllText(stagedMarkdownPath);
+        Assert.Equal(30, report.FailedTestCaseCount);
+        Assert.Equal(25, report.FailedTestCases.Count);
+        Assert.True(Encoding.UTF8.GetByteCount(markdown) <= 64 * 1024);
+        Assert.Contains("Showing 25 of 30 failed or errored test case(s).", markdown, StringComparison.Ordinal);
+        Assert.Contains("&lt;script&gt;", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("<script>", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldBoundLargeFailureAndWarningReports()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var projects = Enumerable.Range(0, 30)
+            .Select(index => new CoverageRunSlowTestProject(
+                $"tests/{new string('p', 1024)}-{index}.Tests.csproj",
+                Exclusive: false,
+                Seconds: index,
+                ExitCode: 1,
+                JunitFile: null,
+                ParserStatus: "notRequested",
+                LogFile: Path.Join(repo.Path, $"project-{index}.log")))
+            .ToArray();
+        var failedTestCases = Enumerable.Range(0, 25)
+            .Select(index => new CoverageRunSlowTestCase(
+                new string('n', 2048),
+                $"Failure{index}",
+                index,
+                "failed",
+                projects[index].Project,
+                $"junit-{index}.xml",
+                index == 0 ? null : new string('x', 4096)))
+            .ToArray();
+        var report = new CoverageRunSlowTestDiagnosticsReport(
+            CoverageRunSlowTestDiagnosticsWriter.SchemaVersion,
+            DateTimeOffset.UtcNow,
+            MetadataComplete: false,
+            JunitFileCount: 0,
+            projects,
+            TestCaseCount: 30,
+            FailedTestCaseCount: 30,
+            ErrorTestCaseCount: 0,
+            SkippedTestCaseCount: 0,
+            failedTestCases,
+            TopTestCases: [],
+            Warnings: Enumerable.Range(0, 100)
+                .Select(index => $"{new string('a', index)}{string.Concat(Enumerable.Repeat("😀", 1024))}")
+                .ToArray());
+        var stagedMarkdownPath = TestPathUtils.PathUnder(repo.Path, $".{CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName}.{Guid.NewGuid():N}.tmp");
+        var stagedJsonPath = TestPathUtils.PathUnder(repo.Path, $".{CoverageRunSlowTestDiagnosticsWriter.JsonFileName}.{Guid.NewGuid():N}.tmp");
+
+        await CoverageRunSlowTestDiagnosticsWriter.WriteAsync(
+            stagedMarkdownPath,
+            stagedJsonPath,
+            repo.Path,
+            report,
+            () => 0,
+            _ => 0,
+            CancellationToken.None);
+
+        var markdown = File.ReadAllText(stagedMarkdownPath);
+        Assert.True(Encoding.UTF8.GetByteCount(markdown) <= 64 * 1024);
+        Assert.Contains("5 additional project(s) are available in the artifact.", markdown, StringComparison.Ordinal);
+        Assert.Contains("No failure message or stack trace was included in the JUnit result.", markdown, StringComparison.Ordinal);
+        Assert.Contains("Showing ", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("Showing 25 of 30", markdown, StringComparison.Ordinal);
+        Assert.Contains("Slow-test diagnostics reached their output budget.", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SlowTestDiagnosticsWriter_ShouldPreserveHigherPriorityFailureStatus()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var junit = repo.WriteFile(
+            "junit.xml",
+            "<testsuite><testcase classname=\"SampleTests\" name=\"Priority\" time=\"1\"><error>higher-priority evidence</error><failure>lower-priority evidence</failure></testcase></testsuite>");
+        var report = await CoverageRunSlowTestDiagnosticsWriter.CollectAsync(
+            [CreateProjectRunResult(repo.Path, junit)],
+            CancellationToken.None);
+
+        var failure = Assert.Single(report.FailedTestCases);
+        Assert.Equal("error", failure.Status);
+        Assert.Contains("higher-priority evidence", failure.FailureDetail, StringComparison.Ordinal);
+        Assert.DoesNotContain("lower-priority evidence", failure.FailureDetail, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2362,6 +2539,28 @@ public sealed class CoverageRunTests
             CancellationToken.None));
 
         Assert.True(Directory.Exists(timingsPath));
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldClassifyProjectManifestWriteFailure()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = new CoverageRunWorkflow(
+            new RecordingCoverageRunProcessRunner(),
+            new RecordingReportGenerator(),
+            TimeProvider.System,
+            writeProjectManifest: (_, _, _, _) => throw new IOException("manifest destination is unavailable"));
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project]),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("ASCOV120", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("project manifest could not be written", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace ForgeTrust.AppSurface.PackageIndex;
 
 /// <summary>
@@ -13,6 +15,7 @@ internal sealed class PackageArtifactWorkflow
     private readonly ICommandRunner _commandRunner;
     private readonly PackageArtifactValidator _validator;
     private readonly ICoverageCliConsumerProofWorkflow _coverageProofWorkflow;
+    private readonly IDocsPackageConsumerProofWorkflow _docsProofWorkflow;
     private readonly PackagePayloadInventoryLoader _payloadInventoryLoader;
     private readonly PackageArtifactManifestWriter _artifactManifestWriter;
 
@@ -26,16 +29,22 @@ internal sealed class PackageArtifactWorkflow
     /// Packaged coverage CLI proof that installs the validated CLI artifact in a clean consumer fixture before
     /// protected publish jobs can consume the artifact manifest.
     /// </param>
+    /// <param name="docsProofWorkflow">
+    /// Packed Docs consumer proof that restores the validated Docs artifact in an independent locked consumer before
+    /// protected publish jobs can consume the artifact manifest.
+    /// </param>
     internal PackageArtifactWorkflow(
         PackagePublishPlanResolver planResolver,
         ICommandRunner commandRunner,
         PackageArtifactValidator validator,
-        ICoverageCliConsumerProofWorkflow coverageProofWorkflow)
+        ICoverageCliConsumerProofWorkflow coverageProofWorkflow,
+        IDocsPackageConsumerProofWorkflow docsProofWorkflow)
     {
         _planResolver = planResolver;
         _commandRunner = commandRunner;
         _validator = validator;
         _coverageProofWorkflow = coverageProofWorkflow;
+        _docsProofWorkflow = docsProofWorkflow;
         _payloadInventoryLoader = new PackagePayloadInventoryLoader();
         _artifactManifestWriter = new PackageArtifactManifestWriter();
     }
@@ -52,8 +61,15 @@ internal sealed class PackageArtifactWorkflow
     {
         ValidateRequest(request);
         PackageVersionValidator.Require(request.PackageVersion, PackageVersionPolicy.StableOrPrereleaseNoBuildMetadata);
-        CoverageCliConsumerProofWorkflow.PrepareWorkDirectory(
+        PackageProofWorkDirectory.RequireDisjoint(
             request.CoverageProofWorkDirectory,
+            request.DocsProofWorkDirectory);
+        PackageProofWorkDirectory.Prepare(
+            request.CoverageProofWorkDirectory,
+            request.RepositoryRoot,
+            request.ArtifactsOutputPath);
+        PackageProofWorkDirectory.Prepare(
+            request.DocsProofWorkDirectory,
             request.RepositoryRoot,
             request.ArtifactsOutputPath);
 
@@ -74,6 +90,8 @@ internal sealed class PackageArtifactWorkflow
             [
                 "restore",
                 "ForgeTrust.AppSurface.slnx",
+                "--configfile",
+                "NuGet.package-gate.config",
                 "/p:ContinuousIntegrationBuild=true",
                 "/p:TailwindRuntimeBinaryResolutionEnabled=true"
             ],
@@ -150,18 +168,51 @@ internal sealed class PackageArtifactWorkflow
             request.CoverageProofReportPath,
             CoverageCliConsumerProofReportRenderer.RenderMarkdown(coverageProofReport),
             cancellationToken);
+        var coverageProofEvidencePath = Path.Join(
+            Path.GetDirectoryName(request.CoverageProofReportPath)!,
+            "coverage-cli-consumer-proof.evidence.json");
+        await WriteCoverageProofEvidenceAsync(
+            coverageProofEvidencePath,
+            CoverageCliConsumerProofEvidenceRenderer.RenderJson(coverageProofReport),
+            request.ArtifactsOutputPath,
+            cancellationToken);
+
+        var docsProofReport = await _docsProofWorkflow.RunAsync(
+            new DocsPackageConsumerProofRequest(
+                request.RepositoryRoot,
+                request.ArtifactsOutputPath,
+                request.PackageVersion,
+                request.DocsProofWorkDirectory,
+                request.Source),
+            report,
+            cancellationToken);
+        CreateParentDirectoryIfPresent(request.DocsProofReportPath);
+        await File.WriteAllTextAsync(
+            request.DocsProofReportPath,
+            DocsPackageConsumerProofReportRenderer.RenderMarkdown(docsProofReport),
+            cancellationToken);
 
         CreateParentDirectoryIfPresent(request.ReportPath);
         await File.WriteAllTextAsync(
             request.ReportPath,
-            PackageArtifactReportRenderer.RenderMarkdown(report, coverageProofReport),
+            PackageArtifactReportRenderer.RenderMarkdown(report, coverageProofReport, docsProofReport),
             cancellationToken);
 
-        if (!coverageProofReport.Succeeded)
+        if (!coverageProofReport.Succeeded || !docsProofReport.Succeeded)
         {
             DeleteArtifactManifest(request.ArtifactManifestPath);
-            throw new PackageIndexException(
-                $"Coverage CLI consumer proof failed for '{CoverageCliConsumerProofWorkflow.CliPackageId}'. Report: {request.CoverageProofReportPath}");
+            var failedProofs = new List<string>();
+            if (!coverageProofReport.Succeeded)
+            {
+                failedProofs.Add($"Coverage CLI consumer proof failed. Report: {request.CoverageProofReportPath}");
+            }
+
+            if (!docsProofReport.Succeeded)
+            {
+                failedProofs.Add($"Docs package consumer proof failed. Report: {request.DocsProofReportPath}");
+            }
+
+            throw new PackageIndexException(string.Join(" ", failedProofs));
         }
 
         await _artifactManifestWriter.WriteAsync(
@@ -209,6 +260,16 @@ internal sealed class PackageArtifactWorkflow
         if (string.IsNullOrWhiteSpace(request.CoverageProofReportPath))
         {
             throw new PackageIndexException("Coverage CLI consumer proof report path must be provided.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.DocsProofWorkDirectory))
+        {
+            throw new PackageIndexException("Docs package consumer proof work directory must be provided.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.DocsProofReportPath))
+        {
+            throw new PackageIndexException("Docs package consumer proof report path must be provided.");
         }
 
         if (string.IsNullOrWhiteSpace(request.Source))
@@ -277,6 +338,103 @@ internal sealed class PackageArtifactWorkflow
             Directory.CreateDirectory(directory);
         }
     }
+
+    /// <summary>
+    /// Atomically publishes scrubbed coverage proof evidence without following an existing symbolic-link destination.
+    /// </summary>
+    /// <param name="evidencePath">Final evidence path below the trusted artifact output directory.</param>
+    /// <param name="contents">Already-scrubbed JSON payload.</param>
+    /// <param name="trustedRootDirectory">Regular artifact output directory that bounds every evidence directory component.</param>
+    /// <param name="cancellationToken">Cancellation token for temporary-file creation.</param>
+    /// <param name="temporaryFileCreated">
+    /// Optional narrow test seam invoked after the temporary file is closed and before the destination is replaced.
+    /// </param>
+    /// <returns>A task that completes after the temporary file has replaced a regular destination.</returns>
+    internal static async Task WriteCoverageProofEvidenceAsync(
+        string evidencePath,
+        string contents,
+        string trustedRootDirectory,
+        CancellationToken cancellationToken,
+        Action<string>? temporaryFileCreated = null)
+    {
+        var parentDirectory = Path.GetDirectoryName(evidencePath);
+        if (string.IsNullOrWhiteSpace(parentDirectory))
+        {
+            throw new PackageIndexException("Coverage proof evidence path does not have a parent directory.");
+        }
+        EnsureRegularDirectoryChain(trustedRootDirectory, parentDirectory);
+        EnsureRegularOrAbsentFile(evidencePath);
+        var temporaryPath = Path.Join(parentDirectory, $".{Path.GetFileName(evidencePath)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await using (var stream = new System.IO.FileStream(
+                temporaryPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 4096,
+                options: FileOptions.Asynchronous))
+            {
+                await stream.WriteAsync(Encoding.UTF8.GetBytes(contents), cancellationToken);
+            }
+
+            temporaryFileCreated?.Invoke(temporaryPath);
+            cancellationToken.ThrowIfCancellationRequested();
+            EnsureRegularDirectoryChain(trustedRootDirectory, parentDirectory);
+            EnsureRegularOrAbsentFile(evidencePath);
+            File.Move(temporaryPath, evidencePath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    private static void EnsureRegularDirectoryChain(string trustedRootDirectory, string directoryPath)
+    {
+        var root = new DirectoryInfo(Path.GetFullPath(trustedRootDirectory));
+        if (!root.Exists || root.LinkTarget is not null)
+        {
+            throw new PackageIndexException($"Coverage proof evidence root '{root.FullName}' must be a regular existing directory.");
+        }
+
+        var relative = Path.GetRelativePath(root.FullName, Path.GetFullPath(directoryPath));
+        if (Path.IsPathRooted(relative)
+            || relative == ".."
+            || relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+            || relative.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal))
+        {
+            throw new PackageIndexException($"Coverage proof evidence directory '{directoryPath}' must be contained by artifact output '{root.FullName}'.");
+        }
+
+        var current = root;
+        foreach (var component in relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = new DirectoryInfo(Path.Join(current.FullName, component));
+            if (!current.Exists || current.LinkTarget is not null)
+            {
+                throw new PackageIndexException($"Coverage proof evidence directory '{current.FullName}' must be a regular existing directory.");
+            }
+        }
+    }
+
+    private static void EnsureRegularOrAbsentFile(string path)
+    {
+        if (Directory.Exists(path))
+        {
+            throw new PackageIndexException(
+                $"Coverage proof evidence destination '{path}' must be a regular file or absent; a directory already exists at that path.");
+        }
+
+        var file = new FileInfo(path);
+        if (file.LinkTarget is not null)
+        {
+            throw new PackageIndexException($"Coverage proof evidence destination '{path}' must not be a symbolic link.");
+        }
+    }
 }
 
 /// <summary>
@@ -290,6 +448,8 @@ internal sealed class PackageArtifactWorkflow
 /// <param name="ArtifactManifestPath">Machine-readable validation manifest path for the publish workflow.</param>
 /// <param name="CoverageProofWorkDirectory">Isolated work directory for the packaged coverage CLI consumer proof.</param>
 /// <param name="CoverageProofReportPath">Standalone markdown report path for the packaged coverage CLI consumer proof.</param>
+/// <param name="DocsProofWorkDirectory">Isolated work directory for the packed Docs consumer proof.</param>
+/// <param name="DocsProofReportPath">Standalone markdown report path for the packed Docs consumer proof.</param>
 /// <param name="Source">NuGet source used for third-party dependencies while first-party packages map to local artifacts.</param>
 internal sealed record PackageArtifactRequest(
     string RepositoryRoot,
@@ -300,4 +460,6 @@ internal sealed record PackageArtifactRequest(
     string ArtifactManifestPath,
     string CoverageProofWorkDirectory,
     string CoverageProofReportPath,
+    string DocsProofWorkDirectory,
+    string DocsProofReportPath,
     string Source);

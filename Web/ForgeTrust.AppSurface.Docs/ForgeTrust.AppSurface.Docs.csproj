@@ -18,10 +18,7 @@
     <ProjectReference Include="..\..\Config\ForgeTrust.AppSurface.Config\ForgeTrust.AppSurface.Config.csproj" />
     <ProjectReference Include="..\..\Intelligence\ForgeTrust.AppSurface.Intelligence\ForgeTrust.AppSurface.Intelligence.csproj" />
     <ProjectReference Include="..\..\ForgeTrust.AppSurface.Theming\ForgeTrust.AppSurface.Theming.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Include="..\..\tools\ForgeTrust.AppSurface.ReleaseContracts\UnreleasedEntryComposer.cs" Link="Services\UnreleasedEntryComposer.cs" />
+    <ProjectReference Include="..\..\tools\ForgeTrust.AppSurface.ReleaseContracts\ForgeTrust.AppSurface.ReleaseContracts.csproj" />
   </ItemGroup>
 
   <Import Project="..\ForgeTrust.AppSurface.Web.Tailwind\build\ForgeTrust.AppSurface.Web.Tailwind.targets" Condition="Exists('..\ForgeTrust.AppSurface.Web.Tailwind\build\ForgeTrust.AppSurface.Web.Tailwind.targets')" />

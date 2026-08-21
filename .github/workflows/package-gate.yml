@@ -74,8 +74,37 @@ jobs:
         run: |
           dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --configuration Release --no-build -- verify
 
-      - name: Pack release artifacts
+      - name: Verify package artifacts
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/nuget-packages
+          PACKAGE_VERSION: 0.0.0-ci.${{ github.run_number }}
+          PACKAGE_ARTIFACTS: ${{ runner.temp }}/package-gate-artifacts
         run: |
-          dotnet pack ForgeTrust.AppSurface.slnx --configuration Release --no-build --output "${{ runner.temp }}/appsurface-packages" /p:TailwindRuntimeBinaryResolutionEnabled=true
+          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
+            verify-packages \
+            --package-version "${PACKAGE_VERSION}" \
+            --artifacts-output "${PACKAGE_ARTIFACTS}" \
+            --artifact-manifest "${PACKAGE_ARTIFACTS}/package-artifact-manifest.json" \
+            --report "${PACKAGE_ARTIFACTS}/package-validation-report.md"
+
+      - name: Upload package validation diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appsurface-package-gate-validation-diagnostics-${{ github.run_number }}
+          path: |
+            ${{ runner.temp }}/package-gate-artifacts/package-validation-report.md
+            ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof.md
+            ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof.evidence.json
+            ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof/NuGet.tool.config
+            ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof/consumer/NuGet.config
+            ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof/consumer/.config/dotnet-tools.json
+            ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof/consumer/TestResults/**
+            ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof/logs/**
+            ${{ runner.temp }}/package-gate-artifacts/docs-package-consumer-proof.md
+            ${{ runner.temp }}/package-gate-artifacts/docs-package-consumer-proof/consumer/NuGet.config
+            ${{ runner.temp }}/package-gate-artifacts/docs-package-consumer-proof/consumer/Docs.ConsumerProof.csproj
+            ${{ runner.temp }}/package-gate-artifacts/docs-package-consumer-proof/consumer/packages.lock.json
+            ${{ runner.temp }}/package-gate-artifacts/docs-package-consumer-proof/consumer/obj/project.assets.json
+            ${{ runner.temp }}/package-gate-artifacts/docs-package-consumer-proof/logs/**
+          if-no-files-found: warn

@@ -121,11 +121,12 @@
 }
 
 /*
- * Docs predates the shared theme pair and still has a small number of Tailwind slate utilities in its Razor views.
- * Preserve those views while a host opts into browser-local light/system preferences by mapping Tailwind's neutral
- * palette back to the Docs semantic tokens. Dark and legacy fixed-dark hosts keep Tailwind's original palette.
+ * Docs predates the shared theme pair and still has a small number of Tailwind utility colors in its Razor views.
+ * Preserve those views while a host opts into browser-local light/system preferences by mapping those utilities
+ * back to Docs semantic tokens. Dark and legacy fixed-dark hosts keep Tailwind's original palette.
  */
-html[data-as-theme-mode="light"] {
+html[data-as-theme-mode="light"],
+html[data-docs-theme-preset="appsurface-light"] {
     --color-slate-50: var(--docs-color-text-strong);
     --color-slate-100: var(--docs-color-text-strong);
     --color-slate-200: var(--docs-color-text-default);
@@ -137,8 +138,8 @@ html[data-as-theme-mode="light"] {
     --color-slate-800: var(--docs-color-border-muted);
     --color-slate-900: var(--docs-color-surface-raised);
     --color-slate-950: var(--docs-color-surface-canvas);
-    --color-amber-100: var(--docs-color-visited-link);
-    --color-amber-200: var(--docs-color-visited-link);
+    --color-amber-100: var(--docs-color-link-visited);
+    --color-amber-200: var(--docs-color-link-visited);
     --color-emerald-100: var(--docs-color-link);
     --color-emerald-200: var(--docs-color-link);
     --color-emerald-300: var(--docs-color-link);
@@ -148,16 +149,64 @@ html[data-as-theme-mode="light"] {
     --color-sky-100: var(--docs-color-link);
 }
 
-html[data-as-theme-mode="light"] .text-white {
+/*
+ * The fixed Docs-local preset does not emit the host-owned status roles. Map every status utility still used by
+ * diagnostics to the complete package-owned syntax and surface palette so those panels do not retain dark fills.
+ */
+html[data-docs-theme-preset="appsurface-light"] {
+    --color-amber-100: var(--docs-color-syntax-parameter);
+    --color-amber-200: var(--docs-color-syntax-parameter);
+    --color-amber-400: var(--docs-color-syntax-parameter);
+    --color-amber-500: var(--docs-color-syntax-parameter);
+    --color-amber-950: var(--docs-color-surface-panel-faint);
+    --color-emerald-100: var(--docs-color-syntax-inserted);
+    --color-emerald-200: var(--docs-color-syntax-inserted);
+    --color-emerald-300: var(--docs-color-syntax-inserted);
+    --color-emerald-400: var(--docs-color-syntax-inserted);
+    --color-emerald-500: var(--docs-color-syntax-inserted);
+    --color-emerald-950: var(--docs-color-surface-panel-faint);
+    --color-rose-100: var(--docs-color-syntax-deleted);
+    --color-rose-200: var(--docs-color-syntax-deleted);
+    --color-rose-300: var(--docs-color-syntax-deleted);
+    --color-rose-400: var(--docs-color-syntax-deleted);
+    --color-rose-500: var(--docs-color-syntax-deleted);
+    --color-rose-950: var(--docs-color-surface-panel-faint);
+    --color-sky-100: var(--docs-color-syntax-type);
+    --color-sky-400: var(--docs-color-syntax-type);
+    --color-sky-950: var(--docs-color-surface-panel-faint);
+    --color-teal-100: var(--docs-brand-teal);
+}
+
+/* Fixed-light badges need dark semantic foregrounds over their translucent category fills. */
+html[data-docs-theme-preset="appsurface-light"] .docs-page-badge--example {
+    color: var(--docs-color-syntax-inserted);
+}
+
+html[data-docs-theme-preset="appsurface-light"] .docs-page-badge--api-reference,
+html[data-docs-theme-preset="appsurface-light"] .docs-page-badge--glossary,
+html[data-docs-theme-preset="appsurface-light"] .docs-page-badge--faq {
+    color: var(--docs-color-syntax-type);
+}
+
+html[data-docs-theme-preset="appsurface-light"] .docs-page-badge--internals,
+html[data-docs-theme-preset="appsurface-light"] .docs-page-badge--troubleshooting {
+    color: var(--docs-color-syntax-parameter);
+}
+
+html[data-as-theme-mode="light"] .text-white,
+html[data-docs-theme-preset="appsurface-light"] .text-white {
     color: var(--docs-color-text-strong);
 }
 
-html[data-as-theme-mode="light"] [class~="border-white/10"] {
+html[data-as-theme-mode="light"] [class~="border-white/10"],
+html[data-docs-theme-preset="appsurface-light"] [class~="border-white/10"] {
     border-color: var(--docs-color-border-muted);
 }
 
 html[data-as-theme-mode="light"] .docs-token-bg-accent.text-slate-950,
-html[data-as-theme-mode="light"] .docs-token-bg-accent-strong.text-white {
+html[data-as-theme-mode="light"] .docs-token-bg-accent-strong.text-white,
+html[data-docs-theme-preset="appsurface-light"] .docs-token-bg-accent.text-slate-950,
+html[data-docs-theme-preset="appsurface-light"] .docs-token-bg-accent-strong.text-white {
     color: var(--color-white);
 }
 
@@ -174,8 +223,8 @@ html[data-as-theme-mode="light"] .docs-token-bg-accent-strong.text-white {
         --color-slate-800: var(--docs-color-border-muted);
         --color-slate-900: var(--docs-color-surface-raised);
         --color-slate-950: var(--docs-color-surface-canvas);
-        --color-amber-100: var(--docs-color-visited-link);
-        --color-amber-200: var(--docs-color-visited-link);
+        --color-amber-100: var(--docs-color-link-visited);
+        --color-amber-200: var(--docs-color-link-visited);
         --color-emerald-100: var(--docs-color-link);
         --color-emerald-200: var(--docs-color-link);
         --color-emerald-300: var(--docs-color-link);
@@ -1670,6 +1719,39 @@ body {
     color: var(--docs-color-link-visited);
     background: var(--docs-color-surface-muted);
     font-weight: 600;
+}
+
+.docs-content .docs-api-lifecycle-badge {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--docs-color-border-accent);
+    border-radius: 9999px;
+    padding: 0.2rem 0.65rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    line-height: 1.25;
+    text-transform: uppercase;
+    color: var(--docs-color-accent-muted);
+    background: var(--docs-color-accent-fill-soft);
+}
+
+.docs-content .docs-api-lifecycle-badge--alpha {
+    border-color: var(--docs-color-border-accent-faint);
+    background: var(--docs-color-brand-violet-wash);
+    color: var(--docs-color-link-visited);
+}
+
+.docs-content .docs-api-lifecycle-badge--beta {
+    border-color: var(--docs-color-border-accent-strong);
+    background: var(--docs-color-brand-teal-wash);
+    color: var(--docs-color-accent-soft);
+}
+
+.docs-content .docs-api-lifecycle-badge--deprecated {
+    border-color: var(--docs-color-border-default-strong);
+    background: var(--docs-color-surface-panel-hover);
+    color: var(--docs-color-syntax-parameter);
 }
 
 .docs-content h2 {

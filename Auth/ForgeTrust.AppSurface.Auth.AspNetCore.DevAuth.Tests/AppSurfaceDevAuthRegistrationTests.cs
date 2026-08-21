@@ -226,6 +226,49 @@ public sealed class AppSurfaceDevAuthRegistrationTests
     }
 
     [Fact]
+    public void PersonaLandingUrl_WithSafeLocalPath_IsStoredAsNavigationMetadata()
+    {
+        var options = new AppSurfaceDevAuthOptions();
+
+        options.Users.Add(
+            "viewer",
+            user => user
+                .Subject("viewer-1")
+                .LandingUrl("/viewer?tab=proof"));
+
+        var persona = Assert.Single(options.Users.Personas).Value;
+
+        Assert.Equal("/viewer?tab=proof", persona.LandingUrl);
+        Assert.DoesNotContain(persona.Claims, claim => string.Equals(claim.Type, "landingUrl", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("viewer")]
+    [InlineData("https://example.com/viewer")]
+    [InlineData("//example.com/viewer")]
+    [InlineData("/\\example.com")]
+    [InlineData("/viewer\\proof")]
+    [InlineData("/viewer\nproof")]
+    public void AddAppSurfaceDevAuth_WithUnsafePersonaLandingUrl_ThrowsSafeDiagnostic(string landingUrl)
+    {
+        var services = new ServiceCollection();
+
+        var ex = Assert.Throws<AppSurfaceDevAuthException>(() =>
+            services.AddAppSurfaceDevAuth(Development(), options =>
+                options.Users.Add(
+                    "viewer",
+                    user => user
+                        .Subject("viewer-1")
+                        .LandingUrl(landingUrl))));
+
+        Assert.Equal(AppSurfaceDevAuthDiagnostics.InvalidPersonaLandingUrl, ex.DiagnosticCode);
+        Assert.Contains("ASDEV007 Problem:", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Fix:", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AddAppSurfaceDevAuth_MaterializesOptionsOnceForSchemeAndRuntime()
     {
         var services = new ServiceCollection();

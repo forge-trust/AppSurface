@@ -172,6 +172,7 @@ public sealed class ReleaseToolTests : IDisposable
             ### Release workflow
 
             - Parallel pull requests add independent release-note entries.
+            - Follow the [Config guide](../../Config/ForgeTrust.AppSurface.Config/README.md#configuration-audit).
             """);
 
         var result = await RunAsync(
@@ -182,6 +183,8 @@ public sealed class ReleaseToolTests : IDisposable
         var releaseNote = await ReadFileAsync("releases/v0.1.0-preview.1.md");
         Assert.Contains("### Release workflow", releaseNote, StringComparison.Ordinal);
         Assert.Contains("Parallel pull requests add independent release-note entries.", releaseNote, StringComparison.Ordinal);
+        Assert.Contains("[Config guide](../Config/ForgeTrust.AppSurface.Config/README.md#configuration-audit)", releaseNote, StringComparison.Ordinal);
+        Assert.DoesNotContain("[Config guide](../../Config/ForgeTrust.AppSurface.Config/README.md#configuration-audit)", releaseNote, StringComparison.Ordinal);
         Assert.False(File.Exists(RepositoryPath(entryPath)));
         Assert.Contains("## Archived unreleased entries", result.Stdout, StringComparison.Ordinal);
         Assert.Contains(entryPath, result.Stdout, StringComparison.Ordinal);
@@ -243,7 +246,7 @@ public sealed class ReleaseToolTests : IDisposable
             FakeCommandRunner.WithSourceCommit("abc123"));
 
         Assert.Equal(1, result.ExitCode);
-        Assert.Contains("uses unsupported section", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("not declared by the living-note template", result.Stdout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -305,7 +308,8 @@ public sealed class ReleaseToolTests : IDisposable
                 new UnreleasedEntry("/entries/2026-08-08-zulu.md", "included", "- Zulu entry."),
                 new UnreleasedEntry("/entries/2026-08-08-alpha.md", "included", "- Alpha entry."),
                 new UnreleasedEntry("/entries/2026-08-08-taking-shape.md", "taking-shape", "- Shaping entry.")
-            ]);
+            ],
+            "/releases/unreleased.md");
 
         Assert.Contains("- Existing note.\n- Alpha entry.\n\n- Zulu entry.", composed, StringComparison.Ordinal);
         Assert.Contains("## Taking shape\n- Shaping entry.", composed, StringComparison.Ordinal);
@@ -313,24 +317,93 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
-    public void UnreleasedEntryComposerRejectsUnsupportedTemplateMarkerAndPaths()
+    public void UnreleasedEntryComposerRebasesLinksWithoutChangingMarkdownCodeExamples()
     {
-        var unsupportedMarker = """
+        const string template = """
             # Unreleased
             <!-- appsurface:unreleased-entries section="taking-shape" -->
             <!-- appsurface:unreleased-entries section="included" -->
             <!-- appsurface:unreleased-entries section="migration-watch" -->
-            <!-- appsurface:unreleased-entries section="future" -->
+            """;
+        const string markdown = """
+            - [Guide](../../Guides/README.md)
+            - `[Literal](../../do-not-rebase-inline.md)`
+
+            ```markdown
+            [Fenced](../../do-not-rebase-fenced.md)
+            ```
+
+                [Indented](../../do-not-rebase-indented.md)
+
+            An unmatched ` stays literal.
+            - [After unmatched code](../../Guides/after.md)
+            """;
+
+        var composed = UnreleasedEntryComposer.Compose(
+            template,
+            [new UnreleasedEntry("/releases/unreleased.entries/2026-08-08-rebased-links.md", "included", markdown)],
+            "/releases/unreleased.md");
+
+        Assert.Contains("[Guide](../Guides/README.md)", composed, StringComparison.Ordinal);
+        Assert.Contains("`[Literal](../../do-not-rebase-inline.md)`", composed, StringComparison.Ordinal);
+        Assert.Contains("[Fenced](../../do-not-rebase-fenced.md)", composed, StringComparison.Ordinal);
+        Assert.Contains("    [Indented](../../do-not-rebase-indented.md)", composed, StringComparison.Ordinal);
+        Assert.Contains("[After unmatched code](../Guides/after.md)", composed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnreleasedEntryComposerPreservesLinksWhenPathsHaveNoDirectory()
+    {
+        const string template = """
+            # Unreleased
+            <!-- appsurface:unreleased-entries section="taking-shape" -->
+            <!-- appsurface:unreleased-entries section="included" -->
+            <!-- appsurface:unreleased-entries section="migration-watch" -->
+            """;
+        const string markdown = "- [Guide](../Guides/README.md)";
+
+        var sourceWithoutDirectory = UnreleasedEntryComposer.Compose(
+            template,
+            [new UnreleasedEntry("entry.md", "included", markdown)],
+            "/releases/unreleased.md");
+        var destinationWithoutDirectory = UnreleasedEntryComposer.Compose(
+            template,
+            [new UnreleasedEntry("/releases/unreleased.entries/entry.md", "included", markdown)],
+            "unreleased.md");
+
+        Assert.Contains(markdown, sourceWithoutDirectory, StringComparison.Ordinal);
+        Assert.Contains(markdown, destinationWithoutDirectory, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnreleasedEntryComposerSupportsTemplateOwnedSectionsAndRejectsMalformedMarkersAndPaths()
+    {
+        var malformedMarker = """
+            # Unreleased
+            <!-- appsurface:unreleased-entries section="taking-shape" -->
+            <!-- appsurface:unreleased-entries section="included" -->
+            <!-- appsurface:unreleased-entries section="migration-watch" -->
+            <!-- appsurface:unreleased-entries section="future section" -->
             """;
 
         var templateException = Assert.Throws<UnreleasedEntryException>(
-            () => UnreleasedEntryComposer.Compose(unsupportedMarker, []));
-        Assert.Contains("no unsupported entry markers", templateException.Message, StringComparison.Ordinal);
-        Assert.Throws<ArgumentOutOfRangeException>(() => UnreleasedEntryComposer.MarkerFor("future"));
+            () => UnreleasedEntryComposer.Compose(malformedMarker, [], "/releases/unreleased.md"));
+        Assert.Contains("unsupported or malformed", templateException.Message, StringComparison.Ordinal);
+        Assert.Equal("<!-- appsurface:unreleased-entries section=\"future\" -->", UnreleasedEntryComposer.MarkerFor("future"));
+        Assert.Throws<ArgumentException>(() => UnreleasedEntryComposer.MarkerFor("future section"));
         Assert.True(UnreleasedEntryComposer.IsEntryPath("releases\\unreleased.entries\\2026-08-08-valid-entry.md"));
         Assert.False(UnreleasedEntryComposer.IsEntryPath("releases/unreleased.entries/nested/2026-08-08-valid-entry.md"));
         Assert.False(UnreleasedEntryComposer.IsEntryPath("releases/unreleased.entries/not-an-entry.md"));
         Assert.Throws<ArgumentException>(() => UnreleasedEntryComposer.IsEntryPath(" "));
+    }
+
+    [Fact]
+    public void UnreleasedEntryComposerRejectsATemplateWithoutCompositionMarkers()
+    {
+        var exception = Assert.Throws<UnreleasedEntryException>(
+            () => UnreleasedEntryComposer.Compose("# Unreleased", [], "/releases/unreleased.md"));
+
+        Assert.Contains("must contain at least one append-only entry marker", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

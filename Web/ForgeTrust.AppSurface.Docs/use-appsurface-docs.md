@@ -33,7 +33,7 @@ The result is a docs surface with:
 
 - section-first navigation such as Start Here, Examples, Releases, Troubleshooting, and API Reference
 - source-derived C# API pages
-- annotation-first JavaScript public API pages for browser events, globals, attributes, config, module contracts, and CSS hooks
+- annotation-first JavaScript public API pages for browser events, globals, attributes, config, module contracts, declaration-only class contracts, and CSS hooks
 - a search index that includes titles, summaries, headings, aliases, keywords, and page types
 - optional trust bars for release notes, policies, and provenance-heavy pages
 - optional `Source of truth` links back to the exact files readers should inspect or edit
@@ -212,7 +212,37 @@ Add theme settings when the consuming repository should make the built-in docs s
 }
 ```
 
-The default theme is `AppSurfaceDark` with comfortable density and standard chrome. `GraphiteDark` is the second dark-family preset for lower-saturation surfaces; it stays a fixed Docs-local dark preset, not a shared pair. Blank color values use the selected preset default. Color overrides must be CSS hex colors and must meet startup contrast checks for their role; validation messages name the exact config key, bad value, required contrast ratio, tested preset background, and fix. The same keys work through environment variables, for example `AppSurfaceDocs__Theme__Preset=GraphiteDark` and `AppSurfaceDocs__Theme__Colors__AccentColor=#38bdf8`.
+The default theme is `AppSurfaceDark` with comfortable density and standard chrome. `GraphiteDark` is the second dark-family preset for lower-saturation surfaces; it stays a fixed Docs-local dark preset, not a shared pair. `AppSurfaceLight` is a complete fixed light presentation for hosts that need a first-party light Docs surface without taking ownership of package CSS. Blank color values use the selected preset default. Color overrides must be CSS hex colors and must meet startup contrast checks for their role; validation messages name the exact config key, bad value, required contrast ratio, tested preset background, and fix. The same keys work through environment variables, for example `AppSurfaceDocs__Theme__Preset=AppSurfaceLight` and `AppSurfaceDocs__Theme__Colors__AccentColor=#1e3a8a`.
+
+Use this complete, accessible AppSurface-light recipe as a starting point:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Theme": {
+      "Preset": "AppSurfaceLight",
+      "Colors": {
+        "AccentColor": "#1e3a8a",
+        "AccentStrongColor": "#1e40af",
+        "LinkColor": "#1e3a8a",
+        "VisitedLinkColor": "#5b21b6"
+      }
+    }
+  }
+}
+```
+
+The equivalent environment variables use ordinary .NET double-underscore binding and do not receive special package-level precedence:
+
+```text
+AppSurfaceDocs__Theme__Preset=AppSurfaceLight
+AppSurfaceDocs__Theme__Colors__AccentColor=#1e3a8a
+AppSurfaceDocs__Theme__Colors__AccentStrongColor=#1e40af
+AppSurfaceDocs__Theme__Colors__LinkColor=#1e3a8a
+AppSurfaceDocs__Theme__Colors__VisitedLinkColor=#5b21b6
+```
+
+Preset resolution is deterministic: Docs builds the complete selected package-owned palette, applies valid direct role values, then regenerates dependent focus, border, fill, and alpha tokens. `AppSurfaceLight` remains fixed for each request and static export: it does not enable a visitor switcher, cookie, local storage, preference bootstrap, or a second stylesheet. Use the [browser-local appearance choice](#optional-browser-local-appearance-choice) only when `AppSurfaceDark` intentionally bridges to a host-owned shared pair. Use the [deliberate whole-layout override boundary](#default-razor-layout-and-deliberate-host-overrides) instead of depending on undocumented `--docs-*` names when a host needs control beyond the four supported roles.
 
 The supported Docs configuration contract is intentionally narrow. Use `Preset`, `Colors`, `Density`, and `Chrome` for package-owned docs chrome. Do not rely on `--docs-*` custom property names as a public API, do not use theme settings for arbitrary surface/text/syntax-token overrides, and do not expect view replacement, layout slots, or external theme packages in v1. Static exports and published release archives freeze the resolved Docs configuration into their exported HTML; changing host config later does not rewrite already-exported archives.
 
@@ -347,7 +377,15 @@ AppSurface Docs starts the first source-backed harvest during application startu
 
 Use `StartupMode=Background` for normal hosts, `Blocking` for hosts that must finish docs warmup before accepting traffic, and `Disabled` only when you intentionally want the old first-request lazy harvest. Strict startup failure still comes from `Harvest:FailOnFailure=true`; when strict mode is enabled, startup waits for harvest health and fails only when every active harvester fails.
 
-For manual UI testing, set the `Testing*Delay*Milliseconds` knobs to positive values. `TestingPreHarvestDelayMilliseconds` pauses after the run is published but before any harvester starts, `TestingDelayPerHarvesterMilliseconds` pauses each harvester after it reports `Running`, and `TestingDelayPerDocumentMilliseconds` publishes each harvester's document count one document at a time. For example, `TestingPreHarvestDelayMilliseconds=1000` and `TestingDelayPerDocumentMilliseconds=150` make the live observatory easy to inspect locally. Keep them at `0` for production traffic.
+For manual UI testing, set the `Testing*Delay*Milliseconds` knobs to positive values. `TestingPreHarvestDelayMilliseconds` pauses after the run is published but before any harvester starts, `TestingDelayPerHarvesterMilliseconds` pauses each harvester after it reports `Running`, and `TestingDelayPerDocumentMilliseconds` paces each **real positive parser-output report** once for every document in that report. It does not delay zero-output source inspection. For example, `TestingPreHarvestDelayMilliseconds=1000` and `TestingDelayPerDocumentMilliseconds=150` make the live observatory easy to inspect locally. Keep every knob at `0` for production traffic.
+
+### Read the live harvest observatory
+
+The observatory is package-owned current-state telemetry, not a file activity log. Built-in Markdown, C#, and enabled JavaScript harvesters expose a closed `phase` value (`Waiting`, `Discovering`, `Parsing`, `Finalizing`, or `Terminal`), a non-negative `sourceUnitsProcessed` count, and their current `docCount`. A source unit is a policy-accepted parser input that has begun inspection; it can legitimately yield no document. Terminal health retains the source-unit evidence while replacing status and final document count with the authoritative health result.
+
+`builtInDocumentsPerSecond` is an additive nullable JSON field and the UI labels it `Built-in docs/s`. `null` renders as `Measuring…` until the reporter has a valid 250 ms rolling observation window; numeric `0` is a valid observed result for zero-output parsing. The rate intentionally includes only package-owned parser reports, so custom `IDocHarvester` implementations retain status-only observability and do not need an API upgrade. Snapshot consumers should tolerate this nullable field and the additive phase/count fields without changing existing behavior.
+
+Every ordinary source/output update is coalesced to one full snapshot at most every 250 ms, with bounded replay; phase and terminal state are published promptly. This keeps large repositories and late subscribers on the latest redacted state. The payload never includes a source path, file name, source content, raw exception, stack trace, percentage, or source total. For a local smoke check, set the test-only delays, open `/_harvest`, verify phase/source movement, see `Measuring…` become a rate or `0`, then confirm the terminal row and no-JavaScript continuation before resetting the delays to `0`.
 
 When the first harvest completes, active JavaScript users receive a live-only RazorWire visit command after the retained completion state is published. Late subscribers replay only safe progress state and use the normal continuation link. The live observatory uses the same redacted diagnostics as harvest health; do not put secrets, absolute repository paths, or raw exception messages into diagnostic fields that can reach client-visible UI.
 
@@ -474,6 +512,8 @@ Once the first pages render, improve the docs in layers:
 5. Add release notes and trust metadata when adoption depends on upgrade confidence.
 6. Add localization metadata when users need more than one language.
 7. Add versioned published trees only after the live source-backed docs are useful.
+
+For a browser singleton with a class-shaped implementation, start with the [JavaScript class authoring template and decision table](./README.md#five-minute-class-contract-recipe). Publish the singleton `@config` as the consumer entry point, keep the declaration-only class and each public method independently documented, and put a stable begin/end source marker around the real implementation. The harvester accepts the declaration-only JavaScript class contract; it intentionally does not parse TypeScript implementations or generated bundles.
 
 That order matters. A beautiful archive of weak docs is still weak docs.
 

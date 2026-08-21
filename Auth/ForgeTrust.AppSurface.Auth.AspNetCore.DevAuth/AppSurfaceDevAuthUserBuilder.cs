@@ -9,6 +9,7 @@ public sealed class AppSurfaceDevAuthUserBuilder
 {
     private readonly List<Claim> _claims = [];
     private string? _displayName;
+    private string? _landingUrl;
     private string _subjectClaimType = AppSurfaceDevAuthDefaults.SubjectClaimType;
     private string? _subject;
 
@@ -31,6 +32,24 @@ public sealed class AppSurfaceDevAuthUserBuilder
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
         _displayName = displayName.Trim();
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the safe local page where this persona starts when no explicit host return target is supplied.
+    /// </summary>
+    /// <param name="landingUrl">Safe rooted local path, such as <c>/viewer</c> or <c>/dashboard?tab=proof</c>.</param>
+    /// <returns>The same builder for chaining.</returns>
+    /// <exception cref="AppSurfaceDevAuthException">
+    /// Thrown with <c>ASDEV007</c> when <paramref name="landingUrl"/> is not a safe rooted local path.
+    /// </exception>
+    /// <remarks>
+    /// This is local-proof navigation metadata, not an authorization policy, claim, cookie payload, or route-access
+    /// check. A safe explicit <c>returnUrl</c> supplied by the host takes precedence over this configured fallback.
+    /// </remarks>
+    public AppSurfaceDevAuthUserBuilder LandingUrl(string landingUrl)
+    {
+        _landingUrl = AppSurfaceDevAuthLocalReturnUrl.ValidateConfigured(landingUrl);
         return this;
     }
 
@@ -93,7 +112,7 @@ public sealed class AppSurfaceDevAuthUserBuilder
             claims = claims.Prepend(new Claim(_subjectClaimType, subject));
         }
 
-        return new AppSurfaceDevAuthPersona(Id, displayName, _subjectClaimType, subject, claims.ToArray());
+        return new AppSurfaceDevAuthPersona(Id, displayName, _landingUrl, _subjectClaimType, subject, claims.ToArray());
     }
 
     /// <summary>

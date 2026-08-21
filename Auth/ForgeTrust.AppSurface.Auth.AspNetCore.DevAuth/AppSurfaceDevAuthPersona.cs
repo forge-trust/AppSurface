@@ -10,12 +10,14 @@ public sealed class AppSurfaceDevAuthPersona
     internal AppSurfaceDevAuthPersona(
         string id,
         string displayName,
+        string? landingUrl,
         string subjectClaimType,
         string subject,
         IReadOnlyList<Claim> claims)
     {
         Id = id;
         DisplayName = displayName;
+        LandingUrl = landingUrl;
         SubjectClaimType = subjectClaimType;
         Subject = subject;
         Claims = claims;
@@ -30,6 +32,15 @@ public sealed class AppSurfaceDevAuthPersona
     /// Gets the display name shown on the local-only DevAuth control page.
     /// </summary>
     public string DisplayName { get; }
+
+    /// <summary>
+    /// Gets the optional safe local page used after selecting this persona when the host did not supply an explicit return target.
+    /// </summary>
+    /// <remarks>
+    /// This value is navigation metadata for local proof flows only. It is not an authorization policy, issued claim,
+    /// cookie payload, status-JSON field, or guarantee that the selected persona can access the configured route.
+    /// </remarks>
+    public string? LandingUrl { get; }
 
     /// <summary>
     /// Gets the claim type used to expose the stable local subject.

@@ -39,9 +39,10 @@ The release evidence bundle is not a signature or hosted-build attestation. It i
 ## Durable public-preview release gate
 
 The Durable packages are eligible for coordinated prerelease publication only when release review confirms schema
-ownership, migrations `0001` through `0008`, the canonical PostgreSQL role recipe, passive storage registration,
-explicit `AddWorkerHost()` hosting, startup schema/epoch validation without DDL, recovery procedures, and the real
-PostgreSQL conformance evidence. The package chooser is the machine-facing install map; the [Durable discovery guide](../Durable/README.md#slice-7-discovery-and-reconciliation)
+ownership, migrations `0001` through `0009`, the canonical PostgreSQL role recipe, registry-scoped Work discovery,
+the drain-first `0009` role transition, passive storage registration, explicit `AddWorkerHost()` hosting, startup
+schema/epoch validation without DDL, recovery procedures, and the real PostgreSQL conformance evidence. The package
+chooser is the machine-facing install map; the [Durable discovery guide](../Durable/README.md#slice-7-discovery-and-reconciliation)
 is the reader-facing operational boundary. The `durable schema` commands do not replace this release review: scripts
 are offline, status and preflight resolve a named connection environment variable, and apply requires a named
 migration-owner environment variable. No command accepts or prints connection strings; the least-privilege role
@@ -64,7 +65,7 @@ Each major item should answer the reader's next question without making them ins
 
 Use internal feature names only after the reader-facing behavior is clear. For example, introduce [RazorWire auth projection](../Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md) as rendering allowed, forbidden, and anonymous UI from host-owned ASP.NET Core policies before relying on the phrase "passive auth projection." When a change ships with a guide or example, link that path from the release note next to the feature summary.
 
-Release notes should also connect related concepts instead of only naming them. If an item mentions a package, guide, example, workflow, policy, diagnostic family, CLI command, or cross-package concept, link the first meaningful mention to the canonical page a consumer should read next. Prefer durable start-here links, package READMEs, guides, examples, and public docs routes over transient PRs or maintainer-only notes.
+Release notes should also connect related concepts instead of only naming them. If an item mentions a package, guide, example, workflow, policy, diagnostic family, CLI command, or cross-package concept, link the first meaningful mention to the canonical page a consumer should read next. Prefer durable start-here links, package READMEs, guides, examples, and public docs routes over transient PRs or maintainer-only notes. Consumer projects that have concurrent release-note authors can use [`appsurface release compose`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-release-compose) instead of making every change edit one shared changelog.
 
 ### Safety second
 
@@ -85,7 +86,7 @@ The checked-in [`unreleased.md`](./unreleased.md) page is a stable release-note 
 - Describe the consumer outcome, link the package or guide, and state an important boundary.
 ```
 
-The supported sections are `taking-shape`, `included`, and `migration-watch`. Entries are filename-sorted and inserted at the bottom of that section, after its placeholder bullet. Do not add a `#` or `##` heading inside an entry because it would create a competing top-level section; `###` headings are appropriate for grouping related items. [Release preparation](../tools/ForgeTrust.AppSurface.Release/README.md#append-only-unreleased-entries) composes the page into the tagged release note, records the exact archived paths in its evidence-digested release manifest, then removes only those entries. A concurrently merged new entry therefore remains in the next cycle rather than being silently folded into, or lost during, the release reset.
+The supported sections are `taking-shape`, `included`, and `migration-watch`. Entries are filename-sorted and inserted at the bottom of that section, after its placeholder bullet. Do not add a `#` or `##` heading inside an entry because it would create a competing top-level section; `###` headings are appropriate for grouping related items. Relative inline and reference link destinations are authored relative to the entry file, then rebased for [`unreleased.md`](./unreleased.md) and the tagged release note; external, rooted, query-only, fragment-only, and code-example content stays unchanged. [Release preparation](../tools/ForgeTrust.AppSurface.Release/README.md#append-only-unreleased-entries) composes the page into the tagged release note, records the exact archived paths in its evidence-digested release manifest, then removes only those entries. A concurrently merged new entry therefore remains in the next cycle rather than being silently folded into, or lost during, the release reset.
 
 ## What belongs in the release surface
 

@@ -135,7 +135,7 @@ packages:
     release_track: coordinated
     order: 37
     use_when: Add this in Development-by-default ASP.NET Core hosts or explicit local/proof environments when package consumers need selectable fake personas, a visible local control page, and AppSurface policy proof without configuring an external identity provider.
-    includes: AppSurface DevAuth named authentication scheme, AddAppSurfaceDevAuth registration, explicit allowed environment names, MapAppSurfaceDevAuth control endpoints, AppSurfaceDevAuthMarker embeddable state overlay, seeded personas, protected persona cookie, loopback-only status JSON, startup safety diagnostics, and ASDEV diagnostic codes.
+    includes: AppSurface DevAuth named authentication scheme, AddAppSurfaceDevAuth registration, explicit allowed environment names, MapAppSurfaceDevAuth control endpoints, AppSurfaceDevAuthMarker embeddable state overlay, seeded personas with optional safe local `LandingUrl` recovery targets, protected persona cookie, loopback-only status JSON, startup safety diagnostics, and ASDEV diagnostic codes.
     does_not_include: Production authentication, OIDC, JWT validation, ASP.NET Identity, password handling, durable app-user mapping, user stores, tenant authority, audit sinks, deployment auth, automatic host HTML injection, RazorWire auth UI components, or Auth.Testing integration-test assertions.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` after `ForgeTrust.AppSurface.Auth.AspNetCore` only for Development hosts or explicit local/proof environments that need fake local personas to prove AppSurface policy results; use the [Auth adoption ladder](../start-here/auth-adoption-ladder.md) to keep DevAuth separate from Auth.Testing.
@@ -632,6 +632,15 @@ packages:
     release_notes_path: releases/unreleased.md
     order: 115
     note: Private compiled MSBuild task used by `ForgeTrust.AppSurface.Web.Tailwind`; consume it only through the packed Tailwind package.
+  - project: tools/ForgeTrust.AppSurface.ReleaseContracts/ForgeTrust.AppSurface.ReleaseContracts.csproj
+    classification: support
+    publish_decision: support_publish
+    product_family: internal_support
+    release_status: support_runtime
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 190
+    note: Transitive release metadata contracts used by `ForgeTrust.AppSurface.Docs` and repository release tooling. Restore it through those packages rather than installing it directly.
   - project: Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj
     classification: proof_host
     publish_decision: support_publish
@@ -641,7 +650,7 @@ packages:
     release_notes_path: releases/unreleased.md
     order: 200
     note: >-
-      Reusable docs package for harvesting repository docs into an AppSurface Docs UI, with source harvesting, search, release archives, diagnostics, and a shared semantic System/Light/Dark theme-pair adapter for package-owned docs chrome. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps. Its exact coordinated GHSA-pgww-w46g-26qg graph is `AngleSharp` `[1.5.2]`, `HtmlSanitizer` `[9.1.949-beta]`, and `AngleSharp.Css` `[1.0.0-beta.216]`; the beta pair is preview-only. Stable verification requires all three dependencies, rejects missing or malformed ranges and AngleSharp floors below 1.5.2, and blocks the beta pair until [issue #682](https://github.com/forge-trust/AppSurface/issues/682) lands compatible stable versions. The [Docs dependency security boundary](../Web/ForgeTrust.AppSurface.Docs/README.md#dependency-security-boundary) covers rendered package-documentation fragments, not general UGC or host CSP.
+      Reusable docs package for harvesting repository docs into an AppSurface Docs UI, with source harvesting, search, release archives, diagnostics, and a shared semantic System/Light/Dark theme-pair adapter for package-owned docs chrome. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps. Its exact coordinated GHSA-pgww-w46g-26qg graph is `AngleSharp` `[1.7.1]`, `HtmlSanitizer` `[9.2.995]`, and `AngleSharp.Css` `[1.0.1]`. Stable verification requires every package dependency container to contain each identity exactly once with its exact bracketed version, and the independent locked consumer proof must resolve the freshly packed Docs artifact plus this exact graph. The [Docs dependency security boundary](../Web/ForgeTrust.AppSurface.Docs/README.md#dependency-security-boundary) covers rendered package-documentation fragments, not general UGC or host CSP.
     start_here_path: Web/ForgeTrust.AppSurface.Docs/README.md
     start_here_label: AppSurface Docs README
     expected_dependency_package_ids:
@@ -649,6 +658,7 @@ packages:
       - ForgeTrust.AppSurface.Caching
       - ForgeTrust.AppSurface.Config
       - ForgeTrust.AppSurface.Intelligence
+      - ForgeTrust.AppSurface.ReleaseContracts
       - ForgeTrust.AppSurface.Theming
       - ForgeTrust.AppSurface.Web
       - ForgeTrust.AppSurface.Web.Tailwind
@@ -730,12 +740,12 @@ packages:
     release_track: coordinated
     order: 120
     tool_command_name: appsurface
-    use_when: Install this when you want repository-level AppSurface tooling, including protected named-canary deployment proof, from a global or local .NET tool command.
-    includes: The `appsurface` .NET tool command, `appsurface canary poll` bounded read-only deployment proof for protected AppSurface Web named canaries, `appsurface docs` AppSurface Docs workflows, `appsurface pwa verify` install evidence plus explicitly requested schema-v3 server-known push-readiness posture evidence for AppSurface Web apps, `appsurface durable schema status|script|preflight|apply` explicit PostgreSQL schema operations, `appsurface coverage run` private test orchestration with managed JUnit diagnostics, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` private threshold enforcement, the `appsurface secrets init`, `set`, `get`, `list --names-only`, `migrate`, `delete`, and `doctor` local-secret workflow, and declared `appsurface secrets transfer plan` and `appsurface secrets transfer apply` jobs, including pinned Google-to-LocalSecrets materialization for local testing.
-    does_not_include: App runtime packages, raw durable Work, Flow, Schedule, or recovery mutations, automatic startup DDL, hosted coverage dashboards, coverage uploads, coverage trend storage, grouped coverage runs, TRX/TUnit result parsing, RazorWire-specific export workflows, or a replacement for project package references.
+    use_when: Install this when you want repository-level AppSurface tooling, including protected named-canary deployment proof or conflict-free release-note composition, from a global or local .NET tool command.
+    includes: The `appsurface` .NET tool command, `appsurface release compose` preview-by-default deterministic composition of isolated Markdown release-note entries for any consumer project, `appsurface canary poll` bounded read-only deployment proof for protected AppSurface Web named canaries, `appsurface docs` AppSurface Docs workflows, `appsurface pwa verify` install evidence plus explicitly requested schema-v3 server-known push-readiness posture evidence for AppSurface Web apps, `appsurface durable schema status|script|preflight|apply` explicit PostgreSQL schema operations, `appsurface coverage run` private test orchestration with managed JUnit diagnostics, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` private threshold enforcement, the `appsurface secrets init`, `set`, `get`, `list --names-only`, `migrate`, `delete`, and `doctor` local-secret workflow, and declared `appsurface secrets transfer plan` and `appsurface secrets transfer apply` jobs, including pinned Google-to-LocalSecrets materialization for local testing.
+    does_not_include: App runtime packages, raw durable Work, Flow, Schedule, or recovery mutations, automatic startup DDL, repository-specific release preparation, changelog rollover, entry consumption, tag binding, package publication, GitHub Release orchestration, hosted coverage dashboards, coverage uploads, coverage trend storage, grouped coverage runs, TRX/TUnit result parsing, RazorWire-specific export workflows, or a replacement for project package references.
     start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
     start_here_label: AppSurface CLI README
-    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface canary poll`, `appsurface docs`, `appsurface pwa verify` install or server-known push-readiness posture evidence, explicit `appsurface durable schema` deployment checks, private coverage commands, explicit macOS LocalSecrets migration, or declared secret-transfer workflows without running from source. Durable `script` stays offline; online operations resolve only a named environment variable and `apply` requires `--apply`. Verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests. PWA evidence is not scoring or delivery proof.
+    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface release compose` to keep concurrent changes out of a shared changelog, `appsurface canary poll`, `appsurface docs`, `appsurface pwa verify` install or server-known push-readiness posture evidence, explicit `appsurface durable schema` deployment checks, private coverage commands, explicit macOS LocalSecrets migration, or declared secret-transfer workflows without running from source. Release composition writes only an explicit `--output --apply` destination; repository release preparation and publication remain separate. Durable `script` stays offline; online operations resolve only a named environment variable and `apply` requires `--apply`. Verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests. PWA evidence is not scoring or delivery proof.
   - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
     classification: excluded
     publish_decision: do_not_publish

@@ -60,6 +60,26 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
     }
 
     [Fact]
+    public async Task SearchResults_RenderGeneratedApiLifecycleBadgesAndAccessibleLabels_OnBothSurfaces()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await RouteSearchPayloadAsync(page, BuildLifecycleSearchPayload());
+
+        await page.GotoAsync(_fixture.DocsUrl);
+        await WaitForSidebarSearchReadyAsync(page);
+        await page.FillAsync("#docs-search-input", "beta");
+        await WaitForLifecycleResultsAsync(page, "#docs-search-results [role=\"option\"]");
+        await AssertLifecyclePresentationAsync(page, "#docs-search-results", "[role=\"option\"]");
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search");
+        await WaitForSearchPageSettledAsync(page);
+        await page.FillAsync("#docs-search-page-input", "beta");
+        await WaitForLifecycleResultsAsync(page, "#docs-search-page-results .docs-search-result");
+        await AssertLifecyclePresentationAsync(page, "#docs-search-page-results", ".docs-search-result");
+    }
+
+    [Fact]
     public async Task SlashShortcut_FocusesVisibleSearchInput_WithoutStealingEditableFocus()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
@@ -1012,6 +1032,43 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
             new PageWaitForFunctionOptions { Timeout = 30_000 });
     }
 
+    private static async Task WaitForLifecycleResultsAsync(IPage page, string resultSelector)
+    {
+        await page.WaitForFunctionAsync(
+            """
+            selector => [...document.querySelectorAll(selector)].some(result => result.textContent.includes('Beta Runtime API'))
+              && [...document.querySelectorAll(selector)].some(result => result.textContent.includes('Beta Guide'))
+            """,
+            resultSelector,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+    }
+
+    private static async Task AssertLifecyclePresentationAsync(IPage page, string resultRootSelector, string resultSelector)
+    {
+        var renderedResults = (await page.Locator(resultRootSelector).Locator(resultSelector).AllTextContentsAsync()).ToArray();
+        var generatedResultIndex = Array.FindIndex(renderedResults, result => result.Contains("Beta Runtime API", StringComparison.Ordinal));
+        var guideIndex = Array.FindIndex(renderedResults, result => result.Contains("Beta Guide", StringComparison.Ordinal));
+        Assert.True(generatedResultIndex >= 0 && guideIndex >= 0);
+        Assert.True(generatedResultIndex < guideIndex, "A matching generated lifecycle symbol should rank ahead of a broad guide.");
+
+        var generatedResult = page.Locator(resultRootSelector)
+            .Locator(resultSelector)
+            .Filter(new LocatorFilterOptions { HasText = "Beta Runtime API" });
+        var untrustedResult = page.Locator(resultRootSelector)
+            .Locator(resultSelector)
+            .Filter(new LocatorFilterOptions { HasText = "Beta Guide" });
+
+        await Assertions.Expect(generatedResult.Locator(".docs-search-result-badge-lifecycle")).ToHaveTextAsync("Beta");
+        await Assertions.Expect(generatedResult.Locator(".docs-search-result-badge-deprecated")).ToHaveTextAsync("Deprecated");
+        var generatedAriaLabel = await generatedResult.Locator("a").GetAttributeAsync("aria-label");
+        Assert.StartsWith("Open Beta Runtime API", generatedAriaLabel, StringComparison.Ordinal);
+        Assert.Contains("Beta, Deprecated.", generatedAriaLabel, StringComparison.Ordinal);
+        Assert.Equal(0, await untrustedResult.Locator(".docs-search-result-badge-lifecycle").CountAsync());
+        Assert.Equal(0, await untrustedResult.Locator(".docs-search-result-badge-deprecated").CountAsync());
+        Assert.DoesNotContain("Alpha", await untrustedResult.Locator("a").GetAttributeAsync("aria-label"));
+        Assert.DoesNotContain("Deprecated", await untrustedResult.Locator("a").GetAttributeAsync("aria-label"));
+    }
+
     private static string BuildMultiWordSearchPayload()
     {
         return BuildControlledSearchPayload(
@@ -1036,6 +1093,36 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
                 "API details for coverage gate integrations.",
                 bodyText: "coverage gate API reference",
                 breadcrumbs: ["API", "Coverage"]));
+    }
+
+    private static string BuildLifecycleSearchPayload()
+    {
+        return BuildControlledSearchPayload(
+            SearchDoc(
+                "api/beta-runtime",
+                "Beta Runtime API",
+                "api-reference",
+                "API Reference",
+                "api-reference",
+                "Generated beta runtime contract.",
+                bodyText: "beta runtime API",
+                breadcrumbs: ["API", "JavaScript"],
+                apiLifecycle: "beta",
+                apiLifecycleLabel: "Beta",
+                isDeprecated: true,
+                isGeneratedApiSymbol: true),
+            SearchDoc(
+                "guides/beta-guide",
+                "Beta Guide",
+                "guide",
+                "Guide",
+                "guide",
+                "Reader guidance that must not inherit untrusted lifecycle metadata.",
+                bodyText: "beta guide",
+                breadcrumbs: ["Guides"],
+                apiLifecycle: "alpha",
+                apiLifecycleLabel: "Alpha",
+                isDeprecated: true));
     }
 
     private static async Task TypePausedMultiWordQueryAsync(IPage page, string selector)
@@ -1112,7 +1199,11 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
         string bodyText = "",
         string? path = null,
         string[]? breadcrumbs = null,
-        object[]? summaryPresentation = null)
+        object[]? summaryPresentation = null,
+        string apiLifecycle = "",
+        string apiLifecycleLabel = "",
+        bool isDeprecated = false,
+        bool isGeneratedApiSymbol = false)
     {
         var resolvedPath = path ?? (id.StartsWith("/docs/", StringComparison.Ordinal)
             ? id
@@ -1139,7 +1230,11 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
             order = 1,
             relatedPages = Array.Empty<string>(),
             breadcrumbs = breadcrumbs ?? [],
-            summaryPresentation
+            summaryPresentation,
+            apiLifecycle,
+            apiLifecycleLabel,
+            isDeprecated,
+            isGeneratedApiSymbol
         };
     }
 

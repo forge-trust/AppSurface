@@ -908,13 +908,25 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine("- Keep `tool_command_name` aligned with each published .NET tool project's `ToolCommandName` so package validation, pre-publish coverage proof, and post-publish smoke tests run the command users will type. Tool smoke tests install the package, run `--help`, then require `--version` to match the package SemVer exactly, including stable or prerelease labels and excluding any leading `v` or build metadata. The command name value must be one file-name-safe command token, not a path: no whitespace, path separators, reserved `.`/`..` segments, trailing periods, Windows reserved device names or dotted aliases, control characters, or Windows-invalid file-name characters.");
         builder.AppendLine($"- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications, package READMEs, product families, release-guidance variants, readiness blockers, or readiness notes; it reports changed and managed README-region counts.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify` before review to confirm package-index outputs and managed README guidance are current without writing files.");
-        builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata, project references, Tailwind runtime payloads, or the packaged coverage CLI. This pre-publish workflow installs the packed `ForgeTrust.AppSurface.Cli` tool from local artifacts, runs `coverage run`, `coverage merge`, a passing `coverage gate`, and an intentionally failing `coverage gate`, then writes `coverage-cli-consumer-proof.md` and blocks the publish manifest when the consumer proof fails.");
+        builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata, project references, Tailwind runtime payloads, the packaged release-note or coverage CLI, or the Docs parser and sanitizer graph. This pre-publish workflow installs the packed `ForgeTrust.AppSurface.Cli` tool from local artifacts, previews and writes a consumer `release compose` note, runs the packaged coverage semantic proof plus `coverage merge`, a passing `coverage gate`, and an intentionally failing `coverage gate`, then writes the private `coverage-cli-consumer-proof.md` and public-safe `coverage-cli-consumer-proof.evidence.json`. It also restores the freshly packed `ForgeTrust.AppSurface.Docs` artifact in an independent locked consumer and writes `docs-package-consumer-proof.md`; either failed proof blocks the publish manifest.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- gate` before publishing rebrand or release metadata changes.");
         builder.AppendLine("- Keep `packages/README.md.yml` hand-authored so AppSurface Docs metadata, trust-bar copy, and section placement stay intentional.");
         builder.AppendLine();
-        builder.AppendLine("### Issue #678 package proof");
+        builder.AppendLine("### Issue #674 packaged coverage proof");
         builder.AppendLine();
-        builder.AppendLine("Use this sequence for the coordinated [#678](https://github.com/forge-trust/AppSurface/pull/678) parser and sanitizer graph. Run it sequentially: later inspection and install steps consume artifacts produced by earlier steps.");
+        builder.AppendLine("Keep the local and packaged coverage questions separate. For repository readiness, use `coverage run --dry-run` → `coverage run` → `coverage gate`: this proves selected VSTest projects produce normal AppSurface artifacts and satisfy the repository thresholds. For a packed CLI candidate, use PackageIndex `verify-packages`: its default collector proof selects exactly one manifest-bound `Smoke.Tests` report, validates owned `Smoke.Calculator` class, line, and branch facts in raw Cobertura, copies and hashes that shard, merges it, and independently validates retention in merged Cobertura. This is an owned fixture proof, not certification of arbitrary consumer application graphs.");
+        builder.AppendLine();
+        builder.AppendLine("The assurance boundary is explicit: `--coverage-driver msbuild` is VSTest artifact compatibility only; `coverage merge` is external-shard fan-in only; and `--no-clean` is an intentional retention escape hatch whose preserved reports or patch-target files may be stale. Native Microsoft Testing Platform (MTP) is a separate runner/integration boundary. Do not switch drivers to satisfy the proof when MTP is selected or runner/package facts conflict; classify the boundary and use a separate MTP path or issue.");
+        builder.AppendLine();
+        builder.AppendLine("The CLI emits schema-versioned `coverage-project.json` beside each per-project report with `schemaVersion`, normalized solution-relative `projectPath`, and CLI-owned `slug`. PackageIndex accepts only regular manifests up to 16 KiB and the bounded Coverlet/ReportGenerator Cobertura subset required by the fixture (`coverage`, `sources`, `source`, `packages`, `package`, `classes`, `class`, `methods`, `method`, `lines`, `line`, `conditions`, and `condition`), with DTD/entity rejection, a 1 MiB document limit, depth 32, and 10,000 elements. The proof requires one `Smoke` package, one `Smoke.Calculator` class, a normalized `Smoke/Calculator.cs` filename, positive line hits, and the `Sign` line-7 two-branch invariant in both raw and merged reports.");
+        builder.AppendLine();
+        builder.AppendLine("Publish `coverage-cli-consumer-proof.evidence.json` beside the existing private Markdown report. Evidence schema 1 is public-safe and allowlists the verdict, package identity and optional digest, configured driver boundary, raw and merged outcomes with optional artifact-relative paths and invariant IDs, the optional raw SHA-256, plus bounded failures with code, scope, cause, next action, and evidence-relative path. Every unavailable optional field is omitted rather than emitted as `null`. The raw and merged outcomes, not the configured driver boundary, state whether a semantic stage actually ran. It excludes command arguments and full invocation traces, working directories, NuGet sources/configuration, absolute paths, raw XML, credentials, and arbitrary output. Readers reject unknown required structure and unsupported major versions.");
+        builder.AppendLine();
+        builder.AppendLine("When upgrading Coverlet, ReportGenerator, or the runner, capture one isolated generated-fixture raw/merged pair, confirm the bounded subset and semantic invariants, run the focused PackageIndex fixture suite and `verify-packages`, then update the versioned schema/subset documentation and consumers together. An unsupported shape is a tool-compatibility result; a valid shape with missing or zero expected semantics is a coverage defect. See the [CLI coverage proof-level and manifest contract](../Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-proof-levels-and-driver-boundary).");
+        builder.AppendLine();
+        builder.AppendLine("### Issue #682 package proof");
+        builder.AppendLine();
+        builder.AppendLine("Use this sequence for the coordinated [#682](https://github.com/forge-trust/AppSurface/issues/682) parser and sanitizer graph. Run it sequentially: later inspection and install steps consume artifacts produced by earlier steps.");
         builder.AppendLine();
         builder.AppendLine("First prove the required asset tools are callable, then create work and artifact directories outside the checkout:");
         builder.AppendLine();
@@ -925,9 +937,9 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine("pnpm --version");
         builder.AppendLine();
         builder.AppendLine("APPSURFACE_REPO_ROOT=\"$(git rev-parse --show-toplevel)\"");
-        builder.AppendLine("APPSURFACE_678_WORK=\"$(mktemp -d \"/tmp/appsurface-678-work.XXXXXX\")\"");
-        builder.AppendLine("APPSURFACE_678_ARTIFACTS=\"$(mktemp -d \"/tmp/appsurface-678-artifacts.XXXXXX\")\"");
-        builder.AppendLine("APPSURFACE_678_VERSION=\"0.2.0-preview.678\"");
+        builder.AppendLine("APPSURFACE_682_WORK=\"$(mktemp -d \"/tmp/appsurface-682-work.XXXXXX\")\"");
+        builder.AppendLine("APPSURFACE_682_ARTIFACTS=\"$(mktemp -d \"/tmp/appsurface-682-artifacts.XXXXXX\")\"");
+        builder.AppendLine("APPSURFACE_682_VERSION=\"0.2.0-preview.682\"");
         builder.AppendLine("```");
         builder.AppendLine();
         builder.AppendLine("Keep both temporary roots external. The repository build intentionally reads its centrally managed versions through `--repo-root`, but temporary consumer projects, tool manifests, and installs must not inherit the checkout's `Directory.Packages.props`; otherwise the proof can fail with unrelated central-package-management errors or accidentally reuse source policy instead of the packed contract. Preserve both paths when a step fails so the report and packages remain inspectable.");
@@ -938,38 +950,62 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine("dotnet run --project \"$APPSURFACE_REPO_ROOT/tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj\" -- \\");
         builder.AppendLine("  verify-packages \\");
         builder.AppendLine("  --repo-root \"$APPSURFACE_REPO_ROOT\" \\");
-        builder.AppendLine("  --package-version \"$APPSURFACE_678_VERSION\" \\");
-        builder.AppendLine("  --artifacts-output \"$APPSURFACE_678_ARTIFACTS\" \\");
-        builder.AppendLine("  --artifact-manifest \"$APPSURFACE_678_ARTIFACTS/package-artifact-manifest.json\" \\");
-        builder.AppendLine("  --report \"$APPSURFACE_678_ARTIFACTS/package-validation-report.md\" \\");
-        builder.AppendLine("  --coverage-proof-work-dir \"$APPSURFACE_678_WORK/coverage-cli-consumer-proof\" \\");
-        builder.AppendLine("  --coverage-proof-report \"$APPSURFACE_678_ARTIFACTS/coverage-cli-consumer-proof.md\"");
-        builder.AppendLine("unzip -p \"$APPSURFACE_678_ARTIFACTS/ForgeTrust.AppSurface.Docs.$APPSURFACE_678_VERSION.nupkg\" '*.nuspec'");
+        builder.AppendLine("  --package-version \"$APPSURFACE_682_VERSION\" \\");
+        builder.AppendLine("  --artifacts-output \"$APPSURFACE_682_ARTIFACTS\" \\");
+        builder.AppendLine("  --artifact-manifest \"$APPSURFACE_682_ARTIFACTS/package-artifact-manifest.json\" \\");
+        builder.AppendLine("  --report \"$APPSURFACE_682_ARTIFACTS/package-validation-report.md\" \\");
+        builder.AppendLine("  --coverage-proof-work-dir \"$APPSURFACE_682_WORK/coverage-cli-consumer-proof\" \\");
+        builder.AppendLine("  --coverage-proof-report \"$APPSURFACE_682_ARTIFACTS/coverage-cli-consumer-proof.md\" \\");
+        builder.AppendLine("  --docs-proof-work-dir \"$APPSURFACE_682_WORK/docs-package-consumer-proof\" \\");
+        builder.AppendLine("  --docs-proof-report \"$APPSURFACE_682_ARTIFACTS/docs-package-consumer-proof.md\"");
+        builder.AppendLine("unzip -p \"$APPSURFACE_682_ARTIFACTS/ForgeTrust.AppSurface.Docs.$APPSURFACE_682_VERSION.nupkg\" '*.nuspec'");
         builder.AppendLine("```");
         builder.AppendLine();
-        builder.AppendLine("Inspect `ForgeTrust.AppSurface.Docs.$APPSURFACE_678_VERSION.nupkg` and its single `.nuspec` next. The Docs dependency group must contain exact equality entries for `AngleSharp` `[1.5.2]`, `HtmlSanitizer` `[9.1.949-beta]`, and `AngleSharp.Css` `[1.0.0-beta.216]`; a missing entry, a range, or a different resolved graph fails the proof. The beta pair is valid only for a preview package version. Stable verification fails with `ASPKG139` when any required dependency is missing, versionless, malformed, or prerelease, when the AngleSharp lower bound is below 1.5.2, or until [issue #682](https://github.com/forge-trust/AppSurface/issues/682) supplies compatible stable sanitizer and CSS versions.");
+        builder.AppendLine("The preview run proves the locked consumer restore and its exact resolved graph, but it deliberately does not evaluate the stable-only `ASPKG139` dependency-container contract.");
+        builder.AppendLine();
+        builder.AppendLine("Before preparing the stable tag, repeat the proof with an unpublished stable candidate version so `ASPKG139` is exercised:");
+        builder.AppendLine();
+        builder.AppendLine("```bash");
+        builder.AppendLine("APPSURFACE_682_STABLE_WORK=\"$(mktemp -d \"/tmp/appsurface-682-stable-work.XXXXXX\")\"");
+        builder.AppendLine("APPSURFACE_682_STABLE_ARTIFACTS=\"$(mktemp -d \"/tmp/appsurface-682-stable-artifacts.XXXXXX\")\"");
+        builder.AppendLine("APPSURFACE_682_STABLE_VERSION=\"0.2.0\"");
+        builder.AppendLine("dotnet run --project \"$APPSURFACE_REPO_ROOT/tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj\" -- \\");
+        builder.AppendLine("  verify-packages \\");
+        builder.AppendLine("  --repo-root \"$APPSURFACE_REPO_ROOT\" \\");
+        builder.AppendLine("  --package-version \"$APPSURFACE_682_STABLE_VERSION\" \\");
+        builder.AppendLine("  --artifacts-output \"$APPSURFACE_682_STABLE_ARTIFACTS\" \\");
+        builder.AppendLine("  --artifact-manifest \"$APPSURFACE_682_STABLE_ARTIFACTS/package-artifact-manifest.json\" \\");
+        builder.AppendLine("  --report \"$APPSURFACE_682_STABLE_ARTIFACTS/package-validation-report.md\" \\");
+        builder.AppendLine("  --coverage-proof-work-dir \"$APPSURFACE_682_STABLE_WORK/coverage-cli-consumer-proof\" \\");
+        builder.AppendLine("  --coverage-proof-report \"$APPSURFACE_682_STABLE_ARTIFACTS/coverage-cli-consumer-proof.md\" \\");
+        builder.AppendLine("  --docs-proof-work-dir \"$APPSURFACE_682_STABLE_WORK/docs-package-consumer-proof\" \\");
+        builder.AppendLine("  --docs-proof-report \"$APPSURFACE_682_STABLE_ARTIFACTS/docs-package-consumer-proof.md\"");
+        builder.AppendLine("unzip -p \"$APPSURFACE_682_STABLE_ARTIFACTS/ForgeTrust.AppSurface.Docs.$APPSURFACE_682_STABLE_VERSION.nupkg\" '*.nuspec'");
+        builder.AppendLine("```");
+        builder.AppendLine();
+        builder.AppendLine($"Inspect both Docs `.nuspec` files next. Every Docs dependency container must contain exact equality entries for {StableDocsDependencyContract.MarkdownDependencyList}. The preview artifact confirms the locked consumer restore; the stable candidate also evaluates `ASPKG139`, which rejects a missing entry, duplicate, range, or different resolved graph. Both `verify-packages` runs independently restore the selected packed Docs artifact into a fresh locked consumer and record its `project.assets.json`, lock file, mapped `NuGet.config`, and exact resolved graph in `docs-package-consumer-proof.md`. Neither local proof publishes a package. Do not use `VersionOverride` or a widened range to make an incompatible graph restore.");
         builder.AppendLine();
         builder.AppendLine("Finally prove the excluded RazorWire tool explicitly; `verify-packages` does not select `do_not_publish` entries:");
         builder.AppendLine();
         builder.AppendLine("```bash");
-        builder.AppendLine("mkdir -p \"$APPSURFACE_678_ARTIFACTS/razorwire\" \"$APPSURFACE_678_WORK/razorwire-tool\" \"$APPSURFACE_678_WORK/razorwire-export\"");
+        builder.AppendLine("mkdir -p \"$APPSURFACE_682_ARTIFACTS/razorwire\" \"$APPSURFACE_682_WORK/razorwire-tool\" \"$APPSURFACE_682_WORK/razorwire-export\"");
         builder.AppendLine("dotnet pack \"$APPSURFACE_REPO_ROOT/Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj\" \\");
         builder.AppendLine("  --configuration Release --no-restore \\");
-        builder.AppendLine("  --output \"$APPSURFACE_678_ARTIFACTS/razorwire\" \\");
+        builder.AppendLine("  --output \"$APPSURFACE_682_ARTIFACTS/razorwire\" \\");
         builder.AppendLine("  /p:EnableRazorWireCliToolPackaging=true \\");
-        builder.AppendLine("  /p:PackageVersion=\"$APPSURFACE_678_VERSION\"");
-        builder.AppendLine("unzip -p \"$APPSURFACE_678_ARTIFACTS/razorwire/ForgeTrust.RazorWire.Cli.$APPSURFACE_678_VERSION.nupkg\" '*.nuspec'");
+        builder.AppendLine("  /p:PackageVersion=\"$APPSURFACE_682_VERSION\"");
+        builder.AppendLine("unzip -p \"$APPSURFACE_682_ARTIFACTS/razorwire/ForgeTrust.RazorWire.Cli.$APPSURFACE_682_VERSION.nupkg\" '*.nuspec'");
         builder.AppendLine("dotnet tool install ForgeTrust.RazorWire.Cli \\");
-        builder.AppendLine("  --tool-path \"$APPSURFACE_678_WORK/razorwire-tool\" \\");
-        builder.AppendLine("  --source \"$APPSURFACE_678_ARTIFACTS/razorwire\" \\");
-        builder.AppendLine("  --version \"$APPSURFACE_678_VERSION\"");
-        builder.AppendLine("\"$APPSURFACE_678_WORK/razorwire-tool/razorwire\" --help");
-        builder.AppendLine("\"$APPSURFACE_678_WORK/razorwire-tool/razorwire\" export --help");
-        builder.AppendLine("\"$APPSURFACE_678_WORK/razorwire-tool/razorwire\" export \\");
+        builder.AppendLine("  --tool-path \"$APPSURFACE_682_WORK/razorwire-tool\" \\");
+        builder.AppendLine("  --source \"$APPSURFACE_682_ARTIFACTS/razorwire\" \\");
+        builder.AppendLine("  --version \"$APPSURFACE_682_VERSION\"");
+        builder.AppendLine("\"$APPSURFACE_682_WORK/razorwire-tool/razorwire\" --help");
+        builder.AppendLine("\"$APPSURFACE_682_WORK/razorwire-tool/razorwire\" export --help");
+        builder.AppendLine("\"$APPSURFACE_682_WORK/razorwire-tool/razorwire\" export \\");
         builder.AppendLine("  --project \"$APPSURFACE_REPO_ROOT/examples/razorwire-mvc/RazorWireWebExample.csproj\" \\");
         builder.AppendLine("  --mode hybrid \\");
-        builder.AppendLine("  --output \"$APPSURFACE_678_WORK/razorwire-export\"");
-        builder.AppendLine("test -f \"$APPSURFACE_678_WORK/razorwire-export/index.html\"");
+        builder.AppendLine("  --output \"$APPSURFACE_682_WORK/razorwire-export\"");
+        builder.AppendLine("test -f \"$APPSURFACE_682_WORK/razorwire-export/index.html\"");
         builder.AppendLine("```");
         builder.AppendLine();
         builder.AppendLine("The tool package must have one `DotnetTool` package type, command `razorwire`, and no NuGet dependency group or `<dependency>` entries: its proof-only package bundles the closure under `tools/**`. Installation, both help surfaces, and the sample hybrid export must succeed. These checks do not change its excluded classification or `publish_decision: do_not_publish`, and the artifact must not be pushed.");
@@ -2329,12 +2365,15 @@ internal sealed record PackageProjectMetadata(
 /// Discovers candidate projects that should be classified by the package chooser manifest.
 /// </summary>
 /// <remarks>
-/// The scanner intentionally excludes tests, examples, tooling, generated directories, and hidden local cache
-/// directories so the manifest only needs to classify packages that are meaningful to external adopters or
-/// package-surface maintainers.
+/// The scanner intentionally excludes tests, examples, executable tooling, generated directories, and hidden local
+/// cache directories so the manifest only needs to classify packages that are meaningful to external adopters or
+/// package-surface maintainers. <c>ForgeTrust.AppSurface.ReleaseContracts</c> is the one transitive support package
+/// stored below <c>tools</c>; it remains discoverable because published Docs consumers restore it as a dependency.
 /// </remarks>
 internal sealed class PackageProjectScanner
 {
+    private const string ReleaseContractsProjectPath = "/tools/forgetrust.appsurface.releasecontracts/forgetrust.appsurface.releasecontracts.csproj";
+
     /// <summary>
     /// Enumerates candidate project files under the repository root.
     /// </summary>
@@ -2361,13 +2400,22 @@ internal sealed class PackageProjectScanner
         var normalizedPath = relativePath.Replace('\\', '/').Trim('/');
         var normalizedPathLower = "/" + normalizedPath.ToLowerInvariant();
         var projectName = Path.GetFileNameWithoutExtension(relativePath).ToLowerInvariant();
+        var isReleaseContractsPackage = string.Equals(
+            normalizedPathLower,
+            ReleaseContractsProjectPath,
+            StringComparison.Ordinal);
 
         if (HasHiddenDirectorySegment(normalizedPath)
             || normalizedPathLower.StartsWith("/artifacts/", StringComparison.Ordinal)
             || normalizedPathLower.Contains("/bin/", StringComparison.Ordinal)
             || normalizedPathLower.Contains("/obj/", StringComparison.Ordinal)
-            || normalizedPathLower.Contains("/node_modules/", StringComparison.Ordinal)
-            || normalizedPathLower.Contains("/tools/", StringComparison.Ordinal))
+            || normalizedPathLower.Contains("/node_modules/", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (normalizedPathLower.Contains("/tools/", StringComparison.Ordinal)
+            && !isReleaseContractsPackage)
         {
             return false;
         }
