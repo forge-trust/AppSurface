@@ -1292,7 +1292,8 @@ body {
     position: relative;
 }
 
-.docs-content :where(h2, h3, h4, h5, h6)[id] {
+.docs-content :where(h2, h3, h4, h5, h6)[id],
+.docs-content--markdown .docs-rich-tabs__panel {
     scroll-margin-top: 2rem;
 }
 
@@ -1394,7 +1395,8 @@ body {
         -webkit-overflow-scrolling: touch;
     }
 
-    .docs-content :where(h2, h3, h4, h5, h6)[id] {
+    .docs-content :where(h2, h3, h4, h5, h6)[id],
+    .docs-content--markdown .docs-rich-tabs__panel {
         scroll-margin-top: 5rem;
     }
 }
@@ -1437,7 +1439,8 @@ body {
         --docs-outline-compact-top: 3.8125rem;
     }
 
-    .docs-content :where(h2, h3, h4, h5, h6)[id] {
+    .docs-content :where(h2, h3, h4, h5, h6)[id],
+    .docs-content--markdown .docs-rich-tabs__panel {
         scroll-margin-top: 11rem;
     }
 }
@@ -2383,6 +2386,7 @@ body {
     border-bottom: 1px solid var(--docs-color-border-muted);
     margin-bottom: 1rem;
     overflow-x: auto;
+    padding-inline: 0.25rem;
 }
 
 .docs-content--markdown .docs-rich-tabs__tablist {

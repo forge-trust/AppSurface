@@ -1,7 +1,6 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Docs.Models;
 using Markdig;
 using Markdig.Extensions.CustomContainers;
@@ -16,10 +15,10 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// Registers the bounded rich-authoring directives that AppSurface Docs owns.
 /// </summary>
 /// <remarks>
-/// The extension deliberately builds on Markdig's fenced custom-container parser. That keeps ordinary Markdown and
-/// fenced code blocks inside a supported directive on the normal parsing path, while this package owns the small
-/// <c>callout</c>, <c>tabs</c>, and <c>tab</c> grammar and its rendered HTML. Unsupported or malformed directives
-/// render as visible source markers with their body intact instead of being guessed into an interactive component.
+/// The extension deliberately builds on Markdig's fenced custom-container parser. The harvester first recognizes valid
+/// tabs and emits their complete server-rendered baseline; this extension then renders callouts, preserves generic
+/// custom containers, and leaves invalid rich directives visible as source markers with their body intact instead of
+/// guessing them into an interactive component.
 /// </remarks>
 internal sealed class AppSurfaceDocsRichAuthoringMarkdownExtension : IMarkdownExtension
 {
@@ -196,6 +195,15 @@ internal static class AppSurfaceDocsRichAuthoringSyntax
     private const int MaximumLabelRunes = 80;
 
     /// <summary>
+    /// Gets the largest directive nesting level converted to Markdig fences in one document.
+    /// </summary>
+    /// <remarks>
+    /// This bound keeps malformed source such as a long run of unclosed directive openings readable without allocating
+    /// progressively larger fence strings. Content beyond the bound remains literal source until its matching closes.
+    /// </remarks>
+    internal const int MaximumNormalizedDirectiveNestingDepth = 16;
+
+    /// <summary>
     /// Normalizes package directives to Markdig's generic custom-container fence shape without changing authored code.
     /// </summary>
     /// <param name="markdown">The Markdown source about to enter the Markdig pipeline.</param>
@@ -218,6 +226,7 @@ internal static class AppSurfaceDocsRichAuthoringSyntax
         char codeFenceCharacter = default;
         var codeFenceLength = 0;
         var richFenceDepth = 0;
+        var literalOverflowDepth = 0;
         for (var index = 0; index < lines.Length; index++)
         {
             var line = lines[index];
@@ -240,11 +249,23 @@ internal static class AppSurfaceDocsRichAuthoringSyntax
 
             if (!inCodeFence && TryParseDirectiveOpening(line, out var indent, out var directive, out var arguments))
             {
+                if (literalOverflowDepth > 0 || richFenceDepth >= MaximumNormalizedDirectiveNestingDepth)
+                {
+                    literalOverflowDepth++;
+                    continue;
+                }
+
                 lines[index] = $"{indent}{new string(':', 3 + richFenceDepth)} {{.appsurface-rich-{directive} data-appsurface-rich-argument=\"{EncodeArgument(arguments)}\"}}";
                 richFenceDepth++;
             }
-            else if (!inCodeFence && richFenceDepth > 0 && TryParseRichClosing(line, out indent))
+            else if (!inCodeFence && (richFenceDepth > 0 || literalOverflowDepth > 0) && TryParseRichClosing(line, out indent))
             {
+                if (literalOverflowDepth > 0)
+                {
+                    literalOverflowDepth--;
+                    continue;
+                }
+
                 richFenceDepth--;
                 lines[index] = indent + new string(':', 3 + richFenceDepth);
             }
@@ -288,6 +309,7 @@ internal static class AppSurfaceDocsRichAuthoringSyntax
         var inCodeFence = false;
         char codeFenceCharacter = default;
         var codeFenceLength = 0;
+        var openSourceDirectives = new List<string>();
         for (var index = 0; index < lines.Length; index++)
         {
             var line = lines[index];
@@ -315,38 +337,51 @@ internal static class AppSurfaceDocsRichAuthoringSyntax
                 continue;
             }
 
-            if (!TryParseDirectiveOpening(line, out _, out var directive, out var prompt)
-                || !directive.Equals("tabs", StringComparison.OrdinalIgnoreCase)
-                || !TryParseQuotedValue(prompt, MaximumPromptRunes, out var parsedPrompt)
-                || !TryReadTabs(lines, index, out var endIndex, out var panels))
+            if (TryParseDirectiveOpening(line, out _, out var directive, out var prompt))
             {
+                if (directive.Equals("tabs", StringComparison.OrdinalIgnoreCase)
+                    && !openSourceDirectives.Contains("tabs", StringComparer.OrdinalIgnoreCase)
+                    && TryParseQuotedValue(prompt, MaximumPromptRunes, out var parsedPrompt)
+                    && TryReadTabs(lines, index, out var endIndex, out var panels)
+                    && panels.Count is >= 2 and <= 4
+                    && !panels.Any(panel => !TryParseQuotedValue(panel.Label, MaximumLabelRunes, out _))
+                    && panels.Select(panel => panel.Label[1..^1].Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Count() == panels.Count)
+                {
+                    tabsIdentifier++;
+                    tabsToken ??= CreateTabsToken();
+                    var placeholder = $"<!--appsurface-rich-tabs-{tabsIdentifier}-{tabsToken}-->";
+                    result.Add(placeholder);
+                    replacements.Add(new AppSurfaceDocsRichAuthoringTabsReplacement(
+                        placeholder,
+                        BuildTabsHtml(
+                            tabsIdentifier,
+                            documentIdentifier,
+                            tabsToken,
+                            parsedPrompt,
+                            panels.Select(panel => new AppSurfaceDocsRichAuthoringTabPanel(
+                                panel.Label[1..^1].Trim(),
+                                renderPanelMarkdown(string.Join('\n', panel.Lines)))).ToArray())));
+                    index = endIndex;
+                    continue;
+                }
+
+                openSourceDirectives.Add(directive);
                 result.Add(line);
                 continue;
             }
 
-            if (panels.Count is < 2 or > 4
-                || panels.Any(panel => !TryParseQuotedValue(panel.Label, MaximumLabelRunes, out _))
-                || panels.Select(panel => panel.Label).Distinct(StringComparer.OrdinalIgnoreCase).Count() != panels.Count)
+            if (TryParseRichClosing(line, out _))
             {
+                if (openSourceDirectives.Count > 0)
+                {
+                    openSourceDirectives.RemoveAt(openSourceDirectives.Count - 1);
+                }
+
                 result.Add(line);
                 continue;
             }
 
-            tabsIdentifier++;
-            tabsToken ??= CreateTabsToken();
-            var placeholder = $"<!--appsurface-rich-tabs-{tabsIdentifier}-{tabsToken}-->";
-            result.Add(placeholder);
-            replacements.Add(new AppSurfaceDocsRichAuthoringTabsReplacement(
-                placeholder,
-                BuildTabsHtml(
-                    tabsIdentifier,
-                    documentIdentifier,
-                    tabsToken,
-                    parsedPrompt,
-                    panels.Select(panel => new AppSurfaceDocsRichAuthoringTabPanel(
-                        panel.Label[1..^1].Trim(),
-                        renderPanelMarkdown(string.Join('\n', panel.Lines)))).ToArray())));
-            index = endIndex;
+            result.Add(line);
         }
 
         return new AppSurfaceDocsRichAuthoringTabsRenderResult(

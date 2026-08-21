@@ -1328,6 +1328,20 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
+    public void RichAuthoringSyntax_ShouldKeepMalformedDirectiveNestingBoundedAndReadable()
+    {
+        var directives = Enumerable.Repeat(":::callout note", AppSurfaceDocsRichAuthoringSyntax.MaximumNormalizedDirectiveNestingDepth + 4);
+        var closes = Enumerable.Repeat(":::", AppSurfaceDocsRichAuthoringSyntax.MaximumNormalizedDirectiveNestingDepth + 4);
+        var normalized = AppSurfaceDocsRichAuthoringSyntax.NormalizeDirectiveFences(string.Join('\n', directives.Concat(closes)));
+
+        Assert.Equal(
+            AppSurfaceDocsRichAuthoringSyntax.MaximumNormalizedDirectiveNestingDepth,
+            normalized.Split("appsurface-rich-callout", StringSplitOptions.None).Length - 1);
+        Assert.Contains(":::callout note", normalized, StringComparison.Ordinal);
+        Assert.DoesNotContain(new string(':', AppSurfaceDocsRichAuthoringSyntax.MaximumNormalizedDirectiveNestingDepth + 4), normalized, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldKeepDirectiveExamplesInsideTabsCodeFencesLiteral()
     {
         await WriteMarkdownAsync(
@@ -1397,6 +1411,22 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Theory]
+    [InlineData("Same", "same")]
+    [InlineData("Same", " Same ")]
+    public async Task HarvestAsync_ShouldRejectTabsLabelsThatCollideAfterClientNormalization(string firstLabel, string secondLabel)
+    {
+        await WriteMarkdownAsync(
+            "CollidingLabels.md",
+            $"# Colliding labels{Environment.NewLine}{Environment.NewLine}:::tabs \"Choose a path\"{Environment.NewLine}:::tab \"{firstLabel}\"{Environment.NewLine}First.{Environment.NewLine}:::{Environment.NewLine}:::tab \"{secondLabel}\"{Environment.NewLine}Second.{Environment.NewLine}:::{Environment.NewLine}:::");
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(_harvester).GetHarvestDiagnostics();
+
+        Assert.DoesNotContain("data-appsurfacedocs-rich=\"tabs\"", doc.Content, StringComparison.Ordinal);
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.RichAuthoringInvalidTabs);
+    }
+
+    [Theory]
     [InlineData(0, false)]
     [InlineData(1, true)]
     [InlineData(160, true)]
@@ -1445,6 +1475,99 @@ public class MarkdownHarvesterTests : IDisposable
         Assert.Contains("This should remain readable.", doc.Content, StringComparison.Ordinal);
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.RichAuthoringInvalidCallout);
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.RichAuthoringInvalidTabs);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldKeepUnclosedAndStandaloneDirectivesLiteralWithStableDiagnostics()
+    {
+        await WriteMarkdownAsync(
+            "UnclosedCallout.md",
+            """
+            # Unclosed callout
+
+            :::callout note
+            Keep this readable.
+            """);
+        await WriteMarkdownAsync(
+            "UnclosedTabs.md",
+            """
+            # Unclosed tabs
+
+            :::tabs "Choose a path"
+            Keep this readable.
+            """);
+        await WriteMarkdownAsync(
+            "StandaloneTab.md",
+            """
+            # Standalone tab
+
+            :::tab "Only option"
+            Keep this readable.
+            """);
+
+        var docs = await _harvester.HarvestAsync(_testRoot);
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(_harvester).GetHarvestDiagnostics();
+        var callout = Assert.Single(docs, document => document.Path == "UnclosedCallout.md");
+        var tabs = Assert.Single(docs, document => document.Path == "UnclosedTabs.md");
+        var standaloneTab = Assert.Single(docs, document => document.Path == "StandaloneTab.md");
+
+        Assert.Contains(":::callout note", callout.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("docs-rich-callout--note", callout.Content, StringComparison.Ordinal);
+        Assert.Contains(":::tabs", tabs.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-appsurfacedocs-rich=\"tabs\"", tabs.Content, StringComparison.Ordinal);
+        Assert.Contains("Keep this readable.", standaloneTab.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-appsurfacedocs-rich=\"tabs\"", standaloneTab.Content, StringComparison.Ordinal);
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.RichAuthoringInvalidCallout && diagnostic.Problem.Contains("UnclosedCallout.md' at line 3", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.RichAuthoringInvalidTabs && diagnostic.Problem.Contains("UnclosedTabs.md' at line 3", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.RichAuthoringInvalidTab && diagnostic.Problem.Contains("StandaloneTab.md' at line 3", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldRejectTabsWithDirectContentOrNestedTabs()
+    {
+        await WriteMarkdownAsync(
+            "MixedTabs.md",
+            """
+            # Mixed tabs
+
+            :::tabs "Choose a path"
+            This direct text is not a tab.
+            :::tab "First"
+            First.
+            :::
+            :::tab "Second"
+            Second.
+            :::
+            :::
+            """);
+        await WriteMarkdownAsync(
+            "NestedTabs.md",
+            """
+            # Nested tabs
+
+            :::tabs "Choose a path"
+            :::tab "First"
+            :::tabs "Nested choice"
+            :::tab "Inner first"
+            First.
+            :::
+            :::tab "Inner second"
+            Second.
+            :::
+            :::
+            :::
+            :::tab "Second"
+            Second.
+            :::
+            :::
+            """);
+
+        var docs = await _harvester.HarvestAsync(_testRoot);
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(_harvester).GetHarvestDiagnostics();
+
+        Assert.All(docs, document => Assert.DoesNotContain("data-appsurfacedocs-rich=\"tabs\"", document.Content, StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.RichAuthoringInvalidTabs && diagnostic.Problem.Contains("MixedTabs.md", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.RichAuthoringInvalidTabs && diagnostic.Problem.Contains("NestedTabs.md", StringComparison.Ordinal));
     }
 
     [Fact]

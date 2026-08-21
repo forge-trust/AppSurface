@@ -341,7 +341,9 @@ labels are limited to 80 Unicode characters, and prompts to 160. Invalid rich di
 best-effort UI: AppSurface Docs renders their source markers and body visibly, then reports one of
 `appsurfacedocs.rich_authoring.invalid_callout`, `appsurfacedocs.rich_authoring.invalid_tabs`, or
 `appsurfacedocs.rich_authoring.invalid_tab` in harvest health with a problem, cause, and fix. This makes mixed package
-versions and copy-paste mistakes recoverable without a migration.
+versions and copy-paste mistakes recoverable without a migration. To keep malformed source bounded, deeply unclosed
+directive runs remain literal source after the 16-level parser nesting limit rather than creating ever-longer internal
+fences.
 
 ## Harvest Health
 

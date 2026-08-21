@@ -136,6 +136,29 @@ public sealed class AppSurfaceDocsRichAuthoringPlaywrightTests
                 const frame = document.getElementById("doc-content");
                 frame?.insertAdjacentHTML(
                     "beforeend",
+                    `<section id="invalid-rich-tabs-one" data-appsurfacedocs-rich-tabs="true" data-appsurfacedocs-rich-tabs-token="turbo-token"><p data-appsurfacedocs-rich-tabs-baseline="true">One panel remains visible.</p><section data-appsurfacedocs-rich-tab-panel="true" data-appsurfacedocs-rich-tab-label="Only">Only</section></section>
+                     <section id="invalid-rich-tabs-five" data-appsurfacedocs-rich-tabs="true" data-appsurfacedocs-rich-tabs-token="turbo-token"><p data-appsurfacedocs-rich-tabs-baseline="true">Five panels remain visible.</p>${["One", "Two", "Three", "Four", "Five"].map(label => `<section data-appsurfacedocs-rich-tab-panel="true" data-appsurfacedocs-rich-tab-label="${label}">${label}</section>`).join("")}</section>
+                     <section id="invalid-rich-tabs-blank" data-appsurfacedocs-rich-tabs="true" data-appsurfacedocs-rich-tabs-token="turbo-token"><p data-appsurfacedocs-rich-tabs-baseline="true">Blank labels remain visible.</p><section data-appsurfacedocs-rich-tab-panel="true" data-appsurfacedocs-rich-tab-label="">Blank</section><section data-appsurfacedocs-rich-tab-panel="true" data-appsurfacedocs-rich-tab-label="Second">Second</section></section>
+                     <section id="invalid-rich-tabs-duplicate" data-appsurfacedocs-rich-tabs="true" data-appsurfacedocs-rich-tabs-token="turbo-token"><p data-appsurfacedocs-rich-tabs-baseline="true">Duplicate labels remain visible.</p><section data-appsurfacedocs-rich-tab-panel="true" data-appsurfacedocs-rich-tab-label="Same">First</section><section data-appsurfacedocs-rich-tab-panel="true" data-appsurfacedocs-rich-tab-label="same">Second</section></section>`);
+                frame?.dispatchEvent(new Event("turbo:frame-load", { bubbles: true }));
+            }
+            """);
+        var invalidTabs = page.Locator("[id^='invalid-rich-tabs-']");
+        Assert.Equal(4, await invalidTabs.CountAsync());
+        for (var index = 0; index < await invalidTabs.CountAsync(); index++)
+        {
+            var invalidTabsCase = invalidTabs.Nth(index);
+            Assert.Null(await invalidTabsCase.GetAttributeAsync("data-appsurfacedocs-rich-tabs-enhanced"));
+            Assert.Equal(0, await invalidTabsCase.Locator("[role='tab']").CountAsync());
+            Assert.True(await invalidTabsCase.Locator("[data-appsurfacedocs-rich-tabs-baseline='true']").IsVisibleAsync());
+        }
+
+        await page.EvaluateAsync(
+            """
+            () => {
+                const frame = document.getElementById("doc-content");
+                frame?.insertAdjacentHTML(
+                    "beforeend",
                     `<section data-appsurfacedocs-rich-tabs="true" data-appsurfacedocs-rich-tabs-token="forged-token">
                         <p data-appsurfacedocs-rich-tabs-baseline="true">Forged baseline remains visible.</p>
                         <section data-appsurfacedocs-rich-tab-panel="true" data-appsurfacedocs-rich-tab-label="Forged first">First</section>
