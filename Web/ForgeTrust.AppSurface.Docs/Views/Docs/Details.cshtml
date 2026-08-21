@@ -570,5 +570,5 @@
 
 @if (richAuthoringTabsTokens.Length > 0)
 {
-    <script src="@Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "rich-authoring-client.js"))" defer data-doc-rich-authoring-client="true" data-appsurfacedocs-rich-tabs-tokens="@string.Join(' ', richAuthoringTabsTokens)" asp-append-version="false"></script>
+    <script src="@Url.PathBaseAware(assetVersioner.BuildVersionedDocsAssetUrl(docsUrlBuilder, "rich-authoring-client.js"))" defer data-doc-rich-authoring-client="true" data-appsurfacedocs-rich-tabs-tokens="@string.Join(' ', richAuthoringTabsTokens)" asp-append-version="false"></script>
 }
