@@ -131,7 +131,7 @@ internal sealed class CoverageMergeWorkflow
 
         var totalStarted = _timeProvider.GetTimestamp();
         var stagingDirectory = Path.Join(outputDirectory, "reportgenerator-input");
-        StageReports(sourceDirectory, selectedReports, stagingDirectory, cancellationToken);
+        var stagedReports = StageReports(sourceDirectory, selectedReports, stagingDirectory, cancellationToken);
 
         var mergeStarted = _timeProvider.GetTimestamp();
         var reportGeneratorDirectory = Path.Join(outputDirectory, "reportgenerator");
@@ -163,10 +163,24 @@ internal sealed class CoverageMergeWorkflow
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-merge-diagnostics");
         }
 
+        // Keep ReportGenerator's Cobertura output as a validated dependency boundary even when a one-shard merge
+        // later restores source condition detail that ReportGenerator omitted.
+        _ = ReadCoberturaSummary(merge.CoberturaPath, "ASCOV135");
+
         var mergedCoveragePath = Path.Join(outputDirectory, "coverage.cobertura.xml");
         try
         {
-            File.Copy(merge.CoberturaPath, mergedCoveragePath, overwrite: true);
+            if (stagedReports.Count == 1)
+            {
+                // ReportGenerator may inject an external DTD and omit the conditions child on a no-op transformation.
+                // Preserve only the source line-level branch details in its validated result so the public merged
+                // report remains gate-compatible while retaining the semantic facts that the sole input established.
+                WriteSingleShardMergedCobertura(stagedReports[0], merge.CoberturaPath, mergedCoveragePath);
+            }
+            else
+            {
+                File.Copy(merge.CoberturaPath, mergedCoveragePath, overwrite: true);
+            }
             if (File.Exists(merge.SummaryPath))
             {
                 File.Copy(merge.SummaryPath, Path.Join(outputDirectory, "reportgenerator-summary.txt"), overwrite: true);
@@ -188,7 +202,7 @@ internal sealed class CoverageMergeWorkflow
         {
             throw;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException or XmlException or InvalidOperationException)
         {
             throw CoverageRunDiagnostics.Create(
                 "ASCOV137",
@@ -285,7 +299,7 @@ internal sealed class CoverageMergeWorkflow
         }
     }
 
-    private static void StageReports(
+    private static IReadOnlyList<string> StageReports(
         string sourceDirectory,
         IReadOnlyList<string> selectedReports,
         string stagingDirectory,
@@ -294,6 +308,7 @@ internal sealed class CoverageMergeWorkflow
         try
         {
             Directory.CreateDirectory(stagingDirectory);
+            var stagedReports = new List<string>(selectedReports.Count);
             for (var index = 0; index < selectedReports.Count; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -302,12 +317,15 @@ internal sealed class CoverageMergeWorkflow
                 var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(relative)))[..12].ToLowerInvariant();
                 var stagedDirectory = Path.Join(stagingDirectory, $"{(index + 1).ToString("D6", CultureInfo.InvariantCulture)}-{hash}");
                 Directory.CreateDirectory(stagedDirectory);
-                File.Copy(report, Path.Join(stagedDirectory, "coverage.cobertura.xml"), overwrite: true);
+                var stagedReport = Path.Join(stagedDirectory, "coverage.cobertura.xml");
+                File.Copy(report, stagedReport, overwrite: true);
+                stagedReports.Add(stagedReport);
             }
 
             CoverageMergeStaging.EnsurePreservedSelectedShardCount(
                 selectedReports.Count,
                 Directory.EnumerateFiles(stagingDirectory, "coverage.cobertura.xml", SearchOption.AllDirectories).Count());
+            return stagedReports;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
         {
@@ -318,6 +336,102 @@ internal sealed class CoverageMergeWorkflow
                 "Use a writable dedicated output directory and rerun coverage merge.",
                 "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-merge-diagnostics");
         }
+    }
+
+    private static void WriteSingleShardMergedCobertura(
+        string stagedSourcePath,
+        string reportGeneratorPath,
+        string mergedCoveragePath)
+    {
+        using var sourceReader = XmlReader.Create(stagedSourcePath, ReaderSettings);
+        using var reportGeneratorReader = XmlReader.Create(reportGeneratorPath, ReaderSettings);
+        var source = XDocument.Load(sourceReader, LoadOptions.PreserveWhitespace);
+        var merged = XDocument.Load(reportGeneratorReader, LoadOptions.PreserveWhitespace);
+        var mergedClasses = merged
+            .Descendants("class")
+            .Select(candidate => (Candidate: candidate, Key: GetClassIdentity(candidate)))
+            .Where(item => item.Key is not null)
+            .GroupBy(item => item.Key!.Value)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.Candidate).ToArray());
+        var sourceClasses = source
+            .Descendants("class")
+            .Select(candidate => (Candidate: candidate, Key: GetClassIdentity(candidate)))
+            .Where(item => item.Key is not null)
+            .GroupBy(item => item.Key!.Value)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.Candidate).ToArray());
+        foreach (var sourceClass in source.Descendants("class"))
+        {
+            var sourceIdentity = GetClassIdentity(sourceClass);
+            if (sourceIdentity is null
+                || !sourceClasses.TryGetValue(sourceIdentity.Value, out var matchingSourceClasses)
+                || matchingSourceClasses.Length != 1
+                || !mergedClasses.TryGetValue(sourceIdentity.Value, out var matchingMergedClasses)
+                || matchingMergedClasses.Length != 1)
+            {
+                continue;
+            }
+
+            var mergedClass = matchingMergedClasses[0];
+            var mergedLines = mergedClass.Element("lines")?
+                .Elements("line")
+                .Select(candidate => (Candidate: candidate, Number: candidate.Attribute("number")?.Value))
+                .Where(item => !string.IsNullOrWhiteSpace(item.Number))
+                .GroupBy(item => item.Number!, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.Select(item => item.Candidate).ToArray(), StringComparer.Ordinal)
+                ?? new Dictionary<string, XElement[]>(StringComparer.Ordinal);
+            var sourceLines = (sourceClass.Element("lines")?.Elements("line") ?? [])
+                .Select(candidate => (Candidate: candidate, Number: candidate.Attribute("number")?.Value))
+                .Where(item => !string.IsNullOrWhiteSpace(item.Number))
+                .GroupBy(item => item.Number!, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.Select(item => item.Candidate).ToArray(), StringComparer.Ordinal);
+            foreach (var sourceLine in sourceClass.Element("lines")?.Elements("line") ?? [])
+            {
+                var number = sourceLine.Attribute("number")?.Value;
+                if (string.IsNullOrWhiteSpace(number)
+                    || !sourceLines.TryGetValue(number, out var matchingSourceLines)
+                    || matchingSourceLines.Length != 1
+                    || !mergedLines.TryGetValue(number, out var matchingMergedLines)
+                    || matchingMergedLines.Length != 1)
+                {
+                    continue;
+                }
+
+                var mergedLine = matchingMergedLines[0];
+                CopyOptionalAttribute(sourceLine, mergedLine, "branch");
+                CopyOptionalAttribute(sourceLine, mergedLine, "condition-coverage");
+                var sourceConditions = sourceLine.Element("conditions");
+                mergedLine.Element("conditions")?.Remove();
+                if (sourceConditions is null)
+                {
+                    continue;
+                }
+
+                mergedLine.Add(new XElement(sourceConditions));
+            }
+        }
+
+        merged.Save(mergedCoveragePath, SaveOptions.DisableFormatting);
+    }
+
+    private static (string Package, string Name)? GetClassIdentity(XElement coverageClass)
+    {
+        var package = coverageClass.Ancestors("package").FirstOrDefault()?.Attribute("name")?.Value;
+        var name = coverageClass.Attribute("name")?.Value;
+        return string.IsNullOrWhiteSpace(package) || string.IsNullOrWhiteSpace(name)
+            ? null
+            : (package, name);
+    }
+
+    private static void CopyOptionalAttribute(XElement source, XElement destination, string name)
+    {
+        var value = source.Attribute(name)?.Value;
+        if (value is not null)
+        {
+            destination.SetAttributeValue(name, value);
+            return;
+        }
+
+        destination.Attribute(name)?.Remove();
     }
 
     private static async Task WriteSummaryAsync(

@@ -573,6 +573,7 @@ internal sealed class CoverageRunWorkflow
     private readonly Action? _timingsStaged;
     private readonly Action<string>? _deleteStagedCoverageFile;
     private readonly Func<string, string, CancellationToken, Task<CoverageRunDiagnosticLogWriteResult>>? _appendCleanupDiagnostic;
+    private readonly Func<string, string, CoverageRunProject, CancellationToken, Task>? _writeProjectManifest;
     private readonly Func<string, string?> _getEnvironmentVariable;
 
     /// <summary>
@@ -588,6 +589,7 @@ internal sealed class CoverageRunWorkflow
     /// <param name="appendCleanupDiagnostic">Optional test seam that replaces writing a cleanup diagnostic to its dedicated log.</param>
     /// <param name="slowTestDiagnosticsStaged">Optional test seam invoked after diagnostics staging completes and before cancellation is rechecked.</param>
     /// <param name="beforeSlowTestDiagnosticsPromotion">Optional test seam invoked after a prior canonical artifact is backed up and before a staged artifact is promoted.</param>
+    /// <param name="writeProjectManifest">Optional test seam that replaces the per-project manifest writer.</param>
     /// <param name="getEnvironmentVariable">Optional environment lookup used by the sandbox preflight.</param>
     public CoverageRunWorkflow(
         ICoverageRunProcessRunner processRunner,
@@ -600,6 +602,7 @@ internal sealed class CoverageRunWorkflow
         Func<string, string, CancellationToken, Task<CoverageRunDiagnosticLogWriteResult>>? appendCleanupDiagnostic = null,
         Action? slowTestDiagnosticsStaged = null,
         Action<string>? beforeSlowTestDiagnosticsPromotion = null,
+        Func<string, string, CoverageRunProject, CancellationToken, Task>? writeProjectManifest = null,
         Func<string, string?>? getEnvironmentVariable = null)
     {
         _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
@@ -612,6 +615,7 @@ internal sealed class CoverageRunWorkflow
         _timingsStaged = timingsStaged;
         _deleteStagedCoverageFile = deleteStagedCoverageFile;
         _appendCleanupDiagnostic = appendCleanupDiagnostic;
+        _writeProjectManifest = writeProjectManifest;
         _getEnvironmentVariable = getEnvironmentVariable ?? Environment.GetEnvironmentVariable;
     }
 
@@ -1724,7 +1728,28 @@ internal sealed class CoverageRunWorkflow
         var project = entry.Project;
         var index = entry.OriginalIndex;
         var projectOutputDirectory = Path.Join(outputDirectory, "projects", project.Slug);
-        Directory.CreateDirectory(projectOutputDirectory);
+        try
+        {
+            Directory.CreateDirectory(projectOutputDirectory);
+            await (_writeProjectManifest ?? CoverageProjectManifest.WriteAsync)(
+                projectOutputDirectory,
+                resolution.SolutionDirectory,
+                project,
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            throw CoverageRunDiagnostics.Create(
+                "ASCOV120",
+                "Coverage project manifest could not be written.",
+                $"{project.RelativePath}: {exception.Message}",
+                "Use a writable dedicated output directory and rerun coverage run.",
+                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+        }
         var logFile = Path.Join(projectOutputDirectory, "dotnet-test.log");
         var cleanupLogFile = Path.Join(projectOutputDirectory, "coverage-normalization.log");
         var started = _timeProvider.GetTimestamp();
