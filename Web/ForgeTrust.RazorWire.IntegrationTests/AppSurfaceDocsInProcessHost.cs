@@ -76,7 +76,7 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
     {
         var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
         var builder = AppSurfaceDocsStandaloneHost.CreateBuilder(
-            CreateHostArgs(requestedBaseUrl, repoRoot),
+            CreateLegacyHostArgs(requestedBaseUrl, repoRoot),
             DevelopmentEnvironmentProvider.Instance);
 
         return await StartAsync(ConfigureHostBuilder(builder, repoRoot, requestedBaseUrl, configureServices).Build());
@@ -93,7 +93,27 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
     {
         var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
         var builder = AppSurfaceDocsConsumerFixtureHost.CreateBuilder(
-            CreateHostArgs(requestedBaseUrl, repoRoot),
+            CreateLegacyHostArgs(requestedBaseUrl, repoRoot),
+            DevelopmentEnvironmentProvider.Instance);
+
+        return await StartAsync(ConfigureHostBuilder(builder, repoRoot, requestedBaseUrl).Build());
+    }
+
+    /// <summary>
+    /// Builds and starts the consumer fixture in its named public/internal Docs composition mode.
+    /// </summary>
+    /// <param name="requestedBaseUrl">
+    /// The URL passed to Kestrel, typically <c>http://127.0.0.1:0</c> so tests use a real listener on an available port.
+    /// </param>
+    /// <returns>
+    /// A started host that exposes public Docs at <c>/docs</c> and header-authorized internal Docs at
+    /// <c>/internal/docs</c> from disjoint fixture source roots.
+    /// </returns>
+    public static async Task<AppSurfaceDocsInProcessHost> StartMultiInstanceConsumerAsync(string requestedBaseUrl)
+    {
+        var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
+        var builder = AppSurfaceDocsConsumerFixtureHost.CreateBuilder(
+            CreateMultiInstanceConsumerHostArgs(requestedBaseUrl, repoRoot),
             DevelopmentEnvironmentProvider.Instance);
 
         return await StartAsync(ConfigureHostBuilder(builder, repoRoot, requestedBaseUrl).Build());
@@ -211,7 +231,7 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
         return uri.GetLeftPart(UriPartial.Authority);
     }
 
-    private static string[] CreateHostArgs(string baseUrl, string repoRoot)
+    private static string[] CreateLegacyHostArgs(string baseUrl, string repoRoot)
     {
         return
         [
@@ -237,6 +257,52 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
             "true",
             "--AppSurfaceDocs:Metrics:HostedCollection:Enabled",
             "true"
+        ];
+    }
+
+    private static string[] CreateMultiInstanceConsumerHostArgs(string baseUrl, string repoRoot)
+    {
+        var publicSourceRoot = TestPathUtils.PathUnder(
+            repoRoot,
+            "Web",
+            "ForgeTrust.AppSurface.Docs.ConsumerFixture",
+            "Tests",
+            "MultiInstance",
+            "Public");
+        var internalSourceRoot = TestPathUtils.PathUnder(
+            repoRoot,
+            "Web",
+            "ForgeTrust.AppSurface.Docs.ConsumerFixture",
+            "Tests",
+            "MultiInstance",
+            "Internal");
+
+        return
+        [
+            "--urls",
+            baseUrl,
+            "--environment",
+            Environments.Development,
+            "--AppSurfaceDocs:Public:Source:RepositoryRoot",
+            publicSourceRoot,
+            "--AppSurfaceDocs:Public:Routing:RouteRootPath",
+            "/docs",
+            "--AppSurfaceDocs:Public:Routing:DocsRootPath",
+            "/docs",
+            "--AppSurfaceDocs:Public:Identity:DisplayName",
+            "Public Docs",
+            "--AppSurfaceDocs:Public:Theme:Preset",
+            "AppSurfaceDark",
+            "--AppSurfaceDocs:Internal:Source:RepositoryRoot",
+            internalSourceRoot,
+            "--AppSurfaceDocs:Internal:Routing:RouteRootPath",
+            "/internal/docs",
+            "--AppSurfaceDocs:Internal:Routing:DocsRootPath",
+            "/internal/docs",
+            "--AppSurfaceDocs:Internal:Identity:DisplayName",
+            "Contributor Docs",
+            "--AppSurfaceDocs:Internal:Theme:Preset",
+            "GraphiteDark"
         ];
     }
 

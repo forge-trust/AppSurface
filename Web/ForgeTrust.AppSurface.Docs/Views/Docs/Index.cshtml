@@ -1,9 +1,10 @@
 @model ForgeTrust.AppSurface.Docs.Models.DocLandingViewModel
 @inject ForgeTrust.AppSurface.Docs.AppSurfaceDocsAssetPathResolver AssetPathResolver
-@inject ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsIdentityResolver IdentityResolver
+@inject ForgeTrust.AppSurface.Docs.IAppSurfaceDocsRequestRuntimeAccessor RuntimeAccessor
 @{
+    var identityResolver = RuntimeAccessor.GetRequiredRuntime().IdentityResolver;
     ViewData["Title"] = "Documentation Index";
-    var docsIdentity = IdentityResolver.Identity;
+    var docsIdentity = identityResolver.Identity;
     var docsBrandIconUrl = docsIdentity.Logo is null
         ? Url.Content(AssetPathResolver.BrandIconPath)
         : Url.PathBaseAware(docsIdentity.Logo.Path);

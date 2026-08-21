@@ -63,6 +63,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
 
     private readonly IServiceProvider _services;
     private readonly ILogger<AppSurfaceDocsHarvestProgressReporter> _logger;
+    private readonly string _channelName;
     private readonly TimeProvider _timeProvider;
     private readonly object _gate = new();
     private readonly HashSet<string> _completionVisitSuppressedRunIds = new(StringComparer.Ordinal);
@@ -111,9 +112,28 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
         IServiceProvider services,
         ILogger<AppSurfaceDocsHarvestProgressReporter> logger,
         TimeProvider? timeProvider = null)
+        : this(services, logger, ChannelName, timeProvider)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a reporter for an explicitly isolated Docs stream channel.
+    /// </summary>
+    /// <param name="services">The root host service provider used to resolve RazorWire infrastructure.</param>
+    /// <param name="logger">Logger used for bounded publish failures.</param>
+    /// <param name="channelName">The stable Docs harvest channel used only by this runtime.</param>
+    /// <param name="timeProvider">Monotonic time source used for bounded publication and rolling-rate measurement.</param>
+    internal AppSurfaceDocsHarvestProgressReporter(
+        IServiceProvider services,
+        ILogger<AppSurfaceDocsHarvestProgressReporter> logger,
+        string channelName,
+        TimeProvider? timeProvider = null)
     {
         _services = services ?? throw new ArgumentNullException(nameof(services));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _channelName = string.IsNullOrWhiteSpace(channelName)
+            ? throw new ArgumentException("A harvest progress channel is required.", nameof(channelName))
+            : channelName;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -139,6 +159,11 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
     /// Gets the client-side completion navigation delay in milliseconds.
     /// </summary>
     internal int CompletionDelay => CompletionDelayMilliseconds;
+
+    /// <summary>
+    /// Gets the RazorWire stream channel owned by this Docs runtime.
+    /// </summary>
+    internal string StreamChannelName => _channelName;
 
     /// <summary>
     /// Gets the time source shared with run-scoped test pacing and rate measurement.
@@ -803,7 +828,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
                 publication.Snapshot,
                 CompletionDelayMilliseconds);
             await hub.PublishAsync(
-                ChannelName,
+                _channelName,
                 message,
                 new RazorWireStreamPublishOptions { Replay = true });
 
@@ -813,7 +838,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
                     .Visit(CurrentPageVisitUrl, RazorWireVisitAction.Replace)
                     .Build();
                 await hub.PublishAsync(
-                    ChannelName,
+                    _channelName,
                     visitMessage,
                     new RazorWireStreamPublishOptions { Replay = false });
                 MarkCompletionVisitPublished(publication.Snapshot.RunId);

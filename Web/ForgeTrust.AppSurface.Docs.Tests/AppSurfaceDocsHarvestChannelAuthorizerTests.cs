@@ -624,15 +624,206 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
         Assert.Contains("forbade", result.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task OperatorReadPolicyEvaluator_WhenNamedEndpointHasMultiplePolicies_RequiresEveryPolicy()
+    {
+        await using var services = CreateReadPolicyServices();
+
+        var result = await AppSurfaceDocsOperatorReadPolicyEvaluator.AuthorizeAsync(
+            Context("host-channel", services, "alice", "docs.read").HttpContext,
+            [new AuthorizeAttribute("DocsRead"), new AuthorizeAttribute("DocsPublish")]);
+
+        Assert.Equal(AppSurfaceAuthOutcome.Forbid, result.Outcome);
+        Assert.Equal(AppSurfaceAuthReason.Forbidden, result.Reason);
+    }
+
+    [Fact]
+    public async Task OperatorReadPolicyEvaluator_WhenNamedEndpointMetadataIsEmpty_RejectsTheInvalidCall()
+    {
+        await using var services = CreateReadPolicyServices();
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => AppSurfaceDocsOperatorReadPolicyEvaluator.AuthorizeAsync(
+                new DefaultHttpContext { RequestServices = services },
+                []).AsTask());
+
+        Assert.Equal("authorizationData", exception.ParamName);
+    }
+
+    [Fact]
+    public async Task OperatorReadPolicyEvaluator_WhenNamedEndpointRequestServicesAreMissing_ReturnsSetupFailure()
+    {
+        var result = await AppSurfaceDocsOperatorReadPolicyEvaluator.AuthorizeAsync(
+            new DefaultHttpContext(),
+            [new AuthorizeAttribute("DocsRead")]);
+
+        AssertOperatorReadPolicyFailure(
+            result,
+            AppSurfaceAuthReason.MissingServices,
+            "missing_request_services",
+            typeof(IServiceProvider),
+            "the named Docs endpoint authorization requirements");
+    }
+
+    [Fact]
+    public async Task OperatorReadPolicyEvaluator_WhenNamedEndpointPolicyIsMissing_ReturnsSetupFailure()
+    {
+        await using var services = CreateReadPolicyServices();
+
+        var result = await AppSurfaceDocsOperatorReadPolicyEvaluator.AuthorizeAsync(
+            new DefaultHttpContext { RequestServices = services },
+            [new AuthorizeAttribute("MissingPolicy")]);
+
+        AssertOperatorReadPolicyFailure(
+            result,
+            AppSurfaceAuthReason.MissingPolicy,
+            "missing_policy",
+            typeof(AuthorizationPolicy),
+            "MissingPolicy");
+    }
+
+    [Fact]
+    public async Task OperatorReadPolicyEvaluator_WhenNamedEndpointPolicyAllows_ReturnsAllowed()
+    {
+        await using var services = CreateReadPolicyServices();
+
+        var result = await AppSurfaceDocsOperatorReadPolicyEvaluator.AuthorizeAsync(
+            Context("host-channel", services, "alice", "docs.read").HttpContext,
+            [new AuthorizeAttribute("DocsRead")]);
+
+        Assert.True(result.IsAllowed);
+    }
+
+    [Theory]
+    [InlineData("alice", "docs.read", "operator", AppSurfaceAuthOutcome.Allowed)]
+    [InlineData("alice", "docs.read", null, AppSurfaceAuthOutcome.Forbid)]
+    [InlineData("alice", "other", "operator", AppSurfaceAuthOutcome.Forbid)]
+    [InlineData(null, null, null, AppSurfaceAuthOutcome.Challenge)]
+    public async Task OperatorReadPolicyEvaluator_WhenNamedEndpointUsesDefaultPolicyRolesAndSchemes_PreservesEveryRequirement(
+        string? userName,
+        string? scope,
+        string? role,
+        AppSurfaceAuthOutcome expectedOutcome)
+    {
+        await using var services = CreateReadPolicyServices();
+
+        var result = await AppSurfaceDocsOperatorReadPolicyEvaluator.AuthorizeAsync(
+            Context("host-channel", services, userName, scope, role).HttpContext,
+            [
+                new AuthorizeAttribute(),
+                new AuthorizeAttribute
+                {
+                    Roles = "operator",
+                    AuthenticationSchemes = HeaderAuthenticationHandler.SchemeName
+                }
+            ]);
+
+        Assert.Equal(expectedOutcome, result.Outcome);
+    }
+
+    [Fact]
+    public async Task OperatorReadPolicyEvaluator_WhenNamedEndpointPolicyProviderIsMissing_ReturnsSetupFailure()
+    {
+        await using var services = new ServiceCollection().BuildServiceProvider();
+
+        var result = await AppSurfaceDocsOperatorReadPolicyEvaluator.AuthorizeAsync(
+            new DefaultHttpContext { RequestServices = services },
+            [new AuthorizeAttribute("DocsRead")]);
+
+        AssertOperatorReadPolicyFailure(
+            result,
+            AppSurfaceAuthReason.MissingServices,
+            "missing_authorization_policy_provider",
+            typeof(IAuthorizationPolicyProvider),
+            "the named Docs endpoint authorization requirements");
+    }
+
+    [Fact]
+    public async Task OperatorReadPolicyEvaluator_WhenNamedEndpointPolicyEvaluatorIsMissing_ReturnsSetupFailure()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAuthorization(options => options.AddPolicy("DocsRead", policy => policy.RequireAssertion(_ => true)));
+        services.RemoveAll<IPolicyEvaluator>();
+        await using var serviceProvider = services.BuildServiceProvider();
+
+        var result = await AppSurfaceDocsOperatorReadPolicyEvaluator.AuthorizeAsync(
+            new DefaultHttpContext { RequestServices = serviceProvider },
+            [new AuthorizeAttribute("DocsRead")]);
+
+        AssertOperatorReadPolicyFailure(
+            result,
+            AppSurfaceAuthReason.MissingServices,
+            "missing_policy_evaluator",
+            typeof(IPolicyEvaluator),
+            "the named Docs endpoint authorization requirements");
+    }
+
     [Theory]
     [InlineData(null, false)]
     [InlineData("", false)]
     [InlineData("appsurfacedocs-harvest", true)]
+    [InlineData("appsurfacedocs-harvest-internal_docs", true)]
     [InlineData("AppSurfaceDocs-Harvest", false)]
     [InlineData("host-channel", false)]
-    public void IsHarvestProgressChannel_ShouldMatchOnlyExactHarvestChannel(string? channel, bool expected)
+    public void IsHarvestProgressChannel_ShouldMatchLegacyAndValidNamedHarvestChannels(string? channel, bool expected)
     {
         Assert.Equal(expected, AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(channel));
+    }
+
+    [Fact]
+    public async Task StreamAuthorizeAsync_WhenLegacyHostUsesANamedLookingChannel_DelegatesToItsHostAuthorizer()
+    {
+        var authorizer = new AppSurfaceDocsHarvestStreamAuthorizer(
+            Options(AppSurfaceDocsHarvestHealthExposure.Never),
+            new TestHostEnvironment { EnvironmentName = Environments.Production },
+            new TestStreamAuthorizer(AppSurfaceAuthResult.Allowed()));
+
+        var result = await authorizer.AuthorizeAsync(
+            Context(AppSurfaceDocsStreamAuthorization.GetHarvestProgressChannel("internal")));
+
+        Assert.True(result.IsAllowed);
+    }
+
+    [Theory]
+    [InlineData(null, false, null)]
+    [InlineData("appsurfacedocs-harvest-", false, null)]
+    [InlineData("appsurfacedocs-harvest-$", false, null)]
+    [InlineData("appsurfacedocs-harvest-internal_docs", true, "internal_docs")]
+    public void TryGetNamedInstanceFromHarvestProgressChannel_ShouldValidateTheInstanceSuffix(
+        string? channel,
+        bool expected,
+        string? expectedInstanceName)
+    {
+        var matched = AppSurfaceDocsStreamAuthorization.TryGetNamedInstanceFromHarvestProgressChannel(
+            channel,
+            out var instanceName);
+
+        Assert.Equal(expected, matched);
+        Assert.Equal(expectedInstanceName, instanceName);
+    }
+
+    [Fact]
+    public void NamedHarvestProgressChannelHelpers_ShouldUseTheNamedInstanceNameContract()
+    {
+        var channel = AppSurfaceDocsStreamAuthorization.GetHarvestProgressChannel(" Internal_Docs ");
+
+        Assert.Equal("appsurfacedocs-harvest-internal_docs", channel);
+        Assert.True(AppSurfaceDocsStreamAuthorization.TryGetNamedInstanceFromHarvestProgressChannel(channel, out var instanceName));
+        Assert.Equal("internal_docs", instanceName);
+        Assert.False(AppSurfaceDocsStreamAuthorization.TryGetNamedInstanceFromHarvestProgressChannel(
+            "appsurfacedocs-harvest-Internal_Docs",
+            out _));
+        Assert.False(AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(
+            $"appsurfacedocs-harvest-{new string('a', 65)}"));
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => AppSurfaceDocsStreamAuthorization.GetHarvestProgressChannel(new string('a', 65)));
+        Assert.Equal("instanceName", exception.ParamName);
+
+        var blankException = Assert.Throws<ArgumentException>(
+            () => AppSurfaceDocsStreamAuthorization.GetHarvestProgressChannel(" "));
+        Assert.Equal("instanceName", blankException.ParamName);
     }
 
     private static AppSurfaceDocsOptions Options(
@@ -688,11 +879,20 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
         services.AddAuthorization(
             options =>
             {
+                options.DefaultPolicy = new AuthorizationPolicyBuilder(HeaderAuthenticationHandler.SchemeName)
+                    .RequireAuthenticatedUser()
+                    .RequireClaim("scope", "docs.read")
+                    .Build();
                 options.AddPolicy(
                     "DocsRead",
                     policy => policy.AddAuthenticationSchemes(HeaderAuthenticationHandler.SchemeName)
                         .RequireAuthenticatedUser()
                         .RequireClaim("scope", "docs.read"));
+                options.AddPolicy(
+                    "DocsPublish",
+                    policy => policy.AddAuthenticationSchemes(HeaderAuthenticationHandler.SchemeName)
+                        .RequireAuthenticatedUser()
+                        .RequireClaim("scope", "docs.publish"));
             });
         if (replacementAuthorizerAllows || registerReplacementAuthorizer)
         {
@@ -743,7 +943,8 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
         string channel,
         IServiceProvider? requestServices = null,
         string? userName = null,
-        string? scope = null)
+        string? scope = null,
+        string? role = null)
     {
         var httpContext = new DefaultHttpContext();
         if (requestServices is not null)
@@ -759,6 +960,11 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
         if (!string.IsNullOrWhiteSpace(scope))
         {
             httpContext.Request.Headers[HeaderAuthenticationHandler.ScopeHeaderName] = scope;
+        }
+
+        if (!string.IsNullOrWhiteSpace(role))
+        {
+            httpContext.Request.Headers[HeaderAuthenticationHandler.RoleHeaderName] = role;
         }
 
         return new RazorWireStreamAuthorizationContext(
@@ -791,6 +997,7 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
         public const string SchemeName = "HeaderTest";
         public const string UserHeaderName = "X-Test-User";
         public const string ScopeHeaderName = "X-Test-Scope";
+        public const string RoleHeaderName = "X-Test-Role";
 
         public HeaderAuthenticationHandler(
             IOptionsMonitor<AuthenticationSchemeOptions> options,
@@ -820,6 +1027,14 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
                     scopeValues
                         .SelectMany(value => value?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [])
                         .Select(scope => new Claim("scope", scope)));
+            }
+
+            if (Request.Headers.TryGetValue(RoleHeaderName, out var roleValues))
+            {
+                claims.AddRange(
+                    roleValues
+                        .SelectMany(value => value?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [])
+                        .Select(role => new Claim(ClaimTypes.Role, role)));
             }
 
             var identity = new ClaimsIdentity(claims, SchemeName);

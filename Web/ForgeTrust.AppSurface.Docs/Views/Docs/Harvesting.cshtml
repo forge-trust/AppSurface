@@ -11,7 +11,7 @@
      data-appsurface-docs-harvest-delay="@Model.CompletionNavigationDelayMilliseconds">
     @if (Model.CanUseLiveProgress)
     {
-        <rw:stream-source channel="@AppSurfaceDocsStreamAuthorization.HarvestProgressChannel" replay="true"></rw:stream-source>
+        <rw:stream-source channel="@Model.HarvestProgressChannel" replay="true"></rw:stream-source>
     }
     @if (Model.RebuildRequestResult is not null)
     {
