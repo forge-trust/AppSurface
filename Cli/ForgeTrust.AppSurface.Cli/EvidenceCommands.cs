@@ -279,11 +279,17 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
         {
             return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.TimedOut, [], "The existing AppSurface coverage workflow exceeded its bounded execution window.");
         }
-        catch (Exception exception)
+        catch (Exception exception) when (IsNonFatalException(exception))
         {
             return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Failed, [], $"The existing AppSurface coverage workflow failed with {exception.GetType().Name}.");
         }
     }
+
+    private static bool IsNonFatalException(Exception exception) =>
+        exception is not OutOfMemoryException
+            and not StackOverflowException
+            and not AccessViolationException
+            and not AppDomainUnloadedException;
 
     private CoverageGateRequest CreateCoverageGateRequest(string coveragePath, EvidenceCoverageGateRequirements requirements)
     {

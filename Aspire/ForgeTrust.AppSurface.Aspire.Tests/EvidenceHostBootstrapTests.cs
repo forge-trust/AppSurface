@@ -219,6 +219,20 @@ public sealed class EvidenceHostBootstrapTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldPropagateCriticalProducerFailure()
+    {
+        await using var host = EvidenceHostBootstrap.Create(
+            CreatePlan(),
+            registration =>
+            {
+                registration.AddResource(new ReadyResource("postgres"));
+                registration.AddProducer(new CriticalFailingProducer("coverage"));
+            });
+
+        await Assert.ThrowsAsync<OutOfMemoryException>(() => host.RunAsync());
+    }
+
+    [Fact]
     public void Registration_ShouldRequireOneDistinctEntryForEachExplicitCapability()
     {
         var registration = new EvidenceHostRegistration();
@@ -548,6 +562,14 @@ public sealed class EvidenceHostBootstrapTests
 
         public ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken) =>
             ValueTask.FromException<EvidenceProducerResult>(new InvalidOperationException("producer failed"));
+    }
+
+    private sealed class CriticalFailingProducer(string id) : IEvidenceProducer
+    {
+        public string Id { get; } = id;
+
+        public ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken) =>
+            ValueTask.FromException<EvidenceProducerResult>(new OutOfMemoryException("critical producer failure"));
     }
 
     private sealed class WrongIdProducer(string id) : IEvidenceProducer

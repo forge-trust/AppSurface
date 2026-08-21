@@ -354,7 +354,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
             {
                 throw;
             }
-            catch (Exception exception)
+            catch (Exception exception) when (IsNonFatalException(exception))
             {
                 results.Add(new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.Unavailable, timer.ElapsedMilliseconds, $"Resource '{resource.Id}' readiness failed with {exception.GetType().Name}."));
                 return new ResourceReadiness(
@@ -399,7 +399,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
             {
                 throw;
             }
-            catch (Exception exception)
+            catch (Exception exception) when (IsNonFatalException(exception))
             {
                 results.Add(new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.Failed, [], $"Producer '{declaration.Id}' failed with {exception.GetType().Name}.", ElapsedMilliseconds: timer.ElapsedMilliseconds));
             }
@@ -458,7 +458,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
                     syncDisposable.Dispose();
                 }
             }
-            catch (Exception exception)
+            catch (Exception exception) when (IsNonFatalException(exception))
             {
                 failure ??= exception;
             }
@@ -466,6 +466,12 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
 
         return failure is null ? null : $"Evidence cleanup failed with {failure.GetType().Name}.";
     }
+
+    private static bool IsNonFatalException(Exception exception) =>
+        exception is not OutOfMemoryException
+            and not StackOverflowException
+            and not AccessViolationException
+            and not AppDomainUnloadedException;
 
     private IReadOnlyList<EvidenceProducerResult> FailureForEveryProducer(EvidenceProducerOutcome outcome, string diagnostic) =>
         _plan.Profile.Producers.Select(producer => new EvidenceProducerResult(producer.Id, outcome, [], diagnostic)).ToArray();

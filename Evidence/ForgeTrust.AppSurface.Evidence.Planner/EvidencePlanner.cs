@@ -92,12 +92,12 @@ public sealed class EvidencePlanner
         }
 
         var profiles = policy.Profiles.ToDictionary(static profile => profile.Id, StringComparer.Ordinal);
-        if (!profiles.ContainsKey(policy.ConservativeProfileId))
+        if (!profiles.TryGetValue(policy.ConservativeProfileId, out var conservativeProfile))
         {
             throw new EvidencePlanningException("ASEVD104", $"Conservative profile '{policy.ConservativeProfileId}' is not declared.", "Declare the conservative profile in the policy.");
         }
 
-        if (IsEmptyProfile(profiles[policy.ConservativeProfileId]))
+        if (IsEmptyProfile(conservativeProfile))
         {
             throw new EvidencePlanningException("ASEVD105", "The conservative profile cannot be empty.", "Use a profile with explicit evidence requirements for unmatched paths.");
         }
