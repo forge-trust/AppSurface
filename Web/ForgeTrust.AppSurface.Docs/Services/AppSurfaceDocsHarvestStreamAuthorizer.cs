@@ -52,7 +52,7 @@ internal sealed class AppSurfaceDocsHarvestStreamAuthorizer : IRazorWireStreamAu
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (!AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(context.Channel))
+        if (!AppSurfaceDocsStreamAuthorization.IsLegacyHarvestProgressChannel(context.Channel))
         {
             return await AuthorizeHostChannelAsync(context);
         }

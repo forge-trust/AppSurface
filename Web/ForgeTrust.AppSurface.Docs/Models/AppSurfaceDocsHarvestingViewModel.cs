@@ -41,6 +41,15 @@ public sealed record AppSurfaceDocsHarvestingViewModel
     public bool CanUseLiveProgress { get; init; } = true;
 
     /// <summary>
+    /// Gets the isolated RazorWire channel used for this runtime's live harvest progress.
+    /// </summary>
+    /// <remarks>
+    /// Named Docs products use distinct channels so a subscription can never receive another product's harvest state.
+    /// The default value preserves the legacy single-product stream contract.
+    /// </remarks>
+    public string HarvestProgressChannel { get; init; } = AppSurfaceDocsStreamAuthorization.HarvestProgressChannel;
+
+    /// <summary>
     /// Gets the result of the rebuild request that navigated to the observatory, when one is available.
     /// </summary>
     /// <remarks>

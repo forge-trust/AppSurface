@@ -19,6 +19,7 @@ internal sealed class AppSurfaceDocsOperatorReadPolicyWarningService : IHostedSe
     private readonly AppSurfaceDocsOptions _options;
     private readonly IHostEnvironment _environment;
     private readonly ILogger<AppSurfaceDocsOperatorReadPolicyWarningService> _logger;
+    private readonly string _harvestProgressChannel;
 
     /// <summary>
     /// Creates the startup warning service.
@@ -30,10 +31,29 @@ internal sealed class AppSurfaceDocsOperatorReadPolicyWarningService : IHostedSe
         AppSurfaceDocsOptions options,
         IHostEnvironment environment,
         ILogger<AppSurfaceDocsOperatorReadPolicyWarningService> logger)
+        : this(options, environment, logger, AppSurfaceDocsStreamAuthorization.HarvestProgressChannel)
+    {
+    }
+
+    /// <summary>
+    /// Creates the startup warning service for a specific Docs harvest-progress channel.
+    /// </summary>
+    /// <param name="options">The normalized Docs options for the runtime being checked.</param>
+    /// <param name="environment">The current host environment.</param>
+    /// <param name="logger">Logger used for the structured startup warning.</param>
+    /// <param name="harvestProgressChannel">The legacy or named RazorWire channel exposed by this runtime.</param>
+    internal AppSurfaceDocsOperatorReadPolicyWarningService(
+        AppSurfaceDocsOptions options,
+        IHostEnvironment environment,
+        ILogger<AppSurfaceDocsOperatorReadPolicyWarningService> logger,
+        string harvestProgressChannel)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _environment = environment ?? throw new ArgumentNullException(nameof(environment));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _harvestProgressChannel = string.IsNullOrWhiteSpace(harvestProgressChannel)
+            ? throw new ArgumentException("A harvest progress channel is required.", nameof(harvestProgressChannel))
+            : harvestProgressChannel;
     }
 
     /// <summary>
@@ -97,7 +117,7 @@ internal sealed class AppSurfaceDocsOperatorReadPolicyWarningService : IHostedSe
         if (health.ExposeRoutes == AppSurfaceDocsHarvestHealthExposure.Always)
         {
             surfaces.Add("_harvest");
-            surfaces.Add(AppSurfaceDocsStreamAuthorization.HarvestProgressChannel);
+            surfaces.Add(_harvestProgressChannel);
             if (string.IsNullOrWhiteSpace(health.AuthorizationPolicy))
             {
                 surfaces.Add("_health");

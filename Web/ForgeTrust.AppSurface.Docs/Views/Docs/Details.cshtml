@@ -1,7 +1,9 @@
 @model ForgeTrust.AppSurface.Docs.Models.DocDetailsViewModel
-@inject ForgeTrust.AppSurface.Docs.AppSurfaceDocsAssetVersioner AssetVersioner
-@inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrlBuilder
+@inject ForgeTrust.AppSurface.Docs.IAppSurfaceDocsRequestRuntimeAccessor RuntimeAccessor
 @{
+    var runtime = RuntimeAccessor.GetRequiredRuntime();
+    var assetVersioner = runtime.AssetVersioner;
+    var docsUrlBuilder = runtime.DocsUrlBuilder;
     ViewData["Title"] = Model.Title;
     ViewData["CanonicalUrl"] = Model.CanonicalUrl;
     var trust = Model.Document.Metadata?.Trust;
@@ -563,7 +565,7 @@
 
 @if (hasOutline)
 {
-    <script src="@Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "outline-client.js"))" defer data-doc-outline-client="true" asp-append-version="false"></script>
+    <script src="@Url.PathBaseAware(assetVersioner.BuildVersionedDocsAssetUrl(docsUrlBuilder, "outline-client.js"))" defer data-doc-outline-client="true" asp-append-version="false"></script>
 }
 
 @if (richAuthoringTabsTokens.Length > 0)
