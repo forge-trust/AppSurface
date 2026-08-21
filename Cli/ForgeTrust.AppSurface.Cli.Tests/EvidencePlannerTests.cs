@@ -160,6 +160,29 @@ public sealed class EvidencePlannerTests
     }
 
     [Fact]
+    public void Resolve_ShouldMatchAnEmptyTrailingWildcardSegment()
+    {
+        var policy = CreatePolicy() with
+        {
+            Rules = [new EvidencePolicyRule("prefix", "src/Feature*", "no-evidence")],
+        };
+
+        var plan = new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("src/Feature")]);
+
+        Assert.Equal("no-evidence", plan.Profile.Id);
+        Assert.Equal(["prefix"], plan.MatchedRuleIds);
+    }
+
+    [Fact]
+    public void EvidencePlanningException_ShouldExposeTheStableDiagnosticAndRecoveryAction()
+    {
+        var exception = new EvidencePlanningException("ASEVD999", "Evidence planning failed.", "Correct the policy.");
+
+        Assert.Equal("ASEVD999", exception.Code);
+        Assert.Equal("Correct the policy.", exception.Fix);
+    }
+
+    [Fact]
     public void ManifestBuilder_ShouldRejectReleaseClaimWithoutValidatedEnvelope()
     {
         var release = CreatePolicy() with
@@ -429,6 +452,27 @@ public sealed class EvidencePlannerTests
             Obligations = [new EvidenceObligation("behavior", "risk", "why", [], "missing")],
         };
         Assert.Throws<EvidencePlanningException>(() => EvidencePlanner.ValidatePolicy(new EvidencePolicy("policy", "1", "coverage", [invalidObligation], [])));
+    }
+
+    [Fact]
+    public void Planner_ShouldRejectAnUnsupportedCoveragePatchLineMode()
+    {
+        var validProfile = CreateCoverageProfile(EvidenceProfileScope.Targeted);
+        var policy = CreatePolicy() with
+        {
+            Profiles =
+            [
+                validProfile with
+                {
+                    Producers = [validProfile.Producers[0] with { CoverageGate = new EvidenceCoverageGateRequirements(95, 85, PatchLineMode: "unsupported") }],
+                },
+            ],
+        };
+
+        var exception = Assert.Throws<EvidencePlanningException>(() => EvidencePlanner.ValidatePolicy(policy));
+
+        Assert.Equal("ASEVD127", exception.Code);
+        Assert.Contains("patchLineMode", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

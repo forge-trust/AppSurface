@@ -26,6 +26,15 @@ public sealed class EvidenceHostBootstrapTests
     }
 
     [Fact]
+    public void EvidenceHostException_ShouldExposeTheStableDiagnosticAndRecoveryAction()
+    {
+        var exception = new EvidenceHostException("ASEVD999", "Evidence collection failed.", "Register a compatible producer.");
+
+        Assert.Equal("ASEVD999", exception.Code);
+        Assert.Equal("Register a compatible producer.", exception.Fix);
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldCloseObligationAfterExplicitResourceAndProducerRegistrations()
     {
         var resource = new ReadyResource("postgres");

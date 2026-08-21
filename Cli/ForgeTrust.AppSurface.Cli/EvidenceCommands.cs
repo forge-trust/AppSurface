@@ -302,7 +302,9 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
                 PatchDiffSource.ForFile(Path.GetFullPath(DiffFile), Path.GetFileName(DiffFile), 20L * 1024 * 1024),
                 requirements.MinPatchLinePercent,
                 requirements.MinPatchBranchPercent,
-                ParsePatchLineMode(requirements.PatchLineMode));
+                string.Equals(requirements.PatchLineMode, "codecov", StringComparison.OrdinalIgnoreCase)
+                    ? PatchLineMode.Codecov
+                    : PatchLineMode.Measurable);
         return new CoverageGateRequest(
             coveragePath,
             outputDirectory,
@@ -313,13 +315,6 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             patchCoverage,
             requirements.TolerancePercent);
     }
-
-    private static PatchLineMode ParsePatchLineMode(string patchLineMode) =>
-        string.Equals(patchLineMode, "codecov", StringComparison.OrdinalIgnoreCase)
-            ? PatchLineMode.Codecov
-            : string.Equals(patchLineMode, "measurable", StringComparison.OrdinalIgnoreCase)
-                ? PatchLineMode.Measurable
-                : throw new CommandException("ASEVD213: coverageGate.patchLineMode must be measurable or codecov.");
 
     private static async Task WriteGitHubSummaryAsync(EvidenceManifest manifest, CancellationToken cancellationToken)
     {
