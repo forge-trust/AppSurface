@@ -4471,6 +4471,36 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public async Task CoverageCliConsumerProofWorkflow_ReportsMissingReleaseComposeOutput()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            createReleaseOutput: false);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        var releaseApply = Assert.Single(report.Commands, command => command.OperationName == "appsurface release compose apply");
+        Assert.False(releaseApply.Succeeded);
+        Assert.Equal("Expected packaged release composition to create the explicit output file.", releaseApply.FailureReason);
+        Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface canary poll --help");
+    }
+
+    [Fact]
     public async Task CoverageCliConsumerProofWorkflow_StopsBeforeCompatibilityRunWhenRawSemanticProofFails()
     {
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
@@ -9404,6 +9434,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         private readonly string _releasePreviewOutput;
         private readonly string _releaseApplyOutput;
         private readonly string _releaseOutputContents;
+        private readonly bool _createReleaseOutput;
         private readonly bool _createInvalidRawCoverage;
         private readonly bool _createMergedCoverageLoss;
         private readonly bool _createMissingSelectedRawCoverage;
@@ -9437,7 +9468,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
             bool createInvalidRawCoverage = false,
             bool createMergedCoverageLoss = false,
             bool createMissingSelectedRawCoverage = false,
-            bool createShardDirectoryFile = false)
+            bool createShardDirectoryFile = false,
+            bool createReleaseOutput = true)
         {
             _packageVersion = packageVersion;
             _createFailingGateReports = createFailingGateReports;
@@ -9463,6 +9495,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             _releasePreviewOutput = releasePreviewOutput ?? "Preview only. Would write releases/v1.4.0.md; re-run with --apply to make that change.";
             _releaseApplyOutput = releaseApplyOutput ?? "Wrote composed release note to releases/v1.4.0.md.";
             _releaseOutputContents = releaseOutputContents ?? "# Composed consumer release note\n\n- The packaged tool composes consumer release notes.\n";
+            _createReleaseOutput = createReleaseOutput;
             _createInvalidRawCoverage = createInvalidRawCoverage;
             _createMergedCoverageLoss = createMergedCoverageLoss;
             _createMissingSelectedRawCoverage = createMissingSelectedRawCoverage;
@@ -9498,8 +9531,12 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 var rootDirectory = ReadOption(request.Arguments, "--root");
                 var outputPath = ReadOption(request.Arguments, "--output");
                 var path = TestPathUtils.PathUnder(rootDirectory, outputPath);
-                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                File.WriteAllText(path, _releaseOutputContents);
+                if (_createReleaseOutput)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                    File.WriteAllText(path, _releaseOutputContents);
+                }
+
                 return Task.FromResult(new ExternalCommandResult(0, _releaseApplyOutput, string.Empty));
             }
 

@@ -290,6 +290,16 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             return BuildReport(context, commands, artifacts);
         }
 
+        if (!File.Exists(releaseOutputPath))
+        {
+            commands[^1] = commands[^1] with
+            {
+                Succeeded = false,
+                FailureReason = "Expected packaged release composition to create the explicit output file."
+            };
+            return BuildReport(context, commands, artifacts);
+        }
+
         var releaseTemplatePath = Path.Join(fixtureDirectory, "releases", "unreleased.md");
         var releaseEntryPath = Path.Join(fixtureDirectory, "releases", "unreleased.entries", "2026-08-20-package-consumer.md");
         var releaseTemplate = await File.ReadAllTextAsync(releaseTemplatePath, cancellationToken);

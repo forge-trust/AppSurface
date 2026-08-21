@@ -57,7 +57,7 @@ public sealed class ReleaseComposeCommandTests
         command.Apply = true;
         await command.ExecuteAsync(applyConsole, CancellationToken.None);
 
-        var output = File.ReadAllText(Path.Join(root.Path, "releases", "v1.2.3.md"));
+        var output = File.ReadAllText(Path.Join(root.Path, "releases", "v1.2.3.md")).ReplaceLineEndings("\n");
         Assert.Contains("- Alpha capability.\n\n- [Zulu guide](../guides/zulu.md)", output, StringComparison.Ordinal);
         Assert.Contains("## Fixed\n- Fixed a consumer-facing regression.", output, StringComparison.Ordinal);
         Assert.DoesNotContain("<!-- appsurface:unreleased-entries", output, StringComparison.Ordinal);

@@ -111,7 +111,7 @@ dotnet tool run appsurface --version
 dotnet tool run appsurface docs --repo .
 dotnet tool run appsurface coverage run --solution ./MyApp.slnx --dry-run
 dotnet tool run appsurface coverage run --solution ./MyApp.slnx
-dotnet tool run appsurface release compose --root .
+dotnet tool run appsurface -- release compose --root .
 dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --patch-line-mode codecov --min-patch-branch 85
 ```
 
@@ -148,7 +148,7 @@ Then let each change add its own file under `releases/unreleased.entries/`. File
 - Added a consumer-facing capability.
 ```
 
-Entries may contain ordinary Markdown and nested `###` headings, but not new `#` or `##` sections, nested directories, symbolic links, composition markers, terminal control characters, or a section that the template does not declare. Section identifiers use lowercase letters, digits, and single hyphens. Relative Markdown links are rebased from an entry to the composed destination; links inside inline, fenced, and indented code examples remain unchanged. Templates and entries may use tabs and normal line breaks, but other control characters are rejected so a preview cannot alter the maintainer's terminal.
+Entries may contain ordinary Markdown and nested `###` headings, but not new `#` or `##` sections, nested directories, symbolic links, composition markers, terminal control characters, or a section that the template does not declare. Section identifiers use lowercase letters, digits, and single hyphens. Relative Markdown links are rebased from an entry to the composed destination. Without `--output`, preview composes as though the template is the destination; with `--output`, both preview and `--apply` compose for that output file. Consequently, when the template and selected output live in different directories, those two previews can contain different relative link targets. Links inside inline, fenced, and indented code examples remain unchanged. Templates and entries may use tabs and normal line breaks, but other control characters are rejected so a preview cannot alter the maintainer's terminal.
 
 Preview the complete composed document without writing any files:
 

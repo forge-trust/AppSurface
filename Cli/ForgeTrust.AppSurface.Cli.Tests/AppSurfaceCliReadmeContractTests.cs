@@ -214,11 +214,13 @@ public sealed class AppSurfaceCliReadmeContractTests
         Assert.Contains("<!-- appsurface:unreleased-entries section=\"added\" -->", readme, StringComparison.Ordinal);
         Assert.Contains("<!-- appsurface:unreleased-entry section=\"added\" -->", readme, StringComparison.Ordinal);
         Assert.Contains("--output releases/v1.4.0.md", readme, StringComparison.Ordinal);
-        Assert.Contains("--apply", readme, StringComparison.Ordinal);
+        Assert.Contains("`--apply` always requires a distinct `--output`", readme, StringComparison.Ordinal);
+        Assert.Contains("| `--apply` | Off |", readme, StringComparison.Ordinal);
         Assert.Contains("never overwrites the stable template", readme, StringComparison.Ordinal);
         Assert.Contains("does not run AppSurface's repository-owned release cockpit", readme, StringComparison.Ordinal);
         Assert.Contains("changelog rollover and entry consumption", readme, StringComparison.Ordinal);
         Assert.Contains("terminal control characters", readme, StringComparison.Ordinal);
+        Assert.Contains("the template is the destination", readme, StringComparison.Ordinal);
         Assert.Contains("operator-controlled root", readme, StringComparison.Ordinal);
         Assert.Contains("../../tools/ForgeTrust.AppSurface.Release/README.md", readme, StringComparison.Ordinal);
     }

@@ -182,6 +182,23 @@ public sealed class UnreleasedEntryComposerTests : IDisposable
     }
 
     [Fact]
+    public async Task LoadAsyncRejectsTerminalControlCharactersInEntryFiles()
+    {
+        var entriesDirectory = EntriesDirectory();
+        Directory.CreateDirectory(entriesDirectory);
+        await File.WriteAllTextAsync(
+            Path.Join(entriesDirectory, "2026-08-08-control.md"),
+            "<!-- appsurface:unreleased-entry section=\"included\" -->\n- \u001b[2J\n");
+
+        var exception = await Assert.ThrowsAsync<UnreleasedEntryException>(
+            () => UnreleasedEntryComposer.LoadAsync(entriesDirectory, CancellationToken.None));
+
+        Assert.Equal(
+            "Unreleased entry '2026-08-08-control.md' must not contain terminal control characters.",
+            exception.Message);
+    }
+
+    [Fact]
     public void ComposeRebasesRelativeMarkdownLinksAndPreservesCode()
     {
         const string template = """
