@@ -3639,6 +3639,42 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
+    public async Task DetailsView_ShouldOnlyLoadRichAuthoringClientForPackageGeneratedTabs()
+    {
+        const string tabsMarkup = """
+            <section class="docs-rich-tabs" data-appsurfacedocs-rich="tabs" data-appsurfacedocs-rich-tabs="true" data-appsurfacedocs-rich-tabs-token="trusted-token">
+              <section data-appsurfacedocs-rich-tab-panel="true" data-appsurfacedocs-rich-tab-label="First">First</section>
+              <section data-appsurfacedocs-rich-tab-panel="true" data-appsurfacedocs-rich-tab-label="Second">Second</section>
+            </section>
+            """;
+        var generatedDoc = new DocNode(
+            "Tabs",
+            "guides/tabs.md",
+            tabsMarkup)
+        {
+            RichAuthoringTabsTokens = ["trusted-token"]
+        };
+        var generatedHtml = await RenderDetailsViewWithPathBaseAsync(generatedDoc, "/tenant");
+        var generatedDocument = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(generatedHtml);
+
+        var script = generatedDocument.QuerySelector("script[data-doc-rich-authoring-client='true']");
+        Assert.NotNull(script);
+        Assert.Matches("^/tenant/docs/rich-authoring-client\\.js\\?v=.+", script!.GetAttribute("src") ?? string.Empty);
+        Assert.Equal("trusted-token", script.GetAttribute("data-appsurfacedocs-rich-tabs-tokens"));
+
+        var rawAuthorDoc = new DocNode("Raw tabs", "guides/raw-tabs.md", tabsMarkup);
+        var rawAuthorHtml = await RenderDetailsViewAsync(rawAuthorDoc);
+        var calloutOnlyDoc = new DocNode(
+            "Callout",
+            "guides/callout.md",
+            "<section data-appsurfacedocs-rich=\"callout\">Callout</section>");
+        var calloutOnlyHtml = await RenderDetailsViewAsync(calloutOnlyDoc);
+
+        Assert.DoesNotContain("data-doc-rich-authoring-client", rawAuthorHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-doc-rich-authoring-client", calloutOnlyHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task DetailsView_ShouldHideOutlineRail_WhenOnlyMalformedOutlineEntriesExist()
     {
         using var services = CreateServiceProvider(CreateDocs());

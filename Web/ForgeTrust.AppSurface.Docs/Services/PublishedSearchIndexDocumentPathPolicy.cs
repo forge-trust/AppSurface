@@ -22,6 +22,7 @@ internal static class PublishedSearchIndexDocumentPathPolicy
         "search.css",
         "search-client.js",
         "outline-client.js",
+        "rich-authoring-client.js",
         "minisearch.min.js",
         "_harvest",
         "_health",

@@ -4,6 +4,10 @@ This public-preview tutorial proves the current [`ForgeTrust.AppSurface.Durable.
 
 The [AppSurface CLI](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands) owns migration status, reviewed scripts, preflight, and guarded apply. This example owns only two local-proof commands:
 
+:::callout danger
+Application startup never applies DDL. Generate, review, and apply migrations through the explicit migration-owner workflow before any runtime host starts.
+:::
+
 - `schema-bootstrap-dev` initializes one active epoch only with `DOTNET_ENVIRONMENT=Development`, `APPSURFACE_DURABLE_LOCAL_PROOF=1`, a loopback migration-owner connection, and the tutorial's migration-owner role; it does not apply migrations.
 - `verify-local` uses the separate loopback runtime and dispatcher identities to register Work, Flow, Schedule, health, drain, and the bounded pump; it starts the explicitly composed `AddWorkerHost()` until it completes a hosted pass, verifies the durable catalog and migration metadata are unchanged, then stops it without doing DDL.
 
@@ -18,6 +22,15 @@ Install all of the following before starting:
   payload-free dispatcher, scoped runtime, and dedicated retention operator.
 
 The canonical [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) recipe owns the reviewed grants. Do not substitute ad-hoc grants or a copied role script. The dispatcher, runtime, and retention-operator roles must be distinct non-owner login roles without `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION`, or `BYPASSRLS`.
+
+:::tabs "Which environment are you preparing?"
+:::tab "Local proof"
+Continue with the disposable PostgreSQL 17 transcript below. It creates restricted loopback-only roles and proves one bounded worker pass without application-startup DDL.
+:::
+:::tab "Production"
+Use the reviewed migration-owner workflow, deployment secrets, role recipe, preflight, and forward-only recovery guidance. The local transcript is not a production runbook.
+:::
+:::
 
 Only these configuration names are required. Values are placeholders and must never be committed or printed:
 

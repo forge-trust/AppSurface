@@ -121,13 +121,15 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
     [Fact]
     public async Task ProgressReporter_ShouldCoalesceOrdinarySourceReports()
     {
+        var timeProvider = new ManualTimeProvider(DateTimeOffset.UtcNow);
         var hub = new RecordingRazorWireStreamHub();
         var services = new ServiceCollection();
         services.AddSingleton<IRazorWireStreamHub>(hub);
         using var provider = services.BuildServiceProvider();
         var reporter = new AppSurfaceDocsHarvestProgressReporter(
             provider,
-            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance,
+            timeProvider);
         var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
         var session = reporter.CreateSession(runId, nameof(MarkdownHarvester));
 
@@ -137,6 +139,8 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
         }
 
         Assert.Single(hub.Published);
+        await timeProvider.TimerCreated.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        timeProvider.Advance(TimeSpan.FromMilliseconds(250));
         await hub.SecondPublicationObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Equal(2, hub.Published.Count);
         Assert.Equal(10_000, Assert.Single(reporter.CurrentSnapshot.Harvesters).SourceUnitsProcessed);

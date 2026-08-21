@@ -258,6 +258,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         _pipeline = new MarkdownPipelineBuilder()
             .UseAdvancedExtensions()
             .Use(new AppSurfaceDocsCodeBlockMarkdownExtension(codeHighlighter))
+            .Use(new AppSurfaceDocsRichAuthoringMarkdownExtension())
             .Build();
     }
 
@@ -423,7 +424,21 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                         title = string.IsNullOrEmpty(parentDir) ? "Home" : Path.GetFileName(parentDir);
                     }
 
-                    var document = Markdown.Parse(markdownBody, _pipeline);
+                    var richTabs = AppSurfaceDocsRichAuthoringSyntax.RenderValidTabs(
+                        markdownBody,
+                        relativePath,
+                        panelMarkdown => Markdown.ToHtml(
+                            Markdown.Parse(
+                                AppSurfaceDocsRichAuthoringSyntax.NormalizeDirectiveFences(panelMarkdown),
+                                _pipeline),
+                            _pipeline));
+                    var renderedMarkdownBody = richTabs.ReplacePlaceholders(
+                        AppSurfaceDocsRichAuthoringSyntax.NormalizeDirectiveFences(richTabs.Markdown));
+                    var document = Markdown.Parse(renderedMarkdownBody, _pipeline);
+                    foreach (var diagnostic in AppSurfaceDocsRichAuthoringSyntax.CollectDiagnostics(document, relativePath))
+                    {
+                        diagnostics.Add(diagnostic);
+                    }
                     var resolvedTitle = string.IsNullOrWhiteSpace(explicitMetadata?.Title)
                         ? ResolveImplicitTitle(relativePath, document, title)
                         : explicitMetadata!.Title!.Trim();
@@ -436,7 +451,16 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                         _logger);
                     var outline = DocOutlinePolicy.Apply(ExtractOutline(document), metadata);
 
-                    nodes.Add(new DocNode(resolvedTitle, relativePath, html, Metadata: metadata, Outline: outline));
+                    nodes.Add(
+                        new DocNode(
+                            resolvedTitle,
+                            relativePath,
+                            html,
+                            Metadata: metadata,
+                            Outline: outline)
+                        {
+                            RichAuthoringTabsTokens = richTabs.Tokens
+                        });
                     if (progress is not null)
                     {
                         await progress.ReportOutputOnlyAsync(1);

@@ -948,6 +948,7 @@ public class ExportEngineTests
         {
             var docsRoot = Directory.CreateDirectory(Path.Join(tempDir, "docs")).FullName;
             await File.WriteAllTextAsync(Path.Join(docsRoot, "search.html"), "<html>Search</html>");
+            await File.WriteAllTextAsync(Path.Join(docsRoot, "rich-authoring-client.js"), "window.__richAuthoringClient = true;");
             await File.WriteAllTextAsync(
                 Path.Join(docsRoot, "search-index.json"),
                 """
@@ -970,10 +971,14 @@ public class ExportEngineTests
             var rootSearchIndex = await File.ReadAllTextAsync(TestPathUtils.PathUnder(tempDir, "search-index.json"));
             Assert.Contains("\"generatedAtUtc\":\"1970-01-01T00:00:00.0000000Z\"", docsSearchIndex, StringComparison.Ordinal);
             Assert.Equal(docsSearchIndex, rootSearchIndex);
+            var rootRichAuthoringClient = TestPathUtils.PathUnder(tempDir, "rich-authoring-client.js");
+            Assert.True(File.Exists(rootRichAuthoringClient));
+            Assert.Equal("window.__richAuthoringClient = true;", await File.ReadAllTextAsync(rootRichAuthoringClient));
 
             var manifest = await File.ReadAllTextAsync(TestPathUtils.PathUnder(tempDir, ".appsurface-docs-release-manifest.json"));
             Assert.Contains("\"path\": \"search.html\"", manifest, StringComparison.Ordinal);
             Assert.Contains("\"path\": \"search-index.json\"", manifest, StringComparison.Ordinal);
+            Assert.Contains("\"path\": \"rich-authoring-client.js\"", manifest, StringComparison.Ordinal);
         }
         finally
         {

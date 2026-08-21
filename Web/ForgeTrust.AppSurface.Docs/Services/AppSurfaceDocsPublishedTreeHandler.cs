@@ -366,6 +366,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         if (string.Equals(path, "search.css", StringComparison.OrdinalIgnoreCase)
             || string.Equals(path, "search-client.js", StringComparison.OrdinalIgnoreCase)
             || string.Equals(path, "outline-client.js", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(path, "rich-authoring-client.js", StringComparison.OrdinalIgnoreCase)
             || string.Equals(path, "minisearch.min.js", StringComparison.OrdinalIgnoreCase)
             || string.Equals(path, "search-index.json", StringComparison.OrdinalIgnoreCase))
         {
