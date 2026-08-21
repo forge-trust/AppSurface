@@ -45,7 +45,9 @@ internal static class CoverageProjectManifest
         ArgumentException.ThrowIfNullOrWhiteSpace(solutionDirectory);
         ArgumentNullException.ThrowIfNull(project);
 
-        var projectPath = Path.GetRelativePath(solutionDirectory, project.FullPath)
+        var projectPath = Path.GetRelativePath(
+                ResolveExistingDirectoryPath(solutionDirectory),
+                ResolveExistingProjectPath(project.FullPath))
             .Replace('\\', '/');
         var manifestPath = Path.Join(projectOutputDirectory, FileName);
         var stagedPath = Path.Join(projectOutputDirectory, $".coverage-project.{Guid.NewGuid():N}.tmp");
@@ -66,6 +68,33 @@ internal static class CoverageProjectManifest
         {
             File.Delete(stagedPath);
         }
+    }
+
+    private static string ResolveExistingProjectPath(string projectPath)
+    {
+        var fullProjectPath = Path.GetFullPath(projectPath);
+        var projectDirectory = Path.GetDirectoryName(fullProjectPath)
+            ?? throw new IOException($"Project path does not have a directory: {projectPath}");
+        return Path.Join(ResolveExistingDirectoryPath(projectDirectory), Path.GetFileName(fullProjectPath));
+    }
+
+    private static string ResolveExistingDirectoryPath(string directoryPath)
+    {
+        var fullDirectoryPath = Path.GetFullPath(directoryPath);
+        var root = Path.GetPathRoot(fullDirectoryPath)
+            ?? throw new IOException($"Directory path does not have a root: {directoryPath}");
+        var current = root;
+        foreach (var segment in fullDirectoryPath[root.Length..].Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Join(current, segment);
+            var directory = new DirectoryInfo(current);
+            if (directory.LinkTarget is not null)
+            {
+                current = ResolveExistingDirectoryPath(directory.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? current);
+            }
+        }
+
+        return current;
     }
 
     private sealed record CoverageProjectManifestDocument(int SchemaVersion, string ProjectPath, string Slug);

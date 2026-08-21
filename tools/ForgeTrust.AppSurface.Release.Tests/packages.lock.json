@@ -346,7 +346,10 @@
         }
       },
       "forgetrust.appsurface.releasecontracts": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Markdig": "[1.2.0, )"
+        }
       },
       "forgetrust.appsurface.testing": {
         "type": "Project"

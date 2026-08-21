@@ -123,13 +123,79 @@ public sealed class UnreleasedEntryComposerTests : IDisposable
         Assert.DoesNotContain("<!-- appsurface:unreleased-entries", composed, StringComparison.Ordinal);
         Assert.Throws<UnreleasedEntryException>(
             () => UnreleasedEntryComposer.Compose(validTemplate.Replace("included\" -->", "included\" -->\n<!-- appsurface:unreleased-entries section=\"included\" -->", StringComparison.Ordinal), [], Path.Join(_root, "releases", "unreleased.md")));
-        Assert.Throws<UnreleasedEntryException>(
-            () => UnreleasedEntryComposer.Compose(validTemplate + "\n<!-- appsurface:unreleased-entries section=\"future\" -->", [], Path.Join(_root, "releases", "unreleased.md")));
-        Assert.Throws<ArgumentOutOfRangeException>(() => UnreleasedEntryComposer.MarkerFor("future"));
+        var consumerTemplate = "# Next\n<!-- appsurface:unreleased-entries section=\"future\" -->";
+        var consumerComposed = UnreleasedEntryComposer.Compose(
+            consumerTemplate,
+            [new UnreleasedEntry("/entries/2026-08-08-future.md", "future", "- Consumer-defined section.")],
+            Path.Join(_root, "releases", "unreleased.md"));
+        Assert.Contains("- Consumer-defined section.", consumerComposed, StringComparison.Ordinal);
+        Assert.Equal("<!-- appsurface:unreleased-entries section=\"future\" -->", UnreleasedEntryComposer.MarkerFor("future"));
+        Assert.Throws<ArgumentException>(() => UnreleasedEntryComposer.MarkerFor("future section"));
         Assert.True(UnreleasedEntryComposer.IsEntryPath("releases\\unreleased.entries\\2026-08-08-valid-entry.md"));
         Assert.False(UnreleasedEntryComposer.IsEntryPath("releases/unreleased.entries/nested/2026-08-08-valid-entry.md"));
         Assert.False(UnreleasedEntryComposer.IsEntryPath("releases/unreleased.entries/not-an-entry.md"));
         Assert.False(UnreleasedEntryComposer.IsEntryPath("docs/unreleased.entries/2026-08-08-valid-entry.md"));
+    }
+
+    [Fact]
+    public void ComposeRejectsMarkersThatAreEmbeddedOrOnlyAppearInCodeBlocks()
+    {
+        const string validMarker = "<!-- appsurface:unreleased-entries section=\"included\" -->";
+        var embeddedMarker = $"""
+            # Unreleased
+            {validMarker}
+            Example: {validMarker}
+            """;
+        var codeBlockMarker = $"""
+            # Unreleased
+            {validMarker}
+
+            ```markdown
+            <!-- appsurface:unreleased-entries section="example" -->
+            ```
+            """;
+
+        var embeddedException = Assert.Throws<UnreleasedEntryException>(
+            () => UnreleasedEntryComposer.Compose(embeddedMarker, [], Path.Join(_root, "releases", "unreleased.md")));
+        var codeBlockException = Assert.Throws<UnreleasedEntryException>(
+            () => UnreleasedEntryComposer.Compose(codeBlockMarker, [], Path.Join(_root, "releases", "unreleased.md")));
+
+        Assert.Contains("unsupported or malformed", embeddedException.Message, StringComparison.Ordinal);
+        Assert.Contains("unsupported or malformed", codeBlockException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ComposeRejectsTerminalControlCharactersInTemplatesAndEntries()
+    {
+        const string template = "<!-- appsurface:unreleased-entries section=\"included\" -->";
+
+        var templateException = Assert.Throws<UnreleasedEntryException>(
+            () => UnreleasedEntryComposer.Compose(template + "\u001b[2J", [], Path.Join(_root, "releases", "unreleased.md")));
+        var entryException = Assert.Throws<UnreleasedEntryException>(
+            () => UnreleasedEntryComposer.Compose(
+                template,
+                [new UnreleasedEntry("/entries/2026-08-08-control.md", "included", "- \u001b[2J")],
+                Path.Join(_root, "releases", "unreleased.md")));
+
+        Assert.Contains("living-note template must not contain terminal control characters", templateException.Message, StringComparison.Ordinal);
+        Assert.Contains("must not contain terminal control characters", entryException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LoadAsyncRejectsTerminalControlCharactersInEntryFiles()
+    {
+        var entriesDirectory = EntriesDirectory();
+        Directory.CreateDirectory(entriesDirectory);
+        await File.WriteAllTextAsync(
+            Path.Join(entriesDirectory, "2026-08-08-control.md"),
+            "<!-- appsurface:unreleased-entry section=\"included\" -->\n- \u001b[2J\n");
+
+        var exception = await Assert.ThrowsAsync<UnreleasedEntryException>(
+            () => UnreleasedEntryComposer.LoadAsync(entriesDirectory, CancellationToken.None));
+
+        Assert.Equal(
+            "Unreleased entry '2026-08-08-control.md' must not contain terminal control characters.",
+            exception.Message);
     }
 
     [Fact]
@@ -259,7 +325,7 @@ public sealed class UnreleasedEntryComposerTests : IDisposable
         ["not-an-entry.md", "- Missing directive.\n", "YYYY-MM-DD-topic.md"],
         ["2026-13-40-invalid-date.md", "<!-- appsurface:unreleased-entry section=\"included\" -->\n- Invalid date.\n", "YYYY-MM-DD-topic.md"],
         ["2026-08-08-invalid-directive.md", "<!-- appsurface:unreleased-entry section=\"included\"\n- Missing directive terminator.\n", "must begin with"],
-        ["2026-08-08-unsupported-section.md", "<!-- appsurface:unreleased-entry section=\"future\" -->\n- Unsupported section.\n", "uses unsupported section"],
+        ["2026-08-08-invalid-section.md", "<!-- appsurface:unreleased-entry section=\"Future\" -->\n- Invalid section.\n", "uses invalid section"],
         ["2026-08-08-empty.md", "<!-- appsurface:unreleased-entry section=\"included\" -->\n", "must contain Markdown"],
         ["2026-08-08-marker.md", "<!-- appsurface:unreleased-entry section=\"included\" -->\n<!-- appsurface:unreleased-entries section=\"included\" -->\n", "must not contain an AppSurface"],
         ["2026-08-08-top-level.md", "<!-- appsurface:unreleased-entry section=\"included\" -->\n# Invalid heading\n", "must not introduce a top-level"],

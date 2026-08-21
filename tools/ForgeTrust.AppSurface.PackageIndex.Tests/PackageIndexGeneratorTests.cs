@@ -3045,6 +3045,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     public void IsCandidateProject_ExcludesGeneratedAndToolingPaths()
     {
         Assert.False(PackageProjectScanner.IsCandidateProject("tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj"));
+        Assert.True(PackageProjectScanner.IsCandidateProject("tools/ForgeTrust.AppSurface.ReleaseContracts/ForgeTrust.AppSurface.ReleaseContracts.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.AppSurface.Web/bin/Release/net10.0/Generated.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("Web/ForgeTrust.AppSurface.Web/obj/Release/net10.0/Generated.csproj"));
         Assert.False(PackageProjectScanner.IsCandidateProject("node_modules/package/Generated.csproj"));

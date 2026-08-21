@@ -53,10 +53,27 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("docs export", result.AllText, StringComparison.Ordinal);
         Assert.Contains("coverage", result.AllText, StringComparison.Ordinal);
         Assert.Contains("coverage clean", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("release", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("release compose", result.AllText, StringComparison.Ordinal);
         Assert.Contains("secrets", result.AllText, StringComparison.Ordinal);
         Assert.Contains("durable", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EntryPoint_Should_Print_ReleaseCompose_Help_Without_Lifecycle_Noise()
+    {
+        var result = await InvokeEntryPointAsync(["release", "compose", "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("deterministic release note from isolated append-only entries", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--root", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--entries", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--template", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--output", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--apply", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3704,9 +3721,47 @@ public sealed class ProgramEntryPointTests
         };
         var crashedCoverageException = await Assert.ThrowsAsync<CommandException>(() => crashedCoverage.ExecuteAsync(console).AsTask());
         Assert.Contains("ASEVD211", crashedCoverageException.Message, StringComparison.Ordinal);
+
+        var failedGateOutput = Path.Join(directory.Path, "failed-gate-output");
+        var failedGate = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageWorkflow(coveragePasses: false))
+        {
+            PolicyPath = policyPath,
+            Paths = ["src/Feature.cs"],
+            OutputDirectory = failedGateOutput,
+            SolutionPath = solutionPath,
+        };
+        var failedGateException = await Assert.ThrowsAsync<CommandException>(() => failedGate.ExecuteAsync(console).AsTask());
+        var failedGateManifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(
+            await File.ReadAllBytesAsync(Path.Join(failedGateOutput, "evidence-manifest.json")));
+
+        Assert.Contains("ASEVD211", failedGateException.Message, StringComparison.Ordinal);
+        Assert.Equal(EvidenceExecutionVerdict.Incomplete, failedGateManifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, failedGateManifest.ClaimKind);
+        Assert.Contains("Coverage gate did not meet its declared threshold", Assert.Single(failedGateManifest.ProducerResults).Diagnostic, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Join(failedGateOutput, "coverage", "coverage-gate.md")));
+
+        var timedOutPolicyPath = Path.Join(directory.Path, "timed-out.policy.json");
+        await File.WriteAllBytesAsync(
+            timedOutPolicyPath,
+            EvidenceCanonicalJson.Serialize(CreateCoverageEvidencePolicy(EvidenceProfileScope.Targeted, timeoutSeconds: 1)));
+        var timedOutOutput = Path.Join(directory.Path, "timed-out-output");
+        var timedOutCoverage = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageWorkflow(cancels: true))
+        {
+            PolicyPath = timedOutPolicyPath,
+            Paths = ["src/Feature.cs"],
+            OutputDirectory = timedOutOutput,
+            SolutionPath = solutionPath,
+        };
+        var timedOutCoverageException = await Assert.ThrowsAsync<CommandException>(() => timedOutCoverage.ExecuteAsync(console).AsTask());
+        var timedOutManifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(
+            await File.ReadAllBytesAsync(Path.Join(timedOutOutput, "evidence-manifest.json")));
+
+        Assert.Contains("ASEVD211", timedOutCoverageException.Message, StringComparison.Ordinal);
+        Assert.Equal(EvidenceProducerOutcome.TimedOut, Assert.Single(timedOutManifest.ProducerResults).Outcome);
+        Assert.Contains("exceeded its bounded execution window", Assert.Single(timedOutManifest.ProducerResults).Diagnostic, StringComparison.Ordinal);
     }
 
-    private static EvidencePolicy CreateCoverageEvidencePolicy(EvidenceProfileScope scope) => new(
+    private static EvidencePolicy CreateCoverageEvidencePolicy(EvidenceProfileScope scope, int timeoutSeconds = 60) => new(
         "evidence-command-test",
         "1",
         "coverage",
@@ -3723,16 +3778,16 @@ public sealed class ProgramEntryPointTests
                         [],
                         ["coverage/assertion@1"],
                         [],
-                        60,
+                        timeoutSeconds,
                         new EvidenceCoverageGateRequirements(95, 85, PatchLineMode: "measurable", TolerancePercent: 0)),
                 ],
                 [new EvidenceObligation("coverage", "behavior", "Coverage evidence is required.", ["coverage"], "coverage/assertion@1")]),
         ],
         []);
 
-    private static CoverageRunWorkflow CreateCoverageWorkflow(bool testFails = false, bool failProcess = false) => new(
-        new EvidenceCoverageProcessRunner(testFails, failProcess),
-        new EvidenceCoverageReportGenerator(),
+    private static CoverageRunWorkflow CreateCoverageWorkflow(bool testFails = false, bool failProcess = false, bool coveragePasses = true, bool cancels = false) => new(
+        new EvidenceCoverageProcessRunner(testFails, failProcess, cancels),
+        new EvidenceCoverageReportGenerator(coveragePasses),
         TimeProvider.System);
 
     private static IDisposable PushCurrentDirectoryForEvidenceTests(string path)
@@ -4972,11 +5027,13 @@ public sealed class ProgramEntryPointTests
 
         private readonly bool _testFails;
         private readonly bool _failProcess;
+        private readonly bool _cancels;
 
-        public EvidenceCoverageProcessRunner(bool testFails, bool failProcess)
+        public EvidenceCoverageProcessRunner(bool testFails, bool failProcess, bool cancels)
         {
             _testFails = testFails;
             _failProcess = failProcess;
+            _cancels = cancels;
         }
 
         public async Task<CoverageRunProcessResult> RunAsync(CoverageRunProcessRequest request, CancellationToken cancellationToken)
@@ -4986,6 +5043,11 @@ public sealed class ProgramEntryPointTests
             if (_failProcess && string.Equals(operation, "sln", StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("simulated coverage process failure");
+            }
+
+            if (_cancels && string.Equals(operation, "sln", StringComparison.Ordinal))
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             }
 
             if (string.Equals(operation, "sln", StringComparison.Ordinal))
@@ -5019,7 +5081,15 @@ public sealed class ProgramEntryPointTests
 
     private sealed class EvidenceCoverageReportGenerator : ICoverageRunReportGenerator
     {
-        private const string Cobertura = "<coverage lines-covered=\"10\" lines-valid=\"10\" branches-covered=\"10\" branches-valid=\"10\" line-rate=\"1\" branch-rate=\"1\"><packages /></coverage>";
+        private const string PassingCobertura = "<coverage lines-covered=\"10\" lines-valid=\"10\" branches-covered=\"10\" branches-valid=\"10\" line-rate=\"1\" branch-rate=\"1\"><packages /></coverage>";
+        private const string FailingCobertura = "<coverage lines-covered=\"0\" lines-valid=\"10\" branches-covered=\"0\" branches-valid=\"10\" line-rate=\"0\" branch-rate=\"0\"><packages /></coverage>";
+
+        private readonly string _cobertura;
+
+        public EvidenceCoverageReportGenerator(bool coveragePasses)
+        {
+            _cobertura = coveragePasses ? PassingCobertura : FailingCobertura;
+        }
 
         public async Task<CoverageRunMergeResult> MergeAsync(
             IReadOnlyList<string> coverageFiles,
@@ -5029,7 +5099,7 @@ public sealed class ProgramEntryPointTests
             Directory.CreateDirectory(outputDirectory);
             var coberturaPath = Path.Join(outputDirectory, "Cobertura.xml");
             var summaryPath = Path.Join(outputDirectory, "Summary.txt");
-            await File.WriteAllTextAsync(coberturaPath, Cobertura, cancellationToken);
+            await File.WriteAllTextAsync(coberturaPath, _cobertura, cancellationToken);
             await File.WriteAllTextAsync(summaryPath, "coverage summary", cancellationToken);
             return new CoverageRunMergeResult(0, coberturaPath, summaryPath);
         }

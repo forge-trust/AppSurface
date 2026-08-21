@@ -471,6 +471,7 @@
           "ForgeTrust.AppSurface.Caching": "[0.1.0, )",
           "ForgeTrust.AppSurface.Config": "[0.1.0, )",
           "ForgeTrust.AppSurface.Intelligence": "[0.1.0, )",
+          "ForgeTrust.AppSurface.ReleaseContracts": "[0.1.0, )",
           "ForgeTrust.AppSurface.Theming": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web.Tailwind": "[0.1.0, )",
@@ -543,6 +544,12 @@
         "dependencies": {
           "ForgeTrust.AppSurface.Core": "[0.1.0, )",
           "Microsoft.Extensions.Options": "[10.0.8, )"
+        }
+      },
+      "forgetrust.appsurface.releasecontracts": {
+        "type": "Project",
+        "dependencies": {
+          "Markdig": "[1.2.0, )"
         }
       },
       "forgetrust.appsurface.theming": {

@@ -540,6 +540,33 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task CoverageProjectManifest_WriteAsync_ShouldUseSolutionRelativePathWhenAncestorIsLink()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var repo = TempDirectory.Create("appsurface-coverage-manifest-");
+        var physicalSolutionDirectory = Directory.CreateDirectory(TestPathUtils.PathUnder(repo.Path, "physical-solution")).FullName;
+        var linkedSolutionDirectory = TestPathUtils.PathUnder(repo.Path, "solution-link");
+        Directory.CreateSymbolicLink(linkedSolutionDirectory, physicalSolutionDirectory);
+        var projectPath = TestPathUtils.PathUnder(physicalSolutionDirectory, "tests", "Sample.Tests", "Sample.Tests.csproj");
+        Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);
+        await File.WriteAllTextAsync(projectPath, "<Project />");
+        var projectOutputDirectory = Directory.CreateDirectory(TestPathUtils.PathUnder(repo.Path, "coverage-output", "projects", "sample-tests")).FullName;
+
+        await CoverageProjectManifest.WriteAsync(
+            projectOutputDirectory,
+            linkedSolutionDirectory,
+            new CoverageRunProject("tests/Sample.Tests/Sample.Tests.csproj", projectPath, "sample-tests", IsExclusive: false),
+            CancellationToken.None);
+
+        using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(projectOutputDirectory, CoverageProjectManifest.FileName)));
+        Assert.Equal("tests/Sample.Tests/Sample.Tests.csproj", manifest.RootElement.GetProperty("projectPath").GetString());
+    }
+
+    [Fact]
     public async Task RunAsync_TestResultsJunit_ShouldWriteManagedArtifactsAndTimings()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");

@@ -14,7 +14,7 @@ namespace ForgeTrust.AppSurface.PackageIndex;
 internal interface ICoverageCliConsumerProofWorkflow
 {
     /// <summary>
-    /// Installs the validated CLI artifact into an isolated fixture and exercises public coverage commands plus canary-poll discovery.
+    /// Installs the validated CLI artifact into an isolated fixture and exercises public release-note, coverage, and canary-poll commands.
     /// </summary>
     /// <param name="request">Proof request with repository, artifact, work-directory, and package-source settings.</param>
     /// <param name="validationReport">Validated package artifact report that selects the CLI tool artifact.</param>
@@ -32,7 +32,7 @@ internal interface ICoverageCliConsumerProofWorkflow
 /// <remarks>
 /// <para>
 /// The proof runs before package publication. It selects the already validated CLI <c>.nupkg</c>, installs it with a
-/// local-first NuGet configuration, creates a clean xUnit fixture plus an excluded failing sentinel, and executes <c>coverage run</c>,
+/// local-first NuGet configuration, creates a clean xUnit fixture plus an excluded failing sentinel, composes one consumer-owned release note, and executes <c>coverage run</c>,
 /// <c>coverage merge</c>, a passing <c>coverage gate</c>, a patch-target gate plus nonpatch stale-target cleanup, an intentionally failing <c>coverage gate</c>, and
 /// <c>canary poll --help</c>, then runs the packed command against a local protected fixture for one <c>pass</c> and one
 /// <c>stale</c> result to prove its environment-only credential and operator-result paths are packed.
@@ -245,6 +245,75 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             {
                 Succeeded = false,
                 FailureReason = $"Expected '{CliCommandName} --version' to print '{request.PackageVersion}', but it printed '{versionCommand.StandardOutput.Trim()}'."
+            };
+            return BuildReport(context, commands, artifacts);
+        }
+
+        await WriteReleaseNoteFixtureAsync(fixtureDirectory, cancellationToken);
+        var releaseOutputPath = Path.Join(fixtureDirectory, "releases", "v1.4.0.md");
+        if (!await RunRequiredAsync(ToolCommand(
+            context,
+            ["release", "compose", "--root", fixtureDirectory, "--output", "releases/v1.4.0.md"],
+            "appsurface release compose preview",
+            "previewing packaged consumer release-note composition")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        if (!commands[^1].StandardOutput.Contains("Preview only. Would write releases/v1.4.0.md", StringComparison.Ordinal)
+            || File.Exists(releaseOutputPath))
+        {
+            commands[^1] = commands[^1] with
+            {
+                Succeeded = false,
+                FailureReason = "Expected packaged release composition to preview the explicit output without writing it."
+            };
+            return BuildReport(context, commands, artifacts);
+        }
+
+        if (!await RunRequiredAsync(ToolCommand(
+            context,
+            ["release", "compose", "--root", fixtureDirectory, "--output", "releases/v1.4.0.md", "--apply"],
+            "appsurface release compose apply",
+            "writing packaged consumer release-note composition")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        if (!commands[^1].StandardOutput.Contains("Wrote composed release note to releases/v1.4.0.md.", StringComparison.Ordinal))
+        {
+            commands[^1] = commands[^1] with
+            {
+                Succeeded = false,
+                FailureReason = "Expected packaged release composition to confirm its explicit output write."
+            };
+            return BuildReport(context, commands, artifacts);
+        }
+
+        if (!File.Exists(releaseOutputPath))
+        {
+            commands[^1] = commands[^1] with
+            {
+                Succeeded = false,
+                FailureReason = "Expected packaged release composition to create the explicit output file."
+            };
+            return BuildReport(context, commands, artifacts);
+        }
+
+        var releaseTemplatePath = Path.Join(fixtureDirectory, "releases", "unreleased.md");
+        var releaseEntryPath = Path.Join(fixtureDirectory, "releases", "unreleased.entries", "2026-08-20-package-consumer.md");
+        var releaseTemplate = await File.ReadAllTextAsync(releaseTemplatePath, cancellationToken);
+        var releaseEntry = await File.ReadAllTextAsync(releaseEntryPath, cancellationToken);
+        var composedReleaseNote = await File.ReadAllTextAsync(releaseOutputPath, cancellationToken);
+        if (!composedReleaseNote.Contains("- The packaged tool composes consumer release notes.", StringComparison.Ordinal)
+            || composedReleaseNote.Contains("<!-- appsurface:unreleased-entries", StringComparison.Ordinal)
+            || !releaseTemplate.Contains("<!-- appsurface:unreleased-entries section=\"added\" -->", StringComparison.Ordinal)
+            || !releaseEntry.Contains("<!-- appsurface:unreleased-entry section=\"added\" -->", StringComparison.Ordinal))
+        {
+            commands[^1] = commands[^1] with
+            {
+                Succeeded = false,
+                FailureReason = "Expected packaged release composition to write the consumer entry while preserving its stable template and append-only source."
             };
             return BuildReport(context, commands, artifacts);
         }
@@ -828,6 +897,30 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
                     Assert.Equal(expected, Calculator.Sign(value));
                 }
             }
+            """,
+            cancellationToken);
+    }
+
+    private static async Task WriteReleaseNoteFixtureAsync(string fixtureDirectory, CancellationToken cancellationToken)
+    {
+        var releasesDirectory = Path.Join(fixtureDirectory, "releases");
+        var entriesDirectory = Path.Join(releasesDirectory, "unreleased.entries");
+        Directory.CreateDirectory(entriesDirectory);
+        await File.WriteAllTextAsync(
+            Path.Join(releasesDirectory, "unreleased.md"),
+            """
+            # Unreleased
+
+            ## Added
+            <!-- appsurface:unreleased-entries section="added" -->
+            """,
+            cancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Join(entriesDirectory, "2026-08-20-package-consumer.md"),
+            """
+            <!-- appsurface:unreleased-entry section="added" -->
+
+            - The packaged tool composes consumer release notes.
             """,
             cancellationToken);
     }

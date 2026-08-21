@@ -908,7 +908,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine("- Keep `tool_command_name` aligned with each published .NET tool project's `ToolCommandName` so package validation, pre-publish coverage proof, and post-publish smoke tests run the command users will type. Tool smoke tests install the package, run `--help`, then require `--version` to match the package SemVer exactly, including stable or prerelease labels and excluding any leading `v` or build metadata. The command name value must be one file-name-safe command token, not a path: no whitespace, path separators, reserved `.`/`..` segments, trailing periods, Windows reserved device names or dotted aliases, control characters, or Windows-invalid file-name characters.");
         builder.AppendLine($"- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications, package READMEs, product families, release-guidance variants, readiness blockers, or readiness notes; it reports changed and managed README-region counts.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify` before review to confirm package-index outputs and managed README guidance are current without writing files.");
-        builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata, project references, Tailwind runtime payloads, the packaged coverage CLI, or the Docs parser and sanitizer graph. This pre-publish workflow installs the packed `ForgeTrust.AppSurface.Cli` tool from local artifacts, runs the packaged coverage semantic proof plus `coverage merge`, a passing `coverage gate`, and an intentionally failing `coverage gate`, then writes the private `coverage-cli-consumer-proof.md` and public-safe `coverage-cli-consumer-proof.evidence.json`. It also restores the freshly packed `ForgeTrust.AppSurface.Docs` artifact in an independent locked consumer and writes `docs-package-consumer-proof.md`; either failed proof blocks the publish manifest.");
+        builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata, project references, Tailwind runtime payloads, the packaged release-note or coverage CLI, or the Docs parser and sanitizer graph. This pre-publish workflow installs the packed `ForgeTrust.AppSurface.Cli` tool from local artifacts, previews and writes a consumer `release compose` note, runs the packaged coverage semantic proof plus `coverage merge`, a passing `coverage gate`, and an intentionally failing `coverage gate`, then writes the private `coverage-cli-consumer-proof.md` and public-safe `coverage-cli-consumer-proof.evidence.json`. It also restores the freshly packed `ForgeTrust.AppSurface.Docs` artifact in an independent locked consumer and writes `docs-package-consumer-proof.md`; either failed proof blocks the publish manifest.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- gate` before publishing rebrand or release metadata changes.");
         builder.AppendLine("- Keep `packages/README.md.yml` hand-authored so AppSurface Docs metadata, trust-bar copy, and section placement stay intentional.");
         builder.AppendLine();
@@ -2365,12 +2365,15 @@ internal sealed record PackageProjectMetadata(
 /// Discovers candidate projects that should be classified by the package chooser manifest.
 /// </summary>
 /// <remarks>
-/// The scanner intentionally excludes tests, examples, tooling, generated directories, and hidden local cache
-/// directories so the manifest only needs to classify packages that are meaningful to external adopters or
-/// package-surface maintainers.
+/// The scanner intentionally excludes tests, examples, executable tooling, generated directories, and hidden local
+/// cache directories so the manifest only needs to classify packages that are meaningful to external adopters or
+/// package-surface maintainers. <c>ForgeTrust.AppSurface.ReleaseContracts</c> is the one transitive support package
+/// stored below <c>tools</c>; it remains discoverable because published Docs consumers restore it as a dependency.
 /// </remarks>
 internal sealed class PackageProjectScanner
 {
+    private const string ReleaseContractsProjectPath = "/tools/forgetrust.appsurface.releasecontracts/forgetrust.appsurface.releasecontracts.csproj";
+
     /// <summary>
     /// Enumerates candidate project files under the repository root.
     /// </summary>
@@ -2397,13 +2400,22 @@ internal sealed class PackageProjectScanner
         var normalizedPath = relativePath.Replace('\\', '/').Trim('/');
         var normalizedPathLower = "/" + normalizedPath.ToLowerInvariant();
         var projectName = Path.GetFileNameWithoutExtension(relativePath).ToLowerInvariant();
+        var isReleaseContractsPackage = string.Equals(
+            normalizedPathLower,
+            ReleaseContractsProjectPath,
+            StringComparison.Ordinal);
 
         if (HasHiddenDirectorySegment(normalizedPath)
             || normalizedPathLower.StartsWith("/artifacts/", StringComparison.Ordinal)
             || normalizedPathLower.Contains("/bin/", StringComparison.Ordinal)
             || normalizedPathLower.Contains("/obj/", StringComparison.Ordinal)
-            || normalizedPathLower.Contains("/node_modules/", StringComparison.Ordinal)
-            || normalizedPathLower.Contains("/tools/", StringComparison.Ordinal))
+            || normalizedPathLower.Contains("/node_modules/", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (normalizedPathLower.Contains("/tools/", StringComparison.Ordinal)
+            && !isReleaseContractsPackage)
         {
             return false;
         }
