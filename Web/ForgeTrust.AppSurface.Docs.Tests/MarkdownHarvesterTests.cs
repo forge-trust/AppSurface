@@ -5,6 +5,7 @@ using ForgeTrust.AppSurface.Docs.Services;
 using Markdig;
 using Markdig.Extensions.CustomContainers;
 using Markdig.Helpers;
+using Markdig.Renderers;
 using Markdig.Renderers.Html;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
@@ -1312,6 +1313,112 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
+    public void RichAuthoringExtension_ShouldIgnoreNonHtmlRenderers()
+    {
+        var extension = new AppSurfaceDocsRichAuthoringMarkdownExtension();
+        var pipeline = new MarkdownPipelineBuilder().Build();
+
+        extension.Setup(pipeline, A.Fake<IMarkdownRenderer>());
+    }
+
+    [Fact]
+    public void RichAuthoringExtension_ShouldInstallItsRendererWhenNoCustomContainerRendererExists()
+    {
+        var extension = new AppSurfaceDocsRichAuthoringMarkdownExtension();
+        var pipeline = new MarkdownPipelineBuilder().Build();
+        using var writer = new StringWriter();
+        var renderer = new HtmlRenderer(writer);
+
+        extension.Setup(pipeline, renderer);
+
+        Assert.Contains(renderer.ObjectRenderers, objectRenderer => objectRenderer is AppSurfaceDocsRichAuthoringRenderer);
+    }
+
+    [Theory]
+    [InlineData("appsurface-rich-tab", "Rmlyc3Q", ":::tab", "First")]
+    [InlineData("appsurface-rich-callout", "", ":::callout", "")]
+    public void RichAuthoringPipeline_ShouldRenderInvalidDirectivesAsLiteralSource(
+        string directiveClass,
+        string encodedArguments,
+        string expectedDirective,
+        string expectedArgument)
+    {
+        var attribute = string.IsNullOrEmpty(encodedArguments)
+            ? string.Empty
+            : $" data-appsurface-rich-argument=\"{encodedArguments}\"";
+        var html = Markdown.ToHtml(
+            $"::: {{.{directiveClass}{attribute}}}\nReadable body.\n:::\n",
+            CreateRichAuthoringPipeline());
+
+        Assert.Contains("docs-rich-source", html, StringComparison.Ordinal);
+        Assert.Contains(expectedDirective, html, StringComparison.Ordinal);
+        Assert.Contains(expectedArgument, html, StringComparison.Ordinal);
+        Assert.Contains("Readable body.", html, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("note", "Note")]
+    [InlineData("tip", "Tip")]
+    [InlineData("warning", "Warning")]
+    [InlineData("danger", "Danger")]
+    [InlineData("unknown", "Note")]
+    public void GetCalloutLabel_ShouldReturnKnownLabelsAndUseTheSafeDefault(string kind, string expected)
+    {
+        Assert.Equal(expected, AppSurfaceDocsRichAuthoringSyntax.GetCalloutLabel(kind));
+    }
+
+    [Fact]
+    public void GetDirectiveArguments_ShouldFallbackAndRejectInvalidEncodedAttributes()
+    {
+        var fallbackContainer = ParseSingleRichContainer(
+            "::: {.appsurface-rich-callout}\nReadable body.\n:::\n");
+        var invalidEncodedContainer = ParseSingleRichContainer(
+            "::: {.appsurface-rich-callout data-appsurface-rich-argument=\"%%%\"}\nReadable body.\n:::\n");
+
+        Assert.Equal(string.Empty, AppSurfaceDocsRichAuthoringSyntax.GetDirectiveArguments(fallbackContainer));
+        Assert.Equal(string.Empty, AppSurfaceDocsRichAuthoringSyntax.GetDirectiveArguments(invalidEncodedContainer));
+    }
+
+    [Fact]
+    public void RenderValidTabs_ShouldHandleNestedCalloutsAndRejectOrphanContent()
+    {
+        var nestedCallout = AppSurfaceDocsRichAuthoringSyntax.RenderValidTabs(
+            """
+            :::tabs "Choose a path"
+            :::tab "First"
+            :::callout note
+            Nested callout.
+            :::
+            :::
+            :::tab "Second"
+            Second body.
+            :::
+            :::
+            """,
+            "guides/nested.md",
+            panelMarkdown => $"<p>{panelMarkdown.Trim()}</p>");
+        var orphanContent = AppSurfaceDocsRichAuthoringSyntax.RenderValidTabs(
+            """
+            :::tabs "Choose a path"
+            This cannot appear before a tab.
+            :::tab "First"
+            First body.
+            :::
+            :::tab "Second"
+            Second body.
+            :::
+            :::
+            """,
+            "guides/orphan.md",
+            panelMarkdown => panelMarkdown);
+
+        Assert.Single(nestedCallout.Replacements);
+        Assert.Contains("Nested callout.", nestedCallout.Replacements[0].Html, StringComparison.Ordinal);
+        Assert.Empty(orphanContent.Replacements);
+        Assert.Contains("This cannot appear before a tab.", orphanContent.Markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RichAuthoringTabsRenderResult_ShouldReplaceKnownPlaceholdersInOnePass()
     {
         var renderResult = new AppSurfaceDocsRichAuthoringTabsRenderResult(
@@ -1325,6 +1432,19 @@ public class MarkdownHarvesterTests : IDisposable
         var rendered = renderResult.ReplacePlaceholders(renderResult.Markdown);
 
         Assert.Equal("before <section>First</section> between <section>Second</section> after", rendered);
+    }
+
+    [Theory]
+    [InlineData("before <!--appsurface-rich-tabs-unclosed", "before <!--appsurface-rich-tabs-unclosed")]
+    [InlineData("before <!--appsurface-rich-tabs-missing-->", "before <!--appsurface-rich-tabs-missing-->")]
+    public void RichAuthoringTabsRenderResult_ShouldPreserveMalformedOrUnknownPlaceholders(string markdown, string expected)
+    {
+        var renderResult = new AppSurfaceDocsRichAuthoringTabsRenderResult(
+            markdown,
+            [new AppSurfaceDocsRichAuthoringTabsReplacement("<!--appsurface-rich-tabs-known-->", "<section>Known</section>")],
+            ["token"]);
+
+        Assert.Equal(expected, renderResult.ReplacePlaceholders(markdown));
     }
 
     [Fact]
@@ -2585,6 +2705,20 @@ public class MarkdownHarvesterTests : IDisposable
     {
         var message = call.GetArgument<object>(2)?.ToString();
         return message?.Contains(expectedMessageFragment, StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static MarkdownPipeline CreateRichAuthoringPipeline()
+    {
+        return new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()
+            .Use(new AppSurfaceDocsRichAuthoringMarkdownExtension())
+            .Build();
+    }
+
+    private static CustomContainer ParseSingleRichContainer(string markdown)
+    {
+        var document = Markdown.Parse(markdown, CreateRichAuthoringPipeline());
+        return Assert.IsType<CustomContainer>(Assert.Single(document));
     }
 
     private async Task WriteMarkdownAsync(string relativePath, string content)

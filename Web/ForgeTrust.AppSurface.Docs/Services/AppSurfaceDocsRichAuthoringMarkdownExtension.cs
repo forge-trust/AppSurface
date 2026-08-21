@@ -76,18 +76,13 @@ internal sealed class AppSurfaceDocsRichAuthoringRenderer : HtmlObjectRenderer<C
             return;
         }
 
-        switch (validation.Kind)
+        if (validation.Kind == AppSurfaceDocsRichAuthoringKind.Callout)
         {
-            case AppSurfaceDocsRichAuthoringKind.Callout:
-                WriteCallout(renderer, obj, validation.CalloutKind!);
-                break;
-            case AppSurfaceDocsRichAuthoringKind.Tabs:
-                WriteTabs(renderer, obj, validation);
-                break;
-            default:
-                WriteLiteralFallback(renderer, obj);
-                break;
+            WriteCallout(renderer, obj, validation.CalloutKind!);
+            return;
         }
+
+        WriteLiteralFallback(renderer, obj);
     }
 
     private static void WriteGenericContainer(HtmlRenderer renderer, CustomContainer obj)
@@ -124,47 +119,6 @@ internal sealed class AppSurfaceDocsRichAuthoringRenderer : HtmlObjectRenderer<C
             .EnsureLine()
             .Write("</section>")
             .EnsureLine();
-    }
-
-    private static void WriteTabs(
-        HtmlRenderer renderer,
-        CustomContainer obj,
-        AppSurfaceDocsRichAuthoringValidation validation)
-    {
-        var identifier = $"docs-rich-tabs-{obj.Line + 1}";
-        renderer.EnsureLine()
-            .Write("<section class=\"docs-rich-tabs\" data-appsurfacedocs-rich=\"tabs\" data-appsurfacedocs-rich-tabs=\"true\">")
-            .EnsureLine()
-            .Write("<p class=\"docs-rich-tabs__prompt\" id=\"")
-            .Write(identifier)
-            .Write("-prompt\">")
-            .WriteEscape(validation.Prompt!)
-            .Write("</p>")
-            .EnsureLine()
-            .Write("<p class=\"docs-rich-tabs__baseline\" data-appsurfacedocs-rich-tabs-baseline=\"true\">All paths are available below.</p>")
-            .EnsureLine();
-
-        var panels = obj.OfType<CustomContainer>().ToArray();
-        for (var index = 0; index < panels.Length; index++)
-        {
-            var panel = panels[index];
-            var label = validation.PanelLabels[index];
-            renderer.EnsureLine()
-                .Write("<section class=\"docs-rich-tabs__panel\" data-appsurfacedocs-rich-tab-panel=\"true\" data-appsurfacedocs-rich-tab-label=\"")
-                .WriteEscape(label)
-                .Write("\">")
-                .EnsureLine()
-                .Write("<h3 class=\"docs-rich-tabs__panel-title\">")
-                .WriteEscape(label)
-                .Write("</h3>")
-                .EnsureLine();
-            renderer.WriteChildren(panel);
-            renderer.EnsureLine()
-                .Write("</section>")
-                .EnsureLine();
-        }
-
-        renderer.Write("</section>").EnsureLine();
     }
 
     private static void WriteLiteralFallback(HtmlRenderer renderer, CustomContainer obj)
@@ -414,7 +368,9 @@ internal static class AppSurfaceDocsRichAuthoringSyntax
 
         if (directiveName.Equals("tabs", StringComparison.OrdinalIgnoreCase))
         {
-            return ValidateTabs(container);
+            return AppSurfaceDocsRichAuthoringValidation.Invalid(
+                AppSurfaceDocsRichAuthoringKind.Tabs,
+                "Tabs must use the supported two-to-four-panel quoted-label syntax.");
         }
 
         if (directiveName.Equals("tab", StringComparison.OrdinalIgnoreCase))
@@ -498,74 +454,6 @@ internal static class AppSurfaceDocsRichAuthoringSyntax
             "danger" => "Danger",
             _ => "Note"
         };
-    }
-
-    private static AppSurfaceDocsRichAuthoringValidation ValidateTabs(CustomContainer container)
-    {
-        if (container.ClosingFencedCharCount == 0)
-        {
-            return AppSurfaceDocsRichAuthoringValidation.Invalid(
-                AppSurfaceDocsRichAuthoringKind.Tabs,
-                "The tabs block is missing its closing ::: fence.");
-        }
-
-        if (!TryParseQuotedValue(GetDirectiveArguments(container), MaximumPromptRunes, out var prompt))
-        {
-            return AppSurfaceDocsRichAuthoringValidation.Invalid(
-                AppSurfaceDocsRichAuthoringKind.Tabs,
-                "Tabs require one non-empty quoted prompt no longer than 160 Unicode characters.");
-        }
-
-        var children = container.ToArray();
-        if (children.Length is < 2 or > 4 || children.Any(child => child is not CustomContainer))
-        {
-            return AppSurfaceDocsRichAuthoringValidation.Invalid(
-                AppSurfaceDocsRichAuthoringKind.Tabs,
-                "Tabs must contain two to four direct :::tab blocks and no other direct content.");
-        }
-
-        var labels = new List<string>(children.Length);
-        var labelsSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var child in children.Cast<CustomContainer>())
-        {
-            if (!GetDirectiveName(child).Equals("tab", StringComparison.OrdinalIgnoreCase)
-                || child.ClosingFencedCharCount == 0
-                || !TryParseQuotedValue(GetDirectiveArguments(child), MaximumLabelRunes, out var label))
-            {
-                return AppSurfaceDocsRichAuthoringValidation.Invalid(
-                    AppSurfaceDocsRichAuthoringKind.Tabs,
-                    "Each tab must have a closing fence and a unique non-empty quoted label no longer than 80 Unicode characters.");
-            }
-
-            if (!labelsSeen.Add(label) || ContainsTabs(child))
-            {
-                return AppSurfaceDocsRichAuthoringValidation.Invalid(
-                    AppSurfaceDocsRichAuthoringKind.Tabs,
-                    "Tab labels must be unique and tabs cannot be nested inside another tabs block.");
-            }
-
-            labels.Add(label);
-        }
-
-        return AppSurfaceDocsRichAuthoringValidation.Tabs(prompt, labels);
-    }
-
-    private static bool ContainsTabs(ContainerBlock container)
-    {
-        foreach (var child in container)
-        {
-            if (child is not CustomContainer nested)
-            {
-                continue;
-            }
-
-            if (GetDirectiveName(nested).Equals("tabs", StringComparison.OrdinalIgnoreCase) || ContainsTabs(nested))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static bool TryParseQuotedValue(string value, int maximumRunes, out string parsed)
@@ -934,17 +822,13 @@ internal sealed record AppSurfaceDocsRichAuthoringValidation(
     bool IsValid,
     AppSurfaceDocsRichAuthoringKind Kind,
     string? CalloutKind,
-    string? Prompt,
-    IReadOnlyList<string> PanelLabels,
     string? Problem)
 {
-    internal static AppSurfaceDocsRichAuthoringValidation NotRich() => new(false, AppSurfaceDocsRichAuthoringKind.None, null, null, [], null);
+    internal static AppSurfaceDocsRichAuthoringValidation NotRich() => new(false, AppSurfaceDocsRichAuthoringKind.None, null, null);
 
-    internal static AppSurfaceDocsRichAuthoringValidation Callout(string kind) => new(true, AppSurfaceDocsRichAuthoringKind.Callout, kind, null, [], null);
+    internal static AppSurfaceDocsRichAuthoringValidation Callout(string kind) => new(true, AppSurfaceDocsRichAuthoringKind.Callout, kind, null);
 
-    internal static AppSurfaceDocsRichAuthoringValidation Tabs(string prompt, IReadOnlyList<string> labels) => new(true, AppSurfaceDocsRichAuthoringKind.Tabs, null, prompt, labels, null);
-
-    internal static AppSurfaceDocsRichAuthoringValidation Invalid(AppSurfaceDocsRichAuthoringKind kind, string problem) => new(false, kind, null, null, [], problem);
+    internal static AppSurfaceDocsRichAuthoringValidation Invalid(AppSurfaceDocsRichAuthoringKind kind, string problem) => new(false, kind, null, problem);
 }
 
 /// <summary>
