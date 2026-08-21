@@ -266,6 +266,7 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
                 "start-here/first-success-path.md",
                 "packages/README.md",
                 "start-here/auth-adoption-ladder.md",
+                "start-here/evidencehost.md",
                 "Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md"
             ],
             startHere.VisiblePages
