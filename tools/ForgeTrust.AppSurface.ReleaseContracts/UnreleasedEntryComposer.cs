@@ -8,13 +8,15 @@ using Markdig.Syntax;
 namespace ForgeTrust.AppSurface.ReleaseContracts;
 
 /// <summary>
-/// Loads append-only unreleased-note entries and inserts them into the stable living-note template.
+/// Loads append-only release-note entries and inserts them into a stable living-note template.
 /// </summary>
 /// <remarks>
-/// Entries are individual Markdown files in <c>releases/unreleased.entries</c>. The flat, filename-sorted directory
-/// avoids concurrent edits to the living-note template. Each entry begins with an exact section directive and may add
-/// nested headings or ordinary Markdown, but cannot introduce a new top-level section. Callers use the composed content
-/// for rendering or release preparation; the checked-in template remains stable until release preparation resets it.
+/// Entries are individual Markdown files in a flat, filename-sorted directory. This avoids concurrent edits to the
+/// shared living-note template when independent work streams describe their release-facing changes. Each entry begins
+/// with an exact section directive and may add nested headings or ordinary Markdown, but cannot introduce a new
+/// top-level section. The supported section identifiers are declared by the template's composition markers, so consumer
+/// projects can use their own release-note structure without a code change. Callers use the composed content for
+/// rendering or release preparation; the checked-in template remains stable until its owning release workflow resets it.
 /// </remarks>
 internal static class UnreleasedEntryComposer
 {
@@ -23,7 +25,12 @@ internal static class UnreleasedEntryComposer
     private const string EntriesDirectoryPrefix = "releases/" + EntriesDirectoryName + "/";
     private const string EntryDirectivePrefix = "<!-- appsurface:unreleased-entry section=\"";
     private const string EntryDirectiveSuffix = "\" -->";
-    private static readonly string[] Sections = ["taking-shape", "included", "migration-watch"];
+    private static readonly Regex SectionIdentifierPattern = new(
+        "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        RegexOptions.CultureInvariant);
+    private static readonly Regex TemplateMarkerPattern = new(
+        "^ {0,3}<!-- appsurface:unreleased-entries section=\"(?<section>[a-z0-9]+(?:-[a-z0-9]+)*)\" -->[ \\t]*\\r?$",
+        RegexOptions.Multiline | RegexOptions.CultureInvariant);
     private static readonly Regex EntryFileNamePattern = new(
         "^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+(?:-[a-z0-9]+)*\\.md$",
         RegexOptions.CultureInvariant);
@@ -113,7 +120,7 @@ internal static class UnreleasedEntryComposer
     /// <summary>
     /// Inserts validated entries at the end of their designated top-level template sections.
     /// </summary>
-    /// <param name="template">Living-note template that contains one marker for each supported section.</param>
+    /// <param name="template">Living-note template that contains one marker for each template-declared section.</param>
     /// <param name="entries">Validated entries to insert.</param>
     /// <param name="destinationPath">Absolute path of the composed living or versioned release note.</param>
     /// <returns>The deterministic composed release note.</returns>
@@ -123,36 +130,50 @@ internal static class UnreleasedEntryComposer
         ArgumentNullException.ThrowIfNull(template);
         ArgumentNullException.ThrowIfNull(entries);
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+        EnsureTerminalSafeText(template, "The living-note template");
 
+        var markers = GetTemplateMarkers(template);
+        var sections = markers.Select(marker => marker.Section).ToArray();
+        var sectionSet = new HashSet<string>(sections, StringComparer.Ordinal);
         var entryList = entries.ToArray();
+        foreach (var entry in entryList)
+        {
+            EnsureTerminalSafeText(entry.Markdown, $"Unreleased entry '{Path.GetFileName(entry.Path)}'");
+            if (!sectionSet.Contains(entry.Section))
+            {
+                throw new UnreleasedEntryException(
+                    $"Unreleased entry '{Path.GetFileName(entry.Path)}' uses section '{entry.Section}', which is not declared by the living-note template. Supported sections: {string.Join(", ", sections)}.");
+            }
+        }
+
         var entriesBySection = entryList
             .GroupBy(entry => entry.Section, StringComparer.Ordinal)
             .ToDictionary(
                 group => group.Key,
                 group => group.OrderBy(entry => Path.GetFileName(entry.Path), StringComparer.Ordinal).ToArray(),
                 StringComparer.Ordinal);
-        var composed = template;
-        foreach (var section in Sections)
+        var composed = new StringBuilder(template.Length);
+        var sourcePosition = 0;
+        foreach (var marker in markers)
         {
-            var marker = MarkerFor(section);
-            var markerIndex = composed.IndexOf(marker, StringComparison.Ordinal);
-            if (markerIndex < 0 || composed.IndexOf(marker, markerIndex + marker.Length, StringComparison.Ordinal) >= 0)
-            {
-                throw new UnreleasedEntryException($"The unreleased-note template must contain exactly one '{marker}' marker.");
-            }
-
+            var section = marker.Section;
             var sectionContent = entriesBySection.TryGetValue(section, out var sectionEntries)
                 ? string.Join("\n\n", sectionEntries.Select(entry => RebaseRelativeLinkDestinations(entry.Markdown, entry.Path, destinationPath)))
                 : string.Empty;
-            composed = composed.Replace(marker, sectionContent, StringComparison.Ordinal);
+            composed.Append(template, sourcePosition, marker.Index - sourcePosition);
+            composed.Append(sectionContent);
+            sourcePosition = marker.Index + marker.Length;
         }
 
-        if (composed.Contains("<!-- appsurface:unreleased-entries", StringComparison.Ordinal))
+        composed.Append(template, sourcePosition, template.Length - sourcePosition);
+        var composedText = composed.ToString();
+
+        if (composedText.Contains("<!-- appsurface:unreleased-entries", StringComparison.Ordinal))
         {
-            throw new UnreleasedEntryException("The unreleased-note template must contain exactly one append-only entry marker for every supported section and no unsupported entry markers.");
+            throw new UnreleasedEntryException("The living-note template contains an unsupported or malformed append-only entry marker.");
         }
 
-        return composed;
+        return composedText;
     }
 
     /// <summary>
@@ -392,6 +413,8 @@ internal static class UnreleasedEntryComposer
     /// <param name="End">Exclusive zero-based source position.</param>
     private readonly record struct MarkdownRange(int Start, int End);
 
+    private readonly record struct TemplateMarker(int Index, int Length, string Section);
+
     /// <summary>
     /// Gets whether a repository-relative path can be an append-only unreleased entry.
     /// </summary>
@@ -414,16 +437,52 @@ internal static class UnreleasedEntryComposer
     /// <summary>
     /// Gets the exact marker used by the living-note template for a section.
     /// </summary>
-    /// <param name="section">Supported section identifier.</param>
+    /// <param name="section">Valid section identifier.</param>
     /// <returns>Exact HTML comment marker.</returns>
     internal static string MarkerFor(string section)
     {
-        if (!Sections.Contains(section, StringComparer.Ordinal))
+        ArgumentException.ThrowIfNullOrWhiteSpace(section);
+        if (!SectionIdentifierPattern.IsMatch(section))
         {
-            throw new ArgumentOutOfRangeException(nameof(section), section, "The section is not a supported unreleased-entry destination.");
+            throw new ArgumentException("The section identifier must use lowercase letters, digits, and single hyphens.", nameof(section));
         }
 
         return $"<!-- appsurface:unreleased-entries section=\"{section}\" -->";
+    }
+
+    /// <summary>
+    /// Reads the unique composition markers declared by the living-note template.
+    /// </summary>
+    /// <param name="template">Living-note template containing composition markers.</param>
+    /// <returns>Composition markers in their template order.</returns>
+    /// <exception cref="UnreleasedEntryException">Thrown when the template has no markers or repeats a section.</exception>
+    private static IReadOnlyList<TemplateMarker> GetTemplateMarkers(string template)
+    {
+        var codeBlockRanges = FindCodeBlockRanges(template);
+        var markers = new List<TemplateMarker>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (Match match in TemplateMarkerPattern.Matches(template))
+        {
+            if (IntersectsMarkdownRange(match.Index, match.Index + match.Length, codeBlockRanges))
+            {
+                continue;
+            }
+
+            var section = match.Groups["section"].Value;
+            if (!seen.Add(section))
+            {
+                throw new UnreleasedEntryException($"The living-note template must contain exactly one '{MarkerFor(section)}' marker.");
+            }
+
+            markers.Add(new TemplateMarker(match.Index, match.Length, section));
+        }
+
+        if (markers.Count == 0)
+        {
+            throw new UnreleasedEntryException("The living-note template must contain at least one append-only entry marker.");
+        }
+
+        return markers;
     }
 
     private static UnreleasedEntry Parse(string path, string content)
@@ -439,9 +498,9 @@ internal static class UnreleasedEntryComposer
 
         var sectionLength = directive.Length - EntryDirectivePrefix.Length - EntryDirectiveSuffix.Length;
         var section = directive.Substring(EntryDirectivePrefix.Length, sectionLength);
-        if (!Sections.Contains(section, StringComparer.Ordinal))
+        if (!SectionIdentifierPattern.IsMatch(section))
         {
-            throw new UnreleasedEntryException($"Unreleased entry '{Path.GetFileName(path)}' uses unsupported section '{section}'. Supported sections: {string.Join(", ", Sections)}.");
+            throw new UnreleasedEntryException($"Unreleased entry '{Path.GetFileName(path)}' uses invalid section '{section}'. Section identifiers must use lowercase letters, digits, and single hyphens.");
         }
 
         var markdown = (firstLineEnd >= 0 ? content[(firstLineEnd + 1)..] : string.Empty)
@@ -451,6 +510,8 @@ internal static class UnreleasedEntryComposer
         {
             throw new UnreleasedEntryException($"Unreleased entry '{Path.GetFileName(path)}' must contain Markdown after its section directive.");
         }
+
+        EnsureTerminalSafeText(markdown, $"Unreleased entry '{Path.GetFileName(path)}'");
 
         if (markdown.Contains("<!-- appsurface:unreleased-entries", StringComparison.Ordinal)
             || markdown.Contains("<!-- appsurface:unreleased-entry", StringComparison.Ordinal))
@@ -464,6 +525,14 @@ internal static class UnreleasedEntryComposer
         }
 
         return new UnreleasedEntry(path, section, markdown);
+    }
+
+    private static void EnsureTerminalSafeText(string text, string description)
+    {
+        if (text.Any(character => char.IsControl(character) && character is not '\r' and not '\n' and not '\t'))
+        {
+            throw new UnreleasedEntryException($"{description} must not contain terminal control characters.");
+        }
     }
 
     private static bool IsEntryFileName(string fileName)

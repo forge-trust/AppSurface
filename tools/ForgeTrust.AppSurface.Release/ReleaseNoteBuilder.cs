@@ -30,6 +30,31 @@ internal static class ReleaseNoteBuilder
         UnreleasedTemplatePlaceholderDefinitions.Select(placeholder => placeholder.Text).ToArray());
 
     /// <summary>
+    /// Verifies the repository-owned living-note layout before generic entry composition begins.
+    /// </summary>
+    /// <param name="unreleasedTemplate">Raw AppSurface living-note template.</param>
+    /// <exception cref="UnreleasedEntryException">Thrown when an AppSurface-required section marker is absent or repeated.</exception>
+    /// <remarks>
+    /// The public composer intentionally lets consumer templates define their own sections. AppSurface release preparation
+    /// has a stricter contract because its reset placeholders, sidecar narrative, and release review guidance own the
+    /// <c>taking-shape</c>, <c>included</c>, and <c>migration-watch</c> sections. Keep that repository policy here rather
+    /// than constraining consumer projects through the public command.
+    /// </remarks>
+    internal static void EnsureAppSurfaceUnreleasedEntryMarkers(string unreleasedTemplate)
+    {
+        ArgumentNullException.ThrowIfNull(unreleasedTemplate);
+        foreach (var placeholder in UnreleasedTemplatePlaceholderDefinitions)
+        {
+            var marker = UnreleasedEntryComposer.MarkerFor(placeholder.Section);
+            var firstIndex = unreleasedTemplate.IndexOf(marker, StringComparison.Ordinal);
+            if (firstIndex < 0 || unreleasedTemplate.IndexOf(marker, firstIndex + marker.Length, StringComparison.Ordinal) >= 0)
+            {
+                throw new UnreleasedEntryException($"The AppSurface unreleased-note template must contain exactly one '{marker}' marker.");
+            }
+        }
+    }
+
+    /// <summary>
     /// Removes reset-only template bullets directly before their canonical entry markers.
     /// </summary>
     /// <param name="unreleasedTemplate">The raw unreleased template, before append-only entries are composed.</param>

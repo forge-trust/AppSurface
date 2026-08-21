@@ -14,6 +14,8 @@ appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3
 
 The CLI also includes public coverage commands for private-by-default CI coverage enforcement. `appsurface coverage run` discovers or accepts instrumented .NET test projects, writes local coverage artifacts, and merges Cobertura through the package-owned ReportGenerator dependency in the same command. `appsurface coverage merge` fans in existing Cobertura shards from matrix or custom test workflows without reading a consumer tool manifest. `appsurface coverage gate` evaluates the merged local Cobertura XML, writes JSON and Markdown reports, and can append the same Markdown to GitHub Actions step summaries without uploading coverage data to a hosted coverage service. `appsurface coverage clean` previews or explicitly removes those private artifacts; its default ownership-marker mode is narrow, while [`--all`](#appsurface-coverage-clean) provides a deliberate worktree-wide `TestResults` sweep.
 
+`appsurface release compose` gives any consumer project the same append-only release-note workflow AppSurface uses: each change adds its own Markdown entry, then one release owner validates and composes a deterministic note. It does not run AppSurface's repository-owned release cockpit, touch a shared `CHANGELOG.md`, create tags, or publish packages.
+
 ### Coverage proof levels and driver boundary
 
 There are two different coverage questions, and they have different commands:
@@ -109,6 +111,7 @@ dotnet tool run appsurface --version
 dotnet tool run appsurface docs --repo .
 dotnet tool run appsurface coverage run --solution ./MyApp.slnx --dry-run
 dotnet tool run appsurface coverage run --solution ./MyApp.slnx
+dotnet tool run appsurface -- release compose --root .
 dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --patch-line-mode codecov --min-patch-branch 85
 ```
 
@@ -120,6 +123,59 @@ dotnet tool run appsurface --version
 ```
 
 ## Commands
+
+### `appsurface release compose`
+
+Use this command when multiple contributors or automated work streams need to describe release-facing changes without all editing the same living note or changelog. Each change writes one independent entry file; a release owner composes those entries in deterministic filename order. The command works in any project that adopts the small Markdown convention below—its section names belong to the consumer's template, not to AppSurface.
+
+Create a stable living-note template once, with one marker per section:
+
+```markdown
+# Unreleased
+
+## Added
+<!-- appsurface:unreleased-entries section="added" -->
+
+## Fixed
+<!-- appsurface:unreleased-entries section="fixed" -->
+```
+
+Then let each change add its own file under `releases/unreleased.entries/`. File names must be `YYYY-MM-DD-topic.md`, and the first line selects one template section:
+
+```markdown
+<!-- appsurface:unreleased-entry section="added" -->
+
+- Added a consumer-facing capability.
+```
+
+Entries may contain ordinary Markdown and nested `###` headings, but not new `#` or `##` sections, nested directories, symbolic links, composition markers, terminal control characters, or a section that the template does not declare. Section identifiers use lowercase letters, digits, and single hyphens. Relative Markdown links are rebased from an entry to the composed destination. Without `--output`, preview composes as though the template is the destination; with `--output`, both preview and `--apply` compose for that output file. Consequently, when the template and selected output live in different directories, those two previews can contain different relative link targets. Links inside inline, fenced, and indented code examples remain unchanged. Templates and entries may use tabs and normal line breaks, but other control characters are rejected so a preview cannot alter the maintainer's terminal.
+
+Preview the complete composed document without writing any files:
+
+```bash
+dotnet tool run appsurface -- release compose --root .
+```
+
+Write a versioned or reviewable release note only after inspecting the preview:
+
+```bash
+dotnet tool run appsurface -- release compose \
+  --root . \
+  --output releases/v1.4.0.md \
+  --apply
+```
+
+`--apply` always requires a distinct `--output`; the command never overwrites the stable template, deletes source entries, creates tags, updates a shared `CHANGELOG.md`, or publishes anything. It rejects pre-existing links in selected path components, but should run under an operator-controlled root: pathname validation cannot make a directory shared with an untrusted local principal safe from a replacement after validation. Keep changelog rollover and entry consumption in your own reviewed release workflow. AppSurface's repository-owned [`./eng/release`](../../tools/ForgeTrust.AppSurface.Release/README.md) cockpit adds those project-specific responsibilities and itself uses this same composition component; it is not part of the public tool contract.
+
+| Option | Default | Behavior |
+| --- | --- | --- |
+| `--root <directory>` | Current directory | Existing physical project root that bounds all selected paths. Linked roots and linked path components below the root are rejected. |
+| `--entries <directory>` | `releases/unreleased.entries` | Flat append-only entry directory below `--root`. A missing directory composes an empty template. |
+| `--template <file>` | `releases/unreleased.md` | Markdown template below `--root` that declares entry sections with composition markers. |
+| `--output <file>` | Standard output | Destination below `--root`. Without `--apply`, reports the exact prospective write; with `--apply`, it must differ from `--template`. |
+| `--apply` | Off | Writes the composed document to `--output`; otherwise the operation is preview-only. |
+
+Start with this command when the problem is concurrent release-note or changelog authoring. Use the repository cockpit only when you own AppSurface's versioned evidence, package policy, tag binding, and publication workflows.
 
 ### `appsurface canary poll`
 
