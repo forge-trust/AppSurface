@@ -373,6 +373,9 @@ internal sealed partial class EvidenceVerifyCommand(EvidenceCliWorkflow workflow
 /// </summary>
 internal abstract partial class EvidencePlanningCommandBase(EvidenceCliWorkflow workflow) : ICommand
 {
+    /// <summary>
+    /// Gets the policy-planning workflow shared by derived EvidenceHost commands.
+    /// </summary>
     protected EvidenceCliWorkflow Workflow { get; } = workflow ?? throw new ArgumentNullException(nameof(workflow));
 
     /// <summary>Gets or sets the checked-in evidence policy path.</summary>
@@ -390,5 +393,8 @@ internal abstract partial class EvidencePlanningCommandBase(EvidenceCliWorkflow 
     /// <inheritdoc />
     public abstract ValueTask ExecuteAsync(IConsole console);
 
+    /// <summary>
+    /// Creates the explicit policy-and-diff input consumed by a planning operation.
+    /// </summary>
     protected EvidencePlanningRequest CreatePlanningRequest() => new(PolicyPath, Paths, DiffFile);
 }

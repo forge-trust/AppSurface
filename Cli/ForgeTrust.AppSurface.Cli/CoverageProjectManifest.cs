@@ -91,13 +91,14 @@ internal static class CoverageProjectManifest
         {
             current = Path.Join(current, segment);
             var directory = new DirectoryInfo(current);
-            if (!directory.Exists)
+            var linkTarget = directory.LinkTarget;
+            if (linkTarget is null)
             {
-                throw new IOException($"Directory does not exist: {current}");
-            }
+                if (!directory.Exists)
+                {
+                    throw new IOException($"Directory does not exist: {current}");
+                }
 
-            if (directory.LinkTarget is null)
-            {
                 continue;
             }
 
@@ -108,11 +109,6 @@ internal static class CoverageProjectManifest
 
             var targetPath = Path.GetFullPath(directory.ResolveLinkTarget(returnFinalTarget: false)?.FullName
                 ?? throw new IOException($"Could not resolve directory link target: {current}"));
-            if (!Directory.Exists(targetPath))
-            {
-                throw new IOException($"Directory link target does not exist: {targetPath}");
-            }
-
             var targetRoot = Path.GetPathRoot(targetPath)
                 ?? throw new IOException($"Directory link target does not have a root: {targetPath}");
             current = targetRoot;

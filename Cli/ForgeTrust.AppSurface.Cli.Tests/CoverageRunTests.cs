@@ -583,6 +583,34 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task CoverageProjectManifest_WriteAsync_ShouldRejectExcessiveDirectoryLinkResolution()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var repo = TempDirectory.Create("appsurface-coverage-manifest-");
+        var physicalSolutionDirectory = Directory.CreateDirectory(TestPathUtils.PathUnder(repo.Path, "physical-solution")).FullName;
+        var target = physicalSolutionDirectory;
+        for (var index = 40; index >= 0; index--)
+        {
+            var link = TestPathUtils.PathUnder(repo.Path, $"solution-link-{index}");
+            Directory.CreateSymbolicLink(link, target);
+            target = link;
+        }
+
+        var projectOutputDirectory = Directory.CreateDirectory(TestPathUtils.PathUnder(repo.Path, "coverage-output", "projects", "sample-tests")).FullName;
+        var exception = await Assert.ThrowsAsync<IOException>(() => CoverageProjectManifest.WriteAsync(
+            projectOutputDirectory,
+            target,
+            new CoverageRunProject("tests/Sample.Tests/Sample.Tests.csproj", TestPathUtils.PathUnder(physicalSolutionDirectory, "tests", "Sample.Tests", "Sample.Tests.csproj"), "sample-tests", IsExclusive: false),
+            CancellationToken.None));
+
+        Assert.Contains("40-link resolution limit", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RunAsync_TestResultsJunit_ShouldWriteManagedArtifactsAndTimings()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");

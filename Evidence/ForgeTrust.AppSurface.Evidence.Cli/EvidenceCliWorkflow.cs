@@ -13,11 +13,21 @@ internal sealed class EvidenceCliWorkflow
     private const string GeneratedMarker = "appsurface-evidence-starter-v1";
     private readonly EvidencePlanner _planner;
 
+    /// <summary>
+    /// Initializes the workflow with the planner used to resolve policy and changed-path inputs.
+    /// </summary>
     public EvidenceCliWorkflow(EvidencePlanner planner)
     {
         _planner = planner ?? throw new ArgumentNullException(nameof(planner));
     }
 
+    /// <summary>
+    /// Writes the marked v1 starter files beneath <paramref name="rootPath"/>.
+    /// </summary>
+    /// <remarks>
+    /// Existing unmarked files are never overwritten and fail with <c>ASEVD201</c>; existing marked files require
+    /// <paramref name="force"/> and otherwise fail with <c>ASEVD202</c>.
+    /// </remarks>
     public async Task<EvidenceInitializationResult> InitializeAsync(string rootPath, bool force, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
@@ -56,6 +66,9 @@ internal sealed class EvidenceCliWorkflow
         return new EvidenceInitializationResult(root, files.Keys.OrderBy(static path => path, StringComparer.Ordinal).ToArray());
     }
 
+    /// <summary>
+    /// Resolves an evidence plan and reports prerequisite readiness without provisioning resources or running producers.
+    /// </summary>
     public async Task<EvidenceDoctorReport> DoctorAsync(EvidencePlanningRequest request, CancellationToken cancellationToken)
     {
         var plan = await ExplainAsync(request, cancellationToken).ConfigureAwait(false);
@@ -99,6 +112,12 @@ internal sealed class EvidenceCliWorkflow
             checks);
     }
 
+    /// <summary>
+    /// Resolves the checked-in policy and explicit changed paths into a deterministic evidence plan.
+    /// </summary>
+    /// <remarks>
+    /// Missing, malformed, or empty inputs produce the stable <c>ASEVD204</c> through <c>ASEVD207</c> diagnostics.
+    /// </remarks>
     public async Task<EvidencePlan> ExplainAsync(EvidencePlanningRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -108,6 +127,10 @@ internal sealed class EvidenceCliWorkflow
         return _planner.Resolve(policy, paths);
     }
 
+    /// <summary>
+    /// Writes the canonical plan and its human-readable summary to <paramref name="outputDirectory"/>.
+    /// </summary>
+    /// <remarks>Replaces <c>evidence-plan.json</c> and <c>evidence-summary.json</c> when they already exist.</remarks>
     public async Task WritePlanAsync(EvidencePlan plan, string outputDirectory, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -120,6 +143,10 @@ internal sealed class EvidenceCliWorkflow
             cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Writes the canonical manifest and its human-readable summary to <paramref name="outputDirectory"/>.
+    /// </summary>
+    /// <remarks>Replaces <c>evidence-manifest.json</c> and <c>evidence-summary.json</c> when they already exist.</remarks>
     public async Task WriteManifestAsync(EvidenceManifest manifest, string outputDirectory, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(manifest);
@@ -132,6 +159,13 @@ internal sealed class EvidenceCliWorkflow
             cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Verifies that a manifest is canonical and is bound to the supplied plan without rerunning producers.
+    /// </summary>
+    /// <remarks>
+    /// Missing files produce <c>ASEVD208</c>, malformed canonical JSON produces <c>ASEVD209</c>, and a missing,
+    /// unresolvable, or non-binding policy snapshot produces <c>ASEVD203</c>.
+    /// </remarks>
     public async Task<(EvidencePlan Plan, EvidenceManifest Manifest)> VerifyAsync(
         string planPath,
         string manifestPath,
@@ -169,6 +203,9 @@ internal sealed class EvidenceCliWorkflow
         return (plan, manifest);
     }
 
+    /// <summary>
+    /// Formats a deterministic, human-readable summary of a resolved plan.
+    /// </summary>
     public static string FormatSummary(EvidencePlan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -185,6 +222,9 @@ internal sealed class EvidenceCliWorkflow
             $"Required resources: {FormatIds(plan.Profile.Resources.Select(static resource => resource.Id))}");
     }
 
+    /// <summary>
+    /// Formats a deterministic, human-readable summary of an evidence claim and any remaining obligations.
+    /// </summary>
     public static string FormatSummary(EvidenceManifest manifest)
     {
         ArgumentNullException.ThrowIfNull(manifest);
