@@ -709,6 +709,16 @@ public sealed class EvidencePlannerTests
 
         Assert.False(EvidenceArtifactValidation.AreValid(producer with { ArtifactSlots = [producer.ArtifactSlots[0], producer.ArtifactSlots[0]] }, [validArtifact]));
         Assert.False(EvidenceArtifactValidation.AreValid(producer, [validArtifact, validArtifact with { LogicalName = "second" }]));
+        Assert.False(EvidenceArtifactValidation.AreValid(
+            producer with
+            {
+                ArtifactSlots =
+                [
+                    producer.ArtifactSlots[0],
+                    new EvidenceArtifactSlot("summary", "coverage", "text/plain", Required: true, MaximumBytes: EvidenceArtifactWriter.MaximumTotalArtifactBytes + 1),
+                ],
+            },
+            [validArtifact, validArtifact with { LogicalName = "summary", RelativePath = "coverage\\report.txt" }]));
         Assert.False(EvidenceArtifactValidation.AreValid(producer, [validArtifact with { MediaType = "application/json" }]));
         Assert.False(EvidenceArtifactValidation.AreValid(producer, [validArtifact with { LengthBytes = EvidenceArtifactWriter.MaximumTotalArtifactBytes + 1 }]));
         Assert.Throws<ArgumentException>(() => EvidenceArtifactValidation.NormalizeRelativePath(" "));

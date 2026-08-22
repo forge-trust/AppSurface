@@ -601,8 +601,7 @@ public static class EvidenceArtifactValidation
         ArgumentNullException.ThrowIfNull(producer);
         artifacts ??= [];
         if (producer.ArtifactSlots.GroupBy(static slot => slot.LogicalName, StringComparer.Ordinal).Any(static group => group.Count() > 1)
-            || artifacts.GroupBy(static artifact => artifact.LogicalName, StringComparer.Ordinal).Any(static group => group.Count() > 1)
-            || artifacts.GroupBy(static artifact => artifact.RelativePath, StringComparer.Ordinal).Any(static group => group.Count() > 1))
+            || artifacts.GroupBy(static artifact => artifact.LogicalName, StringComparer.Ordinal).Any(static group => group.Count() > 1))
         {
             return false;
         }
@@ -614,6 +613,7 @@ public static class EvidenceArtifactValidation
         }
 
         long totalBytes = 0;
+        var destinations = new HashSet<string>(StringComparer.Ordinal);
         foreach (var artifact in artifacts)
         {
             if (!slots.TryGetValue(artifact.LogicalName, out var slot)
@@ -634,7 +634,13 @@ public static class EvidenceArtifactValidation
 
             try
             {
-                ValidatePathForSlot(slot, artifact.RelativePath);
+                var normalizedPath = NormalizeRelativePath(artifact.RelativePath);
+                if (!destinations.Add(normalizedPath))
+                {
+                    return false;
+                }
+
+                ValidatePathForSlot(slot, normalizedPath);
             }
             catch (ArgumentException)
             {
