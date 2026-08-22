@@ -1,4 +1,0 @@
-<!-- appsurface:unreleased-entry section="included" -->
-### Independent Docs products in one host
-
-- [AppSurface Docs](../../Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md#run-multiple-independent-docs-products) now lets a host register and map several independent Docs products, such as public documentation at `/docs` and contributor documentation at `/internal/docs`. Each product owns its source boundary, route family, identity, theme, search index, harvest state, and version catalog; hosts retain ownership of authentication, authorization policy, and middleware. Map every returned product handle, apply the host policy where needed, and finalize the set once. The executable [public/internal ConsumerFixture](../../Web/ForgeTrust.AppSurface.Docs.ConsumerFixture/MULTI_INSTANCE_WALKTHROUGH.md) demonstrates the complete public-read, internal-challenge, authenticated-contributor proof while keeping its header authentication mechanism explicitly test-only.
