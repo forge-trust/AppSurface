@@ -2,7 +2,7 @@
 
 `ForgeTrust.AppSurface.Evidence.Contracts` is the stable vocabulary for a CI run that says what changed, which evidence was required, what actually ran, and whether a downstream gate may consume the result.
 
-Start with the [EvidenceHost guide](../../start-here/evidencehost.md) before installing a package. Use this package directly only when you are authoring a consumer-owned producer, policy tool, or gate integration. It starts no process, discovers no test code, provisions no resources, and sends no telemetry.
+Start with the [EvidenceHost guide](https://github.com/forge-trust/AppSurface/blob/main/start-here/evidencehost.md) before installing a package. Use this package directly only when you are authoring a consumer-owned producer, policy tool, or gate integration. It starts no process, discovers no test code, provisions no resources, and sends no telemetry.
 
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
@@ -43,6 +43,6 @@ An unavailable capability, timeout, skipped producer, incomplete test profile, o
 - Do not construct a `NoEvidenceRequired` result merely because a local run omitted tests. It is a policy outcome, not a convenience override.
 - Do not treat a coverage collection artifact as a gate pass unless its producer has closed the assertion declared by the selected policy.
 - Do not claim independent attestation in v1. An accepted envelope is represented as `ValidatedNotAttested`.
-- Do not edit generated plan or manifest JSON. Use `EvidenceManifestBuilder.Verify(...)` or `appsurface evidence verify` to detect tampering or mixed artifacts.
+- Do not edit generated plan or manifest JSON. `EvidenceManifestBuilder.Verify(...)` and `appsurface evidence verify` detect inconsistent or edited claim fields by recomputing internal digests; they do not authenticate their inputs. Gates must obtain the plan and manifest through a trusted CI channel.
 
-Read next: the [planner README](../ForgeTrust.AppSurface.Evidence.Planner/README.md), the [Aspire lifecycle README](../ForgeTrust.AppSurface.Evidence.Aspire/README.md), and the [EvidenceHost cookbook](../../guides/evidencehost-cookbook.md).
+Read next: the [planner README](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md), the [Aspire lifecycle README](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md), and the [EvidenceHost cookbook](https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md).

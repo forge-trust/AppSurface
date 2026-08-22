@@ -26,6 +26,7 @@ internal static class CoverageProjectManifest
     internal const string FileName = "coverage-project.json";
 
     private const int SchemaVersion = 1;
+    private const int MaximumLinkResolutions = 40;
 
     /// <summary>
     /// Writes the project-to-artifact-directory binding as a complete UTF-8 JSON document.
@@ -84,18 +85,45 @@ internal static class CoverageProjectManifest
         var root = Path.GetPathRoot(fullDirectoryPath)
             ?? throw new IOException($"Directory path does not have a root: {directoryPath}");
         var current = root;
-        foreach (var segment in fullDirectoryPath[root.Length..].Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+        var linkResolutions = 0;
+        var remainingSegments = new Queue<string>(GetPathSegments(fullDirectoryPath, root));
+        while (remainingSegments.TryDequeue(out var segment))
         {
             current = Path.Join(current, segment);
             var directory = new DirectoryInfo(current);
-            if (directory.LinkTarget is not null)
+            if (!directory.Exists)
             {
-                current = ResolveExistingDirectoryPath(directory.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? current);
+                throw new IOException($"Directory does not exist: {current}");
             }
+
+            if (directory.LinkTarget is null)
+            {
+                continue;
+            }
+
+            if (++linkResolutions > MaximumLinkResolutions)
+            {
+                throw new IOException($"Directory path exceeds the {MaximumLinkResolutions}-link resolution limit: {directoryPath}");
+            }
+
+            var targetPath = Path.GetFullPath(directory.ResolveLinkTarget(returnFinalTarget: false)?.FullName
+                ?? throw new IOException($"Could not resolve directory link target: {current}"));
+            if (!Directory.Exists(targetPath))
+            {
+                throw new IOException($"Directory link target does not exist: {targetPath}");
+            }
+
+            var targetRoot = Path.GetPathRoot(targetPath)
+                ?? throw new IOException($"Directory link target does not have a root: {targetPath}");
+            current = targetRoot;
+            remainingSegments = new Queue<string>(GetPathSegments(targetPath, targetRoot).Concat(remainingSegments));
         }
 
         return current;
     }
+
+    private static IEnumerable<string> GetPathSegments(string path, string root) =>
+        path[root.Length..].Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
 
     private sealed record CoverageProjectManifestDocument(int SchemaVersion, string ProjectPath, string Slug);
 }

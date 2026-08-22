@@ -24,6 +24,7 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
         "start-here/should-i-use-appsurface.md",
         "start-here/first-success-path.md",
         "start-here/auth-adoption-ladder.md",
+        "start-here/evidencehost.md",
         "guides/from-program-cs-to-module.md",
         "troubleshooting/startup-and-modules.md",
         "concepts/glossary.md"

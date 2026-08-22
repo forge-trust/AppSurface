@@ -46,9 +46,10 @@ public sealed class EvidencePlanner
             .Select(static result => result.Profile)
             .DistinctBy(static profile => profile.Id, StringComparer.Ordinal)
             .ToArray();
-        var profile = distinctProfiles.Length == 1
-            ? distinctProfiles[0]
-            : profiles[policy.ConservativeProfileId];
+        var conservativeFallback = distinctProfiles.Length != 1;
+        var profile = conservativeFallback
+            ? profiles[policy.ConservativeProfileId]
+            : distinctProfiles[0];
         var policyDigest = EvidenceDigest.CanonicalSha256(policy);
         var normalizedPaths = changedPaths
             .Select(NormalizePath)
@@ -56,6 +57,12 @@ public sealed class EvidencePlanner
             .ThenBy(static path => path.PreviousPath, StringComparer.Ordinal)
             .ToArray();
         var diffDigest = EvidenceDigest.CanonicalSha256(normalizedPaths);
+        var matchedRuleIds = selected.Select(static result => result.RuleId);
+        if (conservativeFallback)
+        {
+            matchedRuleIds = matchedRuleIds.Append($"conservative:{policy.ConservativeProfileId}");
+        }
+
         var draft = new EvidencePlan(
             ContractVersion: "1.0",
             PolicyId: policy.Id,
@@ -63,7 +70,10 @@ public sealed class EvidencePlanner
             DiffDigest: diffDigest,
             Profile: profile,
             ChangedPaths: normalizedPaths,
-            MatchedRuleIds: selected.Select(static result => result.RuleId).Distinct(StringComparer.Ordinal).OrderBy(static id => id, StringComparer.Ordinal).ToArray(),
+            MatchedRuleIds: matchedRuleIds
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(static id => id, StringComparer.Ordinal)
+                .ToArray(),
             PlanDigest: string.Empty,
             PolicySnapshot: policy);
 
@@ -121,7 +131,9 @@ public sealed class EvidencePlanner
 
     private static void ValidateProfile(EvidenceProfile profile)
     {
-        if (profile.Resources.Count > 16 || profile.Producers.Count > 32 || profile.Obligations.Count > 128)
+        if (profile.Resources.Count > EvidenceProfileLimits.MaximumResources
+            || profile.Producers.Count > EvidenceProfileLimits.MaximumProducers
+            || profile.Obligations.Count > EvidenceProfileLimits.MaximumObligations)
         {
             throw new EvidencePlanningException("ASEVD122", $"Profile '{profile.Id}' exceeds v1 EvidenceHost declaration limits.", "Split the profile into bounded evidence obligations.");
         }
@@ -311,10 +323,8 @@ public sealed class EvidencePlanner
 
         var normalized = path.Trim().Replace('\\', '/');
         if (Path.IsPathRooted(normalized)
-            || normalized.StartsWith("../", StringComparison.Ordinal)
-            || normalized.Contains("/../", StringComparison.Ordinal)
-            || normalized.StartsWith("./", StringComparison.Ordinal)
-            || normalized.Contains("//", StringComparison.Ordinal))
+            || normalized.Contains("//", StringComparison.Ordinal)
+            || normalized.Split('/').Any(static segment => segment is "." or ".."))
         {
             throw new EvidencePlanningException("ASEVD120", $"Path '{path}' escapes the repository-relative evidence boundary.", "Use a normalized relative path.");
         }
@@ -366,8 +376,30 @@ public static class EvidenceUnifiedDiffReader
         var paths = new List<NormalizedDiffPath>();
         string? oldPath = null;
         string? renamedFrom = null;
+        var inHunk = false;
+        var suppressHeaderPair = false;
         foreach (var line in diff.Split('\n'))
         {
+            if (line.StartsWith("diff --git ", StringComparison.Ordinal))
+            {
+                oldPath = null;
+                renamedFrom = null;
+                inHunk = false;
+                suppressHeaderPair = false;
+                continue;
+            }
+
+            if (line.StartsWith("@@", StringComparison.Ordinal))
+            {
+                inHunk = true;
+                continue;
+            }
+
+            if (inHunk)
+            {
+                continue;
+            }
+
             if (line.StartsWith("rename from ", StringComparison.Ordinal))
             {
                 renamedFrom = ReadDiffPath(line[12..]);
@@ -380,19 +412,20 @@ public static class EvidenceUnifiedDiffReader
                 if (renamedFrom is not null && renamedTo is not null)
                 {
                     paths.Add(new NormalizedDiffPath(renamedTo, "renamed", renamedFrom));
+                    suppressHeaderPair = true;
                 }
 
                 renamedFrom = null;
                 continue;
             }
 
-            if (line.StartsWith("--- ", StringComparison.Ordinal))
+            if (!suppressHeaderPair && line.StartsWith("--- ", StringComparison.Ordinal))
             {
                 oldPath = ReadDiffPath(line[4..]);
                 continue;
             }
 
-            if (!line.StartsWith("+++ ", StringComparison.Ordinal))
+            if (suppressHeaderPair || !line.StartsWith("+++ ", StringComparison.Ordinal))
             {
                 continue;
             }

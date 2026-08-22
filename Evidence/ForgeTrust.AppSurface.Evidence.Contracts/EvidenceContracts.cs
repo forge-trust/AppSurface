@@ -268,6 +268,21 @@ public sealed record EvidenceProfile(
     IReadOnlyList<EvidenceObligation> Obligations);
 
 /// <summary>
+/// Defines the shared v1 limits for one EvidenceHost profile declaration.
+/// </summary>
+public static class EvidenceProfileLimits
+{
+    /// <summary>Maximum resources a v1 profile may declare.</summary>
+    public const int MaximumResources = 16;
+
+    /// <summary>Maximum producers a v1 profile may declare.</summary>
+    public const int MaximumProducers = 32;
+
+    /// <summary>Maximum obligations a v1 profile may declare.</summary>
+    public const int MaximumObligations = 128;
+}
+
+/// <summary>
 /// Maps exact paths or segment globs to a single named evidence profile.
 /// </summary>
 /// <param name="Id">Stable rule identifier.</param>
@@ -418,12 +433,14 @@ public interface IEvidenceProducer
 /// </summary>
 public sealed class EvidenceArtifactWriter
 {
-    /// <summary>Maximum total artifact bytes accepted by an EvidenceHost v1 run.</summary>
+    /// <summary>Maximum total artifact bytes accepted by one v1 producer declaration.</summary>
     public const long MaximumTotalArtifactBytes = 256L * 1024 * 1024;
 
     private readonly EvidenceProducerDeclaration _producer;
     private readonly string _rootPath;
-    private readonly Dictionary<string, EvidenceArtifactResult> _artifacts = new(StringComparer.Ordinal);
+    private readonly object _sync = new();
+    private readonly Dictionary<string, EvidenceArtifactResult?> _artifacts = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _destinations = new(StringComparer.Ordinal);
     private long _totalBytes;
 
     /// <summary>
@@ -438,8 +455,20 @@ public sealed class EvidenceArtifactWriter
         _rootPath = Path.GetFullPath(rootPath);
     }
 
-    /// <summary>Gets artifact metadata emitted through this writer in ordinal logical-name order.</summary>
-    public IReadOnlyList<EvidenceArtifactResult> WrittenArtifacts => _artifacts.Values.OrderBy(static artifact => artifact.LogicalName, StringComparer.Ordinal).ToArray();
+    /// <summary>Gets completed artifact metadata emitted through this writer in ordinal logical-name order.</summary>
+    public IReadOnlyList<EvidenceArtifactResult> WrittenArtifacts
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _artifacts.Values
+                    .OfType<EvidenceArtifactResult>()
+                    .OrderBy(static artifact => artifact.LogicalName, StringComparer.Ordinal)
+                    .ToArray();
+            }
+        }
+    }
 
     /// <summary>
     /// Writes one declared artifact and returns only its bounded metadata.
@@ -460,35 +489,31 @@ public sealed class EvidenceArtifactWriter
             throw new InvalidOperationException($"Artifact '{logicalName}' is not declared by producer '{_producer.Id}'.");
         }
 
-        if (!_artifacts.TryAdd(logicalName, null!))
-        {
-            throw new InvalidOperationException($"Artifact '{logicalName}' was already written by producer '{_producer.Id}'.");
-        }
+        var normalizedPath = EvidenceArtifactValidation.NormalizeRelativePath(relativePath);
+        EvidenceArtifactValidation.ValidatePathForSlot(slot, normalizedPath);
+        ReserveArtifact(logicalName, normalizedPath, contents.Length, slot.MaximumBytes);
 
         try
         {
-            if (contents.Length > slot.MaximumBytes || _totalBytes + contents.Length > MaximumTotalArtifactBytes)
-            {
-                throw new InvalidOperationException($"Artifact '{logicalName}' exceeds its evidence size limit.");
-            }
-
-            EvidenceArtifactValidation.ValidatePathForSlot(slot, relativePath);
-            var destination = EvidenceArtifactValidation.GetContainedPath(_rootPath, relativePath);
+            var destination = EvidenceArtifactValidation.GetContainedPath(_rootPath, normalizedPath);
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             await File.WriteAllBytesAsync(destination, contents, cancellationToken).ConfigureAwait(false);
             var artifact = new EvidenceArtifactResult(
                 logicalName,
-                EvidenceArtifactValidation.NormalizeRelativePath(relativePath),
+                normalizedPath,
                 slot.MediaType,
                 contents.Length,
                 EvidenceDigest.Sha256(contents.Span));
-            _artifacts[logicalName] = artifact;
-            _totalBytes += contents.Length;
+            lock (_sync)
+            {
+                _artifacts[logicalName] = artifact;
+            }
+
             return artifact;
         }
         catch
         {
-            _artifacts.Remove(logicalName);
+            ReleaseArtifact(logicalName, normalizedPath, contents.Length);
             throw;
         }
     }
@@ -500,7 +525,7 @@ public sealed class EvidenceArtifactWriter
     /// <returns><see langword="true"/> when every artifact still has its declared length and digest.</returns>
     public async Task<bool> VerifyWrittenArtifactsAsync(CancellationToken cancellationToken = default)
     {
-        foreach (var artifact in _artifacts.Values)
+        foreach (var artifact in WrittenArtifacts)
         {
             string path;
             try
@@ -521,6 +546,43 @@ public sealed class EvidenceArtifactWriter
 
         return true;
     }
+
+    private void ReserveArtifact(string logicalName, string normalizedPath, int lengthBytes, long maximumBytes)
+    {
+        lock (_sync)
+        {
+            if (!_artifacts.TryAdd(logicalName, null))
+            {
+                throw new InvalidOperationException($"Artifact '{logicalName}' was already written by producer '{_producer.Id}'.");
+            }
+
+            if (!_destinations.Add(normalizedPath))
+            {
+                _artifacts.Remove(logicalName);
+                throw new InvalidOperationException($"Artifact destination '{normalizedPath}' was already written by producer '{_producer.Id}'.");
+            }
+
+            if (lengthBytes > maximumBytes
+                || lengthBytes > MaximumTotalArtifactBytes - _totalBytes)
+            {
+                _destinations.Remove(normalizedPath);
+                _artifacts.Remove(logicalName);
+                throw new InvalidOperationException($"Artifact '{logicalName}' exceeds its evidence size limit.");
+            }
+
+            _totalBytes += lengthBytes;
+        }
+    }
+
+    private void ReleaseArtifact(string logicalName, string normalizedPath, int lengthBytes)
+    {
+        lock (_sync)
+        {
+            _artifacts.Remove(logicalName);
+            _destinations.Remove(normalizedPath);
+            _totalBytes -= lengthBytes;
+        }
+    }
 }
 
 /// <summary>
@@ -539,7 +601,8 @@ public static class EvidenceArtifactValidation
         ArgumentNullException.ThrowIfNull(producer);
         artifacts ??= [];
         if (producer.ArtifactSlots.GroupBy(static slot => slot.LogicalName, StringComparer.Ordinal).Any(static group => group.Count() > 1)
-            || artifacts.GroupBy(static artifact => artifact.LogicalName, StringComparer.Ordinal).Any(static group => group.Count() > 1))
+            || artifacts.GroupBy(static artifact => artifact.LogicalName, StringComparer.Ordinal).Any(static group => group.Count() > 1)
+            || artifacts.GroupBy(static artifact => artifact.RelativePath, StringComparer.Ordinal).Any(static group => group.Count() > 1))
         {
             return false;
         }
@@ -597,11 +660,9 @@ public static class EvidenceArtifactValidation
 
         var normalized = relativePath.Trim().Replace('\\', '/');
         if (Path.IsPathRooted(normalized)
-            || normalized.StartsWith("../", StringComparison.Ordinal)
-            || normalized.StartsWith("./", StringComparison.Ordinal)
-            || normalized.Contains("/../", StringComparison.Ordinal)
             || normalized.Contains("//", StringComparison.Ordinal)
-            || normalized.EndsWith("/", StringComparison.Ordinal))
+            || normalized.EndsWith("/", StringComparison.Ordinal)
+            || normalized.Split('/').Any(static segment => segment is "." or ".."))
         {
             throw new ArgumentException("Evidence artifact paths must be normalized and root-relative.", nameof(relativePath));
         }
@@ -860,6 +921,8 @@ public static class EvidenceManifestBuilder
 
     /// <summary>
     /// Validates that a manifest still binds to a supplied plan and canonical manifest content.
+    /// This detects inconsistent or edited claim fields, but does not authenticate the origin of a plan or manifest.
+    /// Gates must obtain both values through a trusted CI channel.
     /// </summary>
     /// <param name="plan">Plan expected by the verifier.</param>
     /// <param name="manifest">Manifest to verify.</param>

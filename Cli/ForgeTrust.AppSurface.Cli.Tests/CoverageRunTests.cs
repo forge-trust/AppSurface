@@ -567,6 +567,22 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task CoverageProjectManifest_WriteAsync_ShouldRejectMissingSolutionDirectory()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-manifest-");
+        var projectOutputDirectory = Directory.CreateDirectory(TestPathUtils.PathUnder(repo.Path, "coverage-output", "projects", "sample-tests")).FullName;
+        var missingSolutionDirectory = TestPathUtils.PathUnder(repo.Path, "missing-solution");
+
+        var exception = await Assert.ThrowsAsync<IOException>(() => CoverageProjectManifest.WriteAsync(
+            projectOutputDirectory,
+            missingSolutionDirectory,
+            new CoverageRunProject("tests/Sample.Tests/Sample.Tests.csproj", TestPathUtils.PathUnder(missingSolutionDirectory, "tests", "Sample.Tests", "Sample.Tests.csproj"), "sample-tests", IsExclusive: false),
+            CancellationToken.None));
+
+        Assert.Contains("does not exist", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RunAsync_TestResultsJunit_ShouldWriteManagedArtifactsAndTimings()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");

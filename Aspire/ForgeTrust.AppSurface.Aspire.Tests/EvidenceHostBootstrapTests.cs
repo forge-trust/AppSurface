@@ -375,6 +375,51 @@ public sealed class EvidenceHostBootstrapTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldInvalidateAProducerWhenItsWrittenArtifactChangesBeforeCollection()
+    {
+        var artifactDirectory = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-evidence-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(artifactDirectory);
+        var artifactPlan = CreatePlan() with
+        {
+            Profile = CreatePlan().Profile with
+            {
+                Producers =
+                [
+                    new EvidenceProducerDeclaration(
+                        "coverage",
+                        "coverage",
+                        "1.0.0",
+                        ["postgres"],
+                        ["coverage/assertion@1"],
+                        [new EvidenceArtifactSlot("report", "coverage", "text/plain", Required: true, MaximumBytes: 16)],
+                        30),
+                ],
+            },
+        };
+        try
+        {
+            await using var host = EvidenceHostBootstrap.Create(
+                artifactPlan,
+                registration =>
+                {
+                    registration.AddResource(new ReadyResource("postgres"));
+                    registration.AddProducer(new TamperingArtifactProducer("coverage", artifactDirectory));
+                },
+                new EvidenceHostOptions(ArtifactDirectory: artifactDirectory));
+
+            var manifest = await host.RunAsync();
+
+            var result = Assert.Single(manifest.ProducerResults);
+            Assert.Equal(EvidenceProducerOutcome.Invalid, result.Outcome);
+            Assert.Contains("missing or changed", result.Diagnostic, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(artifactDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldProtectLifecycleBoundsSharedDependenciesAndCallerCancelledProducers()
     {
         var oversizedPlan = CreatePlan() with
@@ -600,6 +645,18 @@ public sealed class EvidenceHostBootstrapTests
                 ["coverage/assertion@1"],
                 null,
                 [new EvidenceArtifactResult("report", "coverage/report.txt", "text/plain", 1, new string('a', 64))]));
+    }
+
+    private sealed class TamperingArtifactProducer(string id, string artifactDirectory) : IEvidenceProducer
+    {
+        public string Id { get; } = id;
+
+        public async ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
+        {
+            await context.Artifacts!.WriteAsync("report", "coverage/report.txt", "written"u8.ToArray(), cancellationToken);
+            await File.WriteAllTextAsync(Path.Join(artifactDirectory, Id, "coverage", "report.txt"), "changed", cancellationToken);
+            return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Passed, ["coverage/assertion@1"]);
+        }
     }
 
     private sealed class IgnoringCancellationProducer(string id) : IEvidenceProducer

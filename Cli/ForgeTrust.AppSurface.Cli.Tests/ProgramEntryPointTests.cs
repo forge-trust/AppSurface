@@ -3523,16 +3523,14 @@ public sealed class ProgramEntryPointTests
         var coverageProfile = Assert.Single(starterPolicy.Profiles, profile => profile.Id == "targeted-coverage");
         var coverageProducer = Assert.Single(coverageProfile.Producers);
 
-        async Task<CapturedCliRun> RunWithPolicyAsync(string name, EvidenceProfile profile, bool includeSolution = true, bool includeDiff = false)
+        var noEvidenceProfile = Assert.Single(starterPolicy.Profiles, profile => profile.Id == "no-evidence");
+
+        async Task<CapturedCliRun> RunWithPolicyAsync(string name, EvidenceProfile profile, bool includeDiff = false)
         {
             var policyPath = Path.Join(evidenceRoot, $"{name}.policy.json");
             var runOutput = Path.Join(outputDirectory, name);
-            await File.WriteAllBytesAsync(policyPath, EvidenceCanonicalJson.Serialize(starterPolicy with { Profiles = [starterPolicy.Profiles[0], profile] }));
-            var arguments = new List<string> { "evidence", "run", "--policy", policyPath, "--path", "src/Feature.cs", "--output", runOutput };
-            if (includeSolution)
-            {
-                arguments.AddRange(["--solution", Path.Join(directory.Path, "unused.slnx")]);
-            }
+            await File.WriteAllBytesAsync(policyPath, EvidenceCanonicalJson.Serialize(starterPolicy with { Profiles = [noEvidenceProfile, profile] }));
+            var arguments = new List<string> { "evidence", "run", "--policy", policyPath, "--path", "src/Feature.cs", "--output", runOutput, "--solution", Path.Join(directory.Path, "unused.slnx") };
 
             if (includeDiff)
             {
@@ -3656,9 +3654,10 @@ public sealed class ProgramEntryPointTests
         };
         var verifyException = await Assert.ThrowsAsync<CommandException>(() => verify.ExecuteAsync(console).AsTask());
 
-        Assert.Contains("Use 'appsurface evidence init", console.ReadOutputString(), StringComparison.Ordinal);
-        Assert.Contains("Evidence doctor: blocked", console.ReadOutputString(), StringComparison.Ordinal);
-        Assert.Contains("Next:", console.ReadOutputString(), StringComparison.Ordinal);
+        var output = console.ReadOutputString();
+        Assert.Contains("Use 'appsurface evidence init", output, StringComparison.Ordinal);
+        Assert.Contains("Evidence doctor: blocked", output, StringComparison.Ordinal);
+        Assert.Contains("Next:", output, StringComparison.Ordinal);
         Assert.Contains("ASEVD210", doctorException.Message, StringComparison.Ordinal);
         Assert.Contains("ASEVD204", missingDoctorException.Message, StringComparison.Ordinal);
         Assert.Contains("ASEVD117", ambiguousDoctorException.Message, StringComparison.Ordinal);
@@ -5010,7 +5009,7 @@ public sealed class ProgramEntryPointTests
             Task.FromResult(response);
     }
 
-    private sealed class EvidenceCoverageProcessRunner : ICoverageRunProcessRunner
+    private sealed class EvidenceCoverageProcessRunner(bool testFails, bool failProcess, bool cancels) : ICoverageRunProcessRunner
     {
         private const string CapabilityOutput = """
             {
@@ -5025,27 +5024,16 @@ public sealed class ProgramEntryPointTests
 
         private const string Cobertura = "<coverage lines-covered=\"10\" lines-valid=\"10\" branches-covered=\"10\" branches-valid=\"10\" line-rate=\"1\" branch-rate=\"1\"><packages /></coverage>";
 
-        private readonly bool _testFails;
-        private readonly bool _failProcess;
-        private readonly bool _cancels;
-
-        public EvidenceCoverageProcessRunner(bool testFails, bool failProcess, bool cancels)
-        {
-            _testFails = testFails;
-            _failProcess = failProcess;
-            _cancels = cancels;
-        }
-
         public async Task<CoverageRunProcessResult> RunAsync(CoverageRunProcessRequest request, CancellationToken cancellationToken)
         {
             request.Lease.Complete();
             var operation = request.Arguments.FirstOrDefault();
-            if (_failProcess && string.Equals(operation, "sln", StringComparison.Ordinal))
+            if (failProcess && string.Equals(operation, "sln", StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("simulated coverage process failure");
             }
 
-            if (_cancels && string.Equals(operation, "sln", StringComparison.Ordinal))
+            if (cancels && string.Equals(operation, "sln", StringComparison.Ordinal))
             {
                 await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             }
@@ -5072,24 +5060,17 @@ public sealed class ProgramEntryPointTests
                     await File.WriteAllTextAsync(request.OutputFile, "coverage test output", cancellationToken);
                 }
 
-                return new CoverageRunProcessResult(_testFails ? 1 : 0, "coverage test output");
+                return new CoverageRunProcessResult(testFails ? 1 : 0, "coverage test output");
             }
 
             return new CoverageRunProcessResult(0, "build output");
         }
     }
 
-    private sealed class EvidenceCoverageReportGenerator : ICoverageRunReportGenerator
+    private sealed class EvidenceCoverageReportGenerator(bool coveragePasses) : ICoverageRunReportGenerator
     {
         private const string PassingCobertura = "<coverage lines-covered=\"10\" lines-valid=\"10\" branches-covered=\"10\" branches-valid=\"10\" line-rate=\"1\" branch-rate=\"1\"><packages /></coverage>";
         private const string FailingCobertura = "<coverage lines-covered=\"0\" lines-valid=\"10\" branches-covered=\"0\" branches-valid=\"10\" line-rate=\"0\" branch-rate=\"0\"><packages /></coverage>";
-
-        private readonly string _cobertura;
-
-        public EvidenceCoverageReportGenerator(bool coveragePasses)
-        {
-            _cobertura = coveragePasses ? PassingCobertura : FailingCobertura;
-        }
 
         public async Task<CoverageRunMergeResult> MergeAsync(
             IReadOnlyList<string> coverageFiles,
@@ -5099,7 +5080,7 @@ public sealed class ProgramEntryPointTests
             Directory.CreateDirectory(outputDirectory);
             var coberturaPath = Path.Join(outputDirectory, "Cobertura.xml");
             var summaryPath = Path.Join(outputDirectory, "Summary.txt");
-            await File.WriteAllTextAsync(coberturaPath, _cobertura, cancellationToken);
+            await File.WriteAllTextAsync(coberturaPath, coveragePasses ? PassingCobertura : FailingCobertura, cancellationToken);
             await File.WriteAllTextAsync(summaryPath, "coverage summary", cancellationToken);
             return new CoverageRunMergeResult(0, coberturaPath, summaryPath);
         }

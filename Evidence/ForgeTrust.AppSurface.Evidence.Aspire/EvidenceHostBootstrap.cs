@@ -304,7 +304,9 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
 
     private void ValidateRegistrations()
     {
-        if (_plan.Profile.Resources.Count > 16 || _plan.Profile.Producers.Count > 32 || _plan.Profile.Obligations.Count > 128)
+        if (_plan.Profile.Resources.Count > EvidenceProfileLimits.MaximumResources
+            || _plan.Profile.Producers.Count > EvidenceProfileLimits.MaximumProducers
+            || _plan.Profile.Obligations.Count > EvidenceProfileLimits.MaximumObligations)
         {
             throw new EvidenceHostException("ASEVD301", "The resolved plan exceeds v1 EvidenceHost limits.", "Split the policy into bounded profiles before execution.");
         }
@@ -383,13 +385,12 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
                     .ProduceAsync(new EvidenceProducerContext(_plan, declaration, _timeProvider, artifacts), deadline.Token)
                     .AsTask();
                 var result = await producerTask.WaitAsync(deadline.Token).ConfigureAwait(false);
-                results.Add(result.ProducerId != declaration.Id
-                    ? new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.Invalid, [], "Producer returned a result for a different declaration id.", ElapsedMilliseconds: timer.ElapsedMilliseconds)
-                    : result.Artifacts is not null && !result.Artifacts.SequenceEqual(artifacts.WrittenArtifacts)
-                        ? new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.Invalid, [], "Producer returned artifact metadata that was not written through the declared evidence writer.", ElapsedMilliseconds: timer.ElapsedMilliseconds)
-                        : !await artifacts.VerifyWrittenArtifactsAsync(deadline.Token).ConfigureAwait(false)
-                            ? new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.Invalid, [], "A declared evidence artifact was missing or changed before manifest collection.", ElapsedMilliseconds: timer.ElapsedMilliseconds)
-                        : result with { Artifacts = artifacts.WrittenArtifacts, ElapsedMilliseconds = timer.ElapsedMilliseconds });
+                results.Add(await ValidateProducerResultAsync(
+                    declaration,
+                    result,
+                    artifacts,
+                    timer.ElapsedMilliseconds,
+                    deadline.Token).ConfigureAwait(false));
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
@@ -406,6 +407,32 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         }
 
         return results;
+    }
+
+    private static async Task<EvidenceProducerResult> ValidateProducerResultAsync(
+        EvidenceProducerDeclaration declaration,
+        EvidenceProducerResult result,
+        EvidenceArtifactWriter artifacts,
+        long elapsedMilliseconds,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(result.ProducerId, declaration.Id, StringComparison.Ordinal))
+        {
+            return new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.Invalid, [], "Producer returned a result for a different declaration id.", ElapsedMilliseconds: elapsedMilliseconds);
+        }
+
+        var writtenArtifacts = artifacts.WrittenArtifacts;
+        if (result.Artifacts is not null && !result.Artifacts.SequenceEqual(writtenArtifacts))
+        {
+            return new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.Invalid, [], "Producer returned artifact metadata that was not written through the declared evidence writer.", ElapsedMilliseconds: elapsedMilliseconds);
+        }
+
+        if (!await artifacts.VerifyWrittenArtifactsAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.Invalid, [], "A declared evidence artifact was missing or changed before manifest collection.", ElapsedMilliseconds: elapsedMilliseconds);
+        }
+
+        return result with { Artifacts = writtenArtifacts, ElapsedMilliseconds = elapsedMilliseconds };
     }
 
     private async Task<EvidenceManifest> CollectAndCleanAsync(

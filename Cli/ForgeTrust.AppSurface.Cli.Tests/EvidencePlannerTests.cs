@@ -143,6 +143,28 @@ public sealed class EvidencePlannerTests
     }
 
     [Fact]
+    public void UnifiedDiffReader_ShouldIgnoreHeaderLikeHunkContentAndAvoidDuplicateRenameEntries()
+    {
+        var paths = EvidenceUnifiedDiffReader.Read(
+            """
+            diff --git a/src/OldName.cs b/src/NewName.cs
+            similarity index 90%
+            rename from src/OldName.cs
+            rename to src/NewName.cs
+            --- a/src/OldName.cs
+            +++ b/src/NewName.cs
+            @@ -1,2 +1,2 @@
+            --- a/not-a-file-header
+            +++ b/not-a-file-header
+            """);
+
+        var path = Assert.Single(paths);
+        Assert.Equal("renamed", path.Kind);
+        Assert.Equal("src/NewName.cs", path.Path);
+        Assert.Equal("src/OldName.cs", path.PreviousPath);
+    }
+
+    [Fact]
     public void Resolve_ShouldRejectSameLiteralSegmentSpecificityRatherThanChoosingLongerWildcardText()
     {
         var policy = CreatePolicy() with
@@ -419,16 +441,16 @@ public sealed class EvidencePlannerTests
     {
         var planner = new EvidencePlanner();
 
-        Assert.Throws<EvidencePlanningException>(() => planner.Resolve(CreatePolicy(), []));
-        Assert.Throws<EvidencePlanningException>(() => planner.Resolve(CreatePolicy(), [new NormalizedDiffPath("./src/Feature.cs")]));
-        Assert.Throws<EvidencePlanningException>(() => EvidencePlanner.ValidatePolicy(CreatePolicy() with { Profiles = [] }));
-        Assert.Throws<EvidencePlanningException>(() => EvidencePlanner.ValidatePolicy(CreatePolicy() with { ConservativeProfileId = "missing" }));
+        AssertPlanningCode(() => planner.Resolve(CreatePolicy(), []), "ASEVD101");
+        AssertPlanningCode(() => planner.Resolve(CreatePolicy(), [new NormalizedDiffPath("./src/Feature.cs")]), "ASEVD120");
+        AssertPlanningCode(() => EvidencePlanner.ValidatePolicy(CreatePolicy() with { Profiles = [] }), "ASEVD102");
+        AssertPlanningCode(() => EvidencePlanner.ValidatePolicy(CreatePolicy() with { ConservativeProfileId = "missing" }), "ASEVD104");
 
         var invalidResource = CreateCoverageProfile(EvidenceProfileScope.Targeted) with
         {
             Resources = [new EvidenceResourceDeclaration("postgres", "unknown", 1, [])],
         };
-        Assert.Throws<EvidencePlanningException>(() => EvidencePlanner.ValidatePolicy(new EvidencePolicy("policy", "1", "coverage", [invalidResource], [])));
+        AssertPlanningCode(() => EvidencePlanner.ValidatePolicy(new EvidencePolicy("policy", "1", "coverage", [invalidResource], [])), "ASEVD123");
 
         var invalidProducer = CreateCoverageProfile(EvidenceProfileScope.Targeted) with
         {
@@ -445,13 +467,13 @@ public sealed class EvidencePlannerTests
                     new EvidenceCoverageGateRequirements(101, 85)),
             ],
         };
-        Assert.Throws<EvidencePlanningException>(() => EvidencePlanner.ValidatePolicy(new EvidencePolicy("policy", "1", "coverage", [invalidProducer], [])));
+        AssertPlanningCode(() => EvidencePlanner.ValidatePolicy(new EvidencePolicy("policy", "1", "coverage", [invalidProducer], [])), "ASEVD110");
 
         var invalidObligation = CreateCoverageProfile(EvidenceProfileScope.Targeted) with
         {
             Obligations = [new EvidenceObligation("behavior", "risk", "why", [], "missing")],
         };
-        Assert.Throws<EvidencePlanningException>(() => EvidencePlanner.ValidatePolicy(new EvidencePolicy("policy", "1", "coverage", [invalidObligation], [])));
+        AssertPlanningCode(() => EvidencePlanner.ValidatePolicy(new EvidencePolicy("policy", "1", "coverage", [invalidObligation], [])), "ASEVD113");
     }
 
     [Fact]
@@ -485,7 +507,10 @@ public sealed class EvidencePlannerTests
             "1",
             [],
             [],
-            [new EvidenceArtifactSlot("report", "coverage", "text/plain", false, 1)],
+            [
+                new EvidenceArtifactSlot("report", "coverage", "text/plain", false, 1),
+                new EvidenceArtifactSlot("summary", "coverage", "text/plain", false, 1),
+            ],
             1);
         var writer = new EvidenceArtifactWriter(producer, directory.Path);
 
@@ -493,9 +518,39 @@ public sealed class EvidencePlannerTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => writer.WriteAsync("report", "coverage/report.txt", "too-large"u8.ToArray()).AsTask());
         await writer.WriteAsync("report", "coverage/report.txt", "x"u8.ToArray());
         await Assert.ThrowsAsync<InvalidOperationException>(() => writer.WriteAsync("report", "coverage/again.txt", "x"u8.ToArray()).AsTask());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => writer.WriteAsync("summary", "coverage/report.txt", "x"u8.ToArray()).AsTask());
 
         Assert.False(EvidenceArtifactValidation.AreValid(producer, [new EvidenceArtifactResult("report", "outside.txt", "text/plain", 1, new string('a', 64))]));
         Assert.Throws<ArgumentException>(() => EvidenceArtifactValidation.NormalizeRelativePath("coverage/../outside.txt"));
+        Assert.Throws<ArgumentException>(() => EvidenceArtifactValidation.NormalizeRelativePath("coverage/."));
+        Assert.Throws<ArgumentException>(() => EvidenceArtifactValidation.NormalizeRelativePath("coverage/.."));
+    }
+
+    [Fact]
+    public async Task ArtifactWriter_ShouldReleaseItsReservationWhenWritingFails()
+    {
+        using var directory = TestDirectory.Create();
+        var blockedRoot = Path.Join(directory.Path, "artifact-root");
+        await File.WriteAllTextAsync(blockedRoot, "not-a-directory");
+        var producer = new EvidenceProducerDeclaration(
+            "coverage",
+            "coverage",
+            "1",
+            [],
+            [],
+            [new EvidenceArtifactSlot("report", "coverage", "text/plain", false, 16)],
+            1);
+        var writer = new EvidenceArtifactWriter(producer, blockedRoot);
+
+        await Assert.ThrowsAnyAsync<IOException>(() => writer.WriteAsync("report", "coverage/report.txt", "first"u8.ToArray()).AsTask());
+
+        File.Delete(blockedRoot);
+        Directory.CreateDirectory(blockedRoot);
+        var artifact = await writer.WriteAsync("report", "coverage/report.txt", "retry"u8.ToArray());
+
+        Assert.Equal("report", artifact.LogicalName);
+        Assert.Equal([artifact], writer.WrittenArtifacts);
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
     }
 
     [Fact]
@@ -689,6 +744,13 @@ public sealed class EvidencePlannerTests
 
         var exception = Assert.Throws<EvidencePlanningException>(() => EvidencePlanner.ValidatePolicy(policy));
         Assert.Contains(code, exception.Message, StringComparison.Ordinal);
+    }
+
+    private static void AssertPlanningCode(Action action, string code)
+    {
+        var exception = Assert.Throws<EvidencePlanningException>(action);
+
+        Assert.Equal(code, exception.Code);
     }
 
     private static EvidencePolicy CreatePolicy() => new(

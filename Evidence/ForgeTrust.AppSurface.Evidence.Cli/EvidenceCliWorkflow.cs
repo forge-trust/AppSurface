@@ -5,6 +5,9 @@ using ForgeTrust.AppSurface.Evidence.Planner;
 
 namespace ForgeTrust.AppSurface.Evidence.Cli;
 
+/// <summary>
+/// Coordinates deterministic EvidenceHost CLI file operations for the AppSurface command assembly.
+/// </summary>
 internal sealed class EvidenceCliWorkflow
 {
     private const string GeneratedMarker = "appsurface-evidence-starter-v1";
@@ -402,14 +405,29 @@ internal sealed class EvidenceCliWorkflow
         """;
 }
 
+/// <summary>
+/// Describes a policy and explicit changed-path input for an EvidenceHost planning operation.
+/// </summary>
 internal sealed record EvidencePlanningRequest(string PolicyPath, IReadOnlyList<string> Paths, string? DiffFile);
 
+/// <summary>
+/// Describes starter files created by an EvidenceHost initialization operation.
+/// </summary>
 internal sealed record EvidenceInitializationResult(string RootPath, IReadOnlyList<string> CreatedFiles);
 
+/// <summary>
+/// Describes one environment or capability prerequisite observed by the evidence doctor.
+/// </summary>
 internal sealed record EvidenceDoctorCheck(string Id, bool Satisfied, string Status, string Message, string? NextAction);
 
+/// <summary>
+/// Describes the plan and prerequisite checks produced by the evidence doctor.
+/// </summary>
 internal sealed record EvidenceDoctorReport(string Status, EvidencePlan Plan, IReadOnlyList<EvidenceDoctorCheck> Checks);
 
+/// <summary>
+/// Represents a stable, user-actionable EvidenceHost CLI failure.
+/// </summary>
 internal sealed class EvidenceCliException : InvalidOperationException
 {
     public EvidenceCliException(string code, string problem, string fix)
@@ -419,7 +437,9 @@ internal sealed class EvidenceCliException : InvalidOperationException
         Fix = fix;
     }
 
+    /// <summary>Gets the stable EvidenceHost diagnostic code.</summary>
     public string Code { get; }
 
+    /// <summary>Gets the recommended recovery action.</summary>
     public string Fix { get; }
 }

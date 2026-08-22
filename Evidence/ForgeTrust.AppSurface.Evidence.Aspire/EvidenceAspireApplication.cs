@@ -15,7 +15,7 @@ public sealed class EvidenceAspireApplication : IAsyncDisposable
 {
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(30);
     private readonly DistributedApplication _application;
-    private bool _disposed;
+    private int _disposed;
 
     private EvidenceAspireApplication(DistributedApplication application)
     {
@@ -77,12 +77,11 @@ public sealed class EvidenceAspireApplication : IAsyncDisposable
     /// <returns>A task that completes after bounded application cleanup.</returns>
     public async ValueTask DisposeAsync()
     {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
         {
             return;
         }
 
-        _disposed = true;
         using var stop = new CancellationTokenSource(StopTimeout);
         try
         {
@@ -96,7 +95,7 @@ public sealed class EvidenceAspireApplication : IAsyncDisposable
 
     private void ThrowIfDisposed()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
     }
 
     private sealed class AspireHealthReadiness(
