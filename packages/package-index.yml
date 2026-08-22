@@ -451,6 +451,76 @@ packages:
       - ForgeTrust.AppSurface.Deployment
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Deployment
+  - project: Evidence/ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj
+    release_guidance_variant: default
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 56
+    use_when: Add this when authoring a consumer-owned CI evidence producer, policy editor, or downstream gate that needs stable plan, producer, manifest, claim, and canonical digest contracts without taking a CLI or Aspire dependency.
+    includes: Versioned evidence policy and profile declarations; normalized diff paths; resource, producer, artifact, and obligation declarations; immutable plans and manifests; terminal outcomes and claim eligibility; canonical JSON; SHA-256 digests; and manifest verification.
+    does_not_include: Policy matching, Git inspection, test discovery, coverage collection, numeric threshold enforcement, container provisioning, browser execution, Aspire hosting, independent attestation, hosted dashboards, or outbound telemetry.
+    start_here_path: Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md
+    recipe_summary: Start with `ForgeTrust.AppSurface.Evidence.Contracts` only when building a consumer-owned EvidenceHost integration or gate; most adopters should begin with the EvidenceHost guide and public CLI.
+  - project: Evidence/ForgeTrust.AppSurface.Evidence.Planner/ForgeTrust.AppSurface.Evidence.Planner.csproj
+    release_guidance_variant: default
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 57
+    use_when: Add this when a consumer-owned CI integration needs deterministic explicit-diff selection of a checked-in EvidencePolicy before tests, resources, or gates begin.
+    includes: EvidencePlanner policy validation and resolution, conservative fallback, equal-precedence ambiguity rejection, normalized path validation, unified-diff input parsing, and deterministic plan digests.
+    does_not_include: Git commands, test or resource execution, policy inference, semantic classification of source lines, coverage thresholds, artifact storage, or a gate decision outside the resolved contract.
+    start_here_path: Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Evidence.Planner` after the contracts package only for a custom CI integration that needs explainable policy resolution without the AppSurface CLI.
+    depends_on:
+      - ForgeTrust.AppSurface.Evidence.Contracts
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Evidence.Contracts
+  - project: Evidence/ForgeTrust.AppSurface.Evidence.Cli/ForgeTrust.AppSurface.Evidence.Cli.csproj
+    release_guidance_variant: default
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 58
+    use_when: Reference this only when hosting the AppSurface Evidence command workflow in a composition root; normal consumers install ForgeTrust.AppSurface.Cli and run `appsurface evidence`.
+    includes: Marked starter generation, explicit policy and diff loading, doctor diagnostics, plan/manifest/summary artifact writing, policy-bound coverage-gate execution, canonical verification, and safe next-action diagnostics used by the public CLI command family.
+    does_not_include: A dotnet tool entry point, ambient test discovery, consumer browser/E2E producers, resource provisioning, GitHub API calls, telemetry, or a normal application AppHost integration.
+    start_here_path: Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md
+    recipe_summary: Use `ForgeTrust.AppSurface.Evidence.Cli` only as the internal workflow behind a custom AppSurface CLI composition; normal CI users should follow the EvidenceHost guide.
+    depends_on:
+      - ForgeTrust.AppSurface.Evidence.Contracts
+      - ForgeTrust.AppSurface.Evidence.Planner
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Evidence.Contracts
+      - ForgeTrust.AppSurface.Evidence.Planner
+  - project: Evidence/ForgeTrust.AppSurface.Evidence.Aspire/ForgeTrust.AppSurface.Evidence.Aspire.csproj
+    release_guidance_variant: apphost
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 59
+    use_when: Add this in a consumer test or CI composition root when resource-backed coverage, API, or browser E2E producers need explicit Aspire readiness, bounded lifecycle ownership, cleanup, and a truthful evidence manifest separate from normal application startup.
+    includes: Explicit EvidenceHost bootstrap and registration, resource dependency ordering and readiness deadlines, typed producer execution deadlines, failure and cleanup handling, trusted-envelope extension point, observation-only claims, and manifest collection.
+    does_not_include: Normal AppHost registration, automatic resource or producer discovery, reuse or mutation of the normal development AppHost graph, Docker sandboxing, independent provenance attestation, cloud provisioning, cross-job aggregation, hosted dashboards, or test framework/browser implementation.
+    start_here_path: Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Evidence.Aspire` only to test or CI composition for explicit resource-backed evidence; keep application AppHosts and runtime projects unaware of it.
+    depends_on:
+      - ForgeTrust.AppSurface.Evidence.Contracts
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Evidence.Contracts
   - project: Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj
     release_guidance_variant: apphost
     classification: public

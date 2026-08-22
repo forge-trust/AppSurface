@@ -26,6 +26,7 @@ internal static class CoverageProjectManifest
     internal const string FileName = "coverage-project.json";
 
     private const int SchemaVersion = 1;
+    private const int MaximumLinkResolutions = 40;
 
     /// <summary>
     /// Writes the project-to-artifact-directory binding as a complete UTF-8 JSON document.
@@ -45,7 +46,9 @@ internal static class CoverageProjectManifest
         ArgumentException.ThrowIfNullOrWhiteSpace(solutionDirectory);
         ArgumentNullException.ThrowIfNull(project);
 
-        var projectPath = Path.GetRelativePath(solutionDirectory, project.FullPath)
+        var projectPath = Path.GetRelativePath(
+                ResolveExistingDirectoryPath(solutionDirectory),
+                ResolveExistingProjectPath(project.FullPath))
             .Replace('\\', '/');
         var manifestPath = Path.Join(projectOutputDirectory, FileName);
         var stagedPath = Path.Join(projectOutputDirectory, $".coverage-project.{Guid.NewGuid():N}.tmp");
@@ -67,6 +70,54 @@ internal static class CoverageProjectManifest
             File.Delete(stagedPath);
         }
     }
+
+    private static string ResolveExistingProjectPath(string projectPath)
+    {
+        var fullProjectPath = Path.GetFullPath(projectPath);
+        var projectDirectory = Path.GetDirectoryName(fullProjectPath)
+            ?? throw new IOException($"Project path does not have a directory: {projectPath}");
+        return Path.Join(ResolveExistingDirectoryPath(projectDirectory), Path.GetFileName(fullProjectPath));
+    }
+
+    private static string ResolveExistingDirectoryPath(string directoryPath)
+    {
+        var fullDirectoryPath = Path.GetFullPath(directoryPath);
+        var root = Path.GetPathRoot(fullDirectoryPath)
+            ?? throw new IOException($"Directory path does not have a root: {directoryPath}");
+        var current = root;
+        var linkResolutions = 0;
+        var remainingSegments = new Queue<string>(GetPathSegments(fullDirectoryPath, root));
+        while (remainingSegments.TryDequeue(out var segment))
+        {
+            current = Path.Join(current, segment);
+            var directory = new DirectoryInfo(current);
+            var linkTarget = directory.LinkTarget;
+            if (linkTarget is null)
+            {
+                if (!directory.Exists)
+                {
+                    throw new IOException($"Directory does not exist: {current}");
+                }
+
+                continue;
+            }
+
+            if (++linkResolutions > MaximumLinkResolutions)
+            {
+                throw new IOException($"Directory path exceeds the {MaximumLinkResolutions}-link resolution limit: {directoryPath}");
+            }
+
+            var targetPath = Path.GetFullPath(linkTarget, Path.GetDirectoryName(current)!);
+            var targetRoot = Path.GetPathRoot(targetPath)!;
+            current = targetRoot;
+            remainingSegments = new Queue<string>(GetPathSegments(targetPath, targetRoot).Concat(remainingSegments));
+        }
+
+        return current;
+    }
+
+    private static IEnumerable<string> GetPathSegments(string path, string root) =>
+        path[root.Length..].Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
 
     private sealed record CoverageProjectManifestDocument(int SchemaVersion, string ProjectPath, string Slug);
 }

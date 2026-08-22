@@ -17,6 +17,7 @@
 ForgeTrust.AppSurface is a collection of .NET libraries designed to provide a lightweight, modular startup pipeline for both console and web applications.
 
 If you are deciding which package to install first, start with the [AppSurface package chooser](./packages/README.md). If you are choosing among Auth packages, use the [AppSurface Auth adoption ladder](./start-here/auth-adoption-ladder.md) before installing optional auth adapters.
+If your CI gate should distinguish an explicit low-risk change from an incomplete test run, start with the [EvidenceHost guide](./start-here/evidencehost.md).
 
 ## Vision
 
@@ -107,7 +108,14 @@ The Durable packages are coordinated public previews. The [Slice 7 discovery and
 
 ### [CLI](./Cli/ForgeTrust.AppSurface.Cli/README.md)
 
-- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including [`appsurface release compose`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-release-compose) deterministic release-note composition from isolated entries, [`appsurface canary poll`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-canary-poll) bounded read-only deployment proof for protected AppSurface Web named canaries, `appsurface docs` preview/export workflows, `appsurface secrets` local-secret diagnostics, `appsurface coverage run` package-consumer test orchestration, `appsurface coverage merge` Cobertura fan-in, and `appsurface coverage gate` local threshold enforcement.
+- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including [`appsurface evidence`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-evidence) policy-aware CI evidence planning, [`appsurface release compose`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-release-compose) deterministic release-note composition, [`appsurface canary poll`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-canary-poll) bounded read-only deployment proof for protected AppSurface Web named canaries, `appsurface docs` preview/export workflows, `appsurface secrets` local-secret diagnostics, `appsurface coverage run` package-consumer test orchestration, `appsurface coverage merge` Cobertura fan-in, and `appsurface coverage gate` local threshold enforcement.
+
+### [EvidenceHost](./start-here/evidencehost.md)
+
+- [**EvidenceHost guide**](./start-here/evidencehost.md) – Contract-first changed-risk planning so CI can require meaningful coverage or E2E evidence without turning an intentionally low-risk change or an incomplete test profile into a misleading coverage claim.
+- [**ForgeTrust.AppSurface.Evidence.Contracts**](./Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md) – Versioned plans, producers, manifests, claims, and canonical digest verification.
+- [**ForgeTrust.AppSurface.Evidence.Planner**](./Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md) – Deterministic explicit-diff policy resolution with conservative fallback and ambiguity rejection.
+- [**ForgeTrust.AppSurface.Evidence.Aspire**](./Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) – Separate, explicit consumer-owned lifecycle for Aspire readiness and browser/E2E producers; it is never mixed into normal application startup.
 
 ### [Dependency](./Dependency/README.md)
 
@@ -116,6 +124,7 @@ The Durable packages are coordinated public previews. The [Slice 7 discovery and
 ### [Aspire](./Aspire/README.md)
 
 - [**ForgeTrust.AppSurface.Aspire**](./Aspire/ForgeTrust.AppSurface.Aspire/README.md) – Local .NET Aspire AppHost composition with AppSurface modules, CLI-selectable profiles, reusable Aspire components, and native publish/verification integration for explicitly annotated resources.
+- [**ForgeTrust.AppSurface.Evidence.Aspire**](./Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) – Test/CI-only explicit EvidenceHost lifecycle for consumer-owned Aspire readiness and E2E producers, separate from the normal AppHost.
 
 ### [Deployment](./Deployment/README.md)
 
