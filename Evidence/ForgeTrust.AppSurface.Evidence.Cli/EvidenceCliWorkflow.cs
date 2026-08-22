@@ -116,7 +116,8 @@ internal sealed class EvidenceCliWorkflow
     /// Resolves the checked-in policy and explicit changed paths into a deterministic evidence plan.
     /// </summary>
     /// <remarks>
-    /// Missing, malformed, or empty inputs produce the stable <c>ASEVD204</c> through <c>ASEVD207</c> diagnostics.
+    /// Missing, malformed, or empty CLI inputs produce the stable <c>ASEVD204</c> through <c>ASEVD207</c> diagnostics.
+    /// A hunked diff without Git file headers is rejected with <c>ASEVD128</c> rather than planning from incomplete paths.
     /// </remarks>
     public async Task<EvidencePlan> ExplainAsync(EvidencePlanningRequest request, CancellationToken cancellationToken)
     {

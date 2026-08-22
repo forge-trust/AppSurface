@@ -378,10 +378,13 @@ public static class EvidenceUnifiedDiffReader
         string? renamedFrom = null;
         var inHunk = false;
         var suppressHeaderPair = false;
+        var sawGitHeader = false;
+        var sawHunkHeader = false;
         foreach (var line in diff.Split('\n'))
         {
             if (line.StartsWith("diff --git ", StringComparison.Ordinal))
             {
+                sawGitHeader = true;
                 oldPath = null;
                 renamedFrom = null;
                 inHunk = false;
@@ -391,6 +394,7 @@ public static class EvidenceUnifiedDiffReader
 
             if (line.StartsWith("@@", StringComparison.Ordinal))
             {
+                sawHunkHeader = true;
                 inHunk = true;
                 continue;
             }
@@ -440,6 +444,14 @@ public static class EvidenceUnifiedDiffReader
             var selected = newPath ?? oldPath!;
             paths.Add(new NormalizedDiffPath(selected, kind, oldPath is not null && newPath is not null && !string.Equals(oldPath, newPath, StringComparison.Ordinal) ? oldPath : null));
             oldPath = null;
+        }
+
+        if (sawHunkHeader && !sawGitHeader)
+        {
+            throw new EvidencePlanningException(
+                "ASEVD128",
+                "Unified diff contains hunks but no 'diff --git' file headers.",
+                "Supply a git-formatted unified diff, or pass explicit --path values.");
         }
 
         return paths

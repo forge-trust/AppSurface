@@ -165,6 +165,27 @@ public sealed class EvidencePlannerTests
     }
 
     [Fact]
+    public void UnifiedDiffReader_ShouldRejectHunkedNonGitDiff()
+    {
+        var exception = Assert.Throws<EvidencePlanningException>(() => EvidenceUnifiedDiffReader.Read(
+            """
+            --- src/First.cs
+            +++ src/First.cs
+            @@ -1 +1 @@
+            -before
+            +after
+            --- src/Second.cs
+            +++ src/Second.cs
+            @@ -1 +1 @@
+            -before
+            +after
+            """));
+
+        Assert.Equal("ASEVD128", exception.Code);
+        Assert.Contains("git-formatted", exception.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Resolve_ShouldRejectSameLiteralSegmentSpecificityRatherThanChoosingLongerWildcardText()
     {
         var policy = CreatePolicy() with

@@ -107,10 +107,8 @@ internal static class CoverageProjectManifest
                 throw new IOException($"Directory path exceeds the {MaximumLinkResolutions}-link resolution limit: {directoryPath}");
             }
 
-            var targetPath = Path.GetFullPath(directory.ResolveLinkTarget(returnFinalTarget: false)?.FullName
-                ?? throw new IOException($"Could not resolve directory link target: {current}"));
-            var targetRoot = Path.GetPathRoot(targetPath)
-                ?? throw new IOException($"Directory link target does not have a root: {targetPath}");
+            var targetPath = Path.GetFullPath(linkTarget, Path.GetDirectoryName(current)!);
+            var targetRoot = Path.GetPathRoot(targetPath)!;
             current = targetRoot;
             remainingSegments = new Queue<string>(GetPathSegments(targetPath, targetRoot).Concat(remainingSegments));
         }

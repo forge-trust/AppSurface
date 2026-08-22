@@ -548,9 +548,11 @@ public sealed class CoverageRunTests
         }
 
         using var repo = TempDirectory.Create("appsurface-coverage-manifest-");
-        var physicalSolutionDirectory = Directory.CreateDirectory(TestPathUtils.PathUnder(repo.Path, "physical-solution")).FullName;
-        var linkedSolutionDirectory = TestPathUtils.PathUnder(repo.Path, "solution-link");
-        Directory.CreateSymbolicLink(linkedSolutionDirectory, physicalSolutionDirectory);
+        var physicalRootDirectory = Directory.CreateDirectory(TestPathUtils.PathUnder(repo.Path, "physical-root")).FullName;
+        var physicalSolutionDirectory = Directory.CreateDirectory(TestPathUtils.PathUnder(physicalRootDirectory, "solution")).FullName;
+        var linkedRootDirectory = TestPathUtils.PathUnder(repo.Path, "solution-root");
+        Directory.CreateSymbolicLink(linkedRootDirectory, "physical-root");
+        var linkedSolutionDirectory = Path.Join(linkedRootDirectory, "solution");
         var projectPath = TestPathUtils.PathUnder(physicalSolutionDirectory, "tests", "Sample.Tests", "Sample.Tests.csproj");
         Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);
         await File.WriteAllTextAsync(projectPath, "<Project />");
