@@ -228,10 +228,29 @@ internal sealed class PythonParserCandidateProofWorkflow
             throw new InvalidOperationException("Tree-sitter returned no parse tree for a fixed smoke input.");
         }
 
+        if (validTree.RootNode.HasError)
+        {
+            throw new InvalidOperationException("The valid fixed smoke input produced a Tree-sitter error node.");
+        }
+
+        if (!malformedTree.RootNode.HasError)
+        {
+            throw new InvalidOperationException("The malformed fixed smoke input did not produce a Tree-sitter error node.");
+        }
+
+        var largeSourceBytes = Encoding.UTF8.GetByteCount(largeSource);
+        if (largeTree.RootNode.EndIndex != largeSourceBytes)
+        {
+            throw new InvalidOperationException($"The large fixed smoke input was not fully consumed: expected {largeSourceBytes} bytes but parsed {largeTree.RootNode.EndIndex}.");
+        }
+
         Console.WriteLine($"RID={RuntimeInformation.RuntimeIdentifier}");
         Console.WriteLine($"VALID={validTree.RootNode.Type}");
+        Console.WriteLine($"VALID_HAS_ERROR={validTree.RootNode.HasError}");
         Console.WriteLine($"MALFORMED={malformedTree.RootNode.Type}");
-        Console.WriteLine($"LARGE_SOURCE_BYTES={Encoding.UTF8.GetByteCount(largeSource)}");
+        Console.WriteLine($"MALFORMED_HAS_ERROR={malformedTree.RootNode.HasError}");
+        Console.WriteLine($"LARGE_SOURCE_BYTES={largeSourceBytes}");
+        Console.WriteLine($"LARGE_END_INDEX={largeTree.RootNode.EndIndex}");
         Console.WriteLine($"LARGE={largeTree.RootNode.Type}");
         """;
 
@@ -256,6 +275,11 @@ internal sealed class PythonParserCandidateProofWorkflow
         var missingRuntimeIdentifiers = RequiredRuntimeIdentifiers.Where(rid => !actualRuntimeIdentifiers.Contains(rid)).ToArray();
         var unexpectedRuntimeIdentifiers = actualRuntimeIdentifiers.Where(rid => !RequiredRuntimeIdentifiers.Contains(rid, StringComparer.Ordinal)).OrderBy(rid => rid, StringComparer.Ordinal).ToArray();
         var metadata = ReadNuspecMetadata(archive);
+        var licenseAndNoticePaths = archive.Entries
+            .Select(entry => entry.FullName)
+            .Where(IsLicenseOrNoticePath)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
         return new PythonParserCandidateArchiveEvidence(
             Path.GetFileName(request.CandidatePackagePath),
             sha256,
@@ -265,7 +289,11 @@ internal sealed class PythonParserCandidateProofWorkflow
             metadata,
             nativeAssets,
             missingRuntimeIdentifiers,
-            unexpectedRuntimeIdentifiers);
+            unexpectedRuntimeIdentifiers,
+            licenseAndNoticePaths,
+            new PythonParserCandidateProvenanceReviewEvidence(
+                "metadata_recorded_not_accepted",
+                "Archive metadata and license/notice paths are recorded for a separate human redistribution review; this candidate proof does not approve a dependency."));
     }
 
     private static PythonParserCandidateNuspecMetadata ReadNuspecMetadata(ZipArchive archive)
@@ -319,6 +347,15 @@ internal sealed class PythonParserCandidateProofWorkflow
             && string.Equals(segments[2], "native", StringComparison.Ordinal)
             ? segments[1]
             : null;
+    }
+
+    private static bool IsLicenseOrNoticePath(string entryPath)
+    {
+        var fileName = Path.GetFileName(entryPath);
+        return fileName.StartsWith("license", StringComparison.OrdinalIgnoreCase)
+            || fileName.StartsWith("notice", StringComparison.OrdinalIgnoreCase)
+            || fileName.StartsWith("copying", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("third-party", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<PythonParserCandidateProofCommandResult> RunCommandAsync(
@@ -475,7 +512,9 @@ internal sealed record PythonParserCandidateArchiveEvidence(
     PythonParserCandidateNuspecMetadata Metadata,
     IReadOnlyList<PythonParserNativeRuntimeEvidence> NativeRuntimeAssets,
     IReadOnlyList<string> MissingRuntimeIdentifiers,
-    IReadOnlyList<string> UnexpectedRuntimeIdentifiers)
+    IReadOnlyList<string> UnexpectedRuntimeIdentifiers,
+    IReadOnlyList<string> LicenseAndNoticePaths,
+    PythonParserCandidateProvenanceReviewEvidence ProvenanceReview)
 {
     /// <summary>
     /// Gets whether the archive declares the minimum license and source provenance fields for later human review.
@@ -497,6 +536,13 @@ internal sealed record PythonParserCandidateNuspecMetadata(
     string RepositoryType,
     string RepositoryUrl,
     string RepositoryCommit);
+
+/// <summary>
+/// Explicit boundary between machine-recorded provenance facts and a human redistribution approval.
+/// </summary>
+/// <param name="Status">Deterministic review state for this candidate proof.</param>
+/// <param name="Explanation">Why the candidate proof cannot constitute legal or supply-chain approval.</param>
+internal sealed record PythonParserCandidateProvenanceReviewEvidence(string Status, string Explanation);
 
 /// <summary>
 /// Full native asset inventory declared for one runtime identifier.

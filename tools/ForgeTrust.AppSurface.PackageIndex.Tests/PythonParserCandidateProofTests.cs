@@ -23,7 +23,7 @@ public sealed class PythonParserCandidateProofTests : IDisposable
         var commandRunner = new RecordingCommandRunner(
         [
             new ExternalCommandResult(0, $"Restored {consumerDirectory} (in 123 ms)", string.Empty),
-            new ExternalCommandResult(0, "RID=osx-arm64\nVALID=module\nMALFORMED=module\nLARGE_SOURCE_BYTES=1000000\nLARGE=module\n", string.Empty)
+            new ExternalCommandResult(0, "RID=osx-arm64\nVALID=module\nVALID_HAS_ERROR=False\nMALFORMED=module\nMALFORMED_HAS_ERROR=True\nLARGE_SOURCE_BYTES=1000000\nLARGE_END_INDEX=1000000\nLARGE=module\n", string.Empty)
         ]);
         var workflow = new PythonParserCandidateProofWorkflow(commandRunner);
 
@@ -35,6 +35,8 @@ public sealed class PythonParserCandidateProofTests : IDisposable
         Assert.Contains("compressed_archive_exceeds_budget", report.RejectionReasons);
         Assert.Empty(report.Archive.MissingRuntimeIdentifiers);
         Assert.Empty(report.Archive.UnexpectedRuntimeIdentifiers);
+        Assert.Empty(report.Archive.LicenseAndNoticePaths);
+        Assert.Equal("metadata_recorded_not_accepted", report.Archive.ProvenanceReview.Status);
         Assert.True(report.Archive.HasCompleteProvenanceMetadata);
         Assert.Equal(PythonParserCandidateProofWorkflow.CandidatePackageId, report.Archive.Metadata.PackageId);
         Assert.Equal(PythonParserCandidateProofWorkflow.CandidatePackageVersion, report.Archive.Metadata.PackageVersion);
@@ -44,6 +46,8 @@ public sealed class PythonParserCandidateProofTests : IDisposable
         Assert.Equal("Restored <consumer> (in <duration>)", report.Restore.StandardOutput);
         Assert.Equal(0, report.Smoke!.ExitCode);
         Assert.Contains("RID=osx-arm64", report.Smoke.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("MALFORMED_HAS_ERROR=True", report.Smoke.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("LARGE_END_INDEX=1000000", report.Smoke.StandardOutput, StringComparison.Ordinal);
         Assert.Equal(2, commandRunner.Requests.Count);
         Assert.Equal("dotnet", commandRunner.Requests[0].FileName);
         Assert.Equal(["restore", "PythonParserCandidateSmoke.csproj", "--configfile", "NuGet.config", "--disable-parallel"], commandRunner.Requests[0].Arguments);
@@ -55,6 +59,39 @@ public sealed class PythonParserCandidateProofTests : IDisposable
         using var reportJson = await JsonDocument.ParseAsync(reportStream);
         Assert.Equal("treesitter-dotnet-1.3.0.nupkg", reportJson.RootElement.GetProperty("archive").GetProperty("packageFileName").GetString());
         Assert.Contains("compressed_archive_exceeds_budget", reportJson.RootElement.GetProperty("rejectionReasons").EnumerateArray().Select(value => value.GetString()));
+    }
+
+    [Fact]
+    public async Task Workflow_RecordsSortedLicenseAndNoticeInventoryForHumanReview()
+    {
+        var candidatePackagePath = CreateCandidatePackage(
+            licenseAndNoticePaths:
+            [
+                "licenses/COPYING",
+                "NOTICE.txt",
+                "legal/third-party-notices.md"
+            ]);
+        var commandRunner = new RecordingCommandRunner(
+        [
+            new ExternalCommandResult(0, "Restored", string.Empty),
+            new ExternalCommandResult(0, "SMOKE", string.Empty)
+        ]);
+        var workflow = new PythonParserCandidateProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new PythonParserCandidateProofRequest(
+                _repositoryRoot,
+                candidatePackagePath,
+                Path.Combine(_repositoryRoot, "artifacts", "notice-inventory"),
+                Path.Combine(_repositoryRoot, "notice-inventory.json"),
+                MaximumCompressedPackageBytes: long.MaxValue),
+            CancellationToken.None);
+
+        Assert.Equal(
+            ["NOTICE.txt", "legal/third-party-notices.md", "licenses/COPYING"],
+            report.Archive.LicenseAndNoticePaths);
+        Assert.Equal("metadata_recorded_not_accepted", report.Archive.ProvenanceReview.Status);
+        Assert.Contains("separate human redistribution review", report.Archive.ProvenanceReview.Explanation, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -165,7 +202,10 @@ public sealed class PythonParserCandidateProofTests : IDisposable
         }
     }
 
-    private string CreateCandidatePackage(IReadOnlyList<string>? runtimeIdentifiers = null, string? directory = null)
+    private string CreateCandidatePackage(
+        IReadOnlyList<string>? runtimeIdentifiers = null,
+        IReadOnlyList<string>? licenseAndNoticePaths = null,
+        string? directory = null)
     {
         var packageDirectory = directory ?? Path.Combine(_repositoryRoot, "candidate");
         Directory.CreateDirectory(packageDirectory);
@@ -184,6 +224,11 @@ public sealed class PythonParserCandidateProofTests : IDisposable
               </metadata>
             </package>
             """);
+        foreach (var licenseOrNoticePath in licenseAndNoticePaths ?? [])
+        {
+            WriteArchiveEntry(archive, licenseOrNoticePath, licenseOrNoticePath);
+        }
+
         foreach (var runtimeIdentifier in runtimeIdentifiers ??
                  ["linux-arm", "linux-arm64", "linux-x64", "linux-x86", "osx-arm64", "osx-x64", "win-arm64", "win-x64", "win-x86"])
         {
@@ -217,7 +262,9 @@ public sealed class PythonParserCandidateProofTests : IDisposable
                     "0123456789abcdef"),
                 [],
                 [],
-                []),
+                [],
+                [],
+                new PythonParserCandidateProvenanceReviewEvidence("metadata_recorded_not_accepted", "Not accepted.")),
             null,
             null,
             ["compressed_archive_exceeds_budget"]);

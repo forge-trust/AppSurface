@@ -60,7 +60,7 @@ The artifact's single `.nuspec` declares the following metadata:
 | Repository commit | `8cae484bc033dac6e492ed15166877f3d784850f` |
 | Target framework | `.NETStandard2.0` |
 
-That metadata is recorded for traceability only. A filename scan of the archive found no in-package `LICENSE`, `NOTICE`, `COPYING`, or third-party-notice file. AppSurface therefore has not accepted this candidate's provenance or notices for redistribution, and it has not added a third-party notice. Completing that review would not change the already-failing size gate.
+That metadata is recorded for traceability only. The proof's sorted `licenseAndNoticePaths` inventory is empty: the archive has no in-package `LICENSE`, `NOTICE`, `COPYING`, or third-party-notice file. Its `provenanceReview.status` is `metadata_recorded_not_accepted`, so AppSurface has not accepted the candidate's provenance or notices for redistribution and has not added a third-party notice. Completing that human review would not change the already-failing size gate.
 
 ## Isolated consumer smoke
 
@@ -76,12 +76,15 @@ Observed child-process result:
 exit code: 0
 RID=osx-arm64
 VALID=module
+VALID_HAS_ERROR=False
 MALFORMED=module
+MALFORMED_HAS_ERROR=True
 LARGE_SOURCE_BYTES=1000000
+LARGE_END_INDEX=1000000
 LARGE=module
 ```
 
-The binding initialized and returned a parse tree for every input, including the malformed source, without an abnormal exit or child-process stderr output. The successful restore emitted the .NET SDK's workload-verification advisory on stderr; that advisory is captured in the [machine-readable proof record](./tree-sitter-dotnet-1.3.0-proof.json) and is not a restore failure. This is evidence for the local `osx-arm64` asset only. Windows and Linux consumer smoke paths were intentionally not added to CI because the candidate had already failed the non-negotiable distribution-size limit.
+The binding initialized and returned a parse tree for every input. The valid source has no error node, the malformed source has an error node, and the large source's parsed end index matches all 1,000,000 bytes. The child completed without an abnormal exit or child-process stderr output. The successful restore emitted the .NET SDK's workload-verification advisory on stderr; that advisory is captured in the [machine-readable proof record](./tree-sitter-dotnet-1.3.0-proof.json) and is not a restore failure. This is evidence for the local `osx-arm64` asset only. Windows and Linux consumer smoke paths were intentionally not added to CI because the candidate had already failed the non-negotiable distribution-size limit.
 
 ## Reproduction
 
