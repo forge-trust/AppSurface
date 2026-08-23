@@ -328,6 +328,11 @@
     ],
     "missingRuntimeIdentifiers": [],
     "unexpectedRuntimeIdentifiers": [],
+    "licenseAndNoticePaths": [],
+    "provenanceReview": {
+      "status": "metadata_recorded_not_accepted",
+      "explanation": "Archive metadata and license/notice paths are recorded for a separate human redistribution review; this candidate proof does not approve a dependency."
+    },
     "hasCompleteProvenanceMetadata": true
   },
   "restore": {
@@ -341,7 +346,7 @@
     "operation": "dotnet run Python parser candidate smoke host",
     "command": "run --project PythonParserCandidateSmoke.csproj --no-restore",
     "exitCode": 0,
-    "standardOutput": "RID=osx-arm64\nVALID=module\nMALFORMED=module\nLARGE_SOURCE_BYTES=1000000\nLARGE=module\n",
+    "standardOutput": "RID=osx-arm64\nVALID=module\nVALID_HAS_ERROR=False\nMALFORMED=module\nMALFORMED_HAS_ERROR=True\nLARGE_SOURCE_BYTES=1000000\nLARGE_END_INDEX=1000000\nLARGE=module\n",
     "standardError": ""
   },
   "rejectionReasons": [
