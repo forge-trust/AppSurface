@@ -33,6 +33,33 @@ aspire run --non-interactive --apphost examples/auth-aspire-keycloak-apphost/Aut
 The verifier checks Keycloak metadata, generated realm/client evidence, forbidden secret markers in the realm evidence,
 the authorization challenge, `/auth/proof/status`, and `/auth/proof/protected`.
 
+## #782 Completion-Gate Feasibility Spike
+
+The AppHost now inserts the finite `auth-aspire-keycloak-readiness-gate` project between Keycloak health and the web
+proof:
+
+```text
+Keycloak healthy
+    -> readiness gate runs AppSurface metadata + realm-evidence + public-client checks once
+        -> gate exits 0
+            -> web proof starts
+```
+
+The gate is an implementation-only feasibility artifact, not a package API. It receives only non-secret local proof
+metadata, reconstructs the existing [`AppSurfaceKeycloakReadinessProbe`](../../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md#apphost-shape), and exits nonzero with a named `ASKEYC` code on failure. It never receives an
+administrator credential, performs Keycloak administration, or prints raw exception/provider output.
+
+This establishes the documented Aspire `WaitFor` plus `WaitForCompletion` path for a finite project. It does **not**
+ship the proposed `RealmReady` or `WithLocalSeed` package surface; those remain gated by the approved
+[#782 design](../../docs/designs/auth-aspire-keycloak-local-seeds.md) and its
+[test plan](../../docs/designs/auth-aspire-keycloak-local-seeds-test-plan.md).
+
+For fast, container-free verification of the sample gate contract, run:
+
+```bash
+dotnet test Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj --no-restore
+```
+
 ## Theme Lifecycle
 
 The default sample intentionally stays on the no-theme path so a real OIDC login remains a five-minute proof. To activate its checked-in assets-only `appsurface-sample` theme, set an immutable Keycloak image reference before running the same local profile:
@@ -88,6 +115,7 @@ optional rather than impersonating an identity provider.
 | Container startup fails | Docker/container runtime is unavailable. | Start Docker or your configured container runtime, then rerun. |
 | `ASKEYC002` | Port `8080` or `5059` is occupied. | Stop the other process or override the matching option in the AppHost. |
 | `ASKEYC003` | Keycloak metadata did not become reachable. | Inspect container logs and confirm port/container runtime health. |
+| `ASKEYC004`–`ASKEYC005` | Keycloak metadata issuer or generated realm evidence differs from the local proof contract. | Recreate the disposable local realm/import and rerun; inspect only the named safe diagnostic. |
 | `ASKEYC006` | Client id or redirect URI does not match imported realm state. | Reset stale Keycloak data or keep callback path and web proof port aligned. |
 | `ASKEYC010`–`ASKEYC014` | Theme name, image, source, property, resource, or template-baseline declaration is invalid. | Read the package source-policy guidance, then rebuild the manifest. |
 | `ASKEYC015`–`ASKEYC016` | The pinned archive layout is unsupported or source changed after validation. | Review the exact image layout, then regenerate the manifest and build contract. |

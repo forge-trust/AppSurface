@@ -1,7 +1,10 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
+using System.Text.Json;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.Publishing;
 using ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests;
@@ -173,6 +176,49 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     }
 
     [Fact]
+    public void AspireCompletionSpike_UsesTheDocumentedHealthyThenSuccessfulCompletionGraph()
+    {
+        using var directory = new TempDirectory();
+        var builder = DistributedApplication.CreateBuilder([]);
+        var (keycloak, _) = AddWithAvailablePorts(builder, directory.Path, usePersistentDataVolume: false);
+        var gate = builder
+            .AddProject("readiness-gate", GetCurrentTestProjectPath())
+            .WaitFor(keycloak.Resource);
+        var firstFiniteProject = builder
+            .AddProject("first-finite-project", GetCurrentTestProjectPath())
+            .WaitForCompletion(gate);
+        var secondFiniteProject = builder
+            .AddProject("second-finite-project", GetCurrentTestProjectPath())
+            .WaitForCompletion(firstFiniteProject);
+
+        AssertWait(gate.Resource, keycloak.Resource.Resource.Name, WaitType.WaitUntilHealthy);
+        AssertWait(firstFiniteProject.Resource, gate.Resource.Name, WaitType.WaitForCompletion);
+        AssertWait(secondFiniteProject.Resource, firstFiniteProject.Resource.Name, WaitType.WaitForCompletion);
+    }
+
+    [Fact]
+    public async Task AspireSecretBindingSpike_EmitsOnlyAParameterReferenceForItsDeclaredProject()
+    {
+        const string sentinel = "LOCAL_TEST_SECRET_SENTINEL";
+        var builder = DistributedApplication.CreateBuilder([]);
+        var secret = builder.AddParameter("seed-admin-secret", sentinel, secret: true);
+        var seed = builder
+            .AddProject("seed-worker", GetCurrentTestProjectPath())
+            .WithEnvironment("SEED_ADMIN_SECRET", secret);
+        var web = builder.AddProject("web", GetCurrentTestProjectPath());
+
+        var seedManifest = await WriteEnvironmentManifestAsync(seed.Resource);
+        var webManifest = await WriteEnvironmentManifestAsync(web.Resource);
+
+        Assert.Contains("SEED_ADMIN_SECRET", seedManifest, StringComparison.Ordinal);
+        Assert.Contains("seed-admin-secret", seedManifest, StringComparison.Ordinal);
+        Assert.DoesNotContain(sentinel, seedManifest, StringComparison.Ordinal);
+        Assert.DoesNotContain("SEED_ADMIN_SECRET", webManifest, StringComparison.Ordinal);
+        Assert.DoesNotContain("seed-admin-secret", webManifest, StringComparison.Ordinal);
+        Assert.DoesNotContain(sentinel, webManifest, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Defaults_ExposeBoundedReadinessTimeout()
     {
         Assert.Equal(TimeSpan.FromSeconds(120), AppSurfaceKeycloakDefaults.ReadinessTimeout);
@@ -260,5 +306,31 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         }
 
         return Path.GetFullPath(projectPath, AppContext.BaseDirectory);
+    }
+
+    private static void AssertWait(IResource resource, string dependencyName, WaitType expectedWaitType)
+    {
+        var wait = Assert.Single(resource.Annotations.OfType<WaitAnnotation>());
+
+        Assert.Equal(dependencyName, wait.Resource.Name);
+        Assert.Equal(expectedWaitType, wait.WaitType);
+        Assert.Equal(0, wait.ExitCode);
+    }
+
+    private static async Task<string> WriteEnvironmentManifestAsync(IResource resource)
+    {
+        await using var stream = new MemoryStream();
+        await using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
+        var context = new ManifestPublishingContext(
+            new DistributedApplicationExecutionContext(DistributedApplicationOperation.Publish),
+            resource.Name,
+            writer,
+            CancellationToken.None);
+
+        writer.WriteStartObject();
+        await context.WriteEnvironmentVariablesAsync(resource);
+        writer.WriteEndObject();
+        await writer.FlushAsync();
+        return Encoding.UTF8.GetString(stream.ToArray());
     }
 }

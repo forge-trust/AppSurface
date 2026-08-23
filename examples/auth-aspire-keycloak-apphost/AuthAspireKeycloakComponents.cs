@@ -1,5 +1,6 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
+using AuthAspireKeycloakReadinessGate;
 using ForgeTrust.AppSurface.Aspire;
 using ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
@@ -48,12 +49,62 @@ public sealed class AuthAspireKeycloakComponent : IAspireComponent<KeycloakResou
 public sealed class AuthAspireKeycloakWebComponent : IAspireComponent<ProjectResource>
 {
     private readonly AuthAspireKeycloakComponent _keycloak;
+    private readonly AuthAspireKeycloakReadinessGateComponent _readinessGate;
 
     /// <summary>
     /// Creates the web component.
     /// </summary>
     /// <param name="keycloak">Keycloak component that supplies provider configuration.</param>
-    public AuthAspireKeycloakWebComponent(AuthAspireKeycloakComponent keycloak)
+    /// <param name="readinessGate">Finite baseline gate that must complete before the web proof can start.</param>
+    public AuthAspireKeycloakWebComponent(
+        AuthAspireKeycloakComponent keycloak,
+        AuthAspireKeycloakReadinessGateComponent readinessGate)
+    {
+        _keycloak = keycloak;
+        _readinessGate = readinessGate;
+    }
+
+    /// <inheritdoc />
+    public IResourceBuilder<ProjectResource> Generate(
+        AspireStartupContext context,
+        IDistributedApplicationBuilder appBuilder)
+    {
+        var keycloak = context.Resolve(_keycloak);
+        var readinessGate = context.Resolve(_readinessGate);
+        var web = appBuilder
+            .AddProject<Projects.AuthAspireKeycloakWeb>("auth-aspire-keycloak-web")
+            .WithHttpEndpoint(targetPort: AppSurfaceKeycloakDefaults.WebProofPort, env: "ASPNETCORE_HTTP_PORTS")
+            .WithEnvironment("DOTNET_ENVIRONMENT", "Development")
+            .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
+            .WithReference(keycloak)
+            .WaitFor(keycloak)
+            .WaitForCompletion(readinessGate);
+
+        return _keycloak.Resolved.Configuration.ApplyTo(web);
+    }
+}
+
+/// <summary>
+/// Adds the finite #782 feasibility process that proves a project can complete after AppSurface baseline readiness.
+/// </summary>
+/// <remarks>
+/// The component deliberately remains sample-only. It proves public Aspire graph behavior without adding a
+/// package-managed callback runner or a public local-seed API before the documented feasibility evidence exists.
+/// </remarks>
+public sealed class AuthAspireKeycloakReadinessGateComponent : IAspireComponent<ProjectResource>
+{
+    /// <summary>
+    /// Stable resource name used by the feasibility graph and its captured state timeline.
+    /// </summary>
+    public const string ResourceName = "auth-aspire-keycloak-readiness-gate";
+
+    private readonly AuthAspireKeycloakComponent _keycloak;
+
+    /// <summary>
+    /// Creates the finite readiness-gate component.
+    /// </summary>
+    /// <param name="keycloak">The component that supplies the local Keycloak resource and safe proof metadata.</param>
+    public AuthAspireKeycloakReadinessGateComponent(AuthAspireKeycloakComponent keycloak)
     {
         _keycloak = keycloak;
     }
@@ -64,15 +115,22 @@ public sealed class AuthAspireKeycloakWebComponent : IAspireComponent<ProjectRes
         IDistributedApplicationBuilder appBuilder)
     {
         var keycloak = context.Resolve(_keycloak);
-        var web = appBuilder
-            .AddProject<Projects.AuthAspireKeycloakWeb>("auth-aspire-keycloak-web")
-            .WithHttpEndpoint(targetPort: AppSurfaceKeycloakDefaults.WebProofPort, env: "ASPNETCORE_HTTP_PORTS")
-            .WithEnvironment("DOTNET_ENVIRONMENT", "Development")
-            .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
-            .WithReference(keycloak)
-            .WaitFor(keycloak);
+        var metadata = _keycloak.Resolved;
+        var redirectUri = new Uri($"http://localhost:{AppSurfaceKeycloakDefaults.WebProofPort}{metadata.Configuration.CallbackPath}", UriKind.Absolute);
+        var postLogoutRedirectUri = new Uri($"http://localhost:{AppSurfaceKeycloakDefaults.WebProofPort}{metadata.Configuration.SignedOutCallbackPath}", UriKind.Absolute);
+        var realmImportDirectory = Path.GetDirectoryName(metadata.RealmImportFile)
+            ?? throw new InvalidOperationException("The generated Keycloak realm-import file must have a parent directory.");
 
-        return _keycloak.Resolved.Configuration.ApplyTo(web);
+        return appBuilder
+            .AddProject<Projects.AuthAspireKeycloakReadinessGate>(ResourceName)
+            .WithEnvironment(KeycloakReadinessGateEnvironment.Authority, metadata.Configuration.Authority)
+            .WithEnvironment(KeycloakReadinessGateEnvironment.ClientId, metadata.Configuration.ClientId)
+            .WithEnvironment(KeycloakReadinessGateEnvironment.CallbackPath, metadata.Configuration.CallbackPath)
+            .WithEnvironment(KeycloakReadinessGateEnvironment.SignedOutCallbackPath, metadata.Configuration.SignedOutCallbackPath)
+            .WithEnvironment(KeycloakReadinessGateEnvironment.RedirectUri, redirectUri.ToString())
+            .WithEnvironment(KeycloakReadinessGateEnvironment.PostLogoutRedirectUri, postLogoutRedirectUri.ToString())
+            .WithEnvironment(KeycloakReadinessGateEnvironment.RealmImportDirectory, realmImportDirectory)
+            .WaitFor(keycloak);
     }
 }
 

@@ -68,6 +68,7 @@
     <Project Path="examples/durable-postgresql/DurablePostgreSqlLocalExample.csproj" />
     <Project Path="examples/durable-postgresql.tests/DurablePostgreSqlLocalExample.Tests.csproj" />
     <Project Path="examples/auth-aspire-keycloak-apphost/AuthAspireKeycloakAppHost.csproj" />
+    <Project Path="examples/auth-aspire-keycloak-readiness-gate/AuthAspireKeycloakReadinessGate.csproj" />
     <Project Path="examples/auth-aspire-keycloak-verifier/AuthAspireKeycloakVerifier.csproj" />
     <Project Path="examples/auth-aspire-keycloak-web/AuthAspireKeycloakWeb.csproj" />
     <Project Path="examples/auth-aspnetcore-dev-auth.tests/AuthAspNetCoreDevAuthExample.Tests.csproj" />

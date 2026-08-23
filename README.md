@@ -392,7 +392,7 @@ how to use this project.
   descriptors.
 - [Aspire AppHost example](examples/aspire-apphost/README.md) – shows local Aspire AppHost
   composition with AppSurface profiles and reusable Aspire components.
-- [Auth Aspire Keycloak AppHost proof](examples/auth-aspire-keycloak-apphost/README.md) – starts local Keycloak, imports a deterministic AppSurface realm, runs the OIDC web proof, and provides a noninteractive verifier for the real-provider flow.
+- [Auth Aspire Keycloak AppHost proof](examples/auth-aspire-keycloak-apphost/README.md) – starts local Keycloak, proves its finite baseline-readiness gate before the OIDC web proof, and provides a noninteractive verifier for the real-provider flow without adding a runtime Keycloak dependency.
 - [Web app example](examples/web-app/README.md) – shows a minimal ASP.NET Core app that
   composes middleware and endpoints from modules.
 - [Web error-page proof](examples/web-error-pages/README.md) – runs a one-command verifier

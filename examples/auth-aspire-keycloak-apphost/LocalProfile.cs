@@ -86,7 +86,6 @@ public sealed partial class VerifyProfile : ICommand
         {
             await console.Output.WriteLineAsync("Starting AppSurface Auth Aspire Keycloak verification...");
             await app.StartAsync(timeout.Token);
-            await _keycloak.Resolved.Readiness.CheckOnceAsync(timeout.Token);
 
             await app.ResourceNotifications.WaitForResourceAsync(
                 VerifierResourceName,
