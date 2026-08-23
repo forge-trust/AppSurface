@@ -150,6 +150,25 @@ public sealed class PythonParserCandidateProofTests : IDisposable
     }
 
     [Fact]
+    public async Task Workflow_RejectsOversizedArchiveBeforeHashingOrOpeningIt()
+    {
+        var candidatePackagePath = Path.Combine(_repositoryRoot, "oversized.nupkg");
+        await using (var stream = File.Create(candidatePackagePath))
+        {
+            stream.SetLength(PythonParserCandidateProofWorkflow.MaximumArchiveBytesToInspect + 1);
+        }
+
+        var workflow = new PythonParserCandidateProofWorkflow();
+        var report = await workflow.RunAsync(
+            new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, ReportPath("oversized.json")),
+            CancellationToken.None);
+
+        Assert.Equal(["archive_inspection_failed"], report.RejectionReasons);
+        Assert.Equal(string.Empty, report.Archive.Sha256);
+        Assert.Contains("Compressed archive exceeds", report.Archive.InspectionFailure, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Workflow_RejectsArchivesWithExcessiveEntryCounts()
     {
         var candidatePackagePath = CreateCandidatePackage(extraEntryCount: PythonParserCandidateProofWorkflow.MaximumArchiveEntryCount);
@@ -189,6 +208,25 @@ public sealed class PythonParserCandidateProofTests : IDisposable
                 CancellationToken.None));
 
         Assert.Contains("within the repository artifacts directory", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Workflow_RejectsReportPathsThatTraverseSymbolicLinks()
+    {
+        var candidatePackagePath = CreateCandidatePackage();
+        Directory.CreateDirectory(Path.Combine(_repositoryRoot, "artifacts"));
+        var externalTarget = Path.Combine(_repositoryRoot, "outside.json");
+        await File.WriteAllTextAsync(externalTarget, "preserve me");
+        File.CreateSymbolicLink(ReportPath("linked.json"), externalTarget);
+        var workflow = new PythonParserCandidateProofWorkflow();
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(
+            () => workflow.RunAsync(
+                new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, ReportPath("linked.json")),
+                CancellationToken.None));
+
+        Assert.Contains("must not traverse or overwrite symbolic links", error.Message, StringComparison.Ordinal);
+        Assert.Equal("preserve me", await File.ReadAllTextAsync(externalTarget));
     }
 
     [Fact]

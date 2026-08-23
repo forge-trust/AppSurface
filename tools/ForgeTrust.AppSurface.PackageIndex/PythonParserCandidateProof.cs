@@ -104,17 +104,18 @@ internal sealed class PythonParserCandidateProofWorkflow
         CancellationToken cancellationToken)
     {
         var fileInfo = new FileInfo(request.CandidatePackagePath);
-        await using var packageStream = File.OpenRead(request.CandidatePackagePath);
-        var sha256 = Convert.ToHexString(await SHA256.HashDataAsync(packageStream, cancellationToken));
         if (fileInfo.Length > MaximumArchiveBytesToInspect)
         {
             return CreateUninspectableArchiveEvidence(
                 fileInfo,
-                sha256,
+                string.Empty,
                 0,
                 0,
                 $"Compressed archive exceeds the {MaximumArchiveBytesToInspect}-byte static inspection limit.");
         }
+
+        await using var packageStream = File.OpenRead(request.CandidatePackagePath);
+        var sha256 = Convert.ToHexString(await SHA256.HashDataAsync(packageStream, cancellationToken));
 
         try
         {
@@ -326,6 +327,36 @@ internal sealed class PythonParserCandidateProofWorkflow
         if (!IsPathWithin(artifactsDirectory, reportPath))
         {
             throw new PackageIndexException("Python parser candidate report path must be within the repository artifacts directory.");
+        }
+
+        RejectExistingReportLinks(artifactsDirectory, reportPath);
+    }
+
+    private static void RejectExistingReportLinks(string artifactsDirectory, string reportPath)
+    {
+        var currentDirectory = Path.GetFullPath(artifactsDirectory);
+        ThrowIfLink(new DirectoryInfo(currentDirectory));
+        var reportDirectory = Path.GetDirectoryName(reportPath) ?? throw new PackageIndexException("Python parser candidate report path must have a directory.");
+        var relativeDirectory = Path.GetRelativePath(currentDirectory, reportDirectory);
+        foreach (var segment in relativeDirectory.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+        {
+            if (string.IsNullOrWhiteSpace(segment) || string.Equals(segment, ".", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            currentDirectory = Path.Join(currentDirectory, segment);
+            ThrowIfLink(new DirectoryInfo(currentDirectory));
+        }
+
+        ThrowIfLink(new FileInfo(reportPath));
+    }
+
+    private static void ThrowIfLink(FileSystemInfo fileSystemInfo)
+    {
+        if (fileSystemInfo.LinkTarget is not null)
+        {
+            throw new PackageIndexException("Python parser candidate report path must not traverse or overwrite symbolic links.");
         }
     }
 
