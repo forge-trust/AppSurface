@@ -1490,6 +1490,37 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Theory]
+    [InlineData('`')]
+    [InlineData('~')]
+    public async Task HarvestAsync_ShouldKeepTabsSyntaxInsideCodeFencesAfterNonClosingFence(char fenceCharacter)
+    {
+        var fence = new string(fenceCharacter, 3);
+        await WriteMarkdownAsync(
+            "CodeFenceLikeCloser.md",
+            $"""
+            # Syntax example
+
+            {fence}markdown
+            :::tabs "Choose a path"
+            {fence}not-a-closing-fence
+            :::tab "First"
+            Literal source remains in the code sample.
+            :::
+            :::tab "Second"
+            This is also source text.
+            :::
+            :::
+            {fence}
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+
+        Assert.Contains(":::tabs", doc.Content, StringComparison.Ordinal);
+        Assert.Contains("not-a-closing-fence", doc.Content, StringComparison.Ordinal);
+        Assert.Empty(doc.RichAuthoringTabsTokens ?? []);
+    }
+
+    [Theory]
     [InlineData(1, false)]
     [InlineData(2, true)]
     [InlineData(4, true)]

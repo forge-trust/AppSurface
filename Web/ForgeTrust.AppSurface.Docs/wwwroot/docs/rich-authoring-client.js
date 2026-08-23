@@ -126,7 +126,7 @@
             button.tabIndex = index === 0 ? 0 : -1;
             button.addEventListener("click", () => selectPanel(tabs, panels, buttons, index, true));
             button.addEventListener("keydown", (event) => {
-                let nextIndex = index;
+                let nextIndex;
                 if (event.key === "ArrowRight" || event.key === "ArrowDown") {
                     nextIndex = (index + 1) % buttons.length;
                 } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {

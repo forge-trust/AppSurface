@@ -1235,8 +1235,10 @@ public class AppSurfaceDocsWebModuleRegressionTests
                     Assert.Contains("window.__outlineAsset = true;", outlineBody);
                     Assert.Equal("/docs/next/outline-client.js", outlineResponse.RequestMessage?.RequestUri?.AbsolutePath);
 
-                    using var outlineHeadResponse = await client.SendAsync(
-                        new HttpRequestMessage(HttpMethod.Head, "/docs/next/outline-client.js?cache=abc"));
+                    using var outlineHeadRequest = new HttpRequestMessage(
+                        HttpMethod.Head,
+                        "/docs/next/outline-client.js?cache=abc");
+                    using var outlineHeadResponse = await client.SendAsync(outlineHeadRequest);
                     Assert.Equal(HttpStatusCode.OK, outlineHeadResponse.StatusCode);
                     Assert.Equal("text/javascript", outlineHeadResponse.Content.Headers.ContentType?.MediaType);
                     Assert.Equal("/docs/next/outline-client.js", outlineHeadResponse.RequestMessage?.RequestUri?.AbsolutePath);
@@ -1247,14 +1249,18 @@ public class AppSurfaceDocsWebModuleRegressionTests
                     Assert.Contains("window.__richAuthoringAsset = true;", richAuthoringBody);
                     Assert.Equal("/docs/next/rich-authoring-client.js", richAuthoringResponse.RequestMessage?.RequestUri?.AbsolutePath);
 
-                    using var richAuthoringHeadResponse = await client.SendAsync(
-                        new HttpRequestMessage(HttpMethod.Head, "/docs/next/rich-authoring-client.js?cache=abc"));
+                    using var richAuthoringHeadRequest = new HttpRequestMessage(
+                        HttpMethod.Head,
+                        "/docs/next/rich-authoring-client.js?cache=abc");
+                    using var richAuthoringHeadResponse = await client.SendAsync(richAuthoringHeadRequest);
                     Assert.Equal(HttpStatusCode.OK, richAuthoringHeadResponse.StatusCode);
                     Assert.Equal("text/javascript", richAuthoringHeadResponse.Content.Headers.ContentType?.MediaType);
                     Assert.Equal("/docs/next/rich-authoring-client.js", richAuthoringHeadResponse.RequestMessage?.RequestUri?.AbsolutePath);
 
-                    using var headResponse = await client.SendAsync(
-                        new HttpRequestMessage(HttpMethod.Head, "/docs/next/minisearch.min.js?cache=abc"));
+                    using var headRequest = new HttpRequestMessage(
+                        HttpMethod.Head,
+                        "/docs/next/minisearch.min.js?cache=abc");
+                    using var headResponse = await client.SendAsync(headRequest);
                     Assert.Equal(HttpStatusCode.OK, headResponse.StatusCode);
                     Assert.Equal("text/javascript", headResponse.Content.Headers.ContentType?.MediaType);
                 }

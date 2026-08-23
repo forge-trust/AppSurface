@@ -185,7 +185,8 @@ internal static class AppSurfaceDocsRichAuthoringSyntax
         {
             var line = lines[index];
             var trimmed = line.TrimStart(' ', '\t');
-            if (TryGetCodeFence(trimmed, out var fenceCharacter, out var fenceLength))
+            if (TryGetCodeFence(trimmed, out var fenceCharacter, out var fenceLength)
+                && (!inCodeFence || IsCodeFenceClosingFence(trimmed, fenceLength)))
             {
                 if (!inCodeFence)
                 {
@@ -268,7 +269,8 @@ internal static class AppSurfaceDocsRichAuthoringSyntax
         {
             var line = lines[index];
             var trimmed = line.TrimStart(' ', '\t');
-            if (TryGetCodeFence(trimmed, out var fenceCharacter, out var fenceLength))
+            if (TryGetCodeFence(trimmed, out var fenceCharacter, out var fenceLength)
+                && (!inCodeFence || IsCodeFenceClosingFence(trimmed, fenceLength)))
             {
                 if (!inCodeFence)
                 {
@@ -498,7 +500,8 @@ internal static class AppSurfaceDocsRichAuthoringSyntax
         {
             var line = lines[index];
             var trimmed = line.TrimStart(' ', '\t');
-            if (TryGetCodeFence(trimmed, out var fenceCharacter, out var fenceLength))
+            if (TryGetCodeFence(trimmed, out var fenceCharacter, out var fenceLength)
+                && (!inCodeFence || IsCodeFenceClosingFence(trimmed, fenceLength)))
             {
                 if (!inCodeFence)
                 {
@@ -730,6 +733,11 @@ internal static class AppSurfaceDocsRichAuthoringSyntax
         }
 
         return length >= 3;
+    }
+
+    private static bool IsCodeFenceClosingFence(string value, int fenceLength)
+    {
+        return value[fenceLength..].Trim().Length == 0;
     }
 
     private static string CreateTabsToken()
