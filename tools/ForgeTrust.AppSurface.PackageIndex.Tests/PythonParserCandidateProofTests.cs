@@ -6,7 +6,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
 public sealed class PythonParserCandidateProofTests : IDisposable
 {
-    private readonly string _repositoryRoot = Path.Combine(Path.GetTempPath(), "appsurface-python-parser-proof-tests", Guid.NewGuid().ToString("N"));
+    private readonly string _repositoryRoot = TestPathUtils.PathUnder(Path.GetTempPath(), "appsurface-python-parser-proof-tests", Guid.NewGuid().ToString("N"));
 
     public PythonParserCandidateProofTests()
     {
@@ -152,7 +152,7 @@ public sealed class PythonParserCandidateProofTests : IDisposable
     [Fact]
     public async Task Workflow_RecordsInvalidZipAsStructuredRejection()
     {
-        var candidatePackagePath = Path.Combine(_repositoryRoot, "invalid.nupkg");
+        var candidatePackagePath = TestPathUtils.PathUnder(_repositoryRoot, "invalid.nupkg");
         await File.WriteAllTextAsync(candidatePackagePath, "not a zip archive");
         var workflow = new PythonParserCandidateProofWorkflow();
 
@@ -212,7 +212,7 @@ public sealed class PythonParserCandidateProofTests : IDisposable
     [Fact]
     public async Task Workflow_RejectsOversizedArchiveBeforeHashingOrOpeningIt()
     {
-        var candidatePackagePath = Path.Combine(_repositoryRoot, "oversized.nupkg");
+        var candidatePackagePath = TestPathUtils.PathUnder(_repositoryRoot, "oversized.nupkg");
         await using (var stream = File.Create(candidatePackagePath))
         {
             stream.SetLength(PythonParserCandidateProofWorkflow.MaximumArchiveBytesToInspect + 1);
@@ -274,7 +274,7 @@ public sealed class PythonParserCandidateProofTests : IDisposable
 
         var error = await Assert.ThrowsAsync<PackageIndexException>(
             () => workflow.RunAsync(
-                new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, Path.Combine(_repositoryRoot, "report.json")),
+                new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, TestPathUtils.PathUnder(_repositoryRoot, "report.json")),
                 CancellationToken.None));
 
         Assert.Contains("within the repository artifacts directory", error.Message, StringComparison.Ordinal);
@@ -284,7 +284,7 @@ public sealed class PythonParserCandidateProofTests : IDisposable
     public async Task Workflow_RefusesToOverwriteExistingReports()
     {
         var candidatePackagePath = CreateCandidatePackage();
-        Directory.CreateDirectory(Path.Combine(_repositoryRoot, "artifacts"));
+        Directory.CreateDirectory(TestPathUtils.PathUnder(_repositoryRoot, "artifacts"));
         await File.WriteAllTextAsync(ReportPath("existing.json"), "preserve me");
         var workflow = new PythonParserCandidateProofWorkflow();
 
@@ -301,8 +301,8 @@ public sealed class PythonParserCandidateProofTests : IDisposable
     public async Task Workflow_RejectsReportPathsThatTraverseSymbolicLinks()
     {
         var candidatePackagePath = CreateCandidatePackage();
-        Directory.CreateDirectory(Path.Combine(_repositoryRoot, "artifacts"));
-        var externalTarget = Path.Combine(_repositoryRoot, "outside.json");
+        Directory.CreateDirectory(TestPathUtils.PathUnder(_repositoryRoot, "artifacts"));
+        var externalTarget = TestPathUtils.PathUnder(_repositoryRoot, "outside.json");
         await File.WriteAllTextAsync(externalTarget, "preserve me");
         File.CreateSymbolicLink(ReportPath("linked.json"), externalTarget);
         var workflow = new PythonParserCandidateProofWorkflow();
@@ -320,8 +320,8 @@ public sealed class PythonParserCandidateProofTests : IDisposable
     public async Task Program_InvokesCandidateInspectionAndReportsARejectionWithoutTreatingItAsCliFailure()
     {
         var candidatePackagePath = CreateCandidatePackage();
-        var standardOut = new StringWriter();
-        var standardError = new StringWriter();
+        using var standardOut = new StringWriter();
+        using var standardError = new StringWriter();
         PythonParserCandidateProofRequest? capturedRequest = null;
 
         var exitCode = await Program.RunAsync(
@@ -350,8 +350,8 @@ public sealed class PythonParserCandidateProofTests : IDisposable
     [Fact]
     public async Task Program_ReportsAnEligibleCandidateForFurtherReview()
     {
-        var standardOut = new StringWriter();
-        var standardError = new StringWriter();
+        using var standardOut = new StringWriter();
+        using var standardError = new StringWriter();
 
         var exitCode = await Program.RunAsync(
             [
@@ -371,8 +371,8 @@ public sealed class PythonParserCandidateProofTests : IDisposable
     [Fact]
     public async Task Program_RequiresTheCandidatePackageOption()
     {
-        var standardOut = new StringWriter();
-        var standardError = new StringWriter();
+        using var standardOut = new StringWriter();
+        using var standardError = new StringWriter();
 
         var exitCode = await Program.RunAsync(
             ["inspect-python-parser-candidate"],
@@ -401,9 +401,9 @@ public sealed class PythonParserCandidateProofTests : IDisposable
         int extraEntryCount = 0,
         string? uncompressedPayload = null)
     {
-        var packageDirectory = Path.Combine(_repositoryRoot, Guid.NewGuid().ToString("N"));
+        var packageDirectory = TestPathUtils.PathUnder(_repositoryRoot, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(packageDirectory);
-        var packagePath = Path.Combine(packageDirectory, "treesitter-dotnet-1.3.0.nupkg");
+        var packagePath = TestPathUtils.PathUnder(packageDirectory, "treesitter-dotnet-1.3.0.nupkg");
         using var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create);
         for (var index = 0; index < rootNuspecCount; index++)
         {
@@ -435,7 +435,7 @@ public sealed class PythonParserCandidateProofTests : IDisposable
         return packagePath;
     }
 
-    private string ReportPath(string fileName) => Path.Combine(_repositoryRoot, "artifacts", fileName);
+    private string ReportPath(string fileName) => TestPathUtils.PathUnder(_repositoryRoot, "artifacts", fileName);
 
     private static string CreateNuspec(
         string packageId = PythonParserCandidateProofWorkflow.CandidatePackageId,
