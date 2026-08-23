@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Compression;
 using System.Security;
 using System.Security.Cryptography;
@@ -141,6 +142,12 @@ internal sealed class PythonParserCandidateProofWorkflow
                     $"Archive exceeds the {MaximumUncompressedArchiveBytes}-byte uncompressed static inspection limit.");
             }
 
+            var payloadFailure = await ValidateArchiveEntryPayloadsAsync(archive, cancellationToken);
+            if (payloadFailure is not null)
+            {
+                return CreateUninspectableArchiveEvidence(fileInfo, sha256, archive.Entries.Count, 0, payloadFailure);
+            }
+
             var metadata = ReadNuspecMetadata(archive);
             var nativeAssets = archive.Entries
                 .Select(entry => new { Entry = entry, RuntimeIdentifier = GetNativeRuntimeIdentifier(entry.FullName) })
@@ -178,7 +185,7 @@ internal sealed class PythonParserCandidateProofWorkflow
                     "Archive metadata and license/notice paths are recorded for a separate human redistribution review; this candidate proof does not approve a dependency."),
                 null);
         }
-        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException or SecurityException or XmlException or PackageIndexException)
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException or SecurityException or XmlException or PackageIndexException or InvalidOperationException)
         {
             return CreateUninspectableArchiveEvidence(fileInfo, sha256, 0, 0, $"{ex.GetType().Name}: {ex.Message}");
         }
@@ -189,7 +196,7 @@ internal sealed class PythonParserCandidateProofWorkflow
         var total = 0L;
         foreach (var entry in archive.Entries)
         {
-            if (entry.Length > MaximumUncompressedArchiveBytes - total)
+            if (ExceedsUncompressedArchiveByteLimit(total, entry.Length))
             {
                 return null;
             }
@@ -199,6 +206,78 @@ internal sealed class PythonParserCandidateProofWorkflow
 
         return total;
     }
+
+    private static async Task<string?> ValidateArchiveEntryPayloadsAsync(ZipArchive archive, CancellationToken cancellationToken)
+    {
+        var buffer = ArrayPool<byte>.Shared.Rent(80 * 1024);
+        try
+        {
+            var total = 0L;
+            foreach (var entry in archive.Entries)
+            {
+                await using var stream = entry.Open();
+                var entryTotal = 0L;
+                var crc32 = uint.MaxValue;
+                int bytesRead;
+                while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(), cancellationToken)) != 0)
+                {
+                    if (ExceedsUncompressedArchiveByteLimit(total, bytesRead)
+                        || ExceedsUncompressedArchiveByteLimit(entryTotal, bytesRead))
+                    {
+                        return $"Archive payload exceeds the {MaximumUncompressedArchiveBytes}-byte uncompressed static inspection limit.";
+                    }
+
+                    total += bytesRead;
+                    entryTotal += bytesRead;
+                    crc32 = UpdateCrc32(crc32, buffer.AsSpan(0, bytesRead));
+                }
+
+                if (entryTotal != entry.Length)
+                {
+                    return $"Archive entry '{entry.FullName}' produced {entryTotal} bytes but declares {entry.Length} bytes.";
+                }
+
+                if (~crc32 != entry.Crc32)
+                {
+                    return $"Archive entry '{entry.FullName}' does not match its declared CRC-32 checksum.";
+                }
+            }
+
+            return total <= MaximumUncompressedArchiveBytes
+                ? null
+                : $"Archive payload exceeds the {MaximumUncompressedArchiveBytes}-byte uncompressed static inspection limit.";
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static uint UpdateCrc32(uint crc32, ReadOnlySpan<byte> bytes)
+    {
+        foreach (var value in bytes)
+        {
+            crc32 ^= value;
+            for (var bit = 0; bit < 8; bit++)
+            {
+                crc32 = (crc32 >> 1) ^ ((crc32 & 1) == 0 ? 0U : 0xEDB88320U);
+            }
+        }
+
+        return crc32;
+    }
+
+    /// <summary>
+    /// Determines whether adding one declared archive-entry length would exceed the static inspection limit.
+    /// </summary>
+    /// <param name="currentTotal">Already accepted declared uncompressed bytes.</param>
+    /// <param name="nextEntryLength">Declared uncompressed bytes for the next archive entry.</param>
+    /// <returns><see langword="true" /> when the next entry must not be accepted.</returns>
+    internal static bool ExceedsUncompressedArchiveByteLimit(long currentTotal, long nextEntryLength) =>
+        nextEntryLength < 0
+        || currentTotal < 0
+        || currentTotal > MaximumUncompressedArchiveBytes
+        || nextEntryLength > MaximumUncompressedArchiveBytes - currentTotal;
 
     private static PythonParserCandidateArchiveEvidence CreateUninspectableArchiveEvidence(
         FileInfo fileInfo,
@@ -240,13 +319,13 @@ internal sealed class PythonParserCandidateProofWorkflow
 
         using var stream = nuspecEntries[0].Open();
         var document = XDocument.Load(stream, LoadOptions.None);
-        var metadata = document.Root?.Elements().SingleOrDefault(element => element.Name.LocalName == "metadata");
+        var metadata = GetSingleElement(document.Root?.Elements() ?? [], "metadata", "package");
         if (metadata is null)
         {
             throw new PackageIndexException("Python parser candidate .nuspec is missing metadata.");
         }
 
-        var repository = metadata.Elements().SingleOrDefault(element => element.Name.LocalName == "repository");
+        var repository = GetSingleElement(metadata.Elements(), "repository", ".nuspec metadata");
         return new PythonParserCandidateNuspecMetadata(
             GetElementValue(metadata, "id"),
             GetElementValue(metadata, "version"),
@@ -257,7 +336,18 @@ internal sealed class PythonParserCandidateProofWorkflow
     }
 
     private static string GetElementValue(XElement element, string name) =>
-        element.Elements().SingleOrDefault(child => child.Name.LocalName == name)?.Value.Trim() ?? string.Empty;
+        GetSingleElement(element.Elements(), name, ".nuspec metadata")?.Value.Trim() ?? string.Empty;
+
+    private static XElement? GetSingleElement(IEnumerable<XElement> elements, string name, string parentDescription)
+    {
+        var matches = elements.Where(element => element.Name.LocalName == name).ToArray();
+        if (matches.Length > 1)
+        {
+            throw new PackageIndexException($"Python parser candidate {parentDescription} must not contain duplicate '{name}' elements.");
+        }
+
+        return matches.SingleOrDefault();
+    }
 
     private static string? GetNativeRuntimeIdentifier(string entryPath)
     {
@@ -290,7 +380,7 @@ internal sealed class PythonParserCandidateProofWorkflow
         }
 
         Directory.CreateDirectory(reportDirectory);
-        await using var stream = File.Create(reportPath);
+        await using var stream = new FileStream(reportPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         await JsonSerializer.SerializeAsync(
             stream,
             report,
@@ -330,6 +420,10 @@ internal sealed class PythonParserCandidateProofWorkflow
         }
 
         RejectExistingReportLinks(artifactsDirectory, reportPath);
+        if (File.Exists(reportPath) || Directory.Exists(reportPath))
+        {
+            throw new PackageIndexException("Python parser candidate report path must not overwrite an existing artifact.");
+        }
     }
 
     private static void RejectExistingReportLinks(string artifactsDirectory, string reportPath)

@@ -87,7 +87,7 @@ dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurf
   --python-parser-proof-report artifacts/python-parser-proof.json
 ```
 
-Run the command from the repository root. The recorded digest and size are listed above. If either differs, the candidate has changed and the gate must be rerun from the new artifact rather than reusing this result. The command writes its JSON only below the repository's `artifacts/` directory and never adds, restores, builds, loads, or executes `TreeSitter.DotNet` in an AppSurface project.
+Run the command from the repository root with a new report filename. The recorded digest and size are listed above. If either differs, the candidate has changed and the gate must be rerun from the new artifact rather than reusing this result. The command writes an immutable JSON report only below the repository's `artifacts/` directory, refusing existing files and symbolic-link paths, and never adds, restores, builds, loads, or executes `TreeSitter.DotNet` in an AppSurface project.
 
 ## Scope consequence
 

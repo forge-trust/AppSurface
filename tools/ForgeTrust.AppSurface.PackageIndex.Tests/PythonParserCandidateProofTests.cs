@@ -113,9 +113,24 @@ public sealed class PythonParserCandidateProofTests : IDisposable
         Assert.Equal(["browser-wasm"], report.Archive.UnexpectedRuntimeIdentifiers);
     }
 
+    [Fact]
+    public async Task Workflow_RecordsMissingRequiredRuntimeIdentifier()
+    {
+        var candidatePackagePath = CreateCandidatePackage(runtimeIdentifiers: ["osx-arm64"]);
+        var workflow = new PythonParserCandidateProofWorkflow();
+
+        var report = await workflow.RunAsync(
+            new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, ReportPath("missing-rid.json"), MaximumCompressedPackageBytes: long.MaxValue),
+            CancellationToken.None);
+
+        Assert.Contains("native_runtime_identifier_missing", report.RejectionReasons);
+        Assert.Contains("win-x64", report.Archive.MissingRuntimeIdentifiers);
+    }
+
     [Theory]
     [InlineData(0, null, "exactly one root .nuspec")]
     [InlineData(2, "<package><metadata>", "exactly one root .nuspec")]
+    [InlineData(1, "<package><metadata>", "XmlException")]
     [InlineData(1, "<package />", "missing metadata")]
     public async Task Workflow_RecordsMalformedNuspecAsStructuredRejection(
         int rootNuspecCount,
@@ -147,6 +162,51 @@ public sealed class PythonParserCandidateProofTests : IDisposable
 
         Assert.Equal(["archive_inspection_failed"], report.RejectionReasons);
         Assert.Contains("InvalidDataException", report.Archive.InspectionFailure, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Workflow_RecordsDuplicateNuspecMetadataElementsAsStructuredRejection()
+    {
+        var candidatePackagePath = CreateCandidatePackage(
+            nuspecContent: """
+                <package>
+                  <metadata>
+                    <id>TreeSitter.DotNet</id>
+                    <id>Duplicate.Parser</id>
+                    <version>1.3.0</version>
+                    <license type="expression">MIT</license>
+                    <repository type="git" url="https://example.test/tree-sitter-dotnet.git" commit="0123456789abcdef" />
+                  </metadata>
+                </package>
+                """);
+        var workflow = new PythonParserCandidateProofWorkflow();
+
+        var report = await workflow.RunAsync(
+            new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, ReportPath("duplicate-metadata.json")),
+            CancellationToken.None);
+
+        Assert.Equal(["archive_inspection_failed"], report.RejectionReasons);
+        Assert.Contains("duplicate 'id' elements", report.Archive.InspectionFailure, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Workflow_RecordsCorruptArchivePayloadAsStructuredRejection()
+    {
+        const string payload = "candidate-payload-that-will-be-corrupted";
+        var candidatePackagePath = CreateCandidatePackage(uncompressedPayload: payload);
+        var bytes = await File.ReadAllBytesAsync(candidatePackagePath);
+        var payloadOffset = bytes.AsSpan().IndexOf(Encoding.UTF8.GetBytes(payload));
+        Assert.True(payloadOffset >= 0);
+        bytes[payloadOffset] ^= 0x01;
+        await File.WriteAllBytesAsync(candidatePackagePath, bytes);
+        var workflow = new PythonParserCandidateProofWorkflow();
+
+        var report = await workflow.RunAsync(
+            new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, ReportPath("corrupt-payload.json")),
+            CancellationToken.None);
+
+        Assert.Equal(["archive_inspection_failed"], report.RejectionReasons);
+        Assert.Contains("CRC-32 checksum", report.Archive.InspectionFailure, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -182,6 +242,16 @@ public sealed class PythonParserCandidateProofTests : IDisposable
         Assert.Contains("static inspection limit", report.Archive.InspectionFailure, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(0L, 0L, false)]
+    [InlineData(PythonParserCandidateProofWorkflow.MaximumUncompressedArchiveBytes - 1, 1L, false)]
+    [InlineData(PythonParserCandidateProofWorkflow.MaximumUncompressedArchiveBytes, 1L, true)]
+    [InlineData(long.MaxValue, 1L, true)]
+    public void Workflow_RejectsDeclaredUncompressedArchiveOverflow(long currentTotal, long nextEntryLength, bool expected)
+    {
+        Assert.Equal(expected, PythonParserCandidateProofWorkflow.ExceedsUncompressedArchiveByteLimit(currentTotal, nextEntryLength));
+    }
+
     [Fact]
     public async Task Workflow_RejectsOversizedNuspecBeforeParsingIt()
     {
@@ -208,6 +278,23 @@ public sealed class PythonParserCandidateProofTests : IDisposable
                 CancellationToken.None));
 
         Assert.Contains("within the repository artifacts directory", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Workflow_RefusesToOverwriteExistingReports()
+    {
+        var candidatePackagePath = CreateCandidatePackage();
+        Directory.CreateDirectory(Path.Combine(_repositoryRoot, "artifacts"));
+        await File.WriteAllTextAsync(ReportPath("existing.json"), "preserve me");
+        var workflow = new PythonParserCandidateProofWorkflow();
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(
+            () => workflow.RunAsync(
+                new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, ReportPath("existing.json")),
+                CancellationToken.None));
+
+        Assert.Contains("must not overwrite an existing artifact", error.Message, StringComparison.Ordinal);
+        Assert.Equal("preserve me", await File.ReadAllTextAsync(ReportPath("existing.json")));
     }
 
     [Fact]
@@ -311,7 +398,8 @@ public sealed class PythonParserCandidateProofTests : IDisposable
         IReadOnlyList<string>? licenseAndNoticePaths = null,
         string? nuspecContent = null,
         int rootNuspecCount = 1,
-        int extraEntryCount = 0)
+        int extraEntryCount = 0,
+        string? uncompressedPayload = null)
     {
         var packageDirectory = Path.Combine(_repositoryRoot, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(packageDirectory);
@@ -339,6 +427,11 @@ public sealed class PythonParserCandidateProofTests : IDisposable
             WriteArchiveEntry(archive, $"content/{index:D4}.txt", string.Empty);
         }
 
+        if (uncompressedPayload is not null)
+        {
+            WriteArchiveEntry(archive, "content/payload.txt", uncompressedPayload, CompressionLevel.NoCompression);
+        }
+
         return packagePath;
     }
 
@@ -362,9 +455,13 @@ public sealed class PythonParserCandidateProofTests : IDisposable
         </package>
         """;
 
-    private static void WriteArchiveEntry(ZipArchive archive, string path, string content)
+    private static void WriteArchiveEntry(
+        ZipArchive archive,
+        string path,
+        string content,
+        CompressionLevel compressionLevel = CompressionLevel.Optimal)
     {
-        var entry = archive.CreateEntry(path);
+        var entry = archive.CreateEntry(path, compressionLevel);
         using var writer = new StreamWriter(entry.Open(), Encoding.UTF8);
         writer.Write(content);
     }

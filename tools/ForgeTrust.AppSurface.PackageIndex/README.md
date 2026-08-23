@@ -93,6 +93,8 @@ An exit code of `0` means the inspection completed and the report was written; i
 accepted. Reports must be written below the repository's `artifacts/` directory. Read `rejectionReasons` and
 `isEligibleForFurtherReview` from the JSON before taking any dependency action. A candidate that passes static inspection
 still needs a separately approved operating-system-level sandbox design before runtime initialization can become evidence.
+Report destinations are immutable: choose a new filename for every run, because existing files and symbolic-link paths
+are rejected rather than overwritten.
 The [TreeSitter.DotNet 1.3.0 rejection record](../../Web/ForgeTrust.AppSurface.Docs.Tests/TestData/PythonParserDecision/README.md)
 is the current proof: its 50.93 MiB archive exceeds the approved 5 MiB cap, so it must not be referenced by product code.
 
