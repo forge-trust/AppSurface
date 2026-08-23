@@ -76,22 +76,23 @@ remains authored content; after that, retain the markers exactly.
 
 ### Python parser candidate gate
 
-The `inspect-python-parser-candidate` command is a deliberately isolated dependency-selection proof. It accepts one
-local `.nupkg`, enumerates its native runtime assets and NuGet metadata, copies it into a disposable local feed, then
-restores and runs a generated child process through the fixed Python valid/malformed/1,000,000-byte corpus. It writes a
-JSON record containing the archive hash, compressed size, native RID inventory, normalized commands, stdout/stderr, and
-process exit codes. The command never adds the candidate to an AppSurface project or package.
+The `inspect-python-parser-candidate` command is a bounded, static dependency-selection proof. It accepts one local
+`.nupkg`, enumerates its native runtime assets, NuGet metadata, and license/notice paths, then writes JSON containing the
+archive hash, compressed size, RID inventory, and rejection reasons. It never adds, restores, builds, loads, or executes
+candidate package content. A disposable local feed or child process would not sandbox untrusted NuGet build assets,
+managed assemblies, analyzers, or native libraries.
 
 ```bash
 dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
   inspect-python-parser-candidate \
   --python-parser-package /tmp/candidate.nupkg \
-  --python-parser-proof-work-dir /tmp/appsurface-python-parser-proof \
-  --python-parser-proof-report /tmp/python-parser-proof.json
+  --python-parser-proof-report artifacts/python-parser-proof.json
 ```
 
 An exit code of `0` means the inspection completed and the report was written; it does **not** mean the candidate was
-accepted. Read `rejectionReasons` and `isEligibleForFurtherReview` from the JSON before taking any dependency action.
+accepted. Reports must be written below the repository's `artifacts/` directory. Read `rejectionReasons` and
+`isEligibleForFurtherReview` from the JSON before taking any dependency action. A candidate that passes static inspection
+still needs a separately approved operating-system-level sandbox design before runtime initialization can become evidence.
 The [TreeSitter.DotNet 1.3.0 rejection record](../../Web/ForgeTrust.AppSurface.Docs.Tests/TestData/PythonParserDecision/README.md)
 is the current proof: its 50.93 MiB archive exceeds the approved 5 MiB cap, so it must not be referenced by product code.
 

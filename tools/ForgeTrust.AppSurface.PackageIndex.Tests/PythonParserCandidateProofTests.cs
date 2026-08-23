@@ -14,21 +14,13 @@ public sealed class PythonParserCandidateProofTests : IDisposable
     }
 
     [Fact]
-    public async Task Workflow_RecordsArchiveInventoryAndSuccessfulIsolatedSmokeWhenPackageExceedsBudget()
+    public async Task Workflow_RecordsArchiveInventoryAndRejectsPackageOverBudget()
     {
         var candidatePackagePath = CreateCandidatePackage();
-        var reportPath = Path.Combine(_repositoryRoot, "report.json");
-        var workDirectory = Path.Combine(_repositoryRoot, "artifacts", "proof");
-        var consumerDirectory = Path.Combine(workDirectory, "consumer");
-        var commandRunner = new RecordingCommandRunner(
-        [
-            new ExternalCommandResult(0, $"Restored {consumerDirectory} (in 123 ms)", string.Empty),
-            new ExternalCommandResult(0, "RID=osx-arm64\nVALID=module\nVALID_HAS_ERROR=False\nMALFORMED=module\nMALFORMED_HAS_ERROR=True\nLARGE_SOURCE_BYTES=1000000\nLARGE_END_INDEX=1000000\nLARGE=module\n", string.Empty)
-        ]);
-        var workflow = new PythonParserCandidateProofWorkflow(commandRunner);
+        var workflow = new PythonParserCandidateProofWorkflow();
 
         var report = await workflow.RunAsync(
-            new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, workDirectory, reportPath, MaximumCompressedPackageBytes: 1),
+            new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, ReportPath("report.json"), MaximumCompressedPackageBytes: 1),
             CancellationToken.None);
 
         Assert.False(report.IsEligibleForFurtherReview);
@@ -37,25 +29,14 @@ public sealed class PythonParserCandidateProofTests : IDisposable
         Assert.Empty(report.Archive.UnexpectedRuntimeIdentifiers);
         Assert.Empty(report.Archive.LicenseAndNoticePaths);
         Assert.Equal("metadata_recorded_not_accepted", report.Archive.ProvenanceReview.Status);
+        Assert.Null(report.Archive.InspectionFailure);
         Assert.True(report.Archive.HasCompleteProvenanceMetadata);
         Assert.Equal(PythonParserCandidateProofWorkflow.CandidatePackageId, report.Archive.Metadata.PackageId);
         Assert.Equal(PythonParserCandidateProofWorkflow.CandidatePackageVersion, report.Archive.Metadata.PackageVersion);
         Assert.Equal(9, report.Archive.NativeRuntimeAssets.Count);
         Assert.Contains("runtimes/osx-arm64/native/tree-sitter-python.bin", report.Archive.NativeRuntimeAssets.Single(asset => asset.RuntimeIdentifier == "osx-arm64").NativeAssetPaths);
-        Assert.Equal(0, report.Restore!.ExitCode);
-        Assert.Equal("Restored <consumer> (in <duration>)", report.Restore.StandardOutput);
-        Assert.Equal(0, report.Smoke!.ExitCode);
-        Assert.Contains("RID=osx-arm64", report.Smoke.StandardOutput, StringComparison.Ordinal);
-        Assert.Contains("MALFORMED_HAS_ERROR=True", report.Smoke.StandardOutput, StringComparison.Ordinal);
-        Assert.Contains("LARGE_END_INDEX=1000000", report.Smoke.StandardOutput, StringComparison.Ordinal);
-        Assert.Equal(2, commandRunner.Requests.Count);
-        Assert.Equal("dotnet", commandRunner.Requests[0].FileName);
-        Assert.Equal(["restore", "PythonParserCandidateSmoke.csproj", "--configfile", "NuGet.config", "--disable-parallel"], commandRunner.Requests[0].Arguments);
-        Assert.Equal(["run", "--project", "PythonParserCandidateSmoke.csproj", "--no-restore"], commandRunner.Requests[1].Arguments);
-        Assert.Contains("new Language(\"Python\")", await File.ReadAllTextAsync(Path.Combine(workDirectory, "consumer", "Program.cs")), StringComparison.Ordinal);
-        Assert.True(File.Exists(Path.Combine(workDirectory, "local-feed", "treesitter.dotnet.1.3.0.nupkg")));
 
-        await using var reportStream = File.OpenRead(reportPath);
+        await using var reportStream = File.OpenRead(ReportPath("report.json"));
         using var reportJson = await JsonDocument.ParseAsync(reportStream);
         Assert.Equal("treesitter-dotnet-1.3.0.nupkg", reportJson.RootElement.GetProperty("archive").GetProperty("packageFileName").GetString());
         Assert.Contains("compressed_archive_exceeds_budget", reportJson.RootElement.GetProperty("rejectionReasons").EnumerateArray().Select(value => value.GetString()));
@@ -71,74 +52,143 @@ public sealed class PythonParserCandidateProofTests : IDisposable
                 "NOTICE.txt",
                 "legal/third-party-notices.md"
             ]);
-        var commandRunner = new RecordingCommandRunner(
-        [
-            new ExternalCommandResult(0, "Restored", string.Empty),
-            new ExternalCommandResult(0, "SMOKE", string.Empty)
-        ]);
-        var workflow = new PythonParserCandidateProofWorkflow(commandRunner);
+        var workflow = new PythonParserCandidateProofWorkflow();
 
         var report = await workflow.RunAsync(
-            new PythonParserCandidateProofRequest(
-                _repositoryRoot,
-                candidatePackagePath,
-                Path.Combine(_repositoryRoot, "artifacts", "notice-inventory"),
-                Path.Combine(_repositoryRoot, "notice-inventory.json"),
-                MaximumCompressedPackageBytes: long.MaxValue),
+            new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, ReportPath("notice-inventory.json"), MaximumCompressedPackageBytes: long.MaxValue),
             CancellationToken.None);
 
-        Assert.Equal(
-            ["NOTICE.txt", "legal/third-party-notices.md", "licenses/COPYING"],
-            report.Archive.LicenseAndNoticePaths);
+        Assert.True(report.IsEligibleForFurtherReview);
+        Assert.Equal(["NOTICE.txt", "legal/third-party-notices.md", "licenses/COPYING"], report.Archive.LicenseAndNoticePaths);
         Assert.Equal("metadata_recorded_not_accepted", report.Archive.ProvenanceReview.Status);
         Assert.Contains("separate human redistribution review", report.Archive.ProvenanceReview.Explanation, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task Workflow_RecordsRestoreFailureWithoutStartingSmokeProcess()
+    [Theory]
+    [InlineData("package-id")]
+    [InlineData("package-version")]
+    [InlineData("provenance")]
+    public async Task Workflow_RecordsPackageIdentityAndProvenanceRejections(string scenario)
     {
-        var candidatePackagePath = CreateCandidatePackage();
-        var commandRunner = new RecordingCommandRunner([new ExternalCommandResult(1, string.Empty, "restore failed")]);
-        var workflow = new PythonParserCandidateProofWorkflow(commandRunner);
+        var candidatePackagePath = CreateCandidatePackage(
+            nuspecContent: scenario switch
+            {
+                "package-id" => CreateNuspec(packageId: "Different.Parser"),
+                "package-version" => CreateNuspec(packageVersion: "9.9.9"),
+                "provenance" => CreateNuspec(repositoryCommit: string.Empty),
+                _ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, "Unsupported proof scenario.")
+            });
+        var workflow = new PythonParserCandidateProofWorkflow();
 
         var report = await workflow.RunAsync(
-            new PythonParserCandidateProofRequest(
-                _repositoryRoot,
-                candidatePackagePath,
-                Path.Combine(_repositoryRoot, "artifacts", "restore-failure"),
-                Path.Combine(_repositoryRoot, "restore-failure.json"),
-                MaximumCompressedPackageBytes: 1),
+            new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, ReportPath($"{scenario}.json"), MaximumCompressedPackageBytes: long.MaxValue),
             CancellationToken.None);
 
-        Assert.Contains("consumer_restore_failed", report.RejectionReasons);
-        Assert.NotNull(report.Restore);
-        Assert.Null(report.Smoke);
-        Assert.Single(commandRunner.Requests);
+        var expectedRejection = scenario switch
+        {
+            "package-id" => "package_id_mismatch",
+            "package-version" => "package_version_mismatch",
+            "provenance" => "provenance_metadata_incomplete",
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, "Unsupported proof scenario.")
+        };
+        Assert.Contains(expectedRejection, report.RejectionReasons);
+        Assert.False(report.IsEligibleForFurtherReview);
     }
 
     [Fact]
-    public async Task Workflow_RejectsMissingRequiredRuntimeAssetWhileRetainingSmokeEvidence()
+    public async Task Workflow_RecordsUnexpectedRuntimeIdentifier()
     {
-        var candidatePackagePath = CreateCandidatePackage(runtimeIdentifiers: ["osx-arm64"]);
-        var commandRunner = new RecordingCommandRunner(
-        [
-            new ExternalCommandResult(0, "Restored", string.Empty),
-            new ExternalCommandResult(0, "RID=osx-arm64", string.Empty)
-        ]);
-        var workflow = new PythonParserCandidateProofWorkflow(commandRunner);
+        var candidatePackagePath = CreateCandidatePackage(
+            runtimeIdentifiers:
+            [
+                "linux-arm", "linux-arm64", "linux-x64", "linux-x86", "osx-arm64", "osx-x64", "win-arm64", "win-x64", "win-x86", "browser-wasm"
+            ]);
+        var workflow = new PythonParserCandidateProofWorkflow();
 
         var report = await workflow.RunAsync(
-            new PythonParserCandidateProofRequest(
-                _repositoryRoot,
-                candidatePackagePath,
-                Path.Combine(_repositoryRoot, "artifacts", "missing-rid"),
-                Path.Combine(_repositoryRoot, "missing-rid.json"),
-                MaximumCompressedPackageBytes: long.MaxValue),
+            new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, ReportPath("unexpected-rid.json"), MaximumCompressedPackageBytes: long.MaxValue),
             CancellationToken.None);
 
-        Assert.Contains("native_runtime_identifier_missing", report.RejectionReasons);
-        Assert.Contains("win-x64", report.Archive.MissingRuntimeIdentifiers);
-        Assert.NotNull(report.Smoke);
+        Assert.Contains("native_runtime_identifier_unexpected", report.RejectionReasons);
+        Assert.Equal(["browser-wasm"], report.Archive.UnexpectedRuntimeIdentifiers);
+    }
+
+    [Theory]
+    [InlineData(0, null, "exactly one root .nuspec")]
+    [InlineData(2, "<package><metadata>", "exactly one root .nuspec")]
+    [InlineData(1, "<package />", "missing metadata")]
+    public async Task Workflow_RecordsMalformedNuspecAsStructuredRejection(
+        int rootNuspecCount,
+        string? nuspecContent,
+        string expectedFailure)
+    {
+        var candidatePackagePath = CreateCandidatePackage(rootNuspecCount: rootNuspecCount, nuspecContent: nuspecContent);
+        var workflow = new PythonParserCandidateProofWorkflow();
+
+        var report = await workflow.RunAsync(
+            new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, ReportPath($"invalid-{rootNuspecCount}.json")),
+            CancellationToken.None);
+
+        Assert.Equal(["archive_inspection_failed"], report.RejectionReasons);
+        Assert.Contains(expectedFailure, report.Archive.InspectionFailure, StringComparison.Ordinal);
+        Assert.Equal("not_evaluated", report.Archive.ProvenanceReview.Status);
+    }
+
+    [Fact]
+    public async Task Workflow_RecordsInvalidZipAsStructuredRejection()
+    {
+        var candidatePackagePath = Path.Combine(_repositoryRoot, "invalid.nupkg");
+        await File.WriteAllTextAsync(candidatePackagePath, "not a zip archive");
+        var workflow = new PythonParserCandidateProofWorkflow();
+
+        var report = await workflow.RunAsync(
+            new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, ReportPath("invalid-zip.json")),
+            CancellationToken.None);
+
+        Assert.Equal(["archive_inspection_failed"], report.RejectionReasons);
+        Assert.Contains("InvalidDataException", report.Archive.InspectionFailure, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Workflow_RejectsArchivesWithExcessiveEntryCounts()
+    {
+        var candidatePackagePath = CreateCandidatePackage(extraEntryCount: PythonParserCandidateProofWorkflow.MaximumArchiveEntryCount);
+        var workflow = new PythonParserCandidateProofWorkflow();
+
+        var report = await workflow.RunAsync(
+            new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, ReportPath("entry-limit.json")),
+            CancellationToken.None);
+
+        Assert.Equal(["archive_inspection_failed"], report.RejectionReasons);
+        Assert.Contains("static inspection limit", report.Archive.InspectionFailure, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Workflow_RejectsOversizedNuspecBeforeParsingIt()
+    {
+        var candidatePackagePath = CreateCandidatePackage(nuspecContent: new string('x', checked((int)PythonParserCandidateProofWorkflow.MaximumNuspecBytes + 1)));
+        var workflow = new PythonParserCandidateProofWorkflow();
+
+        var report = await workflow.RunAsync(
+            new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, ReportPath("nuspec-limit.json")),
+            CancellationToken.None);
+
+        Assert.Equal(["archive_inspection_failed"], report.RejectionReasons);
+        Assert.Contains("nuspec exceeds", report.Archive.InspectionFailure, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Workflow_RejectsReportsOutsideRepositoryArtifacts()
+    {
+        var candidatePackagePath = CreateCandidatePackage();
+        var workflow = new PythonParserCandidateProofWorkflow();
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(
+            () => workflow.RunAsync(
+                new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, Path.Combine(_repositoryRoot, "report.json")),
+                CancellationToken.None));
+
+        Assert.Contains("within the repository artifacts directory", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -153,7 +203,6 @@ public sealed class PythonParserCandidateProofTests : IDisposable
             [
                 "inspect-python-parser-candidate",
                 "--python-parser-package", candidatePackagePath,
-                "--python-parser-proof-work-dir", "artifacts/candidate-proof",
                 "--python-parser-proof-report", "artifacts/candidate-proof.json"
             ],
             standardOut,
@@ -162,36 +211,53 @@ public sealed class PythonParserCandidateProofTests : IDisposable
             inspectPythonParserCandidateAsync: (request, _) =>
             {
                 capturedRequest = request;
-                return Task.FromResult(CreateRejectedReport());
+                return Task.FromResult(CreateReport(["compressed_archive_exceeds_budget"]));
             });
 
         Assert.Equal(0, exitCode);
         Assert.NotNull(capturedRequest);
         Assert.Equal(candidatePackagePath, capturedRequest!.CandidatePackagePath);
-        Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "candidate-proof"), capturedRequest.WorkDirectory);
-        Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "candidate-proof.json"), capturedRequest.ReportPath);
+        Assert.Equal(ReportPath("candidate-proof.json"), capturedRequest.ReportPath);
         Assert.Contains("rejected (compressed_archive_exceeds_budget)", standardOut.ToString(), StringComparison.Ordinal);
         Assert.Equal(string.Empty, standardError.ToString());
     }
 
     [Fact]
-    public async Task Workflow_RejectsAWorkspaceThatContainsTheCandidatePackage()
+    public async Task Program_ReportsAnEligibleCandidateForFurtherReview()
     {
-        var workDirectory = Path.Combine(_repositoryRoot, "unsafe-workspace");
-        Directory.CreateDirectory(workDirectory);
-        var candidatePackagePath = CreateCandidatePackage(directory: workDirectory);
-        var workflow = new PythonParserCandidateProofWorkflow(new RecordingCommandRunner([]));
+        var standardOut = new StringWriter();
+        var standardError = new StringWriter();
 
-        var error = await Assert.ThrowsAsync<PackageIndexException>(
-            () => workflow.RunAsync(
-                new PythonParserCandidateProofRequest(
-                    _repositoryRoot,
-                    candidatePackagePath,
-                    workDirectory,
-                    Path.Combine(_repositoryRoot, "unsafe.json")),
-                CancellationToken.None));
+        var exitCode = await Program.RunAsync(
+            [
+                "inspect-python-parser-candidate",
+                "--python-parser-package", "candidate.nupkg"
+            ],
+            standardOut,
+            standardError,
+            _repositoryRoot,
+            inspectPythonParserCandidateAsync: (_, _) => Task.FromResult(CreateReport([])));
 
-        Assert.Contains("must not be contained", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, exitCode);
+        Assert.Contains("eligible for further review", standardOut.ToString(), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, standardError.ToString());
+    }
+
+    [Fact]
+    public async Task Program_RequiresTheCandidatePackageOption()
+    {
+        var standardOut = new StringWriter();
+        var standardError = new StringWriter();
+
+        var exitCode = await Program.RunAsync(
+            ["inspect-python-parser-candidate"],
+            standardOut,
+            standardError,
+            _repositoryRoot);
+
+        Assert.Equal(1, exitCode);
+        Assert.Equal(string.Empty, standardOut.ToString());
+        Assert.Contains("requires '--python-parser-package <path>'", standardError.ToString(), StringComparison.Ordinal);
     }
 
     public void Dispose()
@@ -205,25 +271,20 @@ public sealed class PythonParserCandidateProofTests : IDisposable
     private string CreateCandidatePackage(
         IReadOnlyList<string>? runtimeIdentifiers = null,
         IReadOnlyList<string>? licenseAndNoticePaths = null,
-        string? directory = null)
+        string? nuspecContent = null,
+        int rootNuspecCount = 1,
+        int extraEntryCount = 0)
     {
-        var packageDirectory = directory ?? Path.Combine(_repositoryRoot, "candidate");
+        var packageDirectory = Path.Combine(_repositoryRoot, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(packageDirectory);
         var packagePath = Path.Combine(packageDirectory, "treesitter-dotnet-1.3.0.nupkg");
         using var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create);
-        WriteArchiveEntry(
-            archive,
-            "TreeSitter.DotNet.nuspec",
-            """
-            <package>
-              <metadata>
-                <id>TreeSitter.DotNet</id>
-                <version>1.3.0</version>
-                <license type="expression">MIT</license>
-                <repository type="git" url="https://example.test/tree-sitter-dotnet.git" commit="0123456789abcdef" />
-              </metadata>
-            </package>
-            """);
+        for (var index = 0; index < rootNuspecCount; index++)
+        {
+            var suffix = index == 0 ? string.Empty : $".{index}";
+            WriteArchiveEntry(archive, $"TreeSitter.DotNet{suffix}.nuspec", nuspecContent ?? CreateNuspec());
+        }
+
         foreach (var licenseOrNoticePath in licenseAndNoticePaths ?? [])
         {
             WriteArchiveEntry(archive, licenseOrNoticePath, licenseOrNoticePath);
@@ -235,8 +296,33 @@ public sealed class PythonParserCandidateProofTests : IDisposable
             WriteArchiveEntry(archive, $"runtimes/{runtimeIdentifier}/native/tree-sitter-python.bin", runtimeIdentifier);
         }
 
+        for (var index = 0; index < extraEntryCount; index++)
+        {
+            WriteArchiveEntry(archive, $"content/{index:D4}.txt", string.Empty);
+        }
+
         return packagePath;
     }
+
+    private string ReportPath(string fileName) => Path.Combine(_repositoryRoot, "artifacts", fileName);
+
+    private static string CreateNuspec(
+        string packageId = PythonParserCandidateProofWorkflow.CandidatePackageId,
+        string packageVersion = PythonParserCandidateProofWorkflow.CandidatePackageVersion,
+        string licenseExpression = "MIT",
+        string repositoryType = "git",
+        string repositoryUrl = "https://example.test/tree-sitter-dotnet.git",
+        string repositoryCommit = "0123456789abcdef") =>
+        $$"""
+        <package>
+          <metadata>
+            <id>{{packageId}}</id>
+            <version>{{packageVersion}}</version>
+            <license type="expression">{{licenseExpression}}</license>
+            <repository type="{{repositoryType}}" url="{{repositoryUrl}}" commit="{{repositoryCommit}}" />
+          </metadata>
+        </package>
+        """;
 
     private static void WriteArchiveEntry(ZipArchive archive, string path, string content)
     {
@@ -245,7 +331,7 @@ public sealed class PythonParserCandidateProofTests : IDisposable
         writer.Write(content);
     }
 
-    private static PythonParserCandidateProofReport CreateRejectedReport() =>
+    private static PythonParserCandidateProofReport CreateReport(IReadOnlyList<string> rejectionReasons) =>
         new(
             new PythonParserCandidateArchiveEvidence(
                 "TreeSitter.DotNet.1.3.0.nupkg",
@@ -264,31 +350,7 @@ public sealed class PythonParserCandidateProofTests : IDisposable
                 [],
                 [],
                 [],
-                new PythonParserCandidateProvenanceReviewEvidence("metadata_recorded_not_accepted", "Not accepted.")),
-            null,
-            null,
-            ["compressed_archive_exceeds_budget"]);
-
-    private sealed class RecordingCommandRunner : IExternalCommandRunner
-    {
-        private readonly Queue<ExternalCommandResult> _results;
-
-        internal RecordingCommandRunner(IEnumerable<ExternalCommandResult> results)
-        {
-            _results = new Queue<ExternalCommandResult>(results);
-        }
-
-        internal List<ExternalCommandRequest> Requests { get; } = [];
-
-        public Task<ExternalCommandResult> RunAsync(ExternalCommandRequest request, CancellationToken cancellationToken)
-        {
-            Requests.Add(request);
-            if (_results.Count == 0)
-            {
-                throw new InvalidOperationException("No recorded command result remains.");
-            }
-
-            return Task.FromResult(_results.Dequeue());
-        }
-    }
+                new PythonParserCandidateProvenanceReviewEvidence("metadata_recorded_not_accepted", "Not accepted."),
+                null),
+            rejectionReasons);
 }

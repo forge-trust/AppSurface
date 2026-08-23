@@ -28,7 +28,7 @@ The successful local native-load smoke below is useful evidence about the artifa
 | Total uncompressed bytes | 617,084,456 |
 
 The archive size, rather than the NuGet gallery's rounded display, is the acceptance measurement. The SHA-256 identifies the exact bytes that produced this result.
-The [machine-readable proof record](./tree-sitter-dotnet-1.3.0-proof.json) retains the archive inventory, process commands, exit codes, and captured output.
+The [machine-readable proof record](./tree-sitter-dotnet-1.3.0-proof.json) retains the bounded archive inventory, metadata, notice-path inventory, and static-gate result.
 
 ## Native payload inventory
 
@@ -62,29 +62,13 @@ The artifact's single `.nuspec` declares the following metadata:
 
 That metadata is recorded for traceability only. The proof's sorted `licenseAndNoticePaths` inventory is empty: the archive has no in-package `LICENSE`, `NOTICE`, `COPYING`, or third-party-notice file. Its `provenanceReview.status` is `metadata_recorded_not_accepted`, so AppSurface has not accepted the candidate's provenance or notices for redistribution and has not added a third-party notice. Completing that human review would not change the already-failing size gate.
 
-## Isolated consumer smoke
+## Static-inspection boundary
 
-An isolated `net10.0` console project was created outside the repository. It restored only from a local feed containing the SHA-256-verified `.nupkg`; no AppSurface project referenced the candidate. The child process performed the candidate's documented Python initialization and parsed three fixed inputs:
+The original spike proposed a disposable restore and child-process smoke. Security review established that a local NuGet feed and child process do not sandbox package build assets, managed assemblies, analyzers, or native libraries. This candidate has already failed its non-negotiable compressed-size gate, so executing its code would add risk without changing the rejection decision.
 
-1. A valid documented Python function.
-2. A syntactically malformed function declaration.
-3. A 1,000,000-byte repeated-source input, which is the largest fixed corpus input used by this gate check. It exercises parser behavior only; AppSurface has no Python-file budget implementation because the candidate was rejected before integration.
+The committed gate therefore performs bounded static inspection only: it reads the archive hash, central-directory metadata, native RID paths, notice-path inventory, and a root `.nuspec` whose size is capped at 512 KiB. It rejects archives above 64 MiB compressed, 1,024 entries, or 1 GiB declared uncompressed size before parsing package metadata. It never restores, builds, loads, or executes the candidate, and no AppSurface project references it.
 
-Observed child-process result:
-
-```text
-exit code: 0
-RID=osx-arm64
-VALID=module
-VALID_HAS_ERROR=False
-MALFORMED=module
-MALFORMED_HAS_ERROR=True
-LARGE_SOURCE_BYTES=1000000
-LARGE_END_INDEX=1000000
-LARGE=module
-```
-
-The binding initialized and returned a parse tree for every input. The valid source has no error node, the malformed source has an error node, and the large source's parsed end index matches all 1,000,000 bytes. The child completed without an abnormal exit or child-process stderr output. The successful restore emitted the .NET SDK's workload-verification advisory on stderr; that advisory is captured in the [machine-readable proof record](./tree-sitter-dotnet-1.3.0-proof.json) and is not a restore failure. This is evidence for the local `osx-arm64` asset only. Windows and Linux consumer smoke paths were intentionally not added to CI because the candidate had already failed the non-negotiable distribution-size limit.
+A future candidate that passes the static gate needs a separately approved, operating-system-level sandbox design before runtime initialization can be considered acceptance evidence. This record makes no claim that TreeSitter.DotNet initializes correctly on any RID.
 
 ## Reproduction
 
@@ -100,11 +84,10 @@ unzip -p /tmp/treesitter-dotnet-1.3.0.nupkg '*.nuspec'
 dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
   inspect-python-parser-candidate \
   --python-parser-package /tmp/treesitter-dotnet-1.3.0.nupkg \
-  --python-parser-proof-work-dir /tmp/appsurface-python-parser-proof \
-  --python-parser-proof-report /tmp/tree-sitter-dotnet-1.3.0-proof.json
+  --python-parser-proof-report artifacts/python-parser-proof.json
 ```
 
-The recorded digest and size are listed above. If either differs, the candidate has changed and the gate must be rerun from the new artifact rather than reusing this result. The command generates an isolated `net10.0` console project, restores it only from a local feed containing the verified archive, and records its valid, malformed, and 1,000,000-byte fixed-corpus results. It never adds `TreeSitter.DotNet` to an AppSurface project.
+Run the command from the repository root. The recorded digest and size are listed above. If either differs, the candidate has changed and the gate must be rerun from the new artifact rather than reusing this result. The command writes its JSON only below the repository's `artifacts/` directory and never adds, restores, builds, loads, or executes `TreeSitter.DotNet` in an AppSurface project.
 
 ## Scope consequence
 

@@ -38,8 +38,8 @@ internal static class Program
                       Restore published packages from a clean NuGet configuration.
           release-prep-witness
                       Emit a read-only JSON witness for generated package documentation in a release-preparation diff.
-          inspect-python-parser-candidate
-                      Inspect one local TreeSitter.DotNet archive and run its fixed Python corpus in a disposable child process.
+        inspect-python-parser-candidate
+                      Statically inspect one local TreeSitter.DotNet archive without restoring or executing package content.
           gate        Validate release metadata, package class rules, stale brand strings, and managed release-guidance policy; does not write files.
 
         Options:
@@ -75,10 +75,8 @@ internal static class Program
           --witness <path>      Required JSON witness output path for release-prep-witness; normally a temporary path.
           --python-parser-package <path>
                                 Required local TreeSitter.DotNet .nupkg for inspect-python-parser-candidate.
-          --python-parser-proof-work-dir <path>
-                                Disposable candidate-proof workspace. Defaults to <artifacts-output>/python-parser-candidate-proof.
           --python-parser-proof-report <path>
-                                JSON candidate-proof report. Defaults to <artifacts-output>/python-parser-candidate-proof.json.
+                                JSON candidate-proof report beneath <repo-root>/artifacts/. Defaults to <artifacts-output>/python-parser-candidate-proof.json.
           -h, --help            Show this help.
         """;
 
@@ -343,7 +341,7 @@ internal static class Program
         PythonParserCandidateProofRequest request,
         CancellationToken cancellationToken)
     {
-        var workflow = new PythonParserCandidateProofWorkflow(new CliWrapCommandRunner());
+        var workflow = new PythonParserCandidateProofWorkflow();
         return await workflow.RunAsync(request, cancellationToken);
     }
 
@@ -386,7 +384,6 @@ internal static class Program
 /// <param name="BaseRef">Optional fetched base ref or commit used only by the release-preparation witness command.</param>
 /// <param name="WitnessPath">Optional explicit JSON witness destination used only by the release-preparation witness command.</param>
 /// <param name="PythonParserCandidatePackagePath">Optional local candidate package supplied only to the parser-candidate inspection command.</param>
-/// <param name="PythonParserProofWorkDirectory">Disposable candidate-proof workspace path.</param>
 /// <param name="PythonParserProofReportPath">Machine-readable candidate-proof report path.</param>
 internal sealed record CommandLineOptions(
     PackageIndexRequest Request,
@@ -407,7 +404,6 @@ internal sealed record CommandLineOptions(
     string? BaseRef,
     string? WitnessPath,
     string? PythonParserCandidatePackagePath,
-    string PythonParserProofWorkDirectory,
     string PythonParserProofReportPath)
 {
     /// <summary>
@@ -440,7 +436,6 @@ internal sealed record CommandLineOptions(
         string? baseRef = null;
         string? witnessPath = null;
         string? pythonParserCandidatePackagePath = null;
-        string? pythonParserProofWorkDirectory = null;
         string? pythonParserProofReportPath = null;
 
         for (var index = 0; index < args.Length; index++)
@@ -572,12 +567,6 @@ internal sealed record CommandLineOptions(
                 continue;
             }
 
-            if (string.Equals(argument, "--python-parser-proof-work-dir", StringComparison.Ordinal))
-            {
-                pythonParserProofWorkDirectory = ReadRequiredValue(args, ref index, argument);
-                continue;
-            }
-
             if (string.Equals(argument, "--python-parser-proof-report", StringComparison.Ordinal))
             {
                 pythonParserProofReportPath = ReadRequiredValue(args, ref index, argument);
@@ -602,7 +591,6 @@ internal sealed record CommandLineOptions(
         var resolvedPublishLogPath = ResolvePath(publishLogPath, repoRoot, Path.Join(repoRoot, "artifacts", "package-publish-log.md"));
         var resolvedSmokeWorkDirectory = ResolvePath(smokeWorkDirectory, repoRoot, Path.Join(repoRoot, "artifacts", "package-smoke"));
         var resolvedSmokeReportPath = ResolvePath(smokeReportPath, repoRoot, Path.Join(repoRoot, "artifacts", "package-smoke-report.md"));
-        var resolvedPythonParserProofWorkDirectory = ResolvePath(pythonParserProofWorkDirectory, repoRoot, Path.Join(resolvedArtifactsOutputPath, "python-parser-candidate-proof"));
         var resolvedPythonParserProofReportPath = ResolvePath(pythonParserProofReportPath, repoRoot, Path.Join(resolvedArtifactsOutputPath, "python-parser-candidate-proof.json"));
 
         return new CommandLineOptions(
@@ -624,7 +612,6 @@ internal sealed record CommandLineOptions(
             baseRef,
             string.IsNullOrWhiteSpace(witnessPath) ? null : ResolvePath(witnessPath, repoRoot, witnessPath),
             string.IsNullOrWhiteSpace(pythonParserCandidatePackagePath) ? null : ResolvePath(pythonParserCandidatePackagePath, repoRoot, pythonParserCandidatePackagePath),
-            resolvedPythonParserProofWorkDirectory,
             resolvedPythonParserProofReportPath);
     }
 
@@ -708,7 +695,7 @@ internal sealed record CommandLineOptions(
     /// <summary>
     /// Validates and converts the parser-candidate inspection options.
     /// </summary>
-    /// <returns>Resolved candidate archive, disposable workspace, and JSON report inputs.</returns>
+    /// <returns>Resolved candidate archive and JSON report inputs.</returns>
     /// <exception cref="PackageIndexException">Thrown when the required local candidate archive option is absent.</exception>
     internal PythonParserCandidateProofRequest CreatePythonParserCandidateProofRequest()
     {
@@ -720,7 +707,6 @@ internal sealed record CommandLineOptions(
         return new PythonParserCandidateProofRequest(
             Request.RepositoryRoot,
             PythonParserCandidatePackagePath,
-            PythonParserProofWorkDirectory,
             PythonParserProofReportPath);
     }
 

@@ -3,28 +3,29 @@ using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
+using System.Xml;
 using System.Xml.Linq;
 
 namespace ForgeTrust.AppSurface.PackageIndex;
 
 /// <summary>
-/// Runs a disposable, package-only proof for the explicitly evaluated Python parser candidate.
+/// Performs a bounded, static inspection of an explicitly evaluated Python parser package candidate.
 /// </summary>
 /// <remarks>
-/// The workflow never adds the candidate to an AppSurface project. Instead, it copies the supplied archive to a
-/// generated local feed, restores a temporary console application from that feed only, and runs the documented
-/// <c>TreeSitter.Language("Python")</c> initialization in a separate process. A non-zero, timed-out, or malformed
-/// proof result is evidence for candidate rejection rather than an in-process failure that a Docs harvester must catch.
+/// This workflow deliberately never restores, builds, loads, or executes candidate package content. A local feed and
+/// a child process are not a security boundary for untrusted NuGet build assets, managed assemblies, analyzers, or
+/// native libraries. A future candidate that passes this static gate needs a separately approved, sandboxed execution
+/// design before runtime initialization can become acceptance evidence.
 /// </remarks>
 internal sealed class PythonParserCandidateProofWorkflow
 {
     internal const string CandidatePackageId = "TreeSitter.DotNet";
     internal const string CandidatePackageVersion = "1.3.0";
     internal const long MaximumCompressedPackageBytes = 5L * 1024 * 1024;
-    internal const int DotNetCommandTimeoutMilliseconds = 180_000;
-
-    private const string EmptyMsBuildProject = "<Project />\n";
+    internal const long MaximumArchiveBytesToInspect = 64L * 1024 * 1024;
+    internal const int MaximumArchiveEntryCount = 1_024;
+    internal const long MaximumUncompressedArchiveBytes = 1L * 1024 * 1024 * 1024;
+    internal const long MaximumNuspecBytes = 512L * 1024;
 
     private static readonly IReadOnlyList<string> RequiredRuntimeIdentifiers =
     [
@@ -39,25 +40,13 @@ internal sealed class PythonParserCandidateProofWorkflow
         "win-x86"
     ];
 
-    private readonly IExternalCommandRunner _commandRunner;
-
     /// <summary>
-    /// Initializes a package-only candidate proof workflow.
+    /// Inspects the supplied archive and writes deterministic static-gate evidence.
     /// </summary>
-    /// <param name="commandRunner">External command runner used for generated consumer restore and execution.</param>
-    internal PythonParserCandidateProofWorkflow(IExternalCommandRunner commandRunner)
-    {
-        ArgumentNullException.ThrowIfNull(commandRunner);
-        _commandRunner = commandRunner;
-    }
-
-    /// <summary>
-    /// Inspects the supplied archive and runs the fixed Python parser smoke corpus in an isolated child process.
-    /// </summary>
-    /// <param name="request">Repository, candidate archive, workspace, report, and size-budget inputs.</param>
-    /// <param name="cancellationToken">Cancellation token propagated to file and process operations.</param>
-    /// <returns>A machine-readable record of archive, native-asset, and child-process evidence.</returns>
-    /// <exception cref="PackageIndexException">Thrown when the request or supplied archive cannot be inspected safely.</exception>
+    /// <param name="request">Repository, candidate archive, report, and size-budget inputs.</param>
+    /// <param name="cancellationToken">Cancellation token propagated to file operations.</param>
+    /// <returns>A machine-readable record of archive, native-asset, and provenance evidence.</returns>
+    /// <exception cref="PackageIndexException">Thrown when the request has unsafe or incomplete paths.</exception>
     internal async Task<PythonParserCandidateProofReport> RunAsync(
         PythonParserCandidateProofRequest request,
         CancellationToken cancellationToken)
@@ -65,236 +54,172 @@ internal sealed class PythonParserCandidateProofWorkflow
         ValidateRequest(request);
         var archive = await InspectArchiveAsync(request, cancellationToken);
         var rejectionReasons = new List<string>();
-        if (archive.CompressedArchiveBytes > request.MaximumCompressedPackageBytes)
-        {
-            rejectionReasons.Add("compressed_archive_exceeds_budget");
-        }
 
-        if (!string.Equals(archive.Metadata.PackageId, CandidatePackageId, StringComparison.Ordinal))
+        if (!string.IsNullOrWhiteSpace(archive.InspectionFailure))
         {
-            rejectionReasons.Add("package_id_mismatch");
+            rejectionReasons.Add("archive_inspection_failed");
         }
-
-        if (!string.Equals(archive.Metadata.PackageVersion, CandidatePackageVersion, StringComparison.Ordinal))
+        else
         {
-            rejectionReasons.Add("package_version_mismatch");
-        }
-
-        if (archive.MissingRuntimeIdentifiers.Count != 0)
-        {
-            rejectionReasons.Add("native_runtime_identifier_missing");
-        }
-
-        if (archive.UnexpectedRuntimeIdentifiers.Count != 0)
-        {
-            rejectionReasons.Add("native_runtime_identifier_unexpected");
-        }
-
-        if (!archive.HasCompleteProvenanceMetadata)
-        {
-            rejectionReasons.Add("provenance_metadata_incomplete");
-        }
-
-        PythonParserCandidateProofCommandResult? restore = null;
-        PythonParserCandidateProofCommandResult? smoke = null;
-        try
-        {
-            var proofWorkspaceParent = Path.GetDirectoryName(Path.GetFullPath(request.WorkDirectory));
-            if (string.IsNullOrWhiteSpace(proofWorkspaceParent))
+            if (archive.CompressedArchiveBytes > request.MaximumCompressedPackageBytes)
             {
-                throw new PackageIndexException("Python parser candidate proof workspace must have a parent directory.");
+                rejectionReasons.Add("compressed_archive_exceeds_budget");
             }
 
-            PackageProofWorkDirectory.Prepare(request.WorkDirectory, request.RepositoryRoot, proofWorkspaceParent);
-            var feedDirectory = Path.Join(request.WorkDirectory, "local-feed");
-            var consumerDirectory = Path.Join(request.WorkDirectory, "consumer");
-            var packageCacheDirectory = Path.Join(request.WorkDirectory, "packages");
-            var dotNetHomeDirectory = Path.Join(request.WorkDirectory, "dotnet-home");
-            Directory.CreateDirectory(feedDirectory);
-            Directory.CreateDirectory(consumerDirectory);
-            Directory.CreateDirectory(packageCacheDirectory);
-            Directory.CreateDirectory(dotNetHomeDirectory);
-
-            File.Copy(
-                request.CandidatePackagePath,
-                Path.Join(
-                    feedDirectory,
-                    $"{CandidatePackageId.ToLowerInvariant()}.{CandidatePackageVersion}.nupkg"),
-                overwrite: true);
-            await File.WriteAllTextAsync(Path.Join(consumerDirectory, "Directory.Build.props"), EmptyMsBuildProject, cancellationToken);
-            await File.WriteAllTextAsync(Path.Join(consumerDirectory, "Directory.Build.targets"), EmptyMsBuildProject, cancellationToken);
-            await File.WriteAllTextAsync(Path.Join(consumerDirectory, "NuGet.config"), RenderNuGetConfig(feedDirectory), cancellationToken);
-            await File.WriteAllTextAsync(Path.Join(consumerDirectory, "PythonParserCandidateSmoke.csproj"), RenderConsumerProject(), cancellationToken);
-            await File.WriteAllTextAsync(Path.Join(consumerDirectory, "Program.cs"), RenderSmokeProgram(), cancellationToken);
-
-            var environment = new Dictionary<string, string?>(ReleaseEnvironment.Default)
+            if (!string.Equals(archive.Metadata.PackageId, CandidatePackageId, StringComparison.Ordinal))
             {
-                ["NUGET_PACKAGES"] = packageCacheDirectory,
-                ["DOTNET_CLI_HOME"] = dotNetHomeDirectory
-            };
-            restore = await RunCommandAsync(
-                "dotnet restore Python parser candidate smoke host",
-                "restoring the generated candidate-only smoke host",
-                ["restore", "PythonParserCandidateSmoke.csproj", "--configfile", "NuGet.config", "--disable-parallel"],
-                consumerDirectory,
-                environment,
-                cancellationToken);
-            if (restore.ExitCode != 0)
-            {
-                rejectionReasons.Add("consumer_restore_failed");
+                rejectionReasons.Add("package_id_mismatch");
             }
-            else
+
+            if (!string.Equals(archive.Metadata.PackageVersion, CandidatePackageVersion, StringComparison.Ordinal))
             {
-                smoke = await RunCommandAsync(
-                    "dotnet run Python parser candidate smoke host",
-                    "initializing the native Python grammar and parsing the fixed corpus",
-                    ["run", "--project", "PythonParserCandidateSmoke.csproj", "--no-restore"],
-                    consumerDirectory,
-                    environment,
-                    cancellationToken);
-                if (smoke.ExitCode != 0)
-                {
-                    rejectionReasons.Add("consumer_smoke_failed");
-                }
-                else if (ExtractRuntimeIdentifier(smoke.StandardOutput) is null)
-                {
-                    rejectionReasons.Add("consumer_smoke_runtime_identifier_missing");
-                }
+                rejectionReasons.Add("package_version_mismatch");
             }
-        }
-        catch (PackageIndexException ex)
-        {
-            rejectionReasons.Add("proof_workspace_failed");
-            smoke ??= PythonParserCandidateProofCommandResult.NotRun(ex.Message);
-        }
-        catch (IOException ex)
-        {
-            rejectionReasons.Add("proof_workspace_failed");
-            smoke ??= PythonParserCandidateProofCommandResult.NotRun(ex.Message);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            rejectionReasons.Add("proof_workspace_failed");
-            smoke ??= PythonParserCandidateProofCommandResult.NotRun(ex.Message);
+
+            if (archive.MissingRuntimeIdentifiers.Count != 0)
+            {
+                rejectionReasons.Add("native_runtime_identifier_missing");
+            }
+
+            if (archive.UnexpectedRuntimeIdentifiers.Count != 0)
+            {
+                rejectionReasons.Add("native_runtime_identifier_unexpected");
+            }
+
+            if (!archive.HasCompleteProvenanceMetadata)
+            {
+                rejectionReasons.Add("provenance_metadata_incomplete");
+            }
         }
 
         var report = new PythonParserCandidateProofReport(
             archive,
-            restore,
-            smoke,
             rejectionReasons.Distinct(StringComparer.Ordinal).OrderBy(reason => reason, StringComparer.Ordinal).ToArray());
         await WriteReportAsync(report, request.ReportPath, cancellationToken);
         return report;
     }
 
-    /// <summary>
-    /// Renders the generated consumer project that references the exact candidate package identity.
-    /// </summary>
-    /// <returns>Minimal project XML for the disposable smoke host.</returns>
-    internal static string RenderConsumerProject() =>
-        $$"""
-        <Project Sdk="Microsoft.NET.Sdk">
-          <PropertyGroup>
-            <OutputType>Exe</OutputType>
-            <TargetFramework>net10.0</TargetFramework>
-            <ImplicitUsings>enable</ImplicitUsings>
-            <Nullable>enable</Nullable>
-          </PropertyGroup>
-          <ItemGroup>
-            <PackageReference Include="{{CandidatePackageId}}" Version="{{CandidatePackageVersion}}" />
-          </ItemGroup>
-        </Project>
-        """;
-
-    /// <summary>
-    /// Renders the fixed valid, malformed, and large-input parser corpus.
-    /// </summary>
-    /// <returns>Source for the disposable child process.</returns>
-    internal static string RenderSmokeProgram() =>
-        """
-        using System.Runtime.InteropServices;
-        using System.Text;
-        using TreeSitter;
-
-        using var language = new Language("Python");
-        using var parser = new Parser(language);
-        using var validTree = parser.Parse("def answer():\n    \"\"\"Returns the answer.\"\"\"\n    return 42\n");
-        using var malformedTree = parser.Parse("def broken(:\n    return\n");
-        var largeSource = string.Concat(Enumerable.Repeat("value = 1\n", 100_000));
-        using var largeTree = parser.Parse(largeSource);
-
-        if (validTree is null || malformedTree is null || largeTree is null)
-        {
-            throw new InvalidOperationException("Tree-sitter returned no parse tree for a fixed smoke input.");
-        }
-
-        if (validTree.RootNode.HasError)
-        {
-            throw new InvalidOperationException("The valid fixed smoke input produced a Tree-sitter error node.");
-        }
-
-        if (!malformedTree.RootNode.HasError)
-        {
-            throw new InvalidOperationException("The malformed fixed smoke input did not produce a Tree-sitter error node.");
-        }
-
-        var largeSourceBytes = Encoding.UTF8.GetByteCount(largeSource);
-        if (largeTree.RootNode.EndIndex != largeSourceBytes)
-        {
-            throw new InvalidOperationException($"The large fixed smoke input was not fully consumed: expected {largeSourceBytes} bytes but parsed {largeTree.RootNode.EndIndex}.");
-        }
-
-        Console.WriteLine($"RID={RuntimeInformation.RuntimeIdentifier}");
-        Console.WriteLine($"VALID={validTree.RootNode.Type}");
-        Console.WriteLine($"VALID_HAS_ERROR={validTree.RootNode.HasError}");
-        Console.WriteLine($"MALFORMED={malformedTree.RootNode.Type}");
-        Console.WriteLine($"MALFORMED_HAS_ERROR={malformedTree.RootNode.HasError}");
-        Console.WriteLine($"LARGE_SOURCE_BYTES={largeSourceBytes}");
-        Console.WriteLine($"LARGE_END_INDEX={largeTree.RootNode.EndIndex}");
-        Console.WriteLine($"LARGE={largeTree.RootNode.Type}");
-        """;
-
     private static async Task<PythonParserCandidateArchiveEvidence> InspectArchiveAsync(
         PythonParserCandidateProofRequest request,
         CancellationToken cancellationToken)
     {
+        var fileInfo = new FileInfo(request.CandidatePackagePath);
         await using var packageStream = File.OpenRead(request.CandidatePackagePath);
         var sha256 = Convert.ToHexString(await SHA256.HashDataAsync(packageStream, cancellationToken));
-        var fileInfo = new FileInfo(request.CandidatePackagePath);
-        using var archive = ZipFile.OpenRead(request.CandidatePackagePath);
-        var nativeAssets = archive.Entries
-            .Select(entry => new { Entry = entry, RuntimeIdentifier = GetNativeRuntimeIdentifier(entry.FullName) })
-            .Where(candidate => candidate.RuntimeIdentifier is not null)
-            .GroupBy(candidate => candidate.RuntimeIdentifier!, StringComparer.Ordinal)
-            .OrderBy(group => group.Key, StringComparer.Ordinal)
-            .Select(group => new PythonParserNativeRuntimeEvidence(
-                group.Key,
-                group.Select(candidate => candidate.Entry.FullName).OrderBy(path => path, StringComparer.Ordinal).ToArray()))
-            .ToArray();
-        var actualRuntimeIdentifiers = nativeAssets.Select(asset => asset.RuntimeIdentifier).ToHashSet(StringComparer.Ordinal);
-        var missingRuntimeIdentifiers = RequiredRuntimeIdentifiers.Where(rid => !actualRuntimeIdentifiers.Contains(rid)).ToArray();
-        var unexpectedRuntimeIdentifiers = actualRuntimeIdentifiers.Where(rid => !RequiredRuntimeIdentifiers.Contains(rid, StringComparer.Ordinal)).OrderBy(rid => rid, StringComparer.Ordinal).ToArray();
-        var metadata = ReadNuspecMetadata(archive);
-        var licenseAndNoticePaths = archive.Entries
-            .Select(entry => entry.FullName)
-            .Where(IsLicenseOrNoticePath)
-            .OrderBy(path => path, StringComparer.Ordinal)
-            .ToArray();
-        return new PythonParserCandidateArchiveEvidence(
-            Path.GetFileName(request.CandidatePackagePath),
+        if (fileInfo.Length > MaximumArchiveBytesToInspect)
+        {
+            return CreateUninspectableArchiveEvidence(
+                fileInfo,
+                sha256,
+                0,
+                0,
+                $"Compressed archive exceeds the {MaximumArchiveBytesToInspect}-byte static inspection limit.");
+        }
+
+        try
+        {
+            using var archive = ZipFile.OpenRead(request.CandidatePackagePath);
+            if (archive.Entries.Count > MaximumArchiveEntryCount)
+            {
+                return CreateUninspectableArchiveEvidence(
+                    fileInfo,
+                    sha256,
+                    archive.Entries.Count,
+                    0,
+                    $"Archive contains more than the {MaximumArchiveEntryCount}-entry static inspection limit.");
+            }
+
+            var uncompressedArchiveBytes = GetBoundedUncompressedArchiveBytes(archive);
+            if (uncompressedArchiveBytes is null)
+            {
+                return CreateUninspectableArchiveEvidence(
+                    fileInfo,
+                    sha256,
+                    archive.Entries.Count,
+                    0,
+                    $"Archive exceeds the {MaximumUncompressedArchiveBytes}-byte uncompressed static inspection limit.");
+            }
+
+            var metadata = ReadNuspecMetadata(archive);
+            var nativeAssets = archive.Entries
+                .Select(entry => new { Entry = entry, RuntimeIdentifier = GetNativeRuntimeIdentifier(entry.FullName) })
+                .Where(candidate => candidate.RuntimeIdentifier is not null)
+                .GroupBy(candidate => candidate.RuntimeIdentifier!, StringComparer.Ordinal)
+                .OrderBy(group => group.Key, StringComparer.Ordinal)
+                .Select(group => new PythonParserNativeRuntimeEvidence(
+                    group.Key,
+                    group.Select(candidate => candidate.Entry.FullName).OrderBy(path => path, StringComparer.Ordinal).ToArray()))
+                .ToArray();
+            var actualRuntimeIdentifiers = nativeAssets.Select(asset => asset.RuntimeIdentifier).ToHashSet(StringComparer.Ordinal);
+            var missingRuntimeIdentifiers = RequiredRuntimeIdentifiers.Where(rid => !actualRuntimeIdentifiers.Contains(rid)).ToArray();
+            var unexpectedRuntimeIdentifiers = actualRuntimeIdentifiers
+                .Where(rid => !RequiredRuntimeIdentifiers.Contains(rid, StringComparer.Ordinal))
+                .OrderBy(rid => rid, StringComparer.Ordinal)
+                .ToArray();
+            var licenseAndNoticePaths = archive.Entries
+                .Select(entry => entry.FullName)
+                .Where(IsLicenseOrNoticePath)
+                .OrderBy(path => path, StringComparer.Ordinal)
+                .ToArray();
+            return new PythonParserCandidateArchiveEvidence(
+                fileInfo.Name,
+                sha256,
+                fileInfo.Length,
+                archive.Entries.Count,
+                uncompressedArchiveBytes.Value,
+                metadata,
+                nativeAssets,
+                missingRuntimeIdentifiers,
+                unexpectedRuntimeIdentifiers,
+                licenseAndNoticePaths,
+                new PythonParserCandidateProvenanceReviewEvidence(
+                    "metadata_recorded_not_accepted",
+                    "Archive metadata and license/notice paths are recorded for a separate human redistribution review; this candidate proof does not approve a dependency."),
+                null);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException or SecurityException or XmlException or PackageIndexException)
+        {
+            return CreateUninspectableArchiveEvidence(fileInfo, sha256, 0, 0, $"{ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static long? GetBoundedUncompressedArchiveBytes(ZipArchive archive)
+    {
+        var total = 0L;
+        foreach (var entry in archive.Entries)
+        {
+            if (entry.Length > MaximumUncompressedArchiveBytes - total)
+            {
+                return null;
+            }
+
+            total += entry.Length;
+        }
+
+        return total;
+    }
+
+    private static PythonParserCandidateArchiveEvidence CreateUninspectableArchiveEvidence(
+        FileInfo fileInfo,
+        string sha256,
+        int archiveEntryCount,
+        long uncompressedArchiveBytes,
+        string inspectionFailure) =>
+        new(
+            fileInfo.Name,
             sha256,
             fileInfo.Length,
-            archive.Entries.Count,
-            archive.Entries.Sum(entry => entry.Length),
-            metadata,
-            nativeAssets,
-            missingRuntimeIdentifiers,
-            unexpectedRuntimeIdentifiers,
-            licenseAndNoticePaths,
+            archiveEntryCount,
+            uncompressedArchiveBytes,
+            new PythonParserCandidateNuspecMetadata(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty),
+            [],
+            [],
+            [],
+            [],
             new PythonParserCandidateProvenanceReviewEvidence(
-                "metadata_recorded_not_accepted",
-                "Archive metadata and license/notice paths are recorded for a separate human redistribution review; this candidate proof does not approve a dependency."));
-    }
+                "not_evaluated",
+                "Archive inspection did not complete, so this candidate cannot receive provenance approval."),
+            inspectionFailure);
 
     private static PythonParserCandidateNuspecMetadata ReadNuspecMetadata(ZipArchive archive)
     {
@@ -307,33 +232,27 @@ internal sealed class PythonParserCandidateProofWorkflow
             throw new PackageIndexException($"Python parser candidate archive must contain exactly one root .nuspec file, found {nuspecEntries.Length}.");
         }
 
-        try
+        if (nuspecEntries[0].Length > MaximumNuspecBytes)
         {
-            using var stream = nuspecEntries[0].Open();
-            var document = XDocument.Load(stream);
-            var metadata = document.Root?.Elements().SingleOrDefault(element => element.Name.LocalName == "metadata");
-            if (metadata is null)
-            {
-                throw new PackageIndexException("Python parser candidate .nuspec is missing metadata.");
-            }
+            throw new PackageIndexException($"Python parser candidate .nuspec exceeds the {MaximumNuspecBytes}-byte static inspection limit.");
+        }
 
-            var repository = metadata.Elements().SingleOrDefault(element => element.Name.LocalName == "repository");
-            return new PythonParserCandidateNuspecMetadata(
-                GetElementValue(metadata, "id"),
-                GetElementValue(metadata, "version"),
-                GetElementValue(metadata, "license"),
-                repository?.Attribute("type")?.Value ?? string.Empty,
-                repository?.Attribute("url")?.Value ?? string.Empty,
-                repository?.Attribute("commit")?.Value ?? string.Empty);
-        }
-        catch (PackageIndexException)
+        using var stream = nuspecEntries[0].Open();
+        var document = XDocument.Load(stream, LoadOptions.None);
+        var metadata = document.Root?.Elements().SingleOrDefault(element => element.Name.LocalName == "metadata");
+        if (metadata is null)
         {
-            throw;
+            throw new PackageIndexException("Python parser candidate .nuspec is missing metadata.");
         }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or System.Xml.XmlException)
-        {
-            throw new PackageIndexException($"Python parser candidate .nuspec could not be read: {ex.Message}");
-        }
+
+        var repository = metadata.Elements().SingleOrDefault(element => element.Name.LocalName == "repository");
+        return new PythonParserCandidateNuspecMetadata(
+            GetElementValue(metadata, "id"),
+            GetElementValue(metadata, "version"),
+            GetElementValue(metadata, "license"),
+            repository?.Attribute("type")?.Value ?? string.Empty,
+            repository?.Attribute("url")?.Value ?? string.Empty,
+            repository?.Attribute("commit")?.Value ?? string.Empty);
     }
 
     private static string GetElementValue(XElement element, string name) =>
@@ -358,32 +277,6 @@ internal sealed class PythonParserCandidateProofWorkflow
             || fileName.Contains("third-party", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<PythonParserCandidateProofCommandResult> RunCommandAsync(
-        string operationName,
-        string timeoutDescription,
-        IReadOnlyList<string> arguments,
-        string workingDirectory,
-        IReadOnlyDictionary<string, string?> environment,
-        CancellationToken cancellationToken)
-    {
-        var result = await _commandRunner.RunAsync(
-            new ExternalCommandRequest(
-                "dotnet",
-                arguments,
-                workingDirectory,
-                operationName,
-                timeoutDescription,
-                DotNetCommandTimeoutMilliseconds,
-                environment),
-            cancellationToken);
-        return new PythonParserCandidateProofCommandResult(
-            operationName,
-            string.Join(' ', arguments),
-            result.ExitCode,
-            NormalizeEvidenceText(result.StandardOutput, workingDirectory),
-            NormalizeEvidenceText(result.StandardError, workingDirectory));
-    }
-
     private static async Task WriteReportAsync(
         PythonParserCandidateProofReport report,
         string reportPath,
@@ -405,36 +298,11 @@ internal sealed class PythonParserCandidateProofWorkflow
         await stream.WriteAsync(Encoding.UTF8.GetBytes(Environment.NewLine), cancellationToken);
     }
 
-    private static string RenderNuGetConfig(string localFeedDirectory)
-    {
-        var escapedDirectory = SecurityElement.Escape(Path.GetFullPath(localFeedDirectory)) ?? localFeedDirectory;
-        return $$"""
-        <?xml version="1.0" encoding="utf-8"?>
-        <configuration>
-          <packageSources>
-            <clear />
-            <add key="candidate" value="{{escapedDirectory}}" />
-          </packageSources>
-        </configuration>
-        """;
-    }
-
-    private static string? ExtractRuntimeIdentifier(string output) =>
-        output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-            .FirstOrDefault(line => line.StartsWith("RID=", StringComparison.Ordinal))?[4..];
-
-    private static string NormalizeEvidenceText(string value, string workingDirectory) =>
-        Regex.Replace(
-            value.Replace(Path.GetFullPath(workingDirectory), "<consumer>", StringComparison.Ordinal),
-            @"\(in \d+ ms\)",
-            "(in <duration>)");
-
     private static void ValidateRequest(PythonParserCandidateProofRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.RepositoryRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.CandidatePackagePath);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.WorkDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ReportPath);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(request.MaximumCompressedPackageBytes);
         if (!Directory.Exists(request.RepositoryRoot))
@@ -452,56 +320,49 @@ internal sealed class PythonParserCandidateProofWorkflow
             throw new PackageIndexException("Python parser candidate package must be a .nupkg file.");
         }
 
-        var candidatePackagePath = Path.GetFullPath(request.CandidatePackagePath);
-        var workDirectory = Path.GetFullPath(request.WorkDirectory);
-        var workDirectoryPrefix = workDirectory.EndsWith(Path.DirectorySeparatorChar)
-            ? workDirectory
-            : workDirectory + Path.DirectorySeparatorChar;
-        if (string.Equals(candidatePackagePath, workDirectory, PackageIndexGenerator.RepositoryPathComparison)
-            || candidatePackagePath.StartsWith(workDirectoryPrefix, PackageIndexGenerator.RepositoryPathComparison))
+        var repositoryRoot = Path.GetFullPath(request.RepositoryRoot);
+        var artifactsDirectory = Path.Join(repositoryRoot, "artifacts");
+        var reportPath = Path.GetFullPath(request.ReportPath);
+        if (!IsPathWithin(artifactsDirectory, reportPath))
         {
-            throw new PackageIndexException("Python parser candidate package must not be contained by the disposable proof workspace.");
+            throw new PackageIndexException("Python parser candidate report path must be within the repository artifacts directory.");
         }
+    }
+
+    private static bool IsPathWithin(string parentDirectory, string childPath)
+    {
+        var normalizedParent = Path.GetFullPath(parentDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var normalizedChild = Path.GetFullPath(childPath);
+        var prefix = normalizedParent + Path.DirectorySeparatorChar;
+        return normalizedChild.StartsWith(prefix, PackageIndexGenerator.RepositoryPathComparison);
     }
 }
 
 /// <summary>
-/// Inputs for the isolated Python parser candidate proof.
+/// Inputs for the static Python parser candidate proof.
 /// </summary>
-/// <param name="RepositoryRoot">Repository root protected from proof-workspace cleanup.</param>
-/// <param name="CandidatePackagePath">Exact local candidate archive to inspect and place in the generated local feed.</param>
-/// <param name="WorkDirectory">Disposable proof workspace.</param>
-/// <param name="ReportPath">Machine-readable JSON evidence destination.</param>
-/// <param name="MaximumCompressedPackageBytes">Maximum accepted compressed package delta.</param>
 internal sealed record PythonParserCandidateProofRequest(
     string RepositoryRoot,
     string CandidatePackagePath,
-    string WorkDirectory,
     string ReportPath,
     long MaximumCompressedPackageBytes = PythonParserCandidateProofWorkflow.MaximumCompressedPackageBytes);
 
 /// <summary>
-/// Archive, metadata, native-runtime, and process evidence for one parser candidate.
+/// Archive and provenance evidence for one parser candidate.
 /// </summary>
-/// <param name="Archive">Measured candidate archive and declared metadata.</param>
-/// <param name="Restore">Generated consumer restore result, if the workspace was prepared.</param>
-/// <param name="Smoke">Generated consumer process result, if restore succeeded.</param>
-/// <param name="RejectionReasons">Deterministic reasons that prevent the candidate from becoming an AppSurface dependency.</param>
 internal sealed record PythonParserCandidateProofReport(
     PythonParserCandidateArchiveEvidence Archive,
-    PythonParserCandidateProofCommandResult? Restore,
-    PythonParserCandidateProofCommandResult? Smoke,
     IReadOnlyList<string> RejectionReasons)
 {
     /// <summary>
-    /// Gets whether the automated archive and local smoke checks have no rejection reason.
-    /// A true value only permits further review; it is not legal approval or multi-RID acceptance.
+    /// Gets whether the automated static checks have no rejection reason.
+    /// A true value only permits further review; it is not legal or runtime-execution approval.
     /// </summary>
     public bool IsEligibleForFurtherReview => RejectionReasons.Count == 0;
 }
 
 /// <summary>
-/// Immutable inspection result for the supplied candidate archive.
+/// Immutable static inspection result for the supplied candidate archive.
 /// </summary>
 internal sealed record PythonParserCandidateArchiveEvidence(
     string PackageFileName,
@@ -514,7 +375,8 @@ internal sealed record PythonParserCandidateArchiveEvidence(
     IReadOnlyList<string> MissingRuntimeIdentifiers,
     IReadOnlyList<string> UnexpectedRuntimeIdentifiers,
     IReadOnlyList<string> LicenseAndNoticePaths,
-    PythonParserCandidateProvenanceReviewEvidence ProvenanceReview)
+    PythonParserCandidateProvenanceReviewEvidence ProvenanceReview,
+    string? InspectionFailure)
 {
     /// <summary>
     /// Gets whether the archive declares the minimum license and source provenance fields for later human review.
@@ -527,7 +389,7 @@ internal sealed record PythonParserCandidateArchiveEvidence(
 }
 
 /// <summary>
-/// NuGet metadata retained as provenance evidence without treating it as a legal approval.
+/// NuGet metadata retained as provenance evidence without treating it as legal approval.
 /// </summary>
 internal sealed record PythonParserCandidateNuspecMetadata(
     string PackageId,
@@ -538,17 +400,13 @@ internal sealed record PythonParserCandidateNuspecMetadata(
     string RepositoryCommit);
 
 /// <summary>
-/// Explicit boundary between machine-recorded provenance facts and a human redistribution approval.
+/// Explicit boundary between machine-recorded provenance facts and human redistribution approval.
 /// </summary>
-/// <param name="Status">Deterministic review state for this candidate proof.</param>
-/// <param name="Explanation">Why the candidate proof cannot constitute legal or supply-chain approval.</param>
 internal sealed record PythonParserCandidateProvenanceReviewEvidence(string Status, string Explanation);
 
 /// <summary>
 /// Full native asset inventory declared for one runtime identifier.
 /// </summary>
-/// <param name="RuntimeIdentifier">Runtime identifier containing the native payload.</param>
-/// <param name="NativeAssetPaths">Archive paths for every native file under the runtime identifier.</param>
 internal sealed record PythonParserNativeRuntimeEvidence(
     string RuntimeIdentifier,
     IReadOnlyList<string> NativeAssetPaths)
@@ -557,23 +415,4 @@ internal sealed record PythonParserNativeRuntimeEvidence(
     /// Gets the number of enumerated native asset paths.
     /// </summary>
     public int NativeFileCount => NativeAssetPaths.Count;
-}
-
-/// <summary>
-/// Captured generated-consumer command result.
-/// </summary>
-internal sealed record PythonParserCandidateProofCommandResult(
-    string Operation,
-    string Command,
-    int ExitCode,
-    string StandardOutput,
-    string StandardError)
-{
-    /// <summary>
-    /// Creates evidence for a command that was intentionally not run after an earlier failure.
-    /// </summary>
-    /// <param name="reason">Safe reason that prevented command execution.</param>
-    /// <returns>Non-executed command evidence.</returns>
-    internal static PythonParserCandidateProofCommandResult NotRun(string reason) =>
-        new("not-run", string.Empty, -1, string.Empty, reason);
 }
