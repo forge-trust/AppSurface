@@ -333,21 +333,8 @@
       "status": "metadata_recorded_not_accepted",
       "explanation": "Archive metadata and license/notice paths are recorded for a separate human redistribution review; this candidate proof does not approve a dependency."
     },
+    "inspectionFailure": null,
     "hasCompleteProvenanceMetadata": true
-  },
-  "restore": {
-    "operation": "dotnet restore Python parser candidate smoke host",
-    "command": "restore PythonParserCandidateSmoke.csproj --configfile NuGet.config --disable-parallel",
-    "exitCode": 0,
-    "standardOutput": "  Determining projects to restore...\n  Restored \u003Cconsumer\u003E/PythonParserCandidateSmoke.csproj (in \u003Cduration\u003E).\n",
-    "standardError": "An issue was encountered verifying workloads. For more information, run \u0022dotnet workload update\u0022.\n"
-  },
-  "smoke": {
-    "operation": "dotnet run Python parser candidate smoke host",
-    "command": "run --project PythonParserCandidateSmoke.csproj --no-restore",
-    "exitCode": 0,
-    "standardOutput": "RID=osx-arm64\nVALID=module\nVALID_HAS_ERROR=False\nMALFORMED=module\nMALFORMED_HAS_ERROR=True\nLARGE_SOURCE_BYTES=1000000\nLARGE_END_INDEX=1000000\nLARGE=module\n",
-    "standardError": ""
   },
   "rejectionReasons": [
     "compressed_archive_exceeds_budget"
