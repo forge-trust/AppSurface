@@ -4,7 +4,11 @@ using System.Text;
 using System.Text.Json;
 using System.Xml;
 
+#if EVIDENCE_COVERAGE_CORE
+namespace ForgeTrust.AppSurface.Evidence.Coverage;
+#else
 namespace ForgeTrust.AppSurface.Cli;
+#endif
 
 /// <summary>
 /// Writes bounded failure-first test results and best-effort slow-test diagnostic artifacts for <c>coverage run</c>.

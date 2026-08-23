@@ -3,9 +3,19 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Xml;
 using System.Xml.Linq;
+#if !EVIDENCE_COVERAGE_CORE
 using ForgeTrust.AppSurface.CoverageArtifacts;
+#endif
 
+#if EVIDENCE_COVERAGE_CORE
+using CommandException = ForgeTrust.AppSurface.Evidence.Coverage.CoverageExecutionException;
+#endif
+
+#if EVIDENCE_COVERAGE_CORE
+namespace ForgeTrust.AppSurface.Evidence.Coverage;
+#else
 namespace ForgeTrust.AppSurface.Cli;
+#endif
 
 /// <summary>
 /// Coverage integrations supported by the VSTest-based <c>coverage run</c> workflow.
@@ -67,7 +77,7 @@ internal static class CoverageRunDriverPreflight
     /// <param name="supervisor">Run-scoped supervisor for discovery operations and cancellation.</param>
     /// <param name="cancellationToken">Cancellation token for capability evaluation.</param>
     /// <returns>A task that completes when every project is compatible.</returns>
-    /// <exception cref="CliFx.CommandException">Thrown for an engine incompatibility, or once with aggregated project package and capability failures in stable project order.</exception>
+    /// <remarks>Throws a stable coverage execution diagnostic for an engine incompatibility or aggregated project package and capability failures in stable project order.</remarks>
     public static async Task ValidateAsync(
         CoverageRunDriver driver,
         string configuration,
@@ -397,7 +407,7 @@ internal static class CoverageRunDriverStrategy
     /// </summary>
     /// <param name="driver">The driver whose reserved arguments should be enforced.</param>
     /// <param name="arguments">User-supplied <c>dotnet test</c> arguments in invocation order.</param>
-    /// <exception cref="CliFx.CommandException">Thrown when an argument collides with driver-owned coverage configuration.</exception>
+    /// <remarks>Throws a stable coverage execution diagnostic when an argument collides with driver-owned coverage configuration.</remarks>
     public static void ValidateTestArguments(CoverageRunDriver driver, IReadOnlyList<string> arguments)
     {
         for (var index = 0; index < arguments.Count; index++)
@@ -440,7 +450,7 @@ internal static class CoverageRunDriverStrategy
     /// <param name="request">The validated coverage-run request.</param>
     /// <param name="projectOutputDirectory">Absolute AppSurface-owned output directory for the project.</param>
     /// <returns>The driver invocation, including its unique collector directory when applicable.</returns>
-    /// <exception cref="CliFx.CommandException">Thrown when a generated collector invocation directory collides with an existing filesystem object.</exception>
+    /// <remarks>Throws a stable coverage execution diagnostic when a generated collector invocation directory collides with an existing filesystem object.</remarks>
     public static CoverageRunDriverInvocation CreateInvocation(
         CoverageRunRequest request,
         string projectOutputDirectory)
@@ -523,7 +533,7 @@ internal static class CoverageRunDriverStrategy
     /// <param name="cancellationToken">Cancellation token for artifact inspection and staging.</param>
     /// <param name="commitGate">Optional gate that must authorize canonical artifact replacement.</param>
     /// <returns><see langword="true"/> when the current invocation produced a canonical artifact; otherwise <see langword="false"/>.</returns>
-    /// <exception cref="CliFx.CommandException">Thrown when a successful test process produces an invalid artifact result.</exception>
+    /// <remarks>Throws a stable coverage execution diagnostic when a successful test process produces an invalid artifact result.</remarks>
     public static async Task<bool> NormalizeAsync(
         CoverageRunDriverInvocation invocation,
         int processExitCode,

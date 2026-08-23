@@ -1,7 +1,9 @@
 using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Cli;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Testing;
+using CommandException = ForgeTrust.AppSurface.Evidence.Coverage.CoverageExecutionException;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -562,12 +564,8 @@ public sealed class CoverageMergeTests
         {
             if (ThrowMissingPackage)
             {
-                throw CoverageRunDiagnostics.Create(
-                    "ASCOV114",
-                    "ReportGenerator package dependency was not found.",
-                    "Expected fake package.",
-                    "Restore the package.",
-                    "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+                throw new CoverageExecutionException(
+                    "ASCOV114 ReportGenerator package dependency was not found. Cause: Expected fake package. Fix: Restore the package. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
             }
 
             CoverageFiles.AddRange(coverageFiles);

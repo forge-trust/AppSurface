@@ -2,9 +2,17 @@ using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
+#if EVIDENCE_COVERAGE_CORE
+using static ForgeTrust.AppSurface.Evidence.Coverage.CoverageFileSystemInterop;
+#else
 using static ForgeTrust.AppSurface.CoverageArtifacts.CoverageFileSystemInterop;
+#endif
 
+#if EVIDENCE_COVERAGE_CORE
+namespace ForgeTrust.AppSurface.Evidence.Coverage;
+#else
 namespace ForgeTrust.AppSurface.CoverageArtifacts;
+#endif
 
 /// <summary>
 /// Opens collector artifacts without following symbolic links or accepting non-regular files.

@@ -3,9 +3,17 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
+#if EVIDENCE_COVERAGE_CORE
+using static ForgeTrust.AppSurface.Evidence.Coverage.CoverageFileSystemInterop;
+#else
 using static ForgeTrust.AppSurface.CoverageArtifacts.CoverageFileSystemInterop;
+#endif
 
+#if EVIDENCE_COVERAGE_CORE
+namespace ForgeTrust.AppSurface.Evidence.Coverage;
+#else
 namespace ForgeTrust.AppSurface.Cli;
+#endif
 
 /// <summary>
 /// Holds the filesystem objects that lead to a coverage output directory while ownership is

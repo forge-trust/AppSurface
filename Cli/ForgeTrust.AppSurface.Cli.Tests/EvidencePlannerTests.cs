@@ -401,6 +401,13 @@ public sealed class EvidencePlannerTests
         Assert.Equal("no-evidence", diffPlan.Profile.Id);
         Assert.Equal("docs/New.md", Assert.Single(diffPlan.ChangedPaths).Path);
 
+        var resolution = await workflow.ResolveAsync(new EvidencePlanningRequest(policyPath, [], diffPath), CancellationToken.None);
+        await File.WriteAllTextAsync(diffPath, "--- a/src/Old.cs\n+++ b/src/Replaced.cs\n");
+        var snapshot = Assert.IsType<EvidenceDiffSnapshot>(resolution.DiffSnapshot);
+        Assert.Contains("docs/New.md", snapshot.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("src/Replaced.cs", snapshot.Text, StringComparison.Ordinal);
+        Assert.Equal("docs/New.md", Assert.Single(resolution.Plan.ChangedPaths).Path);
+
         var plan = await workflow.ExplainAsync(new EvidencePlanningRequest(policyPath, ["docs/readme.md"], null), CancellationToken.None);
         var output = Path.Join(directory.Path, "output");
         await workflow.WritePlanAsync(plan, output, CancellationToken.None);

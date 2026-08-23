@@ -3,10 +3,21 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+#if !EVIDENCE_COVERAGE_CORE
 using CliFx;
 using CliFx.Infrastructure;
+#endif
 
+#if EVIDENCE_COVERAGE_CORE
+using CommandException = ForgeTrust.AppSurface.Evidence.Coverage.CoverageExecutionException;
+using IConsole = ForgeTrust.AppSurface.Evidence.Coverage.CoverageTextWriters;
+#endif
+
+#if EVIDENCE_COVERAGE_CORE
+namespace ForgeTrust.AppSurface.Evidence.Coverage;
+#else
 namespace ForgeTrust.AppSurface.Cli;
+#endif
 
 /// <summary>
 /// Controls how <c>coverage run</c> responds when an active operation produces no observable progress.

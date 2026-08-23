@@ -6,7 +6,9 @@ using System.Text.Json;
 using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Cli;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Testing;
+using CommandException = ForgeTrust.AppSurface.Evidence.Coverage.CoverageExecutionException;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -3303,7 +3305,7 @@ public sealed class CoverageRunTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV120", exception.Message, StringComparison.Ordinal);
@@ -3410,7 +3412,7 @@ public sealed class CoverageRunTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
@@ -3451,7 +3453,7 @@ public sealed class CoverageRunTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
@@ -3496,7 +3498,7 @@ public sealed class CoverageRunTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
@@ -3513,7 +3515,7 @@ public sealed class CoverageRunTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
@@ -3532,7 +3534,7 @@ public sealed class CoverageRunTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV111", exception.Message, StringComparison.Ordinal);
@@ -3550,7 +3552,7 @@ public sealed class CoverageRunTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
@@ -3590,7 +3592,7 @@ public sealed class CoverageRunTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
@@ -3608,7 +3610,7 @@ public sealed class CoverageRunTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
@@ -3643,7 +3645,7 @@ public sealed class CoverageRunTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
@@ -3903,7 +3905,7 @@ public sealed class CoverageRunTests
             CoverageRunWatchdogMode.Fail,
             TimeSpan.Zero,
             TimeSpan.FromSeconds(1),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             safetyCancellation.Token);
         using var operation = watchdog.Start("project", "tests/Child.Tests/Child.Tests.csproj");

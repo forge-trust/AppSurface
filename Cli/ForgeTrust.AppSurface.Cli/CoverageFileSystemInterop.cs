@@ -2,7 +2,11 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
+#if EVIDENCE_COVERAGE_CORE
+namespace ForgeTrust.AppSurface.Evidence.Coverage;
+#else
 namespace ForgeTrust.AppSurface.CoverageArtifacts;
+#endif
 
 /// <summary>
 /// Provides the native file-system primitives shared by secure coverage path traversal.
