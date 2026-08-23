@@ -22,7 +22,7 @@ public sealed class PythonParserCandidateProofTests : IDisposable
         var consumerDirectory = Path.Combine(workDirectory, "consumer");
         var commandRunner = new RecordingCommandRunner(
         [
-            new ExternalCommandResult(0, $"Restored {consumerDirectory}", string.Empty),
+            new ExternalCommandResult(0, $"Restored {consumerDirectory} (in 123 ms)", string.Empty),
             new ExternalCommandResult(0, "RID=osx-arm64\nVALID=module\nMALFORMED=module\nLARGE_SOURCE_BYTES=1000000\nLARGE=module\n", string.Empty)
         ]);
         var workflow = new PythonParserCandidateProofWorkflow(commandRunner);
@@ -39,8 +39,9 @@ public sealed class PythonParserCandidateProofTests : IDisposable
         Assert.Equal(PythonParserCandidateProofWorkflow.CandidatePackageId, report.Archive.Metadata.PackageId);
         Assert.Equal(PythonParserCandidateProofWorkflow.CandidatePackageVersion, report.Archive.Metadata.PackageVersion);
         Assert.Equal(9, report.Archive.NativeRuntimeAssets.Count);
+        Assert.Contains("runtimes/osx-arm64/native/tree-sitter-python.bin", report.Archive.NativeRuntimeAssets.Single(asset => asset.RuntimeIdentifier == "osx-arm64").NativeAssetPaths);
         Assert.Equal(0, report.Restore!.ExitCode);
-        Assert.Equal("Restored <consumer>", report.Restore.StandardOutput);
+        Assert.Equal("Restored <consumer> (in <duration>)", report.Restore.StandardOutput);
         Assert.Equal(0, report.Smoke!.ExitCode);
         Assert.Contains("RID=osx-arm64", report.Smoke.StandardOutput, StringComparison.Ordinal);
         Assert.Equal(2, commandRunner.Requests.Count);

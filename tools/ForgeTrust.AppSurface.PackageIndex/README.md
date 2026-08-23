@@ -74,6 +74,27 @@ remains authored content; after that, retain the markers exactly.
    It verifies that the packed `README.md` has exactly one managed marker pair and exactly one canonical chooser and
    release-hub URL inside that region.
 
+### Python parser candidate gate
+
+The `inspect-python-parser-candidate` command is a deliberately isolated dependency-selection proof. It accepts one
+local `.nupkg`, enumerates its native runtime assets and NuGet metadata, copies it into a disposable local feed, then
+restores and runs a generated child process through the fixed Python valid/malformed/1,000,000-byte corpus. It writes a
+JSON record containing the archive hash, compressed size, native RID inventory, normalized commands, stdout/stderr, and
+process exit codes. The command never adds the candidate to an AppSurface project or package.
+
+```bash
+dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
+  inspect-python-parser-candidate \
+  --python-parser-package /tmp/candidate.nupkg \
+  --python-parser-proof-work-dir /tmp/appsurface-python-parser-proof \
+  --python-parser-proof-report /tmp/python-parser-proof.json
+```
+
+An exit code of `0` means the inspection completed and the report was written; it does **not** mean the candidate was
+accepted. Read `rejectionReasons` and `isEligibleForFurtherReview` from the JSON before taking any dependency action.
+The [TreeSitter.DotNet 1.3.0 rejection record](../../Web/ForgeTrust.AppSurface.Docs.Tests/TestData/PythonParserDecision/README.md)
+is the current proof: its 50.93 MiB archive exceeds the approved 5 MiB cap, so it must not be referenced by product code.
+
 ## Recovery and release boundary
 
 If `generate` reports a marker, variant, path, or token error, fix the named manifest row or README and rerun the

@@ -28,6 +28,7 @@ The successful local native-load smoke below is useful evidence about the artifa
 | Total uncompressed bytes | 617,084,456 |
 
 The archive size, rather than the NuGet gallery's rounded display, is the acceptance measurement. The SHA-256 identifies the exact bytes that produced this result.
+The [machine-readable proof record](./tree-sitter-dotnet-1.3.0-proof.json) retains the archive inventory, process commands, exit codes, and captured output.
 
 ## Native payload inventory
 
@@ -80,7 +81,7 @@ LARGE_SOURCE_BYTES=1000000
 LARGE=module
 ```
 
-The binding initialized and returned a parse tree for every input, including the malformed source, without an abnormal exit or stderr output. This is evidence for the local `osx-arm64` asset only. Windows and Linux consumer smoke paths were intentionally not added to CI: a full multi-RID proof is only useful after a candidate has met the non-negotiable distribution-size limit.
+The binding initialized and returned a parse tree for every input, including the malformed source, without an abnormal exit or child-process stderr output. The successful restore emitted the .NET SDK's workload-verification advisory on stderr; that advisory is captured in the [machine-readable proof record](./tree-sitter-dotnet-1.3.0-proof.json) and is not a restore failure. This is evidence for the local `osx-arm64` asset only. Windows and Linux consumer smoke paths were intentionally not added to CI because the candidate had already failed the non-negotiable distribution-size limit.
 
 ## Reproduction
 
@@ -93,11 +94,14 @@ shasum -a 256 /tmp/treesitter-dotnet-1.3.0.nupkg
 stat -f '%z bytes' /tmp/treesitter-dotnet-1.3.0.nupkg
 unzip -l /tmp/treesitter-dotnet-1.3.0.nupkg
 unzip -p /tmp/treesitter-dotnet-1.3.0.nupkg '*.nuspec'
+dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
+  inspect-python-parser-candidate \
+  --python-parser-package /tmp/treesitter-dotnet-1.3.0.nupkg \
+  --python-parser-proof-work-dir /tmp/appsurface-python-parser-proof \
+  --python-parser-proof-report /tmp/tree-sitter-dotnet-1.3.0-proof.json
 ```
 
-The accepted digest and size are listed above. If either differs, the candidate has changed and the gate must be rerun from the new artifact rather than reusing this result.
-
-For the smoke, create an isolated `net10.0` console project that references only `TreeSitter.DotNet` `1.3.0` from a local feed containing that verified archive. Its program must instantiate `new TreeSitter.Language("Python")`, parse the valid, malformed, and 1,000,000-byte inputs, write `RuntimeInformation.RuntimeIdentifier`, and treat a non-zero or abnormal child-process exit as a candidate rejection.
+The recorded digest and size are listed above. If either differs, the candidate has changed and the gate must be rerun from the new artifact rather than reusing this result. The command generates an isolated `net10.0` console project, restores it only from a local feed containing the verified archive, and records its valid, malformed, and 1,000,000-byte fixed-corpus results. It never adds `TreeSitter.DotNet` to an AppSurface project.
 
 ## Scope consequence
 

@@ -3,6 +3,7 @@ using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 namespace ForgeTrust.AppSurface.PackageIndex;
@@ -243,13 +244,13 @@ internal sealed class PythonParserCandidateProofWorkflow
         var fileInfo = new FileInfo(request.CandidatePackagePath);
         using var archive = ZipFile.OpenRead(request.CandidatePackagePath);
         var nativeAssets = archive.Entries
-            .Select(entry => entry.FullName.Split('/', StringSplitOptions.RemoveEmptyEntries))
-            .Where(segments => segments.Length >= 4
-                && string.Equals(segments[0], "runtimes", StringComparison.Ordinal)
-                && string.Equals(segments[2], "native", StringComparison.Ordinal))
-            .GroupBy(segments => segments[1], StringComparer.Ordinal)
+            .Select(entry => new { Entry = entry, RuntimeIdentifier = GetNativeRuntimeIdentifier(entry.FullName) })
+            .Where(candidate => candidate.RuntimeIdentifier is not null)
+            .GroupBy(candidate => candidate.RuntimeIdentifier!, StringComparer.Ordinal)
             .OrderBy(group => group.Key, StringComparer.Ordinal)
-            .Select(group => new PythonParserNativeRuntimeEvidence(group.Key, group.Count()))
+            .Select(group => new PythonParserNativeRuntimeEvidence(
+                group.Key,
+                group.Select(candidate => candidate.Entry.FullName).OrderBy(path => path, StringComparer.Ordinal).ToArray()))
             .ToArray();
         var actualRuntimeIdentifiers = nativeAssets.Select(asset => asset.RuntimeIdentifier).ToHashSet(StringComparer.Ordinal);
         var missingRuntimeIdentifiers = RequiredRuntimeIdentifiers.Where(rid => !actualRuntimeIdentifiers.Contains(rid)).ToArray();
@@ -309,6 +310,16 @@ internal sealed class PythonParserCandidateProofWorkflow
 
     private static string GetElementValue(XElement element, string name) =>
         element.Elements().SingleOrDefault(child => child.Name.LocalName == name)?.Value.Trim() ?? string.Empty;
+
+    private static string? GetNativeRuntimeIdentifier(string entryPath)
+    {
+        var segments = entryPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length >= 4
+            && string.Equals(segments[0], "runtimes", StringComparison.Ordinal)
+            && string.Equals(segments[2], "native", StringComparison.Ordinal)
+            ? segments[1]
+            : null;
+    }
 
     private async Task<PythonParserCandidateProofCommandResult> RunCommandAsync(
         string operationName,
@@ -376,7 +387,10 @@ internal sealed class PythonParserCandidateProofWorkflow
             .FirstOrDefault(line => line.StartsWith("RID=", StringComparison.Ordinal))?[4..];
 
     private static string NormalizeEvidenceText(string value, string workingDirectory) =>
-        value.Replace(Path.GetFullPath(workingDirectory), "<consumer>", StringComparison.Ordinal);
+        Regex.Replace(
+            value.Replace(Path.GetFullPath(workingDirectory), "<consumer>", StringComparison.Ordinal),
+            @"\(in \d+ ms\)",
+            "(in <duration>)");
 
     private static void ValidateRequest(PythonParserCandidateProofRequest request)
     {
@@ -485,9 +499,19 @@ internal sealed record PythonParserCandidateNuspecMetadata(
     string RepositoryCommit);
 
 /// <summary>
-/// Count of native files declared for one runtime identifier.
+/// Full native asset inventory declared for one runtime identifier.
 /// </summary>
-internal sealed record PythonParserNativeRuntimeEvidence(string RuntimeIdentifier, int NativeFileCount);
+/// <param name="RuntimeIdentifier">Runtime identifier containing the native payload.</param>
+/// <param name="NativeAssetPaths">Archive paths for every native file under the runtime identifier.</param>
+internal sealed record PythonParserNativeRuntimeEvidence(
+    string RuntimeIdentifier,
+    IReadOnlyList<string> NativeAssetPaths)
+{
+    /// <summary>
+    /// Gets the number of enumerated native asset paths.
+    /// </summary>
+    public int NativeFileCount => NativeAssetPaths.Count;
+}
 
 /// <summary>
 /// Captured generated-consumer command result.
