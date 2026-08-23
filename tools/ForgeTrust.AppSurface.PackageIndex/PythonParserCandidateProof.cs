@@ -243,9 +243,7 @@ internal sealed class PythonParserCandidateProofWorkflow
                 }
             }
 
-            return total <= MaximumUncompressedArchiveBytes
-                ? null
-                : $"Archive payload exceeds the {MaximumUncompressedArchiveBytes}-byte uncompressed static inspection limit.";
+            return null;
         }
         finally
         {
@@ -373,11 +371,7 @@ internal sealed class PythonParserCandidateProofWorkflow
         string reportPath,
         CancellationToken cancellationToken)
     {
-        var reportDirectory = Path.GetDirectoryName(Path.GetFullPath(reportPath));
-        if (string.IsNullOrWhiteSpace(reportDirectory))
-        {
-            throw new PackageIndexException($"Python parser candidate report path '{reportPath}' does not have a directory.");
-        }
+        var reportDirectory = Path.GetDirectoryName(Path.GetFullPath(reportPath))!;
 
         Directory.CreateDirectory(reportDirectory);
         await using var stream = new FileStream(reportPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
@@ -430,7 +424,7 @@ internal sealed class PythonParserCandidateProofWorkflow
     {
         var currentDirectory = Path.GetFullPath(artifactsDirectory);
         ThrowIfLink(new DirectoryInfo(currentDirectory));
-        var reportDirectory = Path.GetDirectoryName(reportPath) ?? throw new PackageIndexException("Python parser candidate report path must have a directory.");
+        var reportDirectory = Path.GetDirectoryName(reportPath)!;
         var relativeDirectory = Path.GetRelativePath(currentDirectory, reportDirectory);
         foreach (var segment in relativeDirectory.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
         {
