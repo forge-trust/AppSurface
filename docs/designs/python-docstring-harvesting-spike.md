@@ -8,6 +8,8 @@ Mode: Builder
 
 Related issue: [#771](https://github.com/forge-trust/AppSurface/issues/771)
 
+> **Candidate-gate outcome — 2026-08-23:** `TreeSitter.DotNet` `1.3.0` was rejected before source integration because its exact compressed archive is 53,401,399 bytes, exceeding the approved 5 MiB limit. The measured artifact, native inventory, license/provenance metadata, and isolated `osx-arm64` consumer result are retained in the [candidate gate record](../../Web/ForgeTrust.AppSurface.Docs.Tests/TestData/PythonParserDecision/README.md). No parser fallback was selected.
+
 ## Problem Statement
 
 Determine whether `ForgeTrust.AppSurface.Docs` can statically document Python that is embedded in or shipped beside a broader .NET codebase. The immediate objective is a credible package-level proof that the product serves more than the direct .NET ecosystem; improving AI answer quality remains a future hypothesis, not this spike's success measure.
