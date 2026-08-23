@@ -516,6 +516,22 @@
           "ForgeTrust.AppSurface.Durable": "[0.1.0, )"
         }
       },
+      "forgetrust.appsurface.evidence.cli": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Planner": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.evidence.contracts": {
+        "type": "Project"
+      },
+      "forgetrust.appsurface.evidence.planner": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )"
+        }
+      },
       "forgetrust.appsurface.flow": {
         "type": "Project",
         "dependencies": {

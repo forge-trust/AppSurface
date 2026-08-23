@@ -609,6 +609,16 @@
       "forgetrust.appsurface.deployment": {
         "type": "Project"
       },
+      "forgetrust.appsurface.evidence.aspire": {
+        "type": "Project",
+        "dependencies": {
+          "Aspire.Hosting": "[13.4.4, 14.0.0)",
+          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.evidence.contracts": {
+        "type": "Project"
+      },
       "forgetrust.appsurface.testing": {
         "type": "Project"
       },

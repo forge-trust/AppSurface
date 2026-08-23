@@ -100,6 +100,26 @@ public sealed partial class RepositoryReadmePolicyTests
         }
     }
 
+    // Regression: ISSUE-001 — EvidenceHost metadata was ignored because an unquoted YAML title contained a colon.
+    // Found by /qa on 2026-08-20.
+    // Report: .gstack/qa-reports/qa-report-localhost-2026-08-20.md
+    [Fact]
+    public void EvidenceHostStartHereMetadata_ShouldBeValidYaml()
+    {
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var metadataPath = ResolveRepositoryRelativePath(
+            repoRoot,
+            "start-here/evidencehost.md.yml",
+            "EvidenceHost Start Here metadata path");
+        var deserializer = new DeserializerBuilder()
+            .WithNamingConvention(UnderscoredNamingConvention.Instance)
+            .Build();
+
+        var metadata = deserializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(metadataPath));
+
+        Assert.Equal("EvidenceHost: risk-mediated CI", metadata["title"]);
+    }
+
     [Fact]
     public void PublicPackageReadmes_ShouldLinkToStableReleaseSurfaces()
     {
@@ -116,7 +136,19 @@ public sealed partial class RepositoryReadmePolicyTests
             .Select(entry => entry.StartHerePath!)
             .ToArray();
 
-        Assert.Equal(35, requiredReadmes.Length);
+        Assert.Equal(39, requiredReadmes.Length);
+        Assert.Contains(
+            "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md",
+            requiredReadmes);
+        Assert.Contains(
+            "Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md",
+            requiredReadmes);
+        Assert.Contains(
+            "Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md",
+            requiredReadmes);
+        Assert.Contains(
+            "Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md",
+            requiredReadmes);
         Assert.Contains(
             "ForgeTrust.AppSurface.Theming/README.md",
             requiredReadmes);
