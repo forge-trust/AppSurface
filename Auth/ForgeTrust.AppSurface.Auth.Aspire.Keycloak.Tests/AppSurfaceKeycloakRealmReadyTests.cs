@@ -100,7 +100,7 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
     public async Task RealmReadyRunner_WhenConfigurationIsSafe_UsesOnlyNonsecretInputsAndReturnsSuccess()
     {
         var environment = CreateEnvironment();
-        var output = new StringWriter();
+        using var output = new StringWriter();
 
         var exitCode = await AppSurfaceKeycloakRealmReadyRunner.RunAsync(
             name => environment.TryGetValue(name, out var value) ? value : null,
@@ -124,7 +124,7 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
     public async Task RealmReadyRunner_WhenTheProbeFails_RedactsTheExceptionAndReturnsFailure()
     {
         const string sentinel = "LOCAL_TEST_SECRET_SENTINEL";
-        var output = new StringWriter();
+        using var output = new StringWriter();
 
         var exitCode = await AppSurfaceKeycloakRealmReadyRunner.RunAsync(
             name =>
@@ -146,7 +146,7 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
     {
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
-        var output = new StringWriter();
+        using var output = new StringWriter();
 
         var exitCode = await AppSurfaceKeycloakRealmReadyRunner.RunAsync(
             name =>
@@ -169,7 +169,7 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
     {
         var environment = CreateEnvironment();
         environment.Remove(missingName);
-        var output = new StringWriter();
+        using var output = new StringWriter();
 
         var exitCode = await AppSurfaceKeycloakRealmReadyRunner.RunAsync(
             name => environment.TryGetValue(name, out var value) ? value : null,

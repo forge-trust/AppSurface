@@ -8,7 +8,9 @@ namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 /// </summary>
 public sealed class AppSurfaceKeycloakResource
 {
+    private readonly object _localSeedsLock = new();
     private readonly List<AppSurfaceKeycloakLocalSeed> _localSeeds = [];
+    private readonly object _realmReadyLock = new();
     private readonly AppSurfaceKeycloakRealmReadyConfiguration? _realmReadyConfiguration;
     private readonly HashSet<ParameterResource> _usedLocalSeedParameters = new(ReferenceEqualityComparer.Instance);
     private AppSurfaceKeycloakRealmReady? _realmReady;
@@ -113,7 +115,7 @@ public sealed class AppSurfaceKeycloakResource
             return _realmReady;
         }
 
-        lock (this)
+        lock (_realmReadyLock)
         {
             if (_realmReady is not null)
             {
@@ -152,7 +154,7 @@ public sealed class AppSurfaceKeycloakResource
     {
         ArgumentNullException.ThrowIfNull(factory);
 
-        lock (this)
+        lock (_localSeedsLock)
         {
             var applicationBuilder = Resource.ApplicationBuilder;
             AppSurfaceKeycloakLocalSeedPolicy.EnsureRunOperation(applicationBuilder);
