@@ -14,7 +14,7 @@ namespace ForgeTrust.AppSurface.PackageIndex;
 internal interface ICoverageCliConsumerProofWorkflow
 {
     /// <summary>
-    /// Installs the validated CLI artifact into an isolated fixture and exercises public coverage commands plus canary-poll discovery.
+    /// Installs the validated CLI artifact into an isolated fixture and exercises public release-note, coverage, and canary-poll commands.
     /// </summary>
     /// <param name="request">Proof request with repository, artifact, work-directory, and package-source settings.</param>
     /// <param name="validationReport">Validated package artifact report that selects the CLI tool artifact.</param>
@@ -32,7 +32,7 @@ internal interface ICoverageCliConsumerProofWorkflow
 /// <remarks>
 /// <para>
 /// The proof runs before package publication. It selects the already validated CLI <c>.nupkg</c>, installs it with a
-/// local-first NuGet configuration, creates a clean xUnit fixture plus an excluded failing sentinel, and executes <c>coverage run</c>,
+/// local-first NuGet configuration, creates a clean xUnit fixture plus an excluded failing sentinel, composes one consumer-owned release note, and executes <c>coverage run</c>,
 /// <c>coverage merge</c>, a passing <c>coverage gate</c>, a patch-target gate plus nonpatch stale-target cleanup, an intentionally failing <c>coverage gate</c>, and
 /// <c>canary poll --help</c>, then runs the packed command against a local protected fixture for one <c>pass</c> and one
 /// <c>stale</c> result to prove its environment-only credential and operator-result paths are packed.
@@ -153,6 +153,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             dotnetHomePath);
         var commands = new List<CoverageCliConsumerProofCommandResult>();
         var artifacts = new List<CoverageCliConsumerProofArtifactCheck>();
+        var semanticProof = CoverageCliConsumerProofSemanticProof.NotRun;
 
         async Task<bool> RunRequiredAsync(ExternalCommandRequest commandRequest)
         {
@@ -248,6 +249,75 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             return BuildReport(context, commands, artifacts);
         }
 
+        await WriteReleaseNoteFixtureAsync(fixtureDirectory, cancellationToken);
+        var releaseOutputPath = Path.Join(fixtureDirectory, "releases", "v1.4.0.md");
+        if (!await RunRequiredAsync(ToolCommand(
+            context,
+            ["release", "compose", "--root", fixtureDirectory, "--output", "releases/v1.4.0.md"],
+            "appsurface release compose preview",
+            "previewing packaged consumer release-note composition")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        if (!commands[^1].StandardOutput.Contains("Preview only. Would write releases/v1.4.0.md", StringComparison.Ordinal)
+            || File.Exists(releaseOutputPath))
+        {
+            commands[^1] = commands[^1] with
+            {
+                Succeeded = false,
+                FailureReason = "Expected packaged release composition to preview the explicit output without writing it."
+            };
+            return BuildReport(context, commands, artifacts);
+        }
+
+        if (!await RunRequiredAsync(ToolCommand(
+            context,
+            ["release", "compose", "--root", fixtureDirectory, "--output", "releases/v1.4.0.md", "--apply"],
+            "appsurface release compose apply",
+            "writing packaged consumer release-note composition")))
+        {
+            return BuildReport(context, commands, artifacts);
+        }
+
+        if (!commands[^1].StandardOutput.Contains("Wrote composed release note to releases/v1.4.0.md.", StringComparison.Ordinal))
+        {
+            commands[^1] = commands[^1] with
+            {
+                Succeeded = false,
+                FailureReason = "Expected packaged release composition to confirm its explicit output write."
+            };
+            return BuildReport(context, commands, artifacts);
+        }
+
+        if (!File.Exists(releaseOutputPath))
+        {
+            commands[^1] = commands[^1] with
+            {
+                Succeeded = false,
+                FailureReason = "Expected packaged release composition to create the explicit output file."
+            };
+            return BuildReport(context, commands, artifacts);
+        }
+
+        var releaseTemplatePath = Path.Join(fixtureDirectory, "releases", "unreleased.md");
+        var releaseEntryPath = Path.Join(fixtureDirectory, "releases", "unreleased.entries", "2026-08-20-package-consumer.md");
+        var releaseTemplate = await File.ReadAllTextAsync(releaseTemplatePath, cancellationToken);
+        var releaseEntry = await File.ReadAllTextAsync(releaseEntryPath, cancellationToken);
+        var composedReleaseNote = await File.ReadAllTextAsync(releaseOutputPath, cancellationToken);
+        if (!composedReleaseNote.Contains("- The packaged tool composes consumer release notes.", StringComparison.Ordinal)
+            || composedReleaseNote.Contains("<!-- appsurface:unreleased-entries", StringComparison.Ordinal)
+            || !releaseTemplate.Contains("<!-- appsurface:unreleased-entries section=\"added\" -->", StringComparison.Ordinal)
+            || !releaseEntry.Contains("<!-- appsurface:unreleased-entry section=\"added\" -->", StringComparison.Ordinal))
+        {
+            commands[^1] = commands[^1] with
+            {
+                Succeeded = false,
+                FailureReason = "Expected packaged release composition to write the consumer entry while preserving its stable template and append-only source."
+            };
+            return BuildReport(context, commands, artifacts);
+        }
+
         if (!await RunRequiredAsync(ToolCommand(
             context,
             ["canary", "poll", "--help"],
@@ -336,10 +406,12 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         }
 
         artifacts.AddRange(CheckCoverageRunArtifacts(coverageMergedDirectory));
+        semanticProof = CoverageCliConsumerProofSemanticValidator.ValidateRaw(coverageMergedDirectory);
+        artifacts.AddRange(CheckSemanticRawArtifacts(coverageMergedDirectory, semanticProof));
         artifacts.Add(CheckExcludedProjectArtifacts(coverageMergedDirectory, "Smoke.Browser.Tests"));
-        if (artifacts.Any(artifact => !artifact.Exists))
+        if (artifacts.Any(artifact => !artifact.Exists) || !semanticProof.CanMerge)
         {
-            return BuildReport(context, commands, artifacts);
+            return BuildReport(context, commands, artifacts, semanticProof);
         }
 
         var coverageMsbuildDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-msbuild");
@@ -349,18 +421,40 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             "appsurface coverage run msbuild",
             "running packaged coverage CLI through the explicit MSBuild compatibility driver")))
         {
-            return BuildReport(context, commands, artifacts);
+            return BuildReport(context, commands, artifacts, semanticProof);
         }
 
         artifacts.AddRange(CheckCoverageRunArtifacts(coverageMsbuildDirectory, "coverage run msbuild"));
         artifacts.Add(CheckExcludedProjectArtifacts(coverageMsbuildDirectory, "Smoke.Tests"));
         if (artifacts.Any(artifact => !artifact.Exists))
         {
-            return BuildReport(context, commands, artifacts);
+            return BuildReport(context, commands, artifacts, semanticProof);
         }
 
         var coverageShardsDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-shards");
-        CopyCoverageShard(coverageMergedDirectory, coverageShardsDirectory);
+        string copiedShardPath;
+        try
+        {
+            copiedShardPath = CopyCoverageShard(semanticProof.RawArtifact!, coverageShardsDirectory);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            semanticProof = semanticProof with
+            {
+                Failures =
+                [
+                    ..semanticProof.Failures,
+                    new CoverageCliConsumerProofFailure(
+                        "CPV011",
+                        "raw-to-merged",
+                        $"The selected Smoke.Tests raw report could not be copied into the merge input: {exception.Message}",
+                        "Regenerate the proof and verify that the coverage fan-in directory is writable.",
+                        "coverage-shards/Smoke.Tests/coverage.cobertura.xml")
+                ]
+            };
+            return BuildReport(context, commands, artifacts, semanticProof);
+        }
+
         var coverageFanInDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-fan-in");
         if (!await RunRequiredAsync(ToolCommand(
             context,
@@ -368,16 +462,19 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             "appsurface coverage merge",
             "merging packaged coverage shards")))
         {
-            return BuildReport(context, commands, artifacts);
+            return BuildReport(context, commands, artifacts, semanticProof);
         }
 
         artifacts.AddRange(CheckCoverageMergeArtifacts(coverageFanInDirectory));
-        if (artifacts.Any(artifact => !artifact.Exists))
-        {
-            return BuildReport(context, commands, artifacts);
-        }
-
         var mergedCoveragePath = Path.Join(coverageFanInDirectory, "coverage.cobertura.xml");
+        semanticProof = CoverageCliConsumerProofSemanticValidator.ValidateMerged(
+            semanticProof,
+            copiedShardPath,
+            mergedCoveragePath);
+        if (!semanticProof.Succeeded || artifacts.Any(artifact => !artifact.Exists))
+        {
+            return BuildReport(context, commands, artifacts, semanticProof);
+        }
         var passingGateDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-gate-pass");
         if (!await RunRequiredAsync(ToolCommand(
             context,
@@ -385,13 +482,13 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             "appsurface coverage gate",
             "running passing packaged coverage gate")))
         {
-            return BuildReport(context, commands, artifacts);
+            return BuildReport(context, commands, artifacts, semanticProof);
         }
 
         artifacts.AddRange(CheckCoverageGateArtifacts(passingGateDirectory, "passing gate"));
         if (artifacts.Any(artifact => !artifact.Exists))
         {
-            return BuildReport(context, commands, artifacts);
+            return BuildReport(context, commands, artifacts, semanticProof);
         }
 
         var patchDiffPath = Path.Join(fixtureDirectory, "coverage-patch-targets.diff");
@@ -413,7 +510,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             "appsurface coverage gate patch targets",
             "running packaged patch-target coverage gate")))
         {
-            return BuildReport(context, commands, artifacts);
+            return BuildReport(context, commands, artifacts, semanticProof);
         }
 
         artifacts.AddRange(CheckCoverageGateArtifacts(patchGateDirectory, "patch-target gate"));
@@ -422,7 +519,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         artifacts.Add(CheckPatchTargetMarkdownContents(patchGateDirectory));
         if (artifacts.Any(artifact => !artifact.Exists))
         {
-            return BuildReport(context, commands, artifacts);
+            return BuildReport(context, commands, artifacts, semanticProof);
         }
 
         if (!await RunRequiredAsync(ToolCommand(
@@ -431,13 +528,13 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             "appsurface coverage gate patch-target cleanup",
             "proving packaged nonpatch gate removes stale patch targets")))
         {
-            return BuildReport(context, commands, artifacts);
+            return BuildReport(context, commands, artifacts, semanticProof);
         }
 
         artifacts.AddRange(CheckAbsentPatchTargetArtifacts(patchGateDirectory, "nonpatch gate"));
         if (artifacts.Any(artifact => !artifact.Exists))
         {
-            return BuildReport(context, commands, artifacts);
+            return BuildReport(context, commands, artifacts, semanticProof);
         }
 
         var failingGateDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-gate-fail");
@@ -467,7 +564,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             };
         }
 
-        return BuildReport(context, commands, artifacts);
+        return BuildReport(context, commands, artifacts, semanticProof);
     }
 
     /// <summary>
@@ -804,6 +901,30 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             cancellationToken);
     }
 
+    private static async Task WriteReleaseNoteFixtureAsync(string fixtureDirectory, CancellationToken cancellationToken)
+    {
+        var releasesDirectory = Path.Join(fixtureDirectory, "releases");
+        var entriesDirectory = Path.Join(releasesDirectory, "unreleased.entries");
+        Directory.CreateDirectory(entriesDirectory);
+        await File.WriteAllTextAsync(
+            Path.Join(releasesDirectory, "unreleased.md"),
+            """
+            # Unreleased
+
+            ## Added
+            <!-- appsurface:unreleased-entries section="added" -->
+            """,
+            cancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Join(entriesDirectory, "2026-08-20-package-consumer.md"),
+            """
+            <!-- appsurface:unreleased-entry section="added" -->
+
+            - The packaged tool composes consumer release notes.
+            """,
+            cancellationToken);
+    }
+
     private static string ResolveSmokeSolutionPath(string fixtureDirectory)
     {
         var slnxPath = Path.Join(fixtureDirectory, "Smoke.slnx");
@@ -826,8 +947,29 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             CheckArtifact(Path.Join(coverageMergedDirectory, "summary.txt"), $"{descriptionPrefix} summary"),
             CheckArtifact(Path.Join(coverageMergedDirectory, "timings.json"), $"{descriptionPrefix} timings"),
             CheckArtifact(Path.Join(coverageMergedDirectory, ".appsurface-coverage-output"), $"{descriptionPrefix} ownership marker"),
-            CheckGlob(Path.Join(coverageMergedDirectory, "projects"), "*", "dotnet-test.log", $"{descriptionPrefix} project log"),
-            CheckGlob(Path.Join(coverageMergedDirectory, "projects"), "*", "coverage.cobertura.xml", $"{descriptionPrefix} project Cobertura")
+            CheckGlob(Path.Join(coverageMergedDirectory, "projects"), "*", "dotnet-test.log", $"{descriptionPrefix} project log")
+        ];
+    }
+
+    private static IReadOnlyList<CoverageCliConsumerProofArtifactCheck> CheckSemanticRawArtifacts(
+        string coverageMergedDirectory,
+        CoverageCliConsumerProofSemanticProof semanticProof)
+    {
+        var selected = semanticProof.RawArtifact;
+        return
+        [
+            selected is null
+                ? new CoverageCliConsumerProofArtifactCheck(
+                    "coverage run Smoke.Tests manifest",
+                    Path.Join(coverageMergedDirectory, "projects", "Smoke.Tests-*", CoverageCliConsumerProofSemanticValidator.ManifestFileName),
+                    Exists: false)
+                : CheckArtifact(selected.ManifestPath, "coverage run Smoke.Tests manifest"),
+            selected is null
+                ? new CoverageCliConsumerProofArtifactCheck(
+                    "coverage run Smoke.Tests Cobertura",
+                    Path.Join(coverageMergedDirectory, "projects", "Smoke.Tests-*", CoverageCliConsumerProofSemanticValidator.CoverageFileName),
+                    Exists: false)
+                : CheckArtifact(selected.CoveragePath, "coverage run Smoke.Tests Cobertura")
         ];
     }
 
@@ -1001,27 +1143,33 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         return new CoverageCliConsumerProofArtifactCheck(description, matchedPath ?? Path.Join(directory, childPattern, fileName), matchedPath is not null);
     }
 
-    private static void CopyCoverageShard(string coverageMergedDirectory, string coverageShardsDirectory)
+    private static string CopyCoverageShard(
+        CoverageCliConsumerProofRawArtifact selectedArtifact,
+        string coverageShardsDirectory)
     {
-        var projectCoveragePath = Directory
-            .EnumerateFiles(Path.Join(coverageMergedDirectory, "projects"), "coverage.cobertura.xml", SearchOption.AllDirectories)
-            .OrderBy(path => path, StringComparer.Ordinal)
-            .First();
         var shardDirectory = Path.Join(coverageShardsDirectory, "Smoke.Tests");
         Directory.CreateDirectory(shardDirectory);
-        File.Copy(projectCoveragePath, Path.Join(shardDirectory, "coverage.cobertura.xml"), overwrite: true);
+        var shardPath = Path.Join(shardDirectory, CoverageCliConsumerProofSemanticValidator.CoverageFileName);
+        File.Copy(selectedArtifact.CoveragePath, shardPath, overwrite: true);
+        return shardPath;
     }
 
     private static CoverageCliConsumerProofReport BuildReport(
         CoverageCliConsumerProofContext context,
         IReadOnlyList<CoverageCliConsumerProofCommandResult> commands,
-        IReadOnlyList<CoverageCliConsumerProofArtifactCheck> artifacts)
+        IReadOnlyList<CoverageCliConsumerProofArtifactCheck> artifacts,
+        CoverageCliConsumerProofSemanticProof? semanticProof = null)
     {
         var failedCommand = commands.FirstOrDefault(command => !command.Succeeded);
         var firstFailure = failedCommand?.FailureReason;
         if (string.IsNullOrWhiteSpace(firstFailure))
         {
             firstFailure = artifacts.FirstOrDefault(artifact => !artifact.Exists)?.Description;
+        }
+
+        if (string.IsNullOrWhiteSpace(firstFailure))
+        {
+            firstFailure = semanticProof?.Failures.FirstOrDefault()?.Cause;
         }
 
         return new CoverageCliConsumerProofReport(
@@ -1035,7 +1183,8 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
             commands,
             artifacts,
             firstFailure ?? string.Empty,
-            CreateReproduceCommand(context.Request));
+            CreateReproduceCommand(context.Request),
+            semanticProof ?? CoverageCliConsumerProofSemanticProof.NotRun);
     }
 
     private static string CreateReproduceCommand(CoverageCliConsumerProofRequest request)
@@ -1380,6 +1529,7 @@ internal sealed record CoverageCliConsumerProofSelectedArtifact(
 /// <param name="Artifacts">Produced and missing artifact checks.</param>
 /// <param name="FirstFailure">First failure summary, or empty when the proof passed.</param>
 /// <param name="ReproduceCommand">Command that reruns the package verifier with the same proof workspace.</param>
+/// <param name="SemanticProof">Manifest-bound default-collector raw-to-merged semantic proof.</param>
 internal sealed record CoverageCliConsumerProofReport(
     string PackageVersion,
     string WorkDirectory,
@@ -1391,14 +1541,16 @@ internal sealed record CoverageCliConsumerProofReport(
     IReadOnlyList<CoverageCliConsumerProofCommandResult> Commands,
     IReadOnlyList<CoverageCliConsumerProofArtifactCheck> Artifacts,
     string FirstFailure,
-    string ReproduceCommand)
+    string ReproduceCommand,
+    CoverageCliConsumerProofSemanticProof? SemanticProof = null)
 {
     /// <summary>
     /// Gets whether every command and artifact check matched the expected consumer contract.
     /// </summary>
     internal bool Succeeded => string.IsNullOrWhiteSpace(FirstFailure)
         && Commands.All(command => command.Succeeded)
-        && Artifacts.All(artifact => artifact.Exists);
+        && Artifacts.All(artifact => artifact.Exists)
+        && SemanticProof?.Succeeded == true;
 
     internal static CoverageCliConsumerProofReport Failed(
         string packageVersion,
@@ -1418,7 +1570,8 @@ internal sealed record CoverageCliConsumerProofReport(
             [],
             [],
             firstFailure,
-            string.Empty);
+            string.Empty,
+            CoverageCliConsumerProofSemanticProof.NotRun);
     }
 }
 

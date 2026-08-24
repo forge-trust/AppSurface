@@ -1,0 +1,33 @@
+title: EvidenceHost Cookbook
+summary: Configure explicit no-evidence rules, coverage evidence, resource-backed browser E2E, and release envelopes without claiming skipped tests are complete coverage.
+page_type: guide
+nav_group: How-to Guides
+sequence_key: evidencehost
+order: 70
+aliases:
+  - evidence policy
+  - no evidence required
+  - browser E2E evidence
+  - release envelope
+keywords:
+  - appsurface evidence init
+  - appsurface evidence doctor
+  - appsurface evidence explain
+  - appsurface evidence run
+  - appsurface evidence verify
+  - coverage gate
+related_pages:
+  - start-here/evidencehost.md
+  - Cli/ForgeTrust.AppSurface.Cli/README.md
+  - Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md
+  - Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md
+trust:
+  status: public preview cookbook
+  summary: Recipes use explicit consumer-owned policy and producer registrations. They do not provision infrastructure or make an independent attestation claim.
+  freshness: Keep command examples aligned with the public CLI and Evidence package contracts.
+  change_scope: Consumer adoption guidance only; each consumer owns its actual test topology, resource definitions, and threshold policy.
+  archive: Semantic classification of low-value source lines and cross-job provenance are follow-on work, not hidden behavior in this cookbook.
+  sources:
+    - start-here/evidencehost.md
+    - Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md
+    - Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md

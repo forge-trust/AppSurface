@@ -74,10 +74,115 @@ internal static class AppSurfaceDocsOperatorReadPolicyEvaluator
                 metadata: Metadata("missing_policy", typeof(AuthorizationPolicy), policyName));
         }
 
+        return await AuthorizePolicyAsync(
+            httpContext,
+            policyEvaluatorResult.Service,
+            policy,
+            policyName,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Evaluates the complete ASP.NET Core authorization metadata applied to a named Docs endpoint group.
+    /// </summary>
+    /// <remarks>
+    /// This preserves default-policy, role, authentication-scheme, and multiple-policy semantics for RazorWire streams,
+    /// which are not conventional HTTP endpoints and therefore cannot receive ASP.NET Core endpoint authorization
+    /// automatically.
+    /// </remarks>
+    /// <param name="httpContext">Current HTTP request context.</param>
+    /// <param name="authorizationData">Authorization metadata captured from the named Docs endpoint group.</param>
+    /// <param name="cancellationToken">Cancellation observed before and during policy lookup.</param>
+    /// <returns>A passive AppSurface auth result representing the combined policy outcome.</returns>
+    public static async ValueTask<AppSurfaceAuthResult> AuthorizeAsync(
+        HttpContext httpContext,
+        IReadOnlyList<IAuthorizeData> authorizationData,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+        ArgumentNullException.ThrowIfNull(authorizationData);
+        if (authorizationData.Count == 0)
+        {
+            throw new ArgumentException("Authorization metadata must contain at least one requirement.", nameof(authorizationData));
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var requestServices = httpContext.RequestServices;
+        const string policyDescription = "the named Docs endpoint authorization requirements";
+        if (requestServices is null)
+        {
+            return MissingServices(
+                typeof(IServiceProvider),
+                policyDescription,
+                "missing_request_services",
+                "Problem: AppSurface Docs could not evaluate endpoint authorization. Likely cause: the current request has no request service provider. Fix: evaluate the stream inside an ASP.NET Core request. Docs: " + DocsUrl);
+        }
+
+        var policyProviderResult = ResolveRequiredService<IAuthorizationPolicyProvider>(
+            requestServices,
+            policyDescription,
+            "missing_authorization_policy_provider",
+            "Problem: AppSurface Docs could not find ASP.NET Core authorization policies. Likely cause: the host did not call services.AddAuthorization(...). Fix: register authorization services for the named Docs endpoint requirements. Docs: " + DocsUrl);
+        if (policyProviderResult.Failure is not null)
+        {
+            return policyProviderResult.Failure;
+        }
+
+        var policyEvaluatorResult = ResolveRequiredService<IPolicyEvaluator>(
+            requestServices,
+            policyDescription,
+            "missing_policy_evaluator",
+            "Problem: AppSurface Docs could not evaluate ASP.NET Core authorization policies. Likely cause: authorization policy evaluator services are missing. Fix: register normal ASP.NET Core authorization services. Docs: " + DocsUrl);
+        if (policyEvaluatorResult.Failure is not null)
+        {
+            return policyEvaluatorResult.Failure;
+        }
+
+        foreach (var policyName in authorizationData
+                     .Select(data => data.Policy)
+                     .Where(policyName => !string.IsNullOrWhiteSpace(policyName))
+                     .Select(policyName => policyName!.Trim())
+                     .Distinct(StringComparer.Ordinal))
+        {
+            if (await policyProviderResult.Service.GetPolicyAsync(policyName).WaitAsync(cancellationToken) is null)
+            {
+                return AppSurfaceAuthResult.MissingPolicy(
+                    message:
+                    $"Problem: AppSurface Docs endpoint authorization policy '{policyName}' was not found. Likely cause: a named Docs handle references an unregistered host policy. Fix: register the policy or update RequireAuthorization(...). Docs: {DocsUrl}",
+                    metadata: Metadata("missing_policy", typeof(AuthorizationPolicy), policyName));
+            }
+        }
+
+        var combinedPolicy = await AuthorizationPolicy.CombineAsync(policyProviderResult.Service, authorizationData)
+            .WaitAsync(cancellationToken);
+        if (combinedPolicy is null)
+        {
+            return AppSurfaceAuthResult.MissingPolicy(
+                message:
+                $"Problem: AppSurface Docs could not combine the named Docs endpoint authorization requirements. Likely cause: the host did not configure a default authorization policy. Fix: register a default policy or use a named RequireAuthorization(...) policy. Docs: {DocsUrl}",
+                metadata: Metadata("missing_policy", typeof(AuthorizationPolicy), policyDescription));
+        }
+
+        return await AuthorizePolicyAsync(
+            httpContext,
+            policyEvaluatorResult.Service,
+            combinedPolicy,
+            policyDescription,
+            cancellationToken);
+    }
+
+    private static async ValueTask<AppSurfaceAuthResult> AuthorizePolicyAsync(
+        HttpContext httpContext,
+        IPolicyEvaluator policyEvaluator,
+        AuthorizationPolicy policy,
+        string policyName,
+        CancellationToken cancellationToken)
+    {
         AuthenticateResult authentication;
         try
         {
-            authentication = await policyEvaluatorResult.Service.AuthenticateAsync(policy, httpContext);
+            authentication = await policyEvaluator.AuthenticateAsync(policy, httpContext);
         }
         catch (InvalidOperationException exception) when (IsMissingAuthenticationSetupFailure(exception))
         {
@@ -90,7 +195,7 @@ internal static class AppSurfaceDocsOperatorReadPolicyEvaluator
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        var authorization = await policyEvaluatorResult.Service.AuthorizeAsync(
+        var authorization = await policyEvaluator.AuthorizeAsync(
             policy,
             authentication,
             httpContext,

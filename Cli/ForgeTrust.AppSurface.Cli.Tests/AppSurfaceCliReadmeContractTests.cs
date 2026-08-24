@@ -185,6 +185,47 @@ public sealed class AppSurfaceCliReadmeContractTests
     }
 
     [Fact]
+    public void Readme_Should_Document_CoverageCleanup_GoldenPath_AndSafetyBoundary()
+    {
+        var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());
+
+        Assert.Contains("### `appsurface coverage clean`", readme, StringComparison.Ordinal);
+        Assert.Contains("appsurface coverage clean --apply", readme, StringComparison.Ordinal);
+        Assert.Contains("appsurface coverage clean --all --root .", readme, StringComparison.Ordinal);
+        Assert.Contains("appsurface coverage clean --all --root . --apply", readme, StringComparison.Ordinal);
+        Assert.Contains("`--apply` is required", readme, StringComparison.Ordinal);
+        Assert.Contains("The root itself is never deleted", readme, StringComparison.Ordinal);
+        Assert.Contains("does not traverse symbolic links or reparse points", readme, StringComparison.Ordinal);
+        Assert.Contains("its target is never read or removed", readme, StringComparison.Ordinal);
+        Assert.Contains("AppSurface-owned coverage artifacts", readme, StringComparison.Ordinal);
+        Assert.Contains("`ASTEST101`", readme, StringComparison.Ordinal);
+        Assert.Contains("`ASTEST102`", readme, StringComparison.Ordinal);
+        Assert.Contains("`ASTEST103`", readme, StringComparison.Ordinal);
+        Assert.Contains("`ASTEST104`", readme, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Readme_Should_Document_ConsumerReleaseNoteComposition_Boundary()
+    {
+        var readme = File.ReadAllText(GetAppSurfaceCliReadmePath());
+
+        Assert.Contains("### `appsurface release compose`", readme, StringComparison.Ordinal);
+        Assert.Contains("dotnet tool run appsurface -- release compose --root .", readme, StringComparison.Ordinal);
+        Assert.Contains("<!-- appsurface:unreleased-entries section=\"added\" -->", readme, StringComparison.Ordinal);
+        Assert.Contains("<!-- appsurface:unreleased-entry section=\"added\" -->", readme, StringComparison.Ordinal);
+        Assert.Contains("--output releases/v1.4.0.md", readme, StringComparison.Ordinal);
+        Assert.Contains("`--apply` always requires a distinct `--output`", readme, StringComparison.Ordinal);
+        Assert.Contains("| `--apply` | Off |", readme, StringComparison.Ordinal);
+        Assert.Contains("never overwrites the stable template", readme, StringComparison.Ordinal);
+        Assert.Contains("does not run AppSurface's repository-owned release cockpit", readme, StringComparison.Ordinal);
+        Assert.Contains("changelog rollover and entry consumption", readme, StringComparison.Ordinal);
+        Assert.Contains("terminal control characters", readme, StringComparison.Ordinal);
+        Assert.Contains("the template is the destination", readme, StringComparison.Ordinal);
+        Assert.Contains("operator-controlled root", readme, StringComparison.Ordinal);
+        Assert.Contains("../../tools/ForgeTrust.AppSurface.Release/README.md", readme, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RepositoryLockFiles_ShouldNotRetainDirectMsbuildCoverageReferences()
     {
         var repositoryRoot = GetRepositoryRoot();

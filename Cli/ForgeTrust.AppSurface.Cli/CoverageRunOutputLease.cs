@@ -69,6 +69,38 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     }
 
     /// <summary>
+    /// Independently opens every existing output-path component without creating a missing directory.
+    /// </summary>
+    /// <param name="outputPath">Absolute output directory path.</param>
+    /// <returns>A retained lease, or <see langword="null"/> when the output directory does not exist.</returns>
+    /// <remarks>
+    /// This is used by explicit coverage cleanup so a preview or cleanup of a missing output never creates an empty
+    /// <c>TestResults</c> directory. Existing components are still opened without following links.
+    /// </remarks>
+    internal static CoverageRunOutputLease? AcquireExisting(string outputPath)
+    {
+        var lease = new CoverageRunOutputLease(NormalizePlatformPath(outputPath));
+        try
+        {
+            var exists = OperatingSystem.IsWindows()
+                ? lease.AcquireWindows(createMissing: false)
+                : lease.AcquireUnix(createMissing: false);
+            if (exists)
+            {
+                return lease;
+            }
+
+            lease.Dispose();
+            return null;
+        }
+        catch
+        {
+            lease.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Validates the existing path and output ownership without creating missing components.
     /// </summary>
     /// <param name="outputPath">Absolute output directory path.</param>
@@ -105,6 +137,57 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
         else
         {
             PrepareUnix(clean, state);
+        }
+    }
+
+    /// <summary>
+    /// Returns AppSurface-owned entries that an explicit coverage clean operation may remove and, when requested,
+    /// deletes them through this retained output-directory lease.
+    /// </summary>
+    /// <param name="apply">Whether the known entries should be deleted after validation.</param>
+    /// <returns>A marker-ownership result and the relative entries selected for cleanup.</returns>
+    /// <remarks>
+    /// The method neither creates an ownership marker nor creates the <c>projects</c> directory. An empty unmarked
+    /// directory therefore remains a no-op, while a populated unmarked directory still fails closed through
+    /// <see cref="ValidateOwnedTree"/>.
+    /// </remarks>
+    internal CoverageOwnedCleanupPlan CleanKnownOwnedArtifacts(bool apply)
+    {
+        var state = ValidateOwnedTree();
+        if (!state.HasMarker)
+        {
+            return new CoverageOwnedCleanupPlan(IsOwned: false, []);
+        }
+
+        var artifacts = state.Snapshot
+            .Where(entry => string.IsNullOrEmpty(Path.GetDirectoryName(entry.RelativePath)))
+            .Where(entry => IsKnownOutputEntry(entry) || IsPatternOutputEntry(entry))
+            .Select(entry => entry.RelativePath)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
+        if (!apply || artifacts.Length == 0)
+        {
+            return new CoverageOwnedCleanupPlan(IsOwned: true, artifacts);
+        }
+
+        VerifyBinding();
+        EnsureOwnershipUnchanged(state, ValidateOwnedTree());
+        DeleteKnownEntries(state);
+
+        return new CoverageOwnedCleanupPlan(IsOwned: true, artifacts);
+    }
+
+    private void DeleteKnownEntries(OwnershipState state)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            DeleteKnownWindowsEntries(BuildAuthorizedChildren(state.Snapshot));
+        }
+        else
+        {
+            DeleteKnownUnixEntries(
+                _outputHandle!.DangerousGetHandle().ToInt32(),
+                BuildAuthorizedChildren(state.Snapshot));
         }
     }
 

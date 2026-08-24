@@ -1,6 +1,7 @@
 @model ForgeTrust.AppSurface.Docs.Models.SearchPageViewModel
-@inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrlBuilder
+@inject ForgeTrust.AppSurface.Docs.IAppSurfaceDocsRequestRuntimeAccessor RuntimeAccessor
 @{
+    var docsUrlBuilder = RuntimeAccessor.GetRequiredRuntime().DocsUrlBuilder;
     const string FailureLinkClass = "grid gap-1 rounded-lg border docs-token-border-muted docs-token-bg-raised px-[0.95rem] py-[0.85rem] no-underline transition-colors docs-token-hover-border-accent docs-token-hover-bg-raised";
 }
 
@@ -51,7 +52,7 @@
         <div class="flex flex-wrap gap-[0.6rem]">
             @foreach (var query in Model.SuggestedQueries)
             {
-                var queryHref = Url.PathBaseAware($"{DocsUrlBuilder.Routes.Search}?q={Uri.EscapeDataString(query)}");
+                var queryHref = Url.PathBaseAware($"{docsUrlBuilder.Routes.Search}?q={Uri.EscapeDataString(query)}");
                 <a class="docs-search-page-starter-chip"
                    href="@queryHref"
                    data-rw-search-suggestion="@query">

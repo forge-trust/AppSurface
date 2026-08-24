@@ -200,7 +200,14 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
             protector.Protect(normalized),
             CreatePersonaCookieOptions(httpContext.Request));
 
-        if (TryGetSafeReturnUrl(httpContext, out var returnUrl))
+        var explicitReturnUrl = TryGetSafeReturnUrl(httpContext, out var safeReturnUrl)
+            ? safeReturnUrl
+            : null;
+        var returnUrl = AppSurfaceDevAuthLocalReturnUrl.ResolveSelectTarget(
+            explicitReturnUrl,
+            persona.LandingUrl,
+            fallbackTarget: null);
+        if (returnUrl is not null)
         {
             return Results.LocalRedirect(returnUrl);
         }
@@ -359,7 +366,11 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         foreach (var persona in options.Users.Personas.Values)
         {
             var selected = string.Equals(status.PersonaId, persona.Id, StringComparison.Ordinal);
-            var action = BuildMutationUrl(options.PathPrefix, "select/" + persona.Id, returnUrl);
+            var actionReturnUrl = AppSurfaceDevAuthLocalReturnUrl.ResolveSelectTarget(
+                returnUrl,
+                persona.LandingUrl,
+                fallbackTarget: null);
+            var action = BuildMutationUrl(options.PathPrefix, "select/" + persona.Id, actionReturnUrl);
             builder.AppendLine($"<form method=\"post\" action=\"{html.Encode(action)}\"><button class=\"{(selected ? "selected" : string.Empty)}\" aria-current=\"{(selected ? "true" : "false")}\">{html.Encode(DisplayPersonaName(persona))}</button></form>");
         }
 
@@ -517,9 +528,9 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
 
     private static bool TryGetSafeReturnUrl(HttpContext httpContext, out string returnUrl)
     {
-        returnUrl = NormalizeLocalReturnUrl(httpContext.Request.Query["returnUrl"].ToString());
-        return !string.Equals(returnUrl, "/", StringComparison.Ordinal) ||
-            string.Equals(httpContext.Request.Query["returnUrl"].ToString(), "/", StringComparison.Ordinal);
+        var safeReturnUrl = AppSurfaceDevAuthLocalReturnUrl.GetSafeOrNull(httpContext.Request.Query["returnUrl"].ToString());
+        returnUrl = safeReturnUrl ?? string.Empty;
+        return safeReturnUrl is not null;
     }
 
     /// <summary>
@@ -548,17 +559,7 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
     /// </summary>
     internal static string NormalizeLocalReturnUrl(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value) ||
-            !value.StartsWith("/", StringComparison.Ordinal) ||
-            value.StartsWith("//", StringComparison.Ordinal) ||
-            value.StartsWith("/\\", StringComparison.Ordinal) ||
-            value.Contains('\\', StringComparison.Ordinal) ||
-            value.Any(char.IsControl))
-        {
-            return "/";
-        }
-
-        return value;
+        return AppSurfaceDevAuthLocalReturnUrl.NormalizeOrRoot(value);
     }
 
     [GeneratedRegex(@"\{[^}/]+\}", RegexOptions.CultureInvariant)]

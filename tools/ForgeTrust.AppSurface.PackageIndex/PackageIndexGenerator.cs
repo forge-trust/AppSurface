@@ -908,9 +908,21 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine("- Keep `tool_command_name` aligned with each published .NET tool project's `ToolCommandName` so package validation, pre-publish coverage proof, and post-publish smoke tests run the command users will type. Tool smoke tests install the package, run `--help`, then require `--version` to match the package SemVer exactly, including stable or prerelease labels and excluding any leading `v` or build metadata. The command name value must be one file-name-safe command token, not a path: no whitespace, path separators, reserved `.`/`..` segments, trailing periods, Windows reserved device names or dotted aliases, control characters, or Windows-invalid file-name characters.");
         builder.AppendLine($"- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications, package READMEs, product families, release-guidance variants, readiness blockers, or readiness notes; it reports changed and managed README-region counts.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify` before review to confirm package-index outputs and managed README guidance are current without writing files.");
-        builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata, project references, Tailwind runtime payloads, the packaged coverage CLI, or the Docs parser and sanitizer graph. This pre-publish workflow installs the packed `ForgeTrust.AppSurface.Cli` tool from local artifacts, runs `coverage run`, `coverage merge`, a passing `coverage gate`, and an intentionally failing `coverage gate`, then writes `coverage-cli-consumer-proof.md`. It also restores the freshly packed `ForgeTrust.AppSurface.Docs` artifact in an independent locked consumer and writes `docs-package-consumer-proof.md`; either failed proof blocks the publish manifest.");
+        builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata, project references, Tailwind runtime payloads, the packaged release-note or coverage CLI, or the Docs parser and sanitizer graph. This pre-publish workflow installs the packed `ForgeTrust.AppSurface.Cli` tool from local artifacts, previews and writes a consumer `release compose` note, runs the packaged coverage semantic proof plus `coverage merge`, a passing `coverage gate`, and an intentionally failing `coverage gate`, then writes the private `coverage-cli-consumer-proof.md` and public-safe `coverage-cli-consumer-proof.evidence.json`. It also restores the freshly packed `ForgeTrust.AppSurface.Docs` artifact in an independent locked consumer and writes `docs-package-consumer-proof.md`; either failed proof blocks the publish manifest.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- gate` before publishing rebrand or release metadata changes.");
         builder.AppendLine("- Keep `packages/README.md.yml` hand-authored so AppSurface Docs metadata, trust-bar copy, and section placement stay intentional.");
+        builder.AppendLine();
+        builder.AppendLine("### Issue #674 packaged coverage proof");
+        builder.AppendLine();
+        builder.AppendLine("Keep the local and packaged coverage questions separate. For repository readiness, use `coverage run --dry-run` → `coverage run` → `coverage gate`: this proves selected VSTest projects produce normal AppSurface artifacts and satisfy the repository thresholds. For a packed CLI candidate, use PackageIndex `verify-packages`: its default collector proof selects exactly one manifest-bound `Smoke.Tests` report, validates owned `Smoke.Calculator` class, line, and branch facts in raw Cobertura, copies and hashes that shard, merges it, and independently validates retention in merged Cobertura. This is an owned fixture proof, not certification of arbitrary consumer application graphs.");
+        builder.AppendLine();
+        builder.AppendLine("The assurance boundary is explicit: `--coverage-driver msbuild` is VSTest artifact compatibility only; `coverage merge` is external-shard fan-in only; and `--no-clean` is an intentional retention escape hatch whose preserved reports or patch-target files may be stale. Native Microsoft Testing Platform (MTP) is a separate runner/integration boundary. Do not switch drivers to satisfy the proof when MTP is selected or runner/package facts conflict; classify the boundary and use a separate MTP path or issue.");
+        builder.AppendLine();
+        builder.AppendLine("The CLI emits schema-versioned `coverage-project.json` beside each per-project report with `schemaVersion`, normalized solution-relative `projectPath`, and CLI-owned `slug`. PackageIndex accepts only regular manifests up to 16 KiB and the bounded Coverlet/ReportGenerator Cobertura subset required by the fixture (`coverage`, `sources`, `source`, `packages`, `package`, `classes`, `class`, `methods`, `method`, `lines`, `line`, `conditions`, and `condition`), with DTD/entity rejection, a 1 MiB document limit, depth 32, and 10,000 elements. The proof requires one `Smoke` package, one `Smoke.Calculator` class, a normalized `Smoke/Calculator.cs` filename, positive line hits, and the `Sign` line-7 two-branch invariant in both raw and merged reports.");
+        builder.AppendLine();
+        builder.AppendLine("Publish `coverage-cli-consumer-proof.evidence.json` beside the existing private Markdown report. Evidence schema 1 is public-safe and allowlists the verdict, package identity and optional digest, configured driver boundary, raw and merged outcomes with optional artifact-relative paths and invariant IDs, the optional raw SHA-256, plus bounded failures with code, scope, cause, next action, and evidence-relative path. Every unavailable optional field is omitted rather than emitted as `null`. The raw and merged outcomes, not the configured driver boundary, state whether a semantic stage actually ran. It excludes command arguments and full invocation traces, working directories, NuGet sources/configuration, absolute paths, raw XML, credentials, and arbitrary output. Readers reject unknown required structure and unsupported major versions.");
+        builder.AppendLine();
+        builder.AppendLine("When upgrading Coverlet, ReportGenerator, or the runner, capture one isolated generated-fixture raw/merged pair, confirm the bounded subset and semantic invariants, run the focused PackageIndex fixture suite and `verify-packages`, then update the versioned schema/subset documentation and consumers together. An unsupported shape is a tool-compatibility result; a valid shape with missing or zero expected semantics is a coverage defect. See the [CLI coverage proof-level and manifest contract](../Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-proof-levels-and-driver-boundary).");
         builder.AppendLine();
         builder.AppendLine("### Issue #682 package proof");
         builder.AppendLine();
@@ -2353,12 +2365,15 @@ internal sealed record PackageProjectMetadata(
 /// Discovers candidate projects that should be classified by the package chooser manifest.
 /// </summary>
 /// <remarks>
-/// The scanner intentionally excludes tests, examples, tooling, generated directories, and hidden local cache
-/// directories so the manifest only needs to classify packages that are meaningful to external adopters or
-/// package-surface maintainers.
+/// The scanner intentionally excludes tests, examples, executable tooling, generated directories, and hidden local
+/// cache directories so the manifest only needs to classify packages that are meaningful to external adopters or
+/// package-surface maintainers. <c>ForgeTrust.AppSurface.ReleaseContracts</c> is the one transitive support package
+/// stored below <c>tools</c>; it remains discoverable because published Docs consumers restore it as a dependency.
 /// </remarks>
 internal sealed class PackageProjectScanner
 {
+    private const string ReleaseContractsProjectPath = "/tools/forgetrust.appsurface.releasecontracts/forgetrust.appsurface.releasecontracts.csproj";
+
     /// <summary>
     /// Enumerates candidate project files under the repository root.
     /// </summary>
@@ -2385,13 +2400,22 @@ internal sealed class PackageProjectScanner
         var normalizedPath = relativePath.Replace('\\', '/').Trim('/');
         var normalizedPathLower = "/" + normalizedPath.ToLowerInvariant();
         var projectName = Path.GetFileNameWithoutExtension(relativePath).ToLowerInvariant();
+        var isReleaseContractsPackage = string.Equals(
+            normalizedPathLower,
+            ReleaseContractsProjectPath,
+            StringComparison.Ordinal);
 
         if (HasHiddenDirectorySegment(normalizedPath)
             || normalizedPathLower.StartsWith("/artifacts/", StringComparison.Ordinal)
             || normalizedPathLower.Contains("/bin/", StringComparison.Ordinal)
             || normalizedPathLower.Contains("/obj/", StringComparison.Ordinal)
-            || normalizedPathLower.Contains("/node_modules/", StringComparison.Ordinal)
-            || normalizedPathLower.Contains("/tools/", StringComparison.Ordinal))
+            || normalizedPathLower.Contains("/node_modules/", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (normalizedPathLower.Contains("/tools/", StringComparison.Ordinal)
+            && !isReleaseContractsPackage)
         {
             return false;
         }

@@ -135,7 +135,7 @@ packages:
     release_track: coordinated
     order: 37
     use_when: Add this in Development-by-default ASP.NET Core hosts or explicit local/proof environments when package consumers need selectable fake personas, a visible local control page, and AppSurface policy proof without configuring an external identity provider.
-    includes: AppSurface DevAuth named authentication scheme, AddAppSurfaceDevAuth registration, explicit allowed environment names, MapAppSurfaceDevAuth control endpoints, AppSurfaceDevAuthMarker embeddable state overlay, seeded personas, protected persona cookie, loopback-only status JSON, startup safety diagnostics, and ASDEV diagnostic codes.
+    includes: AppSurface DevAuth named authentication scheme, AddAppSurfaceDevAuth registration, explicit allowed environment names, MapAppSurfaceDevAuth control endpoints, AppSurfaceDevAuthMarker embeddable state overlay, seeded personas with optional safe local `LandingUrl` recovery targets, protected persona cookie, loopback-only status JSON, startup safety diagnostics, and ASDEV diagnostic codes.
     does_not_include: Production authentication, OIDC, JWT validation, ASP.NET Identity, password handling, durable app-user mapping, user stores, tenant authority, audit sinks, deployment auth, automatic host HTML injection, RazorWire auth UI components, or Auth.Testing integration-test assertions.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` after `ForgeTrust.AppSurface.Auth.AspNetCore` only for Development hosts or explicit local/proof environments that need fake local personas to prove AppSurface policy results; use the [Auth adoption ladder](../start-here/auth-adoption-ladder.md) to keep DevAuth separate from Auth.Testing.
@@ -451,6 +451,76 @@ packages:
       - ForgeTrust.AppSurface.Deployment
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Deployment
+  - project: Evidence/ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj
+    release_guidance_variant: default
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 56
+    use_when: Add this when authoring a consumer-owned CI evidence producer, policy editor, or downstream gate that needs stable plan, producer, manifest, claim, and canonical digest contracts without taking a CLI or Aspire dependency.
+    includes: Versioned evidence policy and profile declarations; normalized diff paths; resource, producer, artifact, and obligation declarations; immutable plans and manifests; terminal outcomes and claim eligibility; canonical JSON; SHA-256 digests; and manifest verification.
+    does_not_include: Policy matching, Git inspection, test discovery, coverage collection, numeric threshold enforcement, container provisioning, browser execution, Aspire hosting, independent attestation, hosted dashboards, or outbound telemetry.
+    start_here_path: Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md
+    recipe_summary: Start with `ForgeTrust.AppSurface.Evidence.Contracts` only when building a consumer-owned EvidenceHost integration or gate; most adopters should begin with the EvidenceHost guide and public CLI.
+  - project: Evidence/ForgeTrust.AppSurface.Evidence.Planner/ForgeTrust.AppSurface.Evidence.Planner.csproj
+    release_guidance_variant: default
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 57
+    use_when: Add this when a consumer-owned CI integration needs deterministic explicit-diff selection of a checked-in EvidencePolicy before tests, resources, or gates begin.
+    includes: EvidencePlanner policy validation and resolution, conservative fallback, equal-precedence ambiguity rejection, normalized path validation, unified-diff input parsing, and deterministic plan digests.
+    does_not_include: Git commands, test or resource execution, policy inference, semantic classification of source lines, coverage thresholds, artifact storage, or a gate decision outside the resolved contract.
+    start_here_path: Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Evidence.Planner` after the contracts package only for a custom CI integration that needs explainable policy resolution without the AppSurface CLI.
+    depends_on:
+      - ForgeTrust.AppSurface.Evidence.Contracts
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Evidence.Contracts
+  - project: Evidence/ForgeTrust.AppSurface.Evidence.Cli/ForgeTrust.AppSurface.Evidence.Cli.csproj
+    release_guidance_variant: default
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 58
+    use_when: Reference this only when hosting the AppSurface Evidence command workflow in a composition root; normal consumers install ForgeTrust.AppSurface.Cli and run `appsurface evidence`.
+    includes: Marked starter generation, explicit policy and diff loading, doctor diagnostics, plan/manifest/summary artifact writing, policy-bound coverage-gate execution, canonical verification, and safe next-action diagnostics used by the public CLI command family.
+    does_not_include: A dotnet tool entry point, ambient test discovery, consumer browser/E2E producers, resource provisioning, GitHub API calls, telemetry, or a normal application AppHost integration.
+    start_here_path: Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md
+    recipe_summary: Use `ForgeTrust.AppSurface.Evidence.Cli` only as the internal workflow behind a custom AppSurface CLI composition; normal CI users should follow the EvidenceHost guide.
+    depends_on:
+      - ForgeTrust.AppSurface.Evidence.Contracts
+      - ForgeTrust.AppSurface.Evidence.Planner
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Evidence.Contracts
+      - ForgeTrust.AppSurface.Evidence.Planner
+  - project: Evidence/ForgeTrust.AppSurface.Evidence.Aspire/ForgeTrust.AppSurface.Evidence.Aspire.csproj
+    release_guidance_variant: apphost
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 59
+    use_when: Add this in a consumer test or CI composition root when resource-backed coverage, API, or browser E2E producers need explicit Aspire readiness, bounded lifecycle ownership, cleanup, and a truthful evidence manifest separate from normal application startup.
+    includes: Explicit EvidenceHost bootstrap and registration, resource dependency ordering and readiness deadlines, typed producer execution deadlines, failure and cleanup handling, trusted-envelope extension point, observation-only claims, and manifest collection.
+    does_not_include: Normal AppHost registration, automatic resource or producer discovery, reuse or mutation of the normal development AppHost graph, Docker sandboxing, independent provenance attestation, cloud provisioning, cross-job aggregation, hosted dashboards, or test framework/browser implementation.
+    start_here_path: Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Evidence.Aspire` only to test or CI composition for explicit resource-backed evidence; keep application AppHosts and runtime projects unaware of it.
+    depends_on:
+      - ForgeTrust.AppSurface.Evidence.Contracts
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Evidence.Contracts
   - project: Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj
     release_guidance_variant: apphost
     classification: public
@@ -632,6 +702,15 @@ packages:
     release_notes_path: releases/unreleased.md
     order: 115
     note: Private compiled MSBuild task used by `ForgeTrust.AppSurface.Web.Tailwind`; consume it only through the packed Tailwind package.
+  - project: tools/ForgeTrust.AppSurface.ReleaseContracts/ForgeTrust.AppSurface.ReleaseContracts.csproj
+    classification: support
+    publish_decision: support_publish
+    product_family: internal_support
+    release_status: support_runtime
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 190
+    note: Transitive release metadata contracts used by `ForgeTrust.AppSurface.Docs` and repository release tooling. Restore it through those packages rather than installing it directly.
   - project: Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj
     classification: proof_host
     publish_decision: support_publish
@@ -649,6 +728,7 @@ packages:
       - ForgeTrust.AppSurface.Caching
       - ForgeTrust.AppSurface.Config
       - ForgeTrust.AppSurface.Intelligence
+      - ForgeTrust.AppSurface.ReleaseContracts
       - ForgeTrust.AppSurface.Theming
       - ForgeTrust.AppSurface.Web
       - ForgeTrust.AppSurface.Web.Tailwind
@@ -730,12 +810,12 @@ packages:
     release_track: coordinated
     order: 120
     tool_command_name: appsurface
-    use_when: Install this when you want repository-level AppSurface tooling, including protected named-canary deployment proof, from a global or local .NET tool command.
-    includes: The `appsurface` .NET tool command, `appsurface canary poll` bounded read-only deployment proof for protected AppSurface Web named canaries, `appsurface docs` AppSurface Docs workflows, `appsurface pwa verify` install evidence plus explicitly requested schema-v3 server-known push-readiness posture evidence for AppSurface Web apps, `appsurface durable schema status|script|preflight|apply` explicit PostgreSQL schema operations, `appsurface coverage run` private test orchestration with managed JUnit diagnostics, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` private threshold enforcement, the `appsurface secrets init`, `set`, `get`, `list --names-only`, `migrate`, `delete`, and `doctor` local-secret workflow, and declared `appsurface secrets transfer plan` and `appsurface secrets transfer apply` jobs, including pinned Google-to-LocalSecrets materialization for local testing.
-    does_not_include: App runtime packages, raw durable Work, Flow, Schedule, or recovery mutations, automatic startup DDL, hosted coverage dashboards, coverage uploads, coverage trend storage, grouped coverage runs, TRX/TUnit result parsing, RazorWire-specific export workflows, or a replacement for project package references.
+    use_when: Install this when you want repository-level AppSurface tooling, including protected named-canary deployment proof or conflict-free release-note composition, from a global or local .NET tool command.
+    includes: The `appsurface` .NET tool command, `appsurface release compose` preview-by-default deterministic composition of isolated Markdown release-note entries for any consumer project, `appsurface canary poll` bounded read-only deployment proof for protected AppSurface Web named canaries, `appsurface docs` AppSurface Docs workflows, `appsurface pwa verify` install evidence plus explicitly requested schema-v3 server-known push-readiness posture evidence for AppSurface Web apps, `appsurface durable schema status|script|preflight|apply` explicit PostgreSQL schema operations, `appsurface coverage run` private test orchestration with managed JUnit diagnostics, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` private threshold enforcement, the `appsurface secrets init`, `set`, `get`, `list --names-only`, `migrate`, `delete`, and `doctor` local-secret workflow, and declared `appsurface secrets transfer plan` and `appsurface secrets transfer apply` jobs, including pinned Google-to-LocalSecrets materialization for local testing.
+    does_not_include: App runtime packages, raw durable Work, Flow, Schedule, or recovery mutations, automatic startup DDL, repository-specific release preparation, changelog rollover, entry consumption, tag binding, package publication, GitHub Release orchestration, hosted coverage dashboards, coverage uploads, coverage trend storage, grouped coverage runs, TRX/TUnit result parsing, RazorWire-specific export workflows, or a replacement for project package references.
     start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
     start_here_label: AppSurface CLI README
-    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface canary poll`, `appsurface docs`, `appsurface pwa verify` install or server-known push-readiness posture evidence, explicit `appsurface durable schema` deployment checks, private coverage commands, explicit macOS LocalSecrets migration, or declared secret-transfer workflows without running from source. Durable `script` stays offline; online operations resolve only a named environment variable and `apply` requires `--apply`. Verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests. PWA evidence is not scoring or delivery proof.
+    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want `appsurface release compose` to keep concurrent changes out of a shared changelog, `appsurface canary poll`, `appsurface docs`, `appsurface pwa verify` install or server-known push-readiness posture evidence, explicit `appsurface durable schema` deployment checks, private coverage commands, explicit macOS LocalSecrets migration, or declared secret-transfer workflows without running from source. Release composition writes only an explicit `--output --apply` destination; repository release preparation and publication remain separate. Durable `script` stays offline; online operations resolve only a named environment variable and `apply` requires `--apply`. Verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests. PWA evidence is not scoring or delivery proof.
   - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
     classification: excluded
     publish_decision: do_not_publish

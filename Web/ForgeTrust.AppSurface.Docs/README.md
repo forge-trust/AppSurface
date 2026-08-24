@@ -8,6 +8,122 @@ Documentation site generation and hosting for AppSurface web applications.
 
 If you are evaluating AppSurface Docs for your own repository, start with [Use AppSurface Docs in your repository](./use-appsurface-docs.md). That page explains the consumer model, host shape, authoring metadata, and adoption checklist before you drill into this package reference.
 
+## Named multi-instance hosting
+
+The named `AddAppSurfaceDocs` overload hosts multiple independent Docs products in one ASP.NET Core application. Each
+registration receives a complete configuration section and returns an `AppSurfaceDocsInstance` handle. Use this when
+products have separate source repositories, identities, route families, harvest state, or reader audiences—for example,
+public documentation at `/docs` and internal contributor documentation at `/internal/docs`:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Public": {
+      "Source": { "RepositoryRoot": "/srv/public-product" },
+      "Routing": { "RouteRootPath": "/docs" }
+    },
+    "Internal": {
+      "Source": { "RepositoryRoot": "/srv/internal-product" },
+      "Routing": { "RouteRootPath": "/internal/docs" }
+    }
+  }
+}
+```
+
+```csharp
+var publicDocs = builder.Services.AddAppSurfaceDocs(
+    "public",
+    builder.Configuration.GetSection("AppSurfaceDocs:Public"));
+var internalDocs = builder.Services.AddAppSurfaceDocs(
+    "internal",
+    builder.Configuration.GetSection("AppSurfaceDocs:Internal"));
+
+var app = builder.Build();
+app.UseRouting();
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.UseEndpoints(endpoints =>
+{
+    // One shared RazorWire transport serves the isolated Docs progress channels.
+    endpoints.MapRazorWire();
+    publicDocs.MapEndpoints(endpoints).AllowAnonymous();
+    internalDocs.MapEndpoints(endpoints)
+        .RequireAuthorization("InternalDocs");
+    endpoints.FinalizeAppSurfaceDocsInstances();
+});
+```
+
+The public handle explicitly uses `AllowAnonymous` so the Docs product remains public when its host configures a fallback
+authorization policy. The internal handle uses a host-owned ASP.NET Core policy; register `InternalDocs` and the host's
+authentication middleware yourself. `MapEndpoints` returns a deferred convention builder, so each convention applies to
+every endpoint owned by that Docs product, including its operational endpoints. AppSurface Docs does not create
+identities, authentication handlers, or authorization policies. See the [ASP.NET Core authorization guidance](https://learn.microsoft.com/aspnet/core/security/authorization/introduction)
+and the [consumer setup and authorization example](./use-appsurface-docs.md#run-multiple-independent-docs-products).
+
+Named registration adds RazorWire services for the live harvest observatory, but the host still maps its one shared
+transport with `endpoints.MapRazorWire()` (from `ForgeTrust.RazorWire`) as shown above. Its stream authorization
+remains host-owned; named Docs filters then enforce each product's diagnostics visibility/read policy and the complete
+authorization requirements attached to that product's handle, including default, role, authentication-scheme, and
+multiple named policies.
+
+Call `FinalizeAppSurfaceDocsInstances` once, after mapping every handle. It validates the named configuration,
+constructs the isolated runtimes, applies endpoint conventions, and publishes the route families. Each handle must be
+mapped exactly once on the same endpoint route builder; mapping after finalization, finalizing twice, or leaving a
+registered handle unmapped is a startup error. During host startup, each finalized runtime also receives the same
+Markdown-policy validation, diagnostics warning, and harvest warmup/preflight behavior as a legacy single-instance
+Docs host; a failure identifies the owning instance.
+
+### Request-time runtime selection
+
+Named endpoint groups carry an `AppSurfaceDocsEndpointMetadata` record containing the normalized instance name.
+Request-time package code and host-owned extensions that need the active product should resolve the
+`IAppSurfaceDocsRequestRuntimeAccessor` service and call `GetRequiredRuntime()`; the accessor reads the selected
+endpoint metadata and never guesses from the request path. The returned `AppSurfaceDocsRuntime` exposes the
+instance's `Name`, immutable `Options` snapshot, and `DocsUrlBuilder`. Use those properties when adding
+instance-aware views or integrations so URLs and configuration remain inside the selected product boundary:
+
+```csharp
+public sealed class DocsNavigationViewComponent(
+    IAppSurfaceDocsRequestRuntimeAccessor runtimeAccessor) : ViewComponent
+{
+    public IViewComponentResult Invoke()
+    {
+        var runtime = runtimeAccessor.GetRequiredRuntime();
+        return View(new
+        {
+            runtime.Name,
+            SearchUrl = runtime.DocsUrlBuilder.BuildSearchUrl()
+        });
+    }
+}
+```
+
+`AppSurfaceDocsRuntime` is created from the configuration snapshot during finalization and implements idempotent
+`Dispose`; hosts should not construct or dispose runtimes themselves. Do not resolve unkeyed Docs services or infer
+an instance from a route prefix when named composition is enabled, because either approach can select the wrong
+product after a route rewrite or custom endpoint mapping.
+
+Named composition has strict coexistence and collision rules:
+
+- Do not combine it with parameterless `AddAppSurfaceDocs()` or `AppSurfaceDocsWebModule`; choose one legacy/default
+  surface or named composition for the host.
+- Names are case-insensitive, must be unique, must be 1–64 characters, and may contain only ASCII letters, digits,
+  hyphens, and underscores. At most eight named instances may be registered.
+- Route families cannot overlap, including equal roots and ancestor/descendant roots. Use sibling roots such as
+  `/docs` and `/internal/docs`.
+- Every named product must explicitly configure `Source:RepositoryRoot`; repository-root discovery is intentionally
+  unavailable because it could cause two products to join the same source boundary. Roots must be distinct. A
+  configured branding asset request prefix must be disjoint from every other product's route family and from every
+  other configured branding prefix, including ancestor/descendant pairs.
+- Each instance is built from its own configuration snapshot; its source boundary, identity, routing, cache, search
+  state, and version catalog are not an ambient default shared with another instance.
+
+Named instances host both the live product routes and their configured published version archives. Static export itself
+remains a one-product-at-a-time operation: export each instance from a host configured for that instance, then point
+its named runtime at that product's catalog and trusted release root. Do not attempt to produce one combined static
+tree from a multi-instance host.
+
 ## Protected Markdown download
 
 AppSurface Docs can expose the exact source bytes for explicitly opted-in Markdown pages as a browser attachment. This v1 feature is disabled by default:

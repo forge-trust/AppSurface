@@ -329,6 +329,16 @@ assert_status() {
   fi
 }
 
+assert_header_equals() {
+  local name="$1"
+  local expected="$2"
+  local headers
+  headers="$(tr -d '\r' < "$work_dir/$name.headers")"
+  if ! grep -Fxq "$expected" <<< "$headers"; then
+    fail "HTTP_PROOF" "HTTP_CONTRACT_FAILED" 5 "The $name header assertion failed." "The endpoint did not return the expected local redirect target." "Inspect the named route contract without following redirects."
+  fi
+}
+
 assert_body_contains() {
   local name="$1"
   local expected="$2"
@@ -440,8 +450,8 @@ assert_body_contains "control" "AppSurface Dev Auth [FAKE LOCAL AUTH]"
 echo "[stage=HTTP_PROOF] DevAuth control page passed"
 
 request "select-admin" "POST" "/_appsurface/dev-auth/select/admin"
-assert_status "select-admin" "200"
-assert_body_contains "select-admin" "Local Admin"
+assert_status "select-admin" "302"
+assert_header_equals "select-admin" "Location: /"
 request "admin-proof" "GET" "/api/auth-proof"
 assert_status "admin-proof" "200"
 assert_body_contains "admin-proof" '"result":"allowed"'
@@ -460,12 +470,15 @@ assert_body_contains "admin-status" '"warnings":[]'
 echo "[stage=HTTP_PROOF] Admin persona, protected proof, and selected status passed"
 
 request "select-viewer" "POST" "/_appsurface/dev-auth/select/viewer"
-assert_status "select-viewer" "200"
-assert_body_contains "select-viewer" "Local Viewer"
+assert_status "select-viewer" "302"
+assert_header_equals "select-viewer" "Location: /viewer"
+request "viewer-landing" "GET" "/viewer"
+assert_status "viewer-landing" "200"
+assert_body_contains "viewer-landing" "Viewer landing page"
 request "viewer-proof" "GET" "/api/auth-proof"
 assert_status "viewer-proof" "403"
 assert_body_contains "viewer-proof" '"appsurfaceAuthOutcome":"Forbid"'
-echo "[stage=HTTP_PROOF] Viewer forbid passed"
+echo "[stage=HTTP_PROOF] Viewer landing and operator forbid passed"
 
 request "clear" "POST" "/_appsurface/dev-auth/clear"
 assert_status "clear" "200"

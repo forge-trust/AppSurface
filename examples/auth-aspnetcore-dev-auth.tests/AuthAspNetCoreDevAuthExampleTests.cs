@@ -84,19 +84,42 @@ public sealed class AuthAspNetCoreDevAuthExampleTests
     }
 
     [Fact]
-    public async Task ViewerPersona_IsForbiddenFromOperatorProof()
+    public async Task ViewerPersona_LandsOnViewerPageAndIsForbiddenFromOperatorProof()
     {
         await WithFactoryAsync(async factory =>
         {
-            using var client = factory.CreateClient();
+            using var anonymousClient = factory.CreateClient(
+                new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+            using var anonymousViewerResponse = await anonymousClient.GetAsync("/viewer");
+            Assert.Equal(HttpStatusCode.Unauthorized, anonymousViewerResponse.StatusCode);
+
+            using var client = factory.CreateClient(
+                new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
             using var selectResponse = await client.PostAsync("/_appsurface/dev-auth/select/viewer", content: null);
-            Assert.Equal(HttpStatusCode.OK, selectResponse.StatusCode);
+            Assert.Equal(HttpStatusCode.Found, selectResponse.StatusCode);
+            Assert.Equal("/viewer", selectResponse.Headers.Location?.OriginalString);
+
+            using var landingResponse = await client.GetAsync("/viewer");
+            var landingBody = await landingResponse.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.OK, landingResponse.StatusCode);
+            Assert.Contains("Viewer landing page", landingBody, StringComparison.Ordinal);
+            Assert.Contains("AppSurface development authentication state", landingBody, StringComparison.Ordinal);
+            Assert.Contains(
+                "action=\"/_appsurface/dev-auth/select/admin?returnUrl=%2F\"",
+                landingBody,
+                StringComparison.Ordinal);
 
             using var proofResponse = await client.GetAsync("/api/auth-proof");
             var body = await proofResponse.Content.ReadAsStringAsync();
 
             Assert.Equal(HttpStatusCode.Forbidden, proofResponse.StatusCode);
             Assert.Contains("\"appsurfaceAuthOutcome\":\"Forbid\"", body, StringComparison.Ordinal);
+
+            using var returnToAdminResponse = await client.PostAsync(
+                "/_appsurface/dev-auth/select/admin?returnUrl=%2F",
+                content: null);
+            Assert.Equal(HttpStatusCode.Found, returnToAdminResponse.StatusCode);
+            Assert.Equal("/", returnToAdminResponse.Headers.Location?.OriginalString);
         });
     }
 

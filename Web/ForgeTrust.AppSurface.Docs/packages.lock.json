@@ -121,6 +121,12 @@
           "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
+      "forgetrust.appsurface.releasecontracts": {
+        "type": "Project",
+        "dependencies": {
+          "Markdig": "[1.2.0, )"
+        }
+      },
       "forgetrust.appsurface.theming": {
         "type": "Project"
       },

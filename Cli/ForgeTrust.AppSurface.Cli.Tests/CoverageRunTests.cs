@@ -500,7 +500,8 @@ public sealed class CoverageRunTests
     {
         using var repo = TempDirectory.Create("appsurface-coverage-run-");
         repo.WriteFile("Sample.slnx", "<Solution />");
-        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        var project = "tests/Sample.Tests/Sample.Tests.csproj";
         using var current = PushCurrentDirectory(repo.Path);
         var runner = new RecordingCoverageRunProcessRunner();
         var reportGenerator = new RecordingReportGenerator();
@@ -518,6 +519,15 @@ public sealed class CoverageRunTests
         Assert.True(File.Exists(Path.Join(repo.Path, "TestResults", "coverage-merged", "coverage.cobertura.xml")));
         Assert.True(File.Exists(Path.Join(repo.Path, "TestResults", "coverage-merged", "summary.txt")));
         Assert.True(File.Exists(Path.Join(repo.Path, "TestResults", "coverage-merged", "timings.json")));
+        var manifestPath = Directory.EnumerateFiles(
+                Path.Join(repo.Path, "TestResults", "coverage-merged", "projects"),
+                CoverageProjectManifest.FileName,
+                SearchOption.AllDirectories)
+            .Single();
+        using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(manifestPath));
+        Assert.Equal(1, manifest.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("tests/Sample.Tests/Sample.Tests.csproj", manifest.RootElement.GetProperty("projectPath").GetString());
+        Assert.Matches(@"\ASample\.Tests-[0-9a-f]{8}\z", Assert.IsType<string>(manifest.RootElement.GetProperty("slug").GetString()));
         Assert.Single(reportGenerator.CoverageFiles);
         var testCommand = Assert.Single(runner.Commands, command => command.Arguments.FirstOrDefault() == "test");
         Assert.Contains("--logger:trx", testCommand.Arguments);
@@ -527,6 +537,79 @@ public sealed class CoverageRunTests
         Assert.DoesNotContain("--no-build", testCommand.Arguments);
         Assert.DoesNotContain("[ForgeTrust.AppSurface.", string.Join(" ", testCommand.Arguments), StringComparison.Ordinal);
         Assert.DoesNotContain("build", runner.Commands.Select(command => command.Arguments.FirstOrDefault()));
+    }
+
+    [Fact]
+    public async Task CoverageProjectManifest_WriteAsync_ShouldUseSolutionRelativePathWhenAncestorIsLink()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var repo = TempDirectory.Create("appsurface-coverage-manifest-");
+        var physicalRootDirectory = Directory.CreateDirectory(TestPathUtils.PathUnder(repo.Path, "physical-root")).FullName;
+        var physicalSolutionDirectory = Directory.CreateDirectory(TestPathUtils.PathUnder(physicalRootDirectory, "solution")).FullName;
+        var linkedRootDirectory = TestPathUtils.PathUnder(repo.Path, "solution-root");
+        Directory.CreateSymbolicLink(linkedRootDirectory, "physical-root");
+        var linkedSolutionDirectory = Path.Join(linkedRootDirectory, "solution");
+        var projectPath = TestPathUtils.PathUnder(physicalSolutionDirectory, "tests", "Sample.Tests", "Sample.Tests.csproj");
+        Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);
+        await File.WriteAllTextAsync(projectPath, "<Project />");
+        var projectOutputDirectory = Directory.CreateDirectory(TestPathUtils.PathUnder(repo.Path, "coverage-output", "projects", "sample-tests")).FullName;
+
+        await CoverageProjectManifest.WriteAsync(
+            projectOutputDirectory,
+            linkedSolutionDirectory,
+            new CoverageRunProject("tests/Sample.Tests/Sample.Tests.csproj", projectPath, "sample-tests", IsExclusive: false),
+            CancellationToken.None);
+
+        using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(projectOutputDirectory, CoverageProjectManifest.FileName)));
+        Assert.Equal("tests/Sample.Tests/Sample.Tests.csproj", manifest.RootElement.GetProperty("projectPath").GetString());
+    }
+
+    [Fact]
+    public async Task CoverageProjectManifest_WriteAsync_ShouldRejectMissingSolutionDirectory()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-manifest-");
+        var projectOutputDirectory = Directory.CreateDirectory(TestPathUtils.PathUnder(repo.Path, "coverage-output", "projects", "sample-tests")).FullName;
+        var missingSolutionDirectory = TestPathUtils.PathUnder(repo.Path, "missing-solution");
+
+        var exception = await Assert.ThrowsAsync<IOException>(() => CoverageProjectManifest.WriteAsync(
+            projectOutputDirectory,
+            missingSolutionDirectory,
+            new CoverageRunProject("tests/Sample.Tests/Sample.Tests.csproj", TestPathUtils.PathUnder(missingSolutionDirectory, "tests", "Sample.Tests", "Sample.Tests.csproj"), "sample-tests", IsExclusive: false),
+            CancellationToken.None));
+
+        Assert.Contains("does not exist", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CoverageProjectManifest_WriteAsync_ShouldRejectExcessiveDirectoryLinkResolution()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var repo = TempDirectory.Create("appsurface-coverage-manifest-");
+        var physicalSolutionDirectory = Directory.CreateDirectory(TestPathUtils.PathUnder(repo.Path, "physical-solution")).FullName;
+        var target = physicalSolutionDirectory;
+        for (var index = 40; index >= 0; index--)
+        {
+            var link = TestPathUtils.PathUnder(repo.Path, $"solution-link-{index}");
+            Directory.CreateSymbolicLink(link, target);
+            target = link;
+        }
+
+        var projectOutputDirectory = Directory.CreateDirectory(TestPathUtils.PathUnder(repo.Path, "coverage-output", "projects", "sample-tests")).FullName;
+        var exception = await Assert.ThrowsAsync<IOException>(() => CoverageProjectManifest.WriteAsync(
+            projectOutputDirectory,
+            target,
+            new CoverageRunProject("tests/Sample.Tests/Sample.Tests.csproj", TestPathUtils.PathUnder(physicalSolutionDirectory, "tests", "Sample.Tests", "Sample.Tests.csproj"), "sample-tests", IsExclusive: false),
+            CancellationToken.None));
+
+        Assert.Contains("40-link resolution limit", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1225,6 +1308,7 @@ public sealed class CoverageRunTests
     [InlineData(".appsurface-coverage-output")]
     [InlineData("projects/sample-tests/dotnet-test.log")]
     [InlineData("projects/sample-tests/coverage-normalization.log")]
+    [InlineData("projects/sample-tests/coverage-project.json")]
     [InlineData("projects/sample-tests/coverage.cobertura.xml")]
     public void OutputGuard_ShouldRejectExistingFixedArtifactSymlink(string relativePath)
     {
@@ -2528,6 +2612,28 @@ public sealed class CoverageRunTests
             CancellationToken.None));
 
         Assert.True(Directory.Exists(timingsPath));
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldClassifyProjectManifestWriteFailure()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = new CoverageRunWorkflow(
+            new RecordingCoverageRunProcessRunner(),
+            new RecordingReportGenerator(),
+            TimeProvider.System,
+            writeProjectManifest: (_, _, _, _) => throw new IOException("manifest destination is unavailable"));
+        using var console = new FakeInMemoryConsole();
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => workflow.RunAsync(
+            CreateRequest(TestProjects: [project]),
+            console,
+            CancellationToken.None));
+
+        Assert.Contains("ASCOV120", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("project manifest could not be written", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -80,19 +80,88 @@ public sealed class CoverageMergeTests
     public async Task MergeAsync_ShouldAllowSingleShard()
     {
         using var repo = TempDirectory.Create("appsurface-coverage-merge-");
-        repo.WriteFile("shards/coverage.cobertura.xml", "<coverage line-rate=\"0.75\" branch-rate=\"0.5\" />");
+        const string input = """
+            <coverage line-rate="0.75" branch-rate="0.5">
+              <packages><package name="Smoke"><classes><class name="Smoke.Calculator" filename="Smoke/Calculator.cs"><lines>
+                <line number="7" hits="2" branch="True" condition-coverage="100% (2/2)"><conditions><condition number="0" type="jump" coverage="100%" /></conditions></line>
+              </lines></class></classes></package></packages>
+            </coverage>
+            """;
+        const string reportGeneratorOutput = """
+            <coverage line-rate="0.1" branch-rate="0.1">
+              <packages><package name="Smoke"><classes><class name="Smoke.Calculator" filename="Smoke/Calculator.cs"><lines>
+                <line number="7" hits="2" />
+              </lines></class></classes></package></packages>
+            </coverage>
+            """;
+        repo.WriteFile("shards/coverage.cobertura.xml", input);
         using var current = PushCurrentDirectory(repo.Path);
-        var workflow = CreateWorkflow(new RecordingReportGenerator { MergedCoverage = "<coverage line-rate=\"0.75\" branch-rate=\"0.5\" />" });
+        var workflow = CreateWorkflow(new RecordingReportGenerator { MergedCoverage = reportGeneratorOutput });
         using var console = new FakeInMemoryConsole();
 
         var result = await workflow.MergeAsync(new CoverageMergeRequest("shards", "merged", Clean: true), console, CancellationToken.None);
 
         Assert.Single(result.SelectedReports);
         var summary = File.ReadAllText(Path.Join(result.OutputDirectory, "summary.txt"));
-        Assert.Contains("Line coverage: 75.00%", summary, StringComparison.Ordinal);
-        Assert.Contains("Branch coverage: 50.00%", summary, StringComparison.Ordinal);
+        Assert.Contains("Line coverage: 10.00%", summary, StringComparison.Ordinal);
+        Assert.Contains("Branch coverage: 10.00%", summary, StringComparison.Ordinal);
         Assert.Contains($"Cobertura: {Path.Join("merged", "coverage.cobertura.xml")}", summary, StringComparison.Ordinal);
         Assert.DoesNotContain(repo.Path, summary, StringComparison.Ordinal);
+        var merged = System.Xml.Linq.XDocument.Load(result.CoveragePath);
+        Assert.Equal("0.1", merged.Root!.Attribute("line-rate")!.Value);
+        Assert.Equal("0.1", merged.Root.Attribute("branch-rate")!.Value);
+        var line = Assert.Single(merged.Descendants("line"));
+        Assert.Equal("True", line.Attribute("branch")!.Value);
+        Assert.Equal("100% (2/2)", line.Attribute("condition-coverage")!.Value);
+        var condition = Assert.Single(line.Descendants("condition"));
+        Assert.Equal("jump", condition.Attribute("type")!.Value);
+        Assert.Equal("100%", condition.Attribute("coverage")!.Value);
+    }
+
+    [Fact]
+    public async Task MergeAsync_ShouldSkipAmbiguousSourceClassesAndLines()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-merge-");
+        const string input = """
+            <coverage>
+              <packages><package name="Smoke"><classes>
+                <class name="Smoke.Ambiguous" filename="Smoke/Ambiguous.cs"><lines>
+                  <line number="7" hits="1" branch="True" condition-coverage="100% (2/2)" />
+                </lines></class>
+                <class name="Smoke.Ambiguous" filename="Smoke/Ambiguous.cs"><lines>
+                  <line number="7" hits="2" branch="True" condition-coverage="0% (0/2)" />
+                </lines></class>
+                <class name="Smoke.Unique" filename="Smoke/Unique.cs"><lines>
+                  <line number="7" hits="1" branch="True" condition-coverage="100% (2/2)" />
+                  <line number="7" hits="2" branch="True" condition-coverage="0% (0/2)" />
+                </lines></class>
+              </classes></package></packages>
+            </coverage>
+            """;
+        const string reportGeneratorOutput = """
+            <coverage>
+              <packages><package name="Smoke"><classes>
+                <class name="Smoke.Ambiguous" filename="Smoke/Ambiguous.cs"><lines><line number="7" hits="1" /></lines></class>
+                <class name="Smoke.Unique" filename="Smoke/Unique.cs"><lines><line number="7" hits="1" /></lines></class>
+              </classes></package></packages>
+            </coverage>
+            """;
+        repo.WriteFile("shards/coverage.cobertura.xml", input);
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = CreateWorkflow(new RecordingReportGenerator { MergedCoverage = reportGeneratorOutput });
+        using var console = new FakeInMemoryConsole();
+
+        var result = await workflow.MergeAsync(new CoverageMergeRequest("shards", "merged", Clean: true), console, CancellationToken.None);
+
+        var classes = System.Xml.Linq.XDocument.Load(result.CoveragePath)
+            .Descendants("class")
+            .ToDictionary(
+                coverageClass => coverageClass.Attribute("name")!.Value,
+                coverageClass => Assert.Single(coverageClass.Descendants("line")));
+        Assert.DoesNotContain("branch", classes["Smoke.Ambiguous"].Attributes().Select(attribute => attribute.Name.LocalName));
+        Assert.DoesNotContain("condition-coverage", classes["Smoke.Ambiguous"].Attributes().Select(attribute => attribute.Name.LocalName));
+        Assert.DoesNotContain("branch", classes["Smoke.Unique"].Attributes().Select(attribute => attribute.Name.LocalName));
+        Assert.DoesNotContain("condition-coverage", classes["Smoke.Unique"].Attributes().Select(attribute => attribute.Name.LocalName));
     }
 
     [Fact]
@@ -112,6 +181,79 @@ public sealed class CoverageMergeTests
         var output = console.ReadOutputString();
         Assert.Contains($"Output: {outputDirectory}", output, StringComparison.Ordinal);
         Assert.Contains($"Coverage artifacts: {outputDirectory}", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MergeAsync_ShouldRetainSingleShardAbsenceOfBranchDetails()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-merge-");
+        repo.WriteFile(
+            "shards/coverage.cobertura.xml",
+            "<coverage line-rate=\"1\" branch-rate=\"1\"><packages><package name=\"Smoke\"><classes><class name=\"Smoke.Calculator\" filename=\"Smoke/Calculator.cs\"><lines><line number=\"7\" hits=\"2\" /></lines></class></classes></package></packages></coverage>");
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = CreateWorkflow(
+            new RecordingReportGenerator
+            {
+                MergedCoverage = "<coverage line-rate=\"1\" branch-rate=\"1\"><packages><package name=\"Smoke\"><classes><class name=\"Smoke.Calculator\" filename=\"Smoke/Calculator.cs\"><lines><line number=\"7\" hits=\"2\" branch=\"True\" condition-coverage=\"100% (2/2)\"><conditions><condition number=\"0\" type=\"jump\" coverage=\"100%\" /></conditions></line></lines></class></classes></package></packages></coverage>"
+            });
+        using var console = new FakeInMemoryConsole();
+
+        var result = await workflow.MergeAsync(new CoverageMergeRequest("shards", "merged", Clean: true), console, CancellationToken.None);
+
+        var line = Assert.Single(System.Xml.Linq.XDocument.Load(result.CoveragePath).Descendants("line"));
+        Assert.Null(line.Attribute("branch"));
+        Assert.Null(line.Attribute("condition-coverage"));
+        Assert.Null(line.Element("conditions"));
+    }
+
+    [Fact]
+    public async Task MergeAsync_ShouldIgnoreUnmatchableSingleShardDetails()
+    {
+        using var repo = TempDirectory.Create("appsurface-coverage-merge-");
+        const string source = """
+            <coverage>
+              <class name="OutsidePackage"><lines><line number="1" branch="True" /></lines></class>
+              <packages><package name="Smoke"><classes>
+                <class filename="Smoke/Unnamed.cs"><lines><line number="1" branch="True" /></lines></class>
+                <class name="Smoke.MissingMergedLine" filename="Smoke/MissingMergedLine.cs"><lines><line number="1" branch="True" /></lines></class>
+                <class name="Smoke.Duplicate" filename="Smoke/Duplicate.cs"><lines><line number="2" branch="True" /></lines></class>
+                <class name="Smoke.Calculator" filename="Smoke/Calculator.cs"><lines>
+                  <line hits="1" branch="True" />
+                  <line number="2" hits="1" branch="True" />
+                  <line number="3" hits="1" branch="True" condition-coverage="100% (1/1)"><conditions><condition number="0" type="jump" coverage="100%" /></conditions></line>
+                </lines></class>
+                <class name="Smoke.NoLines" filename="Smoke/NoLines.cs" />
+              </classes></package></packages>
+            </coverage>
+            """;
+        const string reportGeneratorOutput = """
+            <coverage>
+              <class name="OutsidePackage"><lines><line number="1" /></lines></class>
+              <packages><package name="Smoke"><classes>
+                <class filename="Smoke/Unnamed.cs"><lines><line number="1" /></lines></class>
+                <class name="Smoke.MissingMergedLine" filename="Smoke/MissingMergedLine.cs"><lines><line /></lines></class>
+                <class name="Smoke.Duplicate" filename="Smoke/Duplicate.cs"><lines><line number="2" /><line number="2" /></lines></class>
+                <class name="Smoke.Calculator" filename="Smoke/Calculator.cs"><lines><line /><line number="2" /><line number="2" /><line number="3" /></lines></class>
+                <class name="Smoke.NoLines" filename="Smoke/NoLines.cs" />
+              </classes></package></packages>
+            </coverage>
+            """;
+        repo.WriteFile("shards/coverage.cobertura.xml", source);
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = CreateWorkflow(new RecordingReportGenerator { MergedCoverage = reportGeneratorOutput });
+        using var console = new FakeInMemoryConsole();
+
+        var result = await workflow.MergeAsync(new CoverageMergeRequest("shards", "merged", Clean: true), console, CancellationToken.None);
+
+        var merged = System.Xml.Linq.XDocument.Load(result.CoveragePath);
+        var calculator = Assert.Single(merged.Descendants("class"), candidate => candidate.Attribute("name")?.Value == "Smoke.Calculator");
+        var lines = calculator.Element("lines")!.Elements("line").ToArray();
+        Assert.Null(lines[0].Attribute("branch"));
+        Assert.Null(lines[1].Attribute("branch"));
+        Assert.Null(lines[2].Attribute("branch"));
+        Assert.Equal("True", lines[3].Attribute("branch")!.Value);
+        Assert.Equal("100% (1/1)", lines[3].Attribute("condition-coverage")!.Value);
+        Assert.Single(lines[3].Element("conditions")!.Elements("condition"));
     }
 
     [Fact]

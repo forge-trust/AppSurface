@@ -12,7 +12,32 @@ appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3
 
 `appsurface docs` runs the same AppSurface Docs standalone host used by CI and integration tests. It forwards AppSurface Docs configuration into that host instead of duplicating harvesting, routing, static web asset, or MVC setup in the CLI. `appsurface docs export` starts that same host in-process, binds an internal loopback listener, and delegates static crawling plus CDN validation to the RazorWire export engine. `appsurface docs verify-archive` checks one catalog-pinned exact release tree locally before deploy.
 
-The CLI also includes public coverage commands for private-by-default CI coverage enforcement. `appsurface coverage run` discovers or accepts instrumented .NET test projects, writes local coverage artifacts, and merges Cobertura through the package-owned ReportGenerator dependency in the same command. `appsurface coverage merge` fans in existing Cobertura shards from matrix or custom test workflows without reading a consumer tool manifest. `appsurface coverage gate` evaluates the merged local Cobertura XML, writes JSON and Markdown reports, and can append the same Markdown to GitHub Actions step summaries without uploading coverage data to a hosted coverage service.
+The CLI also includes public coverage commands for private-by-default CI coverage enforcement. `appsurface coverage run` discovers or accepts instrumented .NET test projects, writes local coverage artifacts, and merges Cobertura through the package-owned ReportGenerator dependency in the same command. `appsurface coverage merge` fans in existing Cobertura shards from matrix or custom test workflows without reading a consumer tool manifest. `appsurface coverage gate` evaluates the merged local Cobertura XML, writes JSON and Markdown reports, and can append the same Markdown to GitHub Actions step summaries without uploading coverage data to a hosted coverage service. `appsurface coverage clean` previews or explicitly removes those private artifacts; its default ownership-marker mode is narrow, while [`--all`](#appsurface-coverage-clean) provides a deliberate worktree-wide `TestResults` sweep.
+
+`appsurface evidence` adds a contract-first evidence layer above those local tools. It resolves a checked-in changed-risk policy from explicit paths or a CI-provided diff, explains the selected profile before work begins, diagnoses external prerequisites, records canonical plan/manifest artifacts, and refuses to call an incomplete or skipped profile complete evidence. Start with the [EvidenceHost guide](../../start-here/evidencehost.md).
+
+`appsurface release compose` gives any consumer project the same append-only release-note workflow AppSurface uses: each change adds its own Markdown entry, then one release owner validates and composes a deterministic note. It does not run AppSurface's repository-owned release cockpit, touch a shared `CHANGELOG.md`, create tags, or publish packages.
+
+### Coverage proof levels and driver boundary
+
+There are two different coverage questions, and they have different commands:
+
+| Need | Sequence | What it proves |
+| --- | --- | --- |
+| Validate a repository's local coverage setup | `coverage run --dry-run` → `coverage run` → `coverage gate` | The selected VSTest projects can produce the normal AppSurface artifacts and satisfy the repository's thresholds. |
+| Validate a packed CLI candidate before publication | PackageIndex `verify-packages` | The owned `Smoke.Tests` collector fixture executes `Smoke.Calculator` and retains its class, line, and branch facts from the selected raw report through the merged report. |
+
+Start local readiness with `coverage run --dry-run`. It checks discovery, collector capability, scheduling, and artifact paths without running tests or cleaning output. Run `coverage run` next, then run `coverage gate` against its merged `coverage.cobertura.xml`. That local sequence is the normal consumer workflow; it does not claim semantic raw-to-merged proof for an arbitrary application graph.
+
+The packaged proof is a release-validation workflow, not a replacement for that local sequence. PackageIndex installs the packed CLI in a clean fixture, selects exactly one manifest-bound `Smoke.Tests` report, validates the owned `Smoke.Calculator` class/line/branch invariants in the raw report, copies and hashes that shard, merges it, and independently validates the same invariants in merged Cobertura. The proof also retains the existing artifact, gate, excluded-project, patch-target, and canary checks. It is an owned fixture guard, not a certification of every consumer application.
+
+Keep the assurance boundary explicit:
+
+- The default `collector` driver is the semantic proof path for the packaged fixture and the supported VSTest integration for local runs.
+- `--coverage-driver msbuild` is an explicit VSTest compatibility path for projects that directly reference `coverlet.msbuild`. It proves artifact compatibility only; it is not equivalent to the packaged collector's semantic raw-to-merged proof.
+- `coverage merge` is fan-in only. Use it for externally produced Cobertura shards, then use `coverage gate`; it does not prove that AppSurface's collector observed an owned consumer.
+- `--no-clean` is an intentional retention escape hatch. Preserved reports and patch-target files can be stale until a later gate refreshes them or a nonpatch gate removes them.
+- Native Microsoft Testing Platform (MTP) execution is a separate runner/integration boundary. The v1 collector path rejects MTP rather than switching drivers to satisfy a proof. Capture the runner and direct coverage-package classification, then use a separate MTP path or issue when MTP is selected or the facts conflict.
 
 `appsurface secrets` manages the first-secret workflow for `ForgeTrust.AppSurface.Config.LocalSecrets`: initialize a local namespace, set one key, verify presence without printing the value, list names, explicitly migrate retained macOS Keychain records to v2, delete keys, and run doctor diagnostics for platform availability.
 
@@ -88,6 +113,7 @@ dotnet tool run appsurface --version
 dotnet tool run appsurface docs --repo .
 dotnet tool run appsurface coverage run --solution ./MyApp.slnx --dry-run
 dotnet tool run appsurface coverage run --solution ./MyApp.slnx
+dotnet tool run appsurface -- release compose --root .
 dotnet tool run appsurface coverage gate --coverage ./TestResults/coverage-merged/coverage.cobertura.xml --min-line 95 --min-branch 85 --diff-base origin/main --min-patch-line 95 --patch-line-mode codecov --min-patch-branch 85
 ```
 
@@ -99,6 +125,59 @@ dotnet tool run appsurface --version
 ```
 
 ## Commands
+
+### `appsurface release compose`
+
+Use this command when multiple contributors or automated work streams need to describe release-facing changes without all editing the same living note or changelog. Each change writes one independent entry file; a release owner composes those entries in deterministic filename order. The command works in any project that adopts the small Markdown convention below—its section names belong to the consumer's template, not to AppSurface.
+
+Create a stable living-note template once, with one marker per section:
+
+```markdown
+# Unreleased
+
+## Added
+<!-- appsurface:unreleased-entries section="added" -->
+
+## Fixed
+<!-- appsurface:unreleased-entries section="fixed" -->
+```
+
+Then let each change add its own file under `releases/unreleased.entries/`. File names must be `YYYY-MM-DD-topic.md`, and the first line selects one template section:
+
+```markdown
+<!-- appsurface:unreleased-entry section="added" -->
+
+- Added a consumer-facing capability.
+```
+
+Entries may contain ordinary Markdown and nested `###` headings, but not new `#` or `##` sections, nested directories, symbolic links, composition markers, terminal control characters, or a section that the template does not declare. Section identifiers use lowercase letters, digits, and single hyphens. Relative Markdown links are rebased from an entry to the composed destination. Without `--output`, preview composes as though the template is the destination; with `--output`, both preview and `--apply` compose for that output file. Consequently, when the template and selected output live in different directories, those two previews can contain different relative link targets. Links inside inline, fenced, and indented code examples remain unchanged. Templates and entries may use tabs and normal line breaks, but other control characters are rejected so a preview cannot alter the maintainer's terminal.
+
+Preview the complete composed document without writing any files:
+
+```bash
+dotnet tool run appsurface -- release compose --root .
+```
+
+Write a versioned or reviewable release note only after inspecting the preview:
+
+```bash
+dotnet tool run appsurface -- release compose \
+  --root . \
+  --output releases/v1.4.0.md \
+  --apply
+```
+
+`--apply` always requires a distinct `--output`; the command never overwrites the stable template, deletes source entries, creates tags, updates a shared `CHANGELOG.md`, or publishes anything. It rejects pre-existing links in selected path components, but should run under an operator-controlled root: pathname validation cannot make a directory shared with an untrusted local principal safe from a replacement after validation. Keep changelog rollover and entry consumption in your own reviewed release workflow. AppSurface's repository-owned [`./eng/release`](../../tools/ForgeTrust.AppSurface.Release/README.md) cockpit adds those project-specific responsibilities and itself uses this same composition component; it is not part of the public tool contract.
+
+| Option | Default | Behavior |
+| --- | --- | --- |
+| `--root <directory>` | Current directory | Existing physical project root that bounds all selected paths. Linked roots and linked path components below the root are rejected. |
+| `--entries <directory>` | `releases/unreleased.entries` | Flat append-only entry directory below `--root`. A missing directory composes an empty template. |
+| `--template <file>` | `releases/unreleased.md` | Markdown template below `--root` that declares entry sections with composition markers. |
+| `--output <file>` | Standard output | Destination below `--root`. Without `--apply`, reports the exact prospective write; with `--apply`, it must differ from `--template`. |
+| `--apply` | Off | Writes the composed document to `--output`; otherwise the operation is preview-only. |
+
+Start with this command when the problem is concurrent release-note or changelog authoring. Use the repository cockpit only when you own AppSurface's versioned evidence, package policy, tag binding, and publication workflows.
 
 ### `appsurface canary poll`
 
@@ -415,6 +494,24 @@ clears local transfer evidence and never changes the Google Secret Manager versi
 that resolves a local namespace other than `Development`, `Local`, or `Dev` must explicitly set
 `LocalSecretsPostureMode.SingleMachineSelfHosted`; the transfer CLI does not make that host configuration.
 
+### `appsurface evidence`
+
+Use EvidenceHost when a CI gate must explain why evidence is required for a changed path and must never promote a skipped or incomplete test profile into a full-coverage claim. Start with the [EvidenceHost guide](../../start-here/evidencehost.md). A selected coverage producer carries its exact `coverageGate` thresholds in the checked-in policy and `run` evaluates the existing gate in-process against that resolved policy.
+
+```bash
+appsurface evidence init --sample
+appsurface evidence doctor --path src/Orders/SubmitOrder.cs
+appsurface evidence explain --path src/Orders/SubmitOrder.cs
+appsurface evidence run --diff-file ./artifacts/changed.patch --solution ./App.slnx
+appsurface evidence verify ./TestResults/evidence/evidence-manifest.json
+```
+
+`init --sample` is safe to run in an existing repository: it creates a marked policy, host skeleton, and README and refuses to overwrite unmarked files. `doctor` does not start tests or resources; it reports whether the selected policy needs Docker, a browser runtime, or a protected release envelope. `explain` writes `evidence-plan.json` and a concise human summary before any producer runs. `run` writes the plan, `evidence-manifest.json`, and `evidence-summary.json`; it also appends a short claim summary to `$GITHUB_STEP_SUMMARY` when that CI-provided path exists. `verify` validates plan/manifest digest binding without rerunning producers.
+
+The built-in producer reuses `coverage run` collection and the existing `coverage gate` evaluator; it writes the normal gate and patch-target artifacts beside its coverage output. Browser E2E and resource-backed evidence belong in the separate consumer-owned [`ForgeTrust.AppSurface.Evidence.Aspire`](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) lifecycle. An explicit policy-selected empty profile may claim `NoEvidenceRequired`; unavailable capability, filtered required tests, a failed producer, a missing assertion, an unready declared resource, or a failed declared coverage threshold produces `ClaimKind.None` and command failure. `--observation-only` records a diagnostic claim that is deliberately ineligible for a PR or release gate.
+
+The v1 workflow has no outbound telemetry, no automatic assembly/test discovery, no Docker sandbox, no independent artifact attestation, and no semantic classifier that silently labels arbitrary getters or constructors low value. Keep generated-code exclusions and the coverage thresholds in the reviewed Evidence policy explicit. See the [EvidenceHost cookbook](../../guides/evidencehost-cookbook.md) for policy, E2E, release-envelope, and incomplete-profile patterns.
+
 ### `appsurface coverage run`
 
 Run instrumented .NET test projects and merge private Cobertura artifacts.
@@ -447,6 +544,48 @@ Use `--dry-run` before the first real CI run to confirm project discovery, colle
 capability, exclusive scheduling, and artifact paths without running tests or cleaning
 the output directory.
 
+### `appsurface coverage clean`
+
+The default mode cleans only AppSurface-owned coverage output. It uses the `.appsurface-coverage-output` ownership marker, removes only known AppSurface-owned coverage artifacts that a normal `coverage run` refreshes, preserves unrecognized files beside them, and never creates a missing output directory. Preview the standard output first:
+
+```bash
+appsurface coverage clean
+```
+
+When the listed coverage artifacts are expected, explicitly delete them:
+
+```bash
+appsurface coverage clean --apply
+```
+
+`--apply` is required: omitting it changes no files. `--output ./TestResults/coverage-merged` is the default, but a different existing AppSurface-owned output can be selected with `--output`. A populated output without the valid ownership marker fails closed with `ASCOV109`; an absent or empty unmarked directory is a no-op. This narrow default is the right choice for normal coverage maintenance because it never treats a generic folder name as proof that AppSurface owns its contents.
+
+For a one-time worktree reclamation sweep, use the explicit broader mode:
+
+```bash
+appsurface coverage clean --all --root .
+appsurface coverage clean --all --root . --apply
+```
+
+`--all` scans descendant directory names equal to `TestResults` without regard to case, reports the approximate regular-file bytes, and does not delete nearby names such as `TestResults-old`, `bin`, `obj`, or arbitrary artifacts. The root itself is never deleted, even when it is named `TestResults`; pass its parent directory to remove that folder. Point `--root` at one worktree—its default is the current directory—and do not run cleanup while tests or coverage collection are writing into the same tree.
+
+For a bounded local-trust boundary, `--all` rejects a filesystem root and linked scan root, and does not traverse symbolic links or reparse points. A link inside a removed `TestResults` tree is unlinked with that tree, but its target is never read or removed. The displayed reclaimed total is an estimate measured before deletion, excludes linked content, and may differ if a process changes files between preview and apply. Deletion stops at the first filesystem failure; directories removed before that failure remain removed, so close the process holding the named path and rerun the command. Neither mode cleans `bin`, `obj`, package caches, Git worktrees, or remote artifacts.
+
+| Option | Default | Behavior |
+| --- | --- | --- |
+| `--output <directory>` | `TestResults/coverage-merged` | AppSurface coverage output inspected by the default marker-owned mode. Cannot be combined with `--all`. |
+| `--all` | Off | Scan every descendant `TestResults` directory below `--root` instead of only known AppSurface coverage artifacts. |
+| `--root <directory>` | Current directory | Existing physical worktree scan boundary for `--all`; it is never deleted. Invalid without `--all`. |
+| `--apply` | Off | Deletes the entries discovered for the current invocation; otherwise the command is a preview. |
+
+| Diagnostic | Meaning | Operator action |
+| --- | --- | --- |
+| `ASCOV109` | The default coverage output path is unsafe or is not AppSurface-owned. | Use a dedicated output created by `coverage run` or `coverage merge`. |
+| `ASTEST101` | The `--all` cleanup root is invalid, missing, or cannot be inspected. | Pass an existing readable worktree directory such as `--root .`. |
+| `ASTEST102` | The `--all` root is a filesystem root, symbolic link, or reparse point. | Choose one physical non-root worktree directory. |
+| `ASTEST103` | A `--all` discovered directory could not be deleted. | Close file handles for the reported path and retry `--apply`; already-removed directories stay removed. |
+| `ASTEST104` | The `--all` worktree could not be enumerated or measured completely. | Restore readable filesystem access and retry before applying cleanup. |
+
 #### Add Coverlet First
 
 ```bash
@@ -464,6 +603,33 @@ Add `coverlet.collector` to every selected VSTest project that should contribute
 Use `--coverage-driver msbuild` only as an explicit compatibility path for a project that directly references `coverlet.msbuild`. The command prints a reliability warning because VSTest termination can interrupt the MSBuild integration before hit data is persisted. Migrate back to `coverlet.collector` rather than relying on a fallback.
 
 Collector mode owns `--collect`, `--results-directory`, the `--` runsettings separator, coverage runsettings, and `--settings`/`-s`. MSBuild mode owns the Coverlet `/p:` properties. Passing conflicting tokens through `--test-argument` fails before discovery or output mutation. `--include` and `--exclude` map to the selected driver's native configuration.
+
+#### Project manifests and packaged semantic proof
+
+Each executed project writes `coverage-project.json` beside its per-project `coverage.cobertura.xml`. Schema version 1 is intentionally small and dependency-free:
+
+```json
+{
+  "schemaVersion": 1,
+  "projectPath": "tests/MyApp.Tests/MyApp.Tests.csproj",
+  "slug": "MyApp.Tests-0123abcd"
+}
+```
+
+`projectPath` is the normalized solution-relative test-project path; `slug` is the CLI-owned artifact-directory identity. The manifest is capped at 16 KiB of UTF-8 JSON, and consumers must reject larger files before parsing. PackageIndex consumes this manifest instead of inferring identity from a directory name or recursively searching for an arbitrary XML file. A packaged proof must find exactly one manifest for `Smoke.Tests/Smoke.Tests.csproj` and a regular sibling `coverage.cobertura.xml`; missing, malformed, oversized, unsafe, duplicate, or mismatched manifests fail closed.
+
+The PackageIndex semantic parser accepts only the bounded Coverlet/ReportGenerator Cobertura shape needed by the owned proof: `coverage`, `sources`, `source`, `packages`, `package`, `classes`, `class`, `methods`, `method`, `lines`, `line`, `conditions`, and `condition`. It prohibits DTDs and entities, uses a null XML resolver, caps each document at 1 MiB, and enforces maximum depth 32 and 10,000 elements. Unsupported required shapes, missing identity attributes, unsafe filenames, duplicate identities, or invalid numeric fields are tool-compatibility failures. A valid shape with missing or zero expected semantics is a coverage defect.
+
+For both raw and merged reports, the owned fixture requires one `Smoke` package, one `Smoke.Calculator` class with a normalized filename ending in `Smoke/Calculator.cs`, an executed line with positive hits, and `Sign` line 7 with positive hits plus `branch="True"`, `condition-coverage="100% (2/2)"`, and one `jump` condition at `100%`. The proof compares these semantic facts, not XML bytes; ReportGenerator may legitimately change document structure during merge.
+
+PackageIndex writes the public-safe `coverage-cli-consumer-proof.evidence.json` beside the existing private `coverage-cli-consumer-proof.md`. Evidence schema version 1 contains only `verdict`, `packageVersion`, optional `packageArtifactDigest`, `driverBoundary { runner, integration, directPackages, assuranceLevel }`, `raw { outcome, optional artifactRelativePath, optional sha256, invariants[] }`, `merged { outcome, optional artifactRelativePath, invariants[] }`, and `failures[] { code, scope, cause, nextAction, evidenceRelativePath }`; every unavailable optional field is omitted rather than emitted as `null`. The driver-boundary runner is a configured proof identifier; the raw and merged outcomes state whether semantic validation actually ran. Evidence excludes command arguments and full invocation traces, working directories, NuGet sources/configuration, absolute paths, raw XML, credentials, and arbitrary output excerpts. `CPV` codes describe packaged semantic proof; `ASCOV` codes remain authoritative for the public CLI run, merge, and gate.
+
+Manifest and evidence schemas evolve additively and by version. Schema-1 readers reject unknown required structure and unsupported major versions with an actionable incompatibility result. When upgrading Coverlet, ReportGenerator, or the runner:
+
+1. Capture one isolated generated-fixture raw and merged report.
+2. Confirm it stays within the documented Cobertura subset and preserves the owned class/line/branch invariants.
+3. Run the focused PackageIndex fixture suite and `verify-packages`.
+4. Update the versioned schema/subset documentation and evidence consumers together if the contract changed; do not silently broaden the parser.
 
 #### Coverage Run Watchdog
 
@@ -562,6 +728,7 @@ Artifacts are local and private by default:
 - `junit-coverage-<index>-<project-name-hash>.xml`: AppSurface-managed JUnit test results when `--test-results junit` or `--slow-test-diagnostics` is used.
 - `slow-test-diagnostics.md` and `slow-test-diagnostics.json`: A bounded failure-first test-result summary, slow-test evidence, parser warnings, metadata completeness, and diagnostic overhead when `--slow-test-diagnostics` is used. The Markdown summary caps failed-test detail and total size for GitHub Actions; use the managed JUnit XML and project logs for complete evidence. The command writes these files through private same-directory staging files; a later normal clean run removes only GUID-named staging or backup remnants from an interrupted publication, while `--no-clean` preserves existing output.
 - `projects/<project-name-hash>/coverage.cobertura.xml`: Per-project Coverlet Cobertura output.
+- `projects/<project-name-hash>/coverage-project.json`: Schema-versioned project identity manifest consumed by PackageIndex proof; it contains the normalized solution-relative project path and CLI-owned slug.
 - `projects/<project-name-hash>/collector-results/<run-id>/`: Unique raw collector attachment tree retained for diagnosis.
 - `projects/<project-name-hash>/dotnet-test.log`: Full `dotnet test` output for that project.
 - `projects/<project-name-hash>/coverage-normalization.log`: Secondary collector-artifact cleanup diagnostics that are intentionally not replayed to the console.
@@ -668,6 +835,8 @@ appsurface coverage merge \
 ```
 
 Use `coverage merge` when a CI matrix, custom test harness, or non-AppSurface test producer already writes Cobertura files and you only need AppSurface's package-owned fan-in plus `coverage gate` artifacts. Use `coverage run -> coverage gate` for normal package-consuming .NET repositories where AppSurface should discover projects, invoke `dotnet test`, and merge the Coverlet output. In this repository, the default no-argument `./scripts/coverage-solution.sh` lane runs that pair with repository thresholds; focused selection and shard fan-in always use the public CLI commands above.
+
+When `coverage merge` receives exactly one validated shard, it still runs the package-owned ReportGenerator dependency and writes its normal summary/timings artifacts. Its final merged Cobertura starts from the validated ReportGenerator output, then restores only the staged source's direct class-line branch/condition details that ReportGenerator can omit during a no-op transformation; the resulting report remains gate-compatible and has no external DTD. With two or more shards, the merged Cobertura comes from ReportGenerator as usual.
 
 The v1 source contract is intentionally narrow. `--source` must point to an existing directory. The command recursively selects files named exactly `coverage.cobertura.xml`, sorts them by ordinal path, validates that each selected file has a Cobertura `<coverage>` root, and prints the discovered count plus the first few relative paths. A single shard is valid. Files named `Cobertura.xml`, arbitrary `*.xml`, or non-Cobertura XML are not accepted by v1; rename or copy producer artifacts to `coverage.cobertura.xml` before merging.
 
@@ -777,7 +946,7 @@ Every `ASCOV###` diagnostic includes the problem, likely cause, exact fix, docs 
 | `ASCOV114` | The package-owned ReportGenerator dependency was not found. | Restore or reinstall `ForgeTrust.AppSurface.Cli` so its package dependencies are present. |
 | `ASCOV115` | Collector output was missing, multiple, malformed, or escaped its invocation directory. | Inspect the project log and raw collector results, fix the producer, and rerun. |
 | `ASCOV116` | `--require-non-sandbox` found an enabled sandbox marker. | Run coverage outside the sandbox or omit the option when the restriction is intentional. |
-| `ASCOV120` | One or more test, merge, or artifact steps failed. | Open `timings.json` and per-project logs listed above, fix failing tests, then rerun. |
+| `ASCOV120` | One or more test, merge, manifest, or artifact steps failed. | Open `timings.json` and per-project logs listed above, fix the reported failure, then rerun. |
 | `ASCOV121` | Fail-mode watchdog termination claimed the run. | Inspect the reported watchdog artifact path and project logs; if the path is unavailable, use the ASCOV122 detail, then fix the stall or tune the timeout and rerun. |
 | `ASCOV122` | A bounded watchdog artifact write or promotion failed. | Use a writable dedicated output directory; the process cancellation outcome remains authoritative. |
 | `ASCOV123` | A failed collector-artifact normalization also left its staged temporary file behind. | Inspect the project's `coverageCleanupLog` in `timings.json`, then remove the `.coverage.*.tmp` file after confirming no coverage run is active. |

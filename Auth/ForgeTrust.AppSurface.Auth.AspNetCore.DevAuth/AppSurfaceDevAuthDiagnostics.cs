@@ -39,4 +39,9 @@ public static class AppSurfaceDevAuthDiagnostics
     /// A persona id was invalid, unknown, stale, or tampered.
     /// </summary>
     public const string InvalidPersonaId = "ASDEV006";
+
+    /// <summary>
+    /// A configured persona landing URL was not a safe rooted local path.
+    /// </summary>
+    public const string InvalidPersonaLandingUrl = "ASDEV007";
 }

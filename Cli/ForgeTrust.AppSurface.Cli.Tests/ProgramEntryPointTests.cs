@@ -16,6 +16,10 @@ using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Docs;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
+using ForgeTrust.AppSurface.Evidence.Cli;
+using ForgeTrust.AppSurface.Evidence.Contracts;
+using ForgeTrust.AppSurface.Evidence.Planner;
+using ForgeTrust.AppSurface.Testing;
 using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Cli;
 using Microsoft.AspNetCore.Hosting;
@@ -48,10 +52,42 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("docs", result.AllText, StringComparison.Ordinal);
         Assert.Contains("docs export", result.AllText, StringComparison.Ordinal);
         Assert.Contains("coverage", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("coverage clean", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("release", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("release compose", result.AllText, StringComparison.Ordinal);
         Assert.Contains("secrets", result.AllText, StringComparison.Ordinal);
         Assert.Contains("durable", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EntryPoint_Should_Print_ReleaseCompose_Help_Without_Lifecycle_Noise()
+    {
+        var result = await InvokeEntryPointAsync(["release", "compose", "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("deterministic release note from isolated append-only entries", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--root", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--entries", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--template", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--output", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--apply", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EntryPoint_Should_Print_CoverageClean_Help_Without_Lifecycle_Noise()
+    {
+        var result = await InvokeEntryPointAsync(["coverage", "clean", "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Preview or explicitly clean AppSurface coverage artifacts", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--output", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--all", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--root", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--apply", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3431,6 +3467,335 @@ public sealed class ProgramEntryPointTests
         module.RegisterDependentModules(dependencies);
     }
 
+    [Fact]
+    public async Task EntryPoint_ShouldRunTheNoEvidenceEvidenceHostJourneyAndReportCoveragePrerequisites()
+    {
+        using var directory = TestDirectory.Create();
+        var evidenceRoot = Path.Join(directory.Path, "evidence");
+        var outputDirectory = Path.Join(directory.Path, "output");
+        var init = await InvokeEntryPointAsync(["evidence", "init", "--root", evidenceRoot]);
+        var duplicateInit = await InvokeEntryPointAsync(["evidence", "init", "--root", evidenceRoot]);
+
+        Assert.Equal(0, init.ExitCode);
+        Assert.Contains("Evidence starter created", init.AllText, StringComparison.Ordinal);
+        Assert.Equal(1, duplicateInit.ExitCode);
+        Assert.Contains("ASEVD202", duplicateInit.AllText, StringComparison.Ordinal);
+
+        var policyPath = Path.Join(evidenceRoot, "evidence.policy.json");
+        var doctor = await InvokeEntryPointAsync(["evidence", "doctor", "--policy", policyPath, "--path", "docs/README.md"]);
+        var explain = await InvokeEntryPointAsync(["evidence", "explain", "--policy", policyPath, "--path", "docs/README.md", "--output", outputDirectory]);
+        var run = await InvokeEntryPointAsync(["evidence", "run", "--policy", policyPath, "--path", "docs/README.md", "--output", outputDirectory]);
+        var verify = await InvokeEntryPointAsync(["evidence", "verify", Path.Join(outputDirectory, "evidence-manifest.json")]);
+        var missingVerify = await InvokeEntryPointAsync(["evidence", "verify"]);
+        var invalidExplain = await InvokeEntryPointAsync(["evidence", "explain", "--policy", policyPath, "--path", "./src/Feature.cs"]);
+        var coverage = await InvokeEntryPointAsync(["evidence", "run", "--policy", policyPath, "--path", "src/Feature.cs", "--output", Path.Join(directory.Path, "coverage-output")]);
+
+        Assert.Equal(0, doctor.ExitCode);
+        Assert.Contains("Evidence doctor: ready", doctor.AllText, StringComparison.Ordinal);
+        Assert.Equal(0, explain.ExitCode);
+        Assert.Contains("Evidence plan: no-evidence", explain.AllText, StringComparison.Ordinal);
+        Assert.Equal(0, run.ExitCode);
+        Assert.Contains("NoEvidenceRequired", run.AllText, StringComparison.Ordinal);
+        Assert.Equal(0, verify.ExitCode);
+        Assert.Contains("Evidence manifest verified", verify.AllText, StringComparison.Ordinal);
+        Assert.Equal(1, missingVerify.ExitCode);
+        Assert.Contains("ASEVD212", missingVerify.AllText, StringComparison.Ordinal);
+        Assert.Equal(1, invalidExplain.ExitCode);
+        Assert.Contains("ASEVD120", invalidExplain.AllText, StringComparison.Ordinal);
+        Assert.Equal(1, coverage.ExitCode);
+        Assert.Contains(
+            "requires --solution",
+            await File.ReadAllTextAsync(Path.Join(directory.Path, "coverage-output", "evidence-manifest.json")),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EntryPoint_ShouldExplainWhyEvidenceRunCannotInferConsumerCapabilities()
+    {
+        using var directory = TestDirectory.Create();
+        var evidenceRoot = Path.Join(directory.Path, "evidence");
+        var outputDirectory = Path.Join(directory.Path, "output");
+        var init = await InvokeEntryPointAsync(["evidence", "init", "--root", evidenceRoot]);
+        Assert.Equal(0, init.ExitCode);
+
+        var starterPolicyPath = Path.Join(evidenceRoot, "evidence.policy.json");
+        var starterPolicy = EvidenceCanonicalJson.Deserialize<EvidencePolicy>(await File.ReadAllBytesAsync(starterPolicyPath));
+        var coverageProfile = Assert.Single(starterPolicy.Profiles, profile => profile.Id == "targeted-coverage");
+        var coverageProducer = Assert.Single(coverageProfile.Producers);
+
+        var noEvidenceProfile = Assert.Single(starterPolicy.Profiles, profile => profile.Id == "no-evidence");
+
+        async Task<CapturedCliRun> RunWithPolicyAsync(string name, EvidenceProfile profile, bool includeDiff = false)
+        {
+            var policyPath = Path.Join(evidenceRoot, $"{name}.policy.json");
+            var runOutput = Path.Join(outputDirectory, name);
+            await File.WriteAllBytesAsync(policyPath, EvidenceCanonicalJson.Serialize(starterPolicy with { Profiles = [noEvidenceProfile, profile] }));
+            var arguments = new List<string> { "evidence", "run", "--policy", policyPath, "--path", "src/Feature.cs", "--output", runOutput, "--solution", Path.Join(directory.Path, "unused.slnx") };
+
+            if (includeDiff)
+            {
+                var diffPath = Path.Join(directory.Path, $"{name}.diff");
+                await File.WriteAllTextAsync(diffPath, "--- a/src/Feature.cs\n+++ b/src/Feature.cs\n");
+                arguments.AddRange(["--diff-file", diffPath]);
+            }
+
+            return await InvokeEntryPointAsync([.. arguments]);
+        }
+
+        var resourceProfile = coverageProfile with
+        {
+            Resources = [new EvidenceResourceDeclaration("postgres", "aspire_health", 30, [])],
+        };
+        var resourceRun = await RunWithPolicyAsync("resource", resourceProfile);
+
+        var browserProfile = coverageProfile with
+        {
+            Producers = [coverageProducer with { Kind = "browser-e2e" }],
+        };
+        var browserRun = await RunWithPolicyAsync("browser", browserProfile);
+
+        var noGateProfile = coverageProfile with
+        {
+            Producers = [coverageProducer with { CoverageGate = null }],
+        };
+        var noGateRun = await RunWithPolicyAsync("no-gate", noGateProfile);
+        var missingDiffRun = await RunWithPolicyAsync("missing-diff", coverageProfile);
+
+        Assert.Equal(1, resourceRun.ExitCode);
+        Assert.Equal(1, browserRun.ExitCode);
+        Assert.Equal(1, noGateRun.ExitCode);
+        Assert.Equal(1, missingDiffRun.ExitCode);
+        Assert.Contains(
+            "consumer-owned resources",
+            await File.ReadAllTextAsync(Path.Join(outputDirectory, "resource", "evidence-manifest.json")),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "requires an explicit consumer EvidenceHost",
+            await File.ReadAllTextAsync(Path.Join(outputDirectory, "browser", "evidence-manifest.json")),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "explicit coverageGate requirements",
+            await File.ReadAllTextAsync(Path.Join(outputDirectory, "no-gate", "evidence-manifest.json")),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "requires --diff-file",
+            await File.ReadAllTextAsync(Path.Join(outputDirectory, "missing-diff", "evidence-manifest.json")),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EvidenceCommands_ShouldExposeSuccessAndRecoverySemanticsWithoutEntrypointInfrastructure()
+    {
+        using var directory = TempDirectory.Create("appsurface-evidence-command-");
+        var policyPath = Path.Join(directory.Path, "evidence.policy.json");
+        await File.WriteAllBytesAsync(policyPath, EvidenceCanonicalJson.Serialize(CreateCoverageEvidencePolicy(EvidenceProfileScope.Release)));
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
+        using var console = new FakeInMemoryConsole();
+        using var githubActions = new EnvironmentVariableScope("GITHUB_ACTIONS", null);
+
+        await new EvidenceCommand().ExecuteAsync(console);
+        var doctor = new EvidenceDoctorCommand(workflow)
+        {
+            PolicyPath = policyPath,
+            Paths = ["src/Feature.cs"],
+        };
+        var doctorException = await Assert.ThrowsAsync<CommandException>(() => doctor.ExecuteAsync(console).AsTask());
+
+        var missingDoctor = new EvidenceDoctorCommand(workflow)
+        {
+            PolicyPath = Path.Join(directory.Path, "missing.policy.json"),
+            Paths = ["src/Feature.cs"],
+        };
+        var missingDoctorException = await Assert.ThrowsAsync<CommandException>(() => missingDoctor.ExecuteAsync(console).AsTask());
+
+        var coverageProfile = CreateCoverageEvidencePolicy(EvidenceProfileScope.Targeted).Profiles[0];
+        var ambiguousPolicyPath = Path.Join(directory.Path, "ambiguous.policy.json");
+        await File.WriteAllBytesAsync(
+            ambiguousPolicyPath,
+            EvidenceCanonicalJson.Serialize(new EvidencePolicy(
+                "ambiguous",
+                "1",
+                "coverage",
+                [coverageProfile, new EvidenceProfile("no-evidence", EvidenceProfileScope.Targeted, [], [], [])],
+                [
+                    new EvidencePolicyRule("coverage", "src/*", "coverage"),
+                    new EvidencePolicyRule("none", "src/*", "no-evidence"),
+                ])));
+        var ambiguousDoctor = new EvidenceDoctorCommand(workflow)
+        {
+            PolicyPath = ambiguousPolicyPath,
+            Paths = ["src/Feature.cs"],
+        };
+        var ambiguousDoctorException = await Assert.ThrowsAsync<CommandException>(() => ambiguousDoctor.ExecuteAsync(console).AsTask());
+        var ambiguousRun = new EvidenceRunCommand(workflow, CreateCoverageWorkflow())
+        {
+            PolicyPath = ambiguousPolicyPath,
+            Paths = ["src/Feature.cs"],
+        };
+        var ambiguousRunException = await Assert.ThrowsAsync<CommandException>(() => ambiguousRun.ExecuteAsync(console).AsTask());
+
+        var explain = new EvidenceExplainCommand(workflow)
+        {
+            PolicyPath = Path.Join(directory.Path, "missing.policy.json"),
+            Paths = ["src/Feature.cs"],
+        };
+        var explainException = await Assert.ThrowsAsync<CommandException>(() => explain.ExecuteAsync(console).AsTask());
+
+        var run = new EvidenceRunCommand(workflow, CreateCoverageWorkflow())
+        {
+            PolicyPath = Path.Join(directory.Path, "missing.policy.json"),
+            Paths = ["src/Feature.cs"],
+        };
+        var runException = await Assert.ThrowsAsync<CommandException>(() => run.ExecuteAsync(console).AsTask());
+
+        var verify = new EvidenceVerifyCommand(workflow)
+        {
+            ManifestPath = Path.Join(directory.Path, "missing-manifest.json"),
+        };
+        var verifyException = await Assert.ThrowsAsync<CommandException>(() => verify.ExecuteAsync(console).AsTask());
+
+        var output = console.ReadOutputString();
+        Assert.Contains("Use 'appsurface evidence init", output, StringComparison.Ordinal);
+        Assert.Contains("Evidence doctor: blocked", output, StringComparison.Ordinal);
+        Assert.Contains("Next:", output, StringComparison.Ordinal);
+        Assert.Contains("ASEVD210", doctorException.Message, StringComparison.Ordinal);
+        Assert.Contains("ASEVD204", missingDoctorException.Message, StringComparison.Ordinal);
+        Assert.Contains("ASEVD117", ambiguousDoctorException.Message, StringComparison.Ordinal);
+        Assert.Contains("ASEVD117", ambiguousRunException.Message, StringComparison.Ordinal);
+        Assert.Contains("ASEVD204", explainException.Message, StringComparison.Ordinal);
+        Assert.Contains("ASEVD204", runException.Message, StringComparison.Ordinal);
+        Assert.Contains("ASEVD208", verifyException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EvidenceRunCommand_ShouldDelegateToTheExistingCoverageWorkflowAndCloseTheDeclaredObligation()
+    {
+        using var directory = TempDirectory.Create("appsurface-evidence-coverage-");
+        var policyPath = Path.Join(directory.Path, "evidence.policy.json");
+        var solutionPath = Path.Join(directory.Path, "sample.slnx");
+        var projectPath = Path.Join(directory.Path, "tests", "Sample.Tests", "Sample.Tests.csproj");
+        Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);
+        await File.WriteAllTextAsync(solutionPath, "{}");
+        await File.WriteAllTextAsync(projectPath, "<Project />");
+        await File.WriteAllBytesAsync(policyPath, EvidenceCanonicalJson.Serialize(CreateCoverageEvidencePolicy(EvidenceProfileScope.Targeted)));
+        using var currentDirectory = PushCurrentDirectoryForEvidenceTests(directory.Path);
+        using var console = new FakeInMemoryConsole();
+        var outputDirectory = Path.Join(directory.Path, "evidence-output");
+        var githubSummaryPath = Path.Join(directory.Path, "github-step-summary.md");
+        using var githubSummary = new EnvironmentVariableScope("GITHUB_STEP_SUMMARY", githubSummaryPath);
+        var command = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageWorkflow())
+        {
+            PolicyPath = policyPath,
+            Paths = ["src/Feature.cs"],
+            OutputDirectory = outputDirectory,
+            SolutionPath = solutionPath,
+        };
+
+        await command.ExecuteAsync(console);
+
+        var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(Path.Join(outputDirectory, "evidence-manifest.json")));
+        Assert.Equal(EvidenceClaimKind.TargetedComplete, manifest.ClaimKind);
+        Assert.Equal(EvidenceExecutionVerdict.Passed, manifest.ExecutionVerdict);
+        Assert.Equal(["coverage"], manifest.ClosedObligationIds);
+        Assert.Contains("Coverage gate passed", Assert.Single(manifest.ProducerResults).Diagnostic, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Join(outputDirectory, "coverage", "coverage-gate.md")));
+        Assert.Contains("## AppSurface Evidence", await File.ReadAllTextAsync(githubSummaryPath), StringComparison.Ordinal);
+
+        var failedCoverage = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageWorkflow(testFails: true))
+        {
+            PolicyPath = policyPath,
+            Paths = ["src/Feature.cs"],
+            OutputDirectory = Path.Join(directory.Path, "failed-coverage-output"),
+            SolutionPath = solutionPath,
+        };
+        var failedCoverageException = await Assert.ThrowsAsync<CommandException>(() => failedCoverage.ExecuteAsync(console).AsTask());
+        Assert.Contains("ASEVD211", failedCoverageException.Message, StringComparison.Ordinal);
+
+        var crashedCoverage = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageWorkflow(failProcess: true))
+        {
+            PolicyPath = policyPath,
+            Paths = ["src/Feature.cs"],
+            OutputDirectory = Path.Join(directory.Path, "crashed-coverage-output"),
+            SolutionPath = solutionPath,
+        };
+        var crashedCoverageException = await Assert.ThrowsAsync<CommandException>(() => crashedCoverage.ExecuteAsync(console).AsTask());
+        Assert.Contains("ASEVD211", crashedCoverageException.Message, StringComparison.Ordinal);
+
+        var failedGateOutput = Path.Join(directory.Path, "failed-gate-output");
+        var failedGate = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageWorkflow(coveragePasses: false))
+        {
+            PolicyPath = policyPath,
+            Paths = ["src/Feature.cs"],
+            OutputDirectory = failedGateOutput,
+            SolutionPath = solutionPath,
+        };
+        var failedGateException = await Assert.ThrowsAsync<CommandException>(() => failedGate.ExecuteAsync(console).AsTask());
+        var failedGateManifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(
+            await File.ReadAllBytesAsync(Path.Join(failedGateOutput, "evidence-manifest.json")));
+
+        Assert.Contains("ASEVD211", failedGateException.Message, StringComparison.Ordinal);
+        Assert.Equal(EvidenceExecutionVerdict.Incomplete, failedGateManifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, failedGateManifest.ClaimKind);
+        Assert.Contains("Coverage gate did not meet its declared threshold", Assert.Single(failedGateManifest.ProducerResults).Diagnostic, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Join(failedGateOutput, "coverage", "coverage-gate.md")));
+
+        var timedOutPolicyPath = Path.Join(directory.Path, "timed-out.policy.json");
+        await File.WriteAllBytesAsync(
+            timedOutPolicyPath,
+            EvidenceCanonicalJson.Serialize(CreateCoverageEvidencePolicy(EvidenceProfileScope.Targeted, timeoutSeconds: 1)));
+        var timedOutOutput = Path.Join(directory.Path, "timed-out-output");
+        var timedOutCoverage = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageWorkflow(cancels: true))
+        {
+            PolicyPath = timedOutPolicyPath,
+            Paths = ["src/Feature.cs"],
+            OutputDirectory = timedOutOutput,
+            SolutionPath = solutionPath,
+        };
+        var timedOutCoverageException = await Assert.ThrowsAsync<CommandException>(() => timedOutCoverage.ExecuteAsync(console).AsTask());
+        var timedOutManifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(
+            await File.ReadAllBytesAsync(Path.Join(timedOutOutput, "evidence-manifest.json")));
+
+        Assert.Contains("ASEVD211", timedOutCoverageException.Message, StringComparison.Ordinal);
+        Assert.Equal(EvidenceProducerOutcome.TimedOut, Assert.Single(timedOutManifest.ProducerResults).Outcome);
+        Assert.Contains("exceeded its bounded execution window", Assert.Single(timedOutManifest.ProducerResults).Diagnostic, StringComparison.Ordinal);
+    }
+
+    private static EvidencePolicy CreateCoverageEvidencePolicy(EvidenceProfileScope scope, int timeoutSeconds = 60) => new(
+        "evidence-command-test",
+        "1",
+        "coverage",
+        [
+            new EvidenceProfile(
+                "coverage",
+                scope,
+                [],
+                [
+                    new EvidenceProducerDeclaration(
+                        "coverage",
+                        "coverage",
+                        "1.0.0",
+                        [],
+                        ["coverage/assertion@1"],
+                        [],
+                        timeoutSeconds,
+                        new EvidenceCoverageGateRequirements(95, 85, PatchLineMode: "measurable", TolerancePercent: 0)),
+                ],
+                [new EvidenceObligation("coverage", "behavior", "Coverage evidence is required.", ["coverage"], "coverage/assertion@1")]),
+        ],
+        []);
+
+    private static CoverageRunWorkflow CreateCoverageWorkflow(bool testFails = false, bool failProcess = false, bool coveragePasses = true, bool cancels = false) => new(
+        new EvidenceCoverageProcessRunner(testFails, failProcess, cancels),
+        new EvidenceCoverageReportGenerator(coveragePasses),
+        TimeProvider.System);
+
+    private static IDisposable PushCurrentDirectoryForEvidenceTests(string path)
+    {
+        var previous = Directory.GetCurrentDirectory();
+        Directory.SetCurrentDirectory(path);
+        return new DelegateDisposable(() => Directory.SetCurrentDirectory(previous));
+    }
+
     private static async Task<CapturedCliRun> InvokeEntryPointAsync(
         string[] args,
         Action<ConsoleOptions>? configureOptions = null)
@@ -4642,6 +5007,90 @@ public sealed class ProgramEntryPointTests
     {
         public Task<CanaryPollHttpResponse> SendAsync(CanaryPollRequest request, CancellationToken cancellationToken) =>
             Task.FromResult(response);
+    }
+
+    private sealed class EvidenceCoverageProcessRunner(bool testFails, bool failProcess, bool cancels) : ICoverageRunProcessRunner
+    {
+        private const string CapabilityOutput = """
+            {
+              "Properties": { "TestingPlatformDotnetTestSupport": "false", "TargetFramework": "net10.0" },
+              "Items": {
+                "PackageReference": [
+                  { "Identity": "coverlet.collector" }
+                ]
+              }
+            }
+            """;
+
+        private const string Cobertura = "<coverage lines-covered=\"10\" lines-valid=\"10\" branches-covered=\"10\" branches-valid=\"10\" line-rate=\"1\" branch-rate=\"1\"><packages /></coverage>";
+
+        public async Task<CoverageRunProcessResult> RunAsync(CoverageRunProcessRequest request, CancellationToken cancellationToken)
+        {
+            request.Lease.Complete();
+            var operation = request.Arguments.FirstOrDefault();
+            if (failProcess && string.Equals(operation, "sln", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("simulated coverage process failure");
+            }
+
+            if (cancels && string.Equals(operation, "sln", StringComparison.Ordinal))
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+
+            if (string.Equals(operation, "sln", StringComparison.Ordinal))
+            {
+                return new CoverageRunProcessResult(0, "Project(s)\n----------\ntests/Sample.Tests/Sample.Tests.csproj\n");
+            }
+
+            if (string.Equals(operation, "msbuild", StringComparison.Ordinal))
+            {
+                return new CoverageRunProcessResult(0, CapabilityOutput, StandardOutput: CapabilityOutput);
+            }
+
+            if (string.Equals(operation, "test", StringComparison.Ordinal))
+            {
+                var resultsIndex = request.Arguments.ToList().FindIndex(argument => string.Equals(argument, "--results-directory", StringComparison.Ordinal));
+                Assert.True(resultsIndex >= 0);
+                var collectorDirectory = Path.Join(request.Arguments[resultsIndex + 1], "collector");
+                Directory.CreateDirectory(collectorDirectory);
+                await File.WriteAllTextAsync(Path.Join(collectorDirectory, "coverage.cobertura.xml"), Cobertura, cancellationToken);
+                if (request.OutputFile is not null)
+                {
+                    await File.WriteAllTextAsync(request.OutputFile, "coverage test output", cancellationToken);
+                }
+
+                return new CoverageRunProcessResult(testFails ? 1 : 0, "coverage test output");
+            }
+
+            return new CoverageRunProcessResult(0, "build output");
+        }
+    }
+
+    private sealed class EvidenceCoverageReportGenerator(bool coveragePasses) : ICoverageRunReportGenerator
+    {
+        private const string PassingCobertura = "<coverage lines-covered=\"10\" lines-valid=\"10\" branches-covered=\"10\" branches-valid=\"10\" line-rate=\"1\" branch-rate=\"1\"><packages /></coverage>";
+        private const string FailingCobertura = "<coverage lines-covered=\"0\" lines-valid=\"10\" branches-covered=\"0\" branches-valid=\"10\" line-rate=\"0\" branch-rate=\"0\"><packages /></coverage>";
+
+        public async Task<CoverageRunMergeResult> MergeAsync(
+            IReadOnlyList<string> coverageFiles,
+            string outputDirectory,
+            CancellationToken cancellationToken)
+        {
+            Directory.CreateDirectory(outputDirectory);
+            var coberturaPath = Path.Join(outputDirectory, "Cobertura.xml");
+            var summaryPath = Path.Join(outputDirectory, "Summary.txt");
+            await File.WriteAllTextAsync(coberturaPath, coveragePasses ? PassingCobertura : FailingCobertura, cancellationToken);
+            await File.WriteAllTextAsync(summaryPath, "coverage summary", cancellationToken);
+            return new CoverageRunMergeResult(0, coberturaPath, summaryPath);
+        }
+    }
+
+    private sealed class DelegateDisposable(Action dispose) : IDisposable
+    {
+        private Action? _dispose = dispose;
+
+        public void Dispose() => Interlocked.Exchange(ref _dispose, null)?.Invoke();
     }
 
     private static bool TryCreateFileSymlink(string linkPath, string targetPath)
