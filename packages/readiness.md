@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 53
-- Evidence status: manifest evidence complete: 39; transitive package evidence complete: 6; proof-host evidence complete: 2; excluded by publish decision: 6
-- Product families: AppSurface: 37; Forge Trust: 2; Internal support: 11; RazorWire: 3
+- Packages: 54
+- Evidence status: manifest evidence complete: 39; transitive package evidence complete: 6; proof-host evidence complete: 2; excluded by publish decision: 7
+- Product families: AppSurface: 37; Forge Trust: 2; Internal support: 12; RazorWire: 3
 
 ## Package evidence matrix
 
@@ -25,6 +25,7 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | AppSurface | `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Auth.AspNetCore` | [README](../Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Auth.AspNetCore`<br />`ForgeTrust.AppSurface.Auth` | [README](../Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Auth.Aspire.Keycloak` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Aspire` | [README](../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md) | [notes](../releases/current.md) |
+| Internal support | `ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Auth.Testing` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Auth.AspNetCore`<br />`ForgeTrust.AppSurface.Auth` | [README](../Auth/ForgeTrust.AppSurface.Auth.Testing/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Intelligence` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Intelligence/ForgeTrust.AppSurface.Intelligence/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Observability` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Observability/ForgeTrust.AppSurface.Observability/README.md) | [notes](../releases/current.md) |
