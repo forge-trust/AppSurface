@@ -8,6 +8,14 @@ Status: APPROVED
 Mode: Builder
 Supersedes: andrew-main-design-20260821-033503.md
 
+## Implementation Status
+
+Implemented on the issue #782 branch. The public-Aspire feasibility gate passed with the pinned Aspire hosting
+packages: a finite package-owned realm-ready executable and finite consumer `ProjectResource` stages compose through
+`WaitForCompletion`, and typed secret parameters remain value-free and scoped to their declared seed project. The
+implemented surface is `RealmReady()` plus `WithLocalSeed(...)`; live and focused-test evidence is maintained in the
+[executable test plan](auth-aspire-keycloak-local-seeds-test-plan.md).
+
 ## Problem Statement
 
 `ForgeTrust.AppSurface.Auth.Aspire.Keycloak` already creates a deterministic local Keycloak realm, public client, baseline users, secret-safe OIDC projection, and multi-signal proof readiness. A consumer sometimes needs application-owned local work only after that realm is available: optional external-identity broker setup from local credentials, deterministic test identities or attributes, and companion application fixtures after a known external subject exists. A browser proof must wait until the required work finishes.
@@ -35,7 +43,9 @@ The AppHost graph becomes an honest proof chain: Keycloak is healthy, AppSurface
 2. A finite consumer `ProjectResource` can exit `0` after successful seed work and nonzero on failure, giving downstream resources a native completion signal.
 3. A package-local registry can validate its own wrapper handles: same `IDistributedApplicationBuilder` identity, unique names, and a strict linear predecessor relation.
 4. Existing public-preview Keycloak consumers must retain unchanged behavior when they register no seeds.
-5. Premises 1 and the secret-binding path are feasibility gates, not assumed implementation facts. If either is unavailable or inconclusive, this public seed contract does not ship. A consumer may independently use the existing public `Readiness.CheckOnceAsync()` in its own worker, but documenting or productizing that alternative requires a new design approval; no callback runner is added.
+5. The public-Aspire completion and typed-secret-binding gates passed before this contract was implemented. If either
+   becomes unavailable, scope-unsafe, or inconclusive in a supported future Aspire version, this contract does not gain
+   a callback fallback: a new design review is required.
 
 ## Cross-Model Perspective
 
@@ -63,13 +73,15 @@ The fallback proposed a package-managed callback with a Keycloak `HttpClient`. T
 
 ## Recommended Approach
 
-Build a thin, conditional local-seed extension in `ForgeTrust.AppSurface.Auth.Aspire.Keycloak`. The selected product direction is fixed; exact public method/type names are not frozen until the feasibility gates pass.
+Build a thin local-seed extension in `ForgeTrust.AppSurface.Auth.Aspire.Keycloak`. The feasibility gates passed, so the
+implemented public names are `RealmReady()`, `WithLocalSeed(...)`, `AppSurfaceKeycloakLocalSeed`, and
+`AppSurfaceKeycloakLocalSeedContext`.
 
 ### Execution branch
 
 | Feasibility result | Implementation decision |
 | --- | --- |
-| Completion gate passes and the declared-secret binding is value-free and scoped only to its one declared project | Ship the thin contract in this document. |
+| Completion gate passes and the declared-secret binding is value-free and scoped only to its one declared project | **Observed.** Ship and regression-test the thin contract in this document. |
 | Completion gate is unavailable or its completion/state semantics are inconclusive | Do not ship `RealmReady`, a callback, or a partial seed API. A consumer can independently call `Readiness.CheckOnceAsync()` in its own worker, but any supported fallback returns for a new design approval. |
 | Secret binding is unavailable, leaks a value, or reaches more than the declared seed project | Do not register a seed or substitute a looser binding. Redesign requires a new review. |
 | Completion gate passes but secret binding is inconclusive | Do not freeze or ship a public seed contract. Keep the result as a spike finding and return to this design. |
@@ -228,10 +240,10 @@ The consumer supplies, builds, packages, configures, and maintains every seed wo
 
 ## Next Steps
 
-1. Build the public-Aspire feasibility spike and record exact supported gate, nonsecret context binding, secret binding, cancellation, restart, and state-transition behavior.
-2. Only if it passes, add immutable wrapper-local registration inputs/handles, strict linear ordering, safe metadata, and redacted `ASKEYC` diagnostics.
-3. Add the finite consumer project sample: one explicitly enabled external-identity bootstrap and one companion fixture seed; prove the web project is not launched before final completion.
-4. Implement the full acceptance matrix, then package/dependency guards, docs, package index, readiness, release notes, and migration guide.
+1. Completed: record public-Aspire completion, nonsecret context, typed-secret binding, cancellation, restart, and state-transition behavior.
+2. Completed: add immutable wrapper-local registration handles, strict linear ordering, safe metadata, and redacted `ASKEYC` diagnostics.
+3. Completed: add the two finite consumer projects and prove the web proof is blocked until final completion.
+4. Maintain: keep the acceptance matrix, package/dependency guards, docs, package index, readiness material, and release entry current as the preview surface evolves.
 
 ## The Assignment
 

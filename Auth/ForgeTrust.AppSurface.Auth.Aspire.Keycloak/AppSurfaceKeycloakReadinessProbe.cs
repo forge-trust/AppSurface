@@ -15,6 +15,8 @@ public sealed class AppSurfaceKeycloakReadinessProbe
     };
 
     private readonly HttpClient _httpClient;
+    private readonly string? _expectedLoginThemeName;
+    private readonly IReadOnlyList<string> _expectedSeededUserNames;
     private readonly AppSurfaceKeycloakOptions _options;
     private readonly Func<string, string> _readAllText;
 
@@ -28,7 +30,26 @@ public sealed class AppSurfaceKeycloakReadinessProbe
     /// challenge checks can inspect Keycloak's raw response. Injected clients should preserve those behaviors.
     /// </remarks>
     public AppSurfaceKeycloakReadinessProbe(AppSurfaceKeycloakOptions options, HttpClient? httpClient = null)
-        : this(options, httpClient ?? DefaultHttpClient, File.ReadAllText)
+        : this(options, httpClient ?? DefaultHttpClient, File.ReadAllText, loginThemeName: null, seededUserNames: null)
+    {
+    }
+
+    /// <summary>
+    /// Creates a readiness probe with explicit nonsecret realm-evidence expectations for the finite AppHost worker.
+    /// </summary>
+    /// <param name="options">The reconstructed safe proof options.</param>
+    /// <param name="loginThemeName">The expected theme name, if a local theme was configured.</param>
+    /// <param name="seededUserNames">The expected local user names without their passwords, subjects, or claims.</param>
+    /// <remarks>
+    /// This overload exists so the package-owned executable can prove generated realm evidence without receiving any
+    /// seeded-user credentials. It is internal because consumers register the gate through
+    /// <see cref="AppSurfaceKeycloakResource.RealmReady"/> rather than starting probes themselves.
+    /// </remarks>
+    internal AppSurfaceKeycloakReadinessProbe(
+        AppSurfaceKeycloakOptions options,
+        string? loginThemeName,
+        IReadOnlyList<string> seededUserNames)
+        : this(options, DefaultHttpClient, File.ReadAllText, loginThemeName, seededUserNames)
     {
     }
 
@@ -38,10 +59,14 @@ public sealed class AppSurfaceKeycloakReadinessProbe
     /// <param name="options">The proof options to verify.</param>
     /// <param name="httpClient">HTTP client used for metadata and authorization requests.</param>
     /// <param name="readAllText">Realm import file reader.</param>
+    /// <param name="loginThemeName">Optional safe theme name expected in generated realm evidence.</param>
+    /// <param name="seededUserNames">Optional safe user names expected in generated realm evidence.</param>
     internal AppSurfaceKeycloakReadinessProbe(
         AppSurfaceKeycloakOptions options,
         HttpClient httpClient,
-        Func<string, string> readAllText)
+        Func<string, string> readAllText,
+        string? loginThemeName = null,
+        IReadOnlyList<string>? seededUserNames = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(httpClient);
@@ -50,6 +75,8 @@ public sealed class AppSurfaceKeycloakReadinessProbe
         _options = options;
         _httpClient = httpClient;
         _readAllText = readAllText;
+        _expectedLoginThemeName = loginThemeName ?? options.LoginTheme?.Name;
+        _expectedSeededUserNames = seededUserNames ?? options.SeededUsers.Select(user => user.Username).ToArray();
     }
 
     /// <summary>
@@ -153,8 +180,8 @@ public sealed class AppSurfaceKeycloakReadinessProbe
                 throw RealmEvidence("realm import does not contain a users array.");
             }
 
-            if (_options.LoginTheme is not null
-                && !string.Equals(GetOptionalString(root, "loginTheme"), _options.LoginTheme.Name, StringComparison.Ordinal))
+            if (_expectedLoginThemeName is not null
+                && !string.Equals(GetOptionalString(root, "loginTheme"), _expectedLoginThemeName, StringComparison.Ordinal))
             {
                 throw RealmEvidence("realm import does not contain the expected login theme.");
             }
@@ -178,14 +205,14 @@ public sealed class AppSurfaceKeycloakReadinessProbe
                 }
             }
 
-            foreach (var user in _options.SeededUsers)
+            foreach (var username in _expectedSeededUserNames)
             {
-                if (!users.TryGetValue(user.Username, out var userEvidence))
+                if (!users.TryGetValue(username, out var userEvidence))
                 {
-                    throw RealmEvidence($"realm import does not contain seeded user '{user.Username}'.");
+                    throw RealmEvidence($"realm import does not contain seeded user '{username}'.");
                 }
 
-                CheckSeededUserProfileEvidence(userEvidence, user.Username);
+                CheckSeededUserProfileEvidence(userEvidence, username);
             }
         }
     }

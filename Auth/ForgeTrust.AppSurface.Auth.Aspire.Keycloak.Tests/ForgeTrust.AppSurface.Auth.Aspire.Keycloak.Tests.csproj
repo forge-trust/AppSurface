@@ -31,6 +31,7 @@
     <ProjectReference Include="../../examples/auth-aspire-keycloak-lifecycle-worker/AuthAspireKeycloakLifecycleWorker.csproj" />
     <ProjectReference Include="../../examples/auth-aspire-keycloak-readiness-gate/AuthAspireKeycloakReadinessGate.csproj" />
     <ProjectReference Include="../../examples/auth-aspire-keycloak-verifier/AuthAspireKeycloakVerifier.csproj" />
+    <ProjectReference Include="../../examples/auth-aspire-keycloak-local-seed-store/AuthAspireKeycloakLocalSeedStore.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Auth.Aspire.Keycloak/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.csproj" />
   </ItemGroup>

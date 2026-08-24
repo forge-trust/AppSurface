@@ -1,7 +1,6 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using AuthAspireKeycloakLifecycleWorker;
-using AuthAspireKeycloakReadinessGate;
 using ForgeTrust.AppSurface.Aspire;
 using ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
@@ -12,6 +11,7 @@ namespace AuthAspireKeycloakAppHost;
 /// </summary>
 public sealed class AuthAspireKeycloakComponent : IAspireComponent<KeycloakResource>
 {
+    private const string SampleAdminPassword = "appsurface-keycloak-admin-local-only";
     private const string SampleThemeImageEnvironmentVariable = "AUTH_ASPIRE_KEYCLOAK_THEME_IMAGE";
     private AppSurfaceKeycloakResource? _resolved;
 
@@ -28,7 +28,23 @@ public sealed class AuthAspireKeycloakComponent : IAspireComponent<KeycloakResou
     {
         _ = context;
         var theme = CreateSampleThemeFromEnvironment();
-        _resolved = appBuilder.AddAppSurfaceKeycloak(configure: options => options.LoginTheme = theme);
+        var administratorUsername = appBuilder.AddParameter(
+            AppSurfaceKeycloakDefaults.AdminUserParameterName,
+            AppSurfaceKeycloakDefaults.AdminUser,
+            secret: false);
+        var administratorPassword = appBuilder.AddParameter(
+            AppSurfaceKeycloakDefaults.AdminPasswordParameterName,
+            SampleAdminPassword,
+            secret: true);
+        _resolved = appBuilder.AddAppSurfaceKeycloak(
+            AppSurfaceKeycloakDefaults.ResourceName,
+            administratorUsername,
+            administratorPassword,
+            options =>
+        {
+            options.LoginTheme = theme;
+            options.UsePersistentDataVolume = true;
+        });
         return _resolved.Resource;
     }
 
@@ -49,20 +65,25 @@ public sealed class AuthAspireKeycloakComponent : IAspireComponent<KeycloakResou
 /// </summary>
 public sealed class AuthAspireKeycloakWebComponent : IAspireComponent<ProjectResource>
 {
+    /// <summary>
+    /// Stable resource name for the paired local web proof.
+    /// </summary>
+    public const string ResourceName = "auth-aspire-keycloak-web";
+
     private readonly AuthAspireKeycloakComponent _keycloak;
-    private readonly AuthAspireKeycloakLifecycleWorkerComponent _lifecycleWorker;
+    private readonly AuthAspireKeycloakCandidateFixtureComponent _candidateFixture;
 
     /// <summary>
     /// Creates the web component.
     /// </summary>
     /// <param name="keycloak">Keycloak component that supplies provider configuration.</param>
-    /// <param name="lifecycleWorker">Finite consumer-style worker that must complete before the web proof can start.</param>
+    /// <param name="candidateFixture">Final consumer-owned fixture stage that must complete before the web proof can start.</param>
     public AuthAspireKeycloakWebComponent(
         AuthAspireKeycloakComponent keycloak,
-        AuthAspireKeycloakLifecycleWorkerComponent lifecycleWorker)
+        AuthAspireKeycloakCandidateFixtureComponent candidateFixture)
     {
         _keycloak = keycloak;
-        _lifecycleWorker = lifecycleWorker;
+        _candidateFixture = candidateFixture;
     }
 
     /// <inheritdoc />
@@ -71,9 +92,9 @@ public sealed class AuthAspireKeycloakWebComponent : IAspireComponent<ProjectRes
         IDistributedApplicationBuilder appBuilder)
     {
         var keycloak = context.Resolve(_keycloak);
-        var lifecycleWorker = context.Resolve(_lifecycleWorker);
+        var candidateFixture = context.Resolve(_candidateFixture);
         var web = appBuilder
-            .AddProject<Projects.AuthAspireKeycloakWeb>("auth-aspire-keycloak-web")
+            .AddProject<Projects.AuthAspireKeycloakWeb>(ResourceName)
             .WithHttpEndpoint(
                 port: AppSurfaceKeycloakDefaults.WebProofPort,
                 targetPort: AppSurfaceKeycloakDefaults.WebProofPort,
@@ -83,9 +104,145 @@ public sealed class AuthAspireKeycloakWebComponent : IAspireComponent<ProjectRes
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
             .WithReference(keycloak)
             .WaitFor(keycloak)
-            .WaitForCompletion(lifecycleWorker);
+            .WaitForCompletion(candidateFixture);
 
         return _keycloak.Resolved.Configuration.ApplyTo(web);
+    }
+}
+
+/// <summary>
+/// Adds the first finite consumer-owned seed that upserts the local broker alias and founder subject map.
+/// </summary>
+public sealed class AuthAspireKeycloakIdentityBootstrapComponent : IAspireComponent<ProjectResource>
+{
+    private readonly AuthAspireKeycloakComponent _keycloak;
+    private AppSurfaceKeycloakLocalSeed? _seed;
+
+    /// <summary>
+    /// Creates the identity-bootstrap component.
+    /// </summary>
+    /// <param name="keycloak">The Keycloak component that supplies the typed administrator parameter resources.</param>
+    public AuthAspireKeycloakIdentityBootstrapComponent(AuthAspireKeycloakComponent keycloak)
+    {
+        _keycloak = keycloak;
+    }
+
+    /// <summary>
+    /// Gets the registered local seed after this component has been resolved.
+    /// </summary>
+    public AppSurfaceKeycloakLocalSeed Seed =>
+        _seed ?? throw new InvalidOperationException("Resolve the identity-bootstrap component before reading its seed handle.");
+
+    /// <inheritdoc />
+    public IResourceBuilder<ProjectResource> Generate(
+        AspireStartupContext context,
+        IDistributedApplicationBuilder appBuilder)
+    {
+        var keycloak = context.Resolve(_keycloak);
+        var metadata = _keycloak.Resolved;
+        var administratorUsernameParameter = metadata.Resource.Resource.AdminUserNameParameter
+            ?? throw new InvalidOperationException("The local Keycloak resource must expose an administrator username parameter.");
+        var administratorPasswordParameter = metadata.Resource.Resource.AdminPasswordParameter
+            ?? throw new InvalidOperationException("The local Keycloak resource must expose an administrator password parameter.");
+        var administratorUser = appBuilder.CreateResourceBuilder(administratorUsernameParameter);
+        var administratorPassword = appBuilder.CreateResourceBuilder(administratorPasswordParameter);
+
+        _seed = metadata.WithLocalSeed(
+            "identity-bootstrap",
+            seed => appBuilder
+                .AddProject<Projects.AuthAspireKeycloakIdentityBootstrap>(seed.ResourceName)
+                .WithEnvironment("LOCAL_SEED_ADMIN_USERNAME", administratorUser)
+                .WithEnvironment("LOCAL_SEED_STORE_PATH", AuthAspireKeycloakLocalSeedSample.StorePath(appBuilder))
+                .WithReference(keycloak),
+            options =>
+            {
+                AuthAspireKeycloakLocalSeedSample.EnableExplicitLocalRun(appBuilder, options);
+                options.WithRequiredSecretParameter("LOCAL_SEED_ADMIN_PASSWORD", administratorPassword);
+            });
+
+        return _seed.Resource;
+    }
+}
+
+/// <summary>
+/// Adds the final finite consumer-owned fixture stage that validates the identity map and converges one candidate fixture.
+/// </summary>
+public sealed class AuthAspireKeycloakCandidateFixtureComponent : IAspireComponent<ProjectResource>
+{
+    private const string InjectFailureEnvironmentVariable = "AUTH_ASPIRE_KEYCLOAK_INJECT_FIXTURE_FAILURE";
+
+    private readonly AuthAspireKeycloakIdentityBootstrapComponent _identityBootstrap;
+    private readonly AuthAspireKeycloakComponent _keycloak;
+    private AppSurfaceKeycloakLocalSeed? _seed;
+
+    /// <summary>
+    /// Creates the candidate-fixture component.
+    /// </summary>
+    /// <param name="keycloak">The Keycloak component that owns the ordered local seed registry.</param>
+    /// <param name="identityBootstrap">The immediately preceding identity-bootstrap stage.</param>
+    public AuthAspireKeycloakCandidateFixtureComponent(
+        AuthAspireKeycloakComponent keycloak,
+        AuthAspireKeycloakIdentityBootstrapComponent identityBootstrap)
+    {
+        _keycloak = keycloak;
+        _identityBootstrap = identityBootstrap;
+    }
+
+    /// <summary>
+    /// Gets the registered candidate-fixture seed after this component has been resolved.
+    /// </summary>
+    public AppSurfaceKeycloakLocalSeed Seed =>
+        _seed ?? throw new InvalidOperationException("Resolve the candidate-fixture component before reading its seed handle.");
+
+    /// <inheritdoc />
+    public IResourceBuilder<ProjectResource> Generate(
+        AspireStartupContext context,
+        IDistributedApplicationBuilder appBuilder)
+    {
+        _ = context.Resolve(_identityBootstrap);
+        var metadata = _keycloak.Resolved;
+        var injectFailure = Environment.GetEnvironmentVariable(InjectFailureEnvironmentVariable) ?? "false";
+
+        _seed = metadata.WithLocalSeed(
+            "candidate-fixture",
+            seed => appBuilder
+                .AddProject<Projects.AuthAspireKeycloakCandidateFixture>(seed.ResourceName)
+                .WithEnvironment("LOCAL_SEED_STORE_PATH", AuthAspireKeycloakLocalSeedSample.StorePath(appBuilder))
+                .WithEnvironment("LOCAL_SEED_INJECT_FIXTURE_FAILURE", injectFailure),
+            options =>
+            {
+                AuthAspireKeycloakLocalSeedSample.EnableExplicitLocalRun(appBuilder, options);
+                options.After(_identityBootstrap.Seed);
+            });
+
+        return _seed.Resource;
+    }
+}
+
+/// <summary>
+/// Holds the sample-only local execution configuration that remains outside the reusable package contract.
+/// </summary>
+internal static class AuthAspireKeycloakLocalSeedSample
+{
+    private const string EnableLocalSeedsEnvironmentVariable = "AUTH_ASPIRE_KEYCLOAK_ENABLE_LOCAL_SEEDS";
+
+    internal static void EnableExplicitLocalRun(
+        IDistributedApplicationBuilder appBuilder,
+        AppSurfaceKeycloakLocalSeedOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(appBuilder);
+        ArgumentNullException.ThrowIfNull(options);
+        if (bool.TryParse(Environment.GetEnvironmentVariable(EnableLocalSeedsEnvironmentVariable), out var enabled)
+            && enabled)
+        {
+            options.AllowedEnvironmentNames.Add(appBuilder.Environment.EnvironmentName);
+        }
+    }
+
+    internal static string StorePath(IDistributedApplicationBuilder appBuilder)
+    {
+        ArgumentNullException.ThrowIfNull(appBuilder);
+        return Path.Join(appBuilder.AppHostDirectory, ".appsurface", "auth-aspire-keycloak-local-seed-store.json");
     }
 }
 
@@ -132,18 +289,19 @@ public sealed class AuthAspireKeycloakLifecycleWorkerComponent : IAspireComponen
 }
 
 /// <summary>
-/// Adds the finite #782 feasibility process that proves a project can complete after AppSurface baseline readiness.
+/// Resolves the package-owned finite realm-ready process used by the local proof graph.
 /// </summary>
 /// <remarks>
-/// The component deliberately remains sample-only. It proves public Aspire graph behavior without adding a
-/// package-managed callback runner or a public local-seed API before the documented feasibility evidence exists.
+/// The underlying <see cref="AppSurfaceKeycloakResource.RealmReady"/> resource checks the generated baseline after
+/// Keycloak health and provides the completion handle consumed by finite local seed projects. It does not perform
+/// provider administration or consume seed credentials.
 /// </remarks>
-public sealed class AuthAspireKeycloakReadinessGateComponent : IAspireComponent<ProjectResource>
+public sealed class AuthAspireKeycloakReadinessGateComponent : IAspireComponent<ExecutableResource>
 {
     /// <summary>
-    /// Stable resource name used by the feasibility graph and its captured state timeline.
+    /// Stable resource name used by the realm-ready completion graph.
     /// </summary>
-    public const string ResourceName = "auth-aspire-keycloak-readiness-gate";
+    public const string ResourceName = "keycloak-realm-ready";
 
     private readonly AuthAspireKeycloakComponent _keycloak;
 
@@ -157,27 +315,13 @@ public sealed class AuthAspireKeycloakReadinessGateComponent : IAspireComponent<
     }
 
     /// <inheritdoc />
-    public IResourceBuilder<ProjectResource> Generate(
+    public IResourceBuilder<ExecutableResource> Generate(
         AspireStartupContext context,
         IDistributedApplicationBuilder appBuilder)
     {
-        var keycloak = context.Resolve(_keycloak);
-        var metadata = _keycloak.Resolved;
-        var redirectUri = new Uri($"http://localhost:{AppSurfaceKeycloakDefaults.WebProofPort}{metadata.Configuration.CallbackPath}", UriKind.Absolute);
-        var postLogoutRedirectUri = new Uri($"http://localhost:{AppSurfaceKeycloakDefaults.WebProofPort}{metadata.Configuration.SignedOutCallbackPath}", UriKind.Absolute);
-        var realmImportDirectory = Path.GetDirectoryName(metadata.RealmImportFile)
-            ?? throw new InvalidOperationException("The generated Keycloak realm-import file must have a parent directory.");
-
-        return appBuilder
-            .AddProject<Projects.AuthAspireKeycloakReadinessGate>(ResourceName)
-            .WithEnvironment(KeycloakReadinessGateEnvironment.Authority, metadata.Configuration.Authority)
-            .WithEnvironment(KeycloakReadinessGateEnvironment.ClientId, metadata.Configuration.ClientId)
-            .WithEnvironment(KeycloakReadinessGateEnvironment.CallbackPath, metadata.Configuration.CallbackPath)
-            .WithEnvironment(KeycloakReadinessGateEnvironment.SignedOutCallbackPath, metadata.Configuration.SignedOutCallbackPath)
-            .WithEnvironment(KeycloakReadinessGateEnvironment.RedirectUri, redirectUri.ToString())
-            .WithEnvironment(KeycloakReadinessGateEnvironment.PostLogoutRedirectUri, postLogoutRedirectUri.ToString())
-            .WithEnvironment(KeycloakReadinessGateEnvironment.RealmImportDirectory, realmImportDirectory)
-            .WaitFor(keycloak);
+        _ = appBuilder;
+        _ = context.Resolve(_keycloak);
+        return _keycloak.Resolved.RealmReady().Resource;
     }
 }
 
@@ -216,6 +360,9 @@ public sealed class AuthAspireKeycloakVerifierComponent : IAspireComponent<Proje
             .WithEnvironment("AUTH_ASPIRE_KEYCLOAK_TARGET_URL", web.GetEndpoint("http"))
             .WithEnvironment("AUTH_ASPIRE_KEYCLOAK_CLIENT_ID", metadata.Configuration.ClientId)
             .WithEnvironment("AUTH_ASPIRE_KEYCLOAK_REALM_IMPORT_FILE", metadata.RealmImportFile)
+            .WithEnvironment("APPSURFACE_KEYCLOAK_LOCAL_SEED_AUTHORITY", metadata.Configuration.Authority)
+            .WithEnvironment("APPSURFACE_KEYCLOAK_LOCAL_SEED_PUBLIC_CLIENT_ID", metadata.Configuration.ClientId)
+            .WithEnvironment("LOCAL_SEED_STORE_PATH", AuthAspireKeycloakLocalSeedSample.StorePath(appBuilder))
             .WithReference(keycloak)
             .WaitFor(web)
             .WaitFor(keycloak);

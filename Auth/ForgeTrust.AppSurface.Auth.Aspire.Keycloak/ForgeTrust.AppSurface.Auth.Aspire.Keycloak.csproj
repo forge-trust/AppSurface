@@ -1,11 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageDescription>AppHost-only local Keycloak proof conventions for AppSurface OpenID Connect authentication.</PackageDescription>
     <PackageTags>appsurface;dotnet;aspire;authentication;oidc;keycloak</PackageTags>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);AddRealmReadyWorkerToPackage</TargetsForTfmSpecificContentInPackage>
   </PropertyGroup>
 
   <ItemGroup>
@@ -16,5 +19,17 @@
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.Keycloak" />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Include="buildTransitive/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.targets" Pack="true" PackagePath="buildTransitive/" />
+  </ItemGroup>
+
+  <Target Name="AddRealmReadyWorkerToPackage">
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="$(TargetDir)$(AssemblyName).dll" PackagePath="tools/$(TargetFramework)/any/realm-ready" />
+      <TfmSpecificPackageFile Include="$(TargetDir)$(AssemblyName).deps.json" PackagePath="tools/$(TargetFramework)/any/realm-ready" />
+      <TfmSpecificPackageFile Include="$(TargetDir)$(AssemblyName).runtimeconfig.json" PackagePath="tools/$(TargetFramework)/any/realm-ready" />
+    </ItemGroup>
+  </Target>
 
 </Project>

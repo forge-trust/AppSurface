@@ -39,6 +39,29 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     }
 
     [Fact]
+    public void AddAppSurfaceKeycloak_WhenExplicitAdministratorParametersAreProvided_UsesOnlyATypedSecretPassword()
+    {
+        using var directory = new TempDirectory();
+        var builder = DistributedApplication.CreateBuilder([]);
+        var username = builder.AddParameter("keycloak-admin-username", "admin", secret: false);
+        var password = builder.AddParameter("keycloak-admin-password", "LOCAL_TEST_SECRET_SENTINEL", secret: true);
+
+        var resource = AddWithAvailablePorts(builder, directory.Path, username, password);
+
+        Assert.Same(username.Resource, resource.Resource.Resource.AdminUserNameParameter);
+        Assert.Same(password.Resource, resource.Resource.Resource.AdminPasswordParameter);
+
+        var nonSecretBuilder = DistributedApplication.CreateBuilder([]);
+        var nonSecretUsername = nonSecretBuilder.AddParameter("keycloak-admin-username", "admin", secret: false);
+        var nonSecretPassword = nonSecretBuilder.AddParameter("keycloak-admin-password", "not-secret", secret: false);
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() =>
+            AddWithAvailablePorts(nonSecretBuilder, directory.Path, nonSecretUsername, nonSecretPassword));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.InvalidOptions, exception.Code);
+        Assert.Contains("not secret", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AddAppSurfaceKeycloak_WhenLoginThemeConfigured_MountsAndDescribesTheValidatedTheme()
     {
         using var directory = new TempDirectory();
@@ -295,6 +318,41 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         }
 
         throw new InvalidOperationException("Could not reserve distinct local ports for the Keycloak hosting test.");
+    }
+
+    private static AppSurfaceKeycloakResource AddWithAvailablePorts(
+        IDistributedApplicationBuilder builder,
+        string realmImportDirectory,
+        IResourceBuilder<ParameterResource> username,
+        IResourceBuilder<ParameterResource> password)
+    {
+        const int maxAttempts = 5;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            var keycloakPort = GetAvailablePort();
+            var webProofPort = GetAvailablePort();
+            if (keycloakPort == webProofPort)
+            {
+                continue;
+            }
+
+            try
+            {
+                return builder.AddAppSurfaceKeycloak("keycloak-explicit-admin", username, password, options =>
+                {
+                    options.KeycloakPort = keycloakPort;
+                    options.WebProofPort = webProofPort;
+                    options.RealmImportDirectory = realmImportDirectory;
+                });
+            }
+            catch (AppSurfaceKeycloakException exception)
+                when (exception.Code == AppSurfaceKeycloakDiagnosticCodes.PortOccupied && attempt < maxAttempts)
+            {
+                // Retry with fresh ports if another process wins the preflight race.
+            }
+        }
+
+        throw new InvalidOperationException("Could not reserve distinct local ports for the explicit-admin hosting test.");
     }
 
     private static string GetCurrentTestProjectPath()

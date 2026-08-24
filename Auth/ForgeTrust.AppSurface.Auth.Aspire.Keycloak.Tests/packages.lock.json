@@ -644,6 +644,9 @@
       "authaspirekeycloaklifecycleworker": {
         "type": "Project"
       },
+      "authaspirekeycloaklocalseedstore": {
+        "type": "Project"
+      },
       "authaspirekeycloakreadinessgate": {
         "type": "Project",
         "dependencies": {
@@ -651,7 +654,10 @@
         }
       },
       "authaspirekeycloakverifier": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "AuthAspireKeycloakLocalSeedStore": "[0.1.0, )"
+        }
       },
       "forgetrust.appsurface.aspire": {
         "type": "Project",

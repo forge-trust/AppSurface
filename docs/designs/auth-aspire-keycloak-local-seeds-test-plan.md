@@ -1,19 +1,19 @@
 # Test Plan: Issue #782 Local Keycloak Seed Extension Points
 
-Status: Feasibility spike in progress; public seed API intentionally withheld
+Status: Implemented and verified on the supported public Aspire surface
 Design: [Ordered Local Seed Extension Points](auth-aspire-keycloak-local-seeds.md)
 
 ## Test Layers
 
 | Layer | Purpose | Primary location |
 | --- | --- | --- |
-| Public-Aspire spike | Prove lifecycle, binding, manifest, and execution-context semantics using supported APIs only. | New focused test AppHost/sample, before public API implementation. |
+| Public-Aspire proof | Preserve the supported lifecycle, binding, manifest, and execution-context semantics used by the public API. | Focused package tests and the runnable AppHost/sample. |
 | Hosting unit tests | Verify wrapper-local validation, immutable handles, diagnostics, and no registry records on failure. | `Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests` |
 | AppHost integration tests | Observe ordered process launch, completion, failure, cancellation, and publish exclusion. | Focused AppHost test project introduced by the spike. |
 | Runnable sample proof | Verify consumer-owned identity/fixture convergence and output hygiene against persistent local data. | New #782 sample and verifier. |
 | Package/docs verification | Preserve dependency isolation and links across the package index, README, sample guide, and release notes. | Existing repository package/doc verification suites. |
 
-## Feasibility Spike Cases
+## Contract Verification Cases
 
 | Case | Setup | Assertion |
 | --- | --- | --- |
@@ -48,15 +48,18 @@ Design: [Ordered Local Seed Extension Points](auth-aspire-keycloak-local-seeds.m
 
 ## Exit Criteria
 
-Implementation may add the public `RealmReady` and `WithLocalSeed` surface only when every feasibility-spike case passes on documented public APIs. Any unavailable or inconclusive case returns the work to the design instead of substituting a callback runner or a broader secret-binding mechanism.
+`RealmReady()` and `WithLocalSeed(...)` are now implemented only because the supported public APIs proved the required
+completion, typed-parameter, and manifest behavior. The regression suite must preserve that behavior. Any future
+Aspire incompatibility returns the feature to this design; it must not be replaced with a package callback runner or a
+broader secret-binding mechanism.
 
 ## Current Spike Evidence
 
-The first #782 pull request implements only the isolated finite-project spike. It adds a private sample worker at
-[`examples/auth-aspire-keycloak-readiness-gate`](../../examples/auth-aspire-keycloak-readiness-gate) and places it
-between Keycloak health and the existing web proof with Aspire's public `WaitFor` and `WaitForCompletion` annotations.
-The worker reconstructs the existing public readiness probe from safe local values and never accepts an administrator
-credential or a generic configuration object.
+The initial #782 spike added a private finite gate at
+[`examples/auth-aspire-keycloak-readiness-gate`](../../examples/auth-aspire-keycloak-readiness-gate). Its public-API
+findings are now embodied by the package-owned `RealmReady()` executable and the two consumer-owned projects in the
+[runnable AppHost](../../examples/auth-aspire-keycloak-apphost). The package gate reconstructs the existing readiness
+probe from safe values and never accepts an administrator credential or arbitrary consumer configuration.
 
 The deterministic test suite captures these results without a container runtime:
 
@@ -92,7 +95,24 @@ secret or retaining a generated artifact:
 | Finite consumer timeout | The worker's consumer-enforced timeout mode transitioned `Running -> Finished` with the same blocked web result. No automatic worker restart was observed before AppHost cancellation. |
 | Finite consumer hang and cancellation | The worker remained `Running` while web and verifier remained `Waiting`. Cancelling the owned AppHost session transitioned web and verifier to `FailedToStart`; the DCP executor stopped its resource watchers during shutdown. |
 
-The public `RealmReady` and `WithLocalSeed` contract remains withheld until the remaining lifecycle cases
-(consumer nonzero exit, cancellation, consumer timeout, hang, and restart behavior) and the complete secret-binding
-matrix have been observed through the supported runtime. The first spike is now no longer globally inconclusive, but
-its current evidence is still insufficient to freeze the public seed surface.
+### Implemented-contract evidence
+
+The public `RealmReady` and `WithLocalSeed` contract is intentionally narrow and additive. The focused tests verify
+cached realm-ready registration, the linear `WaitForCompletion` chain, operation-first local-only denial, factory and
+predecessor validation, redacted typed-secret manifest binding, no secret reuse, and absence of a seed from unrelated
+web configuration. The consumer-store tests verify idempotent natural-key replacement, malformed-state rejection,
+atomic-update recovery, and concurrent read consistency.
+
+Live Aspire CLI `13.4.6` runs against the pinned `13.4.4` hosting packages recorded these final sample outcomes without
+committing generated state or credential values:
+
+| Lifecycle case | Observed result |
+| --- | --- |
+| Normal two-seed run | Keycloak became healthy; `RealmReady`, identity bootstrap, candidate fixture, web proof, and verifier completed in order. The verifier confirmed one broker alias, one founder mapping, and one fixture. |
+| Persistent normal rerun | The same graph completed with the same exact three record counts, proving the consumer upserts did not duplicate state. |
+| Injected fixture failure | Identity bootstrap converged the broker and founder mapping; the candidate fixture exited nonzero before its upsert. The web proof remained blocked/failed to start and no candidate fixture was recorded. |
+| Recovery run | Removing the injected failure and rerunning converged the partial state to exactly one record of each kind. |
+
+The observed Aspire runtime does not promise automatic restart of a failed finite project. A consumer therefore owns
+its bounded timeout and rerun-safe idempotence; dependents receive no successful completion signal after a failure or
+while a worker is hung.

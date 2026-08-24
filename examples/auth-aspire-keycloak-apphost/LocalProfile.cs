@@ -87,10 +87,24 @@ public sealed partial class VerifyProfile : ICommand
             await console.Output.WriteLineAsync("Starting AppSurface Auth Aspire Keycloak verification...");
             await app.StartAsync(timeout.Token);
 
-            await app.ResourceNotifications.WaitForResourceAsync(
+            var verifierCompletion = app.ResourceNotifications.WaitForResourceAsync(
                 VerifierResourceName,
                 [KnownResourceStates.Finished, KnownResourceStates.Exited, KnownResourceStates.FailedToStart],
                 timeout.Token);
+            var blockedWeb = app.ResourceNotifications.WaitForResourceAsync(
+                AuthAspireKeycloakWebComponent.ResourceName,
+                [KnownResourceStates.FailedToStart],
+                timeout.Token);
+            var terminalResource = await Task.WhenAny(verifierCompletion, blockedWeb);
+            if (ReferenceEquals(terminalResource, blockedWeb))
+            {
+                Environment.ExitCode = 1;
+                await console.Error.WriteLineAsync(
+                    "AppSurface Auth Aspire Keycloak verification was blocked because the dependent web resource did not start.");
+                return;
+            }
+
+            await verifierCompletion;
 
             var exitCode = 1;
             if (app.ResourceNotifications.TryGetCurrentState(VerifierResourceName, out var resourceEvent))
@@ -108,10 +122,15 @@ public sealed partial class VerifyProfile : ICommand
                 await console.Error.WriteLineAsync($"AppSurface Auth Aspire Keycloak verification failed with exit code {exitCode}.");
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
         {
             Environment.ExitCode = 124;
             await console.Error.WriteLineAsync("AppSurface Auth Aspire Keycloak verification timed out after 5 minutes.");
+        }
+        catch (OperationCanceledException)
+        {
+            Environment.ExitCode = 124;
+            await console.Error.WriteLineAsync("AppSurface Auth Aspire Keycloak verification was canceled before completion.");
         }
         catch (Exception exception) when (IsNonFatalVerificationException(exception))
         {
