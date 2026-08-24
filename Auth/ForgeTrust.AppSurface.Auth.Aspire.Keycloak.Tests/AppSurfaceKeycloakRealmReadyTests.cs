@@ -67,6 +67,11 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
         Assert.Equal("exec", worker.Arguments[0]);
         Assert.Contains("--runtimeconfig", worker.Arguments, StringComparer.Ordinal);
         Assert.Contains("--depsfile", worker.Arguments, StringComparer.Ordinal);
+        Assert.Contains(
+            worker.Arguments,
+            argument => argument.EndsWith(
+                $"{AppSurfaceKeycloakRealmReadyWorker.WorkerAssemblyName}.dll",
+                StringComparison.Ordinal));
         Assert.Equal("--appsurface-keycloak-realm-ready", worker.Arguments[^1]);
     }
 
@@ -75,19 +80,20 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
     {
         using var directory = new TempDirectory();
         var assemblyName = typeof(AppSurfaceKeycloakRealmReadyWorker).Assembly.GetName().Name!;
+        var workerAssemblyName = AppSurfaceKeycloakRealmReadyWorker.WorkerAssemblyName;
         var outputDirectory = Path.Join(directory.Path, "consumer", "bin");
         var workerDirectory = Path.Join(outputDirectory, "appsurface-keycloak-realm-ready");
         Directory.CreateDirectory(workerDirectory);
         var assemblyPath = Path.Join(outputDirectory, $"{assemblyName}.dll");
         File.WriteAllText(assemblyPath, string.Empty);
-        File.WriteAllText(Path.Join(workerDirectory, $"{assemblyName}.dll"), string.Empty);
-        File.WriteAllText(Path.Join(workerDirectory, $"{assemblyName}.deps.json"), string.Empty);
-        File.WriteAllText(Path.Join(workerDirectory, $"{assemblyName}.runtimeconfig.json"), string.Empty);
+        File.WriteAllText(Path.Join(workerDirectory, $"{workerAssemblyName}.dll"), string.Empty);
+        File.WriteAllText(Path.Join(workerDirectory, $"{workerAssemblyName}.deps.json"), string.Empty);
+        File.WriteAllText(Path.Join(workerDirectory, $"{workerAssemblyName}.runtimeconfig.json"), string.Empty);
 
         var worker = AppSurfaceKeycloakRealmReadyWorker.Resolve(assemblyPath);
 
         Assert.Equal(workerDirectory, worker.WorkingDirectory);
-        Assert.Contains(Path.Join(workerDirectory, $"{assemblyName}.dll"), worker.Arguments, StringComparer.Ordinal);
+        Assert.Contains(Path.Join(workerDirectory, $"{workerAssemblyName}.dll"), worker.Arguments, StringComparer.Ordinal);
     }
 
     [Fact]

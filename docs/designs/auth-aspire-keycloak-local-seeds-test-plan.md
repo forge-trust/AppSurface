@@ -7,10 +7,10 @@ Design: [Ordered Local Seed Extension Points](auth-aspire-keycloak-local-seeds.m
 
 | Layer | Purpose | Primary location |
 | --- | --- | --- |
-| Public-Aspire proof | Preserve the supported lifecycle, binding, manifest, and execution-context semantics used by the public API. | Focused package tests and the runnable AppHost/sample. |
+| Public-Aspire proof | Preserve the supported lifecycle, binding, manifest, and execution-context semantics used by the public API. | Focused package tests and the executable AppHost/sample. |
 | Hosting unit tests | Verify wrapper-local validation, immutable handles, diagnostics, and no registry records on failure. | `Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests` |
 | AppHost integration tests | Observe ordered process launch, completion, failure, cancellation, and publish exclusion. | Focused AppHost test project introduced by the spike. |
-| Runnable sample proof | Verify consumer-owned identity/fixture convergence and output hygiene against persistent local data. | New #782 sample and verifier. |
+| Executable sample proof | Verify consumer-owned identity/fixture convergence and output hygiene against persistent local data. | New #782 sample and verifier. |
 | Package/docs verification | Preserve dependency isolation and links across the package index, README, sample guide, and release notes. | Existing repository package/doc verification suites. |
 
 ## Contract Verification Cases
@@ -58,7 +58,7 @@ broader secret-binding mechanism.
 The initial #782 spike added a private finite gate at
 [`examples/auth-aspire-keycloak-readiness-gate`](../../examples/auth-aspire-keycloak-readiness-gate). Its public-API
 findings are now embodied by the package-owned `RealmReady()` executable and the two consumer-owned projects in the
-[runnable AppHost](../../examples/auth-aspire-keycloak-apphost). The package gate reconstructs the existing readiness
+[sample AppHost](../../examples/auth-aspire-keycloak-apphost). The package gate reconstructs the existing readiness
 probe from safe values and never accepts an administrator credential or arbitrary consumer configuration.
 
 The deterministic test suite captures these results without a container runtime:

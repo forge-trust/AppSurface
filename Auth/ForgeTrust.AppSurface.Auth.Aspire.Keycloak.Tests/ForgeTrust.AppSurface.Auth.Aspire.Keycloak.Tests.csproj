@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <NuGetLockFilePath>packages.$(NETCoreSdkRuntimeIdentifier).lock.json</NuGetLockFilePath>
   </PropertyGroup>
 
   <ItemGroup>
@@ -33,6 +34,7 @@
     <ProjectReference Include="../../examples/auth-aspire-keycloak-verifier/AuthAspireKeycloakVerifier.csproj" />
     <ProjectReference Include="../../examples/auth-aspire-keycloak-local-seed-store/AuthAspireKeycloakLocalSeedStore.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Auth.Aspire.Keycloak/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.csproj" />
+    <ProjectReference Include="../ForgeTrust.AppSurface.Auth.Aspire.Keycloak/realm-ready/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.csproj" />
   </ItemGroup>
 

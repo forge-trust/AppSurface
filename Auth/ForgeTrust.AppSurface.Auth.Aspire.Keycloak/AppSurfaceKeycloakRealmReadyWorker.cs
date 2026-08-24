@@ -7,6 +7,7 @@ internal static class AppSurfaceKeycloakRealmReadyWorker
 {
     private const string ConsumerOutputWorkerDirectoryName = "appsurface-keycloak-realm-ready";
     private const string WorkerDirectoryName = "realm-ready";
+    internal const string WorkerAssemblyName = "ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker";
 
     internal static AppSurfaceKeycloakRealmReadyWorkerInvocation Resolve(string? assemblyPath = null)
     {
@@ -25,27 +26,20 @@ internal static class AppSurfaceKeycloakRealmReadyWorker
             "net10.0",
             "any",
             WorkerDirectoryName));
-        var packageWorker = CreateInvocation(packageWorkerDirectory, assemblyPath: null, runtimeConfigPath: null, depsFilePath: null);
+        var packageWorker = CreateInvocation(packageWorkerDirectory);
         if (packageWorker is not null)
         {
             return packageWorker;
         }
 
         var consumerOutputWorker = CreateInvocation(
-            Path.Combine(assemblyDirectory, ConsumerOutputWorkerDirectoryName),
-            assemblyPath: null,
-            runtimeConfigPath: null,
-            depsFilePath: null);
+            Path.Combine(assemblyDirectory, ConsumerOutputWorkerDirectoryName));
         if (consumerOutputWorker is not null)
         {
             return consumerOutputWorker;
         }
 
-        var projectReferenceWorker = CreateInvocation(
-            assemblyDirectory,
-            assemblyPath,
-            runtimeConfigPath: null,
-            depsFilePath: null);
+        var projectReferenceWorker = CreateInvocation(assemblyDirectory);
         if (projectReferenceWorker is not null)
         {
             return projectReferenceWorker;
@@ -54,15 +48,11 @@ internal static class AppSurfaceKeycloakRealmReadyWorker
         throw AppSurfaceKeycloakRealmReadyConfiguration.WorkerUnavailable();
     }
 
-    private static AppSurfaceKeycloakRealmReadyWorkerInvocation? CreateInvocation(
-        string workingDirectory,
-        string? assemblyPath,
-        string? runtimeConfigPath,
-        string? depsFilePath)
+    private static AppSurfaceKeycloakRealmReadyWorkerInvocation? CreateInvocation(string workingDirectory)
     {
-        var workerAssemblyPath = assemblyPath ?? Path.Combine(workingDirectory, $"{typeof(AppSurfaceKeycloakRealmReadyWorker).Assembly.GetName().Name}.dll");
-        var workerRuntimeConfigPath = runtimeConfigPath ?? Path.Combine(workingDirectory, $"{typeof(AppSurfaceKeycloakRealmReadyWorker).Assembly.GetName().Name}.runtimeconfig.json");
-        var workerDepsFilePath = depsFilePath ?? Path.Combine(workingDirectory, $"{typeof(AppSurfaceKeycloakRealmReadyWorker).Assembly.GetName().Name}.deps.json");
+        var workerAssemblyPath = Path.Combine(workingDirectory, $"{WorkerAssemblyName}.dll");
+        var workerRuntimeConfigPath = Path.Combine(workingDirectory, $"{WorkerAssemblyName}.runtimeconfig.json");
+        var workerDepsFilePath = Path.Combine(workingDirectory, $"{WorkerAssemblyName}.deps.json");
         if (!File.Exists(workerAssemblyPath) || !File.Exists(workerRuntimeConfigPath) || !File.Exists(workerDepsFilePath))
         {
             return null;
