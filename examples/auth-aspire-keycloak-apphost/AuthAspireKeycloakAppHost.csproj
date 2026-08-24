@@ -14,10 +14,12 @@
     </Content>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="../auth-aspire-keycloak-lifecycle-worker/LifecycleWorkerEnvironment.cs" Link="LifecycleWorkerEnvironment.cs" />
     <Compile Include="../auth-aspire-keycloak-readiness-gate/KeycloakReadinessGateEnvironment.cs" Link="KeycloakReadinessGateEnvironment.cs" />
     <PackageReference Include="Aspire.Hosting.AppHost" />
     <ProjectReference Include="../../Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="../../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="../auth-aspire-keycloak-lifecycle-worker/AuthAspireKeycloakLifecycleWorker.csproj" AspireProjectMetadataTypeName="AuthAspireKeycloakLifecycleWorker" />
     <ProjectReference Include="../auth-aspire-keycloak-readiness-gate/AuthAspireKeycloakReadinessGate.csproj" AspireProjectMetadataTypeName="AuthAspireKeycloakReadinessGate" />
     <ProjectReference Include="../auth-aspire-keycloak-verifier/AuthAspireKeycloakVerifier.csproj" AspireProjectMetadataTypeName="AuthAspireKeycloakVerifier" />
     <ProjectReference Include="../auth-aspire-keycloak-web/AuthAspireKeycloakWeb.csproj" AspireProjectMetadataTypeName="AuthAspireKeycloakWeb" />

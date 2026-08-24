@@ -42,15 +42,19 @@ proof:
 Keycloak healthy
     -> readiness gate runs AppSurface metadata + realm-evidence + public-client checks once
         -> gate exits 0
-            -> web proof starts
+            -> finite lifecycle worker exits 0
+                -> web proof starts
 ```
 
 The gate is an implementation-only feasibility artifact, not a package API. It receives only non-secret local proof
 metadata, reconstructs the existing [`AppSurfaceKeycloakReadinessProbe`](../../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md#apphost-shape), and exits nonzero with a named `ASKEYC` code on failure. It never receives an
 administrator credential, performs Keycloak administration, or prints raw exception/provider output.
 
-This establishes the documented Aspire `WaitFor` plus `WaitForCompletion` path for a finite project. It does **not**
-ship the proposed `RealmReady` or `WithLocalSeed` package surface; those remain gated by the approved
+This establishes the documented Aspire `WaitFor` plus `WaitForCompletion` path for both the baseline gate and a
+consumer-style finite project. The lifecycle worker accepts only the private feasibility modes `success`, `failure`,
+`timeout`, and `hang` through its AppHost environment so the spike can record native terminal and blocked-dependent
+behavior; it does not administer Keycloak or register a public seed. This AppHost does **not** ship the proposed
+`RealmReady` or `WithLocalSeed` package surface; those remain gated by the approved
 [#782 design](../../docs/designs/auth-aspire-keycloak-local-seeds.md) and its
 [test plan](../../docs/designs/auth-aspire-keycloak-local-seeds-test-plan.md).
 

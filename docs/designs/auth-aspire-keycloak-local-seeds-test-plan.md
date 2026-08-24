@@ -62,8 +62,9 @@ The deterministic test suite captures these results without a container runtime:
 
 | Evidence | Result |
 | --- | --- |
-| Completion graph | A Keycloak dependency uses `WaitFor`; first and second finite projects each use a successful-exit `WaitForCompletion` dependency. |
+| Completion graph | The AppHost wires Keycloak through `WaitFor` to the readiness gate, then through successful-exit `WaitForCompletion` dependencies to a finite consumer-style worker and the web proof. |
 | Gate outcomes | The worker returns `0` after an injected successful probe, `1` for a named safe diagnostic or invalid input, and `124` after cancellation. |
+| Consumer-worker outcomes | The private lifecycle worker deterministically returns `0` for success, `1` for failure or its bounded timeout mode, and `124` when a hanging test worker is cancelled. |
 | Output hygiene | An injected `LOCAL_TEST_SECRET_SENTINEL` inside a probe exception is absent from worker output. |
 | Parameter binding | A secret `ParameterResource` produces only its value-free reference in the declared project's publish manifest; an unrelated web project receives neither the variable nor the reference. |
 
@@ -77,8 +78,21 @@ provider response is committed as evidence.
 On Aspire CLI `13.4.6`, the first local `verify` run was inconclusive: DCP created the local container network but did
 not allocate the Keycloak service port before the profile's existing five-minute timeout. Keycloak, the gate, the web
 project, and the verifier therefore remained unlaunched; no `ASKEYC` diagnostic or worker output was produced. This is
-a container-orchestration prerequisite failure, not evidence that the finite gate completed or failed.
+recorded as an infrastructure observation, not gate evidence.
 
-The public `RealmReady` and `WithLocalSeed` contract remains withheld until a supported local Aspire runtime completes
-the baseline and the remaining lifecycle cases. The runner, annotations, deterministic manifest test, and this
-inconclusive status are the complete scope of the isolated first spike pull request.
+Follow-up runs on the same pinned AppHost packages established two public-Aspire observations without exposing a
+secret or retaining a generated artifact:
+
+| Lifecycle case | Observed result |
+| --- | --- |
+| Isolated randomized-port run | Keycloak reached healthy state, then the gate started and finished with its fixed-authority probe unable to use the randomized provider port. The web proof remained blocked and transitioned to failed start; no dependent verifier launched. This demonstrates nonzero finite completion does not release the dependent web project. |
+| Fixed-port normal run | Keycloak became healthy, the finite gate completed, the web proof started, the verifier started, and the `verify` profile exited `0` with its success message. The web endpoint explicitly pins both public and target ports to the realm's registered local redirect port and opts out of DCP proxying, preventing a dynamically allocated redirect URI. |
+| Finite consumer worker success | Keycloak, gate, private lifecycle worker, web proof, and verifier completed in that order; the `verify` profile exited `0`. |
+| Finite consumer worker failure | The worker transitioned `Running -> Finished` after its nonzero failure mode. The web proof transitioned `Waiting -> FailedToStart`; the verifier never launched. No automatic worker restart was observed before AppHost cancellation. |
+| Finite consumer timeout | The worker's consumer-enforced timeout mode transitioned `Running -> Finished` with the same blocked web result. No automatic worker restart was observed before AppHost cancellation. |
+| Finite consumer hang and cancellation | The worker remained `Running` while web and verifier remained `Waiting`. Cancelling the owned AppHost session transitioned web and verifier to `FailedToStart`; the DCP executor stopped its resource watchers during shutdown. |
+
+The public `RealmReady` and `WithLocalSeed` contract remains withheld until the remaining lifecycle cases
+(consumer nonzero exit, cancellation, consumer timeout, hang, and restart behavior) and the complete secret-binding
+matrix have been observed through the supported runtime. The first spike is now no longer globally inconclusive, but
+its current evidence is still insufficient to freeze the public seed surface.

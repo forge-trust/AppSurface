@@ -1,5 +1,6 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
+using AuthAspireKeycloakLifecycleWorker;
 using AuthAspireKeycloakReadinessGate;
 using ForgeTrust.AppSurface.Aspire;
 using ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
@@ -49,19 +50,19 @@ public sealed class AuthAspireKeycloakComponent : IAspireComponent<KeycloakResou
 public sealed class AuthAspireKeycloakWebComponent : IAspireComponent<ProjectResource>
 {
     private readonly AuthAspireKeycloakComponent _keycloak;
-    private readonly AuthAspireKeycloakReadinessGateComponent _readinessGate;
+    private readonly AuthAspireKeycloakLifecycleWorkerComponent _lifecycleWorker;
 
     /// <summary>
     /// Creates the web component.
     /// </summary>
     /// <param name="keycloak">Keycloak component that supplies provider configuration.</param>
-    /// <param name="readinessGate">Finite baseline gate that must complete before the web proof can start.</param>
+    /// <param name="lifecycleWorker">Finite consumer-style worker that must complete before the web proof can start.</param>
     public AuthAspireKeycloakWebComponent(
         AuthAspireKeycloakComponent keycloak,
-        AuthAspireKeycloakReadinessGateComponent readinessGate)
+        AuthAspireKeycloakLifecycleWorkerComponent lifecycleWorker)
     {
         _keycloak = keycloak;
-        _readinessGate = readinessGate;
+        _lifecycleWorker = lifecycleWorker;
     }
 
     /// <inheritdoc />
@@ -70,17 +71,63 @@ public sealed class AuthAspireKeycloakWebComponent : IAspireComponent<ProjectRes
         IDistributedApplicationBuilder appBuilder)
     {
         var keycloak = context.Resolve(_keycloak);
-        var readinessGate = context.Resolve(_readinessGate);
+        var lifecycleWorker = context.Resolve(_lifecycleWorker);
         var web = appBuilder
             .AddProject<Projects.AuthAspireKeycloakWeb>("auth-aspire-keycloak-web")
-            .WithHttpEndpoint(targetPort: AppSurfaceKeycloakDefaults.WebProofPort, env: "ASPNETCORE_HTTP_PORTS")
+            .WithHttpEndpoint(
+                port: AppSurfaceKeycloakDefaults.WebProofPort,
+                targetPort: AppSurfaceKeycloakDefaults.WebProofPort,
+                env: "ASPNETCORE_HTTP_PORTS",
+                isProxied: false)
             .WithEnvironment("DOTNET_ENVIRONMENT", "Development")
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
             .WithReference(keycloak)
             .WaitFor(keycloak)
-            .WaitForCompletion(readinessGate);
+            .WaitForCompletion(lifecycleWorker);
 
         return _keycloak.Resolved.Configuration.ApplyTo(web);
+    }
+}
+
+/// <summary>
+/// Adds the finite consumer-style worker used only to observe #782 completion behavior.
+/// </summary>
+/// <remarks>
+/// The worker is not a public seeding API and performs no Keycloak administration. Its bounded modes let the
+/// feasibility spike observe how a normal consumer project reports successful completion, failure, timeout, and a
+/// non-completing process through public Aspire resource relationships.
+/// </remarks>
+public sealed class AuthAspireKeycloakLifecycleWorkerComponent : IAspireComponent<ProjectResource>
+{
+    /// <summary>
+    /// Stable resource name used by the finite-worker feasibility graph.
+    /// </summary>
+    public const string ResourceName = "auth-aspire-keycloak-lifecycle-worker";
+
+    private readonly AuthAspireKeycloakReadinessGateComponent _readinessGate;
+
+    /// <summary>
+    /// Creates the finite worker component.
+    /// </summary>
+    /// <param name="readinessGate">Baseline gate that must complete before the worker starts.</param>
+    public AuthAspireKeycloakLifecycleWorkerComponent(AuthAspireKeycloakReadinessGateComponent readinessGate)
+    {
+        _readinessGate = readinessGate;
+    }
+
+    /// <inheritdoc />
+    public IResourceBuilder<ProjectResource> Generate(
+        AspireStartupContext context,
+        IDistributedApplicationBuilder appBuilder)
+    {
+        var readinessGate = context.Resolve(_readinessGate);
+        var mode = Environment.GetEnvironmentVariable(AuthAspireKeycloakLifecycleWorkerEnvironment.Mode)
+            ?? AuthAspireKeycloakLifecycleWorkerEnvironment.Success;
+
+        return appBuilder
+            .AddProject<Projects.AuthAspireKeycloakLifecycleWorker>(ResourceName)
+            .WithEnvironment(AuthAspireKeycloakLifecycleWorkerEnvironment.Mode, mode)
+            .WaitForCompletion(readinessGate);
     }
 }
 
