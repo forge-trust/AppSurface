@@ -21,6 +21,126 @@ public sealed class AppSurfaceDocsRichAuthoringPlaywrightTests
     }
 
     /// <summary>
+    /// Keeps one rich-authoring client lifecycle when Turbo replaces the Docs content frame.
+    /// </summary>
+    [Fact]
+    public async Task RichAuthoringClient_ReusesOneLifecycle_AfterTurboFrameNavigations()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize { Width = 1440, Height = 900 }
+        });
+        var page = await context.NewPageAsync();
+        await AppSurfaceDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/durable-postgresql",
+            "/examples/durable-postgresql/README.md.html");
+        await page.WaitForSelectorAsync("[data-appsurfacedocs-rich-tabs-enhanced='true']", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Attached
+        });
+        await page.WaitForFunctionAsync(
+            "() => window.__appSurfaceDocsRichAuthoringClient?.version === 'tabs-v1'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+        await page.EvaluateAsync(
+            """
+            () => {
+                window.__testRichAuthoringClient = window.__appSurfaceDocsRichAuthoringClient;
+                window.__testRichAuthoringListenerRegistrations = [];
+
+                const documentAddEventListener = document.addEventListener.bind(document);
+                document.addEventListener = (type, ...args) => {
+                    if (type === "turbo:load" || type === "turbo:frame-load") {
+                        window.__testRichAuthoringListenerRegistrations.push(`document:${type}`);
+                    }
+
+                    return documentAddEventListener(type, ...args);
+                };
+
+                const windowAddEventListener = window.addEventListener.bind(window);
+                window.addEventListener = (type, ...args) => {
+                    if (type === "hashchange" || type === "popstate") {
+                        window.__testRichAuthoringListenerRegistrations.push(`window:${type}`);
+                    }
+
+                    return windowAddEventListener(type, ...args);
+                };
+            }
+            """);
+
+        const string docContentNavigationLinkSelector = "nav[aria-label='Documentation navigation'] a[data-turbo-frame='doc-content']:not([data-doc-anchor-link='true'])";
+        const string durableTutorialLinkSelector = "a[data-turbo-frame='doc-content'][href='/docs/examples/durable-postgresql'], a[data-turbo-frame='doc-content'][href='/docs/examples/durable-postgresql/README.md.html']";
+        var richTarget = new Uri(page.Url).AbsolutePath + new Uri(page.Url).Fragment;
+        var visibleNavigationLinks = page.Locator($"{docContentNavigationLinkSelector}:visible");
+        await visibleNavigationLinks.First.WaitForAsync(new LocatorWaitForOptions
+        {
+            State = WaitForSelectorState.Visible,
+            Timeout = 30_000
+        });
+
+        ILocator? awayLink = null;
+        string? awayTarget = null;
+        var linkCount = await visibleNavigationLinks.CountAsync();
+        for (var index = 0; index < linkCount; index++)
+        {
+            var candidate = visibleNavigationLinks.Nth(index);
+            var candidateHref = await candidate.GetAttributeAsync("href");
+            if (string.IsNullOrWhiteSpace(candidateHref))
+            {
+                continue;
+            }
+
+            var target = new Uri(new Uri(_fixture.DocsUrl), candidateHref);
+            var targetPathAndFragment = target.AbsolutePath + target.Fragment;
+            if (string.Equals(targetPathAndFragment, richTarget, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            awayLink = candidate;
+            awayTarget = targetPathAndFragment;
+            break;
+        }
+
+        Assert.NotNull(awayLink);
+        Assert.NotNull(awayTarget);
+        await NavigateDocContentFrameAsync(page, awayLink!, awayTarget!);
+
+        var examplesSection = page.Locator("#docs-sidebar details").Filter(new LocatorFilterOptions
+        {
+            Has = page.Locator(durableTutorialLinkSelector)
+        }).First;
+        if (!await examplesSection.EvaluateAsync<bool>("section => section.open"))
+        {
+            await examplesSection.Locator("summary span[aria-hidden='true']").ClickAsync();
+        }
+
+        var returnLink = examplesSection.Locator(durableTutorialLinkSelector).First;
+        await returnLink.WaitForAsync(new LocatorWaitForOptions
+        {
+            State = WaitForSelectorState.Visible,
+            Timeout = 30_000
+        });
+        var returnTarget = Assert.IsType<string>(await returnLink.GetAttributeAsync("href"));
+        await NavigateDocContentFrameAsync(page, returnLink, returnTarget);
+        await page.WaitForFunctionAsync(
+            """
+            () => {
+                const client = window.__appSurfaceDocsRichAuthoringClient;
+                return client?.version === "tabs-v1"
+                    && client === window.__testRichAuthoringClient
+                    && window.__testRichAuthoringListenerRegistrations.length === 0
+                    && document.querySelector("[data-appsurfacedocs-rich-tabs-enhanced='true']");
+            }
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+    }
+
+    /// <summary>
     /// Verifies that baseline content remains complete without JavaScript and enhances to manual WAI tabs with it.
     /// </summary>
     [Fact]
@@ -171,5 +291,23 @@ public sealed class AppSurfaceDocsRichAuthoringPlaywrightTests
         Assert.Equal(4, await tabs.CountAsync());
         Assert.Null(await forgedTabs.GetAttributeAsync("data-appsurfacedocs-rich-tabs-enhanced"));
         Assert.True(await forgedTabs.Locator("[data-appsurfacedocs-rich-tabs-baseline='true']").IsVisibleAsync());
+    }
+
+    private static async Task NavigateDocContentFrameAsync(IPage page, ILocator link, string target)
+    {
+        var initialContent = await page.Locator("#doc-content").InnerHTMLAsync();
+
+        await link.ClickAsync();
+        await page.WaitForFunctionAsync(
+            """
+            (args) => {
+                const frame = document.getElementById("doc-content");
+                return window.location.pathname + window.location.hash === args.target
+                    && Boolean(frame)
+                    && frame.innerHTML !== args.initialContent;
+            }
+            """,
+            new { target, initialContent },
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
     }
 }

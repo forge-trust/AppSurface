@@ -1,9 +1,22 @@
 (() => {
     "use strict";
 
+    const clientKey = "__appSurfaceDocsRichAuthoringClient";
+    const clientVersion = "tabs-v1";
+    const existingClient = window[clientKey];
+    if (existingClient?.version === clientVersion && existingClient.init) {
+        existingClient.init();
+        return;
+    }
+
+    existingClient?.destroy?.();
+
     const tabsSelector = "[data-appsurfacedocs-rich-tabs='true']";
     const panelSelector = "[data-appsurfacedocs-rich-tab-panel='true']";
     const focusableSelector = "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+    let turboLoadHandler = null;
+    let turboFrameLoadHandler = null;
+    let domContentLoadedHandler = null;
 
     function normalizeLabel(value) {
         return (value || "").trim().toLowerCase();
@@ -185,17 +198,67 @@
         });
     }
 
-    if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", () => enhance());
-    } else {
+    function initClient() {
+        registerLifecycleEventListeners();
+
+        if (document.readyState === "loading") {
+            if (!domContentLoadedHandler) {
+                domContentLoadedHandler = () => {
+                    domContentLoadedHandler = null;
+                    initClient();
+                };
+                document.addEventListener("DOMContentLoaded", domContentLoadedHandler, { once: true });
+            }
+
+            return;
+        }
+
         enhance();
     }
-    document.addEventListener("turbo:load", () => enhance());
-    document.addEventListener("turbo:frame-load", (event) => {
-        if (event.target?.id === "doc-content") {
-            enhance(event.target);
+
+    function destroyClient() {
+        if (turboLoadHandler) {
+            document.removeEventListener("turbo:load", turboLoadHandler);
+            turboLoadHandler = null;
         }
-    });
-    window.addEventListener("hashchange", synchronizeFragments);
-    window.addEventListener("popstate", synchronizeFragments);
+
+        if (turboFrameLoadHandler) {
+            document.removeEventListener("turbo:frame-load", turboFrameLoadHandler);
+            turboFrameLoadHandler = null;
+        }
+
+        if (domContentLoadedHandler) {
+            document.removeEventListener("DOMContentLoaded", domContentLoadedHandler);
+            domContentLoadedHandler = null;
+        }
+
+        window.removeEventListener("hashchange", synchronizeFragments);
+        window.removeEventListener("popstate", synchronizeFragments);
+    }
+
+    function registerLifecycleEventListeners() {
+        if (turboLoadHandler || turboFrameLoadHandler) {
+            return;
+        }
+
+        turboLoadHandler = initClient;
+        turboFrameLoadHandler = (event) => {
+            if (event.target?.id === "doc-content") {
+                enhance(event.target);
+            }
+        };
+
+        document.addEventListener("turbo:load", turboLoadHandler);
+        document.addEventListener("turbo:frame-load", turboFrameLoadHandler);
+        window.addEventListener("hashchange", synchronizeFragments);
+        window.addEventListener("popstate", synchronizeFragments);
+    }
+
+    window[clientKey] = {
+        destroy: destroyClient,
+        init: initClient,
+        version: clientVersion
+    };
+
+    initClient();
 })();

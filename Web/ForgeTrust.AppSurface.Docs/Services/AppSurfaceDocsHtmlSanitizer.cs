@@ -8,7 +8,7 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// <remarks>
 /// AppSurface Docs starts from the HtmlSanitizer defaults, adds the package-owned content tags <c>section</c>,
 /// <c>article</c>, <c>header</c>, <c>details</c>, <c>summary</c>, <c>pre</c>, <c>code</c>, and <c>span</c>, and
-/// allows the <c>class</c>, <c>id</c>, <c>open</c>, <c>aria-label</c>, and package-owned rich-authoring and code
+/// allows the <c>class</c>, <c>id</c>, <c>open</c>, <c>role</c>, <c>aria-label</c>, and package-owned rich-authoring and code
 /// <c>data-*</c> attributes. The
 /// sanitizer explicitly removes <c>style</c> from the default attribute set so harvested Markdown, generated API HTML,
 /// and server-side highlighted code can keep structural hooks while inline presentation and unsafe markup are stripped.

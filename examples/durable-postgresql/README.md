@@ -25,7 +25,7 @@ The canonical [`configure-postgresql-roles.sql`](https://github.com/forge-trust/
 
 :::tabs "Which environment are you preparing?"
 :::tab "Local proof"
-Continue with the disposable PostgreSQL 17 transcript below. It creates restricted loopback-only roles and proves one bounded worker pass without application-startup DDL.
+Continue with the disposable PostgreSQL 16.5 transcript below. It creates restricted loopback-only roles and proves one bounded worker pass without application-startup DDL.
 :::
 :::tab "Production"
 Use the reviewed migration-owner workflow, deployment secrets, role recipe, preflight, and forward-only recovery guidance. The local transcript is not a production runbook.

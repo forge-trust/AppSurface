@@ -59,4 +59,43 @@ public sealed class RichAuthoringSearchQaRegressionTests
         Assert.Contains("Use a review deployment.", indexedDocument.Summary, StringComparison.Ordinal);
         Assert.DoesNotContain(":::", indexedDocument.Summary, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// Keeps the authored summary when rich-authoring source intentionally remains literal.
+    /// </summary>
+    [Fact]
+    public async Task GetSearchIndexPayloadAsync_ShouldKeepAuthoredSummary_ForLiteralRichAuthoringSource()
+    {
+        const string summary = ":::callout note Literal source remains searchable. :::";
+        var harvester = A.Fake<IDocHarvester>();
+        var environment = A.Fake<IWebHostEnvironment>();
+        var sanitizer = A.Fake<IAppSurfaceDocsHtmlSanitizer>();
+        A.CallTo(() => environment.ContentRootPath).Returns(Path.GetTempPath());
+        A.CallTo(() => sanitizer.Sanitize(A<string>._)).ReturnsLazily((string html) => html);
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(
+        [
+            new DocNode(
+                "Literal rich authoring",
+                "guides/literal-rich-authoring.md",
+                """
+                <p class="docs-rich-source"><code>:::callout note</code></p><p>Literal source remains searchable.</p>
+                """,
+                Metadata: new DocMetadata { Summary = summary })
+        ]);
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var aggregator = new DocAggregator(
+            [harvester],
+            new AppSurfaceDocsOptions(),
+            environment,
+            new Memo(cache),
+            sanitizer,
+            A.Fake<ILogger<DocAggregator>>());
+
+        var payload = await aggregator.GetSearchIndexPayloadAsync();
+
+        var indexedDocument = Assert.Single(payload.Documents);
+        Assert.Equal(summary, indexedDocument.Summary);
+        Assert.NotEqual(indexedDocument.Snippet, indexedDocument.Summary);
+    }
 }
