@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.RazorWire.Cli;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -125,6 +126,19 @@ public sealed class AppSurfaceCliAppTests
         Assert.NotNull(provider.GetService<ExportSourceResolver>());
         Assert.NotNull(provider.GetService<ITargetAppProcessFactory>());
         Assert.NotNull(provider.GetService<IHttpClientFactory>());
+    }
+
+    [Fact]
+    public void AddCoverageServices_Should_Resolve_EvidenceProducer_WithThePrivateCoreWorkflow()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(TimeProvider.System);
+
+        AppSurfaceCliApp.AddCoverageServices(services);
+
+        using var provider = services.BuildServiceProvider();
+
+        Assert.NotNull(provider.GetRequiredService<CoverageEvidenceProducer>());
     }
 
     private static async Task ServeRedirectAsync(TcpListener listener, string targetUrl)

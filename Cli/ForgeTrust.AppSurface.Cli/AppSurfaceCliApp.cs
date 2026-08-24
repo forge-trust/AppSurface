@@ -11,6 +11,7 @@ using ForgeTrust.RazorWire.Cli;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using EvidenceCoverage = ForgeTrust.AppSurface.Evidence.Coverage;
 
 namespace ForgeTrust.AppSurface.Cli;
 
@@ -76,9 +77,6 @@ internal static class AppSurfaceCliApp
         services.AddSingleton<IAppSurfaceDocsExportRunner, AppSurfaceDocsInProcessExportRunner>();
         services.AddSingleton<IAppSurfaceDocsHealthVerifyRunner, AppSurfaceDocsInProcessHealthVerifyRunner>();
         services.AddSingleton<IRazorWireStaticExporter, RazorWireExportEngineAdapter>();
-        services.AddSingleton<ICoverageRunProcessRunner, CliWrapCoverageRunProcessRunner>();
-        services.AddSingleton<IReportGeneratorPackageLocator, ReportGeneratorPackageLocator>();
-        services.AddSingleton<ICoverageRunReportGenerator, CoverageRunReportGenerator>();
         services.TryAddSingleton<IAppSurfaceGoogleSecretTransferClient, GoogleSecretManagerTransferClientAdapter>();
         services.TryAddSingleton<ISecretPromotionGoogleClientFactory, DefaultSecretPromotionGoogleClientFactory>();
         services.TryAddSingleton<LocalSecretsTransferCoordinator>();
@@ -88,10 +86,7 @@ internal static class AppSurfaceCliApp
         services.AddSingleton(TimeProvider.System);
         AddCanaryPollingServices(services);
         services.AddTransient<CanaryPollWorkflow>();
-        services.AddTransient<CoverageRunWorkflow>();
-        services.AddTransient<CoverageMergeWorkflow>();
-        services.AddTransient<CoverageEvidenceExecutionWorkflow>();
-        services.AddTransient<CoverageEvidenceProducer>();
+        AddCoverageServices(services);
         services.AddSingleton<EvidencePlanner>();
         services.AddTransient<EvidenceCliWorkflow>();
         services.AddTransient<TestResultsCleanupWorkflow>();
@@ -174,6 +169,34 @@ internal static class AppSurfaceCliApp
             .AddHttpClient<IPwaVerificationHttpClient, PwaVerificationHttpClient>(
                 client => { client.Timeout = TimeSpan.FromSeconds(30); })
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+    }
+
+    /// <summary>
+    /// Registers the CLI and Evidence coverage execution graphs.
+    /// </summary>
+    /// <param name="services">Service collection receiving the coverage command and Evidence registrations.</param>
+    /// <remarks>
+    /// The conditionally linked coverage sources compile into distinct CLI and private-core types. Public coverage
+    /// commands resolve the CLI graph, while the first-party Evidence producer resolves the private-core graph. Both
+    /// graphs intentionally receive their own process runner, ReportGenerator locator, and report generator contracts.
+    /// Registering only the CLI types leaves <see cref="CoverageEvidenceProducer"/> unable to activate.
+    /// </remarks>
+    internal static void AddCoverageServices(IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddSingleton<ICoverageRunProcessRunner, CliWrapCoverageRunProcessRunner>();
+        services.AddSingleton<IReportGeneratorPackageLocator, ReportGeneratorPackageLocator>();
+        services.AddSingleton<ICoverageRunReportGenerator, CoverageRunReportGenerator>();
+        services.AddTransient<CoverageRunWorkflow>();
+        services.AddTransient<CoverageMergeWorkflow>();
+
+        services.AddSingleton<EvidenceCoverage.ICoverageRunProcessRunner, EvidenceCoverage.CliWrapCoverageRunProcessRunner>();
+        services.AddSingleton<EvidenceCoverage.IReportGeneratorPackageLocator, EvidenceCoverage.ReportGeneratorPackageLocator>();
+        services.AddSingleton<EvidenceCoverage.ICoverageRunReportGenerator, EvidenceCoverage.CoverageRunReportGenerator>();
+        services.AddTransient<EvidenceCoverage.CoverageRunWorkflow>();
+        services.AddTransient<CoverageEvidenceExecutionWorkflow>();
+        services.AddTransient<CoverageEvidenceProducer>();
     }
 
     /// <summary>
