@@ -422,6 +422,23 @@ public sealed class EvidencePlannerTests
     }
 
     [Fact]
+    public async Task CliWorkflow_ShouldRejectAnOversizedDiffBeforeReadingIt()
+    {
+        using var directory = TestDirectory.Create();
+        var policyPath = Path.Join(directory.Path, "policy.json");
+        await File.WriteAllBytesAsync(policyPath, EvidenceCanonicalJson.Serialize(CreatePolicy()));
+        var diffPath = Path.Join(directory.Path, "oversized.diff");
+        await File.WriteAllBytesAsync(diffPath, new byte[(20 * 1024 * 1024) + 1]);
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
+
+        var exception = await Assert.ThrowsAsync<EvidenceCliException>(() =>
+            workflow.ExplainAsync(new EvidencePlanningRequest(policyPath, [], diffPath), CancellationToken.None));
+
+        Assert.Contains("ASEVD206", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("exceeds the 20971520 byte limit", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CliWorkflow_ShouldPermitIntentionalReplacementOfItsOwnStarterAndRejectTamperedPlans()
     {
         using var directory = TestDirectory.Create();

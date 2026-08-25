@@ -48,6 +48,26 @@ public sealed class CoverageRunWatchdogTests
     }
 
     [Fact]
+    public void CoverageExecutionException_ShouldExtractCodesAndPreserveOptionalExitCodesWhenMappedToCliFx()
+    {
+        var coded = new CommandException("ASCOV121 coverage watchdog timed out.", exitCode: 124);
+        var codeOnly = new CommandException("ASCOV122");
+        var uncoded = new CommandException("coverage watchdog timed out.");
+
+        Assert.Equal("ASCOV121", coded.Code);
+        Assert.Equal("ASCOV122", codeOnly.Code);
+        Assert.Null(uncoded.Code);
+
+        var mappedWithExitCode = CoverageCommandExceptionMapper.Map(coded);
+        var mappedWithoutExitCode = CoverageCommandExceptionMapper.Map(uncoded);
+
+        Assert.Equal(124, mappedWithExitCode.ExitCode);
+        Assert.Equal(coded.Message, mappedWithExitCode.Message);
+        Assert.Equal(1, mappedWithoutExitCode.ExitCode);
+        Assert.Equal(uncoded.Message, mappedWithoutExitCode.Message);
+    }
+
+    [Fact]
     public async Task WarnMode_ShouldWriteIncidentWithoutCancellingRun()
     {
         using var output = TestDirectory.Create();
