@@ -62,4 +62,28 @@ public class AppSurfaceDocsHtmlSanitizerTests
         Assert.DoesNotContain("onclick", sanitized);
         Assert.DoesNotContain("onmouseover", sanitized);
     }
+
+    [Fact]
+    public void Sanitize_ShouldPreservePackageOwnedRichAuthoringStructureAndRejectUnknownDataAttributes()
+    {
+        var sanitizer = new AppSurfaceDocsHtmlSanitizer();
+        var html = """
+            <section class="docs-rich-tabs" data-appsurfacedocs-rich="tabs" data-appsurfacedocs-rich-tabs="true" data-appsurfacedocs-rich-tabs-token="token" onclick="alert(1)">
+              <p class="docs-rich-tabs__baseline" data-appsurfacedocs-rich-tabs-baseline="true">All paths are available below.</p>
+              <section class="docs-rich-tabs__panel" data-appsurfacedocs-rich-tab-panel="true" data-appsurfacedocs-rich-tab-label="Local proof" data-untrusted="nope" style="display:none">Body</section>
+            </section>
+            """;
+
+        var sanitized = sanitizer.Sanitize(html);
+
+        Assert.Contains("data-appsurfacedocs-rich=\"tabs\"", sanitized);
+        Assert.Contains("data-appsurfacedocs-rich-tabs=\"true\"", sanitized);
+        Assert.Contains("data-appsurfacedocs-rich-tabs-token=\"token\"", sanitized);
+        Assert.Contains("data-appsurfacedocs-rich-tabs-baseline=\"true\"", sanitized);
+        Assert.Contains("data-appsurfacedocs-rich-tab-panel=\"true\"", sanitized);
+        Assert.Contains("data-appsurfacedocs-rich-tab-label=\"Local proof\"", sanitized);
+        Assert.DoesNotContain("data-untrusted", sanitized);
+        Assert.DoesNotContain("onclick", sanitized);
+        Assert.DoesNotContain("style=", sanitized);
+    }
 }

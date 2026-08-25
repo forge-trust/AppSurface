@@ -66,6 +66,7 @@ public class ExportEngine
     [
         "minisearch.min.js",
         "outline-client.js",
+        "rich-authoring-client.js",
         "search-client.js",
         "search-index.json",
         "search.css",
