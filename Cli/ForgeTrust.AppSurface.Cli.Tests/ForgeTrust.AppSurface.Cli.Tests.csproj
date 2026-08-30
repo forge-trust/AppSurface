@@ -31,6 +31,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Config\ForgeTrust.AppSurface.Config.GoogleSecretManager\ForgeTrust.AppSurface.Config.GoogleSecretManager.csproj" />
     <ProjectReference Include="..\..\Durable\ForgeTrust.AppSurface.Durable.PostgreSql\ForgeTrust.AppSurface.Durable.PostgreSql.csproj" />
+    <ProjectReference Include="..\..\Evidence\ForgeTrust.AppSurface.Evidence.Cli\ForgeTrust.AppSurface.Evidence.Cli.csproj" />
+    <ProjectReference Include="..\..\Evidence\ForgeTrust.AppSurface.Evidence.Contracts\ForgeTrust.AppSurface.Evidence.Contracts.csproj" />
+    <ProjectReference Include="..\..\Evidence\ForgeTrust.AppSurface.Evidence.Planner\ForgeTrust.AppSurface.Evidence.Planner.csproj" />
     <ProjectReference Include="..\ForgeTrust.AppSurface.Cli\ForgeTrust.AppSurface.Cli.csproj" />
     <ProjectReference Include="..\..\tests\ForgeTrust.AppSurface.Testing\ForgeTrust.AppSurface.Testing.csproj" />
   </ItemGroup>

@@ -1,9 +1,10 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
-using CliFx;
 using ForgeTrust.AppSurface.Cli;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Testing;
 using Microsoft.Win32.SafeHandles;
+using CommandException = ForgeTrust.AppSurface.Evidence.Coverage.CoverageExecutionException;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 

@@ -5,7 +5,6 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Text;
 using System.Text.Json;
-
 using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Caching;
@@ -18,6 +17,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Evidence.Planner;
 using ForgeTrust.AppSurface.Testing;
 using ForgeTrust.RazorWire;
@@ -3627,7 +3627,7 @@ public sealed class ProgramEntryPointTests
             Paths = ["src/Feature.cs"],
         };
         var ambiguousDoctorException = await Assert.ThrowsAsync<CommandException>(() => ambiguousDoctor.ExecuteAsync(console).AsTask());
-        var ambiguousRun = new EvidenceRunCommand(workflow, CreateCoverageWorkflow())
+        var ambiguousRun = new EvidenceRunCommand(workflow, CreateCoverageEvidenceProducer())
         {
             PolicyPath = ambiguousPolicyPath,
             Paths = ["src/Feature.cs"],
@@ -3641,7 +3641,7 @@ public sealed class ProgramEntryPointTests
         };
         var explainException = await Assert.ThrowsAsync<CommandException>(() => explain.ExecuteAsync(console).AsTask());
 
-        var run = new EvidenceRunCommand(workflow, CreateCoverageWorkflow())
+        var run = new EvidenceRunCommand(workflow, CreateCoverageEvidenceProducer())
         {
             PolicyPath = Path.Join(directory.Path, "missing.policy.json"),
             Paths = ["src/Feature.cs"],
@@ -3683,7 +3683,7 @@ public sealed class ProgramEntryPointTests
         var outputDirectory = Path.Join(directory.Path, "evidence-output");
         var githubSummaryPath = Path.Join(directory.Path, "github-step-summary.md");
         using var githubSummary = new EnvironmentVariableScope("GITHUB_STEP_SUMMARY", githubSummaryPath);
-        var command = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageWorkflow())
+        var command = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageEvidenceProducer())
         {
             PolicyPath = policyPath,
             Paths = ["src/Feature.cs"],
@@ -3701,7 +3701,7 @@ public sealed class ProgramEntryPointTests
         Assert.True(File.Exists(Path.Join(outputDirectory, "coverage", "coverage-gate.md")));
         Assert.Contains("## AppSurface Evidence", await File.ReadAllTextAsync(githubSummaryPath), StringComparison.Ordinal);
 
-        var failedCoverage = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageWorkflow(testFails: true))
+        var failedCoverage = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageEvidenceProducer(testFails: true))
         {
             PolicyPath = policyPath,
             Paths = ["src/Feature.cs"],
@@ -3711,7 +3711,7 @@ public sealed class ProgramEntryPointTests
         var failedCoverageException = await Assert.ThrowsAsync<CommandException>(() => failedCoverage.ExecuteAsync(console).AsTask());
         Assert.Contains("ASEVD211", failedCoverageException.Message, StringComparison.Ordinal);
 
-        var crashedCoverage = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageWorkflow(failProcess: true))
+        var crashedCoverage = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageEvidenceProducer(failProcess: true))
         {
             PolicyPath = policyPath,
             Paths = ["src/Feature.cs"],
@@ -3722,7 +3722,7 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("ASEVD211", crashedCoverageException.Message, StringComparison.Ordinal);
 
         var failedGateOutput = Path.Join(directory.Path, "failed-gate-output");
-        var failedGate = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageWorkflow(coveragePasses: false))
+        var failedGate = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageEvidenceProducer(coveragePasses: false))
         {
             PolicyPath = policyPath,
             Paths = ["src/Feature.cs"],
@@ -3744,7 +3744,7 @@ public sealed class ProgramEntryPointTests
             timedOutPolicyPath,
             EvidenceCanonicalJson.Serialize(CreateCoverageEvidencePolicy(EvidenceProfileScope.Targeted, timeoutSeconds: 1)));
         var timedOutOutput = Path.Join(directory.Path, "timed-out-output");
-        var timedOutCoverage = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageWorkflow(cancels: true))
+        var timedOutCoverage = new EvidenceRunCommand(new EvidenceCliWorkflow(new EvidencePlanner()), CreateCoverageEvidenceProducer(cancels: true))
         {
             PolicyPath = timedOutPolicyPath,
             Paths = ["src/Feature.cs"],
@@ -3788,6 +3788,13 @@ public sealed class ProgramEntryPointTests
         new EvidenceCoverageProcessRunner(testFails, failProcess, cancels),
         new EvidenceCoverageReportGenerator(coveragePasses),
         TimeProvider.System);
+
+    private static CoverageEvidenceProducer CreateCoverageEvidenceProducer(
+        bool testFails = false,
+        bool failProcess = false,
+        bool coveragePasses = true,
+        bool cancels = false) => new(
+        new CoverageEvidenceExecutionWorkflow(CreateCoverageWorkflow(testFails, failProcess, coveragePasses, cancels)));
 
     private static IDisposable PushCurrentDirectoryForEvidenceTests(string path)
     {

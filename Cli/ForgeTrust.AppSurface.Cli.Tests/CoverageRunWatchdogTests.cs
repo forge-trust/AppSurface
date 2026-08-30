@@ -3,6 +3,8 @@ using System.Text.Json;
 using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Cli;
+using ForgeTrust.AppSurface.Evidence.Coverage;
+using CommandException = ForgeTrust.AppSurface.Evidence.Coverage.CoverageExecutionException;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -46,6 +48,26 @@ public sealed class CoverageRunWatchdogTests
     }
 
     [Fact]
+    public void CoverageExecutionException_ShouldExtractCodesAndPreserveOptionalExitCodesWhenMappedToCliFx()
+    {
+        var coded = new CommandException("ASCOV121 coverage watchdog timed out.", exitCode: 124);
+        var codeOnly = new CommandException("ASCOV122");
+        var uncoded = new CommandException("coverage watchdog timed out.");
+
+        Assert.Equal("ASCOV121", coded.Code);
+        Assert.Equal("ASCOV122", codeOnly.Code);
+        Assert.Null(uncoded.Code);
+
+        var mappedWithExitCode = CoverageCommandExceptionMapper.Map(coded);
+        var mappedWithoutExitCode = CoverageCommandExceptionMapper.Map(uncoded);
+
+        Assert.Equal(124, mappedWithExitCode.ExitCode);
+        Assert.Equal(coded.Message, mappedWithExitCode.Message);
+        Assert.Equal(1, mappedWithoutExitCode.ExitCode);
+        Assert.Equal(uncoded.Message, mappedWithoutExitCode.Message);
+    }
+
+    [Fact]
     public async Task WarnMode_ShouldWriteIncidentWithoutCancellingRun()
     {
         using var output = TestDirectory.Create();
@@ -54,7 +76,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Warn,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(100),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None);
         supervisor.BindOutputDirectory(output.Path);
@@ -79,7 +101,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Warn,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(10),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None,
             artifactStaged: () =>
@@ -112,7 +134,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Fail,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(10),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None,
             artifactStaged: () =>
@@ -147,7 +169,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Warn,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(50),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None);
         supervisor.BindOutputDirectory(output.Path);
@@ -174,7 +196,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Warn,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(20),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None,
             artifactStaged: () =>
@@ -225,7 +247,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Warn,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(10),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None,
             artifactStaged: () =>
@@ -263,7 +285,7 @@ public sealed class CoverageRunWatchdogTests
                 CoverageRunWatchdogMode.Off,
                 TimeSpan.Zero,
                 TimeSpan.FromSeconds(1),
-                console,
+                CoverageTextWriters.Create(console.Output, console.Error),
                 TimeProvider.System,
                 CancellationToken.None,
                 bootstrapDirectoryDelete: path =>
@@ -300,7 +322,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Fail,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(10),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None,
             artifactStaged: () =>
@@ -329,7 +351,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Warn,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(100),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             timeProvider,
             CancellationToken.None);
         supervisor.BindOutputDirectory(output.Path);
@@ -355,7 +377,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Fail,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(10),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None);
         supervisor.BindOutputDirectory(output.Path);
@@ -381,7 +403,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Fail,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(10),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None);
         supervisor.BindOutputDirectory(output.Path);
@@ -414,7 +436,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Fail,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(10),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             timeProvider,
             CancellationToken.None,
             processCleanupStarted: cleanupStarted.SetResult,
@@ -457,7 +479,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Fail,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(10),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             timeProvider,
             CancellationToken.None,
             processCleanupStarted: cleanupStarted.SetResult);
@@ -486,7 +508,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Off,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(10),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             timeProvider,
             CancellationToken.None);
         using var operation = supervisor.Start("project", "tests/Quiet.Tests/Quiet.Tests.csproj");
@@ -505,7 +527,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Warn,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(250),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None);
         supervisor.BindOutputDirectory(output.Path);
@@ -544,7 +566,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Warn,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(100),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             timeProvider,
             CancellationToken.None);
         supervisor.BindOutputDirectory(output.Path);
@@ -587,7 +609,7 @@ public sealed class CoverageRunWatchdogTests
     {
         using var output = new BlockingWriteStream();
         using var console = new FakeConsole(Stream.Null, output, Stream.Null);
-        using var sink = new CoverageRunConsoleSink(console, TimeSpan.FromMilliseconds(20));
+        using var sink = new CoverageRunConsoleSink(CoverageTextWriters.Create(console.Output, console.Error), TimeSpan.FromMilliseconds(20));
 
         await sink.WriteOutputAsync("first");
         await sink.WriteOutputAsync("second");
@@ -600,7 +622,7 @@ public sealed class CoverageRunWatchdogTests
     {
         using var output = new GatedCaptureWriteStream();
         using var console = new FakeConsole(Stream.Null, output, Stream.Null);
-        using var sink = new CoverageRunConsoleSink(console, TimeSpan.FromSeconds(1));
+        using var sink = new CoverageRunConsoleSink(CoverageTextWriters.Create(console.Output, console.Error), TimeSpan.FromSeconds(1));
 
         var first = sink.WriteOutputAsync("first");
         await output.FirstWriteStarted.WaitAsync(TimeSpan.FromSeconds(2));
@@ -623,7 +645,7 @@ public sealed class CoverageRunWatchdogTests
     {
         using var output = new GatedCaptureWriteStream();
         using var console = new FakeConsole(Stream.Null, output, Stream.Null);
-        using var sink = new CoverageRunConsoleSink(console, TimeSpan.FromSeconds(1));
+        using var sink = new CoverageRunConsoleSink(CoverageTextWriters.Create(console.Output, console.Error), TimeSpan.FromSeconds(1));
 
         var first = sink.WriteOutputAsync("heartbeat-1", coalesceIfWritePending: true);
         await output.FirstWriteStarted.WaitAsync(TimeSpan.FromSeconds(2));
@@ -644,7 +666,7 @@ public sealed class CoverageRunWatchdogTests
     {
         using var output = new GatedCaptureWriteStream();
         using var console = new FakeConsole(Stream.Null, output, Stream.Null);
-        using var sink = new CoverageRunConsoleSink(console, TimeSpan.FromMilliseconds(20));
+        using var sink = new CoverageRunConsoleSink(CoverageTextWriters.Create(console.Output, console.Error), TimeSpan.FromMilliseconds(20));
 
         var write = sink.WriteOutputAsync("bounded-output");
         await output.FirstWriteStarted.WaitAsync(TimeSpan.FromSeconds(2));
@@ -666,7 +688,7 @@ public sealed class CoverageRunWatchdogTests
         using var error = new GatedCaptureWriteStream();
         error.ReleaseFirstWrite();
         using var console = new FakeConsole(Stream.Null, output, error);
-        using var sink = new CoverageRunConsoleSink(console, TimeSpan.FromMilliseconds(20));
+        using var sink = new CoverageRunConsoleSink(CoverageTextWriters.Create(console.Output, console.Error), TimeSpan.FromMilliseconds(20));
 
         var blocked = sink.WriteOutputAsync("blocked-output");
         await output.FirstWriteStarted.WaitAsync(TimeSpan.FromSeconds(2));
@@ -689,7 +711,7 @@ public sealed class CoverageRunWatchdogTests
     {
         using var output = new ThrowingWriteStream();
         using var console = new FakeConsole(Stream.Null, output, Stream.Null);
-        using var sink = new CoverageRunConsoleSink(console, TimeSpan.FromMilliseconds(20));
+        using var sink = new CoverageRunConsoleSink(CoverageTextWriters.Create(console.Output, console.Error), TimeSpan.FromMilliseconds(20));
 
         await sink.WriteOutputAsync("message");
 
@@ -702,7 +724,7 @@ public sealed class CoverageRunWatchdogTests
     {
         using var error = new MemoryStream();
         using var console = new FakeConsole(Stream.Null, Stream.Null, error);
-        var sink = new CoverageRunConsoleSink(console, TimeSpan.FromSeconds(1));
+        var sink = new CoverageRunConsoleSink(CoverageTextWriters.Create(console.Output, console.Error), TimeSpan.FromSeconds(1));
 
         await sink.WriteErrorAsync("first", appendNewLine: false);
         sink.Dispose();
@@ -717,7 +739,7 @@ public sealed class CoverageRunWatchdogTests
     {
         using var output = new GatedCaptureWriteStream();
         using var console = new FakeConsole(Stream.Null, output, Stream.Null);
-        using var sink = new CoverageRunConsoleSink(console, TimeSpan.FromSeconds(1));
+        using var sink = new CoverageRunConsoleSink(CoverageTextWriters.Create(console.Output, console.Error), TimeSpan.FromSeconds(1));
         using var cancellation = new CancellationTokenSource();
 
         var blocked = sink.WriteOutputAsync("blocked");
@@ -735,7 +757,7 @@ public sealed class CoverageRunWatchdogTests
     {
         using var error = new ThrowingWriteStream();
         using var console = new FakeConsole(Stream.Null, Stream.Null, error);
-        using var sink = new CoverageRunConsoleSink(console, TimeSpan.FromMilliseconds(20));
+        using var sink = new CoverageRunConsoleSink(CoverageTextWriters.Create(console.Output, console.Error), TimeSpan.FromMilliseconds(20));
 
         await sink.WriteCriticalErrorAsync("critical");
 
@@ -816,7 +838,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Off,
             TimeSpan.FromMilliseconds(20),
             TimeSpan.FromSeconds(1),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None);
         using var operation = supervisor.Start("merge", state: "running");
@@ -842,7 +864,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Fail,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(10),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None);
         supervisor.BindOutputDirectory(output.Path);
@@ -863,7 +885,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Off,
             TimeSpan.Zero,
             TimeSpan.FromSeconds(1),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None);
         var committed = false;
@@ -887,7 +909,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Warn,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(20),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None);
         supervisor.BindOutputDirectory(output.Path);
@@ -921,7 +943,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Warn,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(10),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None);
         using var operation = supervisor.Start("project");
@@ -943,7 +965,7 @@ public sealed class CoverageRunWatchdogTests
             CoverageRunWatchdogMode.Warn,
             TimeSpan.Zero,
             TimeSpan.FromMilliseconds(10),
-            console,
+            CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None,
             artifactStaged: () => Directory.CreateDirectory(destination));
@@ -972,7 +994,7 @@ public sealed class CoverageRunWatchdogTests
                 CoverageRunWatchdogMode.Warn,
                 TimeSpan.Zero,
                 TimeSpan.FromMilliseconds(10),
-                console,
+                CoverageTextWriters.Create(console.Output, console.Error),
                 TimeProvider.System,
                 CancellationToken.None,
                 artifactStaged: () => Directory.CreateDirectory(destination),

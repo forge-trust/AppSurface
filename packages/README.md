@@ -115,6 +115,7 @@ Swipe to compare package details on narrow screens.
 
 ### Support and runtime packages
 
+- `ForgeTrust.AppSurface.Evidence.Coverage`: Private coverage execution implementation restored only through first-party AppSurface CLI and Evidence workflow packages; it is not a direct-install integration surface. Release: support runtime; not applicable; [notes](../releases/unreleased.md).
 - `ForgeTrust.AppSurface.ReleaseContracts`: Transitive release metadata contracts used by `ForgeTrust.AppSurface.Docs` and repository release tooling. Restore it through those packages rather than installing it directly. Release: support runtime; not applicable; [notes](../releases/unreleased.md).
 - `ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64`: Tailwind standalone runtime for Linux Arm64 build hosts. Restore it transitively through `ForgeTrust.AppSurface.Web.Tailwind` instead of installing it directly. Release: support runtime; not applicable; [notes](../releases/unreleased.md).
 - `ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64`: Tailwind standalone runtime for Linux x64 build hosts. Restore it transitively through `ForgeTrust.AppSurface.Web.Tailwind` instead of installing it directly. Release: support runtime; not applicable; [notes](../releases/unreleased.md).

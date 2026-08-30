@@ -3,6 +3,7 @@ using System.Globalization;
 using CliFx;
 using CliFx.Binding;
 using CliFx.Infrastructure;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 
 namespace ForgeTrust.AppSurface.Cli;
 
@@ -87,9 +88,16 @@ internal sealed partial class CoverageCleanCommand(
             throw new CommandException("--root is available only with --all. Omit --root to clean AppSurface-owned coverage artifacts, or pass --all to scan a worktree.");
         }
 
-        var outputDirectory = OutputDirectory ?? Path.Join(_getCurrentDirectory(), DefaultOutputDirectory);
-        var result = CoverageRunOutputGuard.CleanExistingOwnedOutput(outputDirectory, Apply);
-        await WriteOwnedCoverageResultAsync(console, result, cancellationToken);
+        try
+        {
+            var outputDirectory = OutputDirectory ?? Path.Join(_getCurrentDirectory(), DefaultOutputDirectory);
+            var result = CoverageRunOutputGuard.CleanExistingOwnedOutput(outputDirectory, Apply);
+            await WriteOwnedCoverageResultAsync(console, result, cancellationToken);
+        }
+        catch (CoverageExecutionException exception)
+        {
+            throw CoverageCommandExceptionMapper.Map(exception);
+        }
     }
 
     private static async Task WriteOwnedCoverageResultAsync(
