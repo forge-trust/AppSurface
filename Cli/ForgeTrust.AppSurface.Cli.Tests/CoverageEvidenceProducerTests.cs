@@ -96,6 +96,49 @@ public sealed class CoverageEvidenceProducerTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldClassifyAnUncancelledCoreCancellationAsFailed()
+    {
+        using var directory = TestDirectory.Create();
+        var solutionPath = Path.Join(directory.Path, "sample.slnx");
+        await File.WriteAllTextAsync(solutionPath, "{}");
+        var producer = CreateProducer(new ThrowingCoverageRunProcessRunner(new OperationCanceledException("core cancellation")));
+        using var standardOutputWriter = new StringWriter();
+        using var standardErrorWriter = new StringWriter();
+
+        var result = await producer.RunAsync(
+            CreateDeclaration(),
+            solutionPath,
+            Path.Join(directory.Path, "output"),
+            null,
+            CoverageTextWriters.Create(standardOutputWriter, standardErrorWriter),
+            CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+        Assert.Contains("OperationCanceledException", result.Diagnostic, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldPropagateCallerCancellation()
+    {
+        using var directory = TestDirectory.Create();
+        var solutionPath = Path.Join(directory.Path, "sample.slnx");
+        await File.WriteAllTextAsync(solutionPath, "{}");
+        var producer = CreateProducer(new ThrowingCoverageRunProcessRunner(new OperationCanceledException("core cancellation")));
+        using var standardOutputWriter = new StringWriter();
+        using var standardErrorWriter = new StringWriter();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => producer.RunAsync(
+            CreateDeclaration(),
+            solutionPath,
+            Path.Join(directory.Path, "output"),
+            null,
+            CoverageTextWriters.Create(standardOutputWriter, standardErrorWriter),
+            cancellation.Token));
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldNotTranslateTerminalRuntimeFailures()
     {
         using var directory = TestDirectory.Create();

@@ -91,4 +91,33 @@ internal sealed class CoverageEvidenceExecutionWorkflow(CoverageRunWorkflow runW
 /// <summary>
 /// Captures the two ordered operation results produced for an Evidence coverage declaration.
 /// </summary>
-internal sealed record CoverageEvidenceExecutionResult(CoverageRunResult Run, CoverageGateResult? Gate);
+internal sealed record CoverageEvidenceExecutionResult
+{
+    /// <summary>
+    /// Initializes the ordered results from one Evidence coverage execution.
+    /// </summary>
+    /// <param name="run">The nonnull collection result that always completes before gate evaluation is considered.</param>
+    /// <param name="gate">
+    /// The gate result when collection succeeds; otherwise null because gate evaluation and report writing are skipped.
+    /// </param>
+    public CoverageEvidenceExecutionResult(CoverageRunResult run, CoverageGateResult? gate)
+    {
+        Run = run ?? throw new ArgumentNullException(nameof(run));
+        Gate = gate;
+    }
+
+    /// <summary>
+    /// Gets the nonnull coverage collection result.
+    /// </summary>
+    public CoverageRunResult Run { get; }
+
+    /// <summary>
+    /// Gets the optional coverage-gate result produced after successful collection.
+    /// </summary>
+    /// <remarks>
+    /// This value is null when <see cref="Run"/> reports failure because the workflow deliberately skips gate
+    /// evaluation and report writing. Callers must check <see cref="CoverageRunResult.Success"/> and handle a null
+    /// value before accessing gate details.
+    /// </remarks>
+    public CoverageGateResult? Gate { get; }
+}

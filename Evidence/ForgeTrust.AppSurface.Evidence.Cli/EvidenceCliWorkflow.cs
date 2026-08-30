@@ -13,13 +13,20 @@ internal sealed class EvidenceCliWorkflow
 {
     private const string GeneratedMarker = "appsurface-evidence-starter-v1";
     private readonly EvidencePlanner _planner;
+    private readonly IEvidenceDiffFileAccess _diffFileAccess;
 
     /// <summary>
-    /// Initializes the workflow with the planner used to resolve policy and changed-path inputs.
+    /// Initializes the workflow with the planner and diff-file access used to resolve policy and changed-path inputs.
     /// </summary>
-    public EvidenceCliWorkflow(EvidencePlanner planner)
+    /// <param name="planner">The nonnull planner that resolves normalized paths against the selected policy.</param>
+    /// <param name="diffFileAccess">
+    /// The optional access boundary that opens explicit diff files. Omit this value in production to use the physical
+    /// file system; tests can supply a deterministic source that verifies the bytes observed at open time.
+    /// </param>
+    public EvidenceCliWorkflow(EvidencePlanner planner, IEvidenceDiffFileAccess? diffFileAccess = null)
     {
         _planner = planner ?? throw new ArgumentNullException(nameof(planner));
+        _diffFileAccess = diffFileAccess ?? new PhysicalEvidenceDiffFileAccess();
     }
 
     /// <summary>
@@ -277,7 +284,7 @@ internal sealed class EvidenceCliWorkflow
         }
     }
 
-    private static async Task<(IReadOnlyList<NormalizedDiffPath> Paths, EvidenceDiffSnapshot? Snapshot)> ReadPathsAndSnapshotAsync(
+    private async Task<(IReadOnlyList<NormalizedDiffPath> Paths, EvidenceDiffSnapshot? Snapshot)> ReadPathsAndSnapshotAsync(
         EvidencePlanningRequest request,
         CancellationToken cancellationToken)
     {
@@ -300,27 +307,13 @@ internal sealed class EvidenceCliWorkflow
         return (paths, snapshot);
     }
 
-    private static async Task<EvidenceDiffSnapshot> ReadDiffSnapshotAsync(string path, CancellationToken cancellationToken)
+    private async Task<EvidenceDiffSnapshot> ReadDiffSnapshotAsync(string path, CancellationToken cancellationToken)
     {
         const long maximumDiffBytes = 20L * 1024 * 1024;
-        if (!File.Exists(path))
-        {
-            throw new EvidenceCliException("ASEVD206", $"Unified diff file '{path}' does not exist.", "Pass an existing --diff-file or explicit --path values.");
-        }
-
         try
         {
-            var info = new FileInfo(path);
-            if (info.Length > maximumDiffBytes)
-            {
-                throw new EvidenceCliException("ASEVD206", $"Unified diff file '{path}' exceeds the {maximumDiffBytes} byte limit.", "Pass a bounded unified diff file or use explicit --path values.");
-            }
-
-            var bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
-            if (bytes.LongLength > maximumDiffBytes)
-            {
-                throw new EvidenceCliException("ASEVD206", $"Unified diff file '{path}' exceeds the {maximumDiffBytes} byte limit.", "Pass a bounded unified diff file or use explicit --path values.");
-            }
+            await using var stream = _diffFileAccess.OpenRead(path);
+            var bytes = await ReadBoundedBytesAsync(stream, maximumDiffBytes, path, cancellationToken).ConfigureAwait(false);
 
             return new EvidenceDiffSnapshot(bytes, Path.GetFileName(path), Convert.ToHexString(SHA256.HashData(bytes)));
         }
@@ -331,6 +324,36 @@ internal sealed class EvidenceCliWorkflow
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             throw new EvidenceCliException("ASEVD206", $"Unified diff file '{path}' could not be read: {exception.Message}", "Pass a readable --diff-file or explicit --path values.");
+        }
+    }
+
+    private static async Task<byte[]> ReadBoundedBytesAsync(
+        Stream stream,
+        long maximumBytes,
+        string path,
+        CancellationToken cancellationToken)
+    {
+        const int bufferSize = 80 * 1024;
+        var buffer = new byte[bufferSize];
+        await using var captured = new MemoryStream();
+        long bytesRead = 0;
+        while (true)
+        {
+            var bytesRemainingIncludingLimitProbe = (maximumBytes - bytesRead) + 1;
+            var requestedBytes = (int)Math.Min(buffer.Length, bytesRemainingIncludingLimitProbe);
+            var count = await stream.ReadAsync(buffer.AsMemory(0, requestedBytes), cancellationToken).ConfigureAwait(false);
+            if (count == 0)
+            {
+                return captured.ToArray();
+            }
+
+            bytesRead += count;
+            if (bytesRead > maximumBytes)
+            {
+                throw new EvidenceCliException("ASEVD206", $"Unified diff file '{path}' exceeds the {maximumBytes} byte limit.", "Pass a bounded unified diff file or use explicit --path values.");
+            }
+
+            await captured.WriteAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -499,47 +522,143 @@ internal sealed record EvidencePlanningRequest(string PolicyPath, IReadOnlyList<
 /// <summary>
 /// Binds a resolved plan to the immutable diff bytes used to derive its changed paths.
 /// </summary>
-internal sealed record EvidencePlanningResolution(EvidencePlan Plan, EvidenceDiffSnapshot? DiffSnapshot);
+/// <remarks>
+/// Keep this pair together from planning through coverage execution. Reopening the source path can observe a replaced
+/// diff and break the plan-to-gate integrity boundary; consumers must reuse <see cref="DiffSnapshot"/> when present.
+/// </remarks>
+internal sealed record EvidencePlanningResolution
+{
+    /// <summary>
+    /// Initializes the resolved planning inputs.
+    /// </summary>
+    /// <param name="plan">The nonnull plan derived from explicit paths and, when supplied, the captured diff bytes.</param>
+    /// <param name="diffSnapshot">
+    /// The optional bounded snapshot that supplied diff-derived paths. It is null only when planning used explicit
+    /// paths without <c>--diff-file</c>.
+    /// </param>
+    public EvidencePlanningResolution(EvidencePlan plan, EvidenceDiffSnapshot? diffSnapshot)
+    {
+        Plan = plan ?? throw new ArgumentNullException(nameof(plan));
+        DiffSnapshot = diffSnapshot;
+    }
+
+    /// <summary>
+    /// Gets the nonnull plan resolved from the exact input set represented by this instance.
+    /// </summary>
+    public EvidencePlan Plan { get; }
+
+    /// <summary>
+    /// Gets the optional immutable diff snapshot from which the plan's diff-derived paths were read.
+    /// </summary>
+    /// <remarks>
+    /// Pass this same value to the coverage producer for patch gates. Do not reopen a source path to obtain a newer
+    /// diff, because that would no longer be the diff on which <see cref="Plan"/> was evaluated.
+    /// </remarks>
+    public EvidenceDiffSnapshot? DiffSnapshot { get; }
+}
 
 /// <summary>
 /// Holds the bounded unified diff input consumed by an Evidence planning operation.
 /// </summary>
+/// <remarks>
+/// The snapshot owns a defensive copy of the bytes supplied at construction. It is bounded by the planning reader to
+/// 20 MiB, and consumers must reuse <see cref="Bytes"/> for planning-adjacent work such as patch coverage instead of
+/// reopening the source path. This preserves the SHA-256-integrity boundary when the original file is replaced later.
+/// </remarks>
 internal sealed class EvidenceDiffSnapshot
 {
+    private const int Sha256HexLength = 64;
     private readonly byte[] _bytes;
 
     /// <summary>
-    /// Initializes a snapshot from diff bytes captured during planning.
+    /// Initializes a snapshot from the exact diff bytes captured during planning.
     /// </summary>
+    /// <param name="bytes">
+    /// The nonnull, bounded diff bytes to copy. Ownership remains with the caller; subsequent caller mutations do not
+    /// affect this snapshot.
+    /// </param>
+    /// <param name="label">The nonempty safe source label used in coverage artifacts and diagnostics.</param>
+    /// <param name="sha256">
+    /// The nonempty 64-character hexadecimal SHA-256 digest computed from <paramref name="bytes"/> at capture time.
+    /// </param>
+    /// <exception cref="ArgumentNullException"><paramref name="bytes"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="label"/> is blank, or <paramref name="sha256"/> is blank or not a SHA-256 hexadecimal digest.
+    /// </exception>
     public EvidenceDiffSnapshot(byte[] bytes, string label, string sha256)
     {
         ArgumentNullException.ThrowIfNull(bytes);
         ArgumentException.ThrowIfNullOrWhiteSpace(label);
         ArgumentException.ThrowIfNullOrWhiteSpace(sha256);
+        if (sha256.Length != Sha256HexLength || !sha256.All(static character => char.IsAsciiHexDigit(character)))
+        {
+            throw new ArgumentException("The diff snapshot SHA-256 digest must be a 64-character hexadecimal string.", nameof(sha256));
+        }
+
         _bytes = bytes.ToArray();
         Label = label;
         Sha256 = sha256;
     }
 
     /// <summary>
-    /// Gets a read-only view of the exact captured diff bytes.
+    /// Gets a read-only view of the exact bytes defensively copied at construction.
     /// </summary>
+    /// <remarks>
+    /// This view avoids another copy for internal consumers, but it exposes no writable access. Reuse it for patch
+    /// coverage and related planning work; reopening the original file can violate the plan-to-gate integrity rule.
+    /// </remarks>
     public ReadOnlyMemory<byte> Bytes => _bytes;
 
     /// <summary>
-    /// Gets the safe source label used in coverage artifacts.
+    /// Gets the nonempty safe source label used in coverage artifacts and diagnostics.
     /// </summary>
     public string Label { get; }
 
     /// <summary>
-    /// Gets the SHA-256 digest of <see cref="Bytes"/>.
+    /// Gets the nonempty 64-character hexadecimal SHA-256 digest of <see cref="Bytes"/> at capture time.
     /// </summary>
     public string Sha256 { get; }
 
     /// <summary>
-    /// Gets the UTF-8 diff text used by the planner and the coverage core.
+    /// Gets the UTF-8 decoding of <see cref="Bytes"/> used by the planner and coverage core.
     /// </summary>
+    /// <remarks>
+    /// This value is derived only from the captured bytes. It must not be replaced with a fresh read of the original
+    /// diff path after planning.
+    /// </remarks>
     public string Text => Encoding.UTF8.GetString(_bytes);
+}
+
+/// <summary>
+/// Opens explicit unified diff files for Evidence planning.
+/// </summary>
+/// <remarks>
+/// This narrow internal boundary keeps the production reader file-backed while allowing tests to prove that the
+/// bounded stream reader evaluates the bytes available when a path is actually opened, not stale file metadata.
+/// </remarks>
+internal interface IEvidenceDiffFileAccess
+{
+    /// <summary>
+    /// Opens <paramref name="path"/> for sequential read access.
+    /// </summary>
+    /// <param name="path">The explicit path supplied through <c>--diff-file</c>.</param>
+    /// <returns>A readable stream owned and disposed by the Evidence workflow.</returns>
+    Stream OpenRead(string path);
+}
+
+/// <summary>
+/// Opens Evidence diff files through the local physical file system.
+/// </summary>
+internal sealed class PhysicalEvidenceDiffFileAccess : IEvidenceDiffFileAccess
+{
+    /// <inheritdoc />
+    public Stream OpenRead(string path) => new FileStream(
+        path,
+        FileMode.Open,
+        FileAccess.Read,
+        FileShare.Read,
+        bufferSize: 80 * 1024,
+        FileOptions.Asynchronous | FileOptions.SequentialScan);
 }
 
 /// <summary>

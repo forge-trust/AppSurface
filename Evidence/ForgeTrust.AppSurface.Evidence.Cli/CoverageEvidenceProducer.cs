@@ -16,8 +16,44 @@ internal sealed class CoverageEvidenceProducer(CoverageEvidenceExecutionWorkflow
     private readonly CoverageEvidenceExecutionWorkflow _executionWorkflow = executionWorkflow ?? throw new ArgumentNullException(nameof(executionWorkflow));
 
     /// <summary>
-    /// Runs one declared coverage producer and returns only its stable evidence outcome.
+    /// Runs one declared coverage producer through the private coverage core and returns its stable evidence outcome.
     /// </summary>
+    /// <param name="producer">
+    /// The explicit <c>coverage</c> declaration to execute. It must include coverage-gate requirements; unsupported
+    /// kinds, missing gates, and patch gates without a captured diff return stable unavailable or invalid outcomes
+    /// without starting the core.
+    /// </param>
+    /// <param name="solutionPath">
+    /// The nonempty solution path used for AppSurface coverage discovery. The producer does not infer this value, so a
+    /// missing path returns an unavailable outcome rather than selecting a solution implicitly.
+    /// </param>
+    /// <param name="outputDirectory">
+    /// The nonempty Evidence output directory. The producer creates and cleans its <c>coverage</c> child directory for
+    /// the fixed Debug, serial, input-order collector run and its merged gate report.
+    /// </param>
+    /// <param name="diffSnapshot">
+    /// The optional bounded immutable diff captured during planning. Patch gates require this snapshot; callers must
+    /// pass the planning snapshot instead of reopening its source file.
+    /// </param>
+    /// <param name="writers">
+    /// The nonnull ordered standard-output and standard-error writers owned by the caller for the shared core's
+    /// diagnostics.
+    /// </param>
+    /// <param name="cancellationToken">
+    /// The caller cancellation token. Caller cancellation is propagated; only expiration of the producer's linked
+    /// deadline yields <see cref="EvidenceProducerOutcome.TimedOut"/>.
+    /// </param>
+    /// <returns>
+    /// A passed result only when collection and the declared gate both pass; a failed result for collection, gate, or
+    /// nonfatal core failures (including independently thrown cancellation exceptions); or an unavailable or invalid
+    /// result for declaration inputs that cannot safely start coverage.
+    /// </returns>
+    /// <exception cref="OperationCanceledException">The caller cancels <paramref name="cancellationToken"/>.</exception>
+    /// <remarks>
+    /// The private core owns collection-before-gate ordering. This adapter fixes the coverage run defaults to Debug,
+    /// serial input-order execution, collector coverage, clean output, and the established AppSurface test exclusion;
+    /// it does not expose a general-purpose coverage configuration surface to Evidence consumers.
+    /// </remarks>
     public async Task<EvidenceProducerResult> RunAsync(
         EvidenceProducerDeclaration producer,
         string? solutionPath,
@@ -51,9 +87,9 @@ internal sealed class CoverageEvidenceProducer(CoverageEvidenceExecutionWorkflow
             return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Unavailable, [], "The declared patch coverage gate requires --diff-file so the plan and coverage gate use the same explicit CI diff.");
         }
 
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         try
         {
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             deadline.CancelAfter(TimeSpan.FromSeconds(producer.TimeoutSeconds));
             var result = await _executionWorkflow.RunAndGateAsync(
                 CreateRunRequest(solutionPath, outputDirectory),
@@ -70,9 +106,17 @@ internal sealed class CoverageEvidenceProducer(CoverageEvidenceExecutionWorkflow
                 ? new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Passed, producer.AssertionIds, $"Coverage gate passed: {gateResult.MarkdownReportPath}")
                 : new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Failed, [], $"Coverage gate did not meet its declared threshold. See {gateResult.MarkdownReportPath}.");
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested)
         {
             return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.TimedOut, [], "The existing AppSurface coverage workflow exceeded its bounded execution window.");
+        }
+        catch (OperationCanceledException)
+        {
+            return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Failed, [], "The existing AppSurface coverage workflow failed with OperationCanceledException.");
         }
         catch (CoverageExecutionException exception) when (IsNonFatal(exception))
         {
