@@ -49,6 +49,12 @@
         })
         .ToList();
     var hasOutline = outlineItems.Count > 0;
+    var richAuthoringTabsTokens = Model.Document.RichAuthoringTabsTokens?
+        .Where(token => !string.IsNullOrWhiteSpace(token))
+        .Select(token => token.Trim())
+        .Distinct(StringComparer.Ordinal)
+        .ToArray()
+        ?? [];
     var documentContent = ResolveGeneratedContentHrefs(Model.Document.Content);
     var visibleDocumentContent = ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsHeadingSuppressor.SuppressLeadingMarkdownH1(
         documentContent,
@@ -560,4 +566,9 @@
 @if (hasOutline)
 {
     <script src="@Url.PathBaseAware(assetVersioner.BuildVersionedDocsAssetUrl(docsUrlBuilder, "outline-client.js"))" defer data-doc-outline-client="true" asp-append-version="false"></script>
+}
+
+@if (richAuthoringTabsTokens.Length > 0)
+{
+    <script src="@Url.PathBaseAware(assetVersioner.BuildVersionedDocsAssetUrl(docsUrlBuilder, "rich-authoring-client.js"))" defer data-doc-rich-authoring-client="true" data-appsurfacedocs-rich-tabs-tokens="@string.Join(' ', richAuthoringTabsTokens)" asp-append-version="false"></script>
 }

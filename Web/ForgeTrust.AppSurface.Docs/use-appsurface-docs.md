@@ -515,6 +515,8 @@ Start with pages that answer adoption questions before you tune visuals:
 - Troubleshooting pages for the failure modes your users actually hit.
 - `NAMESPACE.md` files beside package/project files when generated API reference needs human orientation above the symbol list. Docs-owned namespace README files such as `docs/ForgeTrust.RazorWire/README.md` are still supported for portable folder-index layouts, but `NAMESPACE.md` is the AppSurface house style.
 
+When a page needs a short risk signal or genuinely alternative reader paths, use the package’s [rich-authoring reference](./README.md#rich-authoring). Start with a `:::callout` and preview it. Use `:::tabs` only when the prompt asks the reader to choose between two to four complete alternatives; preserve sequential installation, recovery, and production operations as ordinary Markdown so every required step remains visible and searchable.
+
 Use sidecar metadata for portability-sensitive files such as README pages:
 
 ```yaml

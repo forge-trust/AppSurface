@@ -9,8 +9,8 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// healthy versions or the live preview surface from loading. Validation is intentionally release-local: every version
 /// is checked independently for a readable tree root, the required landing and search pages, the search index, and
 /// the shared search runtime assets that exact-version pages depend on. Exact trees are otherwise treated as immutable,
-/// self-contained artifacts: outline-aware exports should include the page-local outline runtime they reference, while
-/// historical trees are not crawled or upgraded at host startup. Public
+/// self-contained artifacts: outline-aware and rich-authoring exports should include the page-local runtimes they
+/// reference, while historical trees are not crawled or upgraded at host startup. Public
 /// <see cref="AppSurfaceDocsResolvedVersion.AvailabilityIssue"/> values are sanitized for archive UI consumption, while
 /// filesystem paths and exception details stay in structured logs only.
 /// </remarks>
