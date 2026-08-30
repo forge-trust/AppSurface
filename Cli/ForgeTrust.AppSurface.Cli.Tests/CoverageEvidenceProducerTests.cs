@@ -26,7 +26,9 @@ public sealed class CoverageEvidenceProducerTests
     public async Task RunAsync_ShouldExplainUnavailableAndInvalidCoverageInputsWithoutStartingTheCore()
     {
         var producer = CreateProducer(new ThrowingCoverageRunProcessRunner(new InvalidOperationException("The core should not start.")));
-        var writers = CoverageTextWriters.Create(new StringWriter(), new StringWriter());
+        using var standardOutputWriter = new StringWriter();
+        using var standardErrorWriter = new StringWriter();
+        var writers = CoverageTextWriters.Create(standardOutputWriter, standardErrorWriter);
 
         var unsupportedKind = await producer.RunAsync(
             CreateDeclaration(kind: "browser"),
@@ -76,7 +78,9 @@ public sealed class CoverageEvidenceProducerTests
         var solutionPath = Path.Join(directory.Path, "sample.slnx");
         await File.WriteAllTextAsync(solutionPath, "{}");
         var producer = CreateProducer(new ThrowingCoverageRunProcessRunner(new CoverageExecutionException(message)));
-        var writers = CoverageTextWriters.Create(new StringWriter(), new StringWriter());
+        using var standardOutputWriter = new StringWriter();
+        using var standardErrorWriter = new StringWriter();
+        var writers = CoverageTextWriters.Create(standardOutputWriter, standardErrorWriter);
 
         var result = await producer.RunAsync(
             CreateDeclaration(),
@@ -108,12 +112,14 @@ public sealed class CoverageEvidenceProducerTests
         foreach (var failure in terminalFailures)
         {
             var producer = CreateProducer(new ThrowingCoverageRunProcessRunner(failure));
+            using var standardOutputWriter = new StringWriter();
+            using var standardErrorWriter = new StringWriter();
             var observed = await Record.ExceptionAsync(() => producer.RunAsync(
                 CreateDeclaration(),
                 solutionPath,
                 Path.Join(directory.Path, Guid.NewGuid().ToString("N")),
                 null,
-                CoverageTextWriters.Create(new StringWriter(), new StringWriter()),
+                CoverageTextWriters.Create(standardOutputWriter, standardErrorWriter),
                 CancellationToken.None));
 
             Assert.Same(failure, observed);
@@ -133,13 +139,15 @@ public sealed class CoverageEvidenceProducerTests
         var snapshot = new EvidenceDiffSnapshot(diffBytes, "feature.diff", Convert.ToHexString(SHA256.HashData(diffBytes)));
         var producer = CreateProducer(new PassingCoverageRunProcessRunner());
         var outputDirectory = Path.Join(directory.Path, "output");
+        using var standardOutputWriter = new StringWriter();
+        using var standardErrorWriter = new StringWriter();
 
         var result = await producer.RunAsync(
             CreateDeclaration(coverageGate: new EvidenceCoverageGateRequirements(95, 85, PatchLineMode: "codecov", TolerancePercent: 0)),
             solutionPath,
             outputDirectory,
             snapshot,
-            CoverageTextWriters.Create(new StringWriter(), new StringWriter()),
+            CoverageTextWriters.Create(standardOutputWriter, standardErrorWriter),
             CancellationToken.None);
 
         Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
