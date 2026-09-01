@@ -157,6 +157,18 @@ public sealed class IdentityBootstrapTests
         ];
     }
 
+    [Fact]
+    public void SequenceHandler_WhenDisposed_DisposesUnconsumedResponseContent()
+    {
+        var content = new TrackingContent();
+        using var response = new HttpResponseMessage { Content = content };
+        using var handler = new SequenceHandler(response);
+
+        handler.Dispose();
+
+        Assert.True(content.IsDisposed);
+    }
+
     private static Dictionary<string, string?> CreateEnvironment(
         string authority,
         string realmName,
@@ -189,6 +201,42 @@ public sealed class IdentityBootstrapTests
             return _responses.Count > 0
                 ? _responses.Dequeue()
                 : throw new InvalidOperationException("The test did not configure a response for this request.");
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                while (_responses.Count > 0)
+                {
+                    _responses.Dequeue().Dispose();
+                }
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class TrackingContent : HttpContent
+    {
+        internal bool IsDisposed { get; private set; }
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => Task.CompletedTask;
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return true;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                IsDisposed = true;
+            }
+
+            base.Dispose(disposing);
         }
     }
 
