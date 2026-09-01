@@ -390,11 +390,11 @@ public sealed class AppSurfaceWebPushOptionsAndSenderTests
 
         try
         {
-            var result = await send.WaitAsync(TimeSpan.FromSeconds(15));
+            await custody.CallbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var result = await send.WaitAsync(TimeSpan.FromSeconds(5));
 
             Assert.Equal(AppSurfaceWebPushCleanupState.Failed, result.CleanupState);
             Assert.InRange(elapsed.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(10));
-            await custody.CallbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
         }
         finally
         {
@@ -672,7 +672,7 @@ public sealed class AppSurfaceWebPushOptionsAndSenderTests
         public async Task ReleaseCallbackAsync()
         {
             callbackRelease.Set();
-            await CallbackCompleted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            await CallbackCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
             callbackRelease.Dispose();
         }
     }

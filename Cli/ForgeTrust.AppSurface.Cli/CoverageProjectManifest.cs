@@ -1,7 +1,11 @@
 using System.Text;
 using System.Text.Json;
 
+#if EVIDENCE_COVERAGE_CORE
+namespace ForgeTrust.AppSurface.Evidence.Coverage;
+#else
 namespace ForgeTrust.AppSurface.Cli;
+#endif
 
 /// <summary>
 /// Writes the stable binding between one coverage-run project directory and the project that owns it.

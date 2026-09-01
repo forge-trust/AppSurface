@@ -9,15 +9,28 @@ using System.Text;
 using System.Text.Json;
 using System.Xml;
 using System.Xml.Linq;
+#if !EVIDENCE_COVERAGE_CORE
 using CliFx;
 using CliFx.Binding;
 using CliFx.Infrastructure;
+#endif
 using CliWrap;
 using CliWrap.Exceptions;
 using CliCommand = CliWrap.Cli;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 
+#if EVIDENCE_COVERAGE_CORE
+using CommandException = ForgeTrust.AppSurface.Evidence.Coverage.CoverageExecutionException;
+using IConsole = ForgeTrust.AppSurface.Evidence.Coverage.CoverageTextWriters;
+#endif
+
+#if EVIDENCE_COVERAGE_CORE
+namespace ForgeTrust.AppSurface.Evidence.Coverage;
+#else
 namespace ForgeTrust.AppSurface.Cli;
+#endif
 
+#if EVIDENCE_CLI_ADAPTER
 /// <summary>
 /// Runs .NET test projects with Coverlet and produces merged private coverage artifacts.
 /// </summary>
@@ -232,16 +245,26 @@ internal sealed partial class CoverageRunCommand : ICommand
     internal async ValueTask ExecuteAsync(IConsole console, CancellationToken cancellationToken)
     {
         var request = CreateRequest();
-        var result = await _workflow.RunAsync(request, console, cancellationToken);
-        if (!result.Success)
+        try
         {
-            throw CoverageRunDiagnostics.Create(
-                "ASCOV120",
-                "Coverage run failed.",
-                "One or more test, merge, or artifact steps returned a failure.",
-                "Open the per-project logs and timings.json listed above.",
-                "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics",
-                result.FailureLogPath ?? result.CoveragePath);
+            var result = await _workflow.RunAsync(
+                request,
+                CoverageTextWriters.Create(console.Output, console.Error),
+                cancellationToken);
+            if (!result.Success)
+            {
+                throw CoverageRunDiagnostics.Create(
+                    "ASCOV120",
+                    "Coverage run failed.",
+                    "One or more test, merge, or artifact steps returned a failure.",
+                    "Open the per-project logs and timings.json listed above.",
+                    "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics",
+                    result.FailureLogPath ?? result.CoveragePath);
+            }
+        }
+        catch (CoverageExecutionException exception)
+        {
+            throw CoverageCommandExceptionMapper.Map(exception);
         }
     }
 
@@ -434,6 +457,9 @@ internal sealed partial class CoverageRunCommand : ICommand
     }
 }
 
+#endif
+
+#if EVIDENCE_COVERAGE_CORE
 /// <summary>
 /// Request for running and merging coverage from one or more .NET test projects.
 /// </summary>
@@ -3856,3 +3882,4 @@ internal static class CoverageRunDiagnostics
         return new CommandException(builder.ToString());
     }
 }
+#endif

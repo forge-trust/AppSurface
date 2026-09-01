@@ -14,17 +14,32 @@
     <PackageTags>appsurface;evidence;ci;coverage;e2e;release-notes;changelog;canary;deployment;durable;postgresql;schema;migrations;appsurfacedocs;documentation;cleanup;secrets;cli;dotnet-tool</PackageTags>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <DefineConstants>$(DefineConstants);EVIDENCE_CLI_ADAPTER</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\Console\ForgeTrust.AppSurface.Console\ForgeTrust.AppSurface.Console.csproj" />
     <ProjectReference Include="..\..\Config\ForgeTrust.AppSurface.Config.GoogleSecretManager\ForgeTrust.AppSurface.Config.GoogleSecretManager.csproj" />
     <ProjectReference Include="..\..\Config\ForgeTrust.AppSurface.Config.LocalSecrets\ForgeTrust.AppSurface.Config.LocalSecrets.csproj" />
     <ProjectReference Include="..\..\Durable\ForgeTrust.AppSurface.Durable.PostgreSql\ForgeTrust.AppSurface.Durable.PostgreSql.csproj" />
+    <ProjectReference Include="..\..\Evidence\ForgeTrust.AppSurface.Evidence.Coverage\ForgeTrust.AppSurface.Evidence.Coverage.csproj" />
     <ProjectReference Include="..\..\Evidence\ForgeTrust.AppSurface.Evidence.Cli\ForgeTrust.AppSurface.Evidence.Cli.csproj" />
     <ProjectReference Include="..\..\ForgeTrust.AppSurface.Core\ForgeTrust.AppSurface.Core.csproj" />
     <ProjectReference Include="..\..\tools\ForgeTrust.AppSurface.ReleaseContracts\ForgeTrust.AppSurface.ReleaseContracts.csproj" />
     <ProjectReference Include="..\..\Web\ForgeTrust.AppSurface.Web\ForgeTrust.AppSurface.Web.csproj" />
     <ProjectReference Include="..\..\Web\ForgeTrust.AppSurface.Docs.Standalone\ForgeTrust.AppSurface.Docs.Standalone.csproj" />
     <ProjectReference Include="..\..\Web\ForgeTrust.RazorWire.Cli\ForgeTrust.RazorWire.Cli.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="CoverageRunDrivers.cs" />
+    <Compile Remove="CoverageRunWatchdog.cs" />
+    <Compile Remove="CoverageRunArtifactReader.cs" />
+    <Compile Remove="CoverageRunOutputLease.cs" />
+    <Compile Remove="CoverageProjectManifest.cs" />
+    <Compile Remove="CoverageRunSlowTestDiagnostics.cs" />
+    <Compile Remove="CoverageFileSystemInterop.cs" />
   </ItemGroup>
 
   <ItemGroup>

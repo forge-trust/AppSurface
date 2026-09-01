@@ -5,6 +5,7 @@ using CliFx.Binding;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Evidence.Planner;
 
 namespace ForgeTrust.AppSurface.Cli;
@@ -138,9 +139,9 @@ internal sealed partial class EvidenceExplainCommand(EvidenceCliWorkflow workflo
 /// Executes the selected built-in evidence producer and emits a truthful manifest.
 /// </summary>
 [Command("evidence run", Description = "Run selected built-in evidence and write a plan, manifest, and human summary.")]
-internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, CoverageRunWorkflow coverageRunWorkflow) : EvidencePlanningCommandBase(workflow)
+internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, CoverageEvidenceProducer coverageProducer) : EvidencePlanningCommandBase(workflow)
 {
-    private readonly CoverageRunWorkflow _coverageRunWorkflow = coverageRunWorkflow ?? throw new ArgumentNullException(nameof(coverageRunWorkflow));
+    private readonly CoverageEvidenceProducer _coverageProducer = coverageProducer ?? throw new ArgumentNullException(nameof(coverageProducer));
 
     /// <summary>Gets or sets the output directory for plan, manifest, and producer artifacts.</summary>
     [CommandOption("output", Description = "Evidence artifact directory. Defaults to TestResults/evidence.")]
@@ -160,7 +161,8 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
         try
         {
             var cancellationToken = console.RegisterCancellationHandler();
-            var plan = await Workflow.ExplainAsync(CreatePlanningRequest(), cancellationToken);
+            var resolution = await Workflow.ResolveAsync(CreatePlanningRequest(), cancellationToken);
+            var plan = resolution.Plan;
             await Workflow.WritePlanAsync(plan, OutputDirectory, cancellationToken);
             var results = new List<EvidenceProducerResult>();
             var resourceResults = plan.Profile.Resources
@@ -182,7 +184,7 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
             {
                 foreach (var producer in plan.Profile.Producers)
                 {
-                    results.Add(await RunProducerAsync(producer, console, cancellationToken));
+                    results.Add(await RunProducerAsync(producer, resolution.DiffSnapshot, console, cancellationToken));
                 }
             }
 
@@ -206,114 +208,19 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
         }
     }
 
-    private async Task<EvidenceProducerResult> RunProducerAsync(EvidenceProducerDeclaration producer, IConsole console, CancellationToken cancellationToken)
+    private async Task<EvidenceProducerResult> RunProducerAsync(
+        EvidenceProducerDeclaration producer,
+        EvidenceDiffSnapshot? diffSnapshot,
+        IConsole console,
+        CancellationToken cancellationToken)
     {
-        if (!string.Equals(producer.Kind, "coverage", StringComparison.OrdinalIgnoreCase))
-        {
-            return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Unavailable, [], $"Producer kind '{producer.Kind}' requires an explicit consumer EvidenceHost registration.");
-        }
-
-        if (string.IsNullOrWhiteSpace(SolutionPath))
-        {
-            return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Unavailable, [], "The coverage producer requires --solution so it can reuse AppSurface coverage discovery.");
-        }
-
-        if (producer.CoverageGate is null)
-        {
-            return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Invalid, [], "Coverage producer declarations must include explicit coverageGate requirements before they can close a coverage assertion.");
-        }
-
-        if ((producer.CoverageGate.MinPatchLinePercent.HasValue || producer.CoverageGate.MinPatchBranchPercent.HasValue)
-            && string.IsNullOrWhiteSpace(DiffFile))
-        {
-            return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Unavailable, [], "The declared patch coverage gate requires --diff-file so the plan and coverage gate use the same explicit CI diff.");
-        }
-
-        var request = new CoverageRunRequest(
+        return await _coverageProducer.RunAsync(
+            producer,
             SolutionPath,
-            TestProjects: [],
-            ExcludeTestProjects: [],
-            OutputDirectory: Path.Join(OutputDirectory, "coverage"),
-            Configuration: "Debug",
-            Parallelism: 1,
-            ScheduleMode: CoverageRunScheduleMode.InputOrder,
-            ScheduleTimingsPath: null,
-            PriorityTestProjects: [],
-            NoRestore: false,
-            Build: true,
-            NoBuild: false,
-            IncludeFilter: null,
-            ExcludeFilter: "[*.Tests]*,[*.IntegrationTests]*",
-            DryRun: false,
-            NoDiscoverExclusive: false,
-            ExclusiveTestProjects: [],
-            Loggers: [],
-            TestArguments: [],
-            TestResults: CoverageRunTestResultFormat.None,
-            SlowTestDiagnostics: false,
-            Clean: true,
-            Verbosity: "minimal",
-            HeartbeatInterval: TimeSpan.FromSeconds(30),
-            NoProgressTimeout: TimeSpan.FromMinutes(10),
-            WatchdogMode: CoverageRunWatchdogMode.Warn,
-            CoverageDriver: CoverageRunDriver.Collector,
-            RequireNonSandbox: false);
-        try
-        {
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            deadline.CancelAfter(TimeSpan.FromSeconds(producer.TimeoutSeconds));
-            var result = await _coverageRunWorkflow.RunAsync(request, console, deadline.Token);
-            if (!result.Success)
-            {
-                return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Failed, [], "The existing AppSurface coverage workflow reported a failed test, merge, or artifact step.");
-            }
-
-            var gateRequest = CreateCoverageGateRequest(result.CoveragePath, producer.CoverageGate);
-            var gateResult = await CoverageGateEvaluator.EvaluateAsync(gateRequest, deadline.Token);
-            await CoverageGateReportWriter.WriteAsync(gateResult, gateRequest, deadline.Token);
-            return gateResult.Passed
-                ? new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Passed, producer.AssertionIds, $"Coverage gate passed: {gateResult.MarkdownReportPath}")
-                : new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Failed, [], $"Coverage gate did not meet its declared threshold. See {gateResult.MarkdownReportPath}.");
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.TimedOut, [], "The existing AppSurface coverage workflow exceeded its bounded execution window.");
-        }
-        catch (Exception exception) when (IsNonFatalException(exception))
-        {
-            return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Failed, [], $"The existing AppSurface coverage workflow failed with {exception.GetType().Name}.");
-        }
-    }
-
-    private static bool IsNonFatalException(Exception exception) =>
-        exception is not OutOfMemoryException
-            and not StackOverflowException
-            and not AccessViolationException
-            and not AppDomainUnloadedException;
-
-    private CoverageGateRequest CreateCoverageGateRequest(string coveragePath, EvidenceCoverageGateRequirements requirements)
-    {
-        ArgumentNullException.ThrowIfNull(requirements);
-        var outputDirectory = Path.GetDirectoryName(coveragePath) ?? OutputDirectory;
-        var patchCoverage = string.IsNullOrWhiteSpace(DiffFile)
-            ? null
-            : new CoveragePatchRequest(
-                GitRepositoryRootResolver.FindRepositoryRoot(Directory.GetCurrentDirectory()),
-                PatchDiffSource.ForFile(Path.GetFullPath(DiffFile), Path.GetFileName(DiffFile), 20L * 1024 * 1024),
-                requirements.MinPatchLinePercent,
-                requirements.MinPatchBranchPercent,
-                string.Equals(requirements.PatchLineMode, "codecov", StringComparison.OrdinalIgnoreCase)
-                    ? PatchLineMode.Codecov
-                    : PatchLineMode.Measurable);
-        return new CoverageGateRequest(
-            coveragePath,
-            outputDirectory,
-            requirements.MinLinePercent,
-            requirements.MinBranchPercent,
-            WriteGithubSummary: false,
-            GithubStepSummaryPath: null,
-            patchCoverage,
-            requirements.TolerancePercent);
+            OutputDirectory,
+            diffSnapshot,
+            CoverageTextWriters.Create(console.Output, console.Error),
+            cancellationToken);
     }
 
     private static async Task WriteGitHubSummaryAsync(EvidenceManifest manifest, CancellationToken cancellationToken)

@@ -401,6 +401,13 @@ public sealed class EvidencePlannerTests
         Assert.Equal("no-evidence", diffPlan.Profile.Id);
         Assert.Equal("docs/New.md", Assert.Single(diffPlan.ChangedPaths).Path);
 
+        var resolution = await workflow.ResolveAsync(new EvidencePlanningRequest(policyPath, [], diffPath), CancellationToken.None);
+        await File.WriteAllTextAsync(diffPath, "--- a/src/Old.cs\n+++ b/src/Replaced.cs\n");
+        var snapshot = Assert.IsType<EvidenceDiffSnapshot>(resolution.DiffSnapshot);
+        Assert.Contains("docs/New.md", snapshot.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("src/Replaced.cs", snapshot.Text, StringComparison.Ordinal);
+        Assert.Equal("docs/New.md", Assert.Single(resolution.Plan.ChangedPaths).Path);
+
         var plan = await workflow.ExplainAsync(new EvidencePlanningRequest(policyPath, ["docs/readme.md"], null), CancellationToken.None);
         var output = Path.Join(directory.Path, "output");
         await workflow.WritePlanAsync(plan, output, CancellationToken.None);
@@ -412,6 +419,54 @@ public sealed class EvidencePlannerTests
 
         var missingEvidenceException = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.VerifyAsync(Path.Join(output, "missing-plan.json"), Path.Join(output, "missing-manifest.json"), CancellationToken.None));
         Assert.Contains("ASEVD208", missingEvidenceException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CliWorkflow_ShouldRejectAnOversizedDiffWhileStreamingIt()
+    {
+        using var directory = TestDirectory.Create();
+        var policyPath = Path.Join(directory.Path, "policy.json");
+        await File.WriteAllBytesAsync(policyPath, EvidenceCanonicalJson.Serialize(CreatePolicy()));
+        var diffPath = Path.Join(directory.Path, "oversized.diff");
+        await File.WriteAllBytesAsync(diffPath, new byte[(20 * 1024 * 1024) + 1]);
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
+
+        var exception = await Assert.ThrowsAsync<EvidenceCliException>(() =>
+            workflow.ExplainAsync(new EvidencePlanningRequest(policyPath, [], diffPath), CancellationToken.None));
+
+        Assert.Contains("ASEVD206", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("exceeds the 20971520 byte limit", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CliWorkflow_ShouldRejectADiffReplacedWithOversizedContentWhenOpened()
+    {
+        using var directory = TestDirectory.Create();
+        var policyPath = Path.Join(directory.Path, "policy.json");
+        await File.WriteAllBytesAsync(policyPath, EvidenceCanonicalJson.Serialize(CreatePolicy()));
+        var diffPath = Path.Join(directory.Path, "changed.diff");
+        await File.WriteAllTextAsync(diffPath, "--- a/docs/Old.md\n+++ b/docs/New.md\n");
+        var diffFileAccess = new ReplacingEvidenceDiffFileAccess(diffPath, new byte[(20 * 1024 * 1024) + 1]);
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner(), diffFileAccess);
+
+        var exception = await Assert.ThrowsAsync<EvidenceCliException>(() =>
+            workflow.ExplainAsync(new EvidencePlanningRequest(policyPath, [], diffPath), CancellationToken.None));
+
+        Assert.True(diffFileAccess.WasOpened);
+        Assert.Contains("ASEVD206", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("exceeds the 20971520 byte limit", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EvidenceDiffSnapshot_ShouldDefensivelyCopyBytesAndRejectInvalidDigests()
+    {
+        var bytes = new byte[] { 1, 2, 3 };
+        var snapshot = new EvidenceDiffSnapshot(bytes, "change.diff", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)));
+        bytes[0] = 99;
+
+        Assert.Equal((byte)1, snapshot.Bytes.Span[0]);
+        Assert.Throws<ArgumentException>(() => new EvidenceDiffSnapshot([1], "change.diff", "digest"));
+        Assert.Throws<ArgumentException>(() => new EvidenceDiffSnapshot([1], "change.diff", new string('g', 64)));
     }
 
     [Fact]
@@ -764,6 +819,19 @@ public sealed class EvidencePlannerTests
 
         Assert.Equal("ASEVD999", diagnostic.Code);
         Assert.Equal("Correct the input and rerun.", diagnostic.Fix);
+    }
+
+    private sealed class ReplacingEvidenceDiffFileAccess(string expectedPath, byte[] replacement) : IEvidenceDiffFileAccess
+    {
+        public bool WasOpened { get; private set; }
+
+        public Stream OpenRead(string path)
+        {
+            Assert.Equal(expectedPath, path);
+            File.WriteAllBytes(path, replacement);
+            WasOpened = true;
+            return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        }
     }
 
     private static void AssertPolicyCode(EvidencePolicy policy, string code)

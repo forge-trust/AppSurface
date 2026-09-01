@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 54
-- Evidence status: manifest evidence complete: 39; transitive package evidence complete: 6; proof-host evidence complete: 2; excluded by publish decision: 7
-- Product families: AppSurface: 37; Forge Trust: 2; Internal support: 12; RazorWire: 3
+- Packages: 55
+- Evidence status: manifest evidence complete: 39; transitive package evidence complete: 7; proof-host evidence complete: 2; excluded by publish decision: 7
+- Product families: AppSurface: 37; Forge Trust: 2; Internal support: 13; RazorWire: 3
 
 ## Package evidence matrix
 
@@ -45,7 +45,8 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | AppSurface | `ForgeTrust.AppSurface.Deployment.GcpCloudRun` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Deployment` | `ForgeTrust.AppSurface.Deployment` | [README](../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Evidence.Contracts` | public | publish | manifest evidence complete | None | None | None | [README](../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Evidence.Planner` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Evidence.Contracts` | `ForgeTrust.AppSurface.Evidence.Contracts` | [README](../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md) | [notes](../releases/current.md) |
-| AppSurface | `ForgeTrust.AppSurface.Evidence.Cli` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Evidence.Contracts`<br />`ForgeTrust.AppSurface.Evidence.Planner` | `ForgeTrust.AppSurface.Evidence.Contracts`<br />`ForgeTrust.AppSurface.Evidence.Planner` | [README](../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md) | [notes](../releases/current.md) |
+| Internal support | `ForgeTrust.AppSurface.Evidence.Coverage` | support | support publish | transitive package evidence complete | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
+| AppSurface | `ForgeTrust.AppSurface.Evidence.Cli` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Evidence.Contracts`<br />`ForgeTrust.AppSurface.Evidence.Planner` | `ForgeTrust.AppSurface.Evidence.Contracts`<br />`ForgeTrust.AppSurface.Evidence.Coverage`<br />`ForgeTrust.AppSurface.Evidence.Planner` | [README](../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Evidence.Aspire` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Evidence.Contracts` | `ForgeTrust.AppSurface.Evidence.Contracts` | [README](../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Aspire` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Console`<br />`ForgeTrust.AppSurface.Deployment` | [README](../Aspire/ForgeTrust.AppSurface.Aspire/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Aspire.Testing` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Aspire` | `ForgeTrust.AppSurface.Aspire` | [README](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md) | [notes](../releases/current.md) |

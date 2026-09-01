@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj" />
+    <ProjectReference Include="../ForgeTrust.AppSurface.Evidence.Coverage/ForgeTrust.AppSurface.Evidence.Coverage.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Evidence.Planner/ForgeTrust.AppSurface.Evidence.Planner.csproj" />
   </ItemGroup>
 
