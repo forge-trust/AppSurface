@@ -144,6 +144,51 @@ public sealed class AppSurfaceKeycloakLocalSeedTests
     }
 
     [Fact]
+    public void WithLocalSeed_WhenTheFirstStageHasAPredecessorOrANameIsReused_RejectsItBeforeTheFactoryRuns()
+    {
+        using var directory = new TempDirectory();
+        var builder = DistributedApplication.CreateBuilder([]);
+        var keycloak = AddKeycloak(builder, directory.Path);
+        var first = keycloak.WithLocalSeed(
+            "identity-bootstrap",
+            context => AddProject(builder, context.ResourceName),
+            options => AllowCurrentEnvironment(builder, options));
+        var rejectedFactoryCalls = 0;
+
+        var duplicateName = Assert.Throws<AppSurfaceKeycloakException>(() => keycloak.WithLocalSeed(
+            "identity-bootstrap",
+            _ =>
+            {
+                rejectedFactoryCalls++;
+                return AddProject(builder, "should-not-exist");
+            },
+            options =>
+            {
+                AllowCurrentEnvironment(builder, options);
+                options.After(first);
+            }));
+
+        var isolatedBuilder = DistributedApplication.CreateBuilder([]);
+        var isolatedKeycloak = AddKeycloak(isolatedBuilder, directory.Path);
+        var firstStageWithPredecessor = Assert.Throws<AppSurfaceKeycloakException>(() => isolatedKeycloak.WithLocalSeed(
+            "identity-bootstrap",
+            _ =>
+            {
+                rejectedFactoryCalls++;
+                return AddProject(isolatedBuilder, "should-not-exist");
+            },
+            options =>
+            {
+                AllowCurrentEnvironment(isolatedBuilder, options);
+                options.After(first);
+            }));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.LocalSeedInvalid, duplicateName.Code);
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.LocalSeedInvalid, firstStageWithPredecessor.Code);
+        Assert.Equal(0, rejectedFactoryCalls);
+    }
+
+    [Fact]
     public void WithLocalSeed_WhenTheFactoryThrowsReturnsNullOrCreatesTheWrongResource_FailsWithoutAppendingTheRejectedStage()
     {
         using var directory = new TempDirectory();

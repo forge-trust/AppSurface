@@ -1,8 +1,12 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace AuthAspireKeycloakLifecycleWorker;
 
 /// <summary>
 /// Starts the private finite worker used by the #782 feasibility AppHost graph.
 /// </summary>
+[ExcludeFromCodeCoverage(
+    Justification = "The executable entry point only forwards the AppHost-projected mode to the covered sample worker runner.")]
 public static class Program
 {
     /// <summary>

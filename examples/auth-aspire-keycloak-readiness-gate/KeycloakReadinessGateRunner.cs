@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
 namespace AuthAspireKeycloakReadinessGate;
@@ -24,6 +25,8 @@ internal static class KeycloakReadinessGateRunner
     /// <param name="cancellationToken">Cancels the finite worker during AppHost shutdown.</param>
     /// <returns><see cref="SuccessExitCode"/> on success, <see cref="FailureExitCode"/> on a failed probe, or
     /// <see cref="CancellationExitCode"/> when cancellation wins.</returns>
+    [ExcludeFromCodeCoverage(
+        Justification = "The default probe adapter delegates to the injectable RunAsync overload, which covers the readiness gate's observable behavior.")]
     internal static Task<int> RunAsync(
         Func<string, string?> getEnvironmentVariable,
         TextWriter standardError,

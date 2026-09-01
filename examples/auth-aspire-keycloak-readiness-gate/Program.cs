@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Loader;
 
 namespace AuthAspireKeycloakReadinessGate;
@@ -5,6 +6,8 @@ namespace AuthAspireKeycloakReadinessGate;
 /// <summary>
 /// Entry point for the finite sample-only readiness gate.
 /// </summary>
+[ExcludeFromCodeCoverage(
+    Justification = "Process signal registration and Console lifetime wiring delegate to the covered readiness-gate runner seam.")]
 public static class Program
 {
     /// <summary>

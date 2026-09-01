@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Loader;
 using System.Text.Json;
 
@@ -12,6 +13,8 @@ internal static class AppSurfaceKeycloakRealmReadyRunner
     internal const int FailureExitCode = 1;
     internal const int SuccessExitCode = 0;
 
+    [ExcludeFromCodeCoverage(
+        Justification = "The default probe adapter delegates to the injectable RunAsync overload, which covers the runner's observable success and failure behavior.")]
     internal static async Task<int> RunAsync(
         Func<string, string?> getEnvironmentVariable,
         TextWriter standardError,
@@ -62,6 +65,8 @@ internal static class AppSurfaceKeycloakRealmReadyRunner
         }
     }
 
+    [ExcludeFromCodeCoverage(
+        Justification = "Process signal registration and Console lifetime wiring delegate to the covered runner seam and are exercised only by the executable host.")]
     internal static async Task<int> MainAsync()
     {
         using var cancellation = new CancellationTokenSource();

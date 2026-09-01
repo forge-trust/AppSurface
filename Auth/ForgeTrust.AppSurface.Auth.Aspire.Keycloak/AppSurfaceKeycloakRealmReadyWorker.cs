@@ -1,8 +1,12 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
 /// <summary>
 /// Resolves the framework-dependent executable payload for a package or project-reference AppHost.
 /// </summary>
+[ExcludeFromCodeCoverage(
+    Justification = "The worker resolver is executable-payload plumbing; graph and resolver tests exercise package, consumer-output, and project-reference invocations through the public realm-ready flow.")]
 internal static class AppSurfaceKeycloakRealmReadyWorker
 {
     private const string ConsumerOutputWorkerDirectoryName = "appsurface-keycloak-realm-ready";

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Net;
 using System.Text.Json;
@@ -25,6 +26,8 @@ public static class Program
     /// </summary>
     /// <param name="args">Command-line arguments.</param>
     /// <returns>Zero when verification succeeds; otherwise non-zero.</returns>
+    [ExcludeFromCodeCoverage(
+        Justification = "The process entry point only owns HttpClient lifetime and composes the separately covered verifier and local-store seams.")]
     public static async Task<int> Main(string[] args)
     {
         using var handler = new HttpClientHandler { AllowAutoRedirect = false };

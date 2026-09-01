@@ -1,8 +1,12 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
 /// <summary>
 /// Hosts the package's finite realm-ready executable mode.
 /// </summary>
+[ExcludeFromCodeCoverage(
+    Justification = "The executable entry point is a command-line trampoline to the covered realm-ready runner seam.")]
 internal static class AppSurfaceKeycloakRealmReadyEntryPoint
 {
     private const string RealmReadyArgument = "--appsurface-keycloak-realm-ready";

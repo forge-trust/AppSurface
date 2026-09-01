@@ -35,6 +35,17 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         Assert.Equal("appsurface-dev", result.Realm);
     }
 
+    [Fact]
+    public void Constructor_WhenTheRealmReadyWorkerSuppliesExplicitEvidenceInputs_AcceptsThem()
+    {
+        using var directory = new TempDirectory();
+        var options = CreateOptions(directory.Path);
+
+        var probe = new AppSurfaceKeycloakReadinessProbe(options, "application", ["admin", "viewer"]);
+
+        Assert.NotNull(probe);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("other-theme")]

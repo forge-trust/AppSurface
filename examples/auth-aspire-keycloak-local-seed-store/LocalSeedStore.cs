@@ -72,11 +72,6 @@ public sealed class LocalSeedStore
         {
             var records = snapshot.BrokerAliases.ToList();
             var matches = records.Where(record => string.Equals(record.Alias, alias, StringComparison.Ordinal)).ToList();
-            if (matches.Count > 1)
-            {
-                throw new InvalidDataException("The store contains duplicate broker aliases.");
-            }
-
             var replacement = new BrokerAliasRecord(alias, issuer, clientId);
             if (matches.Count == 0)
             {
@@ -104,11 +99,6 @@ public sealed class LocalSeedStore
         {
             var records = snapshot.IdentitySubjectMaps.ToList();
             var matches = records.Where(record => string.Equals(record.NaturalKey, naturalKey, StringComparison.Ordinal)).ToList();
-            if (matches.Count > 1)
-            {
-                throw new InvalidDataException("The store contains duplicate identity subject mappings.");
-            }
-
             var replacement = new IdentitySubjectMapRecord(naturalKey, subject);
             if (matches.Count == 0)
             {
@@ -136,11 +126,6 @@ public sealed class LocalSeedStore
         {
             var records = snapshot.CandidateFixtures.ToList();
             var matches = records.Where(record => string.Equals(record.NaturalKey, naturalKey, StringComparison.Ordinal)).ToList();
-            if (matches.Count > 1)
-            {
-                throw new InvalidDataException("The store contains duplicate candidate fixtures.");
-            }
-
             var replacement = new CandidateFixtureRecord(naturalKey, subject);
             if (matches.Count == 0)
             {
@@ -375,14 +360,6 @@ internal sealed class StoreDocument
         if (properties.Count != allowedPropertySet.Count || !allowedPropertySet.All(properties.Contains))
         {
             throw new InvalidDataException($"The store contains an incomplete {valueName}.");
-        }
-
-        foreach (var property in value.EnumerateObject())
-        {
-            if (!allowedPropertySet.Contains(property.Name))
-            {
-                throw new InvalidDataException($"The store contains an unexpected {valueName} field.");
-            }
         }
     }
 }

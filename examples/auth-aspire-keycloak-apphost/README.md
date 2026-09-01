@@ -56,6 +56,9 @@ Keycloak healthy
 The `identity-bootstrap` project alone receives the typed secret administrator-password parameter. The package never
 resolves that value, and neither the web proof nor fixture project receives its parameter reference. The workers write
 only non-secret records to `.appsurface/auth-aspire-keycloak-local-seed-store.json` below the AppHost directory.
+Before the identity worker sends its administrator-password grant, it accepts only the AppHost-projected HTTPS
+`localhost` or `127.0.0.1` authority whose path is exactly `/realms/{realm}`. A remote host, HTTP authority, encoded
+path separator, or realm mismatch fails locally before any administrator credential reaches transport.
 
 The AppHost uses persistent Keycloak data deliberately. Each worker converges by a natural key, so a normal rerun
 leaves exactly one `local-broker` alias, one `founder -> subject-founder-001` mapping, and one `candidate:founder`

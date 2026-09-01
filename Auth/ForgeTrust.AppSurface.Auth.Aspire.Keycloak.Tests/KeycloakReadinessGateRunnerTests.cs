@@ -126,6 +126,36 @@ public sealed class KeycloakReadinessGateRunnerTests
             standardError.ToString());
     }
 
+    [Theory]
+    [InlineData(KeycloakReadinessGateEnvironment.RedirectUri, "https://keycloak.example.test:5059/signin-appsurface-oidc")]
+    [InlineData(KeycloakReadinessGateEnvironment.RedirectUri, "http://localhost:5059/not-the-callback")]
+    [InlineData(KeycloakReadinessGateEnvironment.PostLogoutRedirectUri, "http://localhost:5059/not-the-signout-callback")]
+    public async Task RunAsync_WhenARedirectUriIsNotTheProjectedLocalCallback_FailsBeforeTheProbe(
+        string environmentName,
+        string redirectUri)
+    {
+        var environment = CreateEnvironment();
+        environment[environmentName] = redirectUri;
+        using var standardError = new StringWriter();
+        var probeCalled = false;
+
+        var exitCode = await KeycloakReadinessGateRunner.RunAsync(
+            environment.GetValueOrDefault,
+            standardError,
+            (_, _) =>
+            {
+                probeCalled = true;
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        Assert.Equal(KeycloakReadinessGateRunner.FailureExitCode, exitCode);
+        Assert.False(probeCalled);
+        Assert.Equal(
+            $"AppSurface Keycloak readiness gate failed. Code: {AppSurfaceKeycloakDiagnosticCodes.InvalidOptions}." + Environment.NewLine,
+            standardError.ToString());
+    }
+
     [Fact]
     public async Task RunAsync_WhenCancellationWinsDuringAProbe_ReturnsTheDocumentedCancellationCode()
     {

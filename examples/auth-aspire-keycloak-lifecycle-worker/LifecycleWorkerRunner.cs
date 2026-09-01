@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace AuthAspireKeycloakLifecycleWorker;
 
 /// <summary>
@@ -41,6 +43,8 @@ internal static class LifecycleWorkerRunner
         return FailureExitCode;
     }
 
+    [ExcludeFromCodeCoverage(
+        Justification = "A cancelled infinite delay throws before its continuation can return; RunAsync covers the observable cancellation exit code.")]
     private static async Task<int> HangAsync(CancellationToken cancellationToken)
     {
         await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);

@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests" />
     <ProjectReference Include="../auth-aspire-keycloak-local-seed-store/AuthAspireKeycloakLocalSeedStore.csproj" />
   </ItemGroup>
 

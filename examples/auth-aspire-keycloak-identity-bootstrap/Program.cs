@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -15,15 +16,33 @@ public static class Program
     /// Obtains a master token, converges the local broker alias, and writes the deterministic subject mapping.
     /// </summary>
     /// <returns>Zero on success and a nonzero process code for every failure.</returns>
+    [ExcludeFromCodeCoverage(
+        Justification = "The process entry point only owns the HttpClient lifetime; RunAsync is exercised with a deterministic local transport seam.")]
     public static async Task<int> Main()
     {
+        using var httpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+        return await RunAsync(Environment.GetEnvironmentVariable, httpClient).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Runs the bootstrap operation with explicit environment and transport dependencies.
+    /// </summary>
+    /// <param name="getEnvironmentVariable">Reads the AppHost-projected local bootstrap environment.</param>
+    /// <param name="httpClient">Sends requests only after the local authority contract has been validated.</param>
+    /// <returns>Zero on success and a nonzero process code for every failure.</returns>
+    internal static async Task<int> RunAsync(
+        Func<string, string?> getEnvironmentVariable,
+        HttpClient httpClient)
+    {
+        ArgumentNullException.ThrowIfNull(getEnvironmentVariable);
+        ArgumentNullException.ThrowIfNull(httpClient);
+
         try
         {
-            var configuration = IdentityBootstrapConfiguration.Read(Environment.GetEnvironmentVariable);
-            using var httpClient = new HttpClient
-            {
-                Timeout = TimeSpan.FromSeconds(30),
-            };
+            var configuration = IdentityBootstrapConfiguration.Read(getEnvironmentVariable);
             var token = await KeycloakAdminClient.GetMasterTokenAsync(httpClient, configuration).ConfigureAwait(false);
             await KeycloakAdminClient.UpsertBrokerAliasAsync(httpClient, configuration, token).ConfigureAwait(false);
 
@@ -59,28 +78,46 @@ internal sealed record IdentityBootstrapConfiguration(
     internal static IdentityBootstrapConfiguration Read(Func<string, string?> getEnvironmentVariable)
     {
         ArgumentNullException.ThrowIfNull(getEnvironmentVariable);
+        var authority = Required(getEnvironmentVariable, "APPSURFACE_KEYCLOAK_LOCAL_SEED_AUTHORITY");
+        var realmName = Required(getEnvironmentVariable, "APPSURFACE_KEYCLOAK_LOCAL_SEED_REALM_NAME");
         return new(
-            ParseAuthority(Required(getEnvironmentVariable, "APPSURFACE_KEYCLOAK_LOCAL_SEED_AUTHORITY")),
-            Required(getEnvironmentVariable, "APPSURFACE_KEYCLOAK_LOCAL_SEED_REALM_NAME"),
+            ParseAuthority(authority, realmName),
+            realmName,
             Required(getEnvironmentVariable, "APPSURFACE_KEYCLOAK_LOCAL_SEED_PUBLIC_CLIENT_ID"),
             Required(getEnvironmentVariable, "LOCAL_SEED_ADMIN_USERNAME"),
             Required(getEnvironmentVariable, "LOCAL_SEED_ADMIN_PASSWORD"),
             Required(getEnvironmentVariable, "LOCAL_SEED_STORE_PATH"));
     }
 
-    private static Uri ParseAuthority(string value)
+    private static Uri ParseAuthority(string value, string realmName)
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out var authority)
-            || (authority.Scheme != Uri.UriSchemeHttp && authority.Scheme != Uri.UriSchemeHttps)
+            || !string.Equals(authority.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal)
+            || !IsLocalhost(authority)
+            || authority.Port is < 1 or > 65535
             || !string.IsNullOrEmpty(authority.UserInfo)
             || !string.IsNullOrEmpty(authority.Query)
-            || !string.IsNullOrEmpty(authority.Fragment))
+            || !string.IsNullOrEmpty(authority.Fragment)
+            || authority.OriginalString.Contains("%2f", StringComparison.OrdinalIgnoreCase)
+            || authority.OriginalString.Contains("%5c", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("The local seed authority is invalid.");
+        }
+
+        var pathSegments = authority.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (pathSegments.Length != 2
+            || !string.Equals(pathSegments[0], "realms", StringComparison.Ordinal)
+            || !string.Equals(pathSegments[1], realmName, StringComparison.Ordinal))
         {
             throw new InvalidDataException("The local seed authority is invalid.");
         }
 
         return authority;
     }
+
+    private static bool IsLocalhost(Uri authority) =>
+        string.Equals(authority.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(authority.Host, "127.0.0.1", StringComparison.Ordinal);
 
     private static string Required(Func<string, string?> getEnvironmentVariable, string name) =>
         string.IsNullOrWhiteSpace(getEnvironmentVariable(name))
