@@ -37,7 +37,7 @@ internal static class AppSurfaceKeycloakRealmReadyWorker
         }
 
         var consumerOutputWorker = CreateInvocation(
-            Path.Combine(assemblyDirectory, ConsumerOutputWorkerDirectoryName));
+            Path.Join(assemblyDirectory, ConsumerOutputWorkerDirectoryName));
         if (consumerOutputWorker is not null)
         {
             return consumerOutputWorker;
@@ -54,9 +54,9 @@ internal static class AppSurfaceKeycloakRealmReadyWorker
 
     private static AppSurfaceKeycloakRealmReadyWorkerInvocation? CreateInvocation(string workingDirectory)
     {
-        var workerAssemblyPath = Path.Combine(workingDirectory, $"{WorkerAssemblyName}.dll");
-        var workerRuntimeConfigPath = Path.Combine(workingDirectory, $"{WorkerAssemblyName}.runtimeconfig.json");
-        var workerDepsFilePath = Path.Combine(workingDirectory, $"{WorkerAssemblyName}.deps.json");
+        var workerAssemblyPath = Path.Join(workingDirectory, $"{WorkerAssemblyName}.dll");
+        var workerRuntimeConfigPath = Path.Join(workingDirectory, $"{WorkerAssemblyName}.runtimeconfig.json");
+        var workerDepsFilePath = Path.Join(workingDirectory, $"{WorkerAssemblyName}.deps.json");
         if (!File.Exists(workerAssemblyPath) || !File.Exists(workerRuntimeConfigPath) || !File.Exists(workerDepsFilePath))
         {
             return null;
