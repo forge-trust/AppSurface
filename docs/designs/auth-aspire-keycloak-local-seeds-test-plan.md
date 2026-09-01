@@ -55,8 +55,9 @@ broader secret-binding mechanism.
 
 ## Current Spike Evidence
 
-The initial #782 spike added a private finite gate at
-[`examples/auth-aspire-keycloak-readiness-gate`](../../examples/auth-aspire-keycloak-readiness-gate). Its public-API
+The initial #782 spike added a private finite gate in
+[`examples/auth-aspire-keycloak-readiness-gate`](https://github.com/forge-trust/AppSurface/tree/main/examples/auth-aspire-keycloak-readiness-gate).
+Its public-API
 findings are now embodied by the package-owned `RealmReady()` executable and the two consumer-owned projects in the
 [sample AppHost](../../examples/auth-aspire-keycloak-apphost). The package gate reconstructs the existing readiness
 probe from safe values and never accepts an administrator credential or arbitrary consumer configuration.
