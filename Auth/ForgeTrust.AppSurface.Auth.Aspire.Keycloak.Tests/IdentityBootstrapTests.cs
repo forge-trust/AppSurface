@@ -120,11 +120,11 @@ public sealed class IdentityBootstrapTests
     [Theory]
     [MemberData(nameof(FailingResponses))]
     public async Task RunAsync_WhenTheKeycloakAdminProtocolFails_ReturnsFailure(
-        HttpResponseMessage[] responses)
+        Func<HttpResponseMessage[]> createResponses)
     {
         using var directory = new TempDirectory();
         var environment = CreateEnvironment("https://localhost:8443/realms/appsurface-dev", "appsurface-dev", Path.Join(directory.Path, "store.json"));
-        using var handler = new SequenceHandler(responses);
+        using var handler = new SequenceHandler(createResponses());
         using var client = new HttpClient(handler);
 
         var exitCode = await Program.RunAsync(
@@ -136,24 +136,20 @@ public sealed class IdentityBootstrapTests
 
     public static IEnumerable<object[]> FailingResponses()
     {
-        yield return [new HttpResponseMessage[] { new(HttpStatusCode.InternalServerError) }];
-        yield return [new HttpResponseMessage[] { JsonResponse("{}") }];
+        yield return [CreateResponseSequence(static () => new(HttpStatusCode.InternalServerError))];
+        yield return [CreateResponseSequence(static () => JsonResponse("{}"))];
         yield return
         [
-            new HttpResponseMessage[]
-            {
-                JsonResponse("""{"access_token":"master-token"}"""),
-                new(HttpStatusCode.InternalServerError),
-            },
+            CreateResponseSequence(
+                static () => JsonResponse("""{"access_token":"master-token"}"""),
+                static () => new HttpResponseMessage(HttpStatusCode.InternalServerError)),
         ];
         yield return
         [
-            new HttpResponseMessage[]
-            {
-                JsonResponse("""{"access_token":"master-token"}"""),
-                new(HttpStatusCode.OK),
-                new(HttpStatusCode.InternalServerError),
-            },
+            CreateResponseSequence(
+                static () => JsonResponse("""{"access_token":"master-token"}"""),
+                static () => new HttpResponseMessage(HttpStatusCode.OK),
+                static () => new HttpResponseMessage(HttpStatusCode.InternalServerError)),
         ];
     }
 
@@ -185,6 +181,10 @@ public sealed class IdentityBootstrapTests
 
     private static HttpResponseMessage JsonResponse(string json) =>
         new(HttpStatusCode.OK) { Content = new StringContent(json) };
+
+    private static Func<HttpResponseMessage[]> CreateResponseSequence(
+        params Func<HttpResponseMessage>[] createResponses) =>
+        () => createResponses.Select(createResponse => createResponse()).ToArray();
 
     private sealed class SequenceHandler(params HttpResponseMessage[] responses) : HttpMessageHandler
     {
