@@ -379,3 +379,317 @@ details remain intentionally open and must be resolved before coding begins:
   leaves room for evidence without silently changing the architecture you approved.
 - You explicitly kept this quiet: no new inspection surface, only correct defaults,
   useful diagnostics, and consumer-real tests.
+
+## Autoplan Phase 1: CEO Review
+
+### System audit and premise challenge
+
+The current main package has five unconditional runtime-project references, while
+`RunTailwindBuildTask` selects only one candidate at build time. That is a real
+consumer cost, not a packaging proxy: project-reference consumers can receive native
+files without executing Tailwind. The selected boundary therefore remains correct.
+
+| Premise | Assessment | Decision |
+|---|---|---|
+| Package targets can choose a build host after restore. | Invalid. NuGet package build assets cannot introduce restore-affecting package items, and restore has already written the dependency closure. | Keep the bounded five-host probe as evidence only. |
+| One standalone CLI is a build-host tool, not a product runtime asset. | Valid. Build task execution, not the consuming application's target RID, chooses the executable. | Preserve the managed verified-cache direction. |
+| A primed verified cache supports offline builds. | Valid, provided absence, invalid content, and an unusable cache root fail before child-process start. | Make the recovery diagnostic and explicit override the complete offline contract. |
+| An explicit CLI path should be evaluated before host mapping. | Valid and already implied by the task's resolution order. | State it unambiguously: an existing explicit override may run on an otherwise unsupported host; unsupported-host rejection applies only when no override was supplied. |
+
+### Existing-code leverage
+
+| Need | Existing foundation | Planned reuse rather than replacement |
+|---|---|---|
+| Host selection | `Internal/TailwindRuntimeMap.cs` | Keep the five-RID map and Windows Arm64-to-`win-x64` policy; remove only runtime-package delivery assumptions. |
+| Cache identity | `Internal/TailwindDownloadCache.cs` | Keep the root precedence and version/RID/binary layout, but make it available to the task assembly and validate it before use. |
+| Download/hash verification | `runtimes/Tailwind.Runtime.Common.targets` | Move its pinned source, retry values, checksum semantics, and executable-bit policy into one internal runtime resolver. |
+| Build/watch process policy | `RunTailwindBuildTask`, `TailwindCliManager`, `TailwindWatchService` | Share verified acquisition while preserving build-mode no-`PATH` and watch-mode non-blocking development fallback. |
+| Consumer-real proof | `TailwindBuildTargetsTests` packed-fixture and static-web-asset tests | Evolve the existing package fixture and add archive/dependency/output assertions rather than substitute a mocked graph. |
+
+### Dream-state delta
+
+```text
+CURRENT
+  main package --> five native companion packages --> downstream runtime payloads
+       |                         |
+       +--> task probes paths     +--> one host binary eventually runs
+
+#790
+  main package --> managed targets + task assembly
+       |
+       +--> verified cache entry: version / actual build host / binary
+       +--> one host binary runs only for CSS build or development watch
+
+12-MONTH IDEAL
+  package consumers receive managed build integration only; build tools have an
+  explicit verified-cache contract, deterministic recovery, consumer-real proof,
+  and no accidental application payload ownership.
+```
+
+### Implementation alternatives
+
+| Approach | Effort | Risk | Coverage | Assessment |
+|---|---:|---:|---:|---|
+| Minimal: remove runtime references and require `TailwindCliPath`. | S | High adoption friction | 3/10 | Reject. It removes leakage by forcing every user to own host discovery, offline setup, and verification. |
+| Selected: internal managed verified cache resolver with one bounded restore-graph probe. | M | Medium, bounded by cache proofs | 10/10 | Keep. It preserves invisible defaults, verified offline reuse, and the existing build/watch escape hatches. |
+| Expand into a general AppSurface external-tool cache platform. | L | Medium-high new API/lifecycle surface | 7/10 for #790 | Defer. It duplicates a future platform decision before a second consumer proves the abstraction. |
+
+### Selective-expansion scan and temporal interrogation
+
+- Defer a general external-tool cache platform and companion-package deprecation/unlisting. Both exceed #790's consumer-boundary blast radius and require a separate owner and release decision.
+- Reject a public cache inspector, dashboard, or telemetry API. It conflicts with the approved quiet-defaults constraint and would widen the support surface without improving the build outcome.
+- Hour 1: record the real five-host restore-graph probe and freeze its pass/fail artifacts before resolver implementation.
+- Hours 2-3: expose one internal cancellable resolver shared by the task and watch paths; define its lock, atomic-publish, checksum, and safe-diagnostic state machine.
+- Hours 4-5: remove package/runtime closure assumptions, update the packed consumer fixture, and prove archive plus two-project output hygiene.
+- Hour 6+: complete the cache, cancellation, watch, package, documentation, and supported-host matrix before release validation.
+
+## Decision Audit Trail
+
+| # | Decision | Classification | Principle | Rationale | Rejected |
+|---:|---|---|---|---|---|
+| 1 | Retain the managed verified-cache architecture after the probe. | Mechanical | P6: act on the settled user decision | The probe tests NuGet feasibility but cannot silently reverse the approved delivery boundary. | Reopening package delivery from an evidence-only probe. |
+| 2 | Use SELECTIVE EXPANSION review posture. | Mechanical | CEO phase override | Audit near-blast-radius opportunities, but do not turn a packaging correction into a platform rewrite. | Scope expansion or reduction. |
+| 3 | Explicit `TailwindCliPath`/`TailwindOptions.CliPath` bypasses host mapping and cache/network work. | Mechanical | P1: complete recovery | A user-supplied executable is the documented escape hatch; rejecting it before checking would make unsupported-host recovery impossible. | Rejecting all unsupported hosts before explicit-path evaluation. |
+| 4 | Add the finite `ASTW012` taxonomy, no-cache-root behavior, and diagnostic redaction to the implementation contract. | Mechanical | P1: complete error paths | Cache acquisition is a new trust boundary and must fail deterministically without leaking configured paths or URLs. | A generic downloader exception or path-bearing error text. |
+| 5 | Require local exclusive-lock and same-directory atomic-publish guarantees, otherwise fail closed. | Mechanical | P5: explicit over clever | Cache correctness relies on filesystem semantics; heuristics for stale locks or cross-filesystem moves create partial-binary execution risk. | PID/time-based lock deletion or best-effort cross-device moves. |
+| 6 | Defer general tool-cache and companion-package lifecycle work. | Scope | P3: pragmatic | They are valuable but outside #790's direct package-consumer blast radius and need independent release ownership. | Building a new public platform or changing published package lifecycle in this issue. |
+| 7 | Treat first-party, version-and-RID-pinned SHA-256 metadata as the cache binary trust anchor. | Mechanical | P1: complete supply-chain proof | A checksum file fetched with the binary detects corruption but is not an independent authenticity anchor. | Trusting two jointly downloaded files as sufficient verification. |
+| 8 | Document primed-cache reproducibility, deterministic CI cache keys, and first-use network behavior. | Mechanical | P1: complete operator contract | The cache path removes payload leakage only if users can predict offline and CI behavior. | An invisible first-use download with no operator recovery guidance. |
+
+### Not in scope
+
+- A reusable public external-tool-cache platform, metrics surface, or cache inspector: no second consumer and incompatible with quiet defaults.
+- Deleting, unlisting, or deprecating published runtime companion packages: release policy is a separate decision after they leave the normal dependency closure.
+- General emulation detection or foreign-binary architecture inspection for explicit overrides: the OS process-start diagnostic remains the safe, observable boundary.
+
+### Section 1: Architecture and state model
+
+```text
+Build target / development watch
+            |
+            +-- explicit CLI supplied? -- yes --> resolve relative path --> execute
+            |                                      | missing/start failure --> ASTW003/ASTW005
+            |
+            no
+            |
+            +--> map actual process host --> supported RID? -- no --> ASTW001
+            |                                         |
+            |                                        yes
+            +--> validate version + root + local-cache filesystem --> ASTW012 on failure
+            +--> acquire entry lock --> final verified? -- yes --> execute
+                              |                  |
+                              |                  no
+                              +--> obtain checksum trust metadata + binary --> verify --> atomic publish
+                                                                  |                |
+                                                                  failure          success
+                                                                  ASTW012          execute
+```
+
+The shared resolver is the one new internal service, not a public feature. Its state
+machine is `Unresolved -> Explicit | HostMapped -> CacheValidated -> Locked ->
+Acquired -> Verified -> Published -> Executed`, with terminal `Diagnostic` and
+`Canceled` states. A final cache file becomes visible only after hash verification and
+same-directory atomic rename while the exclusive lock remains held. Missing input,
+invalid version/root, a checksum mismatch, a lock timeout, cancellation, and a failed
+download are terminal before process start.
+
+The first concrete architecture correction is a package-pinned trust manifest. A
+downloaded binary must match the expected SHA-256 embedded with the pinned Tailwind
+version and RID/binary map in first-party release metadata. Fetching the official
+`sha256sums.txt` remains a consistency/audit check, not the sole trust anchor. A
+Tailwind version bump therefore changes both the version and the five expected digests
+in one reviewed release change; tests must reject a validly paired but tampered
+downloaded binary/checksum file.
+
+### Section 2: Error and rescue registry
+
+| Codepath | Failure mode | Classification / diagnostic | Rescue action | User sees | Test |
+|---|---|---|---|---|---|
+| Explicit path | missing relative/absolute file | existing `ASTW003` | No cache/network fallback. | Correct the path or remove it. | Existing plus unsupported-host override test. |
+| Host map | unknown process OS/architecture without override | existing `ASTW001` | Stop before cache lookup. | Supported host or explicit CLI recovery. | All map branches. |
+| Version parser | blank, prerelease, path-like, whitespace, control, overflow | `ASTW012/invalid-version` | Stop before path/URL construction. | Safe version and override recovery; no cache path shown. | Full invalid-version matrix. |
+| Cache root | no override or environment-derived root | `ASTW012/no-cache-root` | Stop before network/process work. | Configure root or use explicit CLI. | All-empty environment test. |
+| Cache entry | missing, malformed checksum, hash mismatch, incomplete final | `ASTW012/invalid-cache` or `checksum-failure` | Lock, reject named entry, reacquire only when possible. | Redacted identity and recovery. | Missing/malformed/duplicate/hash cases. |
+| Acquisition | non-writable root, transport failure, retry exhaustion, lock timeout | `ASTW012/non-writable-root`, `network-failure`, `retry-exhausted`, or `lock-timeout` | Never execute a partial; build fails and watch warns/non-blocks. | Cache/prewarm/explicit-path recovery. | Root, cancellation, retry and contender tests. |
+| Async bridge | MSBuild cancel during lock/download/rename | existing cancellation diagnostic | Propagate token and return false deterministically. | Canceled build, no child process. | Cancel every pre-execution phase. |
+| Process start | override or verified cache executable cannot start | existing `ASTW005` | Do not fall through to a different candidate. | Correct explicit path / execution environment. | Existing process-start contract. |
+
+Every `ASTW012` contains only the finite classification, safe host RID, stable version
+when validation reached it, and a redacted cache *identity* such as
+`tailwind-4.1.18/linux-x64/<binary>`. It never renders a custom-root prefix, URL,
+credential, response body, exception stack, or cache path for `invalid-version`.
+
+### Section 3: Security and threat model
+
+| Threat | Likelihood | Impact | Mitigation |
+|---|---:|---:|---|
+| Cache binary or locally stored sums are replaced | Medium | High | Rehash every final binary against package-pinned expected hash before every execution. |
+| Transport supplies matching malicious binary and sums | Low | High | Package-pinned expected digest is the authenticity boundary; downloaded sums are never sufficient alone. |
+| Version, RID, or binary name escapes the cache root | Medium | High | Parse normalized stable version and allow only known map values / single filename components before path construction. |
+| Concurrent writers expose a partial file | Medium | High | Local exclusive lock, partial GUID name, verification before same-directory atomic publish, then rehash by each reader. |
+| Custom root leaks a developer/CI secret in an error | Medium | Medium | Never include absolute custom roots or URLs in diagnostics; assert redaction under failure. |
+| Explicit foreign/local CLI is unverified | Accepted | Medium | Preserve the existing deliberate trust escape hatch and make its no-cache/no-network behavior explicit. |
+
+No new network endpoint, secret, user data store, or runtime application API is added.
+The only changed trust boundary is build-tool acquisition, so its diagnostics and
+release-pinned hashes are part of the feature rather than optional hardening.
+
+### Section 4: Data-flow edge cases
+
+```text
+version/root/host inputs
+      | invalid or missing
+      +----------------------------> ASTW012 / ASTW001, no network or process
+      |
+      v
+entry identity --> verified final? --> yes --> rehash --> build executes / watch starts
+      | no                                    |
+      v                                       +--> process-start failure --> ASTW005
+exclusive lock --> retry final check --> download partial --> hash --> atomic rename
+      | canceled / timeout / write failure        | mismatch
+      +--------------> ASTW012 / cancellation     +--> reject, cleanup, ASTW012
+```
+
+Build and watch deliberately differ only after resolution: build treats a failed
+normal resolver path as a stable error and starts no child process; development watch
+logs the same classified acquisition failure and starts the app without watch, then may
+take its existing `PATH` fallback only after verified-cache and explicit-path checks.
+An explicit path always wins before host mapping, so it is the only supported recovery
+for an otherwise unknown host.
+
+### Section 5: Code-quality constraints
+
+- Keep one internal resolver with injected filesystem, HTTP/download, clock/delay, and
+  host-map seams for deterministic tests. Do not duplicate parsing, cache layout, or
+  verification in `RunTailwindBuildTask` and `TailwindCliManager`.
+- `RunTailwindBuildTask.Execute()` may bridge with `GetAwaiter().GetResult()` only at
+  the task boundary; the resolver itself remains fully async, uses
+  `ConfigureAwait(false)`, and receives the task cancellation token in every wait,
+  download, file operation, and process phase.
+- Replace candidate fan-out, version-directory scans, and sibling runtime-package
+  layout inference rather than leaving legacy fallbacks that can restore payload
+  leakage or select an unintended version.
+- Keep test-only RID/host overrides internal and isolated. Production resolution never
+  reads `RuntimeIdentifier` or a target-RID property.
+
+### Section 6: Test diagram and proof matrix
+
+```text
+                        Resolver unit tests
+  parser/root/map ---> validate ---> lock ---> download ---> verify ---> publish
+       |                 |           |          |             |           |
+       +-- invalid        +-- no root +-- timeout +-- retry     +-- tamper  +-- partial cleanup
+
+                 Build task integration                 Watch integration
+ explicit path / ASTW001 / ASTW012 / cancel       cache / override / PATH / non-blocking
+
+                       Package-consumer proofs
+ .nuspec + archive native-free --> clean consumer build --> publish output native-free
+                                           |
+                                           +--> two-project non-executing reference proof
+```
+
+Required tests include all five host maps, explicit override on an unsupported host,
+all finite acquisition classifications, malformed checksum entries including duplicate
+matches, pinned-digest mismatch despite matching downloaded sums, cancellation while
+waiting for a lock and while downloading, concurrent contenders, Unix executable mode,
+Windows no-chmod behavior, no-cache-root, safe diagnostic redaction, offline primed
+cache success, offline empty-cache failure, and no normal build-mode `PATH` probing.
+The package proof must inspect the actual `.nupkg` and `.nuspec`, then build a packed
+main-package-only consumer and a downstream project-reference consumer without native
+files in build or publish output.
+
+### Section 7: Performance and cache budget
+
+The steady state is one small hash read of the host entry and no network request; the
+first-use path has a bounded lock wait of the existing retry budget (five attempts and
+at most 20 seconds at defaults) plus the bounded downloader retries. Contention is
+per version/RID/binary entry, so unrelated hosts and versions do not serialize. There
+is intentionally no automatic cache pruning: operator-owned cache retention is safer
+than deleting a known-good tool during a build. Documentation must provide deterministic
+CI cache keys (`tailwind-<version>-<host-rid>`) and state that cache size/eviction is
+the CI or workstation owner's policy.
+
+### Section 8: Observability and supportability
+
+No dashboard or public inspection API is added. The resolver emits stable MSBuild and
+watch messages keyed by `ASTW012` classification, safe RID/version/identity, whether
+the cache was reused or acquired, and a recovery action. Verbose build logging may
+include stage names but not unredacted URLs, response bodies, absolute custom roots, or
+hash source credentials. The README becomes the support runbook: each classification
+maps to the expected state, safe remediation, and an offline/CI prewarm example.
+
+### Section 9: Distribution, rollout, and rollback
+
+Release changes must remove the five runtime-project references from the main package,
+assert its archive and dependency closure are native-free, and update the third-party
+payload inventory from package-embedded native assets to a build-host fetched tool with
+release-pinned digest metadata. Release notes must call out the changed delivery model,
+the first-use network requirement, primed-cache/offline contract, deterministic CI
+cache key, and explicit CLI fallback. Existing directly referenced companion packages
+remain compatible and are neither removed nor deprecated here.
+
+Rollback is a package-version rollback or a source revert before release. It is safe
+because no data migration or persistent application state changes. A failed release is
+detected by the packed consumer, archive closure, supported-host, and project-reference
+proofs before publication; consumers that need an immediate escape hatch can configure
+the existing explicit CLI path.
+
+### Section 10: Long-term trajectory
+
+This is a reversibility score of 4/5: the selected cache directory is user-owned and
+version-isolated, companion packages remain published, and users retain explicit
+overrides. It establishes a reusable *internal pattern*, not a generic platform. A
+future second build tool could justify a shared abstraction only after it demonstrates
+the same cache identity, trust, cancellation, and delivery requirements. The
+non-negotiable long-term debt guard is that package release metadata must keep version
+and expected digest entries synchronized; validation must make drift fail before pack.
+
+### Section 11: Design and UX
+
+Skipped. #790 changes no application screen, browser interaction, or design-system
+surface; its user experience is developer-facing and reviewed in the DX phase.
+
+### CEO dual voices and consensus
+
+The independent `combo/sub` strategist completed a cold read. The isolated Codex pass
+was unavailable because this host rejected transmission of the private plan/repository
+context to that external CLI, so this phase is explicitly **subagent-only**, not falsely
+reported as cross-model agreement.
+
+| Dimension | Independent strategist | Codex | Consensus |
+|---|---|---|---|
+| Premises valid? | Flags missing checksum trust anchor and unclear host-override wording. | Unavailable by privacy boundary. | N/A; remedies adopted as plan requirements. |
+| Right problem to solve? | Confirms leakage is real, asks to elevate build reproducibility. | Unavailable. | N/A; reproducible primed-cache contract strengthened. |
+| Scope calibration correct? | Warns against hidden network, cache sprawl, and ignored migration experience. | Unavailable. | N/A; CI/prewarm, lifecycle, and release notes made normative. |
+| Alternatives sufficiently explored? | Requests a hybrid companion option comparison. | Unavailable. | N/A; direct companion packages remain an explicit advanced/offline option, not a new default. |
+| Competitive/adoption risk covered? | Requests clear first-use network disclosure. | Unavailable. | N/A; README, package chooser, and release notes are required. |
+| Six-month trajectory sound? | Flags unresolved operational contracts. | Unavailable. | N/A; taxonomy, redaction, locks, cancellation, and digest release metadata are now explicit. |
+
+The strategist's challenge does not reverse the settled cache boundary. It improves
+the implementation contract: a first-use download is transparent and verified against
+package-pinned metadata, while reproducible offline operation means a primed cache or
+an explicit override rather than a promise that a brand-new air-gapped machine builds.
+
+### CEO completion summary
+
+```text
++====================================================================+
+|              CEO REVIEW — COMPLETION SUMMARY                      |
++====================================================================+
+| Mode selected        | SELECTIVE EXPANSION                         |
+| System Audit         | Five unconditional runtime references; no   |
+|                      | #790 TODO blocker; existing package proof   |
+|                      | is the correct test foundation               |
+| Step 0               | Cache boundary held; 3 alternatives assessed |
+| Sections 1-10        | 10 evaluated; security/trust contract added  |
+| Section 11           | SKIPPED (no UI scope)                         |
+| Error/rescue registry| 8 codepath categories, 0 silent paths        |
+| Failure modes        | 8 classified; 0 accepted silent failures     |
+| NOT in scope         | 3 items written                               |
+| Scope proposals      | 3 considered, 0 accepted, 2 deferred, 1 cut  |
+| Outside voice        | subagent-only, 9 issues integrated/recorded  |
+| Diagrams produced    | system, state, data/error, test, deployment  |
+| Unresolved decisions | 0 in CEO phase                                |
++====================================================================+
+```
