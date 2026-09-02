@@ -990,6 +990,7 @@ accepted as-is.
 | 22 | Keep build task synchronous only at the MSBuild boundary; make all resolver work asynchronous and cancellation-aware. | Mechanical | P1: complete cancellation | Existing child-process cancellation is a usable seam that must expand to pre-process acquisition phases. | Blocking lock/download calls or a background fire-and-forget resolver. |
 | 23 | Replace, rather than retain, tests that assert all runtime projects/package payloads exist. | Mechanical | P1: regression-proof distribution change | Old tests would preserve the exact behavior #790 removes. | Add resolver tests while leaving legacy package assertions intact. |
 | 24 | Retain the complete direct blast-radius scope. | Mechanical | P2: boil lakes | Package, tests, CI, and documentation must agree before this delivery boundary can safely ship. | A code-only resolver patch. |
+| 25 | Require five native-host evidence artifacts in the same shipping change. | Taste | P1: prove the changed delivery boundary | A cache distribution replacement is not release-ready until every supported native mapping is evidenced. | Deferring one or more supported RIDs to a follow-up without changing the support claim. |
 
 
 ### Ownership, manifest, and process boundaries
