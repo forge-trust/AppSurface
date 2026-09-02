@@ -604,7 +604,7 @@ files in build or publish output.
 
 ### Section 7: Performance and cache budget
 
-The steady state is one small hash read of the host entry and no network request; the
+The steady state is one full SHA-256 rehash of the host executable and no network request; the
 first-use path has a bounded lock wait of the existing retry budget (five attempts and
 at most 20 seconds at defaults) plus the bounded downloader retries. Contention is
 per version/RID/binary entry, so unrelated hosts and versions do not serialize. There
@@ -1087,6 +1087,76 @@ Implementation lanes are intentionally ordered:
 The engineering reviewer found the approach viable only with the contracts above. The plan now makes linked-source ownership intentional and testable, gives the package-pinned manifest an exact path/schema/pack proof, resolves explicit-path contradictions, specifies cancellation and the process boundary, calibrates the cache threat model, and requires real multiprocess evidence.
 
 The review was conducted by the approved `combo/sub` reviewer. A separate Codex voice was unavailable because the host privacy boundary refused transmission of repository design content to the external service. This is transparent single-model reviewer consensus, not a claim of cross-model agreement.
+
+
+### Engineering scope boundary and existing leverage
+
+**In scope:** the package project graph, shared resolver source, targets/task manifest
+plumbing, build and watch adapters, cache helper behavior, current Tailwind tests and
+a non-packable process helper, package artifact/consumer fixtures, README/package index/
+payload inventory/release note, and CI evidence required to prove five native hosts.
+
+**Not in scope:** a new public resolver/cache API; changing or deleting the direct
+companion package lifecycle; support for unpinned prerelease Tailwind releases; changing
+the existing Tailwind command-line semantics; cross-RID binary execution as acceptance
+evidence; and a generalized binary-cache platform. Each would add ownership or support
+surface beyond the package-consumer boundary #790 corrects.
+
+The implementation is deliberately built on existing seams: TailwindRuntimeMap retains
+the five-RID decision, TailwindProcessRunner remains the child-process/cancellation
+owner, TailwindDownloadCache supplies the established identity/root terminology after
+its task-assembly conditional is removed, current task cancellation remains the MSBuild
+bridge, and TailwindBuildTargetsTests remains the real packed-consumer proof. The
+change replaces candidate enumeration and version-directory scanning rather than
+layering new resolution behavior on top of them.
+
+### Engineering test diagram and failure-mode registry
+
+    Manifest / parser contract suite
+    version + RID + binary + digest -----> identical web/task resolver vectors
+                     |                           |
+                     v                           v
+           cache filesystem suite -----> build task / watch integration
+    lock, partial, hash, cancel, links         arguments, PATH policy, ASTW mapping
+                     |                           |
+                     +---------+-----------------+
+                               v
+                  non-packable multiprocess test host
+            contention / crash / recovery / atomic reader visibility
+                               |
+                               v
+                     packed package-consumer proofs
+           archive + nuspec + output closure + native-host offline runs
+
+| Failure mode | Critical gap before review | Required prevention or proof | Residual risk |
+|---|---|---|---|
+| Malicious binary plus matching fetched sums | Critical: the two downloads have no independent trust relationship. | Pinned package manifest digest and tampered-pair regression test. | A malicious repository release checksum is handled by reviewed first-party manifest updates, not runtime trust-on-first-use. |
+| Incomplete or competing cache publication | Critical: path fan-out can observe unexpected local content. | Kernel lock, partial GUID files, full hash, atomic rename, multiprocess crash tests. | Noncooperating same-principal mutation is outside stated cache boundary. |
+| Cancellation leaves an executable process or corrupt entry | High: existing boundary only covered child execution. | Token propagation, pre/post filesystem checks, late-publish retention, runner-owned termination tests. | Non-cancellable filesystem calls can finish, but must not launch a process after cancellation. |
+| Main package still leaks native payloads | High: existing tests assert the old runtime closure. | Archive/nuspec assertions plus two-project build/publish proof. | Direct consumers of companion packages retain their independent payloads by design. |
+| Build/watch resolution drift | High: task and watch currently use different root/version lookup logic. | One linked source, shared vectors, ordered watch matrix, and no fallback-after-explicit tests. | Explicit paths remain trusted user escape hatches. |
+| Five-RID claim is simulated rather than native | High: cross-RID success cannot execute all host binaries. | Persist actual native runner/host evidence, with self-hosted native lane where hosted capacity is absent. | CI capacity becomes a release prerequisite, not an untested implementation assumption. |
+
+### Engineering consensus table
+
+| Review dimension | Engineering assessment | Reviewer agreement / availability | Decision |
+|---|---|---|---|
+| Scope and existing code | Direct package-delivery code must change together; no unrelated platform work. | combo/sub: confirmed. Codex external pass unavailable. | Keep full direct blast-radius scope. |
+| Architecture ownership | One source-linked internal resolver, manifest loader, and contract vectors avoid duplicate task/watch behavior. | combo/sub: required clarification. Codex unavailable. | Add explicit source ownership and adapter boundaries. |
+| Data integrity and concurrency | Pin digest, validate filesystem, preserve cancellation, and test across processes. | combo/sub: critical/high findings resolved. Codex unavailable. | Treat as a release-blocking acceptance surface. |
+| Release graph | Main package is managed-only; companions direct-only; proof is archive, nuspec, and downstream outputs. | combo/sub: required clarification. Codex unavailable. | Add release graph and artifact gate. |
+| Testability | Existing runner/target seams are adequate when augmented with a non-packable process helper. | combo/sub: confirmed with caveat. Codex unavailable. | Require tests before behavior migration. |
+| CI feasibility | Native host evidence must use an actual available runner per RID. | combo/sub: required evidence gate. Codex unavailable. | Preflight runner availability; block release until artifacts exist. |
+
+### Engineering review completion summary
+
+The engineering pass is complete. It converted the architectural recommendation into
+owned files, manifest locations, boundaries, error semantics, cache invariants,
+release-graph assertions, and executable test evidence. The remaining release-policy
+preference is deliberately not auto-decided: the release owner must select the SemVer or
+pre-release framing after confirming the repository policy. No source-code change is
+authorized by this plan-review output alone.
+
 
 
 ## Cross-phase themes and plan handoff
