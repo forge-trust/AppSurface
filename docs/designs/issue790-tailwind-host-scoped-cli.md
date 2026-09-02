@@ -217,15 +217,18 @@ separate release decision.
    process-start failure for an explicit or acquired executable. Add `ASTW012 Tailwind
    CLI acquisition failed` for invalid version, invalid cache, checksum failure,
    non-writable root, network/retry exhaustion, and lock timeout. Every `ASTW012`
-   message includes the safe host RID, version, normalized cache path, classification,
-   concise cause, and recovery using `TailwindCliPath`, `TailwindDownloadCacheRoot`, or
-   the README. It must never include credentials, response bodies, or an unredacted URL.
+  message includes the safe host RID, version, redacted cache identity, classification,
+  concise cause, and recovery using `TailwindCliPath`, `TailwindDownloadCacheRoot`, or
+  the README. It must never include credentials, response bodies, an unredacted URL, or
+  an absolute configured cache-root path.
 
 4. **Use the resolver in both execution paths without conflating policy.**
    [`RunTailwindBuildTask`](../../Web/ForgeTrust.AppSurface.Web.Tailwind.Tasks/RunTailwindBuildTask.cs)
    replaces its packaged/sibling/project-runtime candidate fan-out with the internal
-   resolver. It continues to reject an unknown or unsafe RID, uses the compiled task,
-   and never searches `PATH`. [`TailwindCliManager`](../../Web/ForgeTrust.AppSurface.Web.Tailwind/TailwindCliManager.cs)
+   resolver. When no explicit `TailwindCliPath` was supplied, it rejects an unknown or
+   unsafe RID; an existing explicit path is resolved and validated first and bypasses
+   host mapping, cache work, and network work. Build uses the compiled task and never
+   searches `PATH`. [`TailwindCliManager`](../../Web/ForgeTrust.AppSurface.Web.Tailwind/TailwindCliManager.cs)
    and [`TailwindWatchService`](../../Web/ForgeTrust.AppSurface.Web.Tailwind/TailwindWatchService.cs)
    use the same cache identity and verification before their existing development-only
    fallback behavior. `TailwindOptions.CliPath` remains the explicit watch override.
@@ -273,9 +276,9 @@ separate release decision.
 | Condition | Build mode | Development watch mode | Recovery |
 |---|---|---|---|
 | Supported host, missing cache, network available | Acquires and verifies one host CLI, then builds CSS. | Acquires and verifies one host CLI before starting watch. | No action required; cache is populated. |
-| Supported host, missing cache, network unavailable or non-writable root | Fails hard with the new stable acquisition diagnostic; no child process starts. | Logs the matching acquisition warning and starts the app without watch. | Prime the configured cache on a connected machine/CI cache, fix root permissions, or set the explicit CLI path. |
-| Cache checksum malformed, missing, mismatched, or final binary hash mismatched | Rejects only the named bad entry under lock, reacquires when possible, then fails with `ASTW012` if no verified final file results; never executes it. | Warns and continues without watch if it cannot reacquire a verified entry. | Remove the named cache entry or provide an explicit verified CLI path. |
-| Unsupported host RID | Fails hard with the existing unsupported-RID diagnostic. | Logs the existing non-blocking unavailable-CLI path. | Use a supported build host or an explicit compatible CLI path. |
+| Supported host, missing cache, network unavailable or non-writable root | Fails hard with the new stable acquisition diagnostic; no child process starts. | Without an explicit watch path, makes the one development-only `PATH` attempt; if it fails, logs the acquisition cause and runs without watch. | Prime the configured cache on a connected machine/CI cache, fix root permissions, or set the explicit CLI path. |
+| Cache checksum malformed, missing, mismatched, or final binary hash mismatched | Rejects only the named bad entry under lock, reacquires when possible, then fails with `ASTW012` if no verified final file results; never executes it. | Without an explicit watch path, makes the one development-only `PATH` attempt after resolver failure; if it fails, runs without watch. | Remove the named cache entry or provide an explicit verified CLI path. |
+| No explicit CLI override and unsupported host RID | Fails hard with the existing unsupported-RID diagnostic. | May make its one development-only `PATH` attempt, then logs the classified cause and runs without watch. | Use a supported build host or supply an existing compatible explicit CLI path, which is evaluated before host mapping. |
 | Explicit CLI override is missing or the OS cannot start it | Retains existing explicit-path/process-start diagnostics; no cache or network fallback occurs. | Retains existing warning/error lifecycle; no cache write occurs. | Correct the explicit path or remove it to use normal host-tool resolution. |
 
 ## Test Plan
@@ -941,3 +944,146 @@ therefore **subagent-only**.
 - [ ] Watch's explicit/cache/acquire/`PATH`/no-watch order is deterministic and tested.
 - [ ] CI docs include the five-host matrix, cache keys, restore timing, permissions, prewarm, and offline behavior.
 - [ ] Release notes include the migration, direct companion, explicit path, and rollback matrix.
+
+## Autoplan Phase 3: Engineering Review
+
+### Scope challenge and existing-code map
+
+The change touches more than eight files, but every touched module is in the direct
+build-host delivery path: package graph, task, watch manager, cache helper, runtime
+metadata, packed-consumer tests, package index, payload inventory, CI guidance, and
+README. Reducing that set would either leave native dependency leakage, fail to prove
+the release artifact, or document a behavior that tests do not enforce. Scope remains
+accepted as-is.
+
+| Sub-problem | Current code evidence | Engineering decision |
+|---|---|---|
+| Main package closure | `ForgeTrust.AppSurface.Web.Tailwind.csproj` unconditionally references all five `runtimes/*.csproj` projects. | Remove only these normal dependency edges; retain the task project as private package build content. |
+| Build candidate fan-out | `RunTailwindBuildTask.EnumerateRuntimeCandidates` probes package, sibling package, project, cache, local, and source-tree locations. | Replace the fan-out with one explicit resolver state machine. |
+| Root logic | `TailwindDownloadCache.GetDefaultRoot` is excluded from task builds by `#if !APP_SURFACE_TAILWIND_TASKS`. | Move root selection into truly shared internal source so task and watch cannot disagree. |
+| Watch version/cache drift | `TailwindCliManager` hardcodes `4.1.18` and scans versioned cache directories. | Consume the same manifest-selected version and exact cache entry as build mode; remove version scanning. |
+| Build cancellation | `RunTailwindBuildTask.Execute` bridges `ExecuteAsync` through `GetAwaiter().GetResult()` and already owns a cancellation source. | Keep that boundary bridge only; thread its token into resolver lock, I/O, delay, and process start. |
+| Download behavior | Runtime targets already own retry values, official release URL, hash read, and Unix chmod. | Transfer those policies into the shared resolver, using package-pinned digests and standard .NET APIs. |
+| Consumer proof | `TailwindBuildTargetsTests` packs runtime packages and asserts their native archive entries. | Invert the proof: main archive/dependency closure and downstream outputs must be native-free while host execution remains real. |
+
+```text
+                          PACKAGE DELIVERY
+  Tailwind.csproj ---------------------------------> build/*.targets + tasks/*.dll
+        |                                                       |
+        X five Runtime.* project references                     v
+                                                        TailwindCliResolver
+                                                            |       |
+                                                     manifest+map  cache filesystem/HTTP
+                                                            |       |
+  RunTailwindBuildTask -------------------------------------+       +--> verified host binary
+  TailwindCliManager / TailwindWatchService ---------------+                   |
+                                                                          process runner
+```
+
+### Engineering decisions
+
+| # | Decision | Classification | Principle | Rationale | Rejected |
+|---:|---|---|---|---|---|
+| 19 | Implement one internal `TailwindCliResolver` with narrow injected seams instead of extending candidate enumeration. | Mechanical | P5: explicit over clever | A named resolver makes trust, locking, cancellation, and build/watch policy boundaries testable without a public API. | Static helpers duplicated across task and watch code. |
+| 20 | Move default-root selection out of the task-build conditional and keep one exact cache identity. | Mechanical | P4: DRY | The existing conditional compilation would otherwise create a build/watch behavior split. | Task-only root reconstruction or source-tree-only defaults. |
+| 21 | Remove cache version-directory scans and the watch's hardcoded `4.1.18`; use manifest version/RID/binary only. | Mechanical | P1: reproducible behavior | A resolver may not select a different cached release than the packed package declares. | “Newest cache wins” fallback. |
+| 22 | Keep build task synchronous only at the MSBuild boundary; make all resolver work asynchronous and cancellation-aware. | Mechanical | P1: complete cancellation | Existing child-process cancellation is a usable seam that must expand to pre-process acquisition phases. | Blocking lock/download calls or a background fire-and-forget resolver. |
+| 23 | Replace, rather than retain, tests that assert all runtime projects/package payloads exist. | Mechanical | P1: regression-proof distribution change | Old tests would preserve the exact behavior #790 removes. | Add resolver tests while leaving legacy package assertions intact. |
+| 24 | Retain the complete direct blast-radius scope. | Mechanical | P2: boil lakes | Package, tests, CI, and documentation must agree before this delivery boundary can safely ship. | A code-only resolver patch. |
+
+
+### Ownership, manifest, and process boundaries
+
+`TailwindCliResolver` is one authoritative **linked-source** implementation, not two separately maintained resolvers. Its files live in the Tailwind package's existing `Internal/` folder and compile into the web and task assemblies through the existing shared-source arrangement. It accepts narrow internal inputs (release manifest, runtime-map result, root/environment adapter, HTTP adapter, filesystem adapter) and returns only an internal `TailwindResolvedCli { Path, Rid, Version, CacheState }`. It never builds Tailwind arguments or launches a process. There must be no assembly-specific resolution branch; shared contract vectors run the same manifest, root, RID, cache, and error cases through build and watch adapters.
+
+This source-link is intentional: #790 needs one implementation and test contract without adding a public package or resolver API. `RunTailwindBuildTask` owns the build adapter and receives a packed manifest path. `TailwindCliManager` owns the watch adapter and reads the same manifest bytes embedded as an assembly resource. Both use the same stream-based loader; neither parses a second contract.
+
+The repository source of truth is `Web/ForgeTrust.AppSurface.Web.Tailwind/tailwind.release.json`. It is embedded in the web assembly and packed verbatim as `build/tailwind.release.json`. The package target passes that path to `RunTailwindBuildTask` as `TailwindReleaseManifestPath`; source-tree targets locate the same file beside the targets. Schema v1 is:
+
+```json
+{
+  "schemaVersion": 1,
+  "version": "4.1.18",
+  "baseUrl": "https://github.com/tailwindlabs/tailwindcss/releases/download/v4.1.18",
+  "assets": [
+    { "rid": "linux-x64", "binaryName": "tailwindcss-linux-x64", "sha256": "<64 lowercase hex characters>" }
+  ]
+}
+```
+
+The complete file contains the five existing map entries in stable order: `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`, and `win-x64`. The loader rejects an unknown schema, duplicate/missing RID, binary mismatch with `TailwindRuntimeMap`, malformed/non-lowercase digest, noncanonical version, or a version/base-URL mismatch with `tailwind.version` and `Tailwind.Common.props` before cache or network work. The canonical manifest version alone feeds URLs, cache identity, diagnostics, and CI keys.
+
+The fetched official `sha256sums.txt` remains an upstream audit signal, never the trust anchor: its matching digest must equal the package-pinned manifest digest or acquisition fails with `ASTW012/checksum-failure`. A tampered binary paired with a tampered downloaded sums file is therefore still rejected. Release verification changes manifest, version metadata, official URL, and all five digests atomically in one reviewed change. Before pack, a focused test validates those fields against the runtime map and a controlled sums fixture; the package-artifact gate then asserts the packed manifest exists byte-for-byte and matches its embedded resource copy, while the main `.nuspec` has no companion dependency or native Tailwind asset.
+
+`TailwindInvocationBuilder` retains the current argument contract: build uses `-i`, `-o`, and `--minify`; watch retains `--watch`. `TailwindProcessRunner` remains the only launch boundary. It receives the resolved path, existing working directory, inherited environment, bounded stdout/stderr, and cancellation token. Its CliWrap/shim behavior, nonzero-exit treatment, and `ASTW005` mapping remain intact. A launch failure never triggers another resolver candidate, cache rewrite, or `PATH` fallback.
+
+
+### Resolution, cancellation, and cache safety contract
+
+The resolver validates a supplied explicit path first. An existing override returns a resolved executable without invoking runtime mapping; a missing override is `ASTW003` and is authoritative. Only the no-override branch maps host RID, reads the manifest, selects a root, and considers cache or network work. Build never considers `PATH`.
+
+`TailwindVersion` is canonical only if it matches `^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$` using ASCII input and each component parses as `Int32`. Prerelease/build suffixes, leading zeroes, Unicode whitespace, controls, separators, `..`, and all other spellings are rejected. The original canonical text—not a normalized variant—is used in manifest lookup, cache directory, official URL, safe diagnostic identity, and CI key.
+
+The acquisition state machine has these cancellation semantics:
+
+1. Exclusive-lock acquisition opens the `.lock` file without deleting it. A contention retry uses `Task.Delay(..., cancellationToken)`; cancellation exits immediately.
+2. HTTP request, response streaming, and partial-file streaming receive the same token. Before and after every non-cancellable `CreateDirectory`, flush, chmod, or atomic rename, the resolver checks cancellation.
+3. If the final atomic rename already committed, the verified final remains reusable; cancellation still returns cancellation and no process starts. The owner removes only its GUID partial or rejected file in `finally` for success, mismatch, network failure, and cancellation.
+4. Cancellation before launch prevents the child from starting. Cancellation during an already-started child is delegated to `TailwindProcessRunner`, which terminates the child, awaits exit, and disposes handles. The MSBuild bridge returns its established cancellation result (`ASTW007` behavior); normal watch shutdown is silent. Cancellation is never reported as `ASTW012`.
+
+The cache boundary is the user or CI principal that owns the configured root; #790 does not claim to protect against a malicious process running as that same principal. The resolver rejects symbolic-link/reparse-point root components, entry directories, lock file, and final executable where the OS exposes that property, requires the final object to be a regular file, and verifies it immediately before invocation. When required local exclusive locking, same-directory atomic rename, or safe-link inspection cannot be established, it fails closed as `ASTW012/invalid-cache`. Same-principal replacement after the final check is outside this cache's threat model and must not be described as eliminated by hashing. The resolver must neither loosen permissions nor fall back to a broader shared location.
+
+While holding the kernel-backed lock, a process may remove only strict `*.partial-<guid>` or `*.rejected-<guid>` descendants before a new acquisition. It never deletes the lock file by PID or timestamp, never deletes a final binary as generic cleanup, and never selects a partial/rejected artifact. A crashed owner leaves an acquirable lock file; the OS releases the lock and the next owner can conservatively clean matching debris. Failed cleanup cannot invalidate a verified final or hide the primary diagnostic.
+
+### Build/watch behavior and release graph
+
+The following table supersedes every earlier abbreviated fallback description:
+
+| Mode and ordered condition | Required behavior |
+|---|---|
+| Build: explicit path exists | Execute it through the existing process runner; no map/cache/network/`PATH` work. |
+| Build: explicit path is missing or cannot start | Return `ASTW003` or existing `ASTW005`; do not fall through. |
+| Build: no override, resolver succeeds | Execute the verified host cache entry. |
+| Build: no override, resolver fails (`ASTW001` or any `ASTW012`) | Fail before a child process; never search `PATH`. |
+| Watch: explicit `TailwindOptions.CliPath` exists | Execute it using current watch semantics; no resolver or `PATH` work. |
+| Watch: explicit path is missing or cannot start | Log the authoritative explicit-path/process error and start the app without watch; no fallback. |
+| Watch: no explicit path, resolver succeeds | Run watch with the verified host cache entry. |
+| Watch: no explicit path, resolver fails | Make exactly one existing development-only `PATH` attempt. It is unverified, never cached, and unavailable in build mode. If it fails, log the resolver classification plus PATH failure and run without watch. |
+
+| Artifact or system | Required post-change condition | Proof |
+|---|---|---|
+| Main Tailwind package | Managed build targets, task assembly, manifest, notices; no `Runtime.*` dependency or `runtimes/<rid>/native` payload. | `.nuspec` and archive assertions in a real packed consumer. |
+| `Tailwind.Runtime.*` companions | Remain independently packable/publishable if their current release process intends it, but are not normal transitive dependencies. Lifecycle/deprecation is a separate decision. | Direct-companion checks remain separate from the main-package gate. |
+| Project-reference consumers | Receive no Tailwind native binary merely by referencing a Tailwind-enabled web project without executing its build target. | Two-project downstream build/publish output listing. |
+| Package index and chooser | Describe verified host-cache acquisition, not a transitive runtime-package bundle; list companions only as direct/legacy where appropriate. | Rendered package-index tests and README assertions. |
+| Third-party inventory | Records the main package fetched official standalone-CLI contract and manifest-pinned provenance; retained companion payload records stay accurate. | Inventory validation and package-artifact review. |
+| CI/publish graph | No main-package job requires `TailwindRuntimeBinaryResolutionEnabled` or treats companions as transitive prerequisites. Publish order preserves only pre-existing direct-companion rules. | Workflow assertions and release dry-run fixture. |
+
+
+The five-host evidence gate names actual current native runners rather than guessing labels in this design. Before implementation, a CI preflight records a `RID -> runner image/host` manifest and archive for each supported RID. If the hosted-runner catalogue lacks a native RID, a trusted self-hosted native runner is required; cross-RID emulation cannot substitute. Each native lane restores the packed consumer, exercises cold acquisition against a controlled local feed/HTTP fixture, then restores a network-disabled primed-cache variant. Evidence records the main archive, `.nuspec`, `project.assets.json`, restore binlog, cache identity, and output listing. The code change does not claim five-host coverage until every artifact exists.
+
+### Engineering verification matrix
+
+| Area | Required automated evidence |
+|---|---|
+| Manifest | Schema, exact five-RID set/order, parser edge cases, map/binary equality, digest format, byte-identical embedded/packed copies, mismatched official sums, and atomic release-metadata drift failures. |
+| Resolver | Explicit precedence; unknown host only without override; each root source; no root; malformed cache; safe-link refusal; checksum mismatch; retry exhaustion; non-writable root; no cache/path/URL work on invalid input; reuse versus acquire. |
+| Cancellation and cleanup | Cancellation while waiting for lock, downloading, before and after publish, and during process execution; committed final retained on late cancellation; no child starts after pre-launch cancellation; owner-only cleanup at every terminal state. |
+| Multiprocess cache | New non-packable `TailwindCacheTestHost` process proves two-process contention, owner death holding lock, stale lock-file reuse, death after partial write, atomic reader visibility, and refusal to select partial/rejected files. Thread-only tests do not satisfy this row. |
+| Process integration | Existing build/watch arguments, working directory, inherited environment, bounded output, CliWrap executable handling, nonzero exit, `ASTW005`, and no fallback after start failure. |
+| Packaging | Main package no companion dependency/native payload; companions direct-only; real packed consumer produces CSS on the native host; two-project non-executing consumer remains native-free. |
+| Watch policy | One case for every resolver classification verifies no override -> one PATH attempt -> non-blocking app start when PATH fails; each explicit-path failure verifies no fallback. |
+| CI/offline/performance | Network-disabled primed-cache build; five native restore artifacts; cold-acquisition and verified-reuse p95 timings; lock-contention timing. Rehash cost is measured as a full executable hash, with no in-memory shortcut that weakens disk verification. |
+| Documentation | Packed-consumer fixture executes the README's exact three-step build path and asserts output/link results; cache/prewarm/offline/recovery and host-versus-target RID examples are checked for drift. |
+
+Implementation lanes are intentionally ordered:
+
+1. Establish manifest/source-link ownership, resolver seams, and deterministic vectors; then land cache, cancellation, and test-host behavior.
+2. Replace build/watch integrations and package dependency graph; prove archive and downstream-output closure with the real packed-consumer suite.
+3. Update package index, inventory, README, CI/release gates, and five-host artifacts only after final manifest and package shapes are available.
+
+### Engineering consensus
+
+The engineering reviewer found the approach viable only with the contracts above. The plan now makes linked-source ownership intentional and testable, gives the package-pinned manifest an exact path/schema/pack proof, resolves explicit-path contradictions, specifies cancellation and the process boundary, calibrates the cache threat model, and requires real multiprocess evidence.
+
+The review was conducted by the approved `combo/sub` reviewer. A separate Codex voice was unavailable because the host privacy boundary refused transmission of repository design content to the external service. This is transparent single-model reviewer consensus, not a claim of cross-model agreement.
