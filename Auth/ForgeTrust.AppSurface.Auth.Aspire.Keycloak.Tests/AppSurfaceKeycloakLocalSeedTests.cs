@@ -226,7 +226,7 @@ public sealed class AppSurfaceKeycloakLocalSeedTests
             keycloak,
             new AppSurfaceKeycloakOptions().CreateConfigurationProjection(),
             new AppSurfaceKeycloakReadinessProbe(new AppSurfaceKeycloakOptions()),
-            Path.Join(Path.GetTempPath(), "appsurface-keycloak-realm.json"));
+            TestPathUtils.PathUnder(Path.GetTempPath(), "appsurface-keycloak-realm.json"));
         var factoryCalls = 0;
 
         var exception = Assert.Throws<AppSurfaceKeycloakException>(() => wrapper.WithLocalSeed(
@@ -379,8 +379,11 @@ public sealed class AppSurfaceKeycloakLocalSeedTests
                 .OrderBy(name => name, StringComparer.Ordinal));
     }
 
-    private static string GetCurrentTestProjectPath() =>
-        Path.GetFullPath("../../../ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj", AppContext.BaseDirectory);
+    private static string GetCurrentTestProjectPath() => TestPathUtils.PathUnder(
+        TestPathUtils.FindRepoRoot(AppContext.BaseDirectory),
+        "Auth",
+        "ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests",
+        "ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj");
 
     private static int GetAvailablePort()
     {

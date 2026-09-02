@@ -26,6 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
     <ProjectReference Include="../auth-aspire-keycloak-local-seed-store/AuthAspireKeycloakLocalSeedStore.csproj" />
   </ItemGroup>
 

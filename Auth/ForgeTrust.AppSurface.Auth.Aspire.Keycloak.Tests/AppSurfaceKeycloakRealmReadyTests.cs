@@ -46,9 +46,9 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
     public async Task RealmReady_WhenAThemeIsConfigured_ProjectsOnlyItsNameToTheExecutableGate()
     {
         using var directory = new TempDirectory();
-        var themeDirectory = Path.Join(directory.Path, "theme");
-        Directory.CreateDirectory(Path.Join(themeDirectory, "login", "resources"));
-        File.WriteAllText(Path.Join(themeDirectory, "login", "theme.properties"), "parent=keycloak\n");
+        var themeDirectory = TestPathUtils.PathUnder(directory.Path, "theme");
+        Directory.CreateDirectory(TestPathUtils.PathUnder(themeDirectory, "login", "resources"));
+        File.WriteAllText(TestPathUtils.PathUnder(themeDirectory, "login", "theme.properties"), "parent=keycloak\n");
         var builder = DistributedApplication.CreateBuilder([]);
         var (keycloak, _) = AddWithAvailablePorts(
             builder,
@@ -112,19 +112,19 @@ public sealed class AppSurfaceKeycloakRealmReadyTests
         using var directory = new TempDirectory();
         var assemblyName = typeof(AppSurfaceKeycloakRealmReadyWorker).Assembly.GetName().Name!;
         var workerAssemblyName = AppSurfaceKeycloakRealmReadyWorker.WorkerAssemblyName;
-        var outputDirectory = Path.Join(directory.Path, "consumer", "bin");
-        var workerDirectory = Path.Join(outputDirectory, "appsurface-keycloak-realm-ready");
+        var outputDirectory = TestPathUtils.PathUnder(directory.Path, "consumer", "bin");
+        var workerDirectory = TestPathUtils.PathUnder(outputDirectory, "appsurface-keycloak-realm-ready");
         Directory.CreateDirectory(workerDirectory);
-        var assemblyPath = Path.Join(outputDirectory, $"{assemblyName}.dll");
+        var assemblyPath = TestPathUtils.PathUnder(outputDirectory, $"{assemblyName}.dll");
         File.WriteAllText(assemblyPath, string.Empty);
-        File.WriteAllText(Path.Join(workerDirectory, $"{workerAssemblyName}.dll"), string.Empty);
-        File.WriteAllText(Path.Join(workerDirectory, $"{workerAssemblyName}.deps.json"), string.Empty);
-        File.WriteAllText(Path.Join(workerDirectory, $"{workerAssemblyName}.runtimeconfig.json"), string.Empty);
+        File.WriteAllText(TestPathUtils.PathUnder(workerDirectory, $"{workerAssemblyName}.dll"), string.Empty);
+        File.WriteAllText(TestPathUtils.PathUnder(workerDirectory, $"{workerAssemblyName}.deps.json"), string.Empty);
+        File.WriteAllText(TestPathUtils.PathUnder(workerDirectory, $"{workerAssemblyName}.runtimeconfig.json"), string.Empty);
 
         var worker = AppSurfaceKeycloakRealmReadyWorker.Resolve(assemblyPath);
 
         Assert.Equal(workerDirectory, worker.WorkingDirectory);
-        Assert.Contains(Path.Join(workerDirectory, $"{workerAssemblyName}.dll"), worker.Arguments, StringComparer.Ordinal);
+        Assert.Contains(TestPathUtils.PathUnder(workerDirectory, $"{workerAssemblyName}.dll"), worker.Arguments, StringComparer.Ordinal);
     }
 
     [Fact]

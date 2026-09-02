@@ -1,4 +1,5 @@
 using AuthAspireKeycloakLocalSeedStore;
+using ForgeTrust.AppSurface.Testing;
 
 namespace AuthAspireKeycloakLocalSeedStore.Tests;
 
@@ -8,7 +9,7 @@ public sealed class LocalSeedStoreTests
     public void ReadSnapshot_WhenStateIsMissing_ReturnsEmptySnapshot()
     {
         using var directory = new TempDirectory();
-        var path = System.IO.Path.Combine(directory.Path, "seed-store.json");
+        var path = TestPathUtils.PathUnder(directory.Path, "seed-store.json");
         var store = new LocalSeedStore(path);
 
         var snapshot = store.ReadSnapshot();
@@ -59,7 +60,7 @@ public sealed class LocalSeedStoreTests
     public void ReadSnapshot_WhenStateIsMalformedOrDuplicate_ThrowsInvalidDataException(string json)
     {
         using var directory = new TempDirectory();
-        var path = System.IO.Path.Combine(directory.Path, "seed-store.json");
+        var path = TestPathUtils.PathUnder(directory.Path, "seed-store.json");
         File.WriteAllText(path, json);
         var store = new LocalSeedStore(path);
 
@@ -70,7 +71,7 @@ public sealed class LocalSeedStoreTests
     public void FailedUpdate_LeavesPreviousReadableSnapshotAndBytesUntouched()
     {
         using var directory = new TempDirectory();
-        var path = System.IO.Path.Combine(directory.Path, "seed-store.json");
+        var path = TestPathUtils.PathUnder(directory.Path, "seed-store.json");
         var store = new LocalSeedStore(path);
         store.UpsertBrokerAlias("local", "https://issuer", "client");
         var before = File.ReadAllBytes(path);
@@ -144,7 +145,7 @@ public sealed class LocalSeedStoreTests
         Assert.Throws<ArgumentException>(() => store.UpsertIdentitySubjectMap("key", ""));
         Assert.Throws<ArgumentException>(() => store.UpsertCandidateFixture("", "subject"));
         Assert.Throws<ArgumentException>(() => store.UpsertCandidateFixture("key", ""));
-        Assert.False(File.Exists(System.IO.Path.Combine(directory.Path, "seed-store.json")));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(directory.Path, "seed-store.json")));
     }
 
     [Fact]
@@ -161,5 +162,5 @@ public sealed class LocalSeedStoreTests
     }
 
     private static LocalSeedStore CreateStore(TempDirectory directory) =>
-        new(System.IO.Path.Combine(directory.Path, "seed-store.json"));
+        new(TestPathUtils.PathUnder(directory.Path, "seed-store.json"));
 }

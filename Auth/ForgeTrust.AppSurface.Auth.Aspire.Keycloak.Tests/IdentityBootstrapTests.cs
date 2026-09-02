@@ -56,7 +56,7 @@ public sealed class IdentityBootstrapTests
     public async Task RunAsync_WhenTheLocalBrokerDoesNotExist_CreatesItAndPersistsTheSeedEvidence()
     {
         using var directory = new TempDirectory();
-        var storePath = Path.Join(directory.Path, "local-seed-store.json");
+        var storePath = TestPathUtils.PathUnder(directory.Path, "local-seed-store.json");
         var environment = CreateEnvironment("https://localhost:8443/realms/appsurface-dev", "appsurface-dev", storePath);
         using var handler = new SequenceHandler(
             JsonResponse("""{"access_token":"master-token"}"""),
@@ -99,7 +99,7 @@ public sealed class IdentityBootstrapTests
     public async Task RunAsync_WhenTheExistingStoreCannotConvergeToOneBrokerAlias_ReturnsFailure()
     {
         using var directory = new TempDirectory();
-        var storePath = Path.Join(directory.Path, "local-seed-store.json");
+        var storePath = TestPathUtils.PathUnder(directory.Path, "local-seed-store.json");
         var store = new LocalSeedStore(storePath);
         store.UpsertBrokerAlias("unrelated-broker", "https://issuer.example.test", "other-client");
         var environment = CreateEnvironment("https://localhost:8443/realms/appsurface-dev", "appsurface-dev", storePath);
@@ -123,7 +123,10 @@ public sealed class IdentityBootstrapTests
         Func<HttpResponseMessage[]> createResponses)
     {
         using var directory = new TempDirectory();
-        var environment = CreateEnvironment("https://localhost:8443/realms/appsurface-dev", "appsurface-dev", Path.Join(directory.Path, "store.json"));
+        var environment = CreateEnvironment(
+            "https://localhost:8443/realms/appsurface-dev",
+            "appsurface-dev",
+            TestPathUtils.PathUnder(directory.Path, "store.json"));
         using var handler = new SequenceHandler(createResponses());
         using var client = new HttpClient(handler);
 

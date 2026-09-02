@@ -74,7 +74,7 @@ public sealed class AppSurfaceKeycloakVerifierTests
     public async Task VerifyLocalSeedStoreAsync_RequiresExactlyTheTwoOrderedConsumerResults()
     {
         using var directory = new TempDirectory();
-        var storePath = Path.Join(directory.Path, "seed-store.json");
+        var storePath = TestPathUtils.PathUnder(directory.Path, "seed-store.json");
         var store = new AuthAspireKeycloakLocalSeedStore.LocalSeedStore(storePath);
         store.UpsertBrokerAlias("local-broker", "https://issuer/realms/appsurface-dev", "appsurface-web");
         store.UpsertIdentitySubjectMap("founder", "subject-founder-001");
@@ -109,7 +109,7 @@ public sealed class AppSurfaceKeycloakVerifierTests
         var incompletePathExitCode = await Program.VerifyLocalSeedStoreAsync(
             name => name switch
             {
-                "LOCAL_SEED_STORE_PATH" => Path.Join(directory.Path, "missing.json"),
+                "LOCAL_SEED_STORE_PATH" => TestPathUtils.PathUnder(directory.Path, "missing.json"),
                 "APPSURFACE_KEYCLOAK_LOCAL_SEED_AUTHORITY" => "https://issuer/realms/appsurface-dev",
                 "APPSURFACE_KEYCLOAK_LOCAL_SEED_PUBLIC_CLIENT_ID" => "appsurface-web",
                 _ => null,
@@ -128,7 +128,7 @@ public sealed class AppSurfaceKeycloakVerifierTests
     public async Task VerifyLocalSeedStoreAsync_WhenBrokerMetadataOrTheStoreDocumentIsInvalid_ReturnsSafeFailure()
     {
         using var directory = new TempDirectory();
-        var storePath = Path.Join(directory.Path, "seed-store.json");
+        var storePath = TestPathUtils.PathUnder(directory.Path, "seed-store.json");
         var store = new AuthAspireKeycloakLocalSeedStore.LocalSeedStore(storePath);
         store.UpsertBrokerAlias("local-broker", "https://wrong-issuer", "wrong-client");
         store.UpsertIdentitySubjectMap("founder", "subject-founder-001");

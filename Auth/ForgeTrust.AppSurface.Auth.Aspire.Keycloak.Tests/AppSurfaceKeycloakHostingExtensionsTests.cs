@@ -355,16 +355,11 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         throw new InvalidOperationException("Could not reserve distinct local ports for the explicit-admin hosting test.");
     }
 
-    private static string GetCurrentTestProjectPath()
-    {
-        const string projectPath = "../../../ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj";
-        if (Path.IsPathRooted(projectPath))
-        {
-            throw new InvalidOperationException("The test project path must stay relative.");
-        }
-
-        return Path.GetFullPath(projectPath, AppContext.BaseDirectory);
-    }
+    private static string GetCurrentTestProjectPath() => TestPathUtils.PathUnder(
+        TestPathUtils.FindRepoRoot(AppContext.BaseDirectory),
+        "Auth",
+        "ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests",
+        "ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj");
 
     private static void AssertWait(IResource resource, string dependencyName, WaitType expectedWaitType)
     {
