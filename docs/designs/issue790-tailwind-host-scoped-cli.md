@@ -1087,3 +1087,20 @@ Implementation lanes are intentionally ordered:
 The engineering reviewer found the approach viable only with the contracts above. The plan now makes linked-source ownership intentional and testable, gives the package-pinned manifest an exact path/schema/pack proof, resolves explicit-path contradictions, specifies cancellation and the process boundary, calibrates the cache threat model, and requires real multiprocess evidence.
 
 The review was conducted by the approved `combo/sub` reviewer. A separate Codex voice was unavailable because the host privacy boundary refused transmission of repository design content to the external service. This is transparent single-model reviewer consensus, not a claim of cross-model agreement.
+
+
+## Cross-phase themes and plan handoff
+
+| Theme | CEO contribution | DX contribution | Engineering contribution | Final decision |
+|---|---|---|---|---|
+| Package boundary | Remove native assets from non-executing consumers. | Keep a no-config default and direct escape hatch. | Prove main archive/dependency closure and downstream output absence. | Main package becomes host-cache delivery; companions remain direct-only. |
+| Trust and recovery | A downloaded checksum cannot validate its paired download alone. | Make failures actionable without new public diagnostics UI. | Define first-party manifest, exact safe taxonomy, cache boundary, and launch contract. | First-party manifest digest is the trust anchor; upstream sums are audit-only. |
+| Predictable precedence | Preserve explicit CLI overrides. | Publish one build/watch matrix and a copy-paste quick start. | Make early explicit-path resolution and no-fallback behavior testable. | Explicit path first; build never PATH; watch has one dev-only PATH attempt only after no-override resolver failure. |
+| Operational reliability | Require usable offline behavior and a release/migration story. | Document cache roots, prewarm, offline recovery, and package chooser changes. | Add atomic publish, cancellation, multiprocess, performance, and five-host native evidence. | A primed verified cache is supported; a fresh offline machine fails safely with documented recovery. |
+| Scope discipline | Do not convert #790 into a public tool-cache platform or companion-package lifecycle rewrite. | Avoid new knobs, dashboard, or package-selection workflow. | Use linked internal source and test seams only. | Keep API surface unchanged; lifecycle policy remains a separately owned release decision. |
+
+The only remaining approval-sensitive preference is whether to ship the full five-native-host
+evidence gate in the same change. The reviewed recommendation is **yes**: a cache-based
+distribution replacement is not release-ready until actual native-host artifacts prove
+all five supported mappings. All other points are implementation decisions with concrete
+tests, not design choices deferred to the implementer.
