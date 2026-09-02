@@ -693,3 +693,251 @@ an explicit override rather than a promise that a brand-new air-gapped machine b
 | Unresolved decisions | 0 in CEO phase                                |
 +====================================================================+
 ```
+
+## Autoplan Phase 2.5: Developer Experience Review
+
+### Developer persona and product classification
+
+**Product type:** .NET library/SDK package with MSBuild build integration and an
+optional development-watch API.
+
+```text
+TARGET DEVELOPER PERSONA
+========================
+Who:       An ASP.NET Core web developer adding Tailwind to an existing AppSurface app.
+Context:   They want generated CSS in a local build and CI without adopting Node.js.
+Tolerance: Five minutes and three primary steps before they abandon the integration.
+Expects:   `dotnet add`, one CSS input, `dotnet build`, readable errors, and an escape
+           hatch for air-gapped CI or a custom frontend pipeline.
+```
+
+### Developer perspective and initial TTHW
+
+> I open the Tailwind README because I need CSS in an AppSurface web project, not a
+> frontend toolchain. The page promises no Node.js, which is exactly why I am here. I
+> copy the package command, add `@import "tailwindcss"`, then discover a five-step
+> path that also asks me to register development watch and wire a layout before I have
+> proven that the build works. I run `dotnet build`; if the tool is not cached, a host
+> CLI now has to be acquired, but the current instructions do not prepare me for that
+> moment or say how CI becomes offline-safe. If it fails, I need the diagnostic to say
+> whether I should fix the cache, provide `TailwindCliPath`, or choose my Node-based
+> pipeline. Once CSS is generated and visible, I am happy, but I should reach that
+> confirmation before learning about watch mode, runtime packages, or maintainer-only
+> switches.
+
+Current first success is approximately five primary actions and 6-8 minutes. The
+target is **Competitive tier: three primary steps and under five minutes**:
+
+1. `dotnet add package ForgeTrust.AppSurface.Web.Tailwind`
+2. Add `@import "tailwindcss";` to `wwwroot/css/app.css`
+3. Run `dotnet build` and see the generated stylesheet plus the safe cache/reuse log.
+
+Layout linking, `AddTailwind`, CI cache setup, explicit CLI paths, and Node-pipeline
+opt-out are progressive-disclosure sections after that first proof. The chosen magical
+moment is the lowest-effort effective vehicle: a copy-paste build command with expected
+generated CSS and a concise cache outcome, not a hosted playground or a new CLI.
+
+### Competitive DX benchmark
+
+| Tool / path | TTHW | Notable choice | Implication for #790 |
+|---|---:|---|---|
+| Tailwind CLI | Four documented steps | CSS import, CLI build, then reference CSS; standalone binary is supported without Node. | AppSurface must beat manual binary placement by hiding host selection while retaining an obvious build result. |
+| UnoCSS CLI | More than five minutes for a new .NET user | Requires npm and lacks a default preset in current CLI docs. | No-Node and opinionated defaults are worth defending. |
+| Tailbreeze-style ASP.NET integration | Advertises two packages / three lines | Directly markets zero-config MSBuild integration. | Three primary actions and transparent CI behavior are the competitive floor. |
+| AppSurface current plan | 6-8 minutes estimated | Five-step README, hidden runtime/cache delivery change. | Needs the revised golden path and recovery information architecture. |
+
+### DX decisions
+
+| # | Decision | Classification | Principle | Rationale | Rejected |
+|---:|---|---|---|---|---|
+| 9 | Use DX POLISH, not a new interactive playground or command. | Mechanical | DX phase override | The package can deliver a competitive first success with documentation and existing build output. | New hosted service or public tool. |
+| 10 | Move watch registration and layout wiring below the first build proof. | Mechanical | P5: progressive disclosure | They are useful next steps but not prerequisites to proving package integration. | A five-step mixed build/watch introduction. |
+| 11 | Make first acquisition, cache reuse, and offline recovery visible in README and CI examples. | Mechanical | P1: fight uncertainty | The delivery boundary changed from restored payload to host-tool acquisition. | Hidden network behavior. |
+| 12 | Keep explicit paths and Node-pipeline opt-out as stable escape hatches. | Mechanical | P4: decide for me, let me override | Strong defaults retain adoption only when advanced projects can exit cleanly. | New per-RID consumer properties or a second package workflow. |
+| 13 | Add a single build/watch precedence, path, root-source, and diagnostic matrix. | Mechanical | P5: explicit over clever | The plan had multiple compatible-looking statements that did not form one deterministic resolution order. | Implicit precedence inferred from separate sections. |
+| 14 | Make package-pinned asset metadata a versioned packed `tailwind.release.json` contract. | Mechanical | P1: complete trust and upgrade proof | A digest map needs a schema, one owner, and pack/release drift tests, not narrative-only metadata. | Multiple unvalidated hash/version sources. |
+| 15 | Preserve watch-mode `PATH` only after normal resolution fails and only when no explicit watch path was configured. | Mechanical | P1: compatibility | It retains the documented development escape hatch without weakening an explicit-path choice or build-mode determinism. | Disabling watch immediately after every acquisition failure or falling through after an explicit path error. |
+| 16 | Make the quick-start consumer fixture execute the documentation's exact commands and file assertions. | Mechanical | P1: learn by doing | A “three-step” claim is useful only when a real packed consumer runs it successfully. | Example prose that can drift from the tested package contract. |
+| 17 | Require a five-host CI/prewarm matrix with deterministic root and cache-key inputs. | Mechanical | P1: complete developer environment | Host-native acquisition cannot be validated by target-RID simulation alone. | Generic cache advice without runner/permission/offline behavior. |
+| 18 | Defer the exact coordinated release-version choice to the release owner and surface it at the final gate. | Taste | User sovereignty | The plan establishes a breaking distribution change but repository release policy, not the implementation design, chooses its SemVer/pre-release framing. | Silently selecting a major, minor, or preview version. |
+
+### Developer journey map
+
+| Stage | Developer does | Friction risk | Planned resolution |
+|---|---|---|---|
+| Discover | Reads package chooser and Tailwind README. | Old text promises transitive runtime packages. | Replace with host-tool/cache boundary and no-Node promise. |
+| Evaluate | Decides whether Node-free build integration fits. | Cannot see first-use/offline tradeoff. | State network-on-first-acquisition and primed-cache contract. |
+| Install | Adds the single main package. | May believe a companion package is required. | State main package only for the normal path. |
+| Hello World | Adds one CSS import and runs build. | Watch/layout steps obscure success. | Three-step copy-paste path with expected output. |
+| Real usage | Links generated CSS and enables dev watch when useful. | Build and watch policy differences surprise developers. | Separate build no-`PATH` and watch development fallback explanations. |
+| Debug | Encounters `ASTW001`/`ASTW012`/explicit-path errors. | May see a bare path or generic download failure. | Problem, cause, classification, redacted identity, fix, and README anchor. |
+| CI/offline | Uses a durable cache or explicit CLI. | Fresh agent cannot build without network. | Deterministic cache key, prewarm example, and clear fail-before-process behavior. |
+| Upgrade | Moves to a version with host-cache delivery. | Transitive binary assumptions can break scripts. | Release note and direct companion/explicit path compatibility matrix. |
+| Extend/exit | Needs npm-only plugins or a custom CLI. | May edit imported targets. | `TailwindEnabled=false` and explicit path guidance. |
+
+### First-time developer confusion report
+
+```text
+FIRST-TIME DEVELOPER REPORT
+===========================
+Persona: ASP.NET Core developer adding Node-free Tailwind
+Attempting: First generated CSS build
+
+T+0:00  I install the one package and see a promise of no Node.js.
+T+0:30  I add the CSS import. The revised guide tells me to build now, not to configure watch.
+T+1:00  Build reports one host CLI acquired or reused and materializes site.gen.css.
+T+2:00  If offline, ASTW012 tells me cache state, safe recovery, and where the CI example is.
+T+3:00  I link the generated stylesheet; only then do I choose whether local watch is useful.
+T+4:00  I find custom-CLI and Node-pipeline exits without editing package targets.
+```
+
+### DX pass assessment
+
+| Pass | Initial | Planned | Evidence and fix |
+|---|---:|---:|---|
+| Getting started | 6/10 | 9/10 | Reduce the README to the three-step build proof and show expected output. |
+| API / SDK design | 8/10 | 8/10 | Keep `TailwindCliPath`, `TailwindOptions.CliPath`, and `TailwindEnabled`; do not add a host-RID knob. |
+| Error messages | 7/10 | 9/10 | `ASTW012` adds finite classification, redaction, recovery, and documentation link. |
+| Documentation | 6/10 | 9/10 | Update README, package chooser, supply-chain inventory, release note, CI prewarm, and migration sections together. |
+| Upgrade path | 4/10 | 8/10 | Publish the transitive-runtime-to-cache compatibility note and direct companion-package matrix. |
+| Developer environment | 6/10 | 9/10 | Cover five hosts, cache keys, supported explicit overrides, offline priming, and unchanged watch fallback. |
+| Community / ecosystem | 8/10 | 8/10 | The public README, permissive upstream tool, and existing package release hub remain sufficient for this scoped correction. |
+| DX measurement | 6/10 | 8/10 | The consumer-real proof matrix is the repeatable TTHW/upgrade measurement; do not add product telemetry for a build package. |
+
+No new DX TODO is created: the necessary documentation and evidence changes are already
+covered by the CEO implementation tasks, and adding a duplicate task would violate
+the selected reuse principle.
+
+### Authoritative resolution and recovery matrix
+
+This table supersedes conflicting prose elsewhere in the document.
+
+| Execution mode | Resolution order | Path anchoring | Failure behavior |
+|---|---|---|---|
+| Build | Non-empty `TailwindCliPath` -> shared resolver. | Explicit path: `ProjectDirectory`; cache: resolved root; relative inputs/outputs: `ProjectDirectory`. Absolute explicit paths are allowed. | Missing explicit path is `ASTW003` with no resolver/`PATH` fallback. No explicit path and unknown host is `ASTW001`. Resolver failure is `ASTW012`; build never searches `PATH`. |
+| Development watch | Non-empty `TailwindOptions.CliPath` -> shared resolver -> development `PATH` -> no watch. | Explicit path and inputs/outputs: `IHostEnvironment.ContentRootPath`; cache uses the package manifest version and resolved root. | Missing explicit watch path is an authoritative warning and no fallback. Without an explicit path, every resolver failure, including unknown host or unavailable root, may try the existing development `PATH` fallback; if that fails, log the classified cause and run the app without watch. |
+| Packed/source-tree consumers | Same resolver identity and manifest. | Packed targets locate `build/tailwind.release.json`; source-tree targets locate the same file beside the source targets. | The manifest version must equal `tailwind.version` and the supplied `TailwindVersion`; mismatch is `ASTW012/checksum-failure` before network work. |
+
+`TailwindDownloadCacheRoot` wins when non-empty. Otherwise root resolution is
+`XDG_CACHE_HOME`, `LOCALAPPDATA`, `HOME`, then `USERPROFILE`; the resolver labels the
+selected *source* as `property`, `xdg`, `local-app-data`, `home`, or `user-profile`
+without exposing its value. An empty value means use the next source, not an empty root.
+If no source produces a root, build returns `ASTW012/no-cache-root`; watch may still use
+its development `PATH` fallback before becoming non-blocking. A cache filesystem that
+cannot take a local exclusive lock or atomically rename a same-directory test partial
+is `ASTW012/invalid-cache`, preserving the fixed finite taxonomy.
+
+The only `ASTW012` classifications are `invalid-version`, `no-cache-root`,
+`invalid-cache`, `checksum-failure`, `non-writable-root`, `network-failure`,
+`retry-exhausted`, and `lock-timeout`. `invalid-version` includes no cache identity;
+all other classifications include the safe root source and relative identity but never
+an absolute root, URL, response body, credential, or exception text.
+
+### Canonical release manifest and CI/offline contract
+
+Add one packed and source-tree-readable `tailwind.release.json` under the Tailwind
+package build directory. Schema version 1 contains `version`, `baseUrl`, and exactly
+five `{ rid, binaryName, sha256 }` asset records. `Tailwind.Common.props` remains the
+version/base-URL input for current packaging, but a package validation test and release
+gate must reject any disagreement with this manifest, the runtime map, or
+`tailwind.version`. The shared resolver receives the manifest path from targets, uses
+its matching SHA-256 as the sole expected digest, and treats the downloaded
+`sha256sums.txt` only as a release-consistency check.
+
+Prewarming has no new command: run the ordinary three-step build once on a connected
+machine using the intended `TailwindDownloadCacheRoot`, then preserve that root with
+the CI cache mechanism. The documentation includes a tested GitHub Actions-style
+example with an explicit `tailwind_host_rid` matrix value, cache restore before
+`dotnet build`, and a cache key such as `appsurface-tailwind-4.1.18-linux-x64`. Linux
+x64, Linux Arm64, macOS x64, macOS Arm64, and Windows x64 run native executable proof
+on their matching host. Non-host selection tests use controlled cache stubs only and
+never execute a foreign binary.
+
+The TTHW claim is scoped: under five minutes means a supported native host with either
+a primed verified cache or a reachable official release, no existing lock contender,
+and a package restore completed before the three-step clock starts. The test records
+resolver stage messages and asserts a prewarmed build produces `site.gen.css` in under
+one minute; connected clean-cache acceptance runs once per supported native host with
+an explicit maximum request timeout and reports acquisition, verification, and CSS
+generation separately. An offline clean-cache build is expected to fail promptly with
+the documented recovery path, not to satisfy TTHW.
+
+### Documentation, migration, and release matrix
+
+The README's first-success block must be an executable packed-consumer test fixture:
+
+1. Prerequisite: an ASP.NET Core project targeting a supported build host.
+2. `dotnet add package ForgeTrust.AppSurface.Web.Tailwind`.
+3. Create `wwwroot/css/app.css` containing `@import "tailwindcss";`, then run
+   `dotnet build` and assert `wwwroot/css/site.gen.css` exists and the build reports
+   a verified host CLI acquired or reused.
+4. As the single follow-up, add `<link rel="stylesheet" href="~/css/site.gen.css">`
+   to the layout before running the application. `AddTailwind` is a separately titled
+   local-watch step, not a prerequisite for CSS generation.
+
+| Upgrade consumer | Expected #790 behavior | Migration / proof |
+|---|---|---|
+| Normal main-package build | One host CLI from verified cache; no native application payload. | Clean upgrade from the previous released main package, then packed consumer build. |
+| Non-executing project-reference consumer | No Tailwind native file in build/publish output. | Two-project output and archive closure assertion. |
+| Script locating a copied runtime binary | Breaking distribution assumption. | Use `TailwindCliPath`/`TailwindOptions.CliPath` or an intentional direct companion-package reference. |
+| Direct companion-package consumer | Existing package remains published and direct use is unchanged. | Direct-reference compatibility fixture; no automatic lifecycle change. |
+| Offline CI | Primed root works; empty root fails before process start. | Cache restore/prewarm workflow and explicit-path fallback test. |
+| Rollback | Revert to the previous package version. | Release notes include the previous package and explicit-path escape hatch. |
+
+This is a documented distribution compatibility change, not a public API removal. The
+release owner must select the coordinated release version according to the repository's
+published SemVer/pre-release policy; the plan requires a breaking-change note and a
+clean-upgrade proof but does not silently select a major version.
+
+### DX dual voices and scorecard
+
+The independent `combo/sub` DX reviewer completed a cold read and identified the
+resolution matrix, bounded first-build claim, full quick-start fixture, path precedence,
+watch order, root-source recovery, manifest schema, migration, CI matrix, and local
+filesystem contract gaps. The isolated Codex DX pass is unavailable because the host
+rejected external transmission of private plan/repository context. This phase is
+therefore **subagent-only**.
+
+| Dimension | Independent DX reviewer | Codex | Consensus |
+|---|---|---|---|
+| Getting started under five minutes | Requires a scoped measurable condition and stage progress. | Unavailable. | N/A; acceptance contract added. |
+| API / naming guessable | Requires authoritative property/options precedence. | Unavailable. | N/A; matrix added. |
+| Errors actionable | Requires root source plus relative cache identity and finite taxonomy. | Unavailable. | N/A; matrix added. |
+| Docs complete | Requires an exact tested quick-start fixture. | Unavailable. | N/A; documentation contract added. |
+| Upgrade safe | Requires consumer migration and rollback matrix. | Unavailable. | N/A; release matrix added. |
+| Developer environment | Requires concrete CI host matrix and local filesystem contract. | Unavailable. | N/A; CI/offline contract added. |
+
+```text
++====================================================================+
+|                 DX PLAN REVIEW — SCORECARD                         |
++====================================================================+
+| Dimension            | Initial | Planned | Trend                   |
+|----------------------|---------|---------|-------------------------|
+| Getting Started      | 6/10    | 9/10    | +3                      |
+| API/CLI/SDK          | 8/10    | 9/10    | +1                      |
+| Error Messages       | 7/10    | 9/10    | +2                      |
+| Documentation        | 6/10    | 9/10    | +3                      |
+| Upgrade Path         | 4/10    | 9/10    | +5                      |
+| Dev Environment      | 6/10    | 9/10    | +3                      |
+| Community            | 8/10    | 8/10    | unchanged               |
+| DX Measurement       | 6/10    | 8/10    | +2                      |
++--------------------------------------------------------------------+
+| TTHW                 | 6-8 min| <5 min | connected/primed only  |
+| Competitive tier     | Needs work -> Competitive                      |
+| Magical moment       | tested copy-paste build output                 |
+| Product type         | .NET library/SDK + MSBuild integration         |
+| Mode                 | DX POLISH                                      |
+| Overall DX           | 6.4/10 -> 8.8/10                               |
++====================================================================+
+```
+
+### DX implementation checklist
+
+- [ ] TTHW test has a connected/primed scope, recorded stage progress, and explicit timeout budget.
+- [ ] First-success documentation is a tested packed-consumer fixture with exact input/output/link step.
+- [ ] Build/watch property precedence and path anchoring are documented and regression-tested.
+- [ ] `ASTW012` provides classification, safe root source, relative identity, and recovery without secrets.
+- [ ] `tailwind.release.json` validates five pinned digests against version, runtime map, pack, and release gates.
+- [ ] Watch's explicit/cache/acquire/`PATH`/no-watch order is deterministic and tested.
+- [ ] CI docs include the five-host matrix, cache keys, restore timing, permissions, prewarm, and offline behavior.
+- [ ] Release notes include the migration, direct companion, explicit path, and rollback matrix.
