@@ -7,9 +7,12 @@ namespace ForgeTrust.AppSurface.PackageIndex;
 /// </summary>
 internal sealed class PackageArtifactWorkflow
 {
+    private const string TailwindMainPackageId = "ForgeTrust.AppSurface.Web.Tailwind";
+
     internal const int RestoreTimeoutMilliseconds = 180_000;
     internal const int BuildTimeoutMilliseconds = 300_000;
     internal const int PackTimeoutMilliseconds = 180_000;
+    internal const int TailwindConsumerProofTimeoutMilliseconds = 240_000;
 
     private readonly PackagePublishPlanResolver _planResolver;
     private readonly ICommandRunner _commandRunner;
@@ -64,6 +67,14 @@ internal sealed class PackageArtifactWorkflow
         PackageProofWorkDirectory.RequireDisjoint(
             request.CoverageProofWorkDirectory,
             request.DocsProofWorkDirectory);
+        var tailwindProofWorkDirectory = Path.Join(Path.GetTempPath(), "appsurface-tailwind-package-consumer-proof", Guid.NewGuid().ToString("N"));
+        var tailwindProofReportPath = Path.Join(request.ArtifactsOutputPath, "tailwind-package-consumer-proof.md");
+        PackageProofWorkDirectory.RequireDisjoint(
+            tailwindProofWorkDirectory,
+            request.CoverageProofWorkDirectory);
+        PackageProofWorkDirectory.RequireDisjoint(
+            tailwindProofWorkDirectory,
+            request.DocsProofWorkDirectory);
         PackageProofWorkDirectory.Prepare(
             request.CoverageProofWorkDirectory,
             request.RepositoryRoot,
@@ -93,7 +104,6 @@ internal sealed class PackageArtifactWorkflow
                 "--configfile",
                 "NuGet.package-gate.config",
                 "/p:ContinuousIntegrationBuild=true",
-                "/p:TailwindRuntimeBinaryResolutionEnabled=true"
             ],
             "dotnet restore",
             "repository",
@@ -113,7 +123,6 @@ internal sealed class PackageArtifactWorkflow
                 $"/p:Version={request.PackageVersion}",
                 $"/p:PackageVersion={request.PackageVersion}",
                 "/p:ContinuousIntegrationBuild=true",
-                "/p:TailwindRuntimeBinaryResolutionEnabled=true"
             ],
             "dotnet build",
             "repository",
@@ -138,7 +147,6 @@ internal sealed class PackageArtifactWorkflow
                     $"/p:Version={request.PackageVersion}",
                     $"/p:PackageVersion={request.PackageVersion}",
                     "/p:ContinuousIntegrationBuild=true",
-                    "/p:TailwindRuntimeBinaryResolutionEnabled=true"
                 ],
                 "dotnet pack",
                 entry.ProjectPath,
@@ -154,6 +162,25 @@ internal sealed class PackageArtifactWorkflow
             request.PackageVersion,
             request.RepositoryRoot,
             payloadInventory);
+        if (plan.Entries.Any(static entry => string.Equals(
+                entry.PackageId,
+                TailwindMainPackageId,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            DeleteFileIfPresent(tailwindProofReportPath);
+            try
+            {
+                await RunTailwindPackedConsumerProofAsync(
+                    request,
+                    tailwindProofWorkDirectory,
+                    tailwindProofReportPath,
+                    cancellationToken);
+            }
+            finally
+            {
+                TryDeleteProofWorkspace(tailwindProofWorkDirectory);
+            }
+        }
         var coverageProofReport = await _coverageProofWorkflow.RunAsync(
             new CoverageCliConsumerProofRequest(
                 request.RepositoryRoot,
@@ -309,6 +336,47 @@ internal sealed class PackageArtifactWorkflow
             cancellationToken);
     }
 
+    private async Task RunTailwindPackedConsumerProofAsync(
+        PackageArtifactRequest request,
+        string proofWorkDirectory,
+        string proofReportPath,
+        CancellationToken cancellationToken)
+    {
+        PackageProofWorkDirectory.Prepare(
+            proofWorkDirectory,
+            request.RepositoryRoot,
+            request.ArtifactsOutputPath);
+        await _commandRunner.RunAsync(
+            new CommandRunRequest(
+                "bash",
+                [
+                    "scripts/verify-tailwind-package-consumer.sh",
+                    "--artifacts",
+                    request.ArtifactsOutputPath,
+                    "--package-version",
+                    request.PackageVersion,
+                    "--work-directory",
+                    proofWorkDirectory,
+                    "--report-path",
+                    proofReportPath
+                ],
+                request.RepositoryRoot,
+                "Tailwind packed consumer proof",
+                "ForgeTrust.AppSurface.Web.Tailwind",
+                "verify",
+                "verifying the packed Tailwind consumer",
+                TailwindConsumerProofTimeoutMilliseconds,
+                new Dictionary<string, string?>
+                {
+                    ["CI"] = "true",
+                    ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1",
+                    ["DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE"] = "1",
+                    ["DOTNET_NOLOGO"] = "1",
+                    ["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1"
+                }),
+            cancellationToken);
+    }
+
     private static void CleanPackageArtifacts(string artifactsOutputPath)
     {
         foreach (var packagePath in Directory.EnumerateFiles(artifactsOutputPath, "*.nupkg", SearchOption.TopDirectoryOnly))
@@ -322,11 +390,35 @@ internal sealed class PackageArtifactWorkflow
         }
     }
 
+    private static void TryDeleteProofWorkspace(string proofWorkDirectory)
+    {
+        try
+        {
+            if (Directory.Exists(proofWorkDirectory))
+            {
+                Directory.Delete(proofWorkDirectory, recursive: true);
+            }
+        }
+        catch (IOException)
+        {
+            // A temporary proof workspace never participates in the uploaded package artifact.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // A temporary proof workspace never participates in the uploaded package artifact.
+        }
+    }
+
     private static void DeleteArtifactManifest(string artifactManifestPath)
     {
-        if (File.Exists(artifactManifestPath))
+        DeleteFileIfPresent(artifactManifestPath);
+    }
+
+    private static void DeleteFileIfPresent(string path)
+    {
+        if (File.Exists(path))
         {
-            File.Delete(artifactManifestPath);
+            File.Delete(path);
         }
     }
 

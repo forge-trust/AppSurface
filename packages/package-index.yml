@@ -679,19 +679,14 @@ packages:
     release_track: coordinated
     order: 110
     use_when: Add this when you want Tailwind build and watch integration in an AppSurface web app without carrying a Node.js asset pipeline.
-    includes: Tailwind standalone CLI integration, watch mode, generated CSS output, and transitive runtime package selection for supported build hosts.
-    does_not_include: JavaScript plugin ecosystems that require npm-first tooling, or direct runtime-package selection.
+    includes: Tailwind standalone CLI integration, verified host-cache acquisition, watch mode, and generated CSS output for supported build hosts.
+    does_not_include: JavaScript plugin ecosystems that require npm-first tooling, application runtime native payloads, or automatic companion runtime-package selection.
     start_here_path: Web/ForgeTrust.AppSurface.Web.Tailwind/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Web.Tailwind` when you want Tailwind without a separate Node.js asset pipeline.
     depends_on:
       - ForgeTrust.AppSurface.Web
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
-      - ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64
-      - ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64
-      - ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64
-      - ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64
-      - ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind.Tasks/ForgeTrust.AppSurface.Web.Tailwind.Tasks.csproj
     classification: excluded
     publish_decision: do_not_publish
@@ -763,7 +758,7 @@ packages:
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
     order: 300
-    note: Tailwind standalone runtime for Linux Arm64 build hosts. Restore it transitively through `ForgeTrust.AppSurface.Web.Tailwind` instead of installing it directly.
+    note: Direct/compatibility Tailwind standalone runtime for Linux Arm64 build hosts. It is no longer restored through `ForgeTrust.AppSurface.Web.Tailwind`.
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.csproj
     classification: support
     publish_decision: support_publish
@@ -772,7 +767,7 @@ packages:
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
     order: 310
-    note: Tailwind standalone runtime for Linux x64 build hosts. Restore it transitively through `ForgeTrust.AppSurface.Web.Tailwind` instead of installing it directly.
+    note: Direct/compatibility Tailwind standalone runtime for Linux x64 build hosts. It is no longer restored through `ForgeTrust.AppSurface.Web.Tailwind`.
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64.csproj
     classification: support
     publish_decision: support_publish
@@ -781,7 +776,7 @@ packages:
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
     order: 320
-    note: Tailwind standalone runtime for macOS Arm64 build hosts. Restore it transitively through `ForgeTrust.AppSurface.Web.Tailwind` instead of installing it directly.
+    note: Direct/compatibility Tailwind standalone runtime for macOS Arm64 build hosts. It is no longer restored through `ForgeTrust.AppSurface.Web.Tailwind`.
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64.csproj
     classification: support
     publish_decision: support_publish
@@ -790,7 +785,7 @@ packages:
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
     order: 330
-    note: Tailwind standalone runtime for macOS x64 build hosts. Restore it transitively through `ForgeTrust.AppSurface.Web.Tailwind` instead of installing it directly.
+    note: Direct/compatibility Tailwind standalone runtime for macOS x64 build hosts. It is no longer restored through `ForgeTrust.AppSurface.Web.Tailwind`.
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64.csproj
     classification: support
     publish_decision: support_publish
@@ -799,7 +794,7 @@ packages:
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
     order: 340
-    note: Tailwind standalone runtime for Windows x64 build hosts. Restore it transitively through `ForgeTrust.AppSurface.Web.Tailwind` instead of installing it directly.
+    note: Direct/compatibility Tailwind standalone runtime for Windows x64 build hosts. It is no longer restored through `ForgeTrust.AppSurface.Web.Tailwind`.
   - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
     release_guidance_variant: default
     classification: public

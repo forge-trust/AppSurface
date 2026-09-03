@@ -12,12 +12,12 @@ internal static class TailwindDiagnostics
         "https://github.com/forge-trust/AppSurface/tree/main/Web/ForgeTrust.AppSurface.Web.Tailwind#tailwind-diagnostics";
 
     /// <summary>
-    /// Diagnostic emitted when the build host operating system or architecture has no packaged Tailwind runtime.
+    /// Diagnostic emitted when the build host operating system or architecture has no supported Tailwind release asset.
     /// </summary>
     public const string UnsupportedRid = "ASTW001";
 
     /// <summary>
-    /// Diagnostic emitted when <c>TailwindVersion</c> is missing while build mode is resolving a packaged runtime.
+    /// Diagnostic emitted when <c>TailwindVersion</c> is missing while build mode is resolving the verified host CLI.
     /// </summary>
     public const string MissingVersion = "ASTW002";
 
@@ -25,11 +25,6 @@ internal static class TailwindDiagnostics
     /// Diagnostic emitted when an explicit <c>TailwindCliPath</c> points to a file that does not exist.
     /// </summary>
     public const string InvalidCliPath = "ASTW003";
-
-    /// <summary>
-    /// Diagnostic emitted when no explicit, packaged, project-local, or source-tree Tailwind executable exists.
-    /// </summary>
-    public const string MissingCli = "ASTW004";
 
     /// <summary>
     /// Diagnostic emitted when the resolved Tailwind executable exists but the operating system cannot start it.
@@ -50,6 +45,11 @@ internal static class TailwindDiagnostics
     /// Diagnostic emitted when Tailwind input and output paths resolve to the same file.
     /// </summary>
     public const string SameInputOutput = "ASTW008";
+
+    /// <summary>
+    /// Diagnostic emitted when verified Tailwind CLI acquisition cannot complete.
+    /// </summary>
+    public const string AcquisitionFailed = "ASTW012";
 
     /// <summary>
     /// Formats a stable Tailwind diagnostic message.

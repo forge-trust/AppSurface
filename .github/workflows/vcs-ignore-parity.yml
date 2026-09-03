@@ -44,8 +44,10 @@ jobs:
           dotnet-version: |
             10.0.x
 
-      - name: Verify Tailwind runtime resolution can be disabled
-        run: dotnet build Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.csproj /p:TailwindRuntimeBinaryResolutionEnabled=false
+      - name: Verify Tailwind companion package project remains buildable
+        run: |
+          dotnet restore Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.csproj
+          dotnet build Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.csproj --no-restore
 
       - name: Run VCS ignore parity tests
         run: dotnet test Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Tests.csproj --filter AppSurfaceDocsHarvestVcsIgnorePolicyTests --logger "console;verbosity=normal"

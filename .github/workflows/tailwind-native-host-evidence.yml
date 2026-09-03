@@ -1,0 +1,219 @@
+name: Tailwind Native Host Evidence
+
+on:
+  workflow_call:
+    inputs:
+      package_version:
+        description: Exact package version that every native host must pack and prove.
+        required: true
+        type: string
+      source_commit:
+        description: Exact immutable source commit that every native host must check out.
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      package_version:
+        description: Optional diagnostic package version. Leave empty to use a run-specific prerelease version.
+        required: false
+        type: string
+      source_commit:
+        description: Optional immutable commit to prove. Leave empty to prove the dispatched ref.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  packed-consumer:
+    name: Packed consumer (${{ matrix.rid }})
+    runs-on: ${{ fromJSON(vars.TAILWIND_NATIVE_HOST_RUNNERS)[matrix.rid] }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: linux-x64
+            binary_name: tailwindcss-linux-x64
+          - rid: linux-arm64
+            binary_name: tailwindcss-linux-arm64
+          - rid: osx-x64
+            binary_name: tailwindcss-macos-x64
+          - rid: osx-arm64
+            binary_name: tailwindcss-macos-arm64
+          - rid: win-x64
+            binary_name: tailwindcss-windows-x64.exe
+    env:
+      PACKAGE_VERSION: ${{ inputs.package_version || format('0.0.0-native-host.{0}', github.run_id) }}
+      SOURCE_COMMIT: ${{ inputs.source_commit || github.sha }}
+      PROOF_DIRECTORY: ${{ runner.temp }}/tailwind-native-host-proof
+      PACKAGE_ARTIFACTS: ${{ runner.temp }}/tailwind-native-host-artifacts
+
+    steps:
+      - name: Checkout exact source commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Pack the main Tailwind consumer surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$PACKAGE_ARTIFACTS"
+          dotnet pack ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj --configuration Release --output "$PACKAGE_ARTIFACTS" -p:Version="$PACKAGE_VERSION" -p:PackageVersion="$PACKAGE_VERSION"
+          dotnet pack Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj --configuration Release --output "$PACKAGE_ARTIFACTS" -p:Version="$PACKAGE_VERSION" -p:PackageVersion="$PACKAGE_VERSION"
+
+      - name: Prove the packed consumer on this native host
+        shell: bash
+        env:
+          EXPECTED_RID: ${{ matrix.rid }}
+        run: |
+          set -euo pipefail
+          bash scripts/verify-tailwind-package-consumer.sh \
+            --artifacts "$PACKAGE_ARTIFACTS" \
+            --package-version "$PACKAGE_VERSION" \
+            --work-directory "$PROOF_DIRECTORY" \
+            --report-path "$PROOF_DIRECTORY/tailwind-package-consumer-proof.md"
+          grep -Fqx -- "- Host RID: $EXPECTED_RID" "$PROOF_DIRECTORY/tailwind-package-consumer-proof.md"
+
+      - name: Record native-host evidence
+        shell: bash
+        env:
+          EXPECTED_RID: ${{ matrix.rid }}
+          EXPECTED_BINARY_NAME: ${{ matrix.binary_name }}
+          EVIDENCE_ARTIFACT: tailwind-native-host-${{ matrix.rid }}-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          digest() {
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$1" | awk '{print $1}'
+            else
+              shasum -a 256 "$1" | awk '{print $1}'
+            fi
+          }
+          manifest_path="Web/ForgeTrust.AppSurface.Web.Tailwind/tailwind.release.json"
+          proof_path="$PROOF_DIRECTORY/tailwind-package-consumer-proof.md"
+          assets_path="$PROOF_DIRECTORY/consumer/obj/project.assets.json"
+          jq -n \
+            --arg package_id "ForgeTrust.AppSurface.Web.Tailwind" \
+            --arg package_version "$PACKAGE_VERSION" \
+            --arg source_commit "$SOURCE_COMMIT" \
+            --arg manifest_sha256 "$(digest "$manifest_path")" \
+            --arg rid "$EXPECTED_RID" \
+            --arg binary_name "$EXPECTED_BINARY_NAME" \
+            --arg runner "${RUNNER_NAME:-unavailable}" \
+            --arg host_os "$(uname -s)" \
+            --arg host_architecture "$(uname -m)" \
+            --arg artifact_name "$EVIDENCE_ARTIFACT" \
+            --arg proof_sha256 "$(digest "$proof_path")" \
+            --arg assets_sha256 "$(digest "$assets_path")" \
+            '{schema:"appsurface-tailwind-native-host-proof-v1",packageId:$package_id,packageVersion:$package_version,sourceCommit:$source_commit,tailwindManifestSha256:$manifest_sha256,rid:$rid,binaryName:$binary_name,runner:$runner,hostOs:$host_os,hostArchitecture:$host_architecture,artifactName:$artifact_name,checks:{packedConsumer:true,generatedCss:true,hostCacheBinary:true,noRuntimeCompanionDependency:true,noNativeConsumerOutput:true},artifacts:[{path:"tailwind-package-consumer-proof.md",sha256:$proof_sha256},{path:"consumer/obj/project.assets.json",sha256:$assets_sha256}]}' \
+            > "$PROOF_DIRECTORY/tailwind-native-host-proof.json"
+
+      - name: Upload native-host evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tailwind-native-host-${{ matrix.rid }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/tailwind-native-host-proof/tailwind-package-consumer-proof.md
+            ${{ runner.temp }}/tailwind-native-host-proof/consumer/obj/project.assets.json
+            ${{ runner.temp }}/tailwind-native-host-proof/tailwind-native-host-proof.json
+          if-no-files-found: warn
+
+  aggregate-evidence:
+    name: Verify five-host native evidence
+    needs: packed-consumer
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PACKAGE_VERSION: ${{ inputs.package_version || format('0.0.0-native-host.{0}', github.run_id) }}
+      SOURCE_COMMIT: ${{ inputs.source_commit || github.sha }}
+      EVIDENCE_DIRECTORY: ${{ runner.temp }}/tailwind-native-host-evidence
+
+    steps:
+      - name: Fail closed when a native host did not finish
+        env:
+          MATRIX_RESULT: ${{ needs.packed-consumer.result }}
+        run: |
+          set -euo pipefail
+          test "$MATRIX_RESULT" = success
+
+      - name: Checkout exact source commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - name: Download per-host evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: tailwind-native-host-*-${{ github.run_id }}
+          path: ${{ env.EVIDENCE_DIRECTORY }}
+
+      - name: Validate and aggregate exact native-host evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          digest() {
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$1" | awk '{print $1}'
+            else
+              shasum -a 256 "$1" | awk '{print $1}'
+            fi
+          }
+          mapfile -t records < <(find "$EVIDENCE_DIRECTORY" -type f -name tailwind-native-host-proof.json | sort)
+          test "${#records[@]}" -eq 5
+          manifest_sha256="$(digest Web/ForgeTrust.AppSurface.Web.Tailwind/tailwind.release.json)"
+          expected_rids='["linux-arm64","linux-x64","osx-arm64","osx-x64","win-x64"]'
+          expected_binaries='{"linux-x64":"tailwindcss-linux-x64","linux-arm64":"tailwindcss-linux-arm64","osx-x64":"tailwindcss-macos-x64","osx-arm64":"tailwindcss-macos-arm64","win-x64":"tailwindcss-windows-x64.exe"}'
+          jq -s -e \
+            --arg package_version "$PACKAGE_VERSION" \
+            --arg source_commit "$SOURCE_COMMIT" \
+            --arg manifest_sha256 "$manifest_sha256" \
+            --argjson expected_rids "$expected_rids" \
+            --argjson expected_binaries "$expected_binaries" \
+            'length == 5
+             and ([.[].rid] | sort) == $expected_rids
+             and all(.[]; .schema == "appsurface-tailwind-native-host-proof-v1"
+                 and .packageId == "ForgeTrust.AppSurface.Web.Tailwind"
+                 and .packageVersion == $package_version
+                 and .sourceCommit == $source_commit
+                 and .tailwindManifestSha256 == $manifest_sha256
+                 and .binaryName == $expected_binaries[.rid]
+                 and .checks.packedConsumer == true
+                 and .checks.generatedCss == true
+                 and .checks.hostCacheBinary == true
+                 and .checks.noRuntimeCompanionDependency == true
+                 and .checks.noNativeConsumerOutput == true
+                 and (.artifacts | length) == 2)' \
+            "${records[@]}"
+          for record in "${records[@]}"; do
+            artifact_directory="$(dirname "$record")"
+            while IFS=$'\t' read -r relative_path expected_sha256; do
+              actual_sha256="$(digest "$artifact_directory/$relative_path")"
+              test "$actual_sha256" = "$expected_sha256"
+            done < <(jq -r '.artifacts[] | [.path, .sha256] | @tsv' "$record")
+          done
+          jq -s \
+            --arg package_version "$PACKAGE_VERSION" \
+            --arg source_commit "$SOURCE_COMMIT" \
+            --arg manifest_sha256 "$manifest_sha256" \
+            '{schema:"appsurface-tailwind-native-host-evidence-v1",packageId:"ForgeTrust.AppSurface.Web.Tailwind",packageVersion:$package_version,sourceCommit:$source_commit,tailwindManifestSha256:$manifest_sha256,requiredRids:["linux-x64","linux-arm64","osx-x64","osx-arm64","win-x64"],proofs:.}' \
+            "${records[@]}" > "$EVIDENCE_DIRECTORY/tailwind-native-host-evidence.json"
+
+      - name: Upload aggregate native-host evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tailwind-native-host-evidence-${{ github.run_id }}
+          path: ${{ env.EVIDENCE_DIRECTORY }}/tailwind-native-host-evidence.json
+          if-no-files-found: error
