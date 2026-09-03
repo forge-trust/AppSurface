@@ -113,6 +113,9 @@
       },
       "authaspirekeycloaklocalseedstore": {
         "type": "Project"
+      },
+      "forgetrust.appsurface.testing": {
+        "type": "Project"
       }
     }
   }
