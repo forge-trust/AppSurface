@@ -1,9 +1,12 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Cli;
+using ForgeTrust.AppSurface.Evidence.Coverage;
+using CommandException = ForgeTrust.AppSurface.Evidence.Coverage.CoverageExecutionException;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -202,7 +205,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV020", exception.Message, StringComparison.Ordinal);
@@ -225,7 +228,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV001", exception.Message, StringComparison.Ordinal);
@@ -245,7 +248,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV001", exception.Message, StringComparison.Ordinal);
@@ -268,7 +271,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV009", exception.Message, StringComparison.Ordinal);
@@ -293,7 +296,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV007", exception.Message, StringComparison.Ordinal);
@@ -318,7 +321,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV007", exception.Message, StringComparison.Ordinal);
@@ -345,7 +348,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV007", exception.Message, StringComparison.Ordinal);
@@ -398,7 +401,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV007", exception.Message, StringComparison.Ordinal);
@@ -426,7 +429,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV007", exception.Message, StringComparison.Ordinal);
@@ -1277,7 +1280,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV017", exception.Message, StringComparison.Ordinal);
@@ -1300,7 +1303,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV018", exception.Message, StringComparison.Ordinal);
@@ -1858,7 +1861,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV011", exception.Message, StringComparison.Ordinal);
@@ -2120,7 +2123,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV015", exception.Message, StringComparison.Ordinal);
@@ -2148,7 +2151,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV015", exception.Message, StringComparison.Ordinal);
@@ -2181,7 +2184,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV015", exception.Message, StringComparison.Ordinal);
@@ -2207,7 +2210,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV013", exception.Message, StringComparison.Ordinal);
@@ -2234,7 +2237,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV013", exception.Message, StringComparison.Ordinal);
@@ -2291,6 +2294,22 @@ public sealed class CoverageGateTests
 
         Assert.Contains("ASCOV013", exception.Message, StringComparison.Ordinal);
         Assert.Contains("not a directory", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PatchDiffSource_ForSnapshot_ShouldPreserveCapturedBytesAndVerifyTheDigest()
+    {
+        var bytes = Encoding.UTF8.GetBytes("--- a/src/Original.cs\n+++ b/src/Original.cs\n");
+        var sha256 = Convert.ToHexString(SHA256.HashData(bytes));
+        var source = PatchDiffSource.ForSnapshot(bytes, "change.diff", 1024, sha256);
+        bytes[0] = (byte)'X';
+
+        var artifact = await source.ReadAsync(Directory.GetCurrentDirectory(), CancellationToken.None);
+
+        Assert.Contains("--- a/src/Original.cs", artifact.Text, StringComparison.Ordinal);
+        var invalidSource = PatchDiffSource.ForSnapshot(Encoding.UTF8.GetBytes("--- a/a.cs\n+++ b/a.cs\n"), "change.diff", 1024, new string('0', 64));
+        var exception = await Assert.ThrowsAsync<CommandException>(() => invalidSource.ReadAsync(Directory.GetCurrentDirectory(), CancellationToken.None));
+        Assert.Contains("ASCOV013", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2422,7 +2441,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV012", exception.Message, StringComparison.Ordinal);
@@ -2446,7 +2465,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV016", exception.Message, StringComparison.Ordinal);
@@ -2473,7 +2492,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV016", exception.Message, StringComparison.Ordinal);
@@ -2500,7 +2519,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV014", exception.Message, StringComparison.Ordinal);
@@ -2528,7 +2547,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV013", exception.Message, StringComparison.Ordinal);
@@ -2564,7 +2583,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV013", exception.Message, StringComparison.Ordinal);
@@ -2611,7 +2630,7 @@ public sealed class CoverageGateTests
             };
             using var console = new FakeInMemoryConsole();
 
-            var exception = await Assert.ThrowsAsync<CommandException>(
+            var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
                 async () => await command.ExecuteAsync(console, CancellationToken.None));
 
             Assert.Contains("ASCOV013", exception.Message, StringComparison.Ordinal);
@@ -2645,7 +2664,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV016", exception.Message, StringComparison.Ordinal);
@@ -3573,11 +3592,11 @@ public sealed class CoverageGateTests
     }
 
     [Fact]
-    public async Task WriteAsync_AppendsSanitizedGithubSummary()
+    public async Task AppendAsync_AppendsSanitizedGithubSummary()
     {
         using var temp = TempDirectory.Create("appsurface-coverage-gate-");
         var summary = Path.Join(temp.Path, "github-step-summary.md");
-        var request = new CoverageGateRequest(Path.Join(temp.Path, "coverage.cobertura.xml"), temp.Path, 50, 50, true, summary);
+        var request = new CoverageGateRequest(Path.Join(temp.Path, "coverage.cobertura.xml"), temp.Path, 50, 50);
         var result = new CoverageGateResult(
             "coverage|with`markdown\u0001.cobertura.xml",
             new CoverageMetric(8, 10, 80),
@@ -3589,12 +3608,28 @@ public sealed class CoverageGateTests
             Path.Join(temp.Path, "coverage-gate.md"));
 
         await CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None);
+        await CoverageGithubSummaryWriter.AppendAsync(summary, result.MarkdownReportPath, CancellationToken.None);
 
         var text = File.ReadAllText(summary);
         Assert.Contains("Cobertura: coverage\\|with\\`markdown.cobertura.xml", text, StringComparison.Ordinal);
         Assert.Contains("coverage\\|with\\`markdown.cobertura.xml", text, StringComparison.Ordinal);
         Assert.DoesNotContain("Cobertura: `", text, StringComparison.Ordinal);
         Assert.DoesNotContain('\u0001', text);
+    }
+
+    [Fact]
+    public async Task AppendAsync_StripsControlsAndBoundsTheSummary()
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var summary = Path.Join(temp.Path, "github-step-summary.md");
+        var report = Path.Join(temp.Path, "coverage-gate.md");
+        await File.WriteAllTextAsync(report, "prefix\u0001" + new string('a', 1024 * 1024));
+
+        await CoverageGithubSummaryWriter.AppendAsync(summary, report, CancellationToken.None);
+
+        var bytes = await File.ReadAllBytesAsync(summary);
+        Assert.DoesNotContain('\u0001', Encoding.UTF8.GetString(bytes));
+        Assert.True(bytes.Length <= (1024 * 1024) + Encoding.UTF8.GetByteCount(Environment.NewLine));
     }
 
     [Fact]
@@ -3605,9 +3640,7 @@ public sealed class CoverageGateTests
             Path.Join(temp.Path, "coverage.cobertura.xml"),
             temp.Path,
             50,
-            50,
-            true,
-            temp.Path);
+            50);
         var result = new CoverageGateResult(
             Path.Join(temp.Path, "coverage.cobertura.xml"),
             new CoverageMetric(8, 10, 80),
@@ -3618,8 +3651,9 @@ public sealed class CoverageGateTests
             Path.Join(temp.Path, "coverage-gate.json"),
             Path.Join(temp.Path, "coverage-gate.md"));
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
-            () => CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None));
+        await CoverageGateReportWriter.WriteAsync(result, request, CancellationToken.None);
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
+            () => CoverageGithubSummaryWriter.AppendAsync(temp.Path, result.MarkdownReportPath, CancellationToken.None));
 
         Assert.Contains("ASCOV008", exception.Message, StringComparison.Ordinal);
     }
@@ -3872,7 +3906,7 @@ public sealed class CoverageGateTests
         };
         using var console = new FakeInMemoryConsole();
 
-        var exception = await Assert.ThrowsAsync<CommandException>(
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
             async () => await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("ASCOV020", exception.Message, StringComparison.Ordinal);

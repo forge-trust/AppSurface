@@ -1,6 +1,8 @@
 using CliFx;
 using CliFx.Infrastructure;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Testing;
+using CommandException = ForgeTrust.AppSurface.Evidence.Coverage.CoverageExecutionException;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -221,7 +223,7 @@ public sealed class CoverageCleanCommandTests
         using var console = new FakeInMemoryConsole();
         var command = new CoverageCleanCommand(new TestResultsCleanupWorkflow()) { RootDirectory = root.Path };
 
-        var error = await Assert.ThrowsAsync<CommandException>(async () =>
+        var error = await Assert.ThrowsAsync<CliFx.CommandException>(async () =>
             await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("--root is available only with --all", error.Message, StringComparison.Ordinal);
@@ -238,7 +240,7 @@ public sealed class CoverageCleanCommandTests
             OutputDirectory = root.CreateDirectory("output"),
         };
 
-        var error = await Assert.ThrowsAsync<CommandException>(async () =>
+        var error = await Assert.ThrowsAsync<CliFx.CommandException>(async () =>
             await command.ExecuteAsync(console, CancellationToken.None));
 
         Assert.Contains("--output cannot be used with --all", error.Message, StringComparison.Ordinal);

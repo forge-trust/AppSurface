@@ -34,7 +34,7 @@ appsurface evidence verify TestResults/evidence/evidence-manifest.json
 
 An intentionally selected `no-evidence` profile may close a gate. A skipped test project, filtered test suite, unavailable browser, missing Docker runtime, or unsupported producer cannot. `run` returns a failing command and a manifest with `ClaimKind.None` for those cases, preserving the diagnostic and next action in `evidence-summary.json`.
 
-The built-in coverage producer is an in-process bridge to the existing `appsurface coverage run` and `appsurface coverage gate` workflows. Its policy declaration carries the exact overall and optional patch thresholds, tolerance, and patch-line mode; the resolved plan binds those values before collection begins. It does not silently convert a partial test selection into a full-profile claim.
+The built-in coverage producer is an in-process adapter over the private [`ForgeTrust.AppSurface.Evidence.Coverage`](../ForgeTrust.AppSurface.Evidence.Coverage/README.md) engine shared with `appsurface coverage run` and `appsurface coverage gate`. Its policy declaration carries the exact overall and optional patch thresholds, tolerance, and patch-line mode; the resolved plan binds those values before collection begins. When a patch gate is selected, `evidence run` captures the bounded `--diff-file` bytes during planning and reuses that immutable snapshot for gate evaluation, so replacing the file mid-run cannot change the measured input. It does not silently convert a partial test selection into a full-profile claim.
 
 ## Pitfalls
 

@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PackageDescription>Private first-party coverage execution implementation shared by AppSurface CLI and Evidence workflows.</PackageDescription>
+    <PackageTags>appsurface;evidence;coverage;internal</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <DefineConstants>$(DefineConstants);EVIDENCE_COVERAGE_CORE</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Cli" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CliWrap" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRun.cs" Link="CoverageRun.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageMerge.cs" Link="CoverageMerge.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageGate.cs" Link="CoverageGate.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunDrivers.cs" Link="CoverageRunDrivers.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunWatchdog.cs" Link="CoverageRunWatchdog.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunArtifactReader.cs" Link="CoverageRunArtifactReader.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunOutputLease.cs" Link="CoverageRunOutputLease.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageProjectManifest.cs" Link="CoverageProjectManifest.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunSlowTestDiagnostics.cs" Link="CoverageRunSlowTestDiagnostics.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageFileSystemInterop.cs" Link="CoverageFileSystemInterop.cs" />
+  </ItemGroup>
+
+</Project>

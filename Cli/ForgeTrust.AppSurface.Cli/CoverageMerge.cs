@@ -5,12 +5,25 @@ using System.Text;
 using System.Text.Json;
 using System.Xml;
 using System.Xml.Linq;
+#if !EVIDENCE_COVERAGE_CORE
 using CliFx;
 using CliFx.Binding;
 using CliFx.Infrastructure;
+#endif
+using ForgeTrust.AppSurface.Evidence.Coverage;
 
+#if EVIDENCE_COVERAGE_CORE
+using CommandException = ForgeTrust.AppSurface.Evidence.Coverage.CoverageExecutionException;
+using IConsole = ForgeTrust.AppSurface.Evidence.Coverage.CoverageTextWriters;
+#endif
+
+#if EVIDENCE_COVERAGE_CORE
+namespace ForgeTrust.AppSurface.Evidence.Coverage;
+#else
 namespace ForgeTrust.AppSurface.Cli;
+#endif
 
+#if EVIDENCE_CLI_ADAPTER
 /// <summary>
 /// Merges existing Cobertura shards into AppSurface coverage artifacts.
 /// </summary>
@@ -61,10 +74,23 @@ internal sealed partial class CoverageMergeCommand : ICommand
     internal async ValueTask ExecuteAsync(IConsole console, CancellationToken cancellationToken)
     {
         var request = new CoverageMergeRequest(SourceDirectory, OutputDirectory, Clean: true);
-        await _workflow.MergeAsync(request, console, cancellationToken);
+        try
+        {
+            await _workflow.MergeAsync(
+                request,
+                CoverageTextWriters.Create(console.Output, console.Error),
+                cancellationToken);
+        }
+        catch (CoverageExecutionException exception)
+        {
+            throw CoverageCommandExceptionMapper.Map(exception);
+        }
     }
 }
 
+#endif
+
+#if EVIDENCE_COVERAGE_CORE
 /// <summary>
 /// Request for merging existing Cobertura coverage shards.
 /// </summary>
@@ -932,3 +958,4 @@ internal static class CoverageMergeStaging
             "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-merge-diagnostics");
     }
 }
+#endif

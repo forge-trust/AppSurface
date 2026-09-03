@@ -9,12 +9,24 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Xml;
+#if !EVIDENCE_COVERAGE_CORE
 using CliFx;
 using CliFx.Binding;
 using CliFx.Infrastructure;
+#endif
+using ForgeTrust.AppSurface.Evidence.Coverage;
 
+#if EVIDENCE_COVERAGE_CORE
+using CommandException = ForgeTrust.AppSurface.Evidence.Coverage.CoverageExecutionException;
+#endif
+
+#if EVIDENCE_COVERAGE_CORE
+namespace ForgeTrust.AppSurface.Evidence.Coverage;
+#else
 namespace ForgeTrust.AppSurface.Cli;
+#endif
 
+#if EVIDENCE_CLI_ADAPTER
 /// <summary>
 /// Evaluates a Cobertura coverage file against line and branch thresholds.
 /// </summary>
@@ -148,8 +160,21 @@ internal sealed partial class CoverageGateCommand : ICommand
     internal async ValueTask ExecuteAsync(IConsole console, CancellationToken cancellationToken)
     {
         var request = CreateRequest();
-        var result = await CoverageGateEvaluator.EvaluateAsync(request, cancellationToken);
-        await CoverageGateReportWriter.WriteAsync(result, request, cancellationToken);
+        CoverageGateResult result;
+        try
+        {
+            result = await CoverageGateEvaluator.EvaluateAsync(request, cancellationToken);
+            await CoverageGateReportWriter.WriteAsync(result, request, cancellationToken);
+        }
+        catch (CoverageExecutionException exception)
+        {
+            throw CoverageCommandExceptionMapper.Map(exception);
+        }
+
+        await CoverageGithubSummaryWriter.AppendAsync(
+            GithubSummary && !NoGithubSummary ? Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY") : null,
+            result.MarkdownReportPath,
+            cancellationToken);
 
         var status = result.Passed ? "PASS" : "FAIL";
         await console.Output.WriteLineAsync(RenderConsoleSummary(status, result, request));
@@ -242,8 +267,6 @@ internal sealed partial class CoverageGateCommand : ICommand
             outputDirectory,
             MinLine,
             MinBranch,
-            GithubSummary && !NoGithubSummary,
-            Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY"),
             patchCoverage,
             Tolerance);
     }
@@ -431,6 +454,9 @@ internal sealed partial class CoverageGateCommand : ICommand
     }
 }
 
+#endif
+
+#if EVIDENCE_COVERAGE_CORE
 /// <summary>
 /// Request for evaluating a Cobertura coverage quality gate.
 /// </summary>
@@ -438,8 +464,6 @@ internal sealed partial class CoverageGateCommand : ICommand
 /// <param name="OutputDirectory">Absolute directory where private report artifacts should be written.</param>
 /// <param name="MinLinePercent">Minimum accepted line coverage percentage.</param>
 /// <param name="MinBranchPercent">Minimum accepted branch coverage percentage.</param>
-/// <param name="WriteGithubSummary">Whether to append Markdown output to <paramref name="GithubStepSummaryPath"/>.</param>
-/// <param name="GithubStepSummaryPath">Optional GitHub step summary file path.</param>
 /// <param name="PatchCoverage">Optional changed-line coverage request.</param>
 /// <param name="TolerancePercent">Grace margin from 0 through 100 subtracted from every configured threshold before evaluation. Defaults to 0.5.</param>
 internal sealed record CoverageGateRequest(
@@ -447,10 +471,27 @@ internal sealed record CoverageGateRequest(
     string OutputDirectory,
     decimal MinLinePercent,
     decimal MinBranchPercent,
-    bool WriteGithubSummary,
-    string? GithubStepSummaryPath,
     CoveragePatchRequest? PatchCoverage = null,
-    decimal TolerancePercent = 0.5m);
+    decimal TolerancePercent = 0.5m)
+{
+    /// <summary>
+    /// Supports existing first-party request construction while intentionally discarding CLI-only summary options.
+    /// </summary>
+    public CoverageGateRequest(
+        string coveragePath,
+        string outputDirectory,
+        decimal minLinePercent,
+        decimal minBranchPercent,
+        bool writeGithubSummary,
+        string? githubStepSummaryPath,
+        CoveragePatchRequest? patchCoverage = null,
+        decimal tolerancePercent = 0.5m)
+        : this(coveragePath, outputDirectory, minLinePercent, minBranchPercent, patchCoverage, tolerancePercent)
+    {
+        _ = writeGithubSummary;
+        _ = githubStepSummaryPath;
+    }
+}
 
 /// <summary>
 /// Request for estimating coverage on lines changed by a patch diff source.
@@ -581,6 +622,37 @@ internal sealed record PatchDiffSource(
                     throw new CommandException($"ASCOV013 Failed to read --diff-file '{path}': {ex.Message}");
                 }
             });
+
+    /// <summary>
+    /// Creates a patch source backed by caller-supplied immutable diff bytes.
+    /// </summary>
+    /// <remarks>
+    /// The source does not reopen a filesystem path. It is used when a first-party caller must prove that planning
+    /// and gate evaluation consumed the same bounded diff input.
+    /// </remarks>
+    public static PatchDiffSource ForSnapshot(byte[] bytes, string label, long maxBytes, string sha256)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        ArgumentException.ThrowIfNullOrWhiteSpace(label);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sha256);
+        var snapshot = bytes.ToArray();
+        return new(
+            PatchDiffSourceKind.File,
+            label,
+            null,
+            null,
+            true,
+            (_, _) =>
+            {
+                var artifact = CreateArtifactFromBoundedBytes(snapshot, maxBytes, $"snapshot diff is too large. Limit is {maxBytes} bytes.");
+                if (!string.Equals(artifact.Sha256, sha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new CommandException("ASCOV013 snapshot diff integrity verification failed.");
+                }
+
+                return Task.FromResult(artifact);
+            });
+    }
 
     public static PatchDiffSource ForStdin(
         string label,
@@ -2073,7 +2145,6 @@ internal static class CoverageGateReportWriter
 {
     private const int PatchTargetsSchemaVersion = 1;
 
-    private const int GithubSummaryLimitBytes = 1024 * 1024;
     private const int MaximumNotMeasuredSamples = 10;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -2176,10 +2247,6 @@ internal static class CoverageGateReportWriter
                 outputLease.DeleteOwnedGateArtifact(CoverageGateArtifactNames.PatchTargetsMarkdown);
             }
 
-            if (request.WriteGithubSummary && !string.IsNullOrWhiteSpace(request.GithubStepSummaryPath))
-            {
-                await AppendGithubSummaryAsync(request.GithubStepSummaryPath, markdown, cancellationToken);
-            }
         }
         catch (CommandException ex) when (ex.Message.StartsWith("ASCOV109", StringComparison.Ordinal))
         {
@@ -2572,29 +2639,6 @@ internal static class CoverageGateReportWriter
         builder.AppendLine(FormattableString.Invariant($"| Patch branches | {coverage} | {thresholdText} | {outcome} |"));
     }
 
-    private static async Task AppendGithubSummaryAsync(
-        string githubStepSummaryPath,
-        string markdown,
-        CancellationToken cancellationToken)
-    {
-        var path = Path.GetFullPath(githubStepSummaryPath);
-        var sanitized = StripControls(markdown);
-        var bytes = Encoding.UTF8.GetBytes(sanitized);
-        if (bytes.Length > GithubSummaryLimitBytes)
-        {
-            sanitized = Encoding.UTF8.GetString(bytes.AsSpan(0, GithubSummaryLimitBytes));
-        }
-
-        try
-        {
-            await File.AppendAllTextAsync(path, sanitized + Environment.NewLine, cancellationToken);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            throw new CommandException($"ASCOV008 Failed to write GitHub step summary '{path}': {ex.Message}");
-        }
-    }
-
     private static string EscapeMarkdownCell(string value)
     {
         return StripControls(value)
@@ -2713,3 +2757,4 @@ internal static class CoverageOutputPathPolicy
             : StringComparison.Ordinal;
     }
 }
+#endif

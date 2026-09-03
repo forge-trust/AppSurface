@@ -5,6 +5,7 @@ using ForgeTrust.AppSurface.Config.GoogleSecretManager;
 using ForgeTrust.AppSurface.Console;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Evidence.Cli;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Evidence.Planner;
 using ForgeTrust.RazorWire.Cli;
 using Microsoft.Extensions.DependencyInjection;
@@ -75,9 +76,6 @@ internal static class AppSurfaceCliApp
         services.AddSingleton<IAppSurfaceDocsExportRunner, AppSurfaceDocsInProcessExportRunner>();
         services.AddSingleton<IAppSurfaceDocsHealthVerifyRunner, AppSurfaceDocsInProcessHealthVerifyRunner>();
         services.AddSingleton<IRazorWireStaticExporter, RazorWireExportEngineAdapter>();
-        services.AddSingleton<ICoverageRunProcessRunner, CliWrapCoverageRunProcessRunner>();
-        services.AddSingleton<IReportGeneratorPackageLocator, ReportGeneratorPackageLocator>();
-        services.AddSingleton<ICoverageRunReportGenerator, CoverageRunReportGenerator>();
         services.TryAddSingleton<IAppSurfaceGoogleSecretTransferClient, GoogleSecretManagerTransferClientAdapter>();
         services.TryAddSingleton<ISecretPromotionGoogleClientFactory, DefaultSecretPromotionGoogleClientFactory>();
         services.TryAddSingleton<LocalSecretsTransferCoordinator>();
@@ -87,8 +85,7 @@ internal static class AppSurfaceCliApp
         services.AddSingleton(TimeProvider.System);
         AddCanaryPollingServices(services);
         services.AddTransient<CanaryPollWorkflow>();
-        services.AddTransient<CoverageRunWorkflow>();
-        services.AddTransient<CoverageMergeWorkflow>();
+        AddCoverageServices(services);
         services.AddSingleton<EvidencePlanner>();
         services.AddTransient<EvidenceCliWorkflow>();
         services.AddTransient<TestResultsCleanupWorkflow>();
@@ -171,6 +168,30 @@ internal static class AppSurfaceCliApp
             .AddHttpClient<IPwaVerificationHttpClient, PwaVerificationHttpClient>(
                 client => { client.Timeout = TimeSpan.FromSeconds(30); })
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+    }
+
+    /// <summary>
+    /// Registers the shared coverage core and its CLI and Evidence adapters.
+    /// </summary>
+    /// <param name="services">Service collection receiving the coverage command and Evidence registrations.</param>
+    /// <remarks>
+    /// The conditionally linked coverage sources compile only into the private core. Public coverage commands use
+    /// CLI-only presentation adapters at their boundary, while the first-party Evidence producer composes the same
+    /// private-core services in process. Registering one shared graph preserves identical collection, merge, gate, and
+    /// watchdog behavior for both entry points without duplicate service descriptors.
+    /// </remarks>
+    internal static void AddCoverageServices(IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddSingleton<ICoverageRunProcessRunner, CliWrapCoverageRunProcessRunner>();
+        services.AddSingleton<IReportGeneratorPackageLocator, ReportGeneratorPackageLocator>();
+        services.AddSingleton<ICoverageRunReportGenerator, CoverageRunReportGenerator>();
+        services.AddTransient<CoverageRunWorkflow>();
+        services.AddTransient<CoverageMergeWorkflow>();
+
+        services.AddTransient<CoverageEvidenceExecutionWorkflow>();
+        services.AddTransient<CoverageEvidenceProducer>();
     }
 
     /// <summary>

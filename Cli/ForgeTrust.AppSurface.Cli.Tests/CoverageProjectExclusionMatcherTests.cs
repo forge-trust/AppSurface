@@ -1,5 +1,6 @@
-using CliFx;
 using ForgeTrust.AppSurface.Cli;
+using ForgeTrust.AppSurface.Evidence.Coverage;
+using CommandException = ForgeTrust.AppSurface.Evidence.Coverage.CoverageExecutionException;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 

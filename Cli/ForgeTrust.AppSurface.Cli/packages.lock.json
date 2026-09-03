@@ -520,11 +520,18 @@
         "type": "Project",
         "dependencies": {
           "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Coverage": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Planner": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.evidence.contracts": {
         "type": "Project"
+      },
+      "forgetrust.appsurface.evidence.coverage": {
+        "type": "Project",
+        "dependencies": {
+          "CliWrap": "[3.10.1, )"
+        }
       },
       "forgetrust.appsurface.evidence.planner": {
         "type": "Project",
