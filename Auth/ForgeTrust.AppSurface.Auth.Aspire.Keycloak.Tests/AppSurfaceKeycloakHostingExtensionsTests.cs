@@ -50,7 +50,12 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
 
         Assert.Same(username.Resource, resource.Resource.Resource.AdminUserNameParameter);
         Assert.Same(password.Resource, resource.Resource.Resource.AdminPasswordParameter);
+    }
 
+    [Fact]
+    public void AddAppSurfaceKeycloak_WhenExplicitAdministratorPasswordIsNotSecret_ThrowsInvalidOptions()
+    {
+        using var directory = new TempDirectory();
         var nonSecretBuilder = DistributedApplication.CreateBuilder([]);
         var nonSecretUsername = nonSecretBuilder.AddParameter("keycloak-admin-username", "admin", secret: false);
         var nonSecretPassword = nonSecretBuilder.AddParameter("keycloak-admin-password", "not-secret", secret: false);
@@ -289,17 +294,8 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         string realmImportDirectory,
         bool usePersistentDataVolume)
     {
-        const int maxAttempts = 5;
-        for (var attempt = 1; attempt <= maxAttempts; attempt++)
-        {
-            var keycloakPort = GetAvailablePort();
-            var webProofPort = GetAvailablePort();
-            if (keycloakPort == webProofPort)
-            {
-                continue;
-            }
-
-            try
+        return WithAvailablePorts(
+            (keycloakPort, webProofPort) =>
             {
                 var resource = builder.AddAppSurfaceKeycloak("keycloak-proof", options =>
                 {
@@ -309,15 +305,8 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
                     options.UsePersistentDataVolume = usePersistentDataVolume;
                 });
                 return (resource, keycloakPort);
-            }
-            catch (AppSurfaceKeycloakException exception)
-                when (exception.Code == AppSurfaceKeycloakDiagnosticCodes.PortOccupied && attempt < maxAttempts)
-            {
-                // Retry with fresh ports if another process wins the preflight race.
-            }
-        }
-
-        throw new InvalidOperationException("Could not reserve distinct local ports for the Keycloak hosting test.");
+            },
+            "Could not reserve distinct local ports for the Keycloak hosting test.");
     }
 
     private static AppSurfaceKeycloakResource AddWithAvailablePorts(
@@ -325,6 +314,22 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         string realmImportDirectory,
         IResourceBuilder<ParameterResource> username,
         IResourceBuilder<ParameterResource> password)
+    {
+        return WithAvailablePorts(
+            (keycloakPort, webProofPort) => builder.AddAppSurfaceKeycloak(
+                "keycloak-explicit-admin",
+                username,
+                password,
+                options =>
+                {
+                    options.KeycloakPort = keycloakPort;
+                    options.WebProofPort = webProofPort;
+                    options.RealmImportDirectory = realmImportDirectory;
+                }),
+            "Could not reserve distinct local ports for the explicit-admin hosting test.");
+    }
+
+    private static T WithAvailablePorts<T>(Func<int, int, T> create, string failureMessage)
     {
         const int maxAttempts = 5;
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
@@ -338,12 +343,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
 
             try
             {
-                return builder.AddAppSurfaceKeycloak("keycloak-explicit-admin", username, password, options =>
-                {
-                    options.KeycloakPort = keycloakPort;
-                    options.WebProofPort = webProofPort;
-                    options.RealmImportDirectory = realmImportDirectory;
-                });
+                return create(keycloakPort, webProofPort);
             }
             catch (AppSurfaceKeycloakException exception)
                 when (exception.Code == AppSurfaceKeycloakDiagnosticCodes.PortOccupied && attempt < maxAttempts)
@@ -352,7 +352,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
             }
         }
 
-        throw new InvalidOperationException("Could not reserve distinct local ports for the explicit-admin hosting test.");
+        throw new InvalidOperationException(failureMessage);
     }
 
     private static string GetCurrentTestProjectPath() => TestPathUtils.PathUnder(

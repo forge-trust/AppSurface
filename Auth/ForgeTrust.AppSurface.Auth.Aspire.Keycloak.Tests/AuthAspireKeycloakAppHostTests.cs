@@ -11,6 +11,10 @@ using AuthAspireKeycloakWebComponent = AppHost::AuthAspireKeycloakAppHost.AuthAs
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests;
 
+[CollectionDefinition("auth-aspire-keycloak-apphost-environment", DisableParallelization = true)]
+public sealed class AuthAspireKeycloakAppHostEnvironmentCollection;
+
+[Collection("auth-aspire-keycloak-apphost-environment")]
 public sealed class AuthAspireKeycloakAppHostTests
 {
     [Fact]

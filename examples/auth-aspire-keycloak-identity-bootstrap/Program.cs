@@ -47,7 +47,7 @@ public static class Program
             await KeycloakAdminClient.UpsertBrokerAliasAsync(httpClient, configuration, token).ConfigureAwait(false);
 
             var store = new LocalSeedStore(configuration.StorePath);
-            store.UpsertBrokerAlias("local-broker", configuration.Authority.ToString(), configuration.PublicClientId);
+            store.UpsertBrokerAlias("local-broker", configuration.Authority.ToString().TrimEnd('/'), configuration.PublicClientId);
             store.UpsertIdentitySubjectMap("founder", "subject-founder-001");
             var snapshot = store.ReadSnapshot();
             if (snapshot.BrokerAliases.Count != 1
@@ -193,7 +193,7 @@ internal static class KeycloakAdminClient
         using var request = new HttpRequestMessage(
             getResponse.StatusCode == HttpStatusCode.NotFound ? HttpMethod.Post : HttpMethod.Put,
             getResponse.StatusCode == HttpStatusCode.NotFound
-                ? new Uri(configuration.Authority, "../admin/realms/" + Uri.EscapeDataString(configuration.RealmName) + "/identity-provider/instances")
+                ? BuildBrokerInstancesEndpoint(configuration)
                 : endpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
@@ -213,10 +213,15 @@ internal static class KeycloakAdminClient
 
     private static Uri BuildBrokerEndpoint(IdentityBootstrapConfiguration configuration)
     {
-        var root = new Uri(configuration.Authority.GetLeftPart(UriPartial.Authority));
-        return new Uri(root, "admin/realms/" + Uri.EscapeDataString(configuration.RealmName)
-            + "/identity-provider/instances/local-broker");
+        return new Uri(
+            BuildBrokerInstancesEndpoint(configuration).ToString().TrimEnd('/') + "/local-broker",
+            UriKind.Absolute);
     }
+
+    private static Uri BuildBrokerInstancesEndpoint(IdentityBootstrapConfiguration configuration) =>
+        new(
+            new Uri(configuration.Authority.GetLeftPart(UriPartial.Authority) + "/", UriKind.Absolute),
+            "admin/realms/" + Uri.EscapeDataString(configuration.RealmName) + "/identity-provider/instances");
 
     private static Uri BuildRealmEndpoint(Uri authority, string suffix) =>
         new(new Uri(authority.ToString().TrimEnd('/') + "/", UriKind.Absolute), suffix);

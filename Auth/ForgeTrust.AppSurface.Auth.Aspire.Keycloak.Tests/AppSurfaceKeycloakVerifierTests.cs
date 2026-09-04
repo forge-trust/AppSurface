@@ -81,15 +81,10 @@ public sealed class AppSurfaceKeycloakVerifierTests
         store.UpsertCandidateFixture("candidate:founder", "subject-founder-001");
         using var output = new StringWriter();
         using var error = new StringWriter();
+        var environment = CreateSeedStoreEnvironment(storePath);
 
         var exitCode = await Program.VerifyLocalSeedStoreAsync(
-            name => name switch
-            {
-                "LOCAL_SEED_STORE_PATH" => storePath,
-                "APPSURFACE_KEYCLOAK_LOCAL_SEED_AUTHORITY" => "https://issuer/realms/appsurface-dev",
-                "APPSURFACE_KEYCLOAK_LOCAL_SEED_PUBLIC_CLIENT_ID" => "appsurface-web",
-                _ => null,
-            },
+            name => environment.TryGetValue(name, out var value) ? value : null,
             output,
             error);
 
@@ -104,16 +99,11 @@ public sealed class AppSurfaceKeycloakVerifierTests
         using var directory = new TempDirectory();
         using var output = new StringWriter();
         using var error = new StringWriter();
+        var environment = CreateSeedStoreEnvironment(TestPathUtils.PathUnder(directory.Path, "missing.json"));
 
         var missingPathExitCode = await Program.VerifyLocalSeedStoreAsync(_ => null, output, error);
         var incompletePathExitCode = await Program.VerifyLocalSeedStoreAsync(
-            name => name switch
-            {
-                "LOCAL_SEED_STORE_PATH" => TestPathUtils.PathUnder(directory.Path, "missing.json"),
-                "APPSURFACE_KEYCLOAK_LOCAL_SEED_AUTHORITY" => "https://issuer/realms/appsurface-dev",
-                "APPSURFACE_KEYCLOAK_LOCAL_SEED_PUBLIC_CLIENT_ID" => "appsurface-web",
-                _ => null,
-            },
+            name => environment.TryGetValue(name, out var value) ? value : null,
             output,
             error);
 

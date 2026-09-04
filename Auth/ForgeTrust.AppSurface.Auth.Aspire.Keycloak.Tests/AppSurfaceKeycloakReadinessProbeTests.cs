@@ -36,14 +36,49 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
     }
 
     [Fact]
-    public void Constructor_WhenTheRealmReadyWorkerSuppliesExplicitEvidenceInputs_AcceptsThem()
+    public async Task CheckOnceAsync_WhenTheRealmReadyWorkerSuppliesExplicitEvidenceInputs_UsesThoseInputs()
     {
         using var directory = new TempDirectory();
-        var options = CreateOptions(directory.Path);
+        var options = CreateOptionsWithTheme(directory.Path);
+        var realmImport = AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options);
+        var realm = JsonNode.Parse(File.ReadAllText(realmImport))!.AsObject();
+        realm["loginTheme"] = "application";
+        File.WriteAllText(realmImport, realm.ToJsonString());
+        using var client = new HttpClient(new StubHandler(MetadataThenOk));
 
-        var probe = new AppSurfaceKeycloakReadinessProbe(options, "application", ["admin", "viewer"]);
+        var probe = new AppSurfaceKeycloakReadinessProbe(
+            options,
+            client,
+            File.ReadAllText,
+            "application",
+            ["admin", "viewer"]);
 
-        Assert.NotNull(probe);
+        var result = await probe.CheckOnceAsync();
+
+        Assert.Equal("appsurface-dev", result.Realm);
+    }
+
+    [Fact]
+    public async Task CheckOnceAsync_WhenExplicitRealmReadyEvidenceDoesNotMatch_ThrowsRealmDiagnostic()
+    {
+        using var directory = new TempDirectory();
+        var options = CreateOptionsWithTheme(directory.Path);
+        var realmImport = AppSurfaceKeycloakRealmGenerator.WriteRealmImport(options);
+        var realm = JsonNode.Parse(File.ReadAllText(realmImport))!.AsObject();
+        realm["loginTheme"] = "application";
+        File.WriteAllText(realmImport, realm.ToJsonString());
+        using var client = new HttpClient(new StubHandler(MetadataThenOk));
+        var probe = new AppSurfaceKeycloakReadinessProbe(
+            options,
+            client,
+            File.ReadAllText,
+            "other-theme",
+            ["admin", "viewer"]);
+
+        var exception = await Assert.ThrowsAsync<AppSurfaceKeycloakException>(() => probe.CheckOnceAsync());
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.RealmEvidenceInvalid, exception.Code);
+        Assert.Contains("login theme", exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -619,7 +654,7 @@ public sealed class AppSurfaceKeycloakReadinessProbeTests
         File.WriteAllText(Path.Join(themeDirectory, "login", "theme.properties"), "parent=keycloak\n");
         var options = CreateOptions(directory);
         options.LoginTheme = AppSurfaceKeycloakThemeOptions.Login(
-            "application",
+            "configured-theme",
             themeDirectory,
             AppSurfaceKeycloakImageReference.Parse($"quay.io/keycloak/keycloak:26.6@sha256:{new string('a', 64)}"));
         return options;

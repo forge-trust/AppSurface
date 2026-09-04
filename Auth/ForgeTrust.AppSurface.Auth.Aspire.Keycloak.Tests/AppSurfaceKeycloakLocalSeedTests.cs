@@ -329,6 +329,40 @@ public sealed class AppSurfaceKeycloakLocalSeedTests
         Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.LocalSeedNotAllowed, exception.Code);
     }
 
+    [Theory]
+    [InlineData("not-an-absolute-uri")]
+    [InlineData("https://localhost:8080/not-realms/appsurface-dev")]
+    [InlineData("https://localhost:8080/realms/")]
+    public void WithLocalSeed_WhenTheConfigurationAuthorityDoesNotContainARealm_ThrowsLocalSeedDiagnostic(string authority)
+    {
+        using var directory = new TempDirectory();
+        var builder = DistributedApplication.CreateBuilder([]);
+        var keycloak = AddKeycloak(builder, directory.Path);
+        var invalidAuthorityKeycloak = new AppSurfaceKeycloakResource(
+            keycloak.Resource,
+            new AppSurfaceKeycloakConfigurationProjection(
+                authority,
+                keycloak.Configuration.ClientId,
+                keycloak.Configuration.CallbackPath,
+                keycloak.Configuration.SignedOutCallbackPath,
+                keycloak.Configuration.RequireClientSecret),
+            keycloak.Readiness,
+            keycloak.RealmImportFile);
+        var factoryCalled = false;
+
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() => invalidAuthorityKeycloak.WithLocalSeed(
+            "identity-bootstrap",
+            context =>
+            {
+                factoryCalled = true;
+                return AddProject(builder, context.ResourceName);
+            },
+            options => AllowCurrentEnvironment(builder, options)));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.LocalSeedInvalid, exception.Code);
+        Assert.False(factoryCalled);
+    }
+
     private static AppSurfaceKeycloakResource AddKeycloak(IDistributedApplicationBuilder builder, string importDirectory)
     {
         for (var attempt = 0; attempt < 5; attempt++)

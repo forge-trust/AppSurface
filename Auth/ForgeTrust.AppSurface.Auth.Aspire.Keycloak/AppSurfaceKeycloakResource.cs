@@ -13,7 +13,7 @@ public sealed class AppSurfaceKeycloakResource
     private readonly object _realmReadyLock = new();
     private readonly AppSurfaceKeycloakRealmReadyConfiguration? _realmReadyConfiguration;
     private readonly HashSet<ParameterResource> _usedLocalSeedParameters = new(ReferenceEqualityComparer.Instance);
-    private AppSurfaceKeycloakRealmReady? _realmReady;
+    private volatile AppSurfaceKeycloakRealmReady? _realmReady;
 
     /// <summary>
     /// Creates a new wrapper around an Aspire Keycloak resource.
@@ -210,7 +210,13 @@ public sealed class AppSurfaceKeycloakResource
     private string RealmName()
     {
         const string realmPathPrefix = "/realms/";
-        var authority = new Uri(Configuration.Authority, UriKind.Absolute);
+        if (!Uri.TryCreate(Configuration.Authority, UriKind.Absolute, out var authority)
+            || !authority.AbsolutePath.StartsWith(realmPathPrefix, StringComparison.Ordinal)
+            || authority.AbsolutePath.Length == realmPathPrefix.Length)
+        {
+            throw AppSurfaceKeycloakLocalSeedPolicy.Invalid();
+        }
+
         return authority.AbsolutePath[realmPathPrefix.Length..];
     }
 }

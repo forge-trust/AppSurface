@@ -52,12 +52,14 @@ public sealed class IdentityBootstrapTests
         Assert.Empty(handler.Requests);
     }
 
-    [Fact]
-    public async Task RunAsync_WhenTheLocalBrokerDoesNotExist_CreatesItAndPersistsTheSeedEvidence()
+    [Theory]
+    [InlineData("https://localhost:8443/realms/appsurface-dev")]
+    [InlineData("https://localhost:8443/realms/appsurface-dev/")]
+    public async Task RunAsync_WhenTheLocalBrokerDoesNotExist_CreatesItAndPersistsTheSeedEvidence(string authority)
     {
         using var directory = new TempDirectory();
         var storePath = TestPathUtils.PathUnder(directory.Path, "local-seed-store.json");
-        var environment = CreateEnvironment("https://localhost:8443/realms/appsurface-dev", "appsurface-dev", storePath);
+        var environment = CreateEnvironment(authority, "appsurface-dev", storePath);
         using var handler = new SequenceHandler(
             JsonResponse("""{"access_token":"master-token"}"""),
             new HttpResponseMessage(HttpStatusCode.NotFound),
@@ -87,11 +89,11 @@ public sealed class IdentityBootstrapTests
                 Assert.Equal(HttpMethod.Post, brokerCreate.Method);
                 Assert.Equal("https://localhost:8443/admin/realms/appsurface-dev/identity-provider/instances", brokerCreate.Uri);
                 using var payload = JsonDocument.Parse(brokerCreate.Content!);
-                Assert.Equal("https://localhost:8443/realms/appsurface-dev", payload.RootElement.GetProperty("config").GetProperty("issuer").GetString());
+                Assert.Equal(authority.TrimEnd('/'), payload.RootElement.GetProperty("config").GetProperty("issuer").GetString());
             });
 
         var snapshot = new LocalSeedStore(storePath).ReadSnapshot();
-        Assert.Equal([new BrokerAliasRecord("local-broker", "https://localhost:8443/realms/appsurface-dev", "appsurface-web")], snapshot.BrokerAliases);
+        Assert.Equal([new BrokerAliasRecord("local-broker", authority.TrimEnd('/'), "appsurface-web")], snapshot.BrokerAliases);
         Assert.Equal([new IdentitySubjectMapRecord("founder", "subject-founder-001")], snapshot.IdentitySubjectMaps);
     }
 

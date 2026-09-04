@@ -71,15 +71,15 @@ public sealed class LocalSeedStore
         Update(snapshot =>
         {
             var records = snapshot.BrokerAliases.ToList();
-            var matches = records.Where(record => string.Equals(record.Alias, alias, StringComparison.Ordinal)).ToList();
+            var index = records.FindIndex(record => string.Equals(record.Alias, alias, StringComparison.Ordinal));
             var replacement = new BrokerAliasRecord(alias, issuer, clientId);
-            if (matches.Count == 0)
+            if (index < 0)
             {
                 records.Add(replacement);
             }
             else
             {
-                records[records.IndexOf(matches[0])] = replacement;
+                records[index] = replacement;
             }
 
             return snapshot with { BrokerAliases = records };
@@ -98,15 +98,15 @@ public sealed class LocalSeedStore
         Update(snapshot =>
         {
             var records = snapshot.IdentitySubjectMaps.ToList();
-            var matches = records.Where(record => string.Equals(record.NaturalKey, naturalKey, StringComparison.Ordinal)).ToList();
+            var index = records.FindIndex(record => string.Equals(record.NaturalKey, naturalKey, StringComparison.Ordinal));
             var replacement = new IdentitySubjectMapRecord(naturalKey, subject);
-            if (matches.Count == 0)
+            if (index < 0)
             {
                 records.Add(replacement);
             }
             else
             {
-                records[records.IndexOf(matches[0])] = replacement;
+                records[index] = replacement;
             }
 
             return snapshot with { IdentitySubjectMaps = records };
@@ -125,15 +125,15 @@ public sealed class LocalSeedStore
         Update(snapshot =>
         {
             var records = snapshot.CandidateFixtures.ToList();
-            var matches = records.Where(record => string.Equals(record.NaturalKey, naturalKey, StringComparison.Ordinal)).ToList();
+            var index = records.FindIndex(record => string.Equals(record.NaturalKey, naturalKey, StringComparison.Ordinal));
             var replacement = new CandidateFixtureRecord(naturalKey, subject);
-            if (matches.Count == 0)
+            if (index < 0)
             {
                 records.Add(replacement);
             }
             else
             {
-                records[records.IndexOf(matches[0])] = replacement;
+                records[index] = replacement;
             }
 
             return snapshot with { CandidateFixtures = records };

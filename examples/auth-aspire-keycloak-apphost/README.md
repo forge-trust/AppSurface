@@ -77,7 +77,7 @@ completion signal either, so its dependents stay blocked until the AppHost is ca
 For focused, container-free API and graph coverage, run:
 
 ```bash
-dotnet test Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj --no-restore -p:UseSharedCompilation=false
+dotnet test Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj -p:UseSharedCompilation=false
 ```
 
 This is startup-time local convergence against a real provider, not request-time persona selection. Use

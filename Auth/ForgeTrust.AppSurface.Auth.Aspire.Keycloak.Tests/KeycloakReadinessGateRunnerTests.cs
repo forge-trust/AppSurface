@@ -97,6 +97,7 @@ public sealed class KeycloakReadinessGateRunnerTests
     }
 
     [Theory]
+    [InlineData("https://keycloak.example.test:18181/realms/appsurface-dev")]
     [InlineData("https://admin@localhost:18181/realms/appsurface-dev")]
     [InlineData("https://localhost:18181/realms/appsurface-dev?unexpected=value")]
     [InlineData("https://localhost:18181/realms/appsurface-dev#unexpected")]
