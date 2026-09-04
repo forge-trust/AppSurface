@@ -642,6 +642,12 @@
           "ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker": "[0.1.0, )"
         }
       },
+      "authaspirekeycloakcandidatefixture": {
+        "type": "Project",
+        "dependencies": {
+          "AuthAspireKeycloakLocalSeedStore": "[0.1.0, )"
+        }
+      },
       "authaspirekeycloakidentitybootstrap": {
         "type": "Project",
         "dependencies": {
