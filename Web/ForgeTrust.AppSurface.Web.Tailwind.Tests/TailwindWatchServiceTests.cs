@@ -361,6 +361,13 @@ public class TailwindWatchServiceTests : IDisposable
     }
 
     [Fact]
+    public void HostPathsAreCaseInsensitive_DefaultImplementation_MatchesOperatingSystem()
+    {
+        var service = new TailwindWatchService(_cliManager, _options, _logger, _environment);
+        Assert.Equal(OperatingSystem.IsWindows(), service.HostPathsAreCaseInsensitive());
+    }
+
+    [Fact]
     public async Task ExecuteTailwindProcessAsync_StreamsOutputWithoutCapturingWatchBuffer()
     {
         var logger = new ListLogger<TailwindWatchService>();

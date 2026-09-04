@@ -20,9 +20,10 @@ internal sealed class TailwindCliResolver
 {
     private const int MaximumChecksumBytes = 1024 * 1024;
     private const long MaximumBinaryBytes = 200L * 1024 * 1024;
-    private static readonly HttpClient HttpClient = new();
+    private static readonly HttpClient SharedHttpClient = new();
     private readonly TailwindReleaseManifest _manifest;
     private readonly Func<Uri, CancellationToken, Task<byte[]>>? _downloadOverride;
+    private readonly HttpClient _httpClient;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly Func<string, string?> _getEnvironmentVariable;
     private readonly Func<string> _getCurrentRid;
@@ -35,15 +36,18 @@ internal sealed class TailwindCliResolver
     /// <param name="getEnvironmentVariable">Optional environment lookup seam.</param>
     /// <param name="getCurrentRid">Optional host RID seam.</param>
     /// <param name="delay">Optional retry-delay seam used by deterministic tests.</param>
+    /// <param name="httpClient">Optional HTTP client seam used by deterministic tests.</param>
     public TailwindCliResolver(
         TailwindReleaseManifest manifest,
         Func<Uri, CancellationToken, Task<byte[]>>? download = null,
         Func<string, string?>? getEnvironmentVariable = null,
         Func<string>? getCurrentRid = null,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
+        HttpClient? httpClient = null)
     {
         _manifest = manifest;
         _downloadOverride = download;
+        _httpClient = httpClient ?? SharedHttpClient;
         _delay = delay ?? Task.Delay;
         _getEnvironmentVariable = getEnvironmentVariable ?? Environment.GetEnvironmentVariable;
         _getCurrentRid = getCurrentRid ?? (() => TailwindRuntimeMap.GetCurrentRid());
@@ -425,9 +429,9 @@ internal sealed class TailwindCliResolver
             lastException);
     }
 
-    private static async Task<byte[]> DownloadSmallPayloadAsync(Uri uri, CancellationToken cancellationToken)
+    private async Task<byte[]> DownloadSmallPayloadAsync(Uri uri, CancellationToken cancellationToken)
     {
-        using var response = await HttpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var response = await _httpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength is > MaximumChecksumBytes)
         {
@@ -458,9 +462,9 @@ internal sealed class TailwindCliResolver
         return output.ToArray();
     }
 
-    private static async Task<string> DownloadBinaryToFileAsync(Uri uri, string destinationPath, CancellationToken cancellationToken)
+    private async Task<string> DownloadBinaryToFileAsync(Uri uri, string destinationPath, CancellationToken cancellationToken)
     {
-        using var response = await HttpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var response = await _httpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength is > MaximumBinaryBytes)
         {

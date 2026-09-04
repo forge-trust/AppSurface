@@ -1,3 +1,4 @@
+using System.Net;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -140,6 +141,188 @@ public sealed class TailwindCliManagerTests : IDisposable
             TailwindDownloadCache.GetRuntimeBinaryPath(cacheRoot, manifest.Version, rid, asset.BinaryName),
             acquired.Path);
         Assert.True(File.Exists(acquired.Path));
+    }
+
+    [Fact]
+    public async Task Resolver_AcquiresThroughTheProductionHttpPipeline()
+    {
+        var payload = Encoding.UTF8.GetBytes("http pipeline executable");
+        var manifest = TailwindReleaseManifest.LoadFromFile(WriteControlledManifest(payload));
+        var asset = manifest.GetAsset("linux-x64");
+        var requests = new List<string>();
+        using var client = new HttpClient(new QueueHttpMessageHandler(request =>
+        {
+            requests.Add(request.RequestUri!.AbsolutePath);
+            return request.RequestUri.AbsolutePath.EndsWith("sha256sums.txt", StringComparison.Ordinal)
+                ? CreateHttpResponse(HttpStatusCode.OK, CreateChecksums(asset, payload))
+                : CreateHttpResponse(HttpStatusCode.OK, payload);
+        }));
+        var resolver = new TailwindCliResolver(manifest, httpClient: client);
+
+        var resolved = await resolver.ResolveAsync(
+            new TailwindCliResolverOptions(null, _tempRoot, Path.Join(_tempRoot, "cache"), manifest.Version, asset.Rid),
+            CancellationToken.None);
+
+        Assert.Equal(TailwindCliCacheState.Acquired, resolved.CacheState);
+        Assert.Equal(payload, await File.ReadAllBytesAsync(resolved.Path));
+        Assert.Equal(["/tailwind/sha256sums.txt", "/tailwind/tailwindcss-linux-x64"], requests);
+    }
+
+    [Fact]
+    public async Task Resolver_RetriesTransientChecksumFailureThroughTheProductionHttpPipeline()
+    {
+        var payload = Encoding.UTF8.GetBytes("http retry executable");
+        var manifest = TailwindReleaseManifest.LoadFromFile(WriteControlledManifest(payload));
+        var asset = manifest.GetAsset("linux-x64");
+        var checksumAttempts = 0;
+        var delayCalls = 0;
+        using var client = new HttpClient(new QueueHttpMessageHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("sha256sums.txt", StringComparison.Ordinal))
+            {
+                checksumAttempts++;
+                return checksumAttempts == 1
+                    ? CreateHttpResponse(HttpStatusCode.ServiceUnavailable, Array.Empty<byte>())
+                    : CreateHttpResponse(HttpStatusCode.OK, CreateChecksums(asset, payload));
+            }
+
+            return CreateHttpResponse(HttpStatusCode.OK, payload);
+        }));
+        var resolver = new TailwindCliResolver(
+            manifest,
+            delay: (_, _) =>
+            {
+                delayCalls++;
+                return Task.CompletedTask;
+            },
+            httpClient: client);
+
+        var resolved = await resolver.ResolveAsync(
+            new TailwindCliResolverOptions(null, _tempRoot, Path.Join(_tempRoot, "cache"), manifest.Version, asset.Rid),
+            CancellationToken.None);
+
+        Assert.Equal(TailwindCliCacheState.Acquired, resolved.CacheState);
+        Assert.Equal(2, checksumAttempts);
+        Assert.Equal(1, delayCalls);
+    }
+
+    [Fact]
+    public async Task Resolver_RetriesTransientBinaryFailureThroughTheProductionHttpPipeline()
+    {
+        var payload = Encoding.UTF8.GetBytes("http binary retry executable");
+        var manifest = TailwindReleaseManifest.LoadFromFile(WriteControlledManifest(payload));
+        var asset = manifest.GetAsset("linux-x64");
+        var binaryAttempts = 0;
+        var delayCalls = 0;
+        using var client = new HttpClient(new QueueHttpMessageHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("sha256sums.txt", StringComparison.Ordinal))
+            {
+                return CreateHttpResponse(HttpStatusCode.OK, CreateChecksums(asset, payload));
+            }
+
+            binaryAttempts++;
+            return binaryAttempts == 1
+                ? CreateHttpResponse(HttpStatusCode.ServiceUnavailable, Array.Empty<byte>())
+                : CreateHttpResponse(HttpStatusCode.OK, payload);
+        }));
+        var resolver = new TailwindCliResolver(
+            manifest,
+            delay: (_, _) =>
+            {
+                delayCalls++;
+                return Task.CompletedTask;
+            },
+            httpClient: client);
+
+        var resolved = await resolver.ResolveAsync(
+            new TailwindCliResolverOptions(null, _tempRoot, Path.Join(_tempRoot, "cache"), manifest.Version, asset.Rid),
+            CancellationToken.None);
+
+        Assert.Equal(TailwindCliCacheState.Acquired, resolved.CacheState);
+        Assert.Equal(2, binaryAttempts);
+        Assert.Equal(1, delayCalls);
+    }
+
+    [Fact]
+    public async Task Resolver_RejectsOversizedChecksumResponsesThroughTheProductionHttpPipeline()
+    {
+        var payload = Encoding.UTF8.GetBytes("http oversized checksum executable");
+        var manifest = TailwindReleaseManifest.LoadFromFile(WriteControlledManifest(payload));
+        var asset = manifest.GetAsset("linux-x64");
+        var checksumAttempts = 0;
+        var delayCalls = 0;
+        using var client = new HttpClient(new QueueHttpMessageHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("sha256sums.txt", StringComparison.Ordinal))
+            {
+                checksumAttempts++;
+                return CreateOversizedHttpResponse(1024 * 1024 + 1L);
+            }
+
+            return CreateHttpResponse(HttpStatusCode.OK, payload);
+        }));
+        var resolver = new TailwindCliResolver(
+            manifest,
+            delay: (_, _) =>
+            {
+                delayCalls++;
+                return Task.CompletedTask;
+            },
+            httpClient: client);
+
+        var exception = await Assert.ThrowsAsync<TailwindCliResolutionException>(() => resolver.ResolveAsync(
+            new TailwindCliResolverOptions(null, _tempRoot, Path.Join(_tempRoot, "cache"), manifest.Version, asset.Rid),
+            CancellationToken.None));
+
+        Assert.Equal(TailwindCliResolutionFailure.RetryExhausted, exception.Failure);
+        Assert.Equal(5, checksumAttempts);
+        Assert.Equal(4, delayCalls);
+    }
+
+    [Fact]
+    public async Task Resolver_RejectsInvalidCacheAndExplicitPathInputsBeforeAcquisition()
+    {
+        var resolver = new TailwindCliResolver(TailwindReleaseManifest.LoadFromFile(GetRepositoryManifestPath()));
+
+        var cacheException = await Assert.ThrowsAsync<TailwindCliResolutionException>(() => resolver.ResolveAsync(
+            new TailwindCliResolverOptions(null, _tempRoot, "\0", "4.1.18", "linux-x64"),
+            CancellationToken.None));
+        var pathException = Assert.Throws<TailwindCliResolutionException>(() =>
+            TailwindCliResolver.ResolveExplicitPath("\0", _tempRoot));
+
+        Assert.Equal(TailwindCliResolutionFailure.InvalidCache, cacheException.Failure);
+        Assert.Equal(TailwindCliResolutionFailure.InvalidCliPath, pathException.Failure);
+    }
+
+    [Fact]
+    public async Task Resolver_ReusesACacheEntryPublishedWhileItWaitsForTheEntryLock()
+    {
+        var payload = Encoding.UTF8.GetBytes("lock publication executable");
+        var manifest = TailwindReleaseManifest.LoadFromFile(WriteControlledManifest(payload));
+        var asset = manifest.GetAsset("linux-x64");
+        var cacheRoot = Path.Join(_tempRoot, "cache");
+        var finalPath = TailwindDownloadCache.GetRuntimeBinaryPath(cacheRoot, manifest.Version, asset.Rid, asset.BinaryName);
+        Directory.CreateDirectory(Path.GetDirectoryName(finalPath)!);
+        using var heldLock = new FileStream(finalPath + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        var lockReleased = false;
+        var resolver = new TailwindCliResolver(
+            manifest,
+            delay: (_, _) =>
+            {
+                File.WriteAllBytes(finalPath, payload);
+                heldLock.Dispose();
+                lockReleased = true;
+                return Task.CompletedTask;
+            });
+
+        var resolved = await resolver.ResolveAsync(
+            new TailwindCliResolverOptions(null, _tempRoot, cacheRoot, manifest.Version, asset.Rid),
+            CancellationToken.None);
+
+        Assert.True(lockReleased);
+        Assert.Equal(TailwindCliCacheState.Reused, resolved.CacheState);
+        Assert.Equal(payload, await File.ReadAllBytesAsync(resolved.Path));
     }
 
     [Fact]
@@ -589,6 +772,38 @@ public sealed class TailwindCliManagerTests : IDisposable
 
         var sums = $"{asset.Sha256}  ./{asset.BinaryName}\n";
         return Encoding.UTF8.GetBytes(sums);
+    }
+
+    private static byte[] CreateChecksums(TailwindReleaseAsset asset, byte[] payload)
+    {
+        return Encoding.UTF8.GetBytes($"{Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant()}  ./{asset.BinaryName}\n");
+    }
+
+    private static HttpResponseMessage CreateHttpResponse(HttpStatusCode statusCode, byte[] content)
+    {
+        return new HttpResponseMessage(statusCode)
+        {
+            Content = new ByteArrayContent(content)
+        };
+    }
+
+    private static HttpResponseMessage CreateOversizedHttpResponse(long contentLength)
+    {
+        var content = new ByteArrayContent(Array.Empty<byte>());
+        content.Headers.ContentLength = contentLength;
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = content
+        };
+    }
+
+    private sealed class QueueHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(responseFactory(request));
+        }
     }
 
     private static string? GetDefaultCacheRoot(params (string Name, string Value)[] values)

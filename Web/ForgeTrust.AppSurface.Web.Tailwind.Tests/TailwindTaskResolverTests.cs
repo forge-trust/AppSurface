@@ -1,4 +1,5 @@
 extern alias TailwindTasks;
+using System.Net;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -169,6 +170,69 @@ public sealed class TailwindTaskResolverTests : IDisposable
             TaskInternal.TailwindDownloadCache.GetRuntimeBinaryPath(cacheRoot, manifest.Version, asset.Rid, asset.BinaryName),
             acquired.Path);
         Assert.True(File.Exists(acquired.Path));
+    }
+
+    [Fact]
+    public async Task Resolver_TaskAssemblyAcquiresThroughTheProductionHttpPipeline()
+    {
+        var payload = Encoding.UTF8.GetBytes("task http pipeline executable");
+        var manifest = TaskInternal.TailwindReleaseManifest.LoadFromFile(WriteControlledManifest(payload));
+        var asset = manifest.GetAsset("linux-x64");
+        var requests = new List<string>();
+        using var client = new HttpClient(new TaskHttpMessageHandler(request =>
+        {
+            requests.Add(request.RequestUri!.AbsolutePath);
+            return request.RequestUri.AbsolutePath.EndsWith("sha256sums.txt", StringComparison.Ordinal)
+                ? CreateHttpResponse(HttpStatusCode.OK, CreateChecksums(asset, payload))
+                : CreateHttpResponse(HttpStatusCode.OK, payload);
+        }));
+        var resolver = new TaskInternal.TailwindCliResolver(manifest, httpClient: client);
+
+        var resolved = await resolver.ResolveAsync(
+            new TaskInternal.TailwindCliResolverOptions(null, _tempRoot, Path.Join(_tempRoot, "cache"), manifest.Version, asset.Rid),
+            CancellationToken.None);
+
+        Assert.Equal(TaskInternal.TailwindCliCacheState.Acquired, resolved.CacheState);
+        Assert.Equal(payload, await File.ReadAllBytesAsync(resolved.Path));
+        Assert.Equal(["/tailwind/sha256sums.txt", "/tailwind/tailwindcss-linux-x64"], requests);
+    }
+
+    [Fact]
+    public async Task Resolver_TaskAssemblyRetriesTransientBinaryFailureThroughTheProductionHttpPipeline()
+    {
+        var payload = Encoding.UTF8.GetBytes("task http retry executable");
+        var manifest = TaskInternal.TailwindReleaseManifest.LoadFromFile(WriteControlledManifest(payload));
+        var asset = manifest.GetAsset("linux-x64");
+        var binaryAttempts = 0;
+        var delayCalls = 0;
+        using var client = new HttpClient(new TaskHttpMessageHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("sha256sums.txt", StringComparison.Ordinal))
+            {
+                return CreateHttpResponse(HttpStatusCode.OK, CreateChecksums(asset, payload));
+            }
+
+            binaryAttempts++;
+            return binaryAttempts == 1
+                ? CreateHttpResponse(HttpStatusCode.ServiceUnavailable, Array.Empty<byte>())
+                : CreateHttpResponse(HttpStatusCode.OK, payload);
+        }));
+        var resolver = new TaskInternal.TailwindCliResolver(
+            manifest,
+            delay: (_, _) =>
+            {
+                delayCalls++;
+                return Task.CompletedTask;
+            },
+            httpClient: client);
+
+        var resolved = await resolver.ResolveAsync(
+            new TaskInternal.TailwindCliResolverOptions(null, _tempRoot, Path.Join(_tempRoot, "cache"), manifest.Version, asset.Rid),
+            CancellationToken.None);
+
+        Assert.Equal(TaskInternal.TailwindCliCacheState.Acquired, resolved.CacheState);
+        Assert.Equal(2, binaryAttempts);
+        Assert.Equal(1, delayCalls);
     }
 
     [Fact]
@@ -452,6 +516,28 @@ public sealed class TailwindTaskResolverTests : IDisposable
 
         var sums = $"{asset.Sha256}  ./{asset.BinaryName}\n";
         return Encoding.UTF8.GetBytes(sums);
+    }
+
+    private static byte[] CreateChecksums(TaskInternal.TailwindReleaseAsset asset, byte[] payload)
+    {
+        return Encoding.UTF8.GetBytes($"{Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant()}  ./{asset.BinaryName}\n");
+    }
+
+    private static HttpResponseMessage CreateHttpResponse(HttpStatusCode statusCode, byte[] content)
+    {
+        return new HttpResponseMessage(statusCode)
+        {
+            Content = new ByteArrayContent(content)
+        };
+    }
+
+    private sealed class TaskHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(responseFactory(request));
+        }
     }
 
     private static string CreateManifestJson(Func<string, string> binaryNameForRid)
