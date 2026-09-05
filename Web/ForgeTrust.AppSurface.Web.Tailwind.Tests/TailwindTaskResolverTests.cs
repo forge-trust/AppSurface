@@ -421,6 +421,96 @@ public sealed class TailwindTaskResolverTests : IDisposable
     }
 
     [Fact]
+    public async Task Resolver_TaskAssemblyReportsLockTimeoutAfterAllBoundedLockAttempts()
+    {
+        var payload = Encoding.UTF8.GetBytes("task lock timeout executable");
+        var manifest = TaskInternal.TailwindReleaseManifest.LoadFromFile(WriteControlledManifest(payload));
+        var asset = manifest.GetAsset("linux-x64");
+        var cacheRoot = Path.Join(_tempRoot, "cache");
+        var finalPath = TaskInternal.TailwindDownloadCache.GetRuntimeBinaryPath(cacheRoot, manifest.Version, asset.Rid, asset.BinaryName);
+        Directory.CreateDirectory(Path.GetDirectoryName(finalPath)!);
+        await using var heldLock = new FileStream(finalPath + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        var delayCalls = 0;
+        var resolver = new TaskInternal.TailwindCliResolver(
+            manifest,
+            (_, _) => Task.FromResult(CreateDownload(new Uri("https://example.test/sha256sums.txt"), asset, payload)),
+            delay: (_, _) =>
+            {
+                delayCalls++;
+                return Task.CompletedTask;
+            });
+
+        var exception = await Assert.ThrowsAsync<TaskInternal.TailwindCliResolutionException>(() => resolver.ResolveAsync(
+            new TaskInternal.TailwindCliResolverOptions(null, _tempRoot, cacheRoot, manifest.Version, asset.Rid),
+            CancellationToken.None));
+
+        Assert.Equal(TaskInternal.TailwindCliResolutionFailure.LockTimeout, exception.Failure);
+        Assert.Equal(4, delayCalls);
+        Assert.IsType<IOException>(exception.InnerException);
+    }
+
+    [Fact]
+    public async Task Resolver_TaskAssemblyRejectsAnUntrustedDownloadedBinary()
+    {
+        var trustedPayload = Encoding.UTF8.GetBytes("trusted task binary checksum");
+        var untrustedPayload = Encoding.UTF8.GetBytes("untrusted task binary checksum");
+        var manifest = TaskInternal.TailwindReleaseManifest.LoadFromFile(WriteControlledManifest(trustedPayload));
+        var asset = manifest.GetAsset("linux-x64");
+        var resolver = new TaskInternal.TailwindCliResolver(manifest, (uri, _) => Task.FromResult(
+            uri.AbsolutePath.EndsWith("sha256sums.txt", StringComparison.Ordinal)
+                ? Encoding.UTF8.GetBytes($"{asset.Sha256}  ./{asset.BinaryName}\n")
+                : untrustedPayload));
+
+        var exception = await Assert.ThrowsAsync<TaskInternal.TailwindCliResolutionException>(() => resolver.ResolveAsync(
+            new TaskInternal.TailwindCliResolverOptions(null, _tempRoot, Path.Join(_tempRoot, "cache"), manifest.Version, asset.Rid),
+            CancellationToken.None));
+
+        Assert.Equal(TaskInternal.TailwindCliResolutionFailure.ChecksumFailure, exception.Failure);
+    }
+
+    [Theory]
+    [InlineData("not-a-checksum-line", "does not contain")]
+    [InlineData("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  other-file", "does not contain")]
+    [InlineData("0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF  ./tailwindcss-linux-x64", "malformed or duplicate")]
+    public async Task Resolver_TaskAssemblyRejectsMalformedOrMissingSelectedChecksumEntries(string checksumLine, string expectedMessage)
+    {
+        var payload = Encoding.UTF8.GetBytes("task checksum format executable");
+        var manifest = TaskInternal.TailwindReleaseManifest.LoadFromFile(WriteControlledManifest(payload));
+        var asset = manifest.GetAsset("linux-x64");
+        var resolver = new TaskInternal.TailwindCliResolver(manifest, (uri, _) => Task.FromResult(
+            uri.AbsolutePath.EndsWith("sha256sums.txt", StringComparison.Ordinal)
+                ? Encoding.UTF8.GetBytes(checksumLine + "\n")
+                : payload));
+
+        var exception = await Assert.ThrowsAsync<TaskInternal.TailwindCliResolutionException>(() => resolver.ResolveAsync(
+            new TaskInternal.TailwindCliResolverOptions(null, _tempRoot, Path.Join(_tempRoot, "cache"), manifest.Version, asset.Rid),
+            CancellationToken.None));
+
+        Assert.Equal(TaskInternal.TailwindCliResolutionFailure.ChecksumFailure, exception.Failure);
+        Assert.Contains(expectedMessage, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Resolver_TaskAssemblyRejectsDuplicateSelectedChecksumEntries()
+    {
+        var payload = Encoding.UTF8.GetBytes("task duplicate checksum executable");
+        var manifest = TaskInternal.TailwindReleaseManifest.LoadFromFile(WriteControlledManifest(payload));
+        var asset = manifest.GetAsset("linux-x64");
+        var checksum = $"{asset.Sha256}  ./{asset.BinaryName}\n{asset.Sha256}  *{asset.BinaryName}\n";
+        var resolver = new TaskInternal.TailwindCliResolver(manifest, (uri, _) => Task.FromResult(
+            uri.AbsolutePath.EndsWith("sha256sums.txt", StringComparison.Ordinal)
+                ? Encoding.UTF8.GetBytes(checksum)
+                : payload));
+
+        var exception = await Assert.ThrowsAsync<TaskInternal.TailwindCliResolutionException>(() => resolver.ResolveAsync(
+            new TaskInternal.TailwindCliResolverOptions(null, _tempRoot, Path.Join(_tempRoot, "cache"), manifest.Version, asset.Rid),
+            CancellationToken.None));
+
+        Assert.Equal(TaskInternal.TailwindCliResolutionFailure.ChecksumFailure, exception.Failure);
+        Assert.Contains("malformed or duplicate", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Resolver_HonorsCancellationWhileWaitingForAnEntryLock()
     {
         var payload = Encoding.UTF8.GetBytes("lock task executable");
@@ -477,6 +567,35 @@ public sealed class TailwindTaskResolverTests : IDisposable
 
         Assert.Equal(TaskInternal.TailwindCliResolutionFailure.InvalidCache, exception.Failure);
         Assert.Equal(0, downloadCalls);
+    }
+
+    [Fact]
+    public void Manifest_TaskAssemblyRejectsEmptyInvalidVersionAndDuplicateAssets()
+    {
+        const string digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        var invalidVersion = "{\"schemaVersion\":1,\"version\":\"4.1.18-preview\",\"baseUrl\":\"https://example.test\",\"assets\":[]}";
+        var duplicateAssets = JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            version = "4.1.18",
+            baseUrl = "https://example.test",
+            assets = new[]
+            {
+                new { rid = "linux-x64", binaryName = "tailwindcss-linux-x64", sha256 = digest },
+                new { rid = "linux-x64", binaryName = "tailwindcss-linux-x64", sha256 = digest }
+            }
+        });
+        using var emptyStream = new MemoryStream(Encoding.UTF8.GetBytes("null"));
+        using var invalidVersionStream = new MemoryStream(Encoding.UTF8.GetBytes(invalidVersion));
+        using var duplicateAssetsStream = new MemoryStream(Encoding.UTF8.GetBytes(duplicateAssets));
+
+        var emptyException = Assert.Throws<InvalidDataException>(() => TaskInternal.TailwindReleaseManifest.Parse(emptyStream));
+        var versionException = Assert.Throws<InvalidDataException>(() => TaskInternal.TailwindReleaseManifest.Parse(invalidVersionStream));
+        var duplicateException = Assert.Throws<InvalidDataException>(() => TaskInternal.TailwindReleaseManifest.Parse(duplicateAssetsStream));
+
+        Assert.Contains("empty", emptyException.Message, StringComparison.Ordinal);
+        Assert.Contains("canonical stable", versionException.Message, StringComparison.Ordinal);
+        Assert.Contains("unsupported or duplicate", duplicateException.Message, StringComparison.Ordinal);
     }
 
     private TaskInternal.TailwindCliResolver CreateResolver(

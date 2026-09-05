@@ -27,6 +27,12 @@ internal sealed class TailwindCliResolver
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly Func<string, string?> _getEnvironmentVariable;
     private readonly Func<string> _getCurrentRid;
+    private readonly Func<string, string, bool> _isVerifiedFinal;
+    private readonly Action<string>? _afterLockOpened;
+    private readonly Action<string> _deleteFile;
+    private readonly Func<bool> _isWindows;
+    private readonly long _maximumBinaryBytes;
+    private readonly Func<string, string, string, string, string> _getRuntimeBinaryPath;
 
     /// <summary>
     /// Initializes a resolver with the supplied checked-in release manifest.
@@ -37,13 +43,25 @@ internal sealed class TailwindCliResolver
     /// <param name="getCurrentRid">Optional host RID seam.</param>
     /// <param name="delay">Optional retry-delay seam used by deterministic tests.</param>
     /// <param name="httpClient">Optional HTTP client seam used by deterministic tests.</param>
+    /// <param name="isVerifiedFinal">Optional final-cache verification seam used by deterministic tests.</param>
+    /// <param name="afterLockOpened">Optional post-open lock-race seam used by deterministic tests.</param>
+    /// <param name="deleteFile">Optional owned-artifact cleanup seam used by deterministic tests.</param>
+    /// <param name="isWindows">Optional platform seam used by deterministic tests.</param>
+    /// <param name="maximumBinaryBytes">Optional binary-size limit seam used by deterministic tests.</param>
+    /// <param name="getRuntimeBinaryPath">Optional cache-path seam used by deterministic tests.</param>
     public TailwindCliResolver(
         TailwindReleaseManifest manifest,
         Func<Uri, CancellationToken, Task<byte[]>>? download = null,
         Func<string, string?>? getEnvironmentVariable = null,
         Func<string>? getCurrentRid = null,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
-        HttpClient? httpClient = null)
+        HttpClient? httpClient = null,
+        Func<string, string, bool>? isVerifiedFinal = null,
+        Action<string>? afterLockOpened = null,
+        Action<string>? deleteFile = null,
+        Func<bool>? isWindows = null,
+        long maximumBinaryBytes = MaximumBinaryBytes,
+        Func<string, string, string, string, string>? getRuntimeBinaryPath = null)
     {
         _manifest = manifest;
         _downloadOverride = download;
@@ -51,6 +69,12 @@ internal sealed class TailwindCliResolver
         _delay = delay ?? Task.Delay;
         _getEnvironmentVariable = getEnvironmentVariable ?? Environment.GetEnvironmentVariable;
         _getCurrentRid = getCurrentRid ?? (() => TailwindRuntimeMap.GetCurrentRid());
+        _isVerifiedFinal = isVerifiedFinal ?? IsVerifiedFinal;
+        _afterLockOpened = afterLockOpened;
+        _deleteFile = deleteFile ?? File.Delete;
+        _isWindows = isWindows ?? OperatingSystem.IsWindows;
+        _maximumBinaryBytes = maximumBinaryBytes;
+        _getRuntimeBinaryPath = getRuntimeBinaryPath ?? TailwindDownloadCache.GetRuntimeBinaryPath;
     }
 
     /// <summary>
@@ -126,11 +150,11 @@ internal sealed class TailwindCliResolver
                 _manifest.Version);
         }
 
-        var finalPath = TailwindDownloadCache.GetRuntimeBinaryPath(cacheRoot, _manifest.Version, rid, asset.BinaryName);
+        var finalPath = _getRuntimeBinaryPath(cacheRoot, _manifest.Version, rid, asset.BinaryName);
         try
         {
             EnsureSafeCachePath(cacheRoot, finalPath);
-            if (IsVerifiedFinal(finalPath, asset.Sha256))
+            if (_isVerifiedFinal(finalPath, asset.Sha256))
             {
                 return new TailwindResolvedCli(finalPath, rid, _manifest.Version, TailwindCliCacheState.Reused);
             }
@@ -208,7 +232,7 @@ internal sealed class TailwindCliResolver
         await using var lockStream = await AcquireLockAsync(finalPath + ".lock", asset.Rid, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (IsVerifiedFinal(finalPath, asset.Sha256))
+        if (_isVerifiedFinal(finalPath, asset.Sha256))
         {
             return new TailwindResolvedCli(finalPath, asset.Rid, _manifest.Version, TailwindCliCacheState.Reused);
         }
@@ -253,7 +277,7 @@ internal sealed class TailwindCliResolver
             File.Move(partialPath, finalPath, overwrite: true);
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!IsVerifiedFinal(finalPath, asset.Sha256))
+            if (!_isVerifiedFinal(finalPath, asset.Sha256))
             {
                 throw new TailwindCliResolutionException(
                     TailwindCliResolutionFailure.InvalidCache,
@@ -279,7 +303,7 @@ internal sealed class TailwindCliResolver
         const int retries = 4;
         const int retryDelayMilliseconds = 5000;
 
-        for (var attempt = 0; attempt <= retries; attempt++)
+        for (var attempt = 0; ; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
@@ -301,14 +325,9 @@ internal sealed class TailwindCliResolver
             }
         }
 
-        throw new TailwindCliResolutionException(
-            TailwindCliResolutionFailure.LockTimeout,
-            "Tailwind CLI acquisition could not obtain its cache-entry lock.",
-            rid,
-            _manifest.Version);
     }
 
-    private static FileStream OpenSafeLockFile(string lockPath)
+    private FileStream OpenSafeLockFile(string lockPath)
     {
         if (!File.Exists(lockPath))
         {
@@ -323,6 +342,7 @@ internal sealed class TailwindCliResolver
         }
 
         var lockStream = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        _afterLockOpened?.Invoke(lockPath);
         if (IsLink(lockPath))
         {
             lockStream.Dispose();
@@ -395,7 +415,7 @@ internal sealed class TailwindCliResolver
                 if (_downloadOverride is not null)
                 {
                     var bytes = await _downloadOverride(uri, cancellationToken);
-                    if (bytes.LongLength > MaximumBinaryBytes)
+                    if (bytes.LongLength > _maximumBinaryBytes)
                     {
                         throw new IOException("The Tailwind executable response exceeded the supported size limit.");
                     }
@@ -466,7 +486,7 @@ internal sealed class TailwindCliResolver
     {
         using var response = await _httpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
-        if (response.Content.Headers.ContentLength is > MaximumBinaryBytes)
+        if (response.Content.Headers.ContentLength is long contentLength && contentLength > _maximumBinaryBytes)
         {
             throw new IOException("The Tailwind executable response exceeded the supported size limit.");
         }
@@ -488,7 +508,7 @@ internal sealed class TailwindCliResolver
             while ((bytesRead = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) != 0)
             {
                 totalBytes += bytesRead;
-                if (totalBytes > MaximumBinaryBytes)
+                if (totalBytes > _maximumBinaryBytes)
                 {
                     throw new IOException("The Tailwind executable response exceeded the supported size limit.");
                 }
@@ -646,9 +666,9 @@ internal sealed class TailwindCliResolver
             : new FileInfo(path).LinkTarget is not null;
     }
 
-    private static void SetUnixExecutableBit(string path)
+    private void SetUnixExecutableBit(string path)
     {
-        if (OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows() || _isWindows())
         {
             return;
         }
@@ -662,11 +682,11 @@ internal sealed class TailwindCliResolver
         return value.Length == 64 && value.All(static character => char.IsAsciiHexDigit(character) && !char.IsUpper(character));
     }
 
-    private static void TryDeleteOwnedArtifact(string path)
+    private void TryDeleteOwnedArtifact(string path)
     {
         try
         {
-            File.Delete(path);
+            _deleteFile(path);
         }
         catch (IOException)
         {

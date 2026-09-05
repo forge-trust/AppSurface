@@ -282,6 +282,48 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     }
 
     [Fact]
+    public void RunTailwindBuildTask_ReportsAstw012WhenTheReleaseManifestIsMissing()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "missing-manifest");
+        Directory.CreateDirectory(projectDirectory);
+        var buildEngine = new RecordingBuildEngine();
+        var task = CreateTask(projectDirectory, buildEngine, configure: task =>
+        {
+            task.TailwindCliPath = null;
+            task.TailwindReleaseManifestPath = null;
+        });
+
+        var result = task.Execute();
+
+        Assert.False(result);
+        Assert.Contains(buildEngine.Errors, error =>
+            error.Message?.Contains("ASTW012", StringComparison.Ordinal) is true
+            && error.Message.Contains("release manifest is missing", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RunTailwindBuildTask_ReportsSafeCacheIdentityForClassifiedAcquisitionFailures()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "cache-identity");
+        Directory.CreateDirectory(projectDirectory);
+        var buildEngine = new RecordingBuildEngine();
+        var task = CreateTask(projectDirectory, buildEngine, configure: task =>
+        {
+            task.TailwindReleaseManifestPath = GetReleaseManifestPath();
+            task.TailwindVersion = "4.1.18";
+            task.TailwindTargetRid = "linux-x64";
+            task.TailwindDownloadCacheRoot = "\0";
+        });
+
+        var result = task.Execute();
+
+        Assert.False(result);
+        Assert.Contains(buildEngine.Errors, error =>
+            error.Message?.Contains("ASTW012", StringComparison.Ordinal) is true
+            && error.Message.Contains("Safe cache identity: tailwind-4.1.18/linux-x64.", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task RunTailwindBuildTask_ReportsAstw007WhenCanceledWhileWaitingForTheCacheLock()
     {
         var projectDirectory = Path.Join(_tempRoot, "resolution-cancellation");
