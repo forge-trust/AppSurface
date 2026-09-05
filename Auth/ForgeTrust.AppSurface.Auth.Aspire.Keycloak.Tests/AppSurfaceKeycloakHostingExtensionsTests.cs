@@ -1,7 +1,10 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
+using System.Text.Json;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.Publishing;
 using ForgeTrust.AppSurface.Auth.Aspire.Keycloak;
 
 namespace ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests;
@@ -33,6 +36,34 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         var (resource, _) = AddWithAvailablePorts(builder, directory.Path, usePersistentDataVolume: false);
 
         Assert.True(File.Exists(resource.RealmImportFile));
+    }
+
+    [Fact]
+    public void AddAppSurfaceKeycloak_WhenExplicitAdministratorParametersAreProvided_UsesOnlyATypedSecretPassword()
+    {
+        using var directory = new TempDirectory();
+        var builder = DistributedApplication.CreateBuilder([]);
+        var username = builder.AddParameter("keycloak-admin-username", "admin", secret: false);
+        var password = builder.AddParameter("keycloak-admin-password", "LOCAL_TEST_SECRET_SENTINEL", secret: true);
+
+        var resource = AddWithAvailablePorts(builder, directory.Path, username, password);
+
+        Assert.Same(username.Resource, resource.Resource.Resource.AdminUserNameParameter);
+        Assert.Same(password.Resource, resource.Resource.Resource.AdminPasswordParameter);
+    }
+
+    [Fact]
+    public void AddAppSurfaceKeycloak_WhenExplicitAdministratorPasswordIsNotSecret_ThrowsInvalidOptions()
+    {
+        using var directory = new TempDirectory();
+        var nonSecretBuilder = DistributedApplication.CreateBuilder([]);
+        var nonSecretUsername = nonSecretBuilder.AddParameter("keycloak-admin-username", "admin", secret: false);
+        var nonSecretPassword = nonSecretBuilder.AddParameter("keycloak-admin-password", "not-secret", secret: false);
+        var exception = Assert.Throws<AppSurfaceKeycloakException>(() =>
+            AddWithAvailablePorts(nonSecretBuilder, directory.Path, nonSecretUsername, nonSecretPassword));
+
+        Assert.Equal(AppSurfaceKeycloakDiagnosticCodes.InvalidOptions, exception.Code);
+        Assert.Contains("not secret", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -173,6 +204,49 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
     }
 
     [Fact]
+    public void AspireCompletionSpike_UsesTheDocumentedHealthyThenSuccessfulCompletionGraph()
+    {
+        using var directory = new TempDirectory();
+        var builder = DistributedApplication.CreateBuilder([]);
+        var (keycloak, _) = AddWithAvailablePorts(builder, directory.Path, usePersistentDataVolume: false);
+        var gate = builder
+            .AddProject("readiness-gate", GetCurrentTestProjectPath())
+            .WaitFor(keycloak.Resource);
+        var firstFiniteProject = builder
+            .AddProject("first-finite-project", GetCurrentTestProjectPath())
+            .WaitForCompletion(gate);
+        var secondFiniteProject = builder
+            .AddProject("second-finite-project", GetCurrentTestProjectPath())
+            .WaitForCompletion(firstFiniteProject);
+
+        AssertWait(gate.Resource, keycloak.Resource.Resource.Name, WaitType.WaitUntilHealthy);
+        AssertWait(firstFiniteProject.Resource, gate.Resource.Name, WaitType.WaitForCompletion);
+        AssertWait(secondFiniteProject.Resource, firstFiniteProject.Resource.Name, WaitType.WaitForCompletion);
+    }
+
+    [Fact]
+    public async Task AspireSecretBindingSpike_EmitsOnlyAParameterReferenceForItsDeclaredProject()
+    {
+        const string sentinel = "LOCAL_TEST_SECRET_SENTINEL";
+        var builder = DistributedApplication.CreateBuilder([]);
+        var secret = builder.AddParameter("seed-admin-secret", sentinel, secret: true);
+        var seed = builder
+            .AddProject("seed-worker", GetCurrentTestProjectPath())
+            .WithEnvironment("SEED_ADMIN_SECRET", secret);
+        var web = builder.AddProject("web", GetCurrentTestProjectPath());
+
+        var seedManifest = await WriteEnvironmentManifestAsync(seed.Resource);
+        var webManifest = await WriteEnvironmentManifestAsync(web.Resource);
+
+        Assert.Contains("SEED_ADMIN_SECRET", seedManifest, StringComparison.Ordinal);
+        Assert.Contains("seed-admin-secret", seedManifest, StringComparison.Ordinal);
+        Assert.DoesNotContain(sentinel, seedManifest, StringComparison.Ordinal);
+        Assert.DoesNotContain("SEED_ADMIN_SECRET", webManifest, StringComparison.Ordinal);
+        Assert.DoesNotContain("seed-admin-secret", webManifest, StringComparison.Ordinal);
+        Assert.DoesNotContain(sentinel, webManifest, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Defaults_ExposeBoundedReadinessTimeout()
     {
         Assert.Equal(TimeSpan.FromSeconds(120), AppSurfaceKeycloakDefaults.ReadinessTimeout);
@@ -220,6 +294,43 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
         string realmImportDirectory,
         bool usePersistentDataVolume)
     {
+        return WithAvailablePorts(
+            (keycloakPort, webProofPort) =>
+            {
+                var resource = builder.AddAppSurfaceKeycloak("keycloak-proof", options =>
+                {
+                    options.KeycloakPort = keycloakPort;
+                    options.WebProofPort = webProofPort;
+                    options.RealmImportDirectory = realmImportDirectory;
+                    options.UsePersistentDataVolume = usePersistentDataVolume;
+                });
+                return (resource, keycloakPort);
+            },
+            "Could not reserve distinct local ports for the Keycloak hosting test.");
+    }
+
+    private static AppSurfaceKeycloakResource AddWithAvailablePorts(
+        IDistributedApplicationBuilder builder,
+        string realmImportDirectory,
+        IResourceBuilder<ParameterResource> username,
+        IResourceBuilder<ParameterResource> password)
+    {
+        return WithAvailablePorts(
+            (keycloakPort, webProofPort) => builder.AddAppSurfaceKeycloak(
+                "keycloak-explicit-admin",
+                username,
+                password,
+                options =>
+                {
+                    options.KeycloakPort = keycloakPort;
+                    options.WebProofPort = webProofPort;
+                    options.RealmImportDirectory = realmImportDirectory;
+                }),
+            "Could not reserve distinct local ports for the explicit-admin hosting test.");
+    }
+
+    private static T WithAvailablePorts<T>(Func<int, int, T> create, string failureMessage)
+    {
         const int maxAttempts = 5;
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -232,14 +343,7 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
 
             try
             {
-                var resource = builder.AddAppSurfaceKeycloak("keycloak-proof", options =>
-                {
-                    options.KeycloakPort = keycloakPort;
-                    options.WebProofPort = webProofPort;
-                    options.RealmImportDirectory = realmImportDirectory;
-                    options.UsePersistentDataVolume = usePersistentDataVolume;
-                });
-                return (resource, keycloakPort);
+                return create(keycloakPort, webProofPort);
             }
             catch (AppSurfaceKeycloakException exception)
                 when (exception.Code == AppSurfaceKeycloakDiagnosticCodes.PortOccupied && attempt < maxAttempts)
@@ -248,17 +352,38 @@ public sealed class AppSurfaceKeycloakHostingExtensionsTests
             }
         }
 
-        throw new InvalidOperationException("Could not reserve distinct local ports for the Keycloak hosting test.");
+        throw new InvalidOperationException(failureMessage);
     }
 
-    private static string GetCurrentTestProjectPath()
-    {
-        const string projectPath = "../../../ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj";
-        if (Path.IsPathRooted(projectPath))
-        {
-            throw new InvalidOperationException("The test project path must stay relative.");
-        }
+    private static string GetCurrentTestProjectPath() => TestPathUtils.PathUnder(
+        TestPathUtils.FindRepoRoot(AppContext.BaseDirectory),
+        "Auth",
+        "ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests",
+        "ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj");
 
-        return Path.GetFullPath(projectPath, AppContext.BaseDirectory);
+    private static void AssertWait(IResource resource, string dependencyName, WaitType expectedWaitType)
+    {
+        var wait = Assert.Single(resource.Annotations.OfType<WaitAnnotation>());
+
+        Assert.Equal(dependencyName, wait.Resource.Name);
+        Assert.Equal(expectedWaitType, wait.WaitType);
+        Assert.Equal(0, wait.ExitCode);
+    }
+
+    private static async Task<string> WriteEnvironmentManifestAsync(IResource resource)
+    {
+        await using var stream = new MemoryStream();
+        await using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
+        var context = new ManifestPublishingContext(
+            new DistributedApplicationExecutionContext(DistributedApplicationOperation.Publish),
+            resource.Name,
+            writer,
+            CancellationToken.None);
+
+        writer.WriteStartObject();
+        await context.WriteEnvironmentVariablesAsync(resource);
+        writer.WriteEndObject();
+        await writer.FlushAsync();
+        return Encoding.UTF8.GetString(stream.ToArray());
     }
 }

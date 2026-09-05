@@ -130,6 +130,7 @@ Swipe to compare package details on narrow screens.
 
 ### Not in the direct-install matrix
 
+- `ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker`: Private Keycloak readiness worker payload; consume it only through ForgeTrust.AppSurface.Auth.Aspire.Keycloak. Release: publication held; excluded; not applicable; [notes](../releases/unreleased.md).
 - `ForgeTrust.AppSurface.Flow.Generators`: Private source generator and diagnostics used by `ForgeTrust.AppSurface.Flow`; consume it only through the packed Flow package. Release: publication held; excluded; not applicable; [notes](../releases/unreleased.md).
 - `ForgeTrust.AppSurface.Durable.PostgreSql.TestHost`: Internal executable test helper; it is not a hosted runtime, production worker, or package adoption surface. Release: publication held; excluded; not applicable; [notes](../releases/unreleased.md).
 - `ForgeTrust.AppSurface.Durable.PostgreSql.V2WorkHarness`: Internal mixed-version compatibility harness; it is not a package, hosted runtime, or adoption surface. Release: publication held; excluded; not applicable; [notes](../releases/unreleased.md).

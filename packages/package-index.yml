@@ -174,6 +174,16 @@ packages:
     recipe_summary: Add `ForgeTrust.AppSurface.Auth.Aspire.Keycloak` in AppHost/dev/test projects only when a real local OIDC provider proof should pair with `ForgeTrust.AppSurface.Auth.AspNetCore.Oidc`; use the [theme lifecycle guide](../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md#theme-quickstart) and [Auth adoption ladder](../start-here/auth-adoption-ladder.md) to keep it separate from DevAuth, OIDC registration, and Auth.Testing.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Aspire
+  - project: Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/realm-ready/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    product_family: internal_support
+    publish_reason: The realm-ready executable is packaged only as a private Keycloak payload and is not a direct-install package.
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 38
+    note: Private Keycloak readiness worker payload; consume it only through ForgeTrust.AppSurface.Auth.Aspire.Keycloak.
   - project: Auth/ForgeTrust.AppSurface.Auth.Testing/ForgeTrust.AppSurface.Auth.Testing.csproj
     release_guidance_variant: default
     classification: public

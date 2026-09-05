@@ -6,15 +6,41 @@
     <Nullable>enable</Nullable>
     <PackageDescription>AppHost-only local Keycloak proof conventions for AppSurface OpenID Connect authentication.</PackageDescription>
     <PackageTags>appsurface;dotnet;aspire;authentication;oidc;keycloak</PackageTags>
+    <RealmReadyWorkerAssemblyName>ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker</RealmReadyWorkerAssemblyName>
+    <RealmReadyWorkerProject>$(MSBuildProjectDirectory)/realm-ready/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker.csproj</RealmReadyWorkerProject>
+    <RealmReadyWorkerOutputDirectory>$(MSBuildProjectDirectory)/realm-ready/bin/$(Configuration)/$(TargetFramework)</RealmReadyWorkerOutputDirectory>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);AddRealmReadyWorkerToPackage</TargetsForTfmSpecificContentInPackage>
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="realm-ready/**/*.cs" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker" />
     <ProjectReference Include="../../Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.Keycloak" />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Include="buildTransitive/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.targets" Pack="true" PackagePath="buildTransitive/" />
+  </ItemGroup>
+
+  <Target Name="BuildRealmReadyWorker" BeforeTargets="GenerateNuspec">
+    <MSBuild
+      Projects="$(RealmReadyWorkerProject)"
+      Targets="Build"
+      Properties="Configuration=$(Configuration);NoBuild=false;TargetFramework=$(TargetFramework);UseSharedCompilation=false" />
+  </Target>
+
+  <Target Name="AddRealmReadyWorkerToPackage" DependsOnTargets="BuildRealmReadyWorker">
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="$(RealmReadyWorkerOutputDirectory)/$(AssemblyName).dll" PackagePath="tools/$(TargetFramework)/any/realm-ready" />
+      <TfmSpecificPackageFile Include="$(RealmReadyWorkerOutputDirectory)/$(RealmReadyWorkerAssemblyName).dll" PackagePath="tools/$(TargetFramework)/any/realm-ready" />
+      <TfmSpecificPackageFile Include="$(RealmReadyWorkerOutputDirectory)/$(RealmReadyWorkerAssemblyName).deps.json" PackagePath="tools/$(TargetFramework)/any/realm-ready" />
+      <TfmSpecificPackageFile Include="$(RealmReadyWorkerOutputDirectory)/$(RealmReadyWorkerAssemblyName).runtimeconfig.json" PackagePath="tools/$(TargetFramework)/any/realm-ready" />
+    </ItemGroup>
+  </Target>
 
 </Project>

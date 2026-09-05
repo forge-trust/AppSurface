@@ -11,4 +11,8 @@
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="../auth-aspire-keycloak-local-seed-store/AuthAspireKeycloakLocalSeedStore.csproj" />
+  </ItemGroup>
+
 </Project>
