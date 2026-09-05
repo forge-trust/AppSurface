@@ -14,9 +14,14 @@
     </Content>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="../auth-aspire-keycloak-lifecycle-worker/LifecycleWorkerEnvironment.cs" Link="LifecycleWorkerEnvironment.cs" />
     <PackageReference Include="Aspire.Hosting.AppHost" />
     <ProjectReference Include="../../Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="../../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="../../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/realm-ready/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="../auth-aspire-keycloak-lifecycle-worker/AuthAspireKeycloakLifecycleWorker.csproj" AspireProjectMetadataTypeName="AuthAspireKeycloakLifecycleWorker" />
+    <ProjectReference Include="../auth-aspire-keycloak-identity-bootstrap/AuthAspireKeycloakIdentityBootstrap.csproj" AspireProjectMetadataTypeName="AuthAspireKeycloakIdentityBootstrap" />
+    <ProjectReference Include="../auth-aspire-keycloak-candidate-fixture/AuthAspireKeycloakCandidateFixture.csproj" AspireProjectMetadataTypeName="AuthAspireKeycloakCandidateFixture" />
     <ProjectReference Include="../auth-aspire-keycloak-verifier/AuthAspireKeycloakVerifier.csproj" AspireProjectMetadataTypeName="AuthAspireKeycloakVerifier" />
     <ProjectReference Include="../auth-aspire-keycloak-web/AuthAspireKeycloakWeb.csproj" AspireProjectMetadataTypeName="AuthAspireKeycloakWeb" />
   </ItemGroup>

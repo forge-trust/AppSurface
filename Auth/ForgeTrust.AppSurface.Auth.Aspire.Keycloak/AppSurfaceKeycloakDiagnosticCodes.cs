@@ -94,4 +94,19 @@ public static class AppSurfaceKeycloakDiagnosticCodes
     /// A declared login resource failed same-origin, hash, size, or availability verification.
     /// </summary>
     public const string ThemeRequiredResourceInvalid = "ASKEYC021";
+
+    /// <summary>
+    /// The package-owned finite realm-ready worker could not be resolved for the current AppHost execution.
+    /// </summary>
+    public const string RealmReadyWorkerUnavailable = "ASKEYC022";
+
+    /// <summary>
+    /// Local seed registration was attempted outside the permitted local AppHost execution policy.
+    /// </summary>
+    public const string LocalSeedNotAllowed = "ASKEYC023";
+
+    /// <summary>
+    /// A local seed name, predecessor, factory result, or secret binding is invalid.
+    /// </summary>
+    public const string LocalSeedInvalid = "ASKEYC024";
 }

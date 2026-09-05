@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker</AssemblyName>
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ForgeTrust.AppSurface.Auth.Aspire.Keycloak.csproj" />
+  </ItemGroup>
+
+</Project>
