@@ -29,6 +29,7 @@ internal sealed class TailwindCliResolver
     private readonly Func<string> _getCurrentRid;
     private readonly Func<string, string, bool> _isVerifiedFinal;
     private readonly Action<string>? _afterLockOpened;
+    private readonly Action<string>? _afterPartialOpened;
     private readonly Action<string> _deleteFile;
     private readonly Func<bool> _isWindows;
     private readonly long _maximumBinaryBytes;
@@ -45,6 +46,7 @@ internal sealed class TailwindCliResolver
     /// <param name="httpClient">Optional HTTP client seam used by deterministic tests.</param>
     /// <param name="isVerifiedFinal">Optional final-cache verification seam used by deterministic tests.</param>
     /// <param name="afterLockOpened">Optional post-open lock-race seam used by deterministic tests.</param>
+    /// <param name="afterPartialOpened">Optional post-open partial-file seam used by real-process cache tests.</param>
     /// <param name="deleteFile">Optional owned-artifact cleanup seam used by deterministic tests.</param>
     /// <param name="isWindows">Optional platform seam used by deterministic tests.</param>
     /// <param name="maximumBinaryBytes">Optional binary-size limit seam used by deterministic tests.</param>
@@ -58,6 +60,7 @@ internal sealed class TailwindCliResolver
         HttpClient? httpClient = null,
         Func<string, string, bool>? isVerifiedFinal = null,
         Action<string>? afterLockOpened = null,
+        Action<string>? afterPartialOpened = null,
         Action<string>? deleteFile = null,
         Func<bool>? isWindows = null,
         long maximumBinaryBytes = MaximumBinaryBytes,
@@ -71,6 +74,7 @@ internal sealed class TailwindCliResolver
         _getCurrentRid = getCurrentRid ?? (() => TailwindRuntimeMap.GetCurrentRid());
         _isVerifiedFinal = isVerifiedFinal ?? IsVerifiedFinal;
         _afterLockOpened = afterLockOpened;
+        _afterPartialOpened = afterPartialOpened;
         _deleteFile = deleteFile ?? File.Delete;
         _isWindows = isWindows ?? OperatingSystem.IsWindows;
         _maximumBinaryBytes = maximumBinaryBytes;
@@ -272,6 +276,7 @@ internal sealed class TailwindCliResolver
                     _manifest.Version);
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             SetUnixExecutableBit(partialPath);
             cancellationToken.ThrowIfCancellationRequested();
             File.Move(partialPath, finalPath, overwrite: true);
@@ -499,6 +504,7 @@ internal sealed class TailwindCliResolver
             FileShare.None,
             bufferSize: 81920,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
+        _afterPartialOpened?.Invoke(destinationPath);
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
         try
@@ -526,7 +532,7 @@ internal sealed class TailwindCliResolver
         return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 
-    private static async Task WriteBinaryBytesToNewFileAsync(string destinationPath, byte[] bytes, CancellationToken cancellationToken)
+    private async Task WriteBinaryBytesToNewFileAsync(string destinationPath, byte[] bytes, CancellationToken cancellationToken)
     {
         await using var output = new FileStream(
             destinationPath,
@@ -535,6 +541,7 @@ internal sealed class TailwindCliResolver
             FileShare.None,
             bufferSize: 81920,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
+        _afterPartialOpened?.Invoke(destinationPath);
         await output.WriteAsync(bytes, cancellationToken);
         await output.FlushAsync(cancellationToken);
     }

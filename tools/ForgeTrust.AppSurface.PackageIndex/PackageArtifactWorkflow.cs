@@ -392,11 +392,28 @@ internal sealed class PackageArtifactWorkflow
 
     private static void TryDeleteProofWorkspace(string proofWorkDirectory)
     {
+        TryDeleteProofWorkspace(
+            proofWorkDirectory,
+            Directory.Exists,
+            static directory => Directory.Delete(directory, recursive: true));
+    }
+
+    /// <summary>
+    /// Deletes a temporary proof workspace and tolerates cleanup failures after proof evidence has been published.
+    /// </summary>
+    /// <param name="proofWorkDirectory">Temporary workspace to delete.</param>
+    /// <param name="directoryExists">Directory existence probe.</param>
+    /// <param name="deleteDirectory">Recursive directory deletion operation.</param>
+    internal static void TryDeleteProofWorkspace(
+        string proofWorkDirectory,
+        Func<string, bool> directoryExists,
+        Action<string> deleteDirectory)
+    {
         try
         {
-            if (Directory.Exists(proofWorkDirectory))
+            if (directoryExists(proofWorkDirectory))
             {
-                Directory.Delete(proofWorkDirectory, recursive: true);
+                deleteDirectory(proofWorkDirectory);
             }
         }
         catch (IOException)

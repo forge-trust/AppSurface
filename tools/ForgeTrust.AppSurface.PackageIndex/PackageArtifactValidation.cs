@@ -1349,7 +1349,15 @@ internal sealed class PackageArtifactValidator
         }
     }
 
-    private static byte[] ReadPackageEntryBytes(string packagePath, string entryPath, string packageId)
+    /// <summary>
+    /// Reads the bytes of a required package archive entry.
+    /// </summary>
+    /// <param name="packagePath">Path to the package archive.</param>
+    /// <param name="entryPath">Repository-style path of the required archive entry.</param>
+    /// <param name="packageId">Package identifier used in a validation failure message.</param>
+    /// <returns>The archive entry bytes.</returns>
+    /// <exception cref="PackageIndexException">Thrown when the archive does not contain the required entry.</exception>
+    internal static byte[] ReadPackageEntryBytes(string packagePath, string entryPath, string packageId)
     {
         using var archive = ZipFile.OpenRead(packagePath);
         var entry = archive.Entries.SingleOrDefault(

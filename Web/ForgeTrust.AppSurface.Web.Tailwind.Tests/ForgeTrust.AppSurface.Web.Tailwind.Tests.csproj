@@ -34,6 +34,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../ForgeTrust.AppSurface.Web.Tailwind.CacheTestHost/ForgeTrust.AppSurface.Web.Tailwind.CacheTestHost.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Web.Tailwind.Tasks/ForgeTrust.AppSurface.Web.Tailwind.Tasks.csproj" Aliases="TailwindTasks" />
     <ProjectReference Include="../../ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj" />

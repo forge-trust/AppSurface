@@ -4,6 +4,7 @@ using ForgeTrust.AppSurface.Web.Tailwind.Internal;
 using Microsoft.Extensions.Logging;
 
 [assembly: InternalsVisibleTo("ForgeTrust.AppSurface.Web.Tailwind.Tests")]
+[assembly: InternalsVisibleTo("ForgeTrust.AppSurface.Web.Tailwind.CacheTestHost")]
 [assembly: InternalsVisibleTo("DynamicProxyGenAssembly2")]
 
 namespace ForgeTrust.AppSurface.Web.Tailwind;

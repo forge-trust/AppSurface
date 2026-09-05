@@ -717,6 +717,16 @@ packages:
     release_notes_path: releases/unreleased.md
     order: 115
     note: Private compiled MSBuild task used by `ForgeTrust.AppSurface.Web.Tailwind`; consume it only through the packed Tailwind package.
+  - project: Web/ForgeTrust.AppSurface.Web.Tailwind.CacheTestHost/ForgeTrust.AppSurface.Web.Tailwind.CacheTestHost.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    product_family: internal_support
+    publish_reason: Child-process cache-conformance helper used only by the Tailwind source-package test suite.
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 116
+    note: Non-packable child-process fixture that proves Tailwind cache locking, atomic publication, and recovery after owner death.
   - project: tools/ForgeTrust.AppSurface.ReleaseContracts/ForgeTrust.AppSurface.ReleaseContracts.csproj
     classification: support
     publish_decision: support_publish

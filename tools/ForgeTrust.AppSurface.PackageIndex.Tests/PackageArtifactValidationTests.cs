@@ -2675,6 +2675,28 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Single(report.Entries);
     }
 
+    [Fact]
+    public void PackageArtifactValidator_ReadPackageEntryBytesThrowsWhenRequiredArchiveEntryIsMissing()
+    {
+        var packagePath = CombineSafeChildPath(_repositoryRoot, "artifacts/missing-entry.nupkg");
+        Directory.CreateDirectory(Path.GetDirectoryName(packagePath)!);
+        using (var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create))
+        {
+            archive.CreateEntry("present.txt");
+        }
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => PackageArtifactValidator.ReadPackageEntryBytes(
+                packagePath,
+                "build/tailwind.release.json",
+                "ForgeTrust.AppSurface.Web.Tailwind"));
+
+        Assert.Contains(
+            "Package 'ForgeTrust.AppSurface.Web.Tailwind' is missing required entry 'build/tailwind.release.json'.",
+            error.Message,
+            StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("build/tailwind.release.json")]
     [InlineData("build/tailwind.version")]
@@ -6998,6 +7020,40 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 """,
                 Encoding.UTF8);
         }
+    }
+
+    [Fact]
+    public void PackageArtifactWorkflow_TryDeleteProofWorkspaceIgnoresIoException()
+    {
+        var deleteCalls = 0;
+
+        PackageArtifactWorkflow.TryDeleteProofWorkspace(
+            "temporary-proof-workspace",
+            static _ => true,
+            _ =>
+            {
+                deleteCalls++;
+                throw new IOException("in use");
+            });
+
+        Assert.Equal(1, deleteCalls);
+    }
+
+    [Fact]
+    public void PackageArtifactWorkflow_TryDeleteProofWorkspaceIgnoresUnauthorizedAccessException()
+    {
+        var deleteCalls = 0;
+
+        PackageArtifactWorkflow.TryDeleteProofWorkspace(
+            "temporary-proof-workspace",
+            static _ => true,
+            _ =>
+            {
+                deleteCalls++;
+                throw new UnauthorizedAccessException("access denied");
+            });
+
+        Assert.Equal(1, deleteCalls);
     }
 
     [Fact]
