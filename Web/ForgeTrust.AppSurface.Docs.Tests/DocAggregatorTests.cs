@@ -969,9 +969,15 @@ public class DocAggregatorTests : IDisposable
         // per-harvester timeout. Allow the Markdown scan to complete when the test host is contended.
         var docs = await aggregator.GetDocsAsync();
         var guide = Assert.Single(docs, document => document.Path == "tools/ForgeTrust.AppSurface.PackageIndex/README.md");
+        var spikeDesign = Assert.Single(docs, document => document.Path == "docs/designs/python-docstring-harvesting-spike.md");
+        const string candidateRecordSource = "https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Docs.Tests/TestData/PythonParserDecision/README.md";
 
         Assert.DoesNotContain("href=\"../../packages/package-index.yml\"", guide.Content, StringComparison.Ordinal);
         Assert.DoesNotContain("href=\"../../.github/workflows/package-gate.yml\"", guide.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("href=\"../../Web/ForgeTrust.AppSurface.Docs.Tests/TestData/PythonParserDecision/README.md\"", guide.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("href=\"../../Web/ForgeTrust.AppSurface.Docs.Tests/TestData/PythonParserDecision/README.md\"", spikeDesign.Content, StringComparison.Ordinal);
+        Assert.Contains($"href=\"{candidateRecordSource}\"", guide.Content, StringComparison.Ordinal);
+        Assert.Contains($"href=\"{candidateRecordSource}\"", spikeDesign.Content, StringComparison.Ordinal);
         Assert.DoesNotContain(
             docs,
             document => string.Equals(
