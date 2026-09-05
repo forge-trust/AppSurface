@@ -8,7 +8,7 @@ Mode: Builder
 
 Related issue: [#771](https://github.com/forge-trust/AppSurface/issues/771)
 
-> **Candidate-gate outcome — 2026-08-23:** `TreeSitter.DotNet` `1.3.0` was rejected before source integration because its exact compressed archive is 53,401,399 bytes, exceeding the approved 5 MiB limit. The measured artifact, native inventory, and license/provenance metadata are retained in the [candidate gate record](../../Web/ForgeTrust.AppSurface.Docs.Tests/TestData/PythonParserDecision/README.md). Security review superseded the planned local restore/child-process smoke: a local feed is not a sandbox for NuGet build or native code, and the failed static size gate means runtime execution cannot change this rejection. A future runtime check requires a separately approved operating-system-level sandbox design. No parser fallback was selected.
+> **Candidate-gate outcome — 2026-08-23:** `TreeSitter.DotNet` `1.3.0` was rejected before source integration because its exact compressed archive is 53,401,399 bytes, exceeding the approved 5 MiB limit. The measured artifact, native inventory, and license/provenance metadata are retained in the [source-controlled candidate gate record](https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Docs.Tests/TestData/PythonParserDecision/README.md). Security review superseded the planned local restore/child-process smoke: a local feed is not a sandbox for NuGet build or native code, and the failed static size gate means runtime execution cannot change this rejection. A future runtime check requires a separately approved operating-system-level sandbox design. No parser fallback was selected.
 
 ## Problem Statement
 

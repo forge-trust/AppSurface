@@ -95,7 +95,7 @@ accepted. Reports must be written below the repository's `artifacts/` directory.
 still needs a separately approved operating-system-level sandbox design before runtime initialization can become evidence.
 Report destinations are immutable: choose a new filename for every run, because existing files and symbolic-link paths
 are rejected rather than overwritten.
-The [TreeSitter.DotNet 1.3.0 rejection record](../../Web/ForgeTrust.AppSurface.Docs.Tests/TestData/PythonParserDecision/README.md)
+The [source-controlled TreeSitter.DotNet 1.3.0 rejection record](https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Docs.Tests/TestData/PythonParserDecision/README.md)
 is the current proof: its 50.93 MiB archive exceeds the approved 5 MiB cap, so it must not be referenced by product code.
 
 ## Recovery and release boundary
