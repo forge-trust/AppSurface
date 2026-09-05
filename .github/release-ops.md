@@ -147,17 +147,28 @@ dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurf
 The verifier restores and builds the solution once, packs manifest-selected packages
 with `--no-restore --no-build`, inspects each `.nupkg`, and writes a markdown report.
 It checks package metadata, expected same-version dependencies, first-party DLL
-informational versions, .NET tool command settings, and Tailwind runtime binary
-payloads. It accepts stable and prerelease SemVer identities, and intentionally
+informational versions, .NET tool command settings, Tailwind main-package manifest
+assets, and direct companion runtime binary payloads. It accepts stable and prerelease SemVer identities, and intentionally
 rejects SemVer build metadata because NuGet strips build metadata from package
 identity.
 
-`verify-packages` is the primary package-proof path for Tailwind runtime packages.
-It forces `TailwindRuntimeBinaryResolutionEnabled=true` during restore, build, and
-pack so runtime `.nupkg` files cannot be created without their native Tailwind
-binary payload. Do not set `TailwindRuntimeBinaryResolutionEnabled=false` for
-release package validation; that switch is only for non-package CI restore,
-build, and test jobs that do not compile Tailwind-consuming projects.
+`verify-packages` is the primary package-proof path for the Tailwind delivery boundary.
+It proves the main package contains its targets, task, notices, and pinned
+`build/tailwind.release.json` while containing no native Tailwind runtime payload or
+runtime-companion dependency. Retained direct companion packages are validated
+separately for their intentional native payloads. Restore and build normally; the
+obsolete `TailwindRuntimeBinaryResolutionEnabled` switch is not part of main-package
+release validation. The workflow also runs
+[`verify-tailwind-package-consumer.sh`](../scripts/verify-tailwind-package-consumer.sh)
+against the freshly packed main package, proving default host-cache acquisition,
+generated CSS, no companion restore edge, and no copied native executable in consumer
+output. Both NuGet publication workflows call the reusable
+[`tailwind-native-host-evidence.yml`](./workflows/tailwind-native-host-evidence.yml)
+gate, which fails closed unless five actual configured hosts return tag-bound evidence
+for the exact package version and Tailwind manifest. Repository administrators must
+configure the protected `TAILWIND_NATIVE_HOST_RUNNERS` JSON variable described in the
+[CI critical path](../eng/ci-critical-path.md#tailwind-host-cache-and-package-proof);
+an unavailable host is a release failure, not a skipped proof or a cross-RID substitute.
 
 Stable publishing is intentionally separate from prerelease publishing so the
 environment protections, trusted-publishing policy, and smoke-install proof stay

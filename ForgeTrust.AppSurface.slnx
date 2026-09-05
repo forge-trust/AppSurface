@@ -171,6 +171,7 @@
     <Project Path="Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj" />
     <Project Path="Web/ForgeTrust.AppSurface.Web.Scalar.Tests/ForgeTrust.AppSurface.Web.Scalar.Tests.csproj" />
     <Project Path="Web/ForgeTrust.AppSurface.Web.Scalar/ForgeTrust.AppSurface.Web.Scalar.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Web.Tailwind.CacheTestHost/ForgeTrust.AppSurface.Web.Tailwind.CacheTestHost.csproj" />
     <Project Path="Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj" />
     <Project Path="Web/ForgeTrust.AppSurface.Web.Tailwind.Tasks/ForgeTrust.AppSurface.Web.Tailwind.Tasks.csproj" />
     <Project Path="Web/ForgeTrust.AppSurface.Web.Tailwind.Tests/ForgeTrust.AppSurface.Web.Tailwind.Tests.csproj" />

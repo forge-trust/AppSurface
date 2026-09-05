@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using ForgeTrust.AppSurface.Web.Tailwind.Internal;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
@@ -11,10 +9,10 @@ namespace ForgeTrust.AppSurface.Web.Tailwind.Tasks;
 /// </summary>
 /// <remarks>
 /// The task is loaded by <c>ForgeTrust.AppSurface.Web.Tailwind.targets</c> for build-time CSS generation.
-/// It prefers an explicit <see cref="TailwindCliPath"/> when supplied; otherwise it resolves the runtime
-/// package for the current build host RID. Build mode intentionally does not search <c>PATH</c>, because
+/// It prefers an explicit <see cref="TailwindCliPath"/> when supplied; otherwise it resolves the package-pinned
+/// standalone CLI into the verified cache for the current build host RID. Build mode intentionally does not search <c>PATH</c>, because
 /// command-line shells and CI agents often expose different paths than MSBuild nodes. Developer watch mode
-/// may use <c>PATH</c>, but reproducible builds should use the packaged runtime or an explicit local binary.
+/// may use <c>PATH</c>, but reproducible builds should use the verified host cache or an explicit local binary.
 /// </remarks>
 public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICancelableTask
 {
@@ -54,13 +52,13 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
     public string OutputPath { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets an optional explicit Tailwind CLI path used instead of the packaged runtime.
+    /// Gets or sets an optional explicit Tailwind CLI path used instead of verified host-cache resolution.
     /// </summary>
     /// <remarks>
     /// Optional. Use this escape hatch when a project must pin a custom standalone Tailwind binary or a local
     /// shim. Relative values resolve from <see cref="ProjectDirectory"/>. When set, the file must exist or the
-    /// task emits <c>ASTW003</c>; when unset, <see cref="TailwindVersion"/> is required so the runtime package
-    /// candidate paths can be constructed.
+    /// task emits <c>ASTW003</c>; when unset, <see cref="TailwindVersion"/> and the release manifest identify
+    /// the single verified cache entry for the build host.
     /// </remarks>
     public string? TailwindCliPath { get; set; }
 
@@ -69,37 +67,44 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
     /// </summary>
     /// <remarks>
     /// Required when <see cref="TailwindCliPath"/> is not supplied. The targets file normally reads this value
-    /// from the package <c>tailwind.version</c> file. Missing values emit <c>ASTW002</c> because packaged runtime
-    /// lookup includes the Tailwind version in source-tree candidate paths.
+    /// from the package <c>tailwind.version</c> file. Missing values emit <c>ASTW002</c> because the verified
+    /// cache identity includes the Tailwind version.
     /// </remarks>
     public string? TailwindVersion { get; set; }
+
+    /// <summary>
+    /// Gets or sets the packed or source-tree <c>tailwind.release.json</c> path.
+    /// </summary>
+    /// <remarks>
+    /// Required when no explicit <see cref="TailwindCliPath"/> is supplied. The manifest
+    /// provides the package-pinned version, release URL, host binary names, and expected
+    /// digests used to verify the one acquired host executable.
+    /// </remarks>
+    public string? TailwindReleaseManifestPath { get; set; }
 
     /// <summary>
     /// Gets or sets the directory containing <c>ForgeTrust.AppSurface.Web.Tailwind.targets</c>.
     /// </summary>
     /// <remarks>
-    /// Required. The task uses this directory to find package-local runtimes, sibling runtime packages in the
-    /// NuGet global-packages layout, and source-tree runtime outputs. MSBuild passes
-    /// <c>$(MSBuildThisFileDirectory)</c>, which includes a trailing separator.
+    /// Retained for MSBuild target compatibility. The host-scoped resolver does not probe package-local, sibling,
+    /// or source-tree native binaries; MSBuild continues to pass <c>$(MSBuildThisFileDirectory)</c>.
     /// </remarks>
     [Required]
     public string TargetsDirectory { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the current build configuration used for source-tree runtime probing.
+    /// Gets or sets the current build configuration.
     /// </summary>
     /// <remarks>
-    /// Optional. Defaults to <c>Debug</c> when blank. Package consumers normally do not depend on this property;
-    /// it exists so repository/source-tree imports can locate runtime outputs under <c>runtimes/obj</c>.
+    /// Retained for target compatibility. Host-scoped CLI resolution does not use this value.
     /// </remarks>
     public string? Configuration { get; set; }
 
     /// <summary>
-    /// Gets or sets the current project target framework used for source-tree runtime probing.
+    /// Gets or sets the current project target framework.
     /// </summary>
     /// <remarks>
-    /// Optional. Defaults to <c>net10.0</c> when blank. This is the consuming project's framework, not the
-    /// framework used to load the MSBuild task assembly.
+    /// Retained for target compatibility. Host-scoped CLI resolution does not use this value.
     /// </remarks>
     public string? TargetFramework { get; set; }
 
@@ -110,8 +115,8 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
     /// Optional. The imported targets default this to a user-level cache such as
     /// <c>$XDG_CACHE_HOME/forgetrust/appsurface/tailwind</c> or
     /// <c>$HOME/.cache/forgetrust/appsurface/tailwind</c>. The task probes this cache so source-tree builds can
-    /// reuse runtime-project downloads across Git worktrees instead of copying every Tailwind executable under
-    /// each worktree's <c>obj</c> directory.
+    /// reuse verified host CLI downloads across Git worktrees instead of copying every executable under each
+    /// worktree's <c>obj</c> directory.
     /// </remarks>
     public string? TailwindDownloadCacheRoot { get; set; }
 
@@ -120,7 +125,7 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
     /// </summary>
     /// <remarks>
     /// Optional. Production builds should leave this blank so <see cref="TailwindRuntimeMap.GetCurrentRid"/> can
-    /// resolve the host RID. Tests set this value to exercise unsupported RIDs and package probing branches.
+    /// resolve the host RID. Tests set this value to exercise unsupported-RID branches.
     /// </remarks>
     public string? TailwindTargetRid { get; set; }
 
@@ -162,23 +167,23 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
 
     private async Task<bool> ExecuteAsync(CancellationToken cancellationToken)
     {
-        var tailwindPath = ResolveTailwindPath();
-        if (string.IsNullOrEmpty(tailwindPath))
-        {
-            return false;
-        }
-
-        var args = new[] { "-i", InputPath, "-o", OutputPath, "--minify" };
-        var invocation = TailwindInvocationBuilder.Build(tailwindPath, args);
-
-        Log.LogMessage(
-            MessageImportance.High,
-            "Tailwind CSS: Running build for {0} -> {1}",
-            InputPath,
-            OutputPath);
-
         try
         {
+            var tailwindPath = await ResolveTailwindPathAsync(cancellationToken);
+            if (string.IsNullOrEmpty(tailwindPath))
+            {
+                return false;
+            }
+
+            var args = new[] { "-i", InputPath, "-o", OutputPath, "--minify" };
+            var invocation = TailwindInvocationBuilder.Build(tailwindPath, args);
+
+            Log.LogMessage(
+                MessageImportance.High,
+                "Tailwind CSS: Running build for {0} -> {1}",
+                InputPath,
+                OutputPath);
+
             var result = await TailwindProcessRunner.ExecuteAsync(
                 invocation.FileName,
                 invocation.Arguments,
@@ -219,237 +224,124 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
                     TailwindDiagnostics.ProcessStartFailed,
                     $"Tailwind CLI process could not be started from '{ex.FileName}'.",
                     ex.InnerException?.Message ?? "The operating system rejected the process start request.",
-                    "Verify TailwindCliPath or the packaged runtime binary is executable and accessible."));
+                    "Verify TailwindCliPath or the verified cached binary is executable and accessible."));
             return false;
         }
     }
 
-    private string? ResolveTailwindPath()
+    private async Task<string?> ResolveTailwindPathAsync(CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrWhiteSpace(TailwindCliPath))
+        try
         {
-            var explicitPath = Path.GetFullPath(TailwindCliPath, ProjectDirectory);
-            if (File.Exists(explicitPath))
+            TailwindResolvedCli resolved;
+            if (!string.IsNullOrWhiteSpace(TailwindCliPath))
             {
-                return explicitPath;
+                cancellationToken.ThrowIfCancellationRequested();
+                resolved = TailwindCliResolver.ResolveExplicitPath(TailwindCliPath, ProjectDirectory);
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(TailwindReleaseManifestPath))
+                {
+                    throw new TailwindCliResolutionException(
+                        TailwindCliResolutionFailure.MissingManifest,
+                        "The package Tailwind release manifest is missing.");
+                }
+
+                var manifest = TailwindReleaseManifest.LoadFromFile(TailwindReleaseManifestPath);
+                var resolver = new TailwindCliResolver(manifest);
+                resolved = await resolver.ResolveAsync(
+                    new TailwindCliResolverOptions(
+                        TailwindCliPath,
+                        ProjectDirectory,
+                        TailwindDownloadCacheRoot,
+                        TailwindVersion,
+                        TailwindTargetRid),
+                    cancellationToken);
             }
 
-            Log.LogError(
-                TailwindDiagnostics.Format(
-                    TailwindDiagnostics.InvalidCliPath,
-                    $"TailwindCliPath was set to '{TailwindCliPath}', but the resolved file '{explicitPath}' does not exist.",
-                    "The explicit CLI override points at a missing file.",
-                    "Set TailwindCliPath to an existing Tailwind standalone binary or remove the property to use the packaged runtime."));
+            Log.LogMessage(MessageImportance.High, "Tailwind CSS: {0} verified CLI for {1} ({2}).", resolved.CacheState, resolved.Rid, resolved.Version);
+            return resolved.Path;
+        }
+        catch (TailwindCliResolutionException ex)
+        {
+            LogResolverFailure(ex);
             return null;
         }
-
-        var rid = string.IsNullOrWhiteSpace(TailwindTargetRid)
-            ? TailwindRuntimeMap.GetCurrentRid()
-            : TailwindTargetRid;
-        if (string.Equals(rid, "unknown", StringComparison.Ordinal))
+        catch (InvalidDataException ex)
         {
-            Log.LogError(
-                TailwindDiagnostics.Format(
-                    TailwindDiagnostics.UnsupportedRid,
-                    "Tailwind CSS could not determine a supported runtime identifier for the current build host.",
-                    "The current operating system and process architecture do not match a packaged Tailwind runtime.",
-                    "Use a supported host or set TailwindCliPath to a compatible local Tailwind CLI binary."));
+            Log.LogError(TailwindDiagnostics.Format(
+                TailwindDiagnostics.AcquisitionFailed,
+                "Tailwind release manifest is invalid.",
+                ex.Message,
+                "Restore the package or set TailwindCliPath to an existing compatible CLI."));
             return null;
         }
-
-        if (!IsRelativePathComponent(rid))
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or ArgumentException
+            or NotSupportedException
+            or PathTooLongException)
         {
-            Log.LogError(
-                TailwindDiagnostics.Format(
-                    TailwindDiagnostics.UnsupportedRid,
-                    $"Tailwind RID '{rid}' is not supported by this package.",
-                    "The resolved RID is not a single relative path component.",
-                    "Use a supported host or set TailwindCliPath to a compatible local Tailwind CLI binary."));
+            Log.LogError(TailwindDiagnostics.Format(
+                TailwindDiagnostics.AcquisitionFailed,
+                "Tailwind release manifest could not be opened.",
+                ex.Message,
+                "Restore the package or set TailwindCliPath to an existing compatible CLI."));
             return null;
         }
-
-        var runtimeBinaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid);
-        if (string.IsNullOrEmpty(runtimeBinaryName) || !IsFileName(runtimeBinaryName))
-        {
-            Log.LogError(
-                TailwindDiagnostics.Format(
-                    TailwindDiagnostics.UnsupportedRid,
-                    $"Tailwind RID '{rid}' is not supported by this package.",
-                    "No Tailwind runtime binary mapping exists for the resolved RID.",
-                    "Use a supported host or set TailwindCliPath to a compatible local Tailwind CLI binary."));
-            return null;
-        }
-
-        if (string.IsNullOrWhiteSpace(TailwindVersion))
-        {
-            Log.LogError(
-                TailwindDiagnostics.Format(
-                    TailwindDiagnostics.MissingVersion,
-                    "Tailwind CSS version could not be resolved.",
-                    "The targets file could not read build/tailwind.version and TailwindVersion was not set.",
-                    "Set TailwindVersion explicitly or ensure tailwind.version is packaged next to the targets file."));
-            return null;
-        }
-
-        foreach (var candidate in EnumerateRuntimeCandidates(rid, runtimeBinaryName).Where(File.Exists))
-        {
-            return candidate;
-        }
-
-        Log.LogError(
-            TailwindDiagnostics.Format(
-                TailwindDiagnostics.MissingCli,
-                "Tailwind CLI binary not found.",
-                "No packaged, project-local, source-tree, or explicit Tailwind CLI binary exists for the current build host. Build mode does not search PATH.",
-                "Install the matching ForgeTrust.AppSurface.Web.Tailwind.Runtime package or set TailwindCliPath to a local Tailwind CLI binary."));
-        return null;
     }
 
-    private IEnumerable<string> EnumerateRuntimeCandidates(string rid, string runtimeBinaryName)
+    private void LogResolverFailure(TailwindCliResolutionException ex)
     {
-        var targetsDirectory = EnsureTrailingSeparator(TargetsDirectory);
-        yield return Path.GetFullPath(Path.Join(targetsDirectory, "..", "runtimes", rid, "native", runtimeBinaryName));
-        foreach (var packageRuntimePath in EnumerateSiblingRuntimePackageCandidates(targetsDirectory, rid, runtimeBinaryName))
+        if (ex.Failure == TailwindCliResolutionFailure.InvalidCliPath)
         {
-            yield return packageRuntimePath;
+            Log.LogError(TailwindDiagnostics.Format(
+                TailwindDiagnostics.InvalidCliPath,
+                "TailwindCliPath was set but does not resolve to an existing file.",
+                ex.Message,
+                "Set TailwindCliPath to an existing Tailwind standalone binary or remove the property to use verified host resolution."));
+            return;
         }
 
-        yield return Path.GetFullPath(Path.Join(ProjectDirectory, "runtimes", rid, "native", runtimeBinaryName));
-
-        if (!string.IsNullOrWhiteSpace(TailwindDownloadCacheRoot))
+        if (ex.Failure == TailwindCliResolutionFailure.MissingManifest)
         {
-            var sharedCacheCandidate = Path.GetFullPath(TailwindDownloadCache.GetRuntimeBinaryPath(
-                TailwindDownloadCacheRoot,
-                TailwindVersion!,
-                rid,
-                runtimeBinaryName));
-            if (IsVerifiedSharedDownloadCacheCandidate(sharedCacheCandidate, runtimeBinaryName))
-            {
-                yield return sharedCacheCandidate;
-            }
+            Log.LogError(TailwindDiagnostics.Format(
+                TailwindDiagnostics.AcquisitionFailed,
+                "The package Tailwind release manifest is missing.",
+                ex.Message,
+                "Restore the package or set TailwindCliPath to an existing compatible CLI."));
+            return;
         }
 
-        var localBinaryName = TailwindRuntimeMap.GetLocalBinaryName();
-        if (IsFileName(localBinaryName))
+        if (ex.Failure == TailwindCliResolutionFailure.UnsupportedRid)
         {
-            yield return Path.GetFullPath(Path.Join(targetsDirectory, "..", localBinaryName));
+            Log.LogError(TailwindDiagnostics.Format(
+                TailwindDiagnostics.UnsupportedRid,
+                ex.Message,
+                "The current operating system and process architecture are not mapped to a Tailwind release asset.",
+                "Use a supported host or set TailwindCliPath to a compatible local Tailwind CLI binary."));
+            return;
         }
 
-        var configuration = string.IsNullOrWhiteSpace(Configuration) ? "Debug" : Configuration;
-        var targetFramework = string.IsNullOrWhiteSpace(TargetFramework) ? "net10.0" : TargetFramework;
-        yield return Path.GetFullPath(Path.Join(
-            targetsDirectory,
-            "..",
-            "runtimes",
-            "obj",
-            $"ForgeTrust.AppSurface.Web.Tailwind.Runtime.{rid}",
-            configuration,
-            targetFramework,
-            $"tailwind-{TailwindVersion}",
-            runtimeBinaryName));
-        yield return Path.GetFullPath(Path.Join(
-            targetsDirectory,
-            "..",
-            "runtimes",
-            "obj",
-            $"ForgeTrust.AppSurface.Web.Tailwind.Runtime.{rid}",
-            configuration,
-            targetFramework,
-            runtimeBinaryName));
-    }
-
-    private bool IsVerifiedSharedDownloadCacheCandidate(string candidatePath, string runtimeBinaryName)
-    {
-        if (!File.Exists(candidatePath))
+        if (ex.Failure == TailwindCliResolutionFailure.MissingVersion)
         {
-            return false;
+            Log.LogError(TailwindDiagnostics.Format(
+                TailwindDiagnostics.MissingVersion,
+                ex.Message,
+                "The package targets could not read tailwind.version.",
+                "Restore the package or set TailwindCliPath to an existing compatible CLI."));
+            return;
         }
 
-        var checksumFile = Path.Join(Path.GetDirectoryName(candidatePath), "sha256sums.txt");
-        var expectedHash = TryReadExpectedChecksum(checksumFile, runtimeBinaryName);
-        if (expectedHash == null)
-        {
-            Log.LogWarning(
-                "Skipping Tailwind shared-cache candidate '{0}' because '{1}' does not contain a checksum for '{2}'.",
-                candidatePath,
-                checksumFile,
-                runtimeBinaryName);
-            return false;
-        }
-
-        var computedHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(candidatePath))).ToLowerInvariant();
-        if (!string.Equals(expectedHash, computedHash, StringComparison.OrdinalIgnoreCase))
-        {
-            Log.LogWarning(
-                "Skipping Tailwind shared-cache candidate '{0}' because its checksum does not match '{1}'.",
-                candidatePath,
-                checksumFile);
-            return false;
-        }
-
-        return true;
-    }
-
-    private static string? TryReadExpectedChecksum(string checksumFile, string runtimeBinaryName)
-    {
-        if (!File.Exists(checksumFile))
-        {
-            return null;
-        }
-
-        foreach (var line in File.ReadLines(checksumFile, Encoding.UTF8))
-        {
-            var tokens = line.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
-            if (tokens.Length < 2)
-            {
-                continue;
-            }
-
-            var fileToken = tokens[1].TrimStart('*');
-            if (fileToken.StartsWith("./", StringComparison.Ordinal))
-            {
-                fileToken = fileToken.Substring(2);
-            }
-
-            if (string.Equals(fileToken, runtimeBinaryName, StringComparison.Ordinal))
-            {
-                return tokens[0].ToLowerInvariant();
-            }
-        }
-
-        return null;
-    }
-
-    private static IEnumerable<string> EnumerateSiblingRuntimePackageCandidates(
-        string targetsDirectory,
-        string rid,
-        string runtimeBinaryName)
-    {
-        var normalizedTargetsDirectory = Path.TrimEndingDirectorySeparator(targetsDirectory);
-        if (string.IsNullOrWhiteSpace(normalizedTargetsDirectory))
-        {
-            yield break;
-        }
-
-        var buildDirectory = new DirectoryInfo(normalizedTargetsDirectory);
-        var mainPackageVersionDirectory = buildDirectory.Parent;
-        var mainPackageIdDirectory = mainPackageVersionDirectory?.Parent;
-        var packagesRoot = mainPackageIdDirectory?.Parent;
-        var packageVersion = mainPackageVersionDirectory?.Name;
-
-        if (packagesRoot == null || packageVersion == null || !IsRelativePathComponent(packageVersion))
-        {
-            yield break;
-        }
-
-        yield return Path.Join(
-            packagesRoot.FullName,
-            $"forgetrust.appsurface.web.tailwind.runtime.{rid}",
-            packageVersion,
-            "runtimes",
-            rid,
-            "native",
-            runtimeBinaryName);
+        var identity = ex.Rid is null || ex.Version is null
+            ? "unavailable"
+            : $"tailwind-{ex.Version}/{ex.Rid}";
+        Log.LogError(TailwindDiagnostics.Format(
+            TailwindDiagnostics.AcquisitionFailed,
+            $"Tailwind CLI acquisition failed ({ex.Failure}).",
+            $"{ex.Message} Safe cache identity: {identity}.",
+            "Set TailwindCliPath, prewarm TailwindDownloadCacheRoot, or consult the Tailwind package diagnostics."));
     }
 
     private void LogStandardErrorLine(string line, TailwindOutputLevel level)
@@ -478,30 +370,4 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
         return $"{Environment.NewLine}Captured stdout tail:{Environment.NewLine}{result.Stdout}{Environment.NewLine}Captured stderr tail:{Environment.NewLine}{result.Stderr}";
     }
 
-    private static string EnsureTrailingSeparator(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            throw new ArgumentException("TargetsDirectory cannot be empty.", nameof(path));
-        }
-
-        if (Path.EndsInDirectorySeparator(path))
-        {
-            return path;
-        }
-
-        return path + Path.DirectorySeparatorChar;
-    }
-
-    private static bool IsRelativePathComponent(string value)
-    {
-        return !string.IsNullOrWhiteSpace(value)
-            && !Path.IsPathRooted(value)
-            && value.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) < 0;
-    }
-
-    private static bool IsFileName(string value)
-    {
-        return IsRelativePathComponent(value) && Path.GetFileName(value) == value;
-    }
 }

@@ -1,10 +1,6 @@
 # ForgeTrust.AppSurface.Web.Tailwind
 
-Tailwind CSS integration for AppSurface web applications with zero Node.js dependency.
-
-## Overview
-
-This package wires the Tailwind standalone CLI into the AppSurface web build pipeline so your app can compile generated CSS during builds and run Tailwind in watch mode during development.
+Node-free Tailwind CSS build and development-watch integration for AppSurface web applications.
 
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
@@ -13,170 +9,177 @@ AppSurface ships as a coordinated package family. Before installing this package
 from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md)
 for current release risk, migration guidance, and readiness.
 <!-- appsurface-release-guidance: end -->
-## Features
 
-- **No Node.js required**: Uses the official standalone Tailwind CLI binaries.
-- **RID-aware runtime packages**: Pulls in the platform-specific runtime package automatically when the package is restored.
-- **Build integration**: Compiles `wwwroot/css/app.css` to `wwwroot/css/site.gen.css` by default.
-- **Development watch mode**: Starts Tailwind in `--watch` during development when you register the service.
+## What the package provides
 
-## Usage
+ForgeTrust.AppSurface.Web.Tailwind treats the Tailwind standalone executable as a
+**build-host tool**, not an application runtime dependency. The main package contains
+MSBuild targets, the compiled task, tailwind.release.json, and notices. It does not
+carry a native Tailwind executable or depend on a Tailwind.Runtime companion package.
 
-### First Tailwind page in five minutes
+On the first normal build, the task selects the machine running MSBuild, obtains the
+matching official Tailwind binary, verifies it against the package-pinned release
+manifest, and atomically stores it in a user or CI-owned cache. Later builds rehash and
+reuse that one host entry. This keeps binaries out of project-reference and application
+outputs while retaining a zero-Node default.
 
-1. Add the package to an AppSurface web project:
+See the generated release-guidance section above for coordinated-version guidance and
+release risk.
 
-```bash
-dotnet add package ForgeTrust.AppSurface.Web.Tailwind
-```
+## First successful build
 
-2. Create the default input file:
+1. Add the package.
 
-```css
-/* wwwroot/css/app.css */
-@import "tailwindcss";
-```
+       dotnet add package ForgeTrust.AppSurface.Web.Tailwind
 
-3. Register watch mode for local development:
+2. Add the default input file.
 
-```csharp
-services.AddTailwind(options =>
-{
-    options.InputPath = "wwwroot/css/app.css";
-    options.OutputPath = "wwwroot/css/site.gen.css";
-});
-```
+       /* wwwroot/css/app.css */
+       @import "tailwindcss";
 
-4. Reference the generated stylesheet from your layout:
+3. Build the project.
 
-```html
-<link rel="stylesheet" href="~/css/site.gen.css" asp-append-version="true" />
-```
+       dotnet build
 
-5. Build and run:
+The first connected build logs whether its host CLI was acquired or reused and writes
+wwwroot/css/site.gen.css. Link that generated file from the layout when the page is
+ready to use it:
 
-```bash
-dotnet build
-dotnet run
-```
+    <link rel="stylesheet" href="~/css/site.gen.css" asp-append-version="true" />
 
-The build should log `Tailwind CSS: Running build for wwwroot/css/app.css -> wwwroot/css/site.gen.css`, create `wwwroot/css/site.gen.css`, and include that file in static web assets when the output remains under `wwwroot/`.
+When TailwindOutputPath remains under wwwroot, the targets register it as a static web
+asset, including on a clean Razor Class Library build. Keep input and output paths
+different: the targets and watch service reject configurations that resolve to the same
+file.
 
-### Build and watch behavior
+## Build-host resolution and trust
 
-When `OutputPath` stays under `wwwroot/`, the generated file is registered as an ASP.NET Core static web
-asset on clean builds and publish runs. That means Razor Class Libraries and other package-style consumers can
-serve the generated CSS without checking `site.gen.css` into source control first.
-That registration also stays in place for projects that disable the SDK's default content items and rely on the
-package to declare the generated web-root asset explicitly.
+Normal resolution maps the **current process host**, never the consuming project's
+RuntimeIdentifier:
 
-Keep `InputPath` and `OutputPath` pointed at different files. The build target and the development watch service both reject configurations where the two paths resolve to the same file, even if one path uses a normalized relative form such as `./wwwroot/css/../css/app.css`.
+| Host | Selected asset |
+|---|---|
+| Linux x64 | linux-x64 |
+| Linux Arm64 | linux-arm64 |
+| macOS x64 | osx-x64 |
+| macOS Arm64 | osx-arm64 |
+| Windows x64 or Arm64 | win-x64 (Windows x64 emulation on Arm64) |
 
-During development, the watch service is non-blocking. If the Tailwind CLI is not available on the current machine, the app still starts and serves any existing CSS while logging a warning that points developers to the runtime package or `TailwindOptions.CliPath` override. Other startup failures still log as errors.
+The package-owned build/tailwind.release.json supplies the canonical Tailwind version,
+official HTTPS release base URL, binary name, and SHA-256 digest for exactly those five
+mappings. A downloaded sha256sums.txt must agree with that pinned digest, and the
+executable is hashed again before every run. Downloaded checksums are an audit signal;
+the packaged manifest is the trust anchor.
 
-Build mode uses a compiled MSBuild task instead of `<Exec>`. The task receives structured arguments, emits stable `ASTW###` diagnostics, and keeps build resolution behavior explicit. Build mode does not search `PATH`; use `TailwindCliPath` when you want a custom CLI during builds. Watch mode may use `PATH` as a development convenience after checking packaged runtime locations.
+The cache identity is:
 
-### MSBuild property reference
+    <TailwindDownloadCacheRoot>/tailwind-<version>/<host-rid>/<binary-name>
 
-| Property | Default | Behavior |
+With no explicit root, the resolver chooses XDG_CACHE_HOME, LOCALAPPDATA, HOME, then
+USERPROFILE, and appends the AppSurface Tailwind cache directory. It uses an exclusive
+entry lock, GUID-suffixed partial downloads, hash verification, same-directory atomic
+publication, and owner-only partial cleanup. A partial, rejected, symlinked, or
+digest-mismatched entry is never executed.
+
+Treat the cache root as user-private infrastructure. The resolver rejects symbolic links
+and reparse points at or below that root before it accepts a cached executable, but a
+user who can replace the configured cache root or its parent controls that local path.
+Use a directory writable only by the build or watch identity; do not point
+`TailwindDownloadCacheRoot` at a shared or untrusted location.
+
+## Offline and CI behavior
+
+A verified, prewarmed cache works with the network disabled. On a connected machine,
+run the normal three-step build once against the intended cache root; preserve that
+directory with your CI cache mechanism. A fresh offline machine has no trusted binary
+and fails before it starts a child process. Supply an explicit CLI path or prewarm the
+cache instead of copying an unverified executable into a build output folder.
+
+Example CI configuration:
+
+    <PropertyGroup>
+      <TailwindDownloadCacheRoot>/mnt/ci-cache/appsurface-tailwind</TailwindDownloadCacheRoot>
+    </PropertyGroup>
+
+CI cache keys should include the manifest version and native build host, for example
+appsurface-tailwind-4.1.18-linux-x64. Release validation records native-host evidence
+for all five supported mappings; a cross-RID executable simulation is not a substitute
+for native execution proof.
+
+## Build and watch policy
+
+| Mode | Ordered resolution | Failure behavior |
 |---|---|---|
-| `TailwindEnabled` | `true` | Set to `false` to skip package-driven build integration. |
-| `TailwindInputPath` | `wwwroot/css/app.css` | CSS input path, resolved relative to the project directory. |
-| `TailwindOutputPath` | `wwwroot/css/site.gen.css` | Generated CSS path, resolved relative to the project directory. Keep it under `wwwroot/` for static web asset registration. |
-| `TailwindCliPath` | empty | Explicit build-time Tailwind CLI path. Relative paths resolve from the project directory. Build mode does not fall back to `PATH`. |
-| `TailwindVersion` | from `build/tailwind.version` | Tailwind standalone CLI version used by runtime packages. Override only when testing a coordinated runtime-package change. |
-| `TailwindRuntimeBinaryResolutionEnabled` | `true` | Maintainer/CI-only. Set to `false` only in non-package jobs that skip runtime binary downloads and do not build Tailwind-consuming projects, unless the job also intentionally sets `TailwindEnabled=false`. Do not use it for consumer builds or package creation; see [`eng/ci-critical-path.md`](../../eng/ci-critical-path.md#tailwind-runtime-binary-resolution-in-ci). |
-| `TailwindDownloadCacheRoot` | source-tree user cache; empty for packed consumers unless set | Shared source-tree download cache used while building Tailwind runtime packages. Source-tree imports default to `$XDG_CACHE_HOME/forgetrust/appsurface/tailwind`, `%LOCALAPPDATA%/ForgeTrust/AppSurface/Tailwind`, `$HOME/.cache/forgetrust/appsurface/tailwind`, or `%USERPROFILE%/.cache/forgetrust/appsurface/tailwind`, in that order. |
+| MSBuild build | Existing TailwindCliPath -> verified host cache/acquisition | Missing explicit path is final. Resolver failure is a build error. Build never searches PATH. |
+| Development watch | Existing TailwindOptions.CliPath -> verified host cache/acquisition -> one PATH attempt | Missing explicit watch path is final. With no explicit path, a resolver and PATH failure logs a warning and the app starts without watch mode. |
 
-### Runtime option reference
+An explicit path is deliberately a trusted escape hatch. Relative TailwindCliPath values
+resolve from the project directory; relative TailwindOptions.CliPath values resolve from
+the host content root. Explicit paths bypass runtime mapping, cache lookup, cache
+writes, and network acquisition. On Windows, watch supports .cmd and .ps1 shims as
+well as the standalone executable.
 
-| Option | Default | Behavior |
+## Configuration reference
+
+| Property | Default | Use it when |
 |---|---|---|
-| `Enabled` | `true` | Set to `false` to disable development watch mode. |
-| `InputPath` | `wwwroot/css/app.css` | Watch-mode input path, resolved relative to the content root. |
-| `OutputPath` | `wwwroot/css/site.gen.css` | Watch-mode output path, resolved relative to the content root. |
-| `CliPath` | `null` | Explicit watch-mode Tailwind CLI path. Relative paths resolve from the content root. |
+| TailwindEnabled | true | Set to false to use another asset pipeline. |
+| TailwindInputPath | wwwroot/css/app.css | Move the Tailwind CSS input. |
+| TailwindOutputPath | wwwroot/css/site.gen.css | Move generated CSS; retain wwwroot for static web assets. |
+| TailwindCliPath | empty | Build with a deliberate local or custom standalone binary. |
+| TailwindVersion | build/tailwind.version | Internal coordinated-release value. It must match the package manifest. |
+| TailwindDownloadCacheRoot | user or CI cache derived from environment | Use a durable or isolated cache root. |
 
-## CI
-
-`ForgeTrust.AppSurface.Web.Tailwind` hooks into the normal `dotnet build` and `dotnet publish` pipeline through MSBuild targets, so the default integration does not require a separate `npm install` or `npm run build` step in CI.
-
-Runtime packages download the official Tailwind checksum file and standalone binary during build or publish, then verify the binary with SHA-256 before packaging it. These downloads retry transient network failures by default, which keeps CI resilient to brief GitHub release CDN 5xx responses and timeouts without weakening checksum validation.
-
-Maintainers can set `TailwindRuntimeBinaryResolutionEnabled=false` only for fast CI jobs that restore, build, or test without producing package artifacts and without compiling Tailwind-consuming projects. Jobs that intentionally skip CSS generation can pair it with `TailwindEnabled=false`, but solution builds should leave runtime binary resolution enabled. Package validation, `dotnet pack`, and release workflows must leave the property enabled or pass `/p:TailwindRuntimeBinaryResolutionEnabled=true`. The authoritative CI matrix and copy-paste examples live in [`eng/ci-critical-path.md`](../../eng/ci-critical-path.md#tailwind-runtime-binary-resolution-in-ci).
-
-Source-tree builds cache downloaded Tailwind executables outside the worktree by default so multiple local worktrees reuse the same binary copy. The cache is versioned and RID-scoped under `TailwindDownloadCacheRoot`, for example `$HOME/.cache/forgetrust/appsurface/tailwind/tailwind-4.1.18/osx-arm64/tailwindcss-macos-arm64`. Packed NuGet consumers normally use NuGet's global package cache instead. Build-time shared-cache probing happens only when `TailwindDownloadCacheRoot` is explicitly set by MSBuild targets or project configuration, and development watch mode does not read the ambient user cache. Missing runtime-package dependencies therefore fail cleanly on developer machines and CI unless the build opts into a cache root or an explicit CLI path is configured.
-
-Build-time shared-cache candidates are used only when the same directory contains `sha256sums.txt` with a matching hash for the Tailwind binary name. A missing or mismatched checksum causes the candidate to be skipped and the normal runtime-package fallback chain to continue. Malformed version directories such as `tailwind-not-a-version` are ignored during versioned shared-cache fallback scans.
-
-The retry behavior is configurable with MSBuild properties:
-
-```xml
-<PropertyGroup>
-  <TailwindDownloadCacheRoot>/mnt/ci-cache/appsurface-tailwind</TailwindDownloadCacheRoot>
-  <TailwindDownloadRetries>4</TailwindDownloadRetries>
-  <TailwindDownloadRetryDelayMilliseconds>5000</TailwindDownloadRetryDelayMilliseconds>
-</PropertyGroup>
-```
-
-Point `TailwindDownloadCacheRoot` at a durable CI cache volume when build agents reuse caches between jobs. Raise the retry values for slower CI networks. Lower them only when you prefer fail-fast behavior and have another way to provide the Tailwind CLI, such as `TailwindCliPath`.
-
-If you need to suppress the package-driven build temporarily, set `TailwindEnabled=false` in MSBuild, for example with `dotnet build -p:TailwindEnabled=false` or a project-level `<TailwindEnabled>false</TailwindEnabled>` property.
-
-If you want to keep the package-driven build but point it at a different standalone Tailwind executable, set `TailwindCliPath` to an absolute path or a project-relative file path:
-
-```xml
-<PropertyGroup>
-  <TailwindCliPath>tools/tailwindcss/tailwindcss</TailwindCliPath>
-</PropertyGroup>
-```
-
-Use the matching runtime option for development watch mode:
-
-```csharp
-services.AddTailwind(options =>
-{
-    options.CliPath = "tools/tailwindcss/tailwindcss";
-});
-```
-
-On Windows, `TailwindCliPath` and `TailwindOptions.CliPath` can point at the standalone binary directly or at the npm-generated `.cmd`, `.bat`, or `.ps1` shim. The package wraps those shims with the correct launcher while preserving argument boundaries for paths with spaces.
-
-## Tailwind diagnostics
-
-Every build-task diagnostic includes a stable code, problem, cause, fix, and this troubleshooting anchor.
-
-| Code | Meaning | Fix |
+| TailwindOptions member | Default | Use it when |
 |---|---|---|
-| `ASTW001` | The build host could not be mapped to a supported Tailwind runtime identifier. | Build on Windows x64/Arm64, macOS x64/Arm64, or Linux x64/Arm64, or set `TailwindCliPath`. |
-| `ASTW002` | `TailwindVersion` could not be resolved. | Ensure `build/tailwind.version` is present next to the targets file or set `TailwindVersion`. |
-| `ASTW003` | `TailwindCliPath` was set but the resolved file does not exist. | Point `TailwindCliPath` at an existing standalone binary or remove it to use packaged runtimes. |
-| `ASTW004` | No build-mode Tailwind CLI was found. | Install the matching runtime package or set `TailwindCliPath`; build mode does not search `PATH`. |
-| `ASTW005` | The MSBuild task assembly could not load or the Tailwind process could not start. | Restore/build the package, verify `build/tasks` exists in the nupkg, and ensure the CLI file is executable. |
-| `ASTW006` | Tailwind exited with a non-zero code. | Read the captured output tail, fix the CSS/configuration error, and run the build again. |
-| `ASTW007` | MSBuild canceled the Tailwind task. | Re-run the build if cancellation was unintentional. |
-| `ASTW008` | Input and output resolve to the same file. | Set `TailwindOutputPath` to a generated file distinct from `TailwindInputPath`. |
-| `ASTW009` | `TailwindRuntimeBinaryResolutionEnabled` has an unsupported value. | Use `true` or `false`; unset defaults to `true`. |
-| `ASTW010` | Runtime package creation was attempted with Tailwind runtime binary resolution disabled. | Rerun package validation, restore, build, and pack with `/p:TailwindRuntimeBinaryResolutionEnabled=true`. |
-| `ASTW011` | The resolved runtime package payload file is missing. | Rerun package validation with binary resolution enabled, delete stale `obj` output if needed, and verify `TailwindBaseUrl`/`TailwindSumsUrl`. |
+| Enabled | true | Disable development watch mode. |
+| InputPath | wwwroot/css/app.css | Move watch-mode input relative to the content root. |
+| OutputPath | wwwroot/css/site.gen.css | Move watch-mode output relative to the content root. |
+| CliPath | null | Use an explicit development-watch CLI. |
 
-If an error mentions `build/tasks`, inspect the packed package. A valid package contains `build/ForgeTrust.AppSurface.Web.Tailwind.targets`, `build/tailwind.version`, `build/tasks/ForgeTrust.AppSurface.Web.Tailwind.Tasks.dll`, and `build/tasks/CliWrap.dll`.
+The retained ForgeTrust.AppSurface.Web.Tailwind.Runtime packages are independent
+companion/compatibility artifacts. They are not part of normal installation or the main
+package dependency graph. See [runtime package guidance](runtimes/README.md) before
+using one directly.
 
-## Escape hatch (plugin-heavy Tailwind setups)
+## Package release proof
 
-If your Tailwind configuration depends on npm-only plugins or custom JavaScript tooling, keep your existing Node-based asset pipeline instead of forcing the standalone CLI path.
+The repository package gate runs a real packed-consumer proof through
+[`scripts/verify-tailwind-package-consumer.sh`](../../scripts/verify-tailwind-package-consumer.sh).
+It restores only the freshly packed main package from the local artifact feed, maps
+third-party resolution to reviewed CliWrap, Microsoft.Extensions, and
+System.Diagnostics.EventLog package sources, isolates all NuGet caches inside the proof
+workspace, verifies the generated consumer lock file with `--locked-mode`, then builds
+with the default resolver. The proof confirms the current host cache entry and
+generated CSS, and rejects any runtime companion edge or copied Tailwind executable in
+consumer output.
+Run `verify-packages` as described in the [package release workflow](../../packages/README.md#package-release-workflow)
+before publishing changes to this package boundary.
 
-Disable the package-driven MSBuild integration with `TailwindEnabled=false`, and either omit `services.AddTailwind()` or set `options.Enabled = false` so the development watch service does not start. After that, run your existing npm, pnpm, or yarn Tailwind command as part of your normal frontend build.
+## Diagnostics
 
-If your custom setup still uses the standalone CLI but stores it outside the package runtime layout, prefer `TailwindCliPath` over editing the imported `.targets` file directly.
+Every task diagnostic has a stable ASTW code, cause, recovery, and this document as its
+help anchor.
 
-The v0.1 integration intentionally does not expose separate MSBuild knobs for minification, additional Tailwind arguments, working directory, template input globs, config input globs, or static web asset registration. Those defaults are part of the zero-Node path. Use `TailwindEnabled=false` and your own asset pipeline when a project needs full Tailwind command control.
+| Code | Meaning | Recovery |
+|---|---|---|
+| ASTW001 | No explicit path was supplied and the build host is unsupported. | Build on a supported host or set TailwindCliPath. |
+| ASTW002 | The package Tailwind version is missing. | Restore the package or provide an explicit CLI path. |
+| ASTW003 | An explicit build CLI path does not exist. | Correct it or remove it to use verified host resolution. |
+| ASTW005 | The task assembly or resolved executable could not start. | Restore package task assets and verify the executable or override is runnable. |
+| ASTW006 | Tailwind exited non-zero. | Read the captured output and fix CSS or configuration. |
+| ASTW007 | MSBuild canceled Tailwind. | Re-run when cancellation was unintended. |
+| ASTW008 | Input and output resolve to the same file. | Choose a distinct generated output. |
+| ASTW012 | Manifest, version, cache, lock, checksum, or acquisition verification failed. | Use the classification and redacted cache identity; prewarm the cache, fix the root, or set an explicit CLI path. |
 
-## Notes
+ASTW012 classifications are finite: invalid-version, no-cache-root, invalid-cache,
+checksum-failure, non-writable-root, network-failure, retry-exhausted, and lock-timeout.
+Diagnostics never render a custom absolute cache root, release URL, response body, or
+credential.
 
-- The generated CSS file is intended to be build output and is commonly ignored in source control.
-- Generated CSS outside `wwwroot/` still builds locally, but it is not exposed automatically through the static web asset pipeline.
-- The platform-specific `ForgeTrust.AppSurface.Web.Tailwind.Runtime.*` packages are support packages consumed transitively by this package and are not usually installed directly.
-- `TailwindDownloadCacheRoot` affects source-tree runtime downloads, not normal generated CSS output. Delete that cache when you intentionally want to force runtime package projects to re-download and re-verify the standalone Tailwind binaries.
-- Tailwind CLI selection follows the current build host, not `RuntimeIdentifier`, because the standalone CLI runs during the build. Cross-targeted builds still execute the host-compatible binary.
-- Windows Arm64 hosts intentionally use the `win-x64` runtime under emulation. There is no `ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-arm64` package because Tailwind `v4.1.18` does not ship a native Windows Arm64 standalone CLI.
+## When not to use this integration
+
+Use TailwindEnabled=false and retain your existing Node/npm/pnpm/yarn pipeline when
+your project needs npm-only Tailwind plugins, custom JavaScript tool orchestration, or
+full command-line control. Do not edit the imported targets file. If you only need a
+custom standalone binary, use TailwindCliPath or TailwindOptions.CliPath instead.

@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 55
-- Evidence status: manifest evidence complete: 39; transitive package evidence complete: 7; proof-host evidence complete: 2; excluded by publish decision: 7
-- Product families: AppSurface: 37; Forge Trust: 2; Internal support: 13; RazorWire: 3
+- Packages: 56
+- Evidence status: manifest evidence complete: 39; transitive package evidence complete: 7; proof-host evidence complete: 2; excluded by publish decision: 8
+- Product families: AppSurface: 37; Forge Trust: 2; Internal support: 14; RazorWire: 3
 
 ## Package evidence matrix
 
@@ -56,8 +56,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | AppSurface | `ForgeTrust.AppSurface.Web.Scalar` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Web.OpenApi` | `ForgeTrust.AppSurface.Web.OpenApi` | [README](../Web/ForgeTrust.AppSurface.Web.Scalar/README.md) | [notes](../releases/current.md) |
 | RazorWire | `ForgeTrust.RazorWire` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Auth`<br />`ForgeTrust.AppSurface.Intelligence`<br />`ForgeTrust.AppSurface.Web` | `ForgeTrust.AppSurface.Auth`<br />`ForgeTrust.AppSurface.Intelligence`<br />`ForgeTrust.AppSurface.Web` | [README](../Web/ForgeTrust.RazorWire/README.md) | [notes](../releases/current.md) |
 | RazorWire | `ForgeTrust.RazorWire.Auth.AspNetCore` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Auth.AspNetCore`<br />`ForgeTrust.RazorWire` | `ForgeTrust.AppSurface.Auth.AspNetCore`<br />`ForgeTrust.RazorWire` | [README](../Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md) | [notes](../releases/current.md) |
-| AppSurface | `ForgeTrust.AppSurface.Web.Tailwind` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Web` | `ForgeTrust.AppSurface.Core`<br />`ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64`<br />`ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64`<br />`ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64`<br />`ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64`<br />`ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64` | [README](../Web/ForgeTrust.AppSurface.Web.Tailwind/README.md) | [notes](../releases/current.md) |
+| AppSurface | `ForgeTrust.AppSurface.Web.Tailwind` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Web` | `ForgeTrust.AppSurface.Core` | [README](../Web/ForgeTrust.AppSurface.Web.Tailwind/README.md) | [notes](../releases/current.md) |
 | Internal support | `ForgeTrust.AppSurface.Web.Tailwind.Tasks` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
+| Internal support | `ForgeTrust.AppSurface.Web.Tailwind.CacheTestHost` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Cli` | public | publish | manifest evidence complete | None | None | None | [AppSurface CLI README](../Cli/ForgeTrust.AppSurface.Cli/README.md) | [notes](../releases/current.md) |
 | Internal support | `ForgeTrust.AppSurface.ReleaseContracts` | support | support publish | transitive package evidence complete | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | Forge Trust | `ForgeTrust.AppSurface.Docs` | proof host | support publish | proof-host evidence complete | None | None | `ForgeTrust.AppSurface.Auth`<br />`ForgeTrust.AppSurface.Caching`<br />`ForgeTrust.AppSurface.Config`<br />`ForgeTrust.AppSurface.Intelligence`<br />`ForgeTrust.AppSurface.ReleaseContracts`<br />`ForgeTrust.AppSurface.Theming`<br />`ForgeTrust.AppSurface.Web`<br />`ForgeTrust.AppSurface.Web.Tailwind`<br />`ForgeTrust.RazorWire` | [AppSurface Docs README](../Web/ForgeTrust.AppSurface.Docs/README.md) | [notes](../releases/unreleased.md) |

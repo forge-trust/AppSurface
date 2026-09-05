@@ -8,14 +8,18 @@
     <_TailwindVersionFileSource>$(MSBuildThisFileDirectory)..\tailwind.version</_TailwindVersionFileSource>
     <_TailwindVersionFile Condition="Exists('$(_TailwindVersionFilePackage)')">$(_TailwindVersionFilePackage)</_TailwindVersionFile>
     <_TailwindVersionFile Condition="'$(_TailwindVersionFile)' == '' and Exists('$(_TailwindVersionFileSource)')">$(_TailwindVersionFileSource)</_TailwindVersionFile>
+    <_TailwindReleaseManifestPackage>$(MSBuildThisFileDirectory)tailwind.release.json</_TailwindReleaseManifestPackage>
+    <_TailwindReleaseManifestSource>$(MSBuildThisFileDirectory)..\tailwind.release.json</_TailwindReleaseManifestSource>
+    <_TailwindReleaseManifest Condition="Exists('$(_TailwindReleaseManifestPackage)')">$(_TailwindReleaseManifestPackage)</_TailwindReleaseManifest>
+    <_TailwindReleaseManifest Condition="'$(_TailwindReleaseManifest)' == '' and Exists('$(_TailwindReleaseManifestSource)')">$(_TailwindReleaseManifestSource)</_TailwindReleaseManifest>
     <_TailwindTaskAssemblyPackage>$(MSBuildThisFileDirectory)tasks\ForgeTrust.AppSurface.Web.Tailwind.Tasks.dll</_TailwindTaskAssemblyPackage>
     <_TailwindTaskAssemblySourceProject>$(MSBuildThisFileDirectory)..\..\ForgeTrust.AppSurface.Web.Tailwind.Tasks\ForgeTrust.AppSurface.Web.Tailwind.Tasks.csproj</_TailwindTaskAssemblySourceProject>
     <_TailwindIsSourceTreeImport Condition="Exists('$(_TailwindTaskAssemblySourceProject)')">true</_TailwindIsSourceTreeImport>
     <_TailwindIsSourceTreeImport Condition="'$(_TailwindIsSourceTreeImport)' == ''">false</_TailwindIsSourceTreeImport>
-    <TailwindDownloadCacheRoot Condition="'$(TailwindDownloadCacheRoot)' == '' AND '$(_TailwindIsSourceTreeImport)' == 'true' AND '$(XDG_CACHE_HOME)' != ''">$(XDG_CACHE_HOME)/forgetrust/appsurface/tailwind</TailwindDownloadCacheRoot>
-    <TailwindDownloadCacheRoot Condition="'$(TailwindDownloadCacheRoot)' == '' AND '$(_TailwindIsSourceTreeImport)' == 'true' AND '$(LOCALAPPDATA)' != ''">$(LOCALAPPDATA)/ForgeTrust/AppSurface/Tailwind</TailwindDownloadCacheRoot>
-    <TailwindDownloadCacheRoot Condition="'$(TailwindDownloadCacheRoot)' == '' AND '$(_TailwindIsSourceTreeImport)' == 'true' AND '$(HOME)' != ''">$(HOME)/.cache/forgetrust/appsurface/tailwind</TailwindDownloadCacheRoot>
-    <TailwindDownloadCacheRoot Condition="'$(TailwindDownloadCacheRoot)' == '' AND '$(_TailwindIsSourceTreeImport)' == 'true' AND '$(USERPROFILE)' != ''">$(USERPROFILE)/.cache/forgetrust/appsurface/tailwind</TailwindDownloadCacheRoot>
+    <TailwindDownloadCacheRoot Condition="'$(TailwindDownloadCacheRoot)' == '' AND '$(XDG_CACHE_HOME)' != ''">$(XDG_CACHE_HOME)/forgetrust/appsurface/tailwind</TailwindDownloadCacheRoot>
+    <TailwindDownloadCacheRoot Condition="'$(TailwindDownloadCacheRoot)' == '' AND '$(LOCALAPPDATA)' != ''">$(LOCALAPPDATA)/ForgeTrust/AppSurface/Tailwind</TailwindDownloadCacheRoot>
+    <TailwindDownloadCacheRoot Condition="'$(TailwindDownloadCacheRoot)' == '' AND '$(HOME)' != ''">$(HOME)/.cache/forgetrust/appsurface/tailwind</TailwindDownloadCacheRoot>
+    <TailwindDownloadCacheRoot Condition="'$(TailwindDownloadCacheRoot)' == '' AND '$(USERPROFILE)' != ''">$(USERPROFILE)/.cache/forgetrust/appsurface/tailwind</TailwindDownloadCacheRoot>
     <_TailwindTaskTargetFramework>net10.0</_TailwindTaskTargetFramework>
     <_TailwindTaskAssemblySource>$(MSBuildThisFileDirectory)..\..\ForgeTrust.AppSurface.Web.Tailwind.Tasks\bin\$(Configuration)\$(_TailwindTaskTargetFramework)\ForgeTrust.AppSurface.Web.Tailwind.Tasks.dll</_TailwindTaskAssemblySource>
     <_TailwindTaskAssemblySourceDisplay Condition="Exists('$(_TailwindTaskAssemblySourceProject)')">$(_TailwindTaskAssemblySource)</_TailwindTaskAssemblySourceDisplay>
@@ -81,7 +85,7 @@
 
   <Target Name="RunTailwindBuild" AfterTargets="ResolveProjectReferences" BeforeTargets="PrepareResources;Compile"
           Condition="'$(TailwindEnabled)' == 'true' AND Exists('$(TailwindInputPath)')"
-          Inputs="$(TailwindInputPath);@(_TailwindTemplates);@(_TailwindConfigs)"
+          Inputs="$(TailwindInputPath);$(_TailwindVersionFile);$(_TailwindReleaseManifest);@(_TailwindTemplates);@(_TailwindConfigs)"
           Outputs="$(TailwindOutputPath)">
     <PropertyGroup>
       <!-- Source-tree consumers import only this targets file, so resolve TailwindVersion here as well. -->
@@ -95,12 +99,16 @@
     <Error Text="ASTW005: Tailwind MSBuild task assembly could not be found. Cause: '$(_TailwindTaskAssemblyDisplay)' does not exist. Fix: Restore and build ForgeTrust.AppSurface.Web.Tailwind.Tasks, or consume the packed ForgeTrust.AppSurface.Web.Tailwind package. See: https://github.com/forge-trust/AppSurface/tree/main/Web/ForgeTrust.AppSurface.Web.Tailwind#tailwind-diagnostics"
            Condition="'$(_TailwindTaskAssembly)' == '' or !Exists('$(_TailwindTaskAssembly)')" />
 
+    <Error Text="ASTW012: Tailwind release manifest could not be found. Cause: '$(_TailwindReleaseManifestPackage)' is missing from the package or source tree. Fix: restore the package again or set TailwindCliPath to an existing compatible CLI. See: https://github.com/forge-trust/AppSurface/tree/main/Web/ForgeTrust.AppSurface.Web.Tailwind#tailwind-diagnostics"
+           Condition="'$(TailwindCliPath)' == '' and ('$(_TailwindReleaseManifest)' == '' or !Exists('$(_TailwindReleaseManifest)'))" />
+
     <ForgeTrust.AppSurface.Web.Tailwind.Tasks.RunTailwindBuildTask
       ProjectDirectory="$(MSBuildProjectDirectory)"
       InputPath="$(TailwindInputPath)"
       OutputPath="$(TailwindOutputPath)"
       TailwindCliPath="$(TailwindCliPath)"
       TailwindVersion="$(TailwindVersion)"
+      TailwindReleaseManifestPath="$(_TailwindReleaseManifest)"
       TargetsDirectory="$(MSBuildThisFileDirectory)"
       Configuration="$(Configuration)"
       TargetFramework="$(TargetFramework)"

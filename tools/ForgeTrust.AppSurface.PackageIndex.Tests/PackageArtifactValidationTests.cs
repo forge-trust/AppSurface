@@ -2649,6 +2649,320 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void PackageArtifactValidator_AcceptsTailwindMainPackageHostScopedContract()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web.Tailwind",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: TailwindMainPackageEntries());
+
+        var report = new PackageArtifactValidator().Validate(
+            new PackagePublishPlan([
+                new PackagePublishPlanEntry(
+                    "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+                    "ForgeTrust.AppSurface.Web.Tailwind",
+                    PackagePublishDecision.Publish,
+                    [],
+                    IsTool: false)
+            ]),
+            artifactDirectory,
+            PackageVersion);
+
+        Assert.Single(report.Entries);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ReadPackageEntryBytesThrowsWhenRequiredArchiveEntryIsMissing()
+    {
+        var packagePath = CombineSafeChildPath(_repositoryRoot, "artifacts/missing-entry.nupkg");
+        Directory.CreateDirectory(Path.GetDirectoryName(packagePath)!);
+        using (var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create))
+        {
+            archive.CreateEntry("present.txt");
+        }
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => PackageArtifactValidator.ReadPackageEntryBytes(
+                packagePath,
+                "build/tailwind.release.json",
+                "ForgeTrust.AppSurface.Web.Tailwind"));
+
+        Assert.Contains(
+            "Package 'ForgeTrust.AppSurface.Web.Tailwind' is missing required entry 'build/tailwind.release.json'.",
+            error.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("build/tailwind.release.json")]
+    [InlineData("build/tailwind.version")]
+    [InlineData("build/ForgeTrust.AppSurface.Web.Tailwind.targets")]
+    public void PackageArtifactValidator_ThrowsWhenTailwindMainPackageHostScopedAssetIsMissing(string missingEntry)
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var entries = TailwindMainPackageEntries();
+        entries.Remove(missingEntry);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web.Tailwind",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: entries);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+                        "ForgeTrust.AppSurface.Web.Tailwind",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains($"missing required host-scoped Tailwind asset '{missingEntry}'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenTailwindMainPackageContainsRuntimePayload()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var entries = TailwindMainPackageEntries();
+        entries["runtimes/linux-x64/native/tailwindcss-linux-x64"] = Encoding.UTF8.GetBytes("tailwind binary");
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web.Tailwind",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: entries);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+                        "ForgeTrust.AppSurface.Web.Tailwind",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains("must not contain a native Tailwind runtime payload", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenTailwindMainPackageDependsOnRuntimeCompanion()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web.Tailwind",
+            PackageVersion,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64"] = $"[{PackageVersion}]"
+            },
+            rawEntries: TailwindMainPackageEntries());
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+                        "ForgeTrust.AppSurface.Web.Tailwind",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains("must not depend on Tailwind runtime companion packages", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("1")]
+    [InlineData("null")]
+    [InlineData("{}")]
+    public void PackageArtifactValidator_RejectsNonStringTailwindManifestVersion(string versionJson)
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var entries = TailwindMainPackageEntries();
+        entries["build/tailwind.release.json"] = Encoding.UTF8.GetBytes($"{{\"version\":{versionJson}}}");
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web.Tailwind",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: entries);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+                        "ForgeTrust.AppSurface.Web.Tailwind",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains("version property must be a JSON string", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenTailwindVersionDisagreesWithManifestVersion()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var entries = TailwindMainPackageEntries();
+        entries["build/tailwind.version"] = Encoding.UTF8.GetBytes("4.2.0");
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web.Tailwind",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: entries);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+                        "ForgeTrust.AppSurface.Web.Tailwind",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains(
+            "Package 'ForgeTrust.AppSurface.Web.Tailwind' has inconsistent Tailwind version metadata: build/tailwind.release.json is '4.1.0', while build/tailwind.version is '4.2.0'.",
+            error.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenRepositoryRootProvidedButCheckedInSourceTailwindManifestIsMissing()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web.Tailwind",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: TailwindMainPackageEntries());
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+                        "ForgeTrust.AppSurface.Web.Tailwind",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion,
+                repositoryRoot: _repositoryRoot));
+
+        var expectedRelativePath = Path.Join("Web", "ForgeTrust.AppSurface.Web.Tailwind", "tailwind.release.json");
+        Assert.Contains(
+            $"Package 'ForgeTrust.AppSurface.Web.Tailwind' requires source manifest '{expectedRelativePath}' for byte-identity validation.",
+            error.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenPackedTailwindManifestBytesDifferFromSourceManifestDespiteSameSemanticContent()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web.Tailwind",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: TailwindMainPackageEntries());
+
+        var sourceManifestPath = CombineSafeChildPath(
+            _repositoryRoot,
+            "Web/ForgeTrust.AppSurface.Web.Tailwind/tailwind.release.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(sourceManifestPath)!);
+        File.WriteAllText(sourceManifestPath, "{\n  \"version\": \"4.1.0\"\n}\n", Encoding.UTF8);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+                        "ForgeTrust.AppSurface.Web.Tailwind",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion,
+                repositoryRoot: _repositoryRoot));
+
+        Assert.Contains(
+            "Package 'ForgeTrust.AppSurface.Web.Tailwind' build/tailwind.release.json does not byte-match the checked-in source manifest.",
+            error.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_AcceptsTailwindMainPackageWhenSourceManifestByteMatches()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web.Tailwind",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: TailwindMainPackageEntries());
+
+        var sourceManifestPath = CombineSafeChildPath(
+            _repositoryRoot,
+            "Web/ForgeTrust.AppSurface.Web.Tailwind/tailwind.release.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(sourceManifestPath)!);
+        File.WriteAllBytes(sourceManifestPath, TailwindMainPackageEntries()["build/tailwind.release.json"]);
+
+        var report = new PackageArtifactValidator().Validate(
+            new PackagePublishPlan([
+                new PackagePublishPlanEntry(
+                    "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+                    "ForgeTrust.AppSurface.Web.Tailwind",
+                    PackagePublishDecision.Publish,
+                    [],
+                    IsTool: false)
+            ]),
+            artifactDirectory,
+            PackageVersion,
+            repositoryRoot: _repositoryRoot);
+
+        Assert.Single(report.Entries);
+    }
+
+    [Fact]
     public void PackageArtifactValidator_ThrowsWhenSuspiciousPayloadIsUnclassified()
     {
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
@@ -6709,6 +7023,40 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void PackageArtifactWorkflow_TryDeleteProofWorkspaceIgnoresIoException()
+    {
+        var deleteCalls = 0;
+
+        PackageArtifactWorkflow.TryDeleteProofWorkspace(
+            "temporary-proof-workspace",
+            static _ => true,
+            _ =>
+            {
+                deleteCalls++;
+                throw new IOException("in use");
+            });
+
+        Assert.Equal(1, deleteCalls);
+    }
+
+    [Fact]
+    public void PackageArtifactWorkflow_TryDeleteProofWorkspaceIgnoresUnauthorizedAccessException()
+    {
+        var deleteCalls = 0;
+
+        PackageArtifactWorkflow.TryDeleteProofWorkspace(
+            "temporary-proof-workspace",
+            static _ => true,
+            _ =>
+            {
+                deleteCalls++;
+                throw new UnauthorizedAccessException("access denied");
+            });
+
+        Assert.Equal(1, deleteCalls);
+    }
+
+    [Fact]
     public async Task PackageArtifactWorkflow_RunsRestoreBuildPackAndWritesReport()
     {
         await WriteFileAsync("packages/package-index.yml",
@@ -6793,20 +7141,20 @@ public sealed class PackageArtifactValidationTests : IDisposable
             restoreCommand.Arguments.Take(4));
         Assert.DoesNotContain("--source", restoreCommand.Arguments);
         Assert.Contains("/p:ContinuousIntegrationBuild=true", restoreCommand.Arguments);
-        Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", restoreCommand.Arguments);
+        Assert.DoesNotContain("/p:TailwindRuntimeBinaryResolutionEnabled=true", restoreCommand.Arguments);
         var packCommand = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet pack");
         Assert.Contains("--no-restore", packCommand.Arguments);
         Assert.Contains("--no-build", packCommand.Arguments);
         Assert.Contains($"/p:Version={PackageVersion}", packCommand.Arguments);
         Assert.Contains($"/p:PackageVersion={PackageVersion}", packCommand.Arguments);
         Assert.Contains("/p:ContinuousIntegrationBuild=true", packCommand.Arguments);
-        Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", packCommand.Arguments);
+        Assert.DoesNotContain("/p:TailwindRuntimeBinaryResolutionEnabled=true", packCommand.Arguments);
         Assert.Equal("true", packCommand.Environment!["CI"]);
         var buildCommand = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet build");
         Assert.Contains($"/p:Version={PackageVersion}", buildCommand.Arguments);
         Assert.Contains($"/p:PackageVersion={PackageVersion}", buildCommand.Arguments);
         Assert.Contains("/p:ContinuousIntegrationBuild=true", buildCommand.Arguments);
-        Assert.Contains("/p:TailwindRuntimeBinaryResolutionEnabled=true", buildCommand.Arguments);
+        Assert.DoesNotContain("/p:TailwindRuntimeBinaryResolutionEnabled=true", buildCommand.Arguments);
         Assert.False(File.Exists(stalePackage));
         Assert.False(File.Exists(staleSymbolPackage));
         Assert.False(File.Exists(staleCoverageProofProject));
@@ -6830,6 +7178,101 @@ public sealed class PackageArtifactValidationTests : IDisposable
             evidenceDocument.RootElement.GetProperty("merged").EnumerateObject().Select(property => property.Name).ToArray());
         Assert.Equal(1, evidenceDocument.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.True(File.Exists(artifactManifestPath), $"Expected artifact manifest at {artifactManifestPath}.");
+    }
+
+    [Fact]
+    public async Task PackageArtifactWorkflow_RunsTailwindProofOutsideTheUploadedArtifactDirectory()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                order: 5
+                use_when: Host web applications.
+                includes: Base web hosting.
+                does_not_include: Tailwind CSS generation.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                order: 10
+                use_when: Generate Tailwind CSS.
+                includes: Host-scoped Tailwind resolution.
+                does_not_include: Native runtime payloads.
+                start_here_path: Web/ForgeTrust.AppSurface.Web.Tailwind/README.md
+            """);
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web.Tailwind/README.md", "# Tailwind");
+        var sourceManifestPath = TestPathUtils.PathUnder(
+            _repositoryRoot,
+            "Web/ForgeTrust.AppSurface.Web.Tailwind/tailwind.release.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(sourceManifestPath)!);
+        await File.WriteAllBytesAsync(sourceManifestPath, TailwindMainPackageEntries()["build/tailwind.release.json"]);
+        await WriteFileAsync("packages/third-party-payloads.yml",
+            """
+            schema_version: 1
+            audits:
+              - id: tailwind-workflow-fixture
+                package_id: ForgeTrust.AppSurface.Web.Tailwind
+                applies_to:
+                  - README.md
+                evidence_kind: fixture_audit
+                source_paths:
+                  - packages/package-index.yml
+                reason: Keeps the workflow test focused on command orchestration.
+                reviewed_on: 2026-06-07
+                source: test fixture
+                revalidate_when: fixture changes.
+            """);
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        var reportPath = CombineSafeChildPath(artifactDirectory, "package-validation-report.md");
+        var artifactManifestPath = CombineSafeChildPath(artifactDirectory, "package-artifact-manifest.json");
+        var tailwindProofReportPath = CombineSafeChildPath(artifactDirectory, "tailwind-package-consumer-proof.md");
+        Directory.CreateDirectory(artifactDirectory);
+        await File.WriteAllTextAsync(tailwindProofReportPath, "stale successful proof", Encoding.UTF8);
+        var commandRunner = new TailwindPackageRecordingCommandRunner();
+        var workflow = new PackageArtifactWorkflow(
+            CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                    "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                    "ForgeTrust.AppSurface.Web"),
+                ["Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj"] = CreateMetadata(
+                    "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+                    "ForgeTrust.AppSurface.Web.Tailwind")
+            }),
+            commandRunner,
+            new PackageArtifactValidator(),
+            new RecordingCoverageCliConsumerProofWorkflow(succeeded: true),
+            new RecordingDocsPackageConsumerProofWorkflow(succeeded: true));
+
+        await workflow.RunAsync(
+            new PackageArtifactRequest(
+                _repositoryRoot,
+                ManifestPath,
+                artifactDirectory,
+                reportPath,
+                PackageVersion,
+                artifactManifestPath,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                CombineSafeChildPath(artifactDirectory, "coverage-proof.md"),
+                CombineSafeChildPath(artifactDirectory, "docs-proof"),
+                CombineSafeChildPath(artifactDirectory, "docs-proof.md"),
+                "https://api.nuget.org/v3/index.json"));
+
+        var proofRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "Tailwind packed consumer proof");
+        var workDirectory = proofRequest.Arguments[proofRequest.Arguments.ToList().IndexOf("--work-directory") + 1];
+        var reportDestination = proofRequest.Arguments[proofRequest.Arguments.ToList().IndexOf("--report-path") + 1];
+        Assert.False(workDirectory.StartsWith(artifactDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(CombineSafeChildPath(artifactDirectory, "tailwind-package-consumer-proof.md"), reportDestination);
+        Assert.False(Directory.Exists(workDirectory), "The external proof workspace should be removed after its report is written.");
+        Assert.False(File.Exists(tailwindProofReportPath), "A failed or incomplete rerun must not retain a stale successful proof report.");
     }
 
     [Fact]
@@ -7168,17 +7611,12 @@ public sealed class PackageArtifactValidationTests : IDisposable
             coverageSecurityJobStart,
             coverageSecurityJobEnd - coverageSecurityJobStart);
 
-        Assert.Matches(disabledRuntimeResolutionSetting, coverageSecurityJob);
-        Assert.Matches(
-            "(?s)--no-restore\\s+/p:TailwindRuntimeBinaryResolutionEnabled=false\\s+/p:TailwindEnabled=false\\s+--filter",
-            coverageSecurityJob);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, buildWorkflowWithoutCoverageSecurityJob);
         Assert.Contains("/p:TailwindEnabled=false", coverageSecurityJob, StringComparison.Ordinal);
         Assert.Contains("Prepare generated docs stylesheet for coverage security tests", coverageSecurityJob, StringComparison.Ordinal);
         Assert.Contains("Web/ForgeTrust.AppSurface.Docs/wwwroot/css/site.gen.css", coverageSecurityJob, StringComparison.Ordinal);
         Assert.DoesNotContain("/p:TailwindEnabled=false", buildWorkflowWithoutCoverageSecurityJob, StringComparison.Ordinal);
         Assert.DoesNotMatch(disabledRuntimeResolutionSetting, codeQualityWorkflow);
-        Assert.Matches(disabledRuntimeResolutionSetting, vcsIgnoreParityWorkflow);
         Assert.Contains("ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.csproj", vcsIgnoreParityWorkflow, StringComparison.Ordinal);
         Assert.Contains("Verify package artifacts", packageGateWorkflow, StringComparison.Ordinal);
         Assert.Contains("verify-packages", packageGateWorkflow, StringComparison.Ordinal);
@@ -7189,7 +7627,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("docs-package-consumer-proof/consumer/NuGet.config", packageGateWorkflow, StringComparison.Ordinal);
         Assert.Contains("docs-package-consumer-proof/consumer/packages.lock.json", packageGateWorkflow, StringComparison.Ordinal);
         Assert.Contains("docs-package-consumer-proof/consumer/obj/project.assets.json", packageGateWorkflow, StringComparison.Ordinal);
-        Assert.Contains("TailwindRuntimeBinaryResolutionEnabled: \"true\"", packageArtifactsWorkflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("TailwindRuntimeBinaryResolutionEnabled: \"true\"", packageArtifactsWorkflow, StringComparison.Ordinal);
         Assert.Contains("Upload package validation diagnostics", packageArtifactsWorkflow, StringComparison.Ordinal);
         Assert.Contains("if: ${{ always() }}", packageArtifactsWorkflow, StringComparison.Ordinal);
         Assert.Contains("coverage-cli-consumer-proof.md", packageArtifactsWorkflow, StringComparison.Ordinal);
@@ -7244,6 +7682,33 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Matches(disabledRuntimeResolutionSetting, "-property:Configuration=Debug;TailwindRuntimeBinaryResolutionEnabled=false");
         Assert.Matches(disabledRuntimeResolutionSetting, "TailwindRuntimeBinaryResolutionEnabled=false dotnet build");
         Assert.Matches(disabledRuntimeResolutionSetting, "env TailwindRuntimeBinaryResolutionEnabled=false dotnet build");
+    }
+
+    [Fact]
+    public async Task TailwindNativeHostEvidenceWorkflowPolicy_FailsClosedBeforeNuGetPublication()
+    {
+        var repositoryRoot = GetRepositoryRoot();
+        var nativeHostWorkflow = await File.ReadAllTextAsync(
+            CombineSafeChildPath(repositoryRoot, ".github/workflows/tailwind-native-host-evidence.yml"));
+        var prereleaseWorkflow = await File.ReadAllTextAsync(
+            CombineSafeChildPath(repositoryRoot, ".github/workflows/nuget-prerelease-publish.yml"));
+        var stableWorkflow = await File.ReadAllTextAsync(
+            CombineSafeChildPath(repositoryRoot, ".github/workflows/nuget-stable-publish.yml"));
+
+        Assert.Contains("workflow_call:", nativeHostWorkflow, StringComparison.Ordinal);
+        Assert.Contains("TAILWIND_NATIVE_HOST_RUNNERS", nativeHostWorkflow, StringComparison.Ordinal);
+        Assert.Contains("aggregate-evidence:", nativeHostWorkflow, StringComparison.Ordinal);
+        Assert.Contains("test \"$MATRIX_RESULT\" = success", nativeHostWorkflow, StringComparison.Ordinal);
+        Assert.Contains("linux-x64", nativeHostWorkflow, StringComparison.Ordinal);
+        Assert.Contains("linux-arm64", nativeHostWorkflow, StringComparison.Ordinal);
+        Assert.Contains("osx-x64", nativeHostWorkflow, StringComparison.Ordinal);
+        Assert.Contains("osx-arm64", nativeHostWorkflow, StringComparison.Ordinal);
+        Assert.Contains("win-x64", nativeHostWorkflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("runner-label", nativeHostWorkflow, StringComparison.Ordinal);
+        Assert.Contains("native-host-evidence", prereleaseWorkflow, StringComparison.Ordinal);
+        Assert.Contains("native-host-evidence", stableWorkflow, StringComparison.Ordinal);
+        Assert.Contains("source_commit: ${{ needs.validate-tag.outputs.tag-commit }}", prereleaseWorkflow, StringComparison.Ordinal);
+        Assert.Contains("source_commit: ${{ needs.validate-tag.outputs.tag-commit }}", stableWorkflow, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -8792,6 +9257,14 @@ public sealed class PackageArtifactValidationTests : IDisposable
         }
     }
 
+    private static Dictionary<string, byte[]> TailwindMainPackageEntries() =>
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["build/tailwind.release.json"] = Encoding.UTF8.GetBytes("{\"version\":\"4.1.0\"}"),
+            ["build/tailwind.version"] = Encoding.UTF8.GetBytes("4.1.0"),
+            ["build/ForgeTrust.AppSurface.Web.Tailwind.targets"] = Encoding.UTF8.GetBytes("<Project />")
+        };
+
     private static string CreateNuspec(
         string packageId,
         string packageVersion,
@@ -9170,6 +9643,37 @@ public sealed class PackageArtifactValidationTests : IDisposable
                     "ForgeTrust.AppSurface.Web",
                     packageVersion,
                     EmptyDependencies);
+            }
+
+            return Task.FromResult(new CommandRunResult(string.Empty, string.Empty));
+        }
+    }
+
+    private sealed class TailwindPackageRecordingCommandRunner : ICommandRunner
+    {
+        public List<CommandRunRequest> Requests { get; } = [];
+
+        public Task<CommandRunResult> RunAsync(CommandRunRequest request, CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            if (request.OperationName == "dotnet pack")
+            {
+                var outputIndex = request.Arguments.ToList().IndexOf("--output");
+                var artifactsDirectory = request.Arguments[outputIndex + 1];
+                var packageVersion = request.Arguments.Single(argument => argument.StartsWith("/p:PackageVersion=", StringComparison.Ordinal))
+                    .Split('=', 2)[1];
+                var projectPath = request.Arguments[1];
+                var packageId = projectPath.Contains("Web.Tailwind", StringComparison.Ordinal)
+                    ? "ForgeTrust.AppSurface.Web.Tailwind"
+                    : "ForgeTrust.AppSurface.Web";
+                WritePackage(
+                    artifactsDirectory,
+                    packageId,
+                    packageVersion,
+                    EmptyDependencies,
+                    rawEntries: string.Equals(packageId, "ForgeTrust.AppSurface.Web.Tailwind", StringComparison.Ordinal)
+                        ? TailwindMainPackageEntries()
+                        : null);
             }
 
             return Task.FromResult(new CommandRunResult(string.Empty, string.Empty));

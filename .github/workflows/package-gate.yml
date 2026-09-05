@@ -54,13 +54,13 @@ jobs:
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/nuget-packages
         run: |
-          dotnet restore ForgeTrust.AppSurface.slnx --configfile NuGet.package-gate.config /p:TailwindRuntimeBinaryResolutionEnabled=true
+          dotnet restore ForgeTrust.AppSurface.slnx --configfile NuGet.package-gate.config
 
       - name: Build release packages
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/nuget-packages
         run: |
-          dotnet build ForgeTrust.AppSurface.slnx --configuration Release --no-restore /p:TailwindRuntimeBinaryResolutionEnabled=true
+          dotnet build ForgeTrust.AppSurface.slnx --configuration Release --no-restore
 
       - name: Validate package manifest gate
         env:
@@ -94,6 +94,7 @@ jobs:
           name: appsurface-package-gate-validation-diagnostics-${{ github.run_number }}
           path: |
             ${{ runner.temp }}/package-gate-artifacts/package-validation-report.md
+            ${{ runner.temp }}/package-gate-artifacts/tailwind-package-consumer-proof.md
             ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof.md
             ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof.evidence.json
             ${{ runner.temp }}/package-gate-artifacts/coverage-cli-consumer-proof/NuGet.tool.config

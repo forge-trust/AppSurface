@@ -66,7 +66,7 @@ public class TailwindWatchService : BackgroundService
                 return;
             }
 
-            var tailwindPath = ResolveTailwindPath();
+            var tailwindPath = await ResolveTailwindPathAsync(stoppingToken);
             var args = new List<string>
             {
                 "-i", _options.InputPath,
@@ -96,7 +96,7 @@ public class TailwindWatchService : BackgroundService
         {
             _logger.LogWarning(
                 ex,
-                "Tailwind CSS watch mode is disabled because the Tailwind CLI could not be found. The app will continue serving existing CSS. Install the platform runtime package or set TailwindOptions.CliPath to enable watch mode.");
+                "Tailwind CSS watch mode is disabled because the Tailwind CLI could not be found. The app will continue serving existing CSS. Prewarm the verified Tailwind cache, install tailwindcss on PATH for development, or set TailwindOptions.CliPath to enable watch mode.");
         }
         catch (Exception ex)
         {
@@ -176,11 +176,11 @@ public class TailwindWatchService : BackgroundService
         return OperatingSystem.IsWindows();
     }
 
-    private string ResolveTailwindPath()
+    private Task<string> ResolveTailwindPathAsync(CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_options.CliPath))
         {
-            return _cliManager.GetTailwindPath();
+            return _cliManager.GetTailwindPathAsync(cancellationToken);
         }
 
         var fullPath = Path.GetFullPath(_options.CliPath, _environment.ContentRootPath);
@@ -191,7 +191,7 @@ public class TailwindWatchService : BackgroundService
                 fullPath);
         }
 
-        return fullPath;
+        return Task.FromResult(fullPath);
     }
 
     private static LogLevel ToLogLevel(TailwindOutputLevel level)

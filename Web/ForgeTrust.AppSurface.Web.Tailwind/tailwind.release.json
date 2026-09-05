@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "version": "4.1.18",
+  "baseUrl": "https://github.com/tailwindlabs/tailwindcss/releases/download/v4.1.18",
+  "assets": [
+    {
+      "rid": "linux-x64",
+      "binaryName": "tailwindcss-linux-x64",
+      "sha256": "737becf8d4ad1115ea98df69fa94026d402ca8feb91306a035b5b004167da8dd"
+    },
+    {
+      "rid": "linux-arm64",
+      "binaryName": "tailwindcss-linux-arm64",
+      "sha256": "7a7702db6c93718a9b6655d455304edda18600f5a4f195242342ed3b5b70ebe8"
+    },
+    {
+      "rid": "osx-x64",
+      "binaryName": "tailwindcss-macos-x64",
+      "sha256": "1e8a77fd796a3a4aa3d8727887de926ef9d38477aba113fd7c32c0d31a32a3ab"
+    },
+    {
+      "rid": "osx-arm64",
+      "binaryName": "tailwindcss-macos-arm64",
+      "sha256": "7f27711dceac1a580b6ad58ddac46e59202c85a6c16f2f08f6fdcdee261008e1"
+    },
+    {
+      "rid": "win-x64",
+      "binaryName": "tailwindcss-windows-x64.exe",
+      "sha256": "55bc5a2e294520a74fe3523eaa11915ef50047e7228a545aa181ec413cf52612"
+    }
+  ]
+}

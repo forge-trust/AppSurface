@@ -55,36 +55,33 @@ Cache-enabled build jobs should restore explicitly before later .NET commands. W
 
 Package-sensitive workflows stay uncached unless a separate issue evaluates their trust boundary. In particular, `package-gate.yml` must keep its isolated `${{ runner.temp }}/nuget-packages` restore and `NuGet.package-gate.config` source policy. Publish, smoke-restore, trusted-publishing, and package validation workflows should not inherit the shared NuGet cache by convention.
 
-## Tailwind runtime binary resolution in CI
+## Tailwind host-scoped CLI in CI
 
-Tailwind runtime package references must stay visible in every build graph. `TailwindRuntimeBinaryResolutionEnabled` controls only runtime package binary downloads; it does not disable the Tailwind build integration used by applications and docs projects. Fast CI may set it to `false` only on non-package jobs that do not build or publish Tailwind-consuming projects, or on jobs that intentionally set `TailwindEnabled=false` and accept skipping generated CSS. Package creation and package validation must force the property back to `true`; otherwise runtime package creation fails before emitting an empty `.nupkg`.
+The main Tailwind package has no native runtime-package dependency. A normal build
+resolves exactly one standalone CLI for the machine running MSBuild and stores it in a
+verified, version/RID-scoped cache. Do not set a consumer RuntimeIdentifier to select
+the CLI: it describes the application target, not the build host.
 
-| Workflow/job | Package-sensitive? | Property value | Where to set it |
-| --- | --- | --- | --- |
-| `build.yml` / `build` | No | default `true` | Leave unset because the solution build compiles Tailwind-consuming projects |
-| `build.yml` / `coverage-security-platform` | No | `false` for binary resolution and build integration | The selected CLI security tests transitively compile the docs project but do not validate CSS or produce packages, so skip both the runtime download and generated CSS. Before compiling, the job creates an empty transient `site.gen.css` because the docs project embeds that generated file. |
-| `code-quality.yml` / `dotnet-format` | No | default `true` | Leave unset because the pre-format build compiles Tailwind-consuming projects |
-| `vcs-ignore-parity.yml` / `parity` smoke step | No | `false` | Dedicated runtime-project build step; the following docs tests leave Tailwind generation enabled |
-| `package-gate.yml` / `package-gate` | Yes | `true` | Pass `/p:TailwindRuntimeBinaryResolutionEnabled=true` on restore/build/pack |
-| `package-artifacts.yml` / `package-artifacts` | Yes | `true` | Job-level `env`, plus `verify-packages` forces `true` internally |
-| `nuget-prerelease-publish.yml` package verification | Yes | `true` | Use `verify-packages`; do not override to `false` |
+| Workflow/job | Required Tailwind posture |
+| --- | --- |
+| `build.yml` / ordinary build | Leave Tailwind enabled when generated CSS is part of the project; it uses the host cache. |
+| `build.yml` / coverage-security-platform | Keep `TailwindEnabled=false` because the test intentionally avoids generated CSS. Do not use the removed runtime-resolution switch. |
+| `vcs-ignore-parity.yml` / compatibility smoke | The direct companion package may be built independently, but it is not evidence for the main-package consumer graph. |
+| `package-gate.yml` and package artifacts | Keep the isolated NuGet cache; `verify-packages` inspects the main archive and runs the real packed-consumer proof. |
+| `tailwind-native-host-evidence.yml` | Runs the exact five-host matrix with repository-configured protected runners and emits an aggregate, tag-bound evidence artifact. |
+| release publishing | Require `verify-packages`, manifest byte-identity proof, packed-consumer proof, and the complete five-host evidence set. |
 
-Fast CI example for a graph that does not run Tailwind-consuming project builds, or for a dedicated runtime-project smoke step that should not produce package artifacts:
+For a durable CI cache, restore the Tailwind cache before `dotnet build` and key it by
+the manifest version and actual native host, for example
+`appsurface-tailwind-4.1.18-linux-x64`. A fresh offline cache must fail before process
+start; a prewarmed verified entry succeeds without network access. An explicit
+`TailwindCliPath` is the documented alternative for air-gapped or custom-tool jobs.
 
-```yaml
-jobs:
-  restore-or-test-non-tailwind-graph:
-    steps:
-      - run: dotnet build Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.csproj /p:TailwindRuntimeBinaryResolutionEnabled=false
-```
-
-Package CI example:
-
-```bash
-dotnet restore ForgeTrust.AppSurface.slnx --configfile NuGet.package-gate.config /p:TailwindRuntimeBinaryResolutionEnabled=true
-dotnet build ForgeTrust.AppSurface.slnx --configuration Release --no-restore /p:TailwindRuntimeBinaryResolutionEnabled=true
-dotnet pack ForgeTrust.AppSurface.slnx --configuration Release --no-build --output "$RUNNER_TEMP/appsurface-packages" /p:TailwindRuntimeBinaryResolutionEnabled=true
-```
+The supported-native evidence set is Linux x64, Linux Arm64, macOS x64, macOS Arm64,
+and Windows x64. Windows Arm64 uses the Windows x64 asset under emulation. CI may not
+claim five-host coverage from a cross-RID run. If a hosted runner is unavailable for a
+RID, use a trusted native self-hosted runner and persist the archive, nuspec, assets
+file, restore binlog, cache identity, and output listing as release evidence.
 
 For release proof, prefer the package artifact workflow over hand-packing:
 
@@ -97,11 +94,26 @@ dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurf
   --report artifacts/package-validation-report.md
 ```
 
-`verify-packages` restores, builds, and packs with `TailwindRuntimeBinaryResolutionEnabled=true`. Raw `dotnet pack` commands are advanced/manual and must pass the property explicitly.
+Publishing calls `tailwind-native-host-evidence.yml` directly and cannot reach the
+NuGet job until its aggregate evidence validates one successful packed consumer for
+each of `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`, and `win-x64`. Configure
+the repository variable `TAILWIND_NATIVE_HOST_RUNNERS` before enabling that gate. It
+must be a JSON object whose values are protected runner-label arrays, for example:
 
-Accepted values are unset/empty, `true`, and `false`, case-insensitive. Unset defaults to `true`. Any other non-empty value fails with an `ASTW009` diagnostic so typos do not silently disable runtime binary resolution. `false` is never an offline package creation mode; for package validation on slow or mirrored networks, use `TailwindBaseUrl`, `TailwindSumsUrl`, `TailwindDownloadRetries`, and `TailwindDownloadRetryDelayMilliseconds`.
+```json
+{
+  "linux-x64": ["self-hosted", "appsurface-tailwind-linux-x64"],
+  "linux-arm64": ["self-hosted", "appsurface-tailwind-linux-arm64"],
+  "osx-x64": ["self-hosted", "appsurface-tailwind-osx-x64"],
+  "osx-arm64": ["self-hosted", "appsurface-tailwind-osx-arm64"],
+  "win-x64": ["self-hosted", "appsurface-tailwind-win-x64"]
+}
+```
 
-When changing this split, record in the job summary how many runtime projects skipped binary resolution, whether package validation ran with resolution enabled, and the restore/build duration. The expected win is reduced network flake and less fast-CI runtime binary work; it is not a license to make package checks optional.
+The gate fails closed when the variable is missing, a runner is unavailable, a host
+reports a different RID, or a record cannot be bound to the exact tag commit, package
+version, and release-manifest digest. Do not substitute cross-RID execution or reuse a
+successful artifact from an earlier workflow run.
 
 Cache misses are normal after dependency updates, lock-file updates, or cache eviction. The cache is only useful if warm runs reduce selected workflow time or runner minutes without regressing the all-green decision path. For cache experiments, record at least:
 
