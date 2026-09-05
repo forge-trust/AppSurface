@@ -2803,6 +2803,144 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void PackageArtifactValidator_ThrowsWhenTailwindVersionDisagreesWithManifestVersion()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var entries = TailwindMainPackageEntries();
+        entries["build/tailwind.version"] = Encoding.UTF8.GetBytes("4.2.0");
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web.Tailwind",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: entries);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+                        "ForgeTrust.AppSurface.Web.Tailwind",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains(
+            "Package 'ForgeTrust.AppSurface.Web.Tailwind' has inconsistent Tailwind version metadata: build/tailwind.release.json is '4.1.0', while build/tailwind.version is '4.2.0'.",
+            error.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenRepositoryRootProvidedButCheckedInSourceTailwindManifestIsMissing()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web.Tailwind",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: TailwindMainPackageEntries());
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+                        "ForgeTrust.AppSurface.Web.Tailwind",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion,
+                repositoryRoot: _repositoryRoot));
+
+        var expectedRelativePath = Path.Join("Web", "ForgeTrust.AppSurface.Web.Tailwind", "tailwind.release.json");
+        Assert.Contains(
+            $"Package 'ForgeTrust.AppSurface.Web.Tailwind' requires source manifest '{expectedRelativePath}' for byte-identity validation.",
+            error.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenPackedTailwindManifestBytesDifferFromSourceManifestDespiteSameSemanticContent()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web.Tailwind",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: TailwindMainPackageEntries());
+
+        var sourceManifestPath = CombineSafeChildPath(
+            _repositoryRoot,
+            "Web/ForgeTrust.AppSurface.Web.Tailwind/tailwind.release.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(sourceManifestPath)!);
+        File.WriteAllText(sourceManifestPath, "{\n  \"version\": \"4.1.0\"\n}\n", Encoding.UTF8);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+                        "ForgeTrust.AppSurface.Web.Tailwind",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion,
+                repositoryRoot: _repositoryRoot));
+
+        Assert.Contains(
+            "Package 'ForgeTrust.AppSurface.Web.Tailwind' build/tailwind.release.json does not byte-match the checked-in source manifest.",
+            error.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_AcceptsTailwindMainPackageWhenSourceManifestByteMatches()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Web.Tailwind",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: TailwindMainPackageEntries());
+
+        var sourceManifestPath = CombineSafeChildPath(
+            _repositoryRoot,
+            "Web/ForgeTrust.AppSurface.Web.Tailwind/tailwind.release.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(sourceManifestPath)!);
+        File.WriteAllBytes(sourceManifestPath, TailwindMainPackageEntries()["build/tailwind.release.json"]);
+
+        var report = new PackageArtifactValidator().Validate(
+            new PackagePublishPlan([
+                new PackagePublishPlanEntry(
+                    "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+                    "ForgeTrust.AppSurface.Web.Tailwind",
+                    PackagePublishDecision.Publish,
+                    [],
+                    IsTool: false)
+            ]),
+            artifactDirectory,
+            PackageVersion,
+            repositoryRoot: _repositoryRoot);
+
+        Assert.Single(report.Entries);
+    }
+
+    [Fact]
     public void PackageArtifactValidator_ThrowsWhenSuspiciousPayloadIsUnclassified()
     {
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
