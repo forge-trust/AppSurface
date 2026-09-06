@@ -2547,11 +2547,10 @@ Passing to Phase 4, the single final approval gate.
 | Codex Review | `/autoplan` | Independent challenge | 1 | ABSORBED | The in-host engineering pass found eight concerns; an independent `combo/sub` pass found eight, all reconciled into the plan without an unresolved engineering disagreement. |
 | Eng Review | `/autoplan` | Architecture, failure paths, performance, and tests | 1 | CLEAR | Folded 25 findings into the plan, specified 24 failure paths, added 12 blocking test groups, and left zero critical gaps. |
 | Design Review | `/autoplan` | User-interface review | 0 | SKIPPED | No UI scope was detected. |
-| DX Review | `/autoplan` | Developer experience | 1 | CHOICE OPEN | Raised the planned score from 4.6/10 to 9.1/10 and defined primed TTHW as median under two minutes, maximum under three; one presentation-layer taste choice remains. |
+| DX Review | `/autoplan` | Developer experience | 1 | CLEAR | Raised the planned score from 4.6/10 to 9.1/10, defined primed TTHW as median under two minutes and maximum under three, and retained transparent direct mapping as the initial template face. |
 
 **CROSS-MODEL:** CEO voices confirmed 3/6 dimensions and converted three scope disagreements into explicit promotion gates; DX voices confirmed 6/6; engineering voices confirmed 6/6 with no disagreement.
 
-**VERDICT:** CEO and engineering are cleared. DX is cleared except for the final choice between transparent direct mapping and early promotion of the experimental ASP.NET adapter.
+**VERDICT:** AUTOPLAN APPROVED — CEO, engineering, and DX are cleared. The initial template uses transparent direct mapping; the experimental ASP.NET adapter remains behind its second-adopter promotion gate.
 
-**UNRESOLVED DECISIONS:**
-- DX taste: keep transparent direct mapping as the initial template face (recommended), or promote the shorter experimental ASP.NET adapter before its second-adopter gate.
+NO UNRESOLVED DECISIONS
