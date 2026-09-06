@@ -212,6 +212,17 @@ is `RequestBudgetExceeded`; after that point either or both sources produce `Pum
 `OperationCanceledException` with neither source canceled is `ActivationFailed` before `pumpStarted` and
 `PumpFailed` after it, both with `ASDUR407`.
 
+Registration is explicit and single-purpose:
+
+```csharp
+services.AddDurableExternalActivation();
+```
+
+The extension registers the service, safely supplies `TimeProvider.System` only when the host did not register a clock,
+and validates the required health and admission-aware pump dependencies when the service provider is built. It does not map
+a route, choose authentication, start a worker, or apply DDL. The Provider package documentation must describe runtime hosts
+and external activators as supported consumers while continuing to steer producer-only applications to the adopter package.
+
 `PumpResult` is required only for `Completed`; `ObservedHealthState` is present only after a successful health read.
 `ProblemCode` accepts only `ASDUR103`, `ASDUR108`, `ASDUR400`–`ASDUR405`, or new `ASDUR407`. It is required for
 `Unavailable`, `Incompatible`, `ActivationFailed`, and `PumpFailed`, and may preserve `ASDUR404`/`ASDUR405` from a
@@ -289,7 +300,18 @@ An adopter can:
   proposed region must contain no more than 25 lines, but a lower count cannot pass the rail if decisions became implicit,
   diagnostics regressed, or the behavioral measures failed.
 - The measurement tool writes deterministic JSON with `schemaVersion`, `consumerRepository`, `baselineCommit`, and ordered `regions`; every region contains `variant`, `name`, `sourceRoot` (`consumer` or `repository`), `relativePath`, `startToken`, `endToken`, `lineCount`, `limit`, and `passed`, followed by `overallPassed`. Tests cover missing/duplicate/reversed tokens, commit mismatch, invalid roots, CRLF/LF, blank lines, and deterministic ordering.
-- The template smoke test measures elapsed time on `ubuntu-latest`, after package restore and PostgreSQL preparation, from copying valid database configuration plus a per-run random Development activation token into the generated project through an authenticated call that observes one completed Work. The warm-path median of five runs must be under two minutes, and all five timings are published in the same evidence file.
+- Template evidence reports two clocks and never markets the primed clock as cold start:
+  - **Cold product path:** begin with .NET 10 and a running Docker daemon but empty NuGet and Docker caches; include template-pack
+    installation, project creation, restore, the pinned PostgreSQL image pull, disposable role/schema/epoch setup, and the
+    generated verification command. Publish all five elapsed times plus median and p95. This clock is an honest diagnostic,
+    not a release gate until two environments establish a stable budget; installing .NET or Docker is an external prerequisite
+    and is reported separately.
+  - **Primed champion path:** begin with NuGet artifacts and the pinned PostgreSQL image cached but no generated project;
+    include template installation, project creation, restore, disposable database setup, and the generated verification
+    command. Five `ubuntu-latest` runs must have a median below two minutes and a maximum below three minutes.
+  A successful run must separately prove Work accepted, Work processed to terminal completion, readiness changed from
+  compatible `NotStarted` to `Healthy`, the authenticated activation path was used, and the activation activity reached an
+  exporter. “Completed” never means only that the project built or the request was accepted.
 - The public truth table makes it impossible for package guidance or first-party samples to call `NotStarted`, `Stale`, `Draining`, `Incompatible`, or `Unavailable` ready.
 - Every first-party external-activation sample uses a host request deadline distinct from the pump discovery budget. Application preparation and cleanup, where present, own separate host-defined tokens outside the adapter.
 - One integration proof fails if expected Durable activities are not exported.
@@ -525,6 +547,9 @@ The legacy registration overloads and #783's `AddDurableWorkExit` overload deleg
 - A definition cannot silently change the facts of already accepted Work.
 - Public/internal API XML documentation explains defaults, immutability, migration, and when direct request construction remains appropriate.
 - The Work protocol, package README, diagnostics catalog, and public API baselines are updated.
+- A versioned adopter migration guide shows the existing registration/request code beside the definition/binding form,
+  explains duplicate-identity and mixed binding failures, and states that the legacy overloads are not obsolete in this rail.
+  No codemod is promised because codec, safety, idempotency, and request identity choices cannot be inferred safely.
 
 #### Dependencies and coordination
 
@@ -948,6 +973,12 @@ safe fix
 canonical docs link
 ```
 
+Every text finding ends with the exact next applicable command, such as rerunning `durable schema preflight`, supplying the
+paired worker arguments, or invoking the generated application's end-to-end verifier. JSON output carries the same next
+action and documentation URL as stable fields. A clean doctor result says “store/runtime checks passed” rather than “worker
+ready,” and links to the application-composition verifier because the doctor deliberately cannot prove registration,
+authorization, activation routing, or exporter delivery.
+
 #### Acceptance criteria
 
 - The default command is non-mutating and never applies migrations, rotates epochs, drains workers, retries Work, or changes retention.
@@ -994,15 +1025,61 @@ The generated project contains:
 - a required `ActivationAuthorization` policy that fails startup closed until a host scheme is configured;
 - an opt-in development/CI-only bearer-token scheme enabled only in `Development` when `APPSURFACE_TEMPLATE_ACTIVATION_TOKEN` is present; it compares the token in fixed time, has no default value, and is rejected in every other environment;
 - a generated caller script/test client that sends the configured bearer token;
+- a cross-platform `FirstDurableWork` integration test that uses the repository's established
+  `Testcontainers.PostgreSql` pattern, creates disposable restricted roles, explicitly applies the reviewed migrations and
+  role recipe outside application startup, generates a per-run Development token, invokes the real authorized endpoint,
+  and prints named proof checkpoints;
 - liveness, compatibility, and readiness endpoints with distinct meanings;
 - OpenTelemetry listener/provider/exporter activation;
 - one first-party lifecycle scenario test;
 - local PostgreSQL instructions and a no-secret checked-in configuration;
 - links to the Work protocol, PostgreSQL deployment guide, diagnostics catalog, native Durable/Workers/Durable Task comparison, and release guidance.
 
+The canonical primed quick start is exactly three commands in one terminal:
+
+```console
+dotnet new install ForgeTrust.AppSurface.Durable.Templates::<version>
+dotnet new appsurface-durable-worker -n FirstDurableWorker
+dotnet test FirstDurableWorker --filter FullyQualifiedName~FirstDurableWork --logger "console;verbosity=detailed"
+```
+
+With the package and PostgreSQL image caches primed, the final command must emit these bounded checkpoints before the test
+passes:
+
+```text
+[first-work] authorized activation accepted
+[first-work] Work reached terminal completion
+[first-work] readiness: NotStarted -> Healthy
+[first-work] exported appsurface.durable.runtime.activation
+```
+
+The generated app's normal startup still never applies DDL. The test fixture is an explicit disposable proof owner, and its
+output names that boundary before schema setup. If Docker is unavailable, the test fails quickly with the missing
+prerequisite, the exact retry action, and the canonical local-proof link; it never silently skips.
+
+Publish `start-here/durable-worker.md` as the canonical entry point. The root README, package chooser, all three Durable
+package READMEs, template package metadata, and CLI doctor output link to it. The page starts with the three-command proof,
+then a package-by-persona table:
+
+| Persona | Direct package(s) | First proof |
+| --- | --- | --- |
+| Producer application | `ForgeTrust.AppSurface.Durable` plus its selected provider client | Create and accept typed Work |
+| Continuously hosted PostgreSQL worker | Durable + Provider + PostgreSQL | `AddWorkerHost()` under runtime roles |
+| Externally activated PostgreSQL worker | Durable + Provider + PostgreSQL | `AddDurableExternalActivation()` and host-owned authorized route |
+| Migration operator | CLI + PostgreSQL migration assets | `durable schema script` then reviewed apply/preflight |
+| Test author | Durable.Testing; PostgreSQL only for provider conformance | Deterministic scenario or real provider proof |
+
+The page then links to, rather than repeats, the production migration/role runbook, the low-level SPI reference, diagnostics,
+and protocol specifications. It contains a “replace the sample safely” section naming every generated file that is
+application-owned, the three locations needed to define/register/request a new Work contract, and the raw
+`DurableWorkRequest`, direct pump, custom route, and custom exporter escape hatches.
+
 #### Acceptance criteria
 
 - Template installation, creation, restore, build, test, format, and local run pass in CI from a clean temporary directory.
+- Template create/restore/build/format and non-Docker tests run on Linux, macOS, and Windows. The real PostgreSQL,
+  authorization, lifecycle, and exporter proof runs on `ubuntu-latest` with the pinned image; generated verification uses
+  .NET test code rather than a Bash-only caller.
 - No generated secret, fixed production credential, anonymous activation route, automatic migration, or broad database privilege exists.
 - Production startup without an application-selected authentication scheme fails with an actionable message. The development scheme fails when its token is absent, cannot activate outside `Development`, rejects missing/wrong tokens, and CI generates a random token per run.
 - Registration tests prove the dispatcher data source is used only for payload-free discovery and the runtime data source for scoped operations; documentation links both credentials to their exact role-recipe grants.
@@ -1010,6 +1087,11 @@ The generated project contains:
 - A generated project can replace the sample Work with a new definition without editing framework plumbing in more than the documented locations.
 - The template uses only stable APIs and contains no experimental adapter reference.
 - Package/repository docs make the template the fastest start while preserving the lower-level manual path for advanced hosts.
+- The canonical start page and generated README distinguish the two timing clocks, show exact expected output, and never call
+  the primed result a zero-prerequisite cold start.
+- A template upgrade section states that generated code is application-owned and is not rewritten by a later template
+  install. Each release with a generated-shape change supplies a versioned before/after guide, package compatibility table,
+  and manual diff checklist. The rail neither auto-edits consumer projects nor deprecates legacy registration.
 - The new template pack project is present in the solution and package index; package, prerelease, stable-release, and
   packed-consumer gates install the exact produced `.nupkg`, list `appsurface-durable-worker`, create a project, and run its
   verification path in a clean temporary directory. Distribution reuses the existing NuGet publication path; no separate
@@ -1467,6 +1549,365 @@ span.
 **Phase 1 complete.** Codex: 5 concerns. Claude subagent: 5 issues. Consensus: 3/6 confirmed, 3 disagreements
 resolved by keeping the roadmap but hardening its promotion gates. Passing to Phase 2.
 
+### Phase 2 — Design review
+
+Skipped. The plan has no user-interface scope. The word “dashboard” appears only in a non-goal and competitor evidence;
+“component” and “form” refer to runtime facts and configuration, not rendered interaction. No design-review skill or UI
+outside voice ran.
+
+### Phase 2.5 — Developer-experience review
+
+#### Product and persona
+
+Primary product type: **.NET library/SDK**, with a public CLI, a PostgreSQL provider, operator documentation, and a proposed
+project template. The target is not a first-time programmer. It is the person who owns a production-shaped worker host and
+must preserve security, deployment, and failure semantics while still getting to a verified result quickly.
+
+```text
+TARGET DEVELOPER PERSONA
+========================
+Who:       A .NET backend/platform engineer integrating a PostgreSQL-backed durable worker.
+Context:   They already know DI, ASP.NET Core, PostgreSQL, CI, and OpenTelemetry. They do not know
+           AppSurface's Work, provider-safety, heartbeat, epoch, pump, or external-activation vocabulary.
+Tolerance: Five minutes to see a credible path; two minutes on a primed machine to prove one completed Work.
+Expects:   NuGet distribution, one canonical start page, typed APIs, IntelliSense, copyable commands,
+           explicit auth and migration boundaries, deterministic tests, and errors that say what to do next.
+```
+
+#### Developer perspective
+
+I open the root README and see a large package map. Durable is one of many systems, and its first link takes me to “Portable
+durable execution,” which immediately separates adopter, Provider, and PostgreSQL packages and warns that everything is
+preview. I can see that the safety model is serious, but I still do not know which packages a worker host is expected to
+reference. The local proof eventually answers that question, but the heading says “Ten-minute PostgreSQL transcript” and the
+path asks me to run Docker, create four roles, capture four passwords, generate a passfile, script and apply nine migrations,
+run the role recipe, choose an epoch, bootstrap it, and only then run `verify-local`. I am learning the entire deployment
+model before seeing one Work complete.
+
+The commands are careful and the expected checkpoints help, but one failed step often ends as an exception type plus a
+statement that secrets were not printed. That is safe, yet it leaves me searching the diagnostics catalog and several
+package READMEs to discover the recovery command. When I reach Skoolit's worker, I see why the protocol matters: seven lanes
+repeat contract identity, health interpretation, direct pump mapping, and lifecycle tests. I want the upstream package to
+remove those repeated facts without hiding auth, deployment gates, outbox work, or reconciliation. A generated, disposable
+proof that reaches terminal Work, changes readiness, and exports the activation activity would let me trust the boundary
+before I study the production runbook.
+
+#### Competitive benchmark and target
+
+No competitor publishes a trustworthy stopwatch for this exact machine/database combination, so command/stage counts are
+reported instead of fabricated timings.
+
+| Tool | Documented first-proof path | Notable DX choice | Source |
+| --- | --- | --- | --- |
+| Microsoft Durable Task SDK | Clone sample, run one Docker emulator, build, run worker, run client; no local env values | One default emulator endpoint and dashboard; generated task registration is available | [portable SDK quickstart](https://learn.microsoft.com/en-us/azure/azure-functions/durable/durable-task-scheduler/quickstart-portable-durable-task-sdks) |
+| Hangfire for ASP.NET Core | Add packages, create/configure SQL Server database, register storage/server, enqueue, run | Very short enqueue API and an immediate dashboard; startup creates storage objects | [ASP.NET Core guide](https://docs.hangfire.io/en/latest/getting-started/aspnet-core-applications.html) |
+| AppSurface Durable today | Existing checkout and tools, prerequisite check, Docker, four roles, passfile, migrations, role recipe, epoch bootstrap, verify | Makes ownership and least privilege visible; the repository itself calls this a ten-minute transcript | `examples/durable-postgresql/README.md` |
+| This rail | Install template, create project, run generated real-provider proof | Keeps explicit production boundaries but moves the first proof into one generated test | Case 9 |
+
+The target is **Champion for the primed PostgreSQL/direct-activation persona**, not a universal zero-prerequisite claim.
+The cold product path is measured separately and remains visible. A second independent adopter, not a faster local clock,
+is still required before the adapter or other convenience surfaces graduate.
+
+#### Magical moment
+
+The moment is not “the app builds.” It is one generated test printing, in order, that the authorized activation was
+accepted, the Work reached terminal completion, health moved from compatible `NotStarted` to `Healthy`, and the
+`appsurface.durable.runtime.activation` activity reached an exporter. The lowest-effort honest vehicle is the three-command
+template path in Case 9. A hosted browser sandbox would have to hide database roles, migration ownership, and auth, while a
+video would not prove the developer's machine or packages; neither is a better first contract.
+
+#### What already exists
+
+| Need | Existing asset to reuse |
+| --- | --- |
+| Disposable real PostgreSQL proof | `Testcontainers.PostgreSql` fixtures in the provider, CLI, and Durable example tests |
+| Secret-safe schema operations | Existing `durable schema status|script|preflight|apply` command family and `--connection-env` pattern |
+| Actionable diagnostic vocabulary | `DurableProblemCodes` plus `troubleshooting/durable-diagnostics.md` |
+| Cross-linked package discovery | Root README, generated package chooser, package READMEs, and release hub |
+| Safe upgrade operations | Forward-only migrations, mixed-version tests, drain/role/preflight rollout guidance |
+| Qualitative feedback | `CONTRIBUTING.md`, security reporting, and `.github/ISSUE_TEMPLATE/docs_dx_feedback.yml` |
+| Consumer proof | Seven Skoolit worker lanes, endpoint tests, and operator certification/runbooks |
+
+The rail extends these assets. It does not introduce a second migration runner, a custom test-container abstraction, a
+second diagnostic taxonomy, a second release channel, or a new support venue.
+
+#### DX NOT in scope
+
+- A hosted playground or free managed PostgreSQL service. It would hide the ownership model and create new infrastructure.
+- A no-Docker real-provider proof. PostgreSQL remains authoritative; in-memory behavior is not equivalent conformance.
+- A new Provider-host package. The first correction is an honest audience map for the existing package.
+- A template updater or codemod. Generated code is application-owned, and identity/safety choices are not inferable.
+- A dashboard or operator UI. CLI diagnostics and exported telemetry cover this rail.
+- A new community chat or plugin marketplace. Existing issue, contribution, and security routes are enough for preview.
+- Stable publication of the ASP.NET adapter before a second distinct adopter and complete outcome matrix.
+
+#### Developer journey
+
+| Stage | Developer does | Current friction | Plan resolution | Status |
+| ---: | --- | --- | --- | --- |
+| 1. Discover | Finds Durable from the root package map | Durable's first page starts with package internals and protocol boundaries | Root/package chooser link first to `start-here/durable-worker.md` | Fixed in plan |
+| 2. Evaluate | Compares native Durable, Workers projection, and Durable Task | Comparison is spread across docs and assumes vocabulary | One decision table on the canonical start page, with links to details | Fixed in plan |
+| 3. Install | Chooses Durable, Provider, PostgreSQL, CLI, and Testing packages | Provider says ordinary apps should not reference it even though external hosts need it | Package-by-persona matrix; Provider explicitly supports runtime hosts/activators | Fixed in plan |
+| 4. Configure | Prepares database roles, schema, epoch, auth, and exporter | Current path requires full manual production-shaped setup before value | Generated disposable Testcontainers proof owns local setup; normal startup stays passive | Fixed in plan |
+| 5. First Work | Wants visible terminal completion | Current tutorial reaches Work only after a ten-minute setup transcript | Exact three commands and four named proof checkpoints | Fixed in plan |
+| 6. Integrate | Replaces the sample with domain Work and host policy | Seven Skoolit lanes repeat contract facts and lifecycle mechanics | Typed definition, one registration extension, three documented edit locations | Fixed in plan |
+| 7. Debug/operate | Distinguishes liveness, compatibility, readiness, drain, and unavailable store | Current safe failures can report only exception type; health meaning is reconstructed | Canonical predicates, diagnostic descriptors, doctor next actions, generated verifier | Fixed in plan |
+| 8. Upgrade | Moves from raw registration/requests and applies schema 0010 | Operational runbook exists, adopter API migration does not | Versioned before/after guide, compatibility matrix, roll-forward steps, no surprise deprecation | Fixed in plan |
+| 9. Extend/migrate | Uses custom route, pump, auth, exporter, or raw request | Template could look like a framework-owned cage | “Replace the sample safely” map plus explicit low-level escape hatches | Fixed in plan |
+
+#### First-time confusion report
+
+```text
+FIRST-TIME DEVELOPER REPORT
+============================
+Persona: .NET backend/platform engineer
+Attempting: run the existing Durable PostgreSQL proof
+
+T+0:00  I open README.md, follow Durable, and encounter three package audiences before an install command.
+T+1:00  The local proof requires Docker, a free port, a checkout, and four roles. I understand why, but I
+        still have not seen a Work contract execute.
+T+4:00  I am entering four passwords and constructing a passfile. The transcript is secure, but copying it
+        correctly is now the dominant task.
+T+8:00  I have applied migrations and the role recipe and am choosing a stable epoch. One failure prints an
+        exception type, so I leave the flow to search for the matching diagnostic.
+T+12:00 I finally run verify-local and see several surfaces pass. I cannot yet tell which minimum pieces my
+        external worker needs or whether the Provider package is a supported application dependency.
+
+PLANNED RESULT
+T+0:00  I run template install and create commands from the canonical page.
+T+0:30  One generated test starts an explicit disposable proof and prints each safety checkpoint.
+T+<2:00 I have a terminal Work completion, a readiness transition, and an exported activity; the README then
+        shows exactly which three locations to replace with my Work and which policies remain mine.
+```
+
+All confusion points are accepted for correction. The production manual path remains because it teaches the real role and
+migration boundaries; it moves behind the generated first proof instead of being deleted.
+
+#### DX dual voices
+
+**CODEX SAYS (DX — developer experience challenge)**
+
+[Running under Codex: the nested Codex CLI pass was skipped by the review skill's anti-recursion guard; this task's own
+repository-grounded analysis is the Codex voice.]
+
+- The current “under two minutes” metric starts after the difficult work. Champion is defensible only with cold and primed
+  clocks and a precise terminal-success definition.
+- A generated real-provider test is the smallest honest magical moment. It can automate disposable local setup without
+  changing the invariant that normal application startup never applies DDL.
+- The Provider package needs a host-consumer story. Adding another package before a second adopter would increase choice
+  cost; clarify the existing package audience and offer one explicit registration extension.
+- Keep direct mapping as the preview template path. It exposes auth, request budget, pump budget, and response policy while
+  the adapter is still unproven.
+- Store/runtime doctor and application verifier are different products. Chaining them is clearer than making the CLI load or
+  execute a consumer assembly.
+
+**CLAUDE SUBAGENT (DX — independent review)**
+
+- Found that the primed metric excludes package installation, database preparation, and the generated application proof.
+- Found a contradiction between Provider's current “SPI, not ordinary applications” positioning and the proposed external
+  host's required dependency.
+- Required an adopter migration guide, compatibility matrix, support horizon, and explicit raw/direct escape hatches.
+- Judged the typed definition better but still concept-heavy; asked for one novice path and an explicitly advanced layer.
+- Kept doctor narrow but required it to point to a generated application-composition verifier.
+- Called “transparent host ownership versus minimum endpoint code” a human taste decision and recommended narrowing the
+  champion claim to the PostgreSQL/direct-activation persona until real evidence exists.
+
+| Dimension | Claude | Codex | Consensus |
+| --- | --- | --- | --- |
+| Getting started under five minutes | No, current; plausible for primed generated path | No, current; yes only after two-clock proof | CONFIRMED |
+| API/CLI naming guessable | Partly; too many early concepts | Mostly after one novice path and package matrix | CONFIRMED concern |
+| Errors actionable | No; safe but fragmented | No; descriptors and exact next action required | CONFIRMED |
+| Docs findable and complete | No canonical worker start | No canonical worker start | CONFIRMED |
+| Upgrade path safe | Operations exist; adopter migration is missing | Same | CONFIRMED |
+| Dev environment friction-free | No; manual database setup dominates | Generated real-provider test can close the primed path | CONFIRMED |
+
+The voices agree on 6/6 dimensions. One taste choice remains: whether transparent direct mapping or the shorter experimental
+adapter should be the public face. The recommendation is **transparent direct mapping for this preview** because it keeps the
+security and budget decisions readable; adapter promotion remains measured and reversible.
+
+#### Pass 1 — Getting started: 2/10 → 9/10
+
+Today, the only real PostgreSQL path is explicitly a ten-minute transcript after the developer already has the repository,
+.NET, Docker, and a free port. It then requires four roles, passwords, a passfile, migrations, role reconciliation, an epoch,
+and a separate verification command. That is honest production teaching, but it is not a first-success path.
+
+A 10 would install and prove real Work from a blank machine in under two minutes with no prerequisite. PostgreSQL, Docker,
+and package restore make that universal claim dishonest. The plan reaches 9 by defining the three-command primed path,
+automating disposable least-privilege setup in a generated test, publishing expected checkpoints, and separately reporting
+the cold clock. The remaining point is external prerequisite time.
+
+#### Pass 2 — API, CLI, and SDK: 6/10 → 9/10
+
+The typed definition removes repeated name, version, codec, provider-safety, and retry facts while keeping scope, command,
+idempotency, payload, override, and due time explicit per request. The novice path now teaches only `Define`,
+`ExecutedBy`, `AddDurableWork`, and `CreateRequest`; reconciler, exit-aware, raw request, direct pump, and custom mapping
+remain linked advanced paths. `AddDurableExternalActivation()` gives the host one guessable opt-in without claiming route or
+authentication ownership.
+
+A 10 would prove that one shorter adapter works unchanged in multiple independent adopters. The plan deliberately stops at
+9: direct mapping is more verbose but exposes every high-cost decision, and the adapter remains experimental until its
+graduation matrix passes.
+
+#### Pass 3 — Errors and debugging: 5/10 → 10/10
+
+Three high-frequency paths were traced. The target format puts problem, cause, fix, and link before bounded technical facts;
+neither text nor JSON emits credentials, payloads, arbitrary exception text, or trace context.
+
+| Path | Current developer sees | Planned developer sees |
+| --- | --- | --- |
+| Database unavailable during health/proof | `Command failed with NpgsqlException` or state misclassified as incompatible | `ASDUR103`; “store could not be observed”; likely connectivity/permission/timeout cause; exact preflight/doctor retry; diagnostics link |
+| Schema or epoch mismatch | Incompatible state plus a code, with recovery spread across package docs | Exact `ASDUR400`–`ASDUR403`/`ASDUR108`, observed vs required safe facts, drain/apply/role/preflight sequence, canonical migration anchor |
+| Missing/wrong template activation auth | Startup failure or 401/403 without a shared first-success chain | Problem first; Development token or production scheme cause; exact configuration action; generated verifier command and auth docs link |
+
+The old local example's top-level safe catch is in this rail's documentation/example blast radius: it must resolve known
+Durable/provider failures through the shared descriptor catalog before falling back to a bounded exception type. No general
+`--verbose` switch is added because dumping provider exceptions would weaken the secret-safe contract; deterministic JSON
+and documentation anchors are the supported debug surface.
+
+#### Pass 4 — Documentation and learning: 5/10 → 9/10
+
+Current information is complete but organized by internal package and protocol audience. The canonical start page changes
+the order to value first: three-command proof, package-by-persona choice, replace-the-sample map, then production runbook and
+protocol references. Every top-level Durable/package/CLI/template entry points to that page, and executable snippets come
+from the packed generated project so copied syntax cannot drift.
+
+A 10 would include a no-install interactive sandbox. That would hide or fake the PostgreSQL ownership model and is not a
+better fit for this product. The generated local proof earns 9 while preserving one source of truth for advanced material.
+
+#### Pass 5 — Upgrade and migration: 4/10 → 9/10
+
+The repository already has forward-only schema guidance, drain/re-enable sequencing, mixed-version tests, package release
+gates, and retained legacy overloads. It lacks a direct adopter path from repeated raw registration/request code to the new
+definition and does not explain what a later template install does to an existing generated project.
+
+The plan adds before/after code, binding-conflict rules, a package/schema compatibility matrix, roll-forward/rollback
+boundaries, template ownership, and a manual diff checklist. It explicitly does not obsolete legacy APIs or promise a
+codemod in this rail because safety, codec, and identity choices cannot be inferred. A 10 waits for a real adopter migration
+rehearsal and evidence that any safe automation is possible.
+
+#### Pass 6 — Developer environment and tooling: 5/10 → 9/10
+
+The planned public API is typed, documented, DI-native, deterministic under tests, and compatible with the existing
+Testcontainers pattern. The generated proof uses .NET test code rather than a platform-specific script, fails quickly when
+Docker is absent, and separates compile/unit checks from the real PostgreSQL proof. Template create/restore/build/format and
+non-Docker tests run on Linux, macOS, and Windows; the pinned real-provider proof runs on Ubuntu.
+
+A 10 would provide equally cheap real-provider proof on every supported architecture and Docker environment. The current
+rail avoids claiming that breadth before it has evidence.
+
+#### Pass 7 — Community and ecosystem: 6/10 → 8/10
+
+The public repository already has CONTRIBUTING guidance, security reporting, a documentation/DX issue form, executable
+examples, package release guidance, and an explicit license. The canonical Durable start page will link those routes and
+state the public-preview support boundary, so a developer knows where to ask, what may change, and which information must
+not enter an issue.
+
+No new chat community, plugin marketplace, or provider ecosystem belongs in this adoption rail. A 10 requires observed
+external contribution/support volume and multiple providers, neither of which a plan can manufacture.
+
+#### Pass 8 — DX measurement and feedback: 4/10 → 10/10
+
+The original plan measured line count and one warm interval, which could reward hidden decisions and exclude the hardest
+setup work. The amended evidence records cold and primed timing distributions, terminal Work proof, readiness transition,
+exporter delivery, explicit host-owned decisions, duplicated facts, failure reproduction, exact consumer commit, and
+deterministic source regions. The docs/DX issue form supplies qualitative feedback, and a later `/devex-review` can rerun the
+same generated artifact rather than scoring prose.
+
+Line count remains a readability guardrail only. Champion status requires the executable primed gate; stable convenience
+promotion still requires independent adoption and upgrade evidence.
+
+#### DX scorecard
+
+| Dimension | Before | Planned | What closes the gap |
+| --- | ---: | ---: | --- |
+| Getting started | 2 | 9 | Three commands, real generated proof, two honest clocks |
+| API/CLI/SDK | 6 | 9 | One novice path, explicit registration, package persona map |
+| Errors/debugging | 5 | 10 | Shared descriptors and exact next action |
+| Documentation/learning | 5 | 9 | One canonical value-first start page |
+| Upgrade/migration | 4 | 9 | Adopter before/after guide, compatibility and template policy |
+| Dev environment/tooling | 5 | 9 | Cross-platform generated code, Ubuntu real-provider proof |
+| Community/ecosystem | 6 | 8 | Existing contribution/support routes made findable |
+| Measurement/feedback | 4 | 10 | Cold/primed timing plus behavioral and qualitative evidence |
+| **Overall** | **4.6/10** | **9.1/10** | Champion for the named primed persona, not a universal cold-start claim |
+
+| DX principle | Coverage after amendment |
+| --- | --- |
+| Zero friction at T0 | Covered for the defined primed path; cold prerequisites remain explicit |
+| Incremental steps | Generated proof precedes production operations and protocol reference |
+| Learn by doing | Real provider, auth, lifecycle, and exporter execute in the first proof |
+| Opinionated defaults + escape hatches | Stable direct path first; raw request/pump/route/exporter remain documented |
+| Fight uncertainty | Shared descriptors and exact next commands across CLI, example, and template |
+| Code in context | Generated host includes auth, health, budgets, tests, and telemetry |
+| Magical moment | Four named checkpoints in one terminal test |
+| Speed | Two reproducible clocks prevent a warm-path marketing shortcut |
+
+#### TTHW assessment
+
+- **Current:** the repository documents a ten-minute PostgreSQL transcript, but that begins after tool/checkout
+  prerequisites and does not include discovering packages, adapting a host, or measuring terminal Work. End-to-end cold
+  TTHW is therefore greater than ten minutes and currently unbounded.
+- **Planned cold product path:** measured from empty NuGet/Docker caches with .NET and Docker installed. Publish five runs,
+  median, and p95; do not set a release threshold until two environments provide stable evidence.
+- **Planned primed path:** from cached packages/image and no generated project through the three commands to all four proof
+  checkpoints. Median of five below two minutes; maximum below three minutes.
+
+#### DX implementation checklist
+
+- [ ] Add and cross-link `start-here/durable-worker.md`; lead with the generated proof and package-by-persona map.
+- [ ] Add `AddDurableExternalActivation()` and document Provider as a supported dependency for runtime hosts/activators.
+- [ ] Generate `FirstDurableWork` with explicit Testcontainers setup, real authorization, terminal Work, health transition,
+  and exporter assertions.
+- [ ] Publish cold and primed timing evidence with exact start/end events; keep line count secondary.
+- [ ] Route known example, health, admission, doctor, and template failures through one descriptor catalog.
+- [ ] Make doctor output name its proof boundary and next command; make the generated verifier authoritative for app
+  composition.
+- [ ] Publish API and template migration guides, compatibility matrix, raw/direct escape hatches, and no-obsoletion policy.
+- [ ] Run generated compile/unit checks on Linux, macOS, and Windows; run the pinned real-provider proof on Ubuntu.
+- [ ] Keep direct mapping in the initial template; record the adapter public-face choice as a taste decision until its
+  second-adopter graduation gate passes.
+
+#### Implementation Tasks — DX synthesis
+
+- [ ] **DX-T1 (P1, human: ~1d / CC: ~25min)** — Documentation — Publish the canonical Durable worker start and package map.
+  - Surfaced by: Discover, Evaluate, Install, and Documentation passes.
+  - Files: `README.md`, `packages/README.md`, `start-here/durable-worker.md`, the three Durable package READMEs, CLI README.
+  - Verify: every named entry point reaches the three-command proof in one link and all snippets compile from the packed template.
+- [ ] **DX-T2 (P1, human: ~2d / CC: ~35min)** — Template proof — Generate and time one authenticated terminal Work.
+  - Surfaced by: Getting Started, Magical Moment, Dev Environment, and Measurement passes.
+  - Files: template pack/manifest, generated test project, package index/workflows, adoption evidence JSON/tool.
+  - Verify: five primed runs meet median <2 minutes and max <3; cold runs publish median/p95; every run proves all four checkpoints.
+- [ ] **DX-T3 (P1, human: ~1d / CC: ~25min)** — Diagnostics — Connect runtime doctor to the application verifier.
+  - Surfaced by: Error/Debug and Journey Debug/Operate.
+  - Files: CLI doctor, diagnostic descriptor catalog/docs, Durable PostgreSQL example catch path, generated template errors.
+  - Verify: snapshot tests prove problem/cause/fix/docs/next-command in text and JSON with no secret or arbitrary exception text.
+- [ ] **DX-T4 (P2, human: ~1d / CC: ~20min)** — Migration — Make additive API and generated-code ownership boring.
+  - Surfaced by: Upgrade/Migration and Extend/Migrate.
+  - Files: Durable package migration guide, release guidance, template README/version guide, packed legacy/new consumer fixtures.
+  - Verify: before/after examples compile; mixed binding fails deterministically; old overload remains supported; schema rollout is rehearsed.
+- [ ] **DX-T5 (P2, human: ~1d / CC: ~20min)** — Portability — Prove the generated project without shell lock-in.
+  - Surfaced by: Dev Environment and Tooling.
+  - Files: template tests and package workflows.
+  - Verify: create/restore/build/format/non-Docker tests pass on Linux, macOS, and Windows; pinned PostgreSQL proof passes on Ubuntu.
+
+#### DX completion summary
+
+| Review area | Result |
+| --- | --- |
+| Mode | DX POLISH |
+| Persona | .NET backend/platform engineer operating a PostgreSQL durable worker |
+| Product | Library/SDK + Provider + CLI + docs + project template |
+| Journey | 9 stages traced; 9 plan corrections accepted |
+| TTHW | Current >10 minutes/unbounded; primed target median <2 minutes, max <3 |
+| Magical moment | Generated authenticated terminal Work + readiness transition + exported activity |
+| Error paths | 3 traced; descriptor and next-action contract added |
+| Scores | 4.6/10 current → 9.1/10 planned |
+| Dual voices | 6/6 dimensions confirmed; 1 taste choice queued |
+| Unresolved critical DX gaps | 0 after plan corrections |
+
+**Phase 2.5 complete.** DX overall: 4.6/10 → 9.1/10. TTHW: >10 minutes/unbounded → primed median
+under 2 minutes. Codex: 5 concerns. Claude subagent: 6 issues. Consensus: 6/6 confirmed, with one taste choice surfaced at
+the final gate. Passing to Phase 3, where engineering review examines the fully amended plan.
+
 <!-- AUTONOMOUS DECISION LOG -->
 ## Decision Audit Trail
 
@@ -1480,3 +1921,10 @@ resolved by keeping the roadmap but hardening its promotion gates. Passing to Ph
 | 6 | CEO | Prove the activation path with an activation-service activity | Observability | P1 Completeness | A separate Flow command cannot prove that external activation is observable | Keep the unrelated Flow activity as the rail's exporter proof |
 | 7 | CEO | Make Case 9 own template packaging and isolated installation | Distribution | P1 Completeness | The repository has no existing template package; distribution must be part of the feature | Assume template packaging already exists |
 | 8 | CEO | Keep heartbeat retention independent and evidence-gate its public defaults | Scope | P2 Boil lakes | Storage is genuinely unbounded, but cleanup policy must be proven separately from adoption | Drop retention as unrelated; let it block Track B |
+| 9 | DX | Report cold and primed TTHW separately; gate only the defined primed clock | Measurement | P5 Explicit over clever | A warm stopwatch cannot support a universal cold-start claim | Keep the after-setup timer and call it champion |
+| 10 | DX | Make a generated real-provider integration test the first-success vehicle | Getting started | P1 Completeness | It proves auth, terminal Work, readiness, and exporter delivery without changing normal startup | Use build success, a video, or the manual production transcript as hello world |
+| 11 | DX | Clarify Provider as a supported runtime-host/activator dependency and publish a package persona map | Information architecture | P4 DRY | Reuses the existing package without forcing hosts to contradict its README or creating another package | Add a new host package before independent adoption |
+| 12 | DX | Keep store/runtime doctor narrow and chain it to the generated app verifier | Tool boundary | P5 Explicit over clever | A CLI cannot prove consumer composition without loading/executing application code | Expand doctor into an application assembly scanner |
+| 13 | DX | Add adopter API, schema, and template migration guidance without obsoleting legacy APIs | Upgrade | P1 Completeness | Existing operational guidance does not tell a caller how to move to definitions or own generated code | Treat additive preview APIs as self-explanatory |
+| 14 | DX | Use transparent direct mapping as the initial template's public face | Taste | P5 Explicit over clever | Auth, route, and budget ownership remain readable until the adapter passes a second-adopter gate | Bless the shorter experimental adapter immediately |
+| 15 | DX | Require cross-platform generated code but keep the pinned real-provider CI proof on Ubuntu | Tooling | P3 Pragmatic | Removes Bash-only adoption while using the repository's proven Docker lane | Claim equal provider proof on unverified environments |
