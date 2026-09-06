@@ -204,13 +204,47 @@ public interface IDurableExternalActivationService
 }
 ```
 
-The service depends only on `IDurableRuntimeHealth`, `IDurableRuntimePumpAdmission`, `TimeProvider`, the canonical AppSurface
-`ActivitySource`, and logging. It creates a separate budget token, links it to the caller token, and records an atomic
-`pumpStarted` phase immediately before calling the admission-aware pump. Cancellation classification is deterministic:
-caller cancellation wins if both sources are canceled before `pumpStarted`; otherwise budget cancellation before that point
-is `RequestBudgetExceeded`; after that point either or both sources produce `PumpCanceled`; an
-`OperationCanceledException` with neither source canceled is `ActivationFailed` before `pumpStarted` and
-`PumpFailed` after it, both with `ASDUR407`.
+The service's object-level dependency surface is limited to `IDurableRuntimeHealth`, `IDurableRuntimePumpAdmission`,
+`TimeProvider`, the canonical AppSurface `ActivitySource`, and logging. This does not create a new lightweight package
+boundary: `ForgeTrust.AppSurface.Durable.Provider` already references `ForgeTrust.AppSurface.Durable`, which in turn
+references Flow, Core, and Workers. Keep that intentional package graph for this rail, version the public-preview Durable
+package family together, and add an architecture test proving the activation contracts expose no PostgreSQL, ASP.NET Core,
+or application types. Split a contracts-only package only after an independent activator proves that the transitive graph is
+a real adoption blocker.
+
+The request-budget clock starts at `ActivateAsync` entry and the linked caller/budget token is passed to both the health read
+and the admission-aware pump. The service records an atomic `pumpInvocationStarted` phase immediately before invoking
+`IDurableRuntimePumpAdmission`; the name deliberately means invocation, not that provider admission or a durable claim
+succeeded. Cancellation classification is deterministic: caller cancellation wins if both sources are canceled before
+`pumpInvocationStarted`; otherwise budget cancellation before that point is `RequestBudgetExceeded`; after that point either
+or both sources produce `PumpCanceled`. An `OperationCanceledException` with neither source canceled is `ActivationFailed`
+before `pumpInvocationStarted` and `PumpFailed` after it, both with `ASDUR407`.
+
+The PostgreSQL implementation uses one internal pass state machine for both public pump entry points:
+
+```text
+SlotPending
+   │ owns process-local slot
+   ▼
+RuntimeAdmitted
+   │ schema/epoch valid + TryBeginPass succeeds
+   ▼
+ProviderPassBegun
+   │ RunPassAsync returns
+   ▼
+ProviderPassCompleted
+   │ bounded non-caller-cancelable heartbeat bookkeeping
+   ▼
+Completed
+```
+
+`RunOnceAsync` and `TryRunOnceAsync` call that core once; neither preflights and then re-enters the same gate. The legacy
+method preserves its overlap exception and other empty-result refusals, while the admission-aware method maps those exact
+states to `Refused`. Once `RunPassAsync` returns, caller cancellation cannot rewrite completed provider work as canceled:
+successful-sweep bookkeeping uses a non-caller-cancelable token while retaining the provider command timeout. A real
+bookkeeping failure remains a pump failure, preserves the original exception, and attempts failure cleanup without masking
+it. This is an intentional correction to the legacy post-pass cancellation race and requires release notes plus a regression
+test; all other legacy outcomes remain unchanged.
 
 Registration is explicit and single-purpose:
 
@@ -239,12 +273,14 @@ stale health observation on another outcome. Constructor validation rejects ever
 | Pump attempt `Unavailable` | `PumpFailed` + `ASDUR103` |
 | Pump attempt `Incompatible` after the health precheck race | `PumpFailed` + corresponding `ASDUR108` or `ASDUR400`–`ASDUR403` |
 | Caller/budget cancellation | Apply the cancellation-precedence rules above |
-| Unexpected non-fatal exception before `pumpStarted` | Log through the host logger; return `ActivationFailed` + `ASDUR407` |
-| Unexpected non-fatal exception after `pumpStarted` | Log through the host logger; return `PumpFailed` + `ASDUR407` |
+| Unexpected non-fatal exception before `pumpInvocationStarted` | Log through the host logger; return `ActivationFailed` + `ASDUR407` |
+| Unexpected non-fatal exception after `pumpInvocationStarted` | Log through the host logger; return `PumpFailed` + `ASDUR407` |
 
 `ASDUR106` and `ASDUR109` are item-level durable outcomes, not activation-service exceptions. They remain in authoritative Work state and contribute to the unchanged aggregate pump `Failed` count. The service must not select one item code to represent a pass.
 
-The bounded catch filter excludes `OperationCanceledException`, `StackOverflowException`, and `OutOfMemoryException`; cancellation follows the phase rules and fatal process failures are not relabeled as an HTTP-capable result.
+The bounded catch filter excludes `OperationCanceledException`, `StackOverflowException`, `OutOfMemoryException`, and
+`AccessViolationException`; cancellation follows the phase rules and fatal process failures are not relabeled as an
+HTTP-capable result.
 
 ## Copy-Ready Case Drafts
 
@@ -397,13 +433,30 @@ public interface IDurableRuntimePumpAdmission
 - translates `DurableRuntimeSchemaException` to `Incompatible` with the existing schema/epoch code;
 - lets caller cancellation and unexpected programming failures propagate.
 
-One internal PostgreSQL failure classifier is shared by health observation and admission-aware pump translation. It owns an
-exhaustive table for caller cancellation, provider/command timeout, connection loss, permission/provider failures,
-schema/epoch incompatibility, malformed or contradictory provider results, and unexpected programming failures. Only
-observed schema/epoch mismatches become `Incompatible`; non-caller-canceled provider failures that prevent an observation
-become `Unavailable`; cancellation and unexpected programming/data-contract failures propagate. The implementation shares
-the existing pump core but does not change `RunOnceAsync` behavior. External-activation helpers require
-`IDurableRuntimePumpAdmission`; existing hosted and direct-pump callers remain source, binary, and behavior compatible.
+One internal PostgreSQL failure classifier is shared by health observation and admission-aware pump translation. It is an
+allowlist with a propagate-by-default arm:
+
+| Evidence | Classification |
+| --- | --- |
+| `OperationCanceledException` and the caller token is canceled | Propagate caller cancellation |
+| Provider command timeout, SQLSTATE `57014` caused by that timeout, Npgsql transient connection failure, SQLSTATE class `08`, `53300`, `57P01`, `57P02`, or `57P03` | `Unavailable` + `ASDUR103` |
+| SQLSTATE `42501` while reading runtime health or admission state | `Unavailable` + `ASDUR103`; diagnostics identify permission configuration without exposing SQL |
+| `DurableRuntimeSchemaException` or an observed schema/epoch status | `Incompatible` + the existing specific code |
+| Undefined relation/function, malformed row shape, invalid enum/value, contradictory result, unrelated `OperationCanceledException`, or any unclassified exception | Propagate; this is a package/data-contract defect, not an outage |
+
+Tests pin every row and the default arm so a future broad `catch (NpgsqlException)` cannot silently turn malformed schema or
+programming failures into an outage. Only observed schema/epoch mismatches become `Incompatible`; provider failures that
+prevent an observation become `Unavailable`.
+
+Health is explicitly a bounded best-effort observation, not a serializable transaction over schema and worker state. After
+schema validation, worker heartbeat and due-dispatch facts are read through one runtime connection and one SQL statement,
+using one captured database observation time and one MVCC statement snapshot. A partial read cannot produce a mixed
+snapshot; it is `Unavailable` when the failure classifier recognizes an observation failure and otherwise propagates. A
+schema change between precheck and pump remains safe because provider admission validates schema and epoch again.
+
+The implementation shares the existing pump core. Existing hosted and direct-pump callers remain source and binary
+compatible; behavior compatibility has the single documented post-pass cancellation correction above.
+External-activation helpers require `IDurableRuntimePumpAdmission`.
 
 Add a normative truth table to the Provider and PostgreSQL package documentation:
 
@@ -425,11 +478,13 @@ Add a normative truth table to the Provider and PostgreSQL package documentation
 - The shared PostgreSQL failure-classification matrix covers caller cancellation, deadline cancellation, connection loss,
   permission/provider errors, schema exceptions, malformed query results, and unexpected programming failures through
   both health and admission-aware pump entry points; no downstream host maintains a second exception classifier.
+- Worker and due-dispatch facts come from one connection, one SQL statement, one database observation time, and one MVCC
+  statement snapshot. Tests force a failure in each component and prove no partially assembled snapshot escapes.
 - Provider and PostgreSQL READMEs distinguish compatibility/startup, readiness, and host liveness with copyable examples.
 - The PostgreSQL example and tests stop hand-writing readiness expressions.
 - A scale-to-zero test proves `NotStarted` may enable and attempt activation before it is ready; a stale-worker test proves the precheck permits the provider's guarded takeover; a drain test proves no new pump attempt is made.
 - Existing snapshot constructor behavior remains source compatible; enum and JSON consumers receive release notes for the additive `Unavailable` value.
-- Existing `IDurableRuntimePump`, pump-result construction, process-local overlap exception, and closed-admission empty-result behavior remain unchanged. The new interface returns the exact four-kind attempt matrix for process-local overlap, closed runtime admission, drain/takeover races, schema/epoch races, and transient store failures.
+- Existing `IDurableRuntimePump`, pump-result construction, process-local overlap exception, and closed-admission empty-result behavior remain unchanged except for the documented post-pass cancellation correction. The new interface returns the exact four-kind attempt matrix for process-local overlap, closed runtime admission, drain/takeover races, schema/epoch races, and transient store failures.
 - No HTTP endpoint, route name, authorization rule, restart policy, or orchestrator-specific type is added.
 
 #### Dependencies and coordination
@@ -532,6 +587,11 @@ The legacy registration overloads and #783's `AddDurableWorkExit` overload deleg
 - `CreateRequest` encodes the typed payload and copies the definition's exact name, version, provider safety, and default retry policy.
 - An explicit retry override is visible at the request call site and remains snapshotted at acceptance.
 - Definitions are immutable, thread-safe, validated at construction, and safe to reuse as static values.
+- Construction validates `workCodec.PayloadType == typeof(TWork)` and `resultCodec.PayloadType == typeof(TResult)`, plus
+  each codec's independently valid contract name, contract version, classification, and retention-policy identifier.
+  Work identity and payload-codec identity are deliberately different namespaces and are not required to be equal. The
+  definition snapshots both codec identities once; bindings, registrations, and registry contributions consume that closed
+  snapshot rather than accepting repeated identity or policy arguments.
 - No assembly scan, reflection, global static registry, expression-tree method identity, or implicit runtime-type serializer is introduced.
 - Existing `AddDurableWork` and `DurableWorkRequest` APIs remain available during the public-preview migration window.
 - The bindings support today's executor/reconciler contracts and #783's final `IDurableWorkExitExecutor<TWork, TResult>` contract without creating a parallel definition type.
@@ -540,7 +600,10 @@ The legacy registration overloads and #783's `AddDurableWorkExit` overload deleg
 #### Acceptance criteria
 
 - Tests prove exact name/version/codec/provider-safety propagation from definition to registration and request.
-- Tests prove codec failure, invalid identity, duplicate registration, mismatched binding, explicit retry override, due time, and concurrent request creation.
+- Tests prove codec failure, invalid Work identity, wrong generic payload type, invalid codec name/version/classification/
+  retention identity, duplicate registration, mismatched binding, explicit retry override, due time, and concurrent request
+  creation. Work and result codecs with different valid contract identities remain supported and are both propagated
+  exactly.
 - Lifetime tests prove singleton definition/codec/registry/registration and transient executor/reconciler behavior.
 - Compile-time negative fixtures prove invalid executor/reconciler constraints do not bind, while runtime validation covers safety/reconciler combinations that C# constraints cannot express.
 - Compile-only packed-consumer tests prove the intended terse syntax and unchanged legacy syntax.
@@ -624,9 +687,22 @@ Add provider-owned, opportunistic heartbeat maintenance:
 - default maintenance cadence: 24 hours per process;
 - default delete batch: 500 rows;
 - retention must be from 24 hours through 3,650 days and longer than the configured stale threshold (currently bounded to one hour); provider validation must reject an unsafe relationship;
-- never delete the current worker instance, a row with a heartbeat at or after the cutoff, or a row updated by heartbeat renewal/takeover after selection;
+- never select the caller-declared current worker instance, a row with a heartbeat at or after the cutoff, or a row whose
+  heartbeat renewal/takeover already owns the row lock;
 - acquire a non-blocking provider advisory lock so only one process performs a batch at a time;
 - expose low-cardinality attempted/deleted/failure telemetry without worker identifiers.
+
+The physical model stays one row per `worker_id`; takeover overwrites the row's `worker_instance_id`. This case bounds stale
+worker identities, not a history of worker generations. Process-plus-GUID deployments create many distinct worker IDs and
+therefore exercise retention, while repeated generations of one stable worker ID exercise overwrite/takeover races.
+
+The current-worker arguments are a correctness guard against accidental self-pruning, not an authenticated security
+boundary. Migration 0005 already documents and enforces that the isolated runtime credential is trusted for the entire
+unscoped heartbeat table through `USING (true)` and `WITH CHECK (true)`. Granting this function lets that same trusted
+principal delete only old rows in bounded batches. A compromised runtime credential can already forge heartbeat metadata;
+it can now also prune all eligible stale rows through repeated valid calls. Document that blast radius explicitly, test
+arbitrary exclusion arguments and repeated batches, and keep the credential unreachable from request-controlled code. A
+dedicated maintenance principal is a separate follow-up if an adopter cannot accept that existing trust model.
 
 Use exact migration `0010_runtime_heartbeat_retention.sql`. It is applied while holding the existing package migration lock and contains:
 
@@ -644,7 +720,7 @@ CREATE FUNCTION appsurface_durable.prune_runtime_heartbeats(
 RETURNS integer
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, appsurface_durable
+SET search_path = pg_catalog, appsurface_durable, pg_temp
 AS $$
 DECLARE
     v_cutoff timestamp with time zone;
@@ -744,22 +820,66 @@ SELECT format(
   :'runtime_role') \gexec
 ```
 
-The function intentionally ignores `pass_active` because an abruptly lost process may leave that flag true. `FOR UPDATE SKIP LOCKED`, the exact identity join, and the single cutoff prevent deletion of a locked, renewed, or replaced row. The two-int advisory namespace avoids collision with the existing one-bigint migration lock; lock refusal is a successful no-op.
+The function intentionally ignores `pass_active` because an abruptly lost process may leave that flag true. PostgreSQL
+[documents `SKIP LOCKED`](https://www.postgresql.org/docs/current/sql-select.html) as a queue-like contention primitive,
+not a consistent general-purpose read; that is appropriate
+here because another maintenance pass may reconsider skipped rows. A renewal/takeover that locks first is skipped and
+survives. If pruning locks the old stale identity first, a later renewal may wait only within its existing command timeout;
+the old identity may be deleted, and takeover must retry/re-register safely. Do not claim that both lock orderings preserve
+the old row or that pruning can never delay a later writer. The exact identity join and one cutoff prevent a different
+generation from being deleted after replacement. The two-int advisory namespace avoids collision with the existing
+one-bigint migration lock; lock refusal is a successful no-op.
 
-The runtime calls the function at most once per configured cadence after it has established its current heartbeat. The command uses the provider's existing bounded command timeout and cancellation; the advisory lock never waits, candidate row locks are skipped, and a timeout rolls back the entire batch. The provider remains safe if maintenance never runs; cleanup is capacity management, not correctness.
+The runtime calls the function at most once per configured cadence after it has established its current heartbeat. The
+command uses the provider's existing bounded command timeout and cancellation; the maintenance advisory lock never waits,
+prelocked candidate rows are skipped, and a timeout rolls back the entire batch. The provider remains safe if maintenance
+never runs; cleanup is capacity management, not correctness.
 
-Deployment is forward-only: run `durable schema preflight`, drain and stop old runtimes, apply migration 0010 as migration owner, reapply the exact role recipe, rerun preflight as the runtime role, deploy the schema-10 binary, then resume activation. `SET LOCAL lock_timeout` makes index lock contention fail and roll back rather than wait indefinitely. Preflight must flag migration 0010 as a downtime migration while it is pending and verify the exact function owner, `prosecdef`, `proconfig` search path, `PUBLIC` revoke, runtime execute grant, and retention index after it lands. Before the migration starts, rollback may redeploy the old binary. After migration 0010 commits, do not down-migrate or assume a schema-9 binary accepts schema 10; hold activation closed and roll forward unless mixed-version compatibility metadata explicitly proves the old binary supports version 10.
+The package migration lock is also bounded. Replace blocking `pg_advisory_lock` in both `ApplyAsync` and generated scripts
+with one shared `pg_try_advisory_lock` retry contract: 100 ms bounded-jitter retries, a 30-second default deadline, caller
+cancellation, and a stable operator-safe timeout diagnostic containing only elapsed time and the fixed lock namespace.
+Never emit another session's query, application name, host, or credentials. `lock_timeout` does not bound advisory-lock
+acquisition; it remains in migration 0010 to bound the ordinary index's table-lock wait.
+
+Deployment uses an explicit two-phase gate:
+
+1. Pack and pre-stage the schema-10-capable package while activation stays on the old deployment.
+2. Prove in CI that the immediately previous package binary remains compatible with schema 10. Migration 0010 is additive,
+   so it intentionally preserves the metadata range that includes that prior reader/writer version.
+3. Drain and stop old runtimes, run `durable schema preflight`, acquire the bounded migration lock, apply 0010 as migration
+   owner, reapply the exact role recipe, and rerun preflight as the runtime role.
+4. Deploy the new binary and resume activation only after compatibility, owner, role, and health checks pass.
+
+If the strict previous-binary test fails, the release must raise migration 0010's minimum reader/writer version to 10 before
+publication and switch the post-commit recovery instruction to activation-closed roll-forward only. If it passes, a failed
+new-package deployment may safely redeploy that exact prior binary; arbitrary older binaries are never inferred compatible.
+No down-migration is supported.
+
+Preflight flags 0010 as a downtime migration while pending. Afterward it verifies function owner, `prosecdef`, the exact
+`proconfig` search path including `pg_temp` last, `PUBLIC` revoke, runtime execute grant, and index structure. Index
+verification reads `pg_index`, `pg_class`, `pg_attribute`, and operator-class catalogs; it does not compare
+`pg_get_indexdef` formatting across PostgreSQL releases.
 
 #### Acceptance criteria
 
 - Fake-clock provider tests cover no-op before cadence, one call after cadence, multiple calls over time, and transient database failure; SQL cutoff uses authoritative database time.
-- Real PostgreSQL tests prove recent rows, the exact current worker instance, a concurrently renewed row, and rows at the exact cutoff survive while eligible older rows are deleted.
+- Real PostgreSQL tests prove recent rows, the exact caller-declared current worker instance, renewal-first rows, and rows at
+  the exact cutoff survive while eligible older rows are deleted. A separate prune-first ordering proves bounded writer
+  delay and safe takeover retry/re-registration without claiming the deleted old row survives.
 - Abrupt-process-loss and process-plus-GUID tests prove old rows eventually leave without shutdown cooperation.
-- Concurrent-call tests prove the advisory lock and `SKIP LOCKED` path never exceed the requested batch and do not block heartbeat renewal or takeover.
-- Role tests prove runtime cannot directly delete or truncate heartbeat rows, `PUBLIC` has no function access, and runtime can execute only the exact constrained function signature.
-- Migration checksum, required schema version 10, function allowlist, role recipe, schema status, script generation, preflight, forward deployment, and no-down-migration guidance remain coherent.
+- Concurrent-call tests prove the advisory lock and `SKIP LOCKED` path never exceed the requested batch, never waits on an
+  already locked candidate, and bounds prune-first contention by the existing command timeout.
+- Role tests prove runtime cannot directly delete or truncate heartbeat rows, `PUBLIC` has no function access, and runtime
+  can execute only the exact constrained function signature. Threat-model tests prove arbitrary exclusion arguments and
+  repeated batches cannot escape the stale cutoff, batch cap, table, or function signature.
+- Migration checksum, required schema version 10, function allowlist, role recipe, schema status, generated bounded-lock
+  script, preflight, two-phase deployment, strict previous-binary recovery proof, and no-down-migration guidance remain
+  coherent.
 - Cleanup failure does not fail a pump pass, change readiness by itself, or hide a real runtime failure.
-- Scale proof seeds 100,000 eligible stale rows plus 1,000 recent rows, records `EXPLAIN (ANALYZE, BUFFERS)` for one 500-row batch, proves the retention index supplies candidate order, deletes no more than 500 rows, observes no lock wait, and completes within the provider's existing command timeout.
+- Scale proof seeds 100,000 eligible stale rows plus 1,000 recent rows, records `EXPLAIN (ANALYZE, BUFFERS)` for one 500-row
+  batch, proves the retention index supplies candidate order, deletes no more than 500 rows, and completes within the
+  provider command timeout. A concurrent-heartbeat benchmark records p50/p95 renewal latency for renewal-first and
+  prune-first orderings and sets the release threshold from the repository's current heartbeat cadence and stale bound.
 
 #### Dependencies and coordination
 
@@ -812,6 +932,10 @@ The current PostgreSQL example proves passive registration, explicit hosting, sc
 
 Add a focused ASP.NET Core reference host and integration-test project. Before case 7, use ordinary ASP.NET Core endpoint mapping so the example establishes the minimum correct baseline the adapter must reduce.
 
+The reference host uses `/live`, `/compatibility`, `/ready`, and `/private/durable/activate` so its tests and generated
+template can name concrete routes. These are example-owned paths, not Provider defaults or compatibility promises; a real
+host may choose different routes and response shapes while preserving the same health and activation semantics.
+
 The reference host must show:
 
 - passive PostgreSQL registration without `AddWorkerHost()`;
@@ -836,9 +960,17 @@ Case 6 is the sole owner of that transport-neutral mapping. The direct endpoint 
 - A cold-start test passes compatibility while the runtime is `NotStarted`, enables activation, runs one pass, and then reaches `Healthy`.
 - Readiness returns failure for `NotStarted`, `Stale`, `Draining`, `Incompatible`, and `Unavailable`.
 - Liveness remains successful during a temporary PostgreSQL outage while compatibility/readiness report `Unavailable`.
-- An outer request timeout does not reuse the pump discovery budget. Cancellation after pump invocation produces only `PumpCanceled`; documentation directs callers to durable state and #783 exits rather than inferring whether an effect occurred.
+- The outer request-budget clock starts before health observation and does not reuse the pump discovery budget. Cancellation
+  before `pumpInvocationStarted` follows caller-over-budget precedence; cancellation after invocation produces only
+  `PumpCanceled` unless `RunPassAsync` already returned and bounded non-caller-cancelable bookkeeping completed, in which
+  case the exact `Completed` result wins. Documentation directs callers to durable state and #783 exits rather than
+  inferring whether an effect occurred.
 - Concurrent activation requests have deterministic bounded behavior and cannot start overlapping passes beyond the provider contract.
-- Table-driven service tests cover every normative outcome, cancellation-precedence branch, and failure-mapping row before the ASP.NET adapter exists.
+- Table-driven service tests cover every normative outcome, cancellation-precedence branch, unrelated
+  `OperationCanceledException`, `AccessViolationException` passthrough, and failure-mapping row before the ASP.NET adapter
+  exists. Pump integration races cover overlap, closed admission, drain, takeover, cancellation before provider admission,
+  cancellation during `RunPassAsync`, cancellation after provider completion, and cancellation during successful-sweep
+  bookkeeping.
 - The integration test configures `Sdk.CreateTracerProviderBuilder()`, adds source
   `AppSurfaceActivitySources.ActivitySourceName` (`ForgeTrust.AppSurface`), uses `AlwaysOnSampler` plus the in-memory
   exporter, invokes the real activation service through the reference endpoint, calls `ForceFlush`, and asserts exported
@@ -1011,9 +1143,12 @@ dotnet new appsurface-durable-worker
 
 No template package or `.template.config/template.json` exists in the repository today. This case therefore owns a small
 packable template project, its template manifest and classifications, package-index entry, NuGet metadata, generated-file
-allowlist, and CI proof that installs the freshly packed artifact into an isolated `DOTNET_CLI_HOME`. It reuses the existing
-NuGet feed, package signing/provenance, preview/stable promotion, and release workflows; it does not assume nonexistent
-template-specific packaging.
+allowlist, and CI proof that installs the freshly packed artifact into isolated `DOTNET_CLI_HOME`, `NUGET_PACKAGES`, and
+temporary output roots with a generated local-feed-only `NuGet.config`. It reuses the existing NuGet feed,
+package signing/provenance, preview/stable promotion, and release workflows; it does not assume nonexistent
+template-specific packaging. CI installs the exact produced `.nupkg` path first, lists the expected short name, creates the
+project, and uninstalls the template before testing the feed/package-ID form. This follows the .NET template packaging and
+installation contract rather than treating copied sample directories as distribution proof.
 
 The generated project contains:
 
@@ -1038,10 +1173,18 @@ The generated project contains:
 The canonical primed quick start is exactly three commands in one terminal:
 
 ```console
-dotnet new install ForgeTrust.AppSurface.Durable.Templates::<version>
+dotnet new install ForgeTrust.AppSurface.Durable.Templates@<version>
 dotnet new appsurface-durable-worker -n FirstDurableWorker
 dotnet test FirstDurableWorker --filter FullyQualifiedName~FirstDurableWork --logger "console;verbosity=detailed"
 ```
+
+The `@<version>` form is normative for supported [.NET template
+installation](https://learn.microsoft.com/en-us/dotnet/core/install/templates); the older `::<version>` separator was
+deprecated in .NET 9.0.200. The generated integration test must not depend on a source checkout. Package the canonical
+`configure-postgresql-roles.sql` as a versioned PostgreSQL package content asset copied to consumer output, with a pack test
+that proves byte identity against the repository source. The fixture maps that exact asset into the Testcontainers
+PostgreSQL container and invokes `psql` there because the recipe intentionally uses psql meta-commands. Do not duplicate or
+translate the allowlist in generated C#.
 
 With the package and PostgreSQL image caches primed, the final command must emit these bounded checkpoints before the test
 passes:
@@ -1077,6 +1220,10 @@ application-owned, the three locations needed to define/register/request a new W
 #### Acceptance criteria
 
 - Template installation, creation, restore, build, test, format, and local run pass in CI from a clean temporary directory.
+- The release matrix is blocking and names each proof owner: package pack/restore; exact `.nupkg` template install/list/
+  create/uninstall; generated allowlist and symbol expansion; clean generated build/format/test; PostgreSQL schema-10,
+  migration-lock, role-recipe, and prior-binary compatibility; activation auth/response mapping; liveness during store
+  outage; readiness under `Unavailable`; and OpenTelemetry redaction/export.
 - Template create/restore/build/format and non-Docker tests run on Linux, macOS, and Windows. The real PostgreSQL,
   authorization, lifecycle, and exporter proof runs on `ubuntu-latest` with the pinned image; generated verification uses
   .NET test code rather than a Bash-only caller.
@@ -1084,6 +1231,8 @@ application-owned, the three locations needed to define/register/request a new W
 - Production startup without an application-selected authentication scheme fails with an actionable message. The development scheme fails when its token is absent, cannot activate outside `Development`, rejects missing/wrong tokens, and CI generates a random token per run.
 - Registration tests prove the dispatcher data source is used only for payload-free discovery and the runtime data source for scoped operations; documentation links both credentials to their exact role-recipe grants.
 - The generated test proves compatible-but-not-started, one successful activation, readiness after a heartbeat, and an exported activity.
+- The packaged role recipe is byte-identical to the canonical repository recipe and available without a repository checkout;
+  the generated .NET fixture maps and runs it through the pinned container's `psql`.
 - A generated project can replace the sample Work with a new definition without editing framework plumbing in more than the documented locations.
 - The template uses only stable APIs and contains no experimental adapter reference.
 - Package/repository docs make the template the fastest start while preserving the lower-level manual path for advanced hosts.
@@ -1096,6 +1245,10 @@ application-owned, the three locations needed to define/register/request a new W
   packed-consumer gates install the exact produced `.nupkg`, list `appsurface-durable-worker`, create a project, and run its
   verification path in a clean temporary directory. Distribution reuses the existing NuGet publication path; no separate
   installer, feed, or service is introduced.
+- The generated reference host proves its own auth scheme, route mapping, readiness semantics, and diagnostics. One
+  representative Skoolit lane separately proves its host-owned browser-auth bypass, deployment `/ready` gate, structured
+  diagnostic route, and activation authorization. Passing the template does not claim those downstream policies are
+  generic or automatically correct.
 - If case 7 later graduates, a separate measured template-update case may replace the direct mapping; graduation does not silently change an existing template.
 
 #### Dependencies and coordination
@@ -1347,7 +1500,7 @@ No health-state transition authorizes effects. Admission and the PostgreSQL perm
 
 #### Section 2 — Error and rescue map
 
-The accepted change distinguishes unexpected failure before and after `pumpStarted`; `ActivationFailed` no longer lies that
+The accepted change distinguishes unexpected failure before and after `pumpInvocationStarted`; `ActivationFailed` no longer lies that
 the pump ran. Health and admission share one provider failure classifier.
 
 ##### Error & Rescue Registry
@@ -1365,10 +1518,10 @@ the pump ran. Health and admission share one provider failure classifier.
 | Definition/binding construction | Invalid identity, codec, safety, or incomplete reconciler/exit binding | Argument/invalid-operation failure | Exact binding rule |
 | `CreateRequest` | Invalid per-request facts or codec failure | Existing request/codec exception with definition context | Request is not accepted |
 | `ActivateAsync` health phase | Known unavailable/incompatible/draining state | Closed canonical outcome | Stable mapper input |
-| `ActivateAsync` before `pumpStarted` | Caller/budget cancellation | `CanceledBeforeAdmission` or `RequestBudgetExceeded` | Safe no-pump result |
-| `ActivateAsync` before `pumpStarted` | Unexpected nonfatal dependency failure | `ActivationFailed` + `ASDUR407`; structured safe log | Generic safe activation failure |
-| `ActivateAsync` after `pumpStarted` | Cancellation | `PumpCanceled`; no effect-truth inference | Inspect durable record/#783 exit |
-| `ActivateAsync` after `pumpStarted` | Unexpected nonfatal pump failure | `PumpFailed` + bounded code | Safe failure; inspect durable state |
+| `ActivateAsync` before `pumpInvocationStarted` | Caller/budget cancellation | `CanceledBeforeAdmission` or `RequestBudgetExceeded` | Safe no-pump result |
+| `ActivateAsync` before `pumpInvocationStarted` | Unexpected nonfatal dependency failure | `ActivationFailed` + `ASDUR407`; structured safe log | Generic safe activation failure |
+| `ActivateAsync` after `pumpInvocationStarted` | Cancellation | `PumpCanceled`; no effect-truth inference | Inspect durable record/#783 exit |
+| `ActivateAsync` after `pumpInvocationStarted` | Unexpected nonfatal pump failure | `PumpFailed` + bounded code | Safe failure; inspect durable state |
 | Heartbeat maintenance | Advisory lock unavailable | Skip maintenance | No correctness impact |
 | Heartbeat maintenance | Timeout/provider failure | Roll back batch; record bounded outcome | Capacity warning; pump remains authoritative |
 | Doctor | Invalid input | Exit 3 | Problem/cause/fix without DB mutation |
@@ -1405,7 +1558,7 @@ admission
   +-- store/schema race --------------------> pump-failed, no effect inference
   |
   v
-pumpStarted -> bounded pump
+pumpInvocationStarted -> bounded pump invocation
   +-- empty result --------------------------> completed, exact zero counts
   +-- has more ------------------------------> completed, exact `HasMore`
   +-- canceled/fails ------------------------> pump-canceled/pump-failed
@@ -1475,7 +1628,7 @@ Skipped. The plan has no user-interface surface; dashboard work is an explicit n
 | Activation | Unexpected pre-pump failure | Yes | Yes | `ActivationFailed`/`ASDUR407` | Yes |
 | Activation | Unexpected post-start failure | Yes | Yes | `PumpFailed`/`ASDUR407` | Yes |
 | Definition/request | Repeated or contradictory contract facts | Yes, fail fast | Yes | Exact contract diagnostic | N/A |
-| Heartbeat maintenance | Lock held or rows concurrently renewed | Yes, skip/recheck | Yes | No correctness change | Bounded result |
+| Heartbeat maintenance | Lock held or renewal/takeover race | Yes, ordering-specific skip/bounded retry | Yes | No correctness change | Bounded result |
 | Heartbeat maintenance | Batch times out | Yes, rollback | Yes | Capacity diagnostic | Yes |
 | Doctor | Missing/invalid env or role | Yes | Yes | Exit 3 + cause/fix/docs | No secrets |
 | Doctor | Dependency unavailable | Yes | Yes | Exit 4 + safe guidance | No secrets |
@@ -1908,6 +2061,452 @@ promotion still requires independent adoption and upgrade evidence.
 under 2 minutes. Codex: 5 concerns. Claude subagent: 6 issues. Consensus: 6/6 confirmed, with one taste choice surfaced at
 the final gate. Passing to Phase 3, where engineering review examines the fully amended plan.
 
+### Phase 3 — Engineering review
+
+#### Step 0 — Scope challenge
+
+The plan crosses more than eight files and introduces more than two public types, so the complexity smell triggered. The
+code check shows this is a roadmap smell, not a reason to collapse the cases: health interpretation, typed definition,
+provider testing, retention, activation, diagnostics, and distribution have different package owners and independent
+acceptance evidence. Shipping them as one implementation change would combine public API, migration, security, CLI, and
+template risk. The correction is the already accepted gated rail: cases 1, 2, 3, and 6 form the first adoption wedge; case 4
+can proceed independently; cases 5 and 7 remain evidence-gated; cases 8 and 9 follow their explicit dependencies.
+
+Actual code mapping:
+
+| Sub-problem | Existing implementation | Engineering disposition |
+| --- | --- | --- |
+| Compatibility/readiness | `DurableRuntimeHealthSnapshot`, `IDurableRuntimeHealth`, and `PostgreSqlDurableRuntimeHealth` | Reuse the facts; add canonical predicates and correct outage classification |
+| Pump admission | `PostgreSqlDurableRuntimePump`, `_passGate`, `DurableRuntimeAdmissionGate`, schema validation, and `TryBeginPassAsync` | Refactor to one internal state machine; do not preflight then enter twice |
+| Work identity | `DurableWorkRegistration`, `IDurablePayloadCodec`, `DurablePayloadCodecRegistry`, and current DI extensions | Add one immutable definition/binding layer over the same registration and registry |
+| Test seams | Public Provider interfaces plus existing xUnit and Testcontainers patterns | Package deterministic fakes; retain PostgreSQL for provider truth |
+| Heartbeat cleanup | Migration 0005, one-row-per-worker heartbeat model, schema manager, role recipe, and mixed-version harness | Add bounded migration 0010 and runtime-owned maintenance under the existing trust model |
+| External activation | Current direct pump and health APIs plus ASP.NET Core endpoint primitives | Add one transport-neutral service; keep route/auth/response mapping host-owned |
+| Diagnostics | Existing `appsurface durable schema` commands, problem codes, docs, and safe CLI output conventions | Extend the CLI without loading application assemblies or mutating the store |
+| Distribution | NuGet pack/release pipeline and `verify-packed-consumers.sh` | Add the missing template project and exact generated-distribution proof |
+
+Minimum complete release remains cases 1, 2, 3, and 6. Case 4 is an independently releasable storage fix. Cases 8 and 9
+are required for champion-tier operations and first-use DX, but they do not need to share a PR with the public-contract
+wedge. No case is folded merely to reduce issue count.
+
+Search check:
+
+- **[Layer 1]** Reuse the repository's existing pump gates, migration catalog, role-adversary tests, mixed-version binary
+  harness, Testcontainers fixture, activity source, CLI descriptors, and NuGet workflows.
+- **[Layer 3]** PostgreSQL [documents `SKIP LOCKED`](https://www.postgresql.org/docs/current/sql-select.html) as suitable
+  for queue-like contention but explicitly not as a consistent general-purpose view. The retention case now promises
+  ordering-specific safety and bounded contention rather than impossible universal non-blocking behavior.
+- **[Layer 1]** PostgreSQL's [`SECURITY DEFINER`
+  guidance](https://www.postgresql.org/docs/current/sql-createfunction.html) requires a protected search path, `pg_temp`
+  last, and revoking `PUBLIC` in the same transaction. Migration 0010 and preflight now pin those facts.
+- **[Layer 1]** The .NET SDK natively [packages templates as NuGet
+  packages](https://learn.microsoft.com/en-us/dotnet/core/tutorials/cli-templates-create-template-package). The plan uses
+  the current `PackageId@version` syntax and tests the produced `.nupkg`; it does not invent an installer.
+
+Distribution is part of case 9, not deferred. The existing copied packed-consumer fixtures cannot prove template symbol
+expansion, installation state, or generated-file drift, so the exact `.nupkg` path is a release gate.
+
+#### CODEX SAYS (eng — in-host architecture challenge)
+
+1. **[P1] (confidence: 10/10)** `PostgreSqlDurableRuntimeHealth.cs:27-32,72-77` catches broad Npgsql/timeouts and reports
+   `SchemaInconsistent`; outages and malformed schema are observationally different and need an allowlisted classifier.
+2. **[P1] (confidence: 10/10)** `PostgreSqlDurableRuntimeHealth.cs:45-46,377-426` assembles worker and due facts from separate
+   connections; the public snapshot must be one bounded best-effort observation or carry separate times.
+3. **[P1] (confidence: 10/10)** `PostgreSqlDurableRuntimePump.cs:55-96` does not expose an admission result and records a
+   successful sweep with caller cancellation after provider work returned; one phase machine must own refusal and
+   post-completion precedence.
+4. **[P1] (confidence: 10/10)** `PostgreSqlDurableRuntimeSchemaManager.cs:459-463` uses blocking `pg_advisory_lock`; migration
+   0010's `lock_timeout` cannot bound that earlier wait.
+5. **[P1] (confidence: 10/10)** migration 0005 grants the runtime role whole-table heartbeat trust through `USING (true)`
+   and `WITH CHECK (true)`; the retention function's caller-supplied current identity cannot be presented as authentication.
+6. **[P1] (confidence: 9/10)** `DurableWorkRegistration.cs:100-116` validates Work facts and non-null codecs but does not
+   freeze custom codec metadata/type invariants; definitions need validation without equating Work and codec namespaces.
+7. **[P2] (confidence: 10/10)** Provider already references the full Durable execution package; “interface-only dependency”
+   describes object coupling, not package coupling. Keep or split that boundary explicitly.
+8. **[P1] (confidence: 10/10)** `verify-packed-consumers.sh` copies hand-written consumers only; it cannot prove template
+   installation, symbol expansion, isolated restore, or generated role-recipe availability.
+
+All eight are folded into the case contracts. The package split was rejected for now because no independent activator has
+measured the current graph as harmful; that follow-up is in `TODOS.md`.
+
+#### INDEPENDENT SUBAGENT (eng — fresh review)
+
+The independent `combo/sub` reviewer found eight material issues: unavailable versus incompatible health, multi-observation
+snapshots, cancellation/bookkeeping races, unbounded migration-lock acquisition, caller-asserted retention identity,
+definition codec invariants, Provider transitive coupling, one-row heartbeat semantics/performance, and incomplete template
+distribution plus downstream host proof.
+
+Two details were corrected during integration:
+
+- Schema metadata currently records reader/writer range `1..version`, so an older package can classify schema 10 as
+  compatible; it does not automatically become `StoreTooNew`. The plan now requires the immediately previous binary to
+  prove that claim before rollback is documented. A failed proof raises the floor to 10 and makes recovery roll-forward.
+- Work name/version and payload codec name/version are independent stable namespaces in current examples. The definition
+  validates generic codec types and each codec's own metadata; it does not require false cross-namespace equality.
+
+The subagent made no code changes and found no reason to move host authentication, route names, deployment policy, or
+domain recovery upstream.
+
+#### ENG DUAL VOICES — CONSENSUS TABLE
+
+| Dimension | Independent subagent | Codex | Consensus |
+| --- | --- | --- | --- |
+| Architecture sound? | Sound after health/pump/package boundaries are explicit | Same | CONFIRMED |
+| Test coverage sufficient? | Missing race, distribution, and host-composition gates | Same; 12 grouped gaps added | CONFIRMED |
+| Performance risks addressed? | Migration wait and retention churn were under-specified | Same; bounded lock and scale/latency proof added | CONFIRMED |
+| Security threats covered? | Runtime-principal blast radius needed an explicit trust model | Same; existing trusted-principal model retained and documented | CONFIRMED |
+| Error paths handled? | Health and cancellation precedence were ambiguous | Same; one classifier and one phase machine added | CONFIRMED |
+| Deployment risk manageable? | Schema-10 recovery and template publication were incomplete | Same; two-phase migration and exact package gates added | CONFIRMED |
+
+Consensus is 6/6 with no architectural disagreement. The only remaining taste choice is inherited from DX: direct mapping
+versus early promotion of the experimental ASP.NET adapter.
+
+#### Section 1 — Architecture
+
+```text
+APPLICATION / TRANSPORT OWNERSHIP
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Skoolit lane              Reference host             Generated template      │
+│ route + auth + policy     concrete example routes    three-command proof     │
+└──────────────┬──────────────────────┬──────────────────────────┬──────────────┘
+               └──────────────────────┴──────────────────────────┘
+                                      │
+                                      ▼
+PROVIDER CONTRACT / MECHANICS
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ IDurableExternalActivationService                                            │
+│   ├── request-budget clock + cancellation precedence                         │
+│   ├── IDurableRuntimeHealth -> canonical predicates                          │
+│   ├── IDurableRuntimePumpAdmission -> one bounded attempt                     │
+│   └── activation Activity + bounded result/problem code                       │
+└───────────────────────┬──────────────────────────────────────────────────────┘
+                        │ public Provider abstractions
+                        ▼
+POSTGRESQL PROVIDER
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ one failure classifier                                                       │
+│ one pump phase machine                                                       │
+│ schema/epoch admission                                                       │
+│ runtime heartbeat + bounded retention                                        │
+│ Work / Flow / Schedule discovery, claim, lease, completion                    │
+└───────────────────────┬──────────────────────────────────────────────────────┘
+                        │ authoritative store facts
+                        ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ appsurface_durable schema                                                     │
+│ migrations + metadata + epoch + heartbeat + dispatch relations               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+AUTHORING / PROOF SIDECARS
+DurableWorkDefinition -> existing registration + codec/work registries -> request
+Durable.Testing ------> deterministic host-contract scenarios
+CLI doctor -----------> read-only schema/runtime observation
+Template pack --------> exact NuGet artifact -> generated real-provider proof
+```
+
+Package dependencies remain explicit:
+
+```text
+Provider ──> Durable ──> Flow + Core + Workers
+PostgreSql ──> Provider + Durable + Npgsql
+Testing ──> Provider contracts (+ Durable types needed by scenarios)
+AspNetCore [experimental] ──> Provider
+Templates ──> packed stable packages; generated source owns host composition
+CLI ──> existing PostgreSQL schema/runtime inspection path
+```
+
+Security boundaries:
+
+- Authorization principal, endpoint exposure, HTTP status/body, request origin, and deployment enablement are host-owned.
+- Provider results are payload-free, bounded, and carry no arbitrary exception text.
+- PostgreSQL schema/epoch, pass admission, claims, leases, and Work state remain authoritative.
+- The runtime database role is a trusted maintenance principal for unscoped heartbeat state and must not be reachable from
+  request-controlled code.
+- Migration ownership and runtime execution stay separate. `SECURITY DEFINER` uses a protected path and exact grants.
+
+Architecture issues found: **6**. All six were auto-decided using explicit-over-clever and DRY: reuse current boundaries,
+centralize semantics, and add no package or scheduler until an adopter proves the need.
+
+#### Section 2 — Code quality
+
+1. Broad provider catches would duplicate or blur failure semantics. One internal allowlisted classifier now owns health
+   and admission translation; unknown exceptions propagate.
+2. `pumpStarted` implied a provider pass had started when only an interface invocation was known. It is renamed
+   `pumpInvocationStarted`, while the provider uses a private five-phase state machine.
+3. Calling a precheck and then legacy `RunOnceAsync` would acquire the same gates twice and create a time-of-check/time-of-use
+   race. Both public entry points call one internal core once and map its state differently.
+4. A custom codec can expose invalid/mutable metadata even though first-party codecs validate themselves. The definition
+   validates payload type and independent codec identity/policy facts at construction, then passes one closed snapshot to
+   registration and registries.
+5. Copying the role recipe into generated C# or template files would create a second privilege allowlist. The PostgreSQL
+   package ships the canonical SQL as a byte-verified content asset and the generated fixture runs it through container
+   `psql`.
+6. `PackageId::<version>` teaches deprecated CLI syntax. The canonical command is `PackageId@<version>`.
+
+Code-quality issues found: **4 grouped defects plus 2 mechanical corrections**. All were folded. Existing comments that say
+PostgreSQL owns authoritative runtime decisions remain accurate; implementation of the private phase machine should add the
+state diagram above beside the pump core because ordering is otherwise non-obvious.
+
+#### Section 3 — Test review
+
+Existing framework: xUnit 2.9.3 with `Microsoft.NET.Test.Sdk`, coverlet, Testcontainers for PostgreSQL integration, public
+API baselines, shell-level packed-consumer checks, and a strict optional old-binary mixed-version harness. No prompt or LLM
+files change, so no eval suite applies.
+
+```text
+CODE / DATA PATHS                                      HOST / DEVELOPER FLOWS
+
+[1] Health GetAsync                                    [A] Deploy / probe
+ ├─ [BASE ★★★] schema status variants                   ├─ [REQ →E2E] /live during DB outage
+ ├─ [REQ ★★★] allowlisted Unavailable failures          ├─ [REQ →E2E] /compatibility truth table
+ ├─ [REQ ★★★] malformed/default propagate               └─ [REQ →E2E] /ready only when Healthy
+ └─ [REQ →E2E] one-statement worker + due snapshot
+
+[2] Pump core / admission                              [B] External activation
+ ├─ [BASE ★★★] legacy overlap + empty refusal           ├─ [REQ →E2E] auth missing/wrong/correct
+ ├─ [REQ ★★★] four attempt kinds                        ├─ [REQ →E2E] cold NotStarted -> Healthy
+ ├─ [REQ ★★★] five provider phases                      ├─ [REQ →E2E] concurrent request -> Busy
+ └─ [REQ ★★★] post-pass cancellation/bookkeeping        └─ [REQ →E2E] caller/budget race + disconnect
+
+[3] Typed definition                                  [C] Author first Work
+ ├─ [BASE ★★★] registration/codec/registry behavior     ├─ [REQ COMPILE] terse definition/binding syntax
+ ├─ [REQ ★★★] generic type + codec metadata             ├─ [REQ →E2E] definition -> accept -> execute
+ ├─ [REQ ★★★] duplicate/mixed binding                   └─ [REQ COMPILE] legacy syntax unchanged
+ └─ [REQ ★★★] retry/due/concurrent request creation
+
+[4] Testing scenarios                                 [D] Deterministic host proof
+ ├─ [REQ ★★★] fake time and scripted health/pump        ├─ [REQ] lifecycle scenario readable in one test
+ ├─ [REQ ★★★] invalid scripts fail at setup             └─ [REQ →E2E] provider-sensitive assertions real DB
+ └─ [REQ ★★★] concurrency/cancellation ordering
+
+[5] Migration + retention                             [E] Operate / upgrade
+ ├─ [BASE ★★★] checksums, roles, preflight, old binary  ├─ [REQ →E2E] bounded migration-lock timeout/retry
+ ├─ [REQ ★★★] exact function/catalog/role shape         ├─ [REQ →E2E] migration committed/deploy failed
+ ├─ [REQ ★★★] cutoff/current/renewal/prune orderings     ├─ [REQ →E2E] strict prior-binary recovery proof
+ └─ [REQ PERF] 100k stale + 1k recent, p50/p95          └─ [REQ] no-down-migration runbook
+
+[6] Activation service                               [F] Observe / recover
+ ├─ [REQ ★★★] complete outcome constructor matrix       ├─ [REQ →E2E] activity reaches exporter
+ ├─ [REQ ★★★] nonfatal/fatal exception filter           ├─ [REQ] no sensitive activity/log fields
+ └─ [REQ ★★★] exact pump result preservation            └─ [REQ] inspect durable state after uncertainty
+
+[7] Target equivalence [evidence-gated]               [G] Compare configured targets
+ ├─ [REQ ★★★] normalization corpus                      ├─ [REQ] Skoolit + distinct adopter same corpus
+ └─ [REQ ★★★] secret-sink and reject corpus             └─ [REQ] no DNS/live-connect side effect
+
+[8] CLI doctor                                        [H] Diagnose
+ ├─ [BASE ★★★] schema command/env secret handling       ├─ [REQ →E2E] healthy/outage/mismatch text+JSON
+ ├─ [REQ ★★★] exact descriptor/exit matrix              └─ [REQ] exact next command and docs anchor
+ └─ [REQ ★★★] no mutation/assembly load/secret sink
+
+[9] Template distribution                             [I] First durable Work
+ ├─ [REQ] exact nupkg install/list/create/uninstall      ├─ [REQ →E2E] three commands/four checkpoints
+ ├─ [REQ] generated-file allowlist/symbol expansion     ├─ [REQ →E2E] no repo checkout for role recipe
+ ├─ [REQ] clean isolated restore/build/format/test       └─ [REQ] Docker-missing fast recovery
+ └─ [REQ →E2E] real DB + roles + auth + terminal Work
+```
+
+Legend: `BASE` = current behavior already has strong coverage; `REQ` = blocking test added to the relevant case; `★★★` =
+behavior, edge, and error branches; `→E2E` = mocks would hide the failure; `PERF` = measured real-provider gate.
+
+Twelve grouped gaps were identified and added:
+
+1. Failure-classifier SQLSTATE/default arms through both health and admission.
+2. Single-observation health and independent component failure.
+3. Admission refusal and all pump phases without double gate entry.
+4. Cancellation precedence, fatal passthrough, and post-completion bookkeeping.
+5. Independent codec namespaces with wrong generic type and invalid metadata.
+6. Retention trust abuse, exact cutoff, and both row-lock orderings.
+7. Bounded migration advisory lock in runtime and generated script.
+8. Strict prior-binary compatibility and post-commit deployment failure drill.
+9. Catalog-based function/index/role inspection across supported PostgreSQL versions.
+10. Host-specific authorization, probe, readiness, and response mapping.
+11. Exact template `.nupkg`, isolated homes, symbol expansion, and generated allowlist.
+12. Packaged byte-identical role recipe used without a repository checkout.
+
+Every gap is blocking in its owning case. The QA artifact is:
+`~/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20260906-150224.md`.
+
+#### Section 4 — Performance
+
+1. Health remains constant work, not N+1, but current worker and due facts use separate connections. Case 1 combines them
+   into one statement snapshot after schema validation. No cache is added because readiness and admission require current
+   state and the existing query is bounded.
+2. Migration lock acquisition currently has no deadline. The shared try-lock contract bounds runtime and generated-script
+   waits to 30 seconds, supports caller cancellation, and avoids sensitive holder diagnostics.
+3. Retention uses one ordered index, non-blocking maintenance lock, `SKIP LOCKED`, and bounded batches. Release proof uses
+   100,000 stale plus 1,000 recent rows and records query plan, buffers, duration, and heartbeat p50/p95 under both lock
+   orderings. Public defaults remain evidence-gated.
+4. Activation adds one health observation, one provider attempt, and one low-cardinality activity. It introduces no polling
+   loop, queue, materialization, or unbounded collection. The host request budget includes health time; pump discovery keeps
+   its separate item/time bounds.
+5. Template speed is measured with separate cold and primed clocks. The primed release target remains median under two
+   minutes and maximum under three across five runs; cold setup is reported, not hidden.
+
+Performance issues found: **3**. All have a measurable release gate; no speculative cache or parallel pump is added.
+
+#### What already exists
+
+| Existing asset | Reused by the plan | Rebuild avoided |
+| --- | --- | --- |
+| Provider health/drain/pump contracts | Canonical predicates, testing fakes, activation | No second operational model |
+| PostgreSQL pump gates and authoritative claims | Admission-aware result wraps the same core | No host-side lock or queue |
+| Registration, codec, Work and payload registries | Definition and bindings close over current APIs | No reflection/global registry |
+| Migration catalog, checksums, preflight, script generation | Migration 0010 and bounded lock share the same path | No separate migrator |
+| Exact PostgreSQL role recipe and adversarial tests | New function grant and packaged content asset | No generated privilege clone |
+| Mixed-version binary harness | Schema-10 rollback claim | No metadata-only compatibility claim |
+| xUnit/Testcontainers integration fixtures | Provider truth and generated first Work | No fake PostgreSQL provider |
+| AppSurface activity source and OTel conventions | Activation activity | No telemetry subsystem |
+| CLI schema/env/JSON safety patterns | Runtime doctor | No application assembly scanner |
+| NuGet package/release and packed-consumer workflows | Testing/template distribution | No new feed or installer |
+| Skoolit probe/readiness/diagnostic separation | Downstream host contract fixture | No upstream Skoolit policy |
+
+#### Failure Modes Registry — final engineering pass
+
+| Codepath | Production failure | Test | Handling | Builder/operator sees | Critical gap |
+| --- | --- | ---: | --- | --- | ---: |
+| Health | Connection refused/timeout/permission denied | Yes | `Unavailable` allowlist | `ASDUR103` + safe next action | No |
+| Health | Missing relation/function or malformed row | Yes | Propagate defect | Host failure; never false incompatibility | No |
+| Health | Worker read succeeds, due read fails | Yes | One statement fails as a unit | `Unavailable` or propagated defect | No |
+| Pump | Overlap/closed/drain/takeover refusal | Yes | Legacy mapping or `Refused` | Empty/exception legacy; `Busy` activation | No |
+| Pump | Caller cancels before provider pass | Yes | Phase-aware cancellation | Conservative `PumpCanceled` after invocation | No |
+| Pump | Cancellation after provider work returned | Yes | Non-caller-cancelable bounded bookkeeping | Exact completion or real bookkeeping failure | No |
+| Pump | Cleanup also fails after original failure | Yes | Preserve original; cleanup with `None` | Original bounded failure | No |
+| Definition | Wrong generic codec type/invalid metadata | Yes | Construction fails | Exact argument/contract diagnostic | No |
+| Definition | Work identity differs from codec identity | Yes | Supported independent namespaces | Exact values propagate | No |
+| Migration | Advisory lock held indefinitely | Yes | Try-lock deadline/cancellation | Stable lock-timeout diagnostic | No |
+| Migration | Index table lock unavailable | Yes | 5-second `lock_timeout`, transaction rollback | Retry after drain/lock owner action | No |
+| Migration | Schema 10 committed, new deploy fails | Yes | Strict prior-binary gate or roll-forward-only | Explicit recovery branch | No |
+| Retention | Runtime credential supplies arbitrary current ID | Yes | Existing trusted-principal model + bounded stale delete | Documented blast radius | No |
+| Retention | Renewal owns row first | Yes | `SKIP LOCKED` | Row survives; later batch retries | No |
+| Retention | Prune owns row first | Yes | Bounded writer wait; takeover retry/re-register | No false “never blocks” promise | No |
+| Retention | 100k stale rows | Yes | Ordered index + 500 default batch | Metrics and scale evidence | No |
+| Activation | Caller and budget cancel together | Yes | Caller precedence before invocation | Deterministic outcome | No |
+| Activation | Fatal runtime exception | Yes | Not caught/relabelled | Process/runtime failure behavior | No |
+| Activation | Store changes after health precheck | Yes | Provider admission revalidates | Specific pump failure; inspect durable truth | No |
+| Doctor | Bad env, wrong role, unavailable store | Yes | Stable exit/descriptor matrix | Problem/cause/fix/docs/next command | No |
+| Template | Wrong/missing auth | Yes | Startup fail closed or 401/403 | Actionable configuration guidance | No |
+| Template | Role recipe unavailable outside checkout | Yes | Versioned package content asset | Generated proof remains self-contained | No |
+| Template | Stale/global template or wrong package | Yes | Isolated CLI/NuGet homes + exact nupkg | Deterministic install/list/create failure | No |
+| Downstream host | Probe auth or readiness mapped incorrectly | Yes | Host-owned Skoolit fixture | Deployment gate fails before promotion | No |
+
+No row is untested, unhandled, and silent after the corrections. **Critical gaps: 0.**
+
+#### NOT in scope — engineering boundary
+
+- A new contracts-only package before an independent activator measures transitive package coupling as harmful.
+- A dedicated heartbeat-maintenance credential/scheduler before an adopter rejects the existing trusted runtime principal.
+- Broker correctness, provider-neutral wake delivery, autoscaling policy, or deployment control.
+- Host route defaults, authentication schemes, HTTP response bodies, Cloud Tasks/OIDC, or domain recovery.
+- A new heartbeat-generation history table; the model remains one row per worker ID.
+- Down-migration for schema 10. Recovery is exact prior binary only when proven, otherwise roll forward.
+- Stable target-equivalence or ASP.NET convenience APIs without their distinct-consumer evidence.
+- Native Work claim/execution spans, a compile-time Work manifest, or CLI application-assembly loading.
+- Automatic edits to projects created from an older template.
+
+The first two deferred boundaries were added to `TODOS.md` with evidence triggers. Existing durable follow-ups already cover
+broker activation, dashboards, and per-surface hosts; they were not duplicated.
+
+#### Worktree parallelization strategy
+
+| Step | Modules touched | Depends on |
+| --- | --- | --- |
+| Case 1 health/admission | `Durable.Provider/`, `Durable.PostgreSql/`, matching tests/docs | — |
+| Issue #783 typed exits | `Durable/`, Workers integration, tests/docs | — |
+| Case 4 retention/migration | `Durable.PostgreSql/`, role recipe, CLI preflight docs/tests | — |
+| Case 2 definitions | `Durable/`, tests/docs | #783 |
+| Case 8 doctor | `Cli/`, `Durable.PostgreSql/`, diagnostics docs/tests | Cases 1 and 4 |
+| Case 3 testing package | new Durable testing package, package/release tests/docs | Cases 1 and 2 |
+| Case 6 activation/reference host | `Durable.Provider/`, examples, integration tests/docs | Cases 1, 2, and 3 |
+| Case 5 target experiment | internal PostgreSQL prototype and consumer corpus | second consumer |
+| Case 7 experimental adapter | new ASP.NET package, endpoint tests/docs | Case 6 + distinct adopter |
+| Case 9 template | template pack, generated source/tests, package/release/docs | Cases 1, 2, 3, and 6 |
+
+Parallel lanes:
+
+- **Lane A:** Case 1.
+- **Lane B:** #783 → Case 2 → Case 3.
+- **Lane C:** Case 4 → Case 8.
+- **Lane D:** Case 5 only after its second-consumer gate.
+- **Wave 2:** Case 6 after A + B; then case 7 and case 9 may run in parallel, with case 7 still experimental.
+
+Launch A, B, and C in parallel worktrees. Merge A + B before case 6. Merge case 4 before finishing doctor. Case 9 waits for
+the stable contract wedge; case 7 never blocks it. Conflict flags: A and C both touch PostgreSQL registration/tests/docs, B
+and case 6 both touch Provider/Durable public API docs, and every lane touches package/release metadata. Assign those shared
+files to an integration lane or merge sequentially; do not let independent worktrees each rewrite public API baselines and
+package indexes.
+
+#### Implementation Tasks — engineering synthesis
+
+- [ ] **ENG-T1 (P1, human: ~2d / CC: ~35min)** — Health/admission — Centralize operational truth.
+  - Surfaced by: architecture, error-path, and performance reviews.
+  - Files: Provider health contracts; PostgreSQL health/pump/classifier; tests; READMEs; public API baselines.
+  - Verify: every classifier row, snapshot predicate, refusal, schema race, and legacy compatibility branch passes.
+- [ ] **ENG-T2 (P1, human: ~2d / CC: ~35min)** — Pump/activation — Implement one phase machine and deterministic cancellation.
+  - Surfaced by: cancellation and post-pass bookkeeping race.
+  - Files: PostgreSQL pump/health; Provider activation service; tests; diagnostics/docs.
+  - Verify: all phase/cancellation orderings pass and completed provider work is never relabeled by late caller cancellation.
+- [ ] **ENG-T3 (P1, human: ~2d / CC: ~30min)** — Definitions — Close typed definitions over existing registries.
+  - Surfaced by: repeated facts and custom-codec metadata gap.
+  - Files: Durable definition/binding/registration/DI; tests; API docs/baselines; adopter guide.
+  - Verify: type/metadata/duplicate/mixed-binding negatives and packed legacy/new consumers pass.
+- [ ] **ENG-T4 (P1, human: ~3d / CC: ~45min)** — PostgreSQL operations — Ship bounded migration 0010 and retention.
+  - Surfaced by: unbounded lock, trust-boundary, row-model, and scale findings.
+  - Files: migration catalog/schema manager; migration 0010; health maintenance; role recipe; PostgreSQL/CLI tests/docs.
+  - Verify: bounded lock, role adversary, both race orderings, 100k scale, and previous-binary recovery matrix pass.
+- [ ] **ENG-T5 (P1, human: ~2d / CC: ~35min)** — Testing — Package deterministic lifecycle scenarios.
+  - Surfaced by: duplicated host fakes and missing lifecycle coverage.
+  - Files: new Durable.Testing package; unit/contract/package/release tests; docs.
+  - Verify: fake-only tests are deterministic and provider-sensitive assertions remain real PostgreSQL tests.
+- [ ] **ENG-T6 (P1, human: ~3d / CC: ~45min)** — Reference host — Prove authorized external activation end to end.
+  - Surfaced by: host composition and observability gaps.
+  - Files: Provider activation types/service; ASP.NET reference host; integration tests; OTel/docs.
+  - Verify: `/live`, `/compatibility`, `/ready`, and `/private/durable/activate` cover every outcome and redaction branch.
+- [ ] **ENG-T7 (P2, human: ~2d / CC: ~30min)** — Doctor — Add read-only runtime diagnosis.
+  - Surfaced by: fragmented problem/cause/fix guidance.
+  - Files: CLI durable command; PostgreSQL inspection; descriptor catalog; tests/docs.
+  - Verify: text/JSON exit matrix, exact next command, no mutation, and secret-sink tests pass.
+- [ ] **ENG-T8 (P1, human: ~3d / CC: ~45min)** — Template/release — Prove the generated distribution path.
+  - Surfaced by: absent template package and checkout-dependent role recipe.
+  - Files: template pack/manifest/generated project; PostgreSQL package content; package index/workflows; docs/tests.
+  - Verify: exact nupkg install/list/create/uninstall, isolated build/test, role asset, real first Work, and timing gates pass.
+- [ ] **ENG-T9 (P3, evidence-gated, human: ~2d / CC: ~30min)** — Convenience experiments — Run adopter evidence.
+  - Surfaced by: target comparer and adapter generality risk.
+  - Files: internal target prototype/corpus; experimental ASP.NET adapter; Skoolit representative fixture; decision record.
+  - Verify: a distinct consumer/adopter passes each graduation matrix before any stable public API ships.
+
+#### Cross-phase themes
+
+- **Central truth, local policy** — CEO, DX, and Eng independently require AppSurface to own health/admission mechanics while
+  Skoolit owns routes, auth, deployment, and recovery policy. This is the strongest upstream boundary.
+- **Executable distribution is the feature** — CEO found the missing package path, DX made the generated proof the magical
+  moment, and Eng made exact `.nupkg` installation plus a checkout-free role recipe blocking release evidence.
+- **Failure categories are part of DX** — CEO, DX, and Eng all found that unavailable, incompatible, refused, canceled, and
+  failed must remain distinct with one safe descriptor and next action.
+- **Evidence before convenience** — CEO gated broad public abstractions, DX kept direct mapping as the novice face, and Eng
+  retained package/adapter/target-comparison gates until a distinct adopter supplies proof.
+
+#### Engineering completion summary
+
+| Review area | Result |
+| --- | --- |
+| Step 0: Scope challenge | Gated multi-case rail retained; first wedge remains cases 1, 2, 3, and 6 |
+| Architecture review | 6 issues found and folded |
+| Code quality review | 4 grouped defects + 2 mechanical corrections folded |
+| Test review | Full diagram produced; 12 grouped gaps added as blocking requirements |
+| Performance review | 3 issues found; bounded and measurable gates added |
+| NOT in scope | Written; two new evidence-triggered deferrals added to `TODOS.md` |
+| What already exists | Written; all new behavior routes through existing package/runtime foundations |
+| Failure modes | 24 paths assessed; 0 critical gaps after corrections |
+| Outside voice | In-host Codex + independent `combo/sub` reviewer |
+| Dual-voice consensus | 6/6 dimensions confirmed; 0 Eng disagreements |
+| Parallelization | 3 launch lanes, 2 evidence/follow-on lanes, shared integration files flagged |
+| Lake score | 25/25 recommendations chose the complete option |
+| Unresolved Eng decisions | 0 |
+
+**Phase 3 complete.** Codex: 8 concerns. Independent subagent: 8 issues. Consensus: 6/6 confirmed, 0 disagreements.
+Passing to Phase 4, the single final approval gate.
+
 <!-- AUTONOMOUS DECISION LOG -->
 ## Decision Audit Trail
 
@@ -1928,3 +2527,14 @@ the final gate. Passing to Phase 3, where engineering review examines the fully 
 | 13 | DX | Add adopter API, schema, and template migration guidance without obsoleting legacy APIs | Upgrade | P1 Completeness | Existing operational guidance does not tell a caller how to move to definitions or own generated code | Treat additive preview APIs as self-explanatory |
 | 14 | DX | Use transparent direct mapping as the initial template's public face | Taste | P5 Explicit over clever | Auth, route, and budget ownership remain readable until the adapter passes a second-adopter gate | Bless the shorter experimental adapter immediately |
 | 15 | DX | Require cross-platform generated code but keep the pinned real-provider CI proof on Ubuntu | Tooling | P3 Pragmatic | Removes Bash-only adoption while using the repository's proven Docker lane | Claim equal provider proof on unverified environments |
+| 16 | Eng | Make provider outage classification allowlisted and propagate malformed/programming failures | Error semantics | P4 DRY | Health and admission need one meaning; a broad Npgsql catch hides defects | Let every consumer or broad catch classify failures |
+| 17 | Eng | Read worker and due facts in one statement snapshot after schema validation | Consistency | P5 Explicit over clever | The public snapshot should not combine facts from separate connections | Add per-component timestamps to the public API |
+| 18 | Eng | Use one pump phase machine and correct late-cancellation bookkeeping | Concurrency | P1 Completeness | One core avoids double admission and keeps completed provider work from becoming a false cancellation | Preserve the post-pass cancellation race for strict behavior identity |
+| 19 | Eng | Keep activation contracts in Provider for now and document its transitive graph | Architecture | P3 Pragmatic | The boundary already exists and no adopter has proved package weight harmful | Create a contracts-only package immediately |
+| 20 | Eng | Treat retention current-worker arguments as a correctness guard under the existing trusted runtime principal | Security | P5 Explicit over clever | PostgreSQL has no independently authenticated worker generation; pretending otherwise creates false assurance | Present caller arguments as authenticated identity |
+| 21 | Eng | Bound migration advisory-lock acquisition and gate rollback on an exact prior-binary proof | Deployment | P1 Completeness | `lock_timeout` does not bound advisory locks and metadata alone is not executable compatibility evidence | Keep blocking lock acquisition or promise arbitrary old-binary rollback |
+| 22 | Eng | Validate independent codec type/metadata namespaces at definition construction | API correctness | P5 Explicit over clever | Work identity and payload identity are intentionally distinct but both must be frozen and valid | Require codec identity to equal Work identity |
+| 23 | Eng | Specify renewal-first and prune-first retention races separately | Concurrency | P5 Explicit over clever | `SKIP LOCKED` skips existing locks but cannot promise a later writer never waits | Claim every concurrent renewal survives with zero wait |
+| 24 | Eng | Package the canonical role recipe and use current `dotnet new` version syntax | Distribution | P4 DRY | Generated proof must work without a checkout and cannot own a copied privilege allowlist | Translate the role recipe into generated C# |
+| 25 | Eng | Make downstream host composition a separate release proof | Boundary | P1 Completeness | A reference template cannot prove Skoolit's auth bypass, deployment gate, or diagnostic route | Treat passing template tests as proof for every host |
+| 26 | Eng | Add all twelve test groups and the exact distribution matrix as blocking case requirements | Verification | P1 Completeness | Planned APIs, races, migration, and packaging need executable proof before publication | Rely on current legacy tests and hand-written consumers |
