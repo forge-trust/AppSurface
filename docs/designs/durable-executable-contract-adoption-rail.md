@@ -1874,9 +1874,9 @@ repository-grounded analysis is the Codex voice.]
 | Upgrade path safe | Operations exist; adopter migration is missing | Same | CONFIRMED |
 | Dev environment friction-free | No; manual database setup dominates | Generated real-provider test can close the primed path | CONFIRMED |
 
-The voices agree on 6/6 dimensions. One taste choice remains: whether transparent direct mapping or the shorter experimental
-adapter should be the public face. The recommendation is **transparent direct mapping for this preview** because it keeps the
-security and budget decisions readable; adapter promotion remains measured and reversible.
+The voices agree on 6/6 dimensions. The final approval gate resolved the public-face taste choice in favor of
+**transparent direct mapping for this preview** because it keeps the security and budget decisions readable; adapter
+promotion remains measured and reversible.
 
 #### Pass 1 — Getting started: 2/10 → 9/10
 
@@ -2054,12 +2054,12 @@ promotion still requires independent adoption and upgrade evidence.
 | Magical moment | Generated authenticated terminal Work + readiness transition + exported activity |
 | Error paths | 3 traced; descriptor and next-action contract added |
 | Scores | 4.6/10 current → 9.1/10 planned |
-| Dual voices | 6/6 dimensions confirmed; 1 taste choice queued |
+| Dual voices | 6/6 dimensions confirmed; direct mapping approved at the final gate |
 | Unresolved critical DX gaps | 0 after plan corrections |
 
 **Phase 2.5 complete.** DX overall: 4.6/10 → 9.1/10. TTHW: >10 minutes/unbounded → primed median
-under 2 minutes. Codex: 5 concerns. Claude subagent: 6 issues. Consensus: 6/6 confirmed, with one taste choice surfaced at
-the final gate. Passing to Phase 3, where engineering review examines the fully amended plan.
+under 2 minutes. Codex: 5 concerns. Claude subagent: 6 issues. Consensus: 6/6 confirmed; the final gate approved transparent
+direct mapping as the preview face. Engineering review examined the fully amended plan.
 
 ### Phase 3 — Engineering review
 
@@ -2158,8 +2158,8 @@ domain recovery upstream.
 | Error paths handled? | Health and cancellation precedence were ambiguous | Same; one classifier and one phase machine added | CONFIRMED |
 | Deployment risk manageable? | Schema-10 recovery and template publication were incomplete | Same; two-phase migration and exact package gates added | CONFIRMED |
 
-Consensus is 6/6 with no architectural disagreement. The only remaining taste choice is inherited from DX: direct mapping
-versus early promotion of the experimental ASP.NET adapter.
+Consensus is 6/6 with no architectural disagreement. The inherited DX taste choice was resolved at final approval:
+transparent direct mapping remains the preview face, and the experimental ASP.NET adapter keeps its promotion gate.
 
 #### Section 1 — Architecture
 
