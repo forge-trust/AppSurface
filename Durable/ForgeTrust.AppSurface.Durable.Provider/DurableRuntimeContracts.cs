@@ -304,7 +304,10 @@ public interface IDurableRuntimePumpAdmission
 {
     /// <summary>Attempts authoritative admission and executes one bounded pass when admitted.</summary>
     /// <param name="request">Bounded pump-pass limits and selected durable surfaces.</param>
-    /// <param name="cancellationToken">Caller cancellation for admission, execution, and finalization.</param>
+    /// <param name="cancellationToken">
+    /// Caller cancellation for admission and application execution. After application execution returns, terminal
+    /// bookkeeping uses an independent provider-owned bound and is not canceled by this token.
+    /// </param>
     /// <returns>
     /// A closed attempt that distinguishes completion, refusal, provider unavailability, and incompatibility.
     /// </returns>

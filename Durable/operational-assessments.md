@@ -215,7 +215,10 @@ The #794 rollout is migration-first and forward-only:
    [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
    with the intended migration owner before applying the migration. Migration 0010 deliberately fails before DDL
    rather than replacing a function owned by another principal.
-4. Apply `0010_runtime_health_observation.sql` with that migration owner, taking schema 9 to schema 10.
+4. Apply migration `0010_runtime_health_observation` with that migration owner through the generated script or the
+   explicit CLI apply command, taking schema 9 to schema 10. The embedded `.sql` resource is a checksum-bound migration
+   fragment whose `SET LOCAL` relies on the package-generated transaction wrapper; do not pass the fragment directly
+   to `psql`.
 5. Rerun the role recipe
    to reconcile object ownership, `PUBLIC EXECUTE`, and the four restricted login leaves.
 6. Run schema `status` and `preflight`, verify the active epoch and StoreId, then smoke-test the old supported reader.

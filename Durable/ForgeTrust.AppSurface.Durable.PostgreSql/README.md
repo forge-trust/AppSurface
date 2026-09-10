@@ -100,7 +100,8 @@ expose SQL, exception text, credentials, role names, payload identifiers, scope 
 For the #794 provider release, drain and stop every durable worker and Schedule writer, keep pre-`0009` workers
 stopped, generate and review the exact script, and verify that the configured migration owner owns the schema-9
 `runtime_due_dispatch_health(integer)` function. Repair owner drift with the canonical role recipe before migration
-if needed. Then apply `0010_runtime_health_observation.sql` from schema 9 to 10 with that owner, rerun the role recipe
+if needed. Then apply migration `0010_runtime_health_observation` from schema 9 to 10 with that owner through the
+generated script or explicit CLI apply command, rerun the role recipe
 for post-migration reconciliation, run status and preflight, smoke-test `v0.2.0-preview.8`, and deploy the new binary.
 Registration never applies the migration.
 
@@ -152,6 +153,8 @@ draining every affected runtime and writer host; the package's checksum-bound tr
 use `CREATE INDEX CONCURRENTLY`. Migration `0010` takes its Schedule table lock with `NOWAIT` and bounds the index
 statement at five minutes, so an active writer or unexpectedly long build fails and rolls the migration back instead
 of silently extending the write outage. Keep writers stopped, inspect the cause, and retry the same forward migration.
+The embedded `.sql` resource is a migration fragment: its `SET LOCAL` depends on the transaction wrapper emitted by
+`GenerateScript` or created by `ApplyAsync`. Do not execute that fragment directly with `psql`.
 Apply schema is forward-only; rolling application code back does not authorize destructive schema rollback. Execute
 generated SQL with a client that stops on the first error; `psql` callers must pass `-v ON_ERROR_STOP=1`.
 

@@ -286,6 +286,14 @@ public sealed class DurableSchemaContractTests
             script.IndexOf("0009_work_contract_discovery", StringComparison.Ordinal)
             < script.IndexOf("0010_runtime_health_observation", StringComparison.Ordinal));
         Assert.Contains("pg_advisory_lock", script, StringComparison.Ordinal);
+        var tenthMarker = script.IndexOf("-- Migration 0010_runtime_health_observation", StringComparison.Ordinal);
+        var tenthTransaction = script.IndexOf("BEGIN;", tenthMarker, StringComparison.Ordinal);
+        var tenthDeadline = script.IndexOf("SET LOCAL statement_timeout = '5min'", tenthMarker, StringComparison.Ordinal);
+        var tenthCommit = script.IndexOf("COMMIT;", tenthMarker, StringComparison.Ordinal);
+        Assert.True(tenthMarker >= 0);
+        Assert.True(tenthTransaction > tenthMarker);
+        Assert.True(tenthDeadline > tenthTransaction);
+        Assert.True(tenthCommit > tenthDeadline);
         Assert.DoesNotContain("0001_work_shared", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0002_forced_rls", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0003_flow_protocol", pendingOnly, StringComparison.Ordinal);

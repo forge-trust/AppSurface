@@ -192,6 +192,74 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
     }
 
     [Fact]
+    public async Task GetAsync_PropagatesCallerCancellationFromSchemaStatus()
+    {
+        using var dataSource = NpgsqlDataSource.Create(
+            "Host=localhost;Port=5432;Database=durable_health;Username=durable;Password=not-opened");
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                dataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                CreateOptions("runtime-health-schema-cancellation-worker"),
+                Guid.NewGuid()),
+            new StubSchemaManager(
+                token => ValueTask.FromCanceled<DurableRuntimeSchemaStatus>(token)));
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await health.GetAsync(cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+    }
+
+    [Fact]
+    public async Task GetAsync_PropagatesCallerCancellationFromSchemaObservationTimestamp()
+    {
+        using var dataSource = NpgsqlDataSource.Create(
+            "Host=localhost;Port=5432;Database=durable_health;Username=durable;Password=not-opened");
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                dataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                CreateOptions("runtime-health-schema-timestamp-cancellation-worker"),
+                Guid.NewGuid()),
+            new StubSchemaManager(
+                _ => ValueTask.FromResult(CreateStatus(DurableRuntimeSchemaCompatibility.UpgradeRequired))),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<PostgreSqlDurableRuntimeHealth>.Instance,
+            token => ValueTask.FromCanceled<DateTimeOffset>(token));
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await health.GetAsync(cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+    }
+
+    [Fact]
+    public async Task GetAsync_PropagatesCallerCancellationFromRuntimeObservation()
+    {
+        using var dataSource = NpgsqlDataSource.Create(
+            "Host=localhost;Port=5432;Database=durable_health;Username=durable;Password=not-opened");
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                dataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                CreateOptions("runtime-health-observation-cancellation-worker"),
+                Guid.NewGuid()),
+            new StubSchemaManager(
+                _ => ValueTask.FromResult(CreateStatus(DurableRuntimeSchemaCompatibility.Compatible))));
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await health.GetAsync(cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+    }
+
+    [Fact]
     public async Task GetAsync_MapsTransientRuntimeObservationToUnavailable()
     {
         using var dataSource = NpgsqlDataSource.Create(

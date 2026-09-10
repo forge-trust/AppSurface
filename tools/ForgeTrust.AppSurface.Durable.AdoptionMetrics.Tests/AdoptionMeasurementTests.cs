@@ -672,11 +672,11 @@ public sealed class AdoptionMeasurementTests : IDisposable
             var consumerPath = $"consumer-{name}.cs";
             var repositoryPath = $"repository-{name}.cs";
             await File.WriteAllTextAsync(
-                Path.Combine(consumerRoot, consumerPath),
+                TestPathUtils.PathUnder(consumerRoot, consumerPath),
                 "start\r\none\r\n\r\ntwo\r\nend\r\n",
                 CancellationToken.None);
             await File.WriteAllTextAsync(
-                Path.Combine(repositoryRoot, repositoryPath),
+                TestPathUtils.PathUnder(repositoryRoot, repositoryPath),
                 "start\none\n\n two \nend\n",
                 CancellationToken.None);
             regions.Add(CreateRegion("baseline", name, "consumer", consumerPath));
