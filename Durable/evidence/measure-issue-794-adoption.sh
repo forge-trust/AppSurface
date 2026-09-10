@@ -11,6 +11,11 @@ if [[ "$#" -lt 4 || "$3" != "--" || ! "$2" =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 
+if [[ ! "$1" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  printf 'LABEL must contain only letters, digits, periods, underscores, and hyphens (grammar: [A-Za-z0-9._-]+).\n' >&2
+  exit 2
+fi
+
 LABEL="$1"
 RUNS="$2"
 shift 3

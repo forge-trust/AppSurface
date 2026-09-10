@@ -517,14 +517,26 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
     private static readonly TimeSpan ProcessCleanupBudget = TimeSpan.FromSeconds(2);
     private readonly string _gitExecutable;
     private readonly TimeSpan _commandTimeout;
+    private readonly Func<Process, IDisposable> _processOwnershipFactory;
 
     internal static GitConsumerRevisionVerifier Instance { get; } = new(
         "git",
         TimeSpan.FromSeconds(30));
 
     /// <summary>Initializes a verifier with an explicit executable and per-command deadline.</summary>
-    /// <remarks>The configurable seam keeps timeout and cancellation behavior deterministic in tests.</remarks>
-    internal GitConsumerRevisionVerifier(string gitExecutable, TimeSpan commandTimeout)
+    /// <param name="gitExecutable">The Git executable or test probe to invoke.</param>
+    /// <param name="commandTimeout">The maximum duration allowed for each Git probe.</param>
+    /// <param name="processOwnershipFactory">
+    /// An optional test seam that assigns the started probe to a descendant-cleanup boundary.
+    /// </param>
+    /// <remarks>
+    /// The configurable seams keep timeout, cancellation, and ownership-failure behavior
+    /// deterministic in tests.
+    /// </remarks>
+    internal GitConsumerRevisionVerifier(
+        string gitExecutable,
+        TimeSpan commandTimeout,
+        Func<Process, IDisposable>? processOwnershipFactory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(gitExecutable);
         if (commandTimeout <= TimeSpan.Zero)
@@ -537,6 +549,7 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
 
         _gitExecutable = gitExecutable;
         _commandTimeout = commandTimeout;
+        _processOwnershipFactory = processOwnershipFactory ?? ProcessOwnership.Attach;
     }
 
     public async Task VerifyAsync(
@@ -592,44 +605,61 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)
     {
-        using var process = CreateGitProcess(workingDirectory, arguments, redirectOutput: true);
+        if (Path.IsPathFullyQualified(_gitExecutable) && !File.Exists(_gitExecutable))
+        {
+            throw new AdoptionMeasurementException(
+                "Could not start Git to verify the consumer checkout.",
+                new System.ComponentModel.Win32Exception(2));
+        }
+
+        using var process = CreateGitProbeProcess(workingDirectory, arguments);
+        IDisposable ownership;
         try
         {
             process.Start();
+            ownership = _processOwnershipFactory(process);
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
+            TryKillProcessTree(process);
             throw new AdoptionMeasurementException("Could not start Git to verify the consumer checkout.", exception);
         }
 
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(_commandTimeout);
-        var output = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
-        var error = process.StandardError.ReadToEndAsync(CancellationToken.None);
-        try
+        using (ownership)
         {
-            await process.WaitForExitAsync(timeout.Token);
-            await Task.WhenAll(output, error);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            await CleanupProcessAsync(process, output, error);
-            throw new AdoptionMeasurementException(
-                $"Git did not complete consumer checkout verification within {_commandTimeout.TotalSeconds:0.###} seconds.");
-        }
-        catch (OperationCanceledException)
-        {
-            await CleanupProcessAsync(process, output, error);
-            cancellationToken.ThrowIfCancellationRequested();
-            throw;
-        }
-        if (process.ExitCode != 0)
-        {
-            throw new AdoptionMeasurementException(
-                $"Git could not verify the consumer checkout: {error.Result.Trim()}");
-        }
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(_commandTimeout);
+            var output = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
+            var error = process.StandardError.ReadToEndAsync(CancellationToken.None);
+            try
+            {
+                await process.WaitForExitAsync(timeout.Token);
+                // Closing the Windows job after the parent exits terminates any descendant that still
+                // owns a redirected pipe. The Unix bootstrap performs the equivalent group cleanup
+                // before it exits. Keep pipe completion under the same command deadline.
+                ownership.Dispose();
+                await Task.WhenAll(output, error).WaitAsync(timeout.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                await CleanupProcessAsync(process, output, error);
+                throw new AdoptionMeasurementException(
+                    $"Git did not complete consumer checkout verification within {_commandTimeout.TotalSeconds:0.###} seconds.");
+            }
+            catch (OperationCanceledException)
+            {
+                await CleanupProcessAsync(process, output, error);
+                cancellationToken.ThrowIfCancellationRequested();
+                throw;
+            }
+            if (process.ExitCode != 0)
+            {
+                throw new AdoptionMeasurementException(
+                    $"Git could not verify the consumer checkout: {error.Result.Trim()}");
+            }
 
-        return output.Result;
+            return output.Result;
+        }
     }
 
     private async Task<int> RunGitExitCodeAsync(
@@ -643,7 +673,7 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
         try
         {
             process.Start();
-            using var ownership = ProcessOwnership.Attach(process);
+            using var ownership = _processOwnershipFactory(process);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(_commandTimeout);
             var standardOutputDrain = process.StandardOutput.BaseStream.CopyToAsync(
@@ -655,7 +685,8 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
             try
             {
                 await process.WaitForExitAsync(timeout.Token);
-                await Task.WhenAll(standardOutputDrain, standardErrorDrain);
+                ownership.Dispose();
+                await Task.WhenAll(standardOutputDrain, standardErrorDrain).WaitAsync(timeout.Token);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {

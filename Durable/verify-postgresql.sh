@@ -15,6 +15,9 @@ list_log="$work_dir/list-tests.log"
 test_log="$work_dir/test-output.log"
 recovery_list_log="$work_dir/recovery-list-tests.log"
 recovery_test_log="$work_dir/recovery-test-output.log"
+ci_all_list_log="$work_dir/ci-all-list-tests.log"
+ci_remaining_list_log="$work_dir/ci-remaining-list-tests.log"
+ci_remaining_test_log="$work_dir/ci-remaining-test-output.log"
 recovery_evidence_file=""
 v2_package_version="0.2.0-preview.8"
 v2_package_sha256="62a48f6b7ec299ad608f3714a49a39f18c5cb1fe45293d53915e5549422d311e"
@@ -39,6 +42,38 @@ fail() {
   echo "Use APPSURFACE_POSTGRES_TEST_CONNECTION for an external PostgreSQL 16.0+ database," >&2
   echo "or start Docker so the pinned Testcontainers path can run." >&2
   exit 1
+}
+
+sha256_file() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+  else
+    fail "SHA-256 hashing requires sha256sum or shasum -a 256"
+  fi
+}
+
+count_discovered_tests() {
+  local log_file="$1"
+  grep -Ec '^[[:space:]]+ForgeTrust\.AppSurface\.Durable\.PostgreSql\.Tests\.' "$log_file" | tr -d ' '
+}
+
+count_exact_discovered_test() {
+  local log_file="$1"
+  local expected_test="$2"
+  awk -v expected="$expected_test" '
+    {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      if (line == expected) {
+        count++
+      }
+    }
+    END { print count + 0 }
+  ' "$log_file"
 }
 
 verify_test_summary() {
@@ -112,7 +147,6 @@ if [[ -n "$evidence_mode" || -n "$evidence_output" ]]; then
   [[ "${APPSURFACE_POSTGRES_TEST_ALLOW_SKIP:-}" != "true" ]] \
     || fail "APPSURFACE_POSTGRES_TEST_ALLOW_SKIP cannot be enabled while recording readiness evidence"
   command -v docker >/dev/null 2>&1 || fail "Docker is required for classified cold/warm evidence"
-  command -v shasum >/dev/null 2>&1 || fail "shasum is required to bind readiness evidence to its source and scenarios"
   if docker image inspect "$postgres_image" >/dev/null 2>&1; then
     observed_mode="warm"
   else
@@ -152,6 +186,23 @@ if [[ -n "$evidence_mode" || -n "$evidence_output" ]]; then
     ! -path '*/bin/*' \
     ! -path '*/obj/*' \
     -print >> "$source_file_list"
+  find "$repo_root/Durable/compatibility/V2WorkHarness" \
+    -type f \
+    ! -path '*/bin/*' \
+    ! -path '*/obj/*' \
+    -print >> "$source_file_list"
+  find "$repo_root" -maxdepth 1 -type f \
+    \( \
+      -name 'Directory.Build.props' \
+      -o -name 'Directory.Build.targets' \
+      -o -name 'Directory.Packages.props' \
+      -o -name 'global*.json' \
+      -o -iname '*nuget*.config' \
+      -o -name 'packages.lock.json' \
+    \) \
+    ! -path '*/bin/*' \
+    ! -path '*/obj/*' \
+    -print >> "$source_file_list"
   printf '%s\n' \
     "$repo_root/Durable/verify-postgresql.sh" \
     "$repo_root/Durable/packed-consumers/PostgreSqlProvider/PostgreSqlReadmeProof.cs" \
@@ -161,14 +212,16 @@ if [[ -n "$evidence_mode" || -n "$evidence_output" ]]; then
     "$repo_root/Cli/ForgeTrust.AppSurface.Cli/README.md" \
     "$repo_root/Web/ForgeTrust.AppSurface.Docs.Tests/DurableSlice7AdoptionDocumentationContractTests.cs" \
     "$repo_root/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md" \
+    "$repo_root/ForgeTrust.AppSurface.slnx" \
+    "$repo_root/NuGet.package-gate.config" \
     "$repo_root/releases/unreleased.md" \
     >> "$source_file_list"
   LC_ALL=C sort -u -o "$source_file_list" "$source_file_list"
   while IFS= read -r source_file; do
-    source_hash="$(shasum -a 256 "$source_file" | awk '{print $1}')"
+    source_hash="$(sha256_file "$source_file")"
     printf '%s  %s\n' "$source_hash" "${source_file#"$repo_root/"}"
   done < "$source_file_list" > "$source_hashes"
-  source_fingerprint="$(shasum -a 256 "$source_hashes" | awk '{print $1}')"
+  source_fingerprint="$(sha256_file "$source_hashes")"
 
   flow_scenarios=(flow-activity-resume flow-event-resume flow-identity-retry flow-scope-disable flow-timer-race)
   work_scenarios=(
@@ -220,10 +273,7 @@ case "$mode" in
       || fail "test discovery failed"
     grep -Fq "$target_test_class" "$list_log" \
       || fail "the named reference workload selected zero tests"
-    quick_expected_test_count="$(
-      grep -Ec '^[[:space:]]+ForgeTrust\.AppSurface\.Durable\.PostgreSql\.Tests\.' "$list_log" \
-        | tr -d ' '
-    )"
+    quick_expected_test_count="$(count_discovered_tests "$list_log")"
     [[ "$quick_expected_test_count" -gt 0 ]] \
       || fail "the named reference workload selected zero tests"
     if [[ -n "$evidence_output" ]]; then
@@ -300,8 +350,6 @@ case "$mode" in
     fi
     ;;
   --ci)
-    command -v shasum >/dev/null 2>&1 \
-      || fail "shasum is required to verify the exact $v2_package_version release artifact"
     v2_harness_project="$repo_root/Durable/compatibility/V2WorkHarness/V2WorkHarness.csproj"
     v2_harness_bin="$work_dir/v2-harness-bin"
     v2_harness_obj="$work_dir/v2-harness-obj"
@@ -315,7 +363,7 @@ case "$mode" in
     v2_package_path="$global_packages/forgetrust.appsurface.durable.postgresql/$v2_package_version/forgetrust.appsurface.durable.postgresql.$v2_package_version.nupkg"
     [[ -f "$v2_package_path" ]] \
       || fail "the restored ForgeTrust.AppSurface.Durable.PostgreSql $v2_package_version artifact is missing"
-    actual_v2_package_sha256="$(shasum -a 256 "$v2_package_path" | awk '{print $1}')"
+    actual_v2_package_sha256="$(sha256_file "$v2_package_path")"
     [[ "$actual_v2_package_sha256" == "$v2_package_sha256" ]] \
       || fail "the $v2_package_version artifact SHA-256 was $actual_v2_package_sha256, expected $v2_package_sha256"
     dotnet build "$v2_harness_project" --configuration Release --no-restore \
@@ -329,10 +377,25 @@ case "$mode" in
     v2_release_test="ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlMixedVersionCompatibilityTests.ExactV020Preview8Package_OperatesAfterSchema10AndSupportsBinaryRollback"
     dotnet test "$project" --list-tests \
       -m:1 -p:UseSharedCompilation=false \
-      --filter "FullyQualifiedName=$v2_release_test" >"$work_dir/v2-release-list-tests.log" \
-      || fail "exact $v2_package_version release-proof discovery failed"
-    grep -Fq "$v2_release_test" "$work_dir/v2-release-list-tests.log" \
-      || fail "the exact $v2_package_version release proof selected zero tests"
+      >"$ci_all_list_log" \
+      || fail "full CI test discovery failed"
+    ci_all_expected_test_count="$(count_discovered_tests "$ci_all_list_log")"
+    [[ "$ci_all_expected_test_count" -gt 0 ]] \
+      || fail "full CI test discovery selected zero tests"
+    ci_release_discovered_test_count="$(count_exact_discovered_test "$ci_all_list_log" "$v2_release_test")"
+    [[ "$ci_release_discovered_test_count" == "1" ]] \
+      || fail "the exact $v2_package_version release proof was discovered $ci_release_discovered_test_count times"
+    ci_remaining_test_filter="FullyQualifiedName!=$v2_release_test"
+    dotnet test "$project" --list-tests \
+      -m:1 -p:UseSharedCompilation=false \
+      --filter "$ci_remaining_test_filter" >"$ci_remaining_list_log" \
+      || fail "remaining CI test discovery failed"
+    ci_remaining_expected_test_count="$(count_discovered_tests "$ci_remaining_list_log")"
+    ci_remaining_release_count="$(count_exact_discovered_test "$ci_remaining_list_log" "$v2_release_test")"
+    [[ "$ci_remaining_release_count" == "0" ]] \
+      || fail "the exact $v2_package_version release proof was included in the remaining CI suite"
+    [[ "$((ci_remaining_expected_test_count + ci_release_discovered_test_count))" == "$ci_all_expected_test_count" ]] \
+      || fail "CI test discovery was not partitioned exactly between the release proof and remaining suite"
     APPSURFACE_REQUIRE_V020_RELEASE_PROOF=true \
     APPSURFACE_DURABLE_V020_HARNESS_PATH="$v2_harness_path" \
     APPSURFACE_DURABLE_V020_PACKAGE_PATH="$v2_package_path" \
@@ -347,7 +410,13 @@ case "$mode" in
       "the exact $v2_package_version release proof"
     dotnet test "$project" \
       -m:1 -p:UseSharedCompilation=false \
-      --logger 'console;verbosity=normal'
+      --filter "$ci_remaining_test_filter" \
+      --logger 'console;verbosity=normal' | tee "$ci_remaining_test_log" \
+      || fail "the remaining CI PostgreSQL suite failed"
+    verify_test_summary \
+      "$ci_remaining_test_log" \
+      "$ci_remaining_expected_test_count" \
+      "the remaining CI PostgreSQL suite"
     ;;
   *)
     usage
@@ -403,13 +472,13 @@ if [[ -n "$evidence_output" ]]; then
       grep -Fq '"FinalState": "retried-from-last-committed-version"' "$scenario_file" \
         || fail "forward recovery evidence has the wrong final state"
     fi
-    scenario_hash="$(shasum -a 256 "$scenario_file" | awk '{print $1}')"
+    scenario_hash="$(sha256_file "$scenario_file")"
     printf '%s  %s.json\n' "$scenario_hash" "$scenario_name" >> "$scenario_hashes"
   done
   scenario_count="$(find "$evidence_output" -maxdepth 1 -type f -name '*.json' ! -name 'run.json' | wc -l | tr -d ' ')"
   [[ "$scenario_count" == "$expected_test_count" ]] \
     || fail "evidence output contains $scenario_count scenario files; expected the exact $expected_test_count-file set"
-  scenario_fingerprint="$(shasum -a 256 "$scenario_hashes" | awk '{print $1}')"
+  scenario_fingerprint="$(sha256_file "$scenario_hashes")"
   host_os="$(uname -s)"
   host_architecture="$(uname -m)"
   image_platform="$(docker image inspect "$postgres_image" --format '{{.Os}}/{{.Architecture}}')"

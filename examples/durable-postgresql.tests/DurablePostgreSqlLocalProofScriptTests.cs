@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using ForgeTrust.AppSurface.Testing;
 
 /// <summary>Locks the one-command proof to its local-only, explicit-migration safety boundary.</summary>
@@ -172,6 +173,9 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
             var heartbeatLength = new FileInfo(heartbeatFile).Length;
             await Task.Delay(TimeSpan.FromMilliseconds(300));
             Assert.Equal(heartbeatLength, new FileInfo(heartbeatFile).Length);
+            Assert.True(
+                await WaitForProcessExitAsync(int.Parse(childPid, CultureInfo.InvariantCulture)),
+                $"The local-proof command child {childPid.Trim()} remained alive after cleanup.");
         }
         finally
         {
@@ -332,6 +336,87 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
             StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("journey|table")]
+    [InlineData("journey`code")]
+    [InlineData("journey\nnewline")]
+    public async Task Adoption_measurement_rejects_labels_that_are_not_safe_markdown_identifiers(string label)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "The adoption measurement script is a Unix Bash entry point.");
+        }
+
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var scriptPath = TestPathUtils.PathUnder(
+            repositoryRoot,
+            "Durable",
+            "evidence",
+            "measure-issue-794-adoption.sh");
+        var startInfo = new ProcessStartInfo("/bin/bash")
+        {
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            WorkingDirectory = repositoryRoot,
+        };
+        startInfo.ArgumentList.Add(scriptPath);
+        startInfo.ArgumentList.Add(label);
+        startInfo.ArgumentList.Add("1");
+        startInfo.ArgumentList.Add("--");
+        startInfo.ArgumentList.Add("/usr/bin/true");
+
+        using var process = Process.Start(startInfo)!;
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        var standardError = await process.StandardError.ReadToEndAsync();
+
+        Assert.Equal(2, process.ExitCode);
+        Assert.Contains(
+            "LABEL must contain only letters, digits, periods, underscores, and hyphens",
+            standardError,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Adoption_measurement_accepts_a_safe_label_and_records_it_in_markdown()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "The adoption measurement script is a Unix Bash entry point.");
+        }
+
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var scriptPath = TestPathUtils.PathUnder(
+            repositoryRoot,
+            "Durable",
+            "evidence",
+            "measure-issue-794-adoption.sh");
+        var startInfo = new ProcessStartInfo("/bin/bash")
+        {
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            WorkingDirectory = repositoryRoot,
+        };
+        startInfo.ArgumentList.Add(scriptPath);
+        startInfo.ArgumentList.Add("journey.v1-2_test");
+        startInfo.ArgumentList.Add("1");
+        startInfo.ArgumentList.Add("--");
+        startInfo.ArgumentList.Add("/usr/bin/true");
+
+        using var process = Process.Start(startInfo)!;
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        var standardOutput = await process.StandardOutput.ReadToEndAsync();
+
+        Assert.Equal(0, process.ExitCode);
+        Assert.Contains(
+            "| `journey.v1-2_test` | 1 |",
+            standardOutput,
+            StringComparison.Ordinal);
+    }
+
     private static int CountOccurrences(string value, string expected)
     {
         var count = 0;
@@ -343,6 +428,29 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
         }
 
         return count;
+    }
+
+    private static async Task<bool> WaitForProcessExitAsync(int processId)
+    {
+        for (var attempt = 0; attempt < 40; attempt++)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(processId);
+                if (process.HasExited)
+                {
+                    return true;
+                }
+            }
+            catch (ArgumentException)
+            {
+                return true;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+        }
+
+        return false;
     }
 
     private static void WriteExecutable(string directory, string name, string contents)

@@ -652,7 +652,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
 
         var timeoutVerifier = new GitConsumerRevisionVerifier(
             executable,
-            TimeSpan.FromMilliseconds(250));
+            TimeSpan.FromSeconds(1));
         await Assert.ThrowsAsync<AdoptionMeasurementException>(
             () => timeoutVerifier.VerifyAsync(
                 _root,
@@ -673,7 +673,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
         var cancellationVerifier = new GitConsumerRevisionVerifier(
             executable,
             TimeSpan.FromSeconds(30));
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(1));
         var canceled = await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => cancellationVerifier.VerifyAsync(
                 _root,
@@ -689,6 +689,40 @@ public sealed class AdoptionMeasurementTests : IDisposable
             Assert.True(
                 await WaitForProcessExitAsync(processId),
                 $"The cancellation heartbeat child {processId} remained alive after cleanup.");
+        }
+    }
+
+    [Fact]
+    public async Task GitVerifierSuccessfulCheckoutProbeCleansUpAChildThatInheritedItsPipes()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "The deterministic inherited-pipe fixture uses Unix shell semantics.");
+        }
+
+        var childProcessIdsPath = Path.Combine(_root, "successful-probe-child-pids");
+        var executable = await CreateUnixExecutableAsync(
+            Path.Combine(_root, "successful-probe-git"),
+            $"#!/bin/sh\n(sleep 30) &\nprintf '%s\\n' \"$!\" >> \"$PWD/successful-probe-child-pids\"\nprintf '%s\\n' '{Commit}'\n");
+        var verifier = new GitConsumerRevisionVerifier(
+            executable,
+            TimeSpan.FromSeconds(2));
+
+        await verifier.VerifyAsync(
+                _root,
+                Commit,
+                [],
+                CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(4));
+
+        var childProcessIds = await WaitForProcessIdsFileAsync(childProcessIdsPath);
+        Assert.NotEmpty(childProcessIds);
+        foreach (var processId in childProcessIds)
+        {
+            Assert.True(
+                await WaitForProcessExitAsync(processId),
+                $"The successful checkout probe child {processId} remained alive after cleanup.");
         }
     }
 
@@ -717,6 +751,44 @@ public sealed class AdoptionMeasurementTests : IDisposable
 
         Assert.Equal("Could not start Git to verify the consumer checkout.", exception.Message);
         Assert.IsType<System.ComponentModel.Win32Exception>(exception.InnerException);
+    }
+
+    [Fact]
+    public async Task GitVerifierCleansUpAStartedProbeWhenProcessOwnershipCannotBeAttached()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "The deterministic blocking Git-process fixture uses a Unix shell script.");
+        }
+
+        var executable = await CreateUnixExecutableAsync(
+            Path.Combine(_root, "ownership-failure-git"),
+            "#!/bin/sh\nsleep 30\n");
+        var startedProcessId = 0;
+        var ownershipFailure = new System.ComponentModel.Win32Exception(5);
+        var verifier = new GitConsumerRevisionVerifier(
+            executable,
+            TimeSpan.FromSeconds(30),
+            process =>
+            {
+                startedProcessId = process.Id;
+                throw ownershipFailure;
+            });
+
+        var exception = await Assert.ThrowsAsync<AdoptionMeasurementException>(
+            () => verifier.VerifyAsync(
+                _root,
+                Commit,
+                [],
+                CancellationToken.None));
+
+        Assert.Equal("Could not start Git to verify the consumer checkout.", exception.Message);
+        Assert.Same(ownershipFailure, exception.InnerException);
+        Assert.NotEqual(0, startedProcessId);
+        Assert.True(
+            await WaitForProcessExitAsync(startedProcessId),
+            $"The unowned Git probe {startedProcessId} remained alive after attachment failed.");
     }
 
     [Fact]
@@ -1252,21 +1324,25 @@ public sealed class AdoptionMeasurementTests : IDisposable
 
     private static async Task<IReadOnlyList<int>> WaitForProcessIdsFileAsync(string path)
     {
-        var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 2;
-        while (!File.Exists(path) && Stopwatch.GetTimestamp() < deadline)
+        var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 5;
+        while (Stopwatch.GetTimestamp() < deadline)
         {
+            if (File.Exists(path))
+            {
+                var processIds = (await File.ReadAllLinesAsync(path))
+                    .Select(static value => int.TryParse(value, out var processId) ? processId : 0)
+                    .Where(static processId => processId > 0)
+                    .ToArray();
+                if (processIds.Length > 0)
+                {
+                    return processIds;
+                }
+            }
+
             await Task.Delay(TimeSpan.FromMilliseconds(10));
         }
 
-        if (!File.Exists(path))
-        {
-            return [];
-        }
-
-        return (await File.ReadAllLinesAsync(path))
-            .Select(static value => int.TryParse(value, out var processId) ? processId : 0)
-            .Where(static processId => processId > 0)
-            .ToArray();
+        return [];
     }
 
     private static async Task<bool> WaitForProcessExitAsync(int processId)

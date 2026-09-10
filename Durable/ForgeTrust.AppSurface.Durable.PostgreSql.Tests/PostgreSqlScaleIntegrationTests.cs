@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text.Json;
 using ForgeTrust.AppSurface.Durable.Provider;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -11,7 +13,9 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 [Collection("PostgreSQL scale")]
 public sealed class PostgreSqlScaleIntegrationTests
 {
-    private const int WarmSampleCount = 64;
+    private const int ConstrainedPoolSize = 8;
+    private const int WarmBatchCount = 5;
+    private const int WarmSamplesPerBatch = 16;
     private const int MixedConcurrency = 32;
     private readonly ITestOutputHelper _output;
 
@@ -120,8 +124,18 @@ public sealed class PostgreSqlScaleIntegrationTests
             sparseDueRowsPerSurface);
         await schema.InitializeRuntimeEpochAsync(epoch, "scale-tests", "runtime-health");
         var status = await schema.GetStatusAsync();
-        var dispatcherDataSource = database.CreateDataSource();
-        var runtimeDataSource = database.CreateDataSource();
+        var dispatcherConnection = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            ApplicationName = "appsurface-runtime-health-scale-dispatcher",
+            MaxPoolSize = ConstrainedPoolSize,
+        };
+        var runtimeConnection = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            ApplicationName = "appsurface-runtime-health-scale-runtime",
+            MaxPoolSize = ConstrainedPoolSize,
+        };
+        await using var dispatcherDataSource = NpgsqlDataSource.Create(dispatcherConnection.ConnectionString);
+        await using var runtimeDataSource = NpgsqlDataSource.Create(runtimeConnection.ConnectionString);
         var statusConnectionAcquisitions = new ConcurrentQueue<TimeSpan>();
         var runtimeConnectionAcquisitions = new ConcurrentQueue<TimeSpan>();
         var services = new ServiceCollection();
@@ -150,7 +164,14 @@ public sealed class PostgreSqlScaleIntegrationTests
         await using var provider = services.BuildServiceProvider();
         var health = provider.GetRequiredService<IDurableRuntimeHealth>();
         var pump = provider.GetRequiredService<IDurableRuntimePumpAdmission>();
-        var runtimeHealthFunctionDefinition = await ReadRuntimeHealthFunctionDefinitionAsync(database.DataSource);
+        await AssertRuntimeHealthFunctionDefinitionAsync(database.DataSource);
+        await ProveConstrainedPoolRecoveryAsync(
+            health,
+            runtimeDataSource,
+            statusConnectionAcquisitions,
+            runtimeConnectionAcquisitions,
+            sparseDueRowsPerSurface * 3L);
+        WriteRunnerProfile();
 
         foreach (var (surfaces, expectedIndexes) in new[]
                  {
@@ -166,10 +187,7 @@ public sealed class PostgreSqlScaleIntegrationTests
                      }),
                  })
         {
-            var plan = await ReadRuntimeHealthPlanAsync(
-                database.DataSource,
-                runtimeHealthFunctionDefinition,
-                surfaces);
+            var plan = await ReadRuntimeHealthNestedPlanAsync(database.DataSource, surfaces);
             foreach (var expectedIndex in expectedIndexes)
             {
                 Assert.True(
@@ -183,41 +201,36 @@ public sealed class PostgreSqlScaleIntegrationTests
             Assert.True(
                 plan.Contains("\"Shared Hit Blocks\"", StringComparison.Ordinal),
                 $"Sparse runtime-health plan for mask {surfaces} omitted buffer evidence:{Environment.NewLine}{plan}");
-            _output.WriteLine($"runtime-health installed-function-derived plan for mask {surfaces}:{Environment.NewLine}{plan}");
+            _output.WriteLine($"runtime-health installed-function nested plan for mask {surfaces}:{Environment.NewLine}{plan}");
         }
 
-        var sparseEvidence = await MeasureWarmHealthAsync(
+        var sparseEvidence = await MeasureWarmHealthBatchesAsync(
             health,
             statusConnectionAcquisitions,
             runtimeConnectionAcquisitions,
             database.DataSource,
             expectedDueCount: sparseDueRowsPerSurface * 3L);
-        ReportEvidence("sparse", sparseEvidence);
-        AssertWarmP95BelowOneSecond("sparse", sparseEvidence.HealthRuns);
+        AssertWarmBatches("sparse", sparseEvidence);
 
         await MakeRuntimeHealthBacklogDenseAsync(database.DataSource, rowsPerSurface);
         foreach (var surfaces in new[] { 1, 2, 4, 7 })
         {
-            var densePlan = await ReadRuntimeHealthPlanAsync(
-                database.DataSource,
-                runtimeHealthFunctionDefinition,
-                surfaces);
+            var densePlan = await ReadRuntimeHealthNestedPlanAsync(database.DataSource, surfaces);
             Assert.Contains(
                 "\"Shared Hit Blocks\"",
                 densePlan,
                 StringComparison.Ordinal);
             _output.WriteLine(
-                $"runtime-health installed-function-derived dense plan for mask {surfaces}:{Environment.NewLine}{densePlan}");
+                $"runtime-health installed-function nested dense plan for mask {surfaces}:{Environment.NewLine}{densePlan}");
         }
 
-        var denseEvidence = await MeasureWarmHealthAsync(
+        var denseEvidence = await MeasureWarmHealthBatchesAsync(
             health,
             statusConnectionAcquisitions,
             runtimeConnectionAcquisitions,
             database.DataSource,
             expectedDueCount: rowsPerSurface * 3L);
-        ReportEvidence("dense", denseEvidence);
-        AssertWarmP95BelowOneSecond("dense", denseEvidence.HealthRuns);
+        AssertWarmBatches("dense", denseEvidence);
 
         var pumpRequest = new DurableRuntimePumpRequest(
             maximumItems: 1,
@@ -233,6 +246,11 @@ public sealed class PostgreSqlScaleIntegrationTests
         var cpuBefore = process.TotalProcessorTime;
         var allocationsBefore = GC.GetTotalAllocatedBytes(precise: true);
         var lockWaitsBefore = await ReadLockWaitCountAsync(database.DataSource);
+        using var lockWaitMonitorCancellation = new CancellationTokenSource();
+        var maximumLockWaits = MonitorMaximumLockWaitCountAsync(
+            database.DataSource,
+            mixedWorkloadStart.Task,
+            lockWaitMonitorCancellation.Token);
         Clear(statusConnectionAcquisitions);
         Clear(runtimeConnectionAcquisitions);
         var mixedHealthReads = Enumerable.Range(0, MixedConcurrency)
@@ -256,10 +274,23 @@ public sealed class PostgreSqlScaleIntegrationTests
             mixedWorkloadStart.Task,
             () => pump.TryRunOnceAsync(pumpRequest));
         mixedWorkloadStart.SetResult();
-        var mixedSnapshots = await Task.WhenAll(mixedHealthReads);
-        var claimResult = await claim;
-        var heartbeatResult = await heartbeat;
-        var pumpResult = await concurrentPump;
+        (DurableRuntimeHealthSnapshot Snapshot, TimeSpan Elapsed)[] mixedSnapshots;
+        long claimResult;
+        int heartbeatResult;
+        DurableRuntimePumpAttempt pumpResult;
+        try
+        {
+            mixedSnapshots = await Task.WhenAll(mixedHealthReads);
+            claimResult = await claim;
+            heartbeatResult = await heartbeat;
+            pumpResult = await concurrentPump;
+        }
+        finally
+        {
+            await lockWaitMonitorCancellation.CancelAsync();
+        }
+
+        var maximumObservedLockWaits = await maximumLockWaits;
         process.Refresh();
         var cpuDelta = process.TotalProcessorTime - cpuBefore;
         var allocatedBytes = GC.GetTotalAllocatedBytes(precise: true) - allocationsBefore;
@@ -283,7 +314,8 @@ public sealed class PostgreSqlScaleIntegrationTests
             cpuDelta,
             allocatedBytes,
             lockWaitsBefore,
-            lockWaitsAfter);
+            lockWaitsAfter,
+            maximumObservedLockWaits);
         AssertWarmP95BelowOneSecond(
             "mixed concurrent",
             mixedSnapshots.Select(run => run.Elapsed).ToArray());
@@ -291,6 +323,7 @@ public sealed class PostgreSqlScaleIntegrationTests
             rowsPerSurface * 3L - 1,
             (await health.GetAsync()).DueDispatchCount);
         Assert.Equal(0, lockWaitsAfter);
+        Assert.Equal(0, maximumObservedLockWaits);
     }
 
     [Fact]
@@ -688,7 +721,7 @@ public sealed class PostgreSqlScaleIntegrationTests
         await command.ExecuteNonQueryAsync();
     }
 
-    private static async ValueTask<string> ReadRuntimeHealthFunctionDefinitionAsync(
+    private static async ValueTask AssertRuntimeHealthFunctionDefinitionAsync(
         NpgsqlDataSource dataSource)
     {
         await using var command = dataSource.CreateCommand(
@@ -709,35 +742,110 @@ public sealed class PostgreSqlScaleIntegrationTests
         Assert.Contains("dispatch.state = 'available'", definition, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("dispatch.state = 'leased'", definition, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("clock_timestamp()", definition, StringComparison.OrdinalIgnoreCase);
-        return definition!;
     }
 
-    private static async ValueTask<string> ReadRuntimeHealthPlanAsync(
+    private static async ValueTask<string> ReadRuntimeHealthNestedPlanAsync(
         NpgsqlDataSource dataSource,
-        string functionDefinition,
         int surfaces)
     {
-        const string returnQueryMarker = "RETURN QUERY";
-        const string functionEndMarker = "END;";
-        var queryStart = functionDefinition.IndexOf(returnQueryMarker, StringComparison.OrdinalIgnoreCase);
-        var queryEnd = functionDefinition.LastIndexOf(functionEndMarker, StringComparison.OrdinalIgnoreCase);
-        Assert.True(queryStart >= 0, "The installed runtime-health function has no RETURN QUERY body.");
-        Assert.True(queryEnd > queryStart, "The installed runtime-health function body could not be parsed.");
+        await using var connection = await dataSource.OpenConnectionAsync();
+        var notices = new List<string>();
+        connection.Notice += (_, args) => notices.Add(args.Notice.MessageText);
 
-        var query = functionDefinition[(queryStart + returnQueryMarker.Length)..queryEnd]
-            .Trim()
-            .TrimEnd(';')
-            .Replace("p_surfaces", "@surfaces", StringComparison.Ordinal)
-            .Replace("observed_at_utc", "@observed_at_utc", StringComparison.Ordinal);
-        await using var command = dataSource.CreateCommand(
-            $"EXPLAIN (ANALYZE, BUFFERS, VERBOSE, SETTINGS, FORMAT JSON) {query};");
-        command.Parameters.AddWithValue("surfaces", surfaces);
-        command.Parameters.AddWithValue("observed_at_utc", DateTime.UtcNow);
-        return (string)(await command.ExecuteScalarAsync()
-            ?? throw new InvalidOperationException("PostgreSQL returned no runtime-health aggregation plan."));
+        await using (var configure = connection.CreateCommand())
+        {
+            configure.CommandText =
+                """
+                LOAD 'auto_explain';
+                SET auto_explain.log_min_duration = 0;
+                SET auto_explain.log_analyze = on;
+                SET auto_explain.log_buffers = on;
+                SET auto_explain.log_format = 'json';
+                SET auto_explain.log_level = 'notice';
+                SET auto_explain.log_nested_statements = on;
+                SET auto_explain.log_timing = off;
+                SET auto_explain.log_verbose = on;
+                """;
+            await configure.ExecuteNonQueryAsync();
+        }
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText =
+                """
+                SELECT *
+                FROM appsurface_durable.runtime_due_dispatch_health(@surfaces);
+                """;
+            command.CommandTimeout = 120;
+            command.Parameters.AddWithValue("surfaces", surfaces);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        Assert.True(
+            notices.Count >= 2,
+            $"auto_explain returned {notices.Count} plan notice(s); expected the outer call and at least one nested statement.");
+        var plan = string.Join(Environment.NewLine, notices);
+        Assert.Contains(
+            "runtime_due_dispatch_health",
+            plan,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "\"Shared Hit Blocks\"",
+            plan,
+            StringComparison.Ordinal);
+        return plan;
     }
 
-    private async ValueTask<HealthEvidence> MeasureWarmHealthAsync(
+    private static async ValueTask ProveConstrainedPoolRecoveryAsync(
+        IDurableRuntimeHealth health,
+        NpgsqlDataSource runtimeDataSource,
+        ConcurrentQueue<TimeSpan> statusConnectionAcquisitions,
+        ConcurrentQueue<TimeSpan> runtimeConnectionAcquisitions,
+        long expectedDueCount)
+    {
+        var heldConnections = new List<NpgsqlConnection>(ConstrainedPoolSize);
+        try
+        {
+            for (var index = 0; index < ConstrainedPoolSize; index++)
+            {
+                heldConnections.Add(await runtimeDataSource.OpenConnectionAsync());
+            }
+
+            Clear(statusConnectionAcquisitions);
+            Clear(runtimeConnectionAcquisitions);
+            var healthRead = health.GetAsync().AsTask();
+            await Task.Delay(TimeSpan.FromMilliseconds(150));
+            Assert.False(
+                healthRead.IsCompleted,
+                $"A public health read acquired a ninth connection from a pool capped at {ConstrainedPoolSize}.");
+
+            await heldConnections[^1].DisposeAsync();
+            heldConnections.RemoveAt(heldConnections.Count - 1);
+            var snapshot = await healthRead.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(expectedDueCount, snapshot.DueDispatchCount);
+            Assert.True(
+                statusConnectionAcquisitions.TryDequeue(out var constrainedWait),
+                "The pool-exhaustion proof did not observe the blocked schema-status acquisition.");
+            Assert.True(
+                constrainedWait >= TimeSpan.FromMilliseconds(100),
+                $"The constrained pool acquisition reported only {constrainedWait.TotalMilliseconds:N1} ms of wait.");
+            Assert.True(
+                runtimeConnectionAcquisitions.TryDequeue(out _),
+                "The pool-exhaustion proof did not observe the runtime-health acquisition after recovery.");
+        }
+        finally
+        {
+            foreach (var connection in heldConnections)
+            {
+                await connection.DisposeAsync();
+            }
+
+            Clear(statusConnectionAcquisitions);
+            Clear(runtimeConnectionAcquisitions);
+        }
+    }
+
+    private async ValueTask<HealthEvidence[]> MeasureWarmHealthBatchesAsync(
         IDurableRuntimeHealth health,
         ConcurrentQueue<TimeSpan> statusConnectionAcquisitions,
         ConcurrentQueue<TimeSpan> runtimeConnectionAcquisitions,
@@ -745,48 +853,102 @@ public sealed class PostgreSqlScaleIntegrationTests
         long expectedDueCount)
     {
         _ = await health.GetAsync();
-        Clear(statusConnectionAcquisitions);
-        Clear(runtimeConnectionAcquisitions);
-        var process = Process.GetCurrentProcess();
-        process.Refresh();
-        var cpuBefore = process.TotalProcessorTime;
-        var allocationsBefore = GC.GetTotalAllocatedBytes(precise: true);
-        var healthRuns = new TimeSpan[WarmSampleCount];
-        var statusPoolRuns = new TimeSpan[WarmSampleCount];
-        var runtimePoolRuns = new TimeSpan[WarmSampleCount];
-        for (var index = 0; index < healthRuns.Length; index++)
+        var batches = new HealthEvidence[WarmBatchCount];
+        for (var batchIndex = 0; batchIndex < batches.Length; batchIndex++)
         {
-            var started = Stopwatch.GetTimestamp();
-            var snapshot = await health.GetAsync();
-            healthRuns[index] = Stopwatch.GetElapsedTime(started);
-            Assert.True(
-                statusConnectionAcquisitions.TryDequeue(out statusPoolRuns[index]),
-                "The public health read did not report its schema-status connection acquisition.");
-            Assert.True(
-                runtimeConnectionAcquisitions.TryDequeue(out runtimePoolRuns[index]),
-                "The public health read did not report its runtime-observation connection acquisition.");
-            Assert.Equal(expectedDueCount, snapshot.DueDispatchCount);
+            Clear(statusConnectionAcquisitions);
+            Clear(runtimeConnectionAcquisitions);
+            var process = Process.GetCurrentProcess();
+            process.Refresh();
+            var cpuBefore = process.TotalProcessorTime;
+            var allocationsBefore = GC.GetTotalAllocatedBytes(precise: true);
+            var healthRuns = new TimeSpan[WarmSamplesPerBatch];
+            var statusPoolRuns = new TimeSpan[WarmSamplesPerBatch];
+            var runtimePoolRuns = new TimeSpan[WarmSamplesPerBatch];
+            for (var sampleIndex = 0; sampleIndex < healthRuns.Length; sampleIndex++)
+            {
+                var started = Stopwatch.GetTimestamp();
+                var snapshot = await health.GetAsync();
+                healthRuns[sampleIndex] = Stopwatch.GetElapsedTime(started);
+                Assert.True(
+                    statusConnectionAcquisitions.TryDequeue(out statusPoolRuns[sampleIndex]),
+                    "The public health read did not report its schema-status connection acquisition.");
+                Assert.True(
+                    runtimeConnectionAcquisitions.TryDequeue(out runtimePoolRuns[sampleIndex]),
+                    "The public health read did not report its runtime-observation connection acquisition.");
+                Assert.Equal(expectedDueCount, snapshot.DueDispatchCount);
+            }
+
+            process.Refresh();
+            batches[batchIndex] = new HealthEvidence(
+                healthRuns,
+                statusPoolRuns,
+                runtimePoolRuns,
+                process.TotalProcessorTime - cpuBefore,
+                GC.GetTotalAllocatedBytes(precise: true) - allocationsBefore,
+                await ReadLockWaitCountAsync(evidenceDataSource));
         }
 
-        process.Refresh();
-        return new HealthEvidence(
-            healthRuns,
-            statusPoolRuns,
-            runtimePoolRuns,
-            process.TotalProcessorTime - cpuBefore,
-            GC.GetTotalAllocatedBytes(precise: true) - allocationsBefore,
-            await ReadLockWaitCountAsync(evidenceDataSource));
+        return batches;
     }
 
-    private void ReportEvidence(string distribution, HealthEvidence evidence)
+    private void AssertWarmBatches(string distribution, HealthEvidence[] batches)
+    {
+        Assert.Equal(WarmBatchCount, batches.Length);
+        for (var batchIndex = 0; batchIndex < batches.Length; batchIndex++)
+        {
+            var evidence = batches[batchIndex];
+            ReportEvidence(distribution, batchIndex + 1, evidence);
+            AssertWarmP95BelowOneSecond(
+                $"{distribution} batch {batchIndex + 1}",
+                evidence.HealthRuns);
+            Assert.Equal(0, evidence.LockWaitCount);
+        }
+    }
+
+    private void WriteRunnerProfile()
     {
         _output.WriteLine(
-            $"{distribution} warm ({evidence.HealthRuns.Length} samples): " +
-            $"health p50/p95/p99={FormatPercentiles(evidence.HealthRuns)}, " +
-            $"schema-status pool p50/p95/p99={FormatPercentiles(evidence.StatusPoolRuns)}, " +
-            $"runtime-observation pool p50/p95/p99={FormatPercentiles(evidence.RuntimePoolRuns)}, " +
-            $"cpu={evidence.CpuDelta}, allocations={evidence.AllocatedBytes:N0} bytes, " +
-            $"lock waits={evidence.LockWaitCount}.");
+            "runtime-health-scale-evidence: " +
+            JsonSerializer.Serialize(new
+            {
+                schemaVersion = 1,
+                kind = "runner-profile",
+                postgresImage = PostgreSqlTestContainerImage.Reference,
+                os = RuntimeInformation.OSDescription,
+                architecture = RuntimeInformation.OSArchitecture.ToString(),
+                framework = RuntimeInformation.FrameworkDescription,
+                processorCount = Environment.ProcessorCount,
+                constrainedPoolSize = ConstrainedPoolSize,
+                warmBatchCount = WarmBatchCount,
+                samplesPerBatch = WarmSamplesPerBatch,
+            }));
+    }
+
+    private void ReportEvidence(string distribution, int batch, HealthEvidence evidence)
+    {
+        _output.WriteLine(
+            "runtime-health-scale-evidence: " +
+            JsonSerializer.Serialize(new
+            {
+                schemaVersion = 1,
+                kind = "warm-health-batch",
+                distribution,
+                batch,
+                sampleCount = evidence.HealthRuns.Length,
+                healthP50Milliseconds = Percentile(evidence.HealthRuns, 0.50).TotalMilliseconds,
+                healthP95Milliseconds = Percentile(evidence.HealthRuns, 0.95).TotalMilliseconds,
+                healthP99Milliseconds = Percentile(evidence.HealthRuns, 0.99).TotalMilliseconds,
+                statusPoolP50Milliseconds = Percentile(evidence.StatusPoolRuns, 0.50).TotalMilliseconds,
+                statusPoolP95Milliseconds = Percentile(evidence.StatusPoolRuns, 0.95).TotalMilliseconds,
+                statusPoolP99Milliseconds = Percentile(evidence.StatusPoolRuns, 0.99).TotalMilliseconds,
+                runtimePoolP50Milliseconds = Percentile(evidence.RuntimePoolRuns, 0.50).TotalMilliseconds,
+                runtimePoolP95Milliseconds = Percentile(evidence.RuntimePoolRuns, 0.95).TotalMilliseconds,
+                runtimePoolP99Milliseconds = Percentile(evidence.RuntimePoolRuns, 0.99).TotalMilliseconds,
+                cpuMilliseconds = evidence.CpuDelta.TotalMilliseconds,
+                evidence.AllocatedBytes,
+                evidence.LockWaitCount,
+            }));
     }
 
     private void ReportMixedEvidence(
@@ -796,22 +958,33 @@ public sealed class PostgreSqlScaleIntegrationTests
         TimeSpan cpuDelta,
         long allocatedBytes,
         long lockWaitsBefore,
-        long lockWaitsAfter)
+        long lockWaitsAfter,
+        long maximumObservedLockWaits)
     {
         var healthRuns = runs.Select(run => run.Elapsed).ToArray();
         _output.WriteLine(
-            $"mixed public GetAsync ({runs.Length} concurrent samples): " +
-            $"health p50/p95/p99={FormatPercentiles(healthRuns)}, " +
-            $"schema-status pool p50/p95/p99={FormatPercentiles(statusConnectionAcquisitions)}, " +
-            $"runtime-observation pool p50/p95/p99={FormatPercentiles(runtimeConnectionAcquisitions)}, " +
-            $"cpu={cpuDelta}, allocations={allocatedBytes:N0} bytes, " +
-            $"lock waits before/after={lockWaitsBefore}/{lockWaitsAfter}.");
+            "runtime-health-scale-evidence: " +
+            JsonSerializer.Serialize(new
+            {
+                schemaVersion = 1,
+                kind = "mixed-concurrency",
+                sampleCount = runs.Length,
+                healthP50Milliseconds = Percentile(healthRuns, 0.50).TotalMilliseconds,
+                healthP95Milliseconds = Percentile(healthRuns, 0.95).TotalMilliseconds,
+                healthP99Milliseconds = Percentile(healthRuns, 0.99).TotalMilliseconds,
+                statusPoolP50Milliseconds = Percentile(statusConnectionAcquisitions, 0.50).TotalMilliseconds,
+                statusPoolP95Milliseconds = Percentile(statusConnectionAcquisitions, 0.95).TotalMilliseconds,
+                statusPoolP99Milliseconds = Percentile(statusConnectionAcquisitions, 0.99).TotalMilliseconds,
+                runtimePoolP50Milliseconds = Percentile(runtimeConnectionAcquisitions, 0.50).TotalMilliseconds,
+                runtimePoolP95Milliseconds = Percentile(runtimeConnectionAcquisitions, 0.95).TotalMilliseconds,
+                runtimePoolP99Milliseconds = Percentile(runtimeConnectionAcquisitions, 0.99).TotalMilliseconds,
+                cpuMilliseconds = cpuDelta.TotalMilliseconds,
+                allocatedBytes,
+                lockWaitsBefore,
+                lockWaitsAfter,
+                maximumObservedLockWaits,
+            }));
     }
-
-    private static string FormatPercentiles(TimeSpan[] samples) =>
-        $"{Percentile(samples, 0.50).TotalMilliseconds:N1}/" +
-        $"{Percentile(samples, 0.95).TotalMilliseconds:N1}/" +
-        $"{Percentile(samples, 0.99).TotalMilliseconds:N1} ms";
 
     private static void Clear(ConcurrentQueue<TimeSpan> samples)
     {
@@ -858,6 +1031,29 @@ public sealed class PostgreSqlScaleIntegrationTests
           AND datname = current_database()
           AND pid <> pg_backend_pid();
         """);
+
+    private static async Task<long> MonitorMaximumLockWaitCountAsync(
+        NpgsqlDataSource dataSource,
+        Task start,
+        CancellationToken cancellationToken)
+    {
+        await start;
+        var maximum = 0L;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            maximum = Math.Max(maximum, await ReadLockWaitCountAsync(dataSource));
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(10), cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+
+        return maximum;
+    }
 
     private static async ValueTask MakeRuntimeHealthBacklogDenseAsync(
         NpgsqlDataSource dataSource,
