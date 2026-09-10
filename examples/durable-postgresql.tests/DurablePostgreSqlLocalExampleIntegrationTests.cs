@@ -204,8 +204,11 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
                       FOR EACH ROW EXECUTE FUNCTION appsurface_durable.test_local_proof_corrupt_flow();
                   """);
 
+        using var output = new StringWriter();
         using var error = new StringWriter();
+        var previousOutput = Console.Out;
         var previousError = Console.Error;
+        Console.SetOut(output);
         Console.SetError(error);
         int exitCode;
         try
@@ -214,10 +217,16 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
         }
         finally
         {
+            Console.SetOut(previousOutput);
             Console.SetError(previousError);
         }
 
         Assert.Equal(1, exitCode);
+        Assert.Contains("[verify-local] admission-aware pass: Completed", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "[verify-local] direct pass completed Work and Flow with zero failures",
+            output.ToString(),
+            StringComparison.Ordinal);
         Assert.Contains("Command failed with InvalidOperationException.", error.ToString(), StringComparison.Ordinal);
     }
 

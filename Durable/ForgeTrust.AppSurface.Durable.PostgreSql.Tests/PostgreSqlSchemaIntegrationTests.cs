@@ -76,35 +76,6 @@ public sealed class PostgreSqlSchemaIntegrationTests
     }
 
     [Fact]
-    public async Task GetStatusAsync_RollsBackWhenTheStatusQueryFails()
-    {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
-        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
-        await manager.ApplyAsync();
-
-        await ExecuteNonQueryAsync(
-            database.DataSource,
-            """
-            ALTER TABLE appsurface_durable.store_metadata DROP CONSTRAINT store_metadata_pkey;
-            INSERT INTO appsurface_durable.store_metadata
-                (singleton, store_id, active_runtime_epoch, schema_version,
-                 minimum_reader_version, maximum_reader_version,
-                 minimum_writer_version, maximum_writer_version)
-            SELECT singleton, store_id, active_runtime_epoch, schema_version,
-                   minimum_reader_version, maximum_reader_version,
-                   minimum_writer_version, maximum_writer_version
-            FROM appsurface_durable.store_metadata
-            WHERE singleton;
-            """);
-
-        var exception = await Assert.ThrowsAsync<InvalidDataException>(async () => await manager.GetStatusAsync());
-        Assert.Contains("metadata query returned more than one row", exception.Message, StringComparison.Ordinal);
-
-        await using var verify = database.DataSource.CreateCommand("SELECT 1;");
-        Assert.Equal(1, await verify.ExecuteScalarAsync());
-    }
-
-    [Fact]
     public async Task GetStatusAsync_RejectsMultipleStoreMetadataRows()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();

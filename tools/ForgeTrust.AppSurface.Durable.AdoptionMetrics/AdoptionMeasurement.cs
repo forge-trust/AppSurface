@@ -370,30 +370,55 @@ internal static class AdoptionMeasurementWriter
         ArgumentNullException.ThrowIfNull(result);
 
         var normalizedOutputPath = Path.GetFullPath(outputPath);
-        var outputDirectory = Path.GetDirectoryName(normalizedOutputPath);
-        if (outputDirectory is not null)
-        {
-            Directory.CreateDirectory(outputDirectory);
-            RejectSymbolicLink(outputDirectory, "output directory");
-        }
-
-        RejectSymbolicLink(normalizedOutputPath, "output file");
-        var json = JsonSerializer.Serialize(result, SerializerOptions).ReplaceLineEndings("\n") + "\n";
-        var temporaryPath = Path.Combine(
-            outputDirectory ?? Directory.GetCurrentDirectory(),
-            $".{Path.GetFileName(normalizedOutputPath)}.{Guid.NewGuid():N}.tmp");
         try
         {
-            await File.WriteAllTextAsync(
-                temporaryPath,
-                json,
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-                cancellationToken);
-            File.Move(temporaryPath, normalizedOutputPath, overwrite: true);
+            var outputDirectory = Path.GetDirectoryName(normalizedOutputPath);
+            if (outputDirectory is not null)
+            {
+                Directory.CreateDirectory(outputDirectory);
+                RejectSymbolicLink(outputDirectory, "output directory");
+            }
+
+            RejectSymbolicLink(normalizedOutputPath, "output file");
+            var json = JsonSerializer.Serialize(result, SerializerOptions).ReplaceLineEndings("\n") + "\n";
+            var temporaryPath = Path.Combine(
+                outputDirectory ?? Directory.GetCurrentDirectory(),
+                $".{Path.GetFileName(normalizedOutputPath)}.{Guid.NewGuid():N}.tmp");
+            try
+            {
+                await File.WriteAllTextAsync(
+                    temporaryPath,
+                    json,
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                    cancellationToken);
+                File.Move(temporaryPath, normalizedOutputPath, overwrite: true);
+            }
+            finally
+            {
+                TryDeleteTemporaryFile(temporaryPath);
+            }
         }
-        finally
+        catch (AdoptionMeasurementException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new AdoptionMeasurementException(
+                $"Could not write adoption measurement output '{normalizedOutputPath}'.",
+                exception);
+        }
+    }
+
+    private static void TryDeleteTemporaryFile(string temporaryPath)
+    {
+        try
         {
             File.Delete(temporaryPath);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Preserve the write or move failure. A later run uses a unique temporary name.
         }
     }
 

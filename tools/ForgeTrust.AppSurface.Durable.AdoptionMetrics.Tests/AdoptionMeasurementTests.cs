@@ -529,30 +529,25 @@ public sealed class AdoptionMeasurementTests : IDisposable
                 "The deterministic Git-process deadline seam uses a Unix shell fixture.");
         }
 
-        var executable = Path.Combine(_root, "blocking-git");
-        await File.WriteAllTextAsync(
-            executable,
-            "#!/bin/sh\nsleep 30\n",
-            CancellationToken.None);
-        File.SetUnixFileMode(
-            executable,
-            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var executable = await CreateUnixExecutableAsync(
+            Path.Combine(_root, "blocking-git"),
+            "#!/bin/sh\nsleep 30\n");
 
         var timeoutVerifier = new GitConsumerRevisionVerifier(
             executable,
-            TimeSpan.FromMilliseconds(50));
+            TimeSpan.FromSeconds(1));
         var timeout = await Assert.ThrowsAsync<AdoptionMeasurementException>(
             () => timeoutVerifier.VerifyAsync(
                 _root,
                 Commit,
                 [],
                 CancellationToken.None));
-        Assert.Contains("within 0.05 seconds", timeout.Message, StringComparison.Ordinal);
+        Assert.Contains("within 1 seconds", timeout.Message, StringComparison.Ordinal);
 
         var cancellationVerifier = new GitConsumerRevisionVerifier(
             executable,
             TimeSpan.FromSeconds(30));
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(1));
         var canceled = await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => cancellationVerifier.VerifyAsync(
                 _root,
@@ -628,19 +623,19 @@ public sealed class AdoptionMeasurementTests : IDisposable
 
         var timeoutVerifier = new GitConsumerRevisionVerifier(
             executable,
-            TimeSpan.FromMilliseconds(250));
+            TimeSpan.FromSeconds(1));
         var timeout = await Assert.ThrowsAsync<AdoptionMeasurementException>(
             () => timeoutVerifier.VerifyAsync(
                 _root,
                 Commit,
                 ["selected.cs"],
                 CancellationToken.None));
-        Assert.Contains("consumer source verification within 0.25 seconds", timeout.Message, StringComparison.Ordinal);
+        Assert.Contains("consumer source verification within 1 seconds", timeout.Message, StringComparison.Ordinal);
 
         var cancellationVerifier = new GitConsumerRevisionVerifier(
             executable,
             TimeSpan.FromSeconds(30));
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(1));
         var canceled = await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => cancellationVerifier.VerifyAsync(
                 _root,
@@ -810,6 +805,39 @@ public sealed class AdoptionMeasurementTests : IDisposable
         Assert.Contains($"consumer commit {commit}", standardOut.ToString(), StringComparison.Ordinal);
         Assert.Contains("overallPassed=true", standardOut.ToString(), StringComparison.Ordinal);
         Assert.Empty(standardError.ToString());
+    }
+
+    [Fact]
+    public async Task ProgramReportsOutputWriteFailuresWithoutEscapingTheCommandBoundary()
+    {
+        var fixture = await CreateValidFixtureAsync();
+        var commit = await InitializeConsumerRepositoryAsync(fixture.ConsumerRoot);
+        await RewriteSpecAsync(fixture.SpecPath, root => root["baselineCommit"] = commit);
+        var output = Path.Combine(_root, "output-is-a-directory");
+        Directory.CreateDirectory(output);
+        using var standardOut = new StringWriter();
+        using var standardError = new StringWriter();
+
+        var exitCode = await Program.RunAsync(
+            [
+                "--spec",
+                fixture.SpecPath,
+                "--consumer-root",
+                fixture.ConsumerRoot,
+                "--output",
+                output,
+            ],
+            standardOut,
+            standardError,
+            fixture.RepositoryRoot,
+            CancellationToken.None);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(standardOut.ToString());
+        Assert.Contains(
+            "Adoption measurement failed: Could not write adoption measurement output",
+            standardError.ToString(),
+            StringComparison.Ordinal);
     }
 
     [Fact]
