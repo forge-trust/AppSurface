@@ -31,16 +31,20 @@ internal static class BillingLifecycleExecutableContractSketch
             var snapshot = await health.GetAsync(cancellationToken);
             return snapshot.IsReady ? Results.Ok() : Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
         });
-        app.MapPost("/_internal/durable/billing/pump", async (IDurableRuntimeHealth health, IDurableExternalActivationService activation, CancellationToken cancellationToken) =>
+        app.MapPost("/_internal/durable/billing/pump", async (IDurableRuntimePumpAdmission admission, CancellationToken cancellationToken) =>
         {
             using var requestBudget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             requestBudget.CancelAfter(BillingLifecycleHostPolicy.RequestBudget);
-            var snapshot = await health.GetAsync(requestBudget.Token);
-            if (!snapshot.CanEnableActivation) return BillingLifecycleActivationResponses.Incompatible(snapshot);
-            if (!snapshot.CanAttemptPump) return BillingLifecycleActivationResponses.Refused(snapshot);
-            var request = new DurableExternalActivationRequest(maximumItems, BillingLifecycleHostPolicy.PumpDiscoveryBudget, DurableRuntimeSurface.Work);
-            var result = await activation.ActivateAsync(request, requestBudget.Token);
-            return BillingLifecycleActivationResponses.Map(result);
+            var request = new DurableRuntimePumpRequest(maximumItems, BillingLifecycleHostPolicy.PumpDiscoveryBudget, DurableRuntimeSurface.Work);
+            var attempt = await admission.TryRunOnceAsync(request, requestBudget.Token);
+            return attempt.Kind switch
+            {
+                DurableRuntimePumpAttemptKind.Completed => BillingLifecycleActivationResponses.Completed(attempt.Result!),
+                DurableRuntimePumpAttemptKind.Refused => BillingLifecycleActivationResponses.Refused(),
+                DurableRuntimePumpAttemptKind.Unavailable => BillingLifecycleActivationResponses.Unavailable(attempt.ProblemCode!),
+                DurableRuntimePumpAttemptKind.Incompatible => BillingLifecycleActivationResponses.Incompatible(attempt.ProblemCode!),
+                _ => throw new UnreachableException(),
+            };
         })
         .RequireAuthorization(BillingLifecycleAuthorization.ActivationPolicy);
     }

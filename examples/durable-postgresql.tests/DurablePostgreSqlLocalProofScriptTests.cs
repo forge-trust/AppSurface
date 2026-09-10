@@ -204,7 +204,21 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
         startInfo.ArgumentList.Add(scriptPath);
 
         using var process = Process.Start(startInfo)!;
-        await process.WaitForExitAsync();
+        try
+        {
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        catch
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync();
+            }
+
+            throw;
+        }
+
         var error = await process.StandardError.ReadToEndAsync();
 
         Assert.True(process.ExitCode == 0, error);

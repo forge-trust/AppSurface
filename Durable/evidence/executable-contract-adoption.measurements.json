@@ -43,7 +43,7 @@
       "relativePath": "Durable/evidence/executable-contract-adoption.sketch.cs",
       "startToken": "// appsurface-adoption:external-activation-mapping:start",
       "endToken": "// appsurface-adoption:external-activation-mapping:end",
-      "lineCount": 20,
+      "lineCount": 24,
       "limit": 25,
       "passed": true
     },

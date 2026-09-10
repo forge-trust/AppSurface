@@ -78,14 +78,16 @@ comments and braces.
 | Touchpoint | Baseline | Proposed | Limit | Interpretation |
 | --- | ---: | ---: | ---: | --- |
 | Registration | 6 | 10 | 25 | One immutable definition closes Work facts and feeds one binding |
-| External-activation mapping | 15 | 20 | 25 | The sketch adds explicit readiness, activation admission, request deadline, pump budget, and authorization |
+| External-activation mapping | 15 | 24 | 25 | The sketch keeps readiness separate, calls authoritative admission directly, and makes the request deadline, pump budget, four outcomes, and authorization explicit |
 | Primary lifecycle test | 25 | 15 | 25 | One scenario removes hand-built health and pump fixtures while asserting the readiness transition |
 
 All proposed regions pass the 25-line readability guardrail. The external
-mapping intentionally grows by five lines: the baseline omits several safety
-decisions that the proposal makes visible. Line count is secondary; a shorter
-mapping that hides health, deadline, admission, or authorization policy would
-fail this evidence.
+mapping intentionally grows by nine lines: the baseline omits several safety
+decisions that the proposal makes visible. The readiness route is a separate
+observation; the activation route calls authoritative admission directly and
+handles its four closed outcomes without a health check-then-act race. Line
+count is secondary; a shorter mapping that hides the deadline, admission,
+outcomes, or authorization policy would fail this evidence.
 
 ## Ownership boundary
 
@@ -93,8 +95,8 @@ The sketch genericises only three reusable touchpoints:
 
 1. `DurableWorkDefinition<TWork, TResult>` owns immutable registration and
    request defaults.
-2. Canonical health assessments and a transport-neutral activation service
-   expose safe host decisions while the direct route keeps policy visible.
+2. Canonical health assessments and admission-aware pumping expose safe host
+   decisions while the direct route keeps transport policy visible.
 3. `DurableHostScenario` owns deterministic Durable health/pump test fixtures.
 
 The following remain explicitly application-owned and outside the measured
