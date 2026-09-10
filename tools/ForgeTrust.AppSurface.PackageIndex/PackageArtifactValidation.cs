@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Text;
+using System.Text.Json;
 using System.Xml;
 using System.Xml.Linq;
 
@@ -13,8 +14,10 @@ namespace ForgeTrust.AppSurface.PackageIndex;
 internal sealed class PackageArtifactValidator
 {
     private const string RequiredPackageProjectUrl = "https://appsurface.dev";
+    private const string TailwindMainPackageId = "ForgeTrust.AppSurface.Web.Tailwind";
     private const string TailwindRuntimePackagePrefix = "ForgeTrust.AppSurface.Web.Tailwind.Runtime.";
     private const int MaxNoticeBytes = 256 * 1024;
+    private const int MaxRequiredPackageEntryBytes = 1024 * 1024;
 
     private static readonly IReadOnlyDictionary<string, string> TailwindRuntimeBinaryNames =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -223,6 +226,8 @@ internal sealed class PackageArtifactValidator
             throw new PackageIndexException(
                 $"Package '{expected.PackageId}' is missing required payload '{expectedPayloadPath}'.");
         }
+
+        ValidateTailwindMainPackageContract(expected.PackageId, inspected, repositoryRoot);
 
         foreach (var expectedDependency in expected.ExpectedDependencyPackageIds)
         {
@@ -1265,6 +1270,226 @@ internal sealed class PackageArtifactValidator
         }
 
         return $"runtimes/{rid}/native/{binaryName}";
+    }
+
+    private static void ValidateTailwindMainPackageContract(string packageId, InspectedPackage inspected, string? repositoryRoot)
+    {
+        if (!string.Equals(packageId, TailwindMainPackageId, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var requiredEntries = new[]
+        {
+            "build/tailwind.release.json",
+            "build/tailwind.version",
+            "build/ForgeTrust.AppSurface.Web.Tailwind.targets"
+        };
+        var missingEntry = requiredEntries.FirstOrDefault(required => !inspected.EntryPaths.Contains(required, StringComparer.OrdinalIgnoreCase));
+        if (missingEntry is not null)
+        {
+            throw new PackageIndexException(
+                $"Package '{packageId}' is missing required host-scoped Tailwind asset '{missingEntry}'.");
+        }
+
+        if (inspected.EntryPaths.Any(static entry => entry.StartsWith("runtimes/", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new PackageIndexException(
+                $"Package '{packageId}' must not contain a native Tailwind runtime payload. Use the verified host cache or a direct companion package.");
+        }
+
+        if (inspected.Dependencies.Keys.Any(static dependency => dependency.StartsWith(TailwindRuntimePackagePrefix, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new PackageIndexException(
+                $"Package '{packageId}' must not depend on Tailwind runtime companion packages.");
+        }
+
+        var packedManifest = ReadPackageEntryBytes(inspected.PackagePath, "build/tailwind.release.json", packageId);
+        var packedVersion = Encoding.UTF8.GetString(ReadPackageEntryBytes(inspected.PackagePath, "build/tailwind.version", packageId)).Trim();
+        string manifestVersion;
+        try
+        {
+            using var document = JsonDocument.Parse(packedManifest);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidDataException("The manifest root must be a JSON object.");
+            }
+
+            var version = document.RootElement.GetProperty("version");
+            if (version.ValueKind != JsonValueKind.String)
+            {
+                throw new InvalidDataException("The version property must be a JSON string.");
+            }
+
+            manifestVersion = version.GetString()
+                ?? throw new InvalidDataException("The version property is missing.");
+            if (string.IsNullOrWhiteSpace(manifestVersion))
+            {
+                throw new InvalidDataException("The version property must not be empty or whitespace.");
+            }
+
+            ValidateTailwindReleaseManifestContract(document.RootElement, manifestVersion);
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidDataException or KeyNotFoundException or InvalidOperationException)
+        {
+            throw new PackageIndexException(
+                $"Package '{packageId}' contains an invalid build/tailwind.release.json manifest: {ex.Message}");
+        }
+
+        if (!string.Equals(manifestVersion, packedVersion, StringComparison.Ordinal))
+        {
+            throw new PackageIndexException(
+                $"Package '{packageId}' has inconsistent Tailwind version metadata: build/tailwind.release.json is '{manifestVersion}', while build/tailwind.version is '{packedVersion}'.");
+        }
+
+        if (string.IsNullOrWhiteSpace(repositoryRoot))
+        {
+            return;
+        }
+
+        var sourceManifestPath = Path.Join(repositoryRoot, "Web", "ForgeTrust.AppSurface.Web.Tailwind", "tailwind.release.json");
+        if (!File.Exists(sourceManifestPath))
+        {
+            throw new PackageIndexException(
+                $"Package '{packageId}' requires source manifest '{Path.GetRelativePath(repositoryRoot, sourceManifestPath)}' for byte-identity validation.");
+        }
+
+        if (!packedManifest.AsSpan().SequenceEqual(File.ReadAllBytes(sourceManifestPath)))
+        {
+            throw new PackageIndexException(
+                $"Package '{packageId}' build/tailwind.release.json does not byte-match the checked-in source manifest.");
+        }
+    }
+
+    private static void ValidateTailwindReleaseManifestContract(JsonElement manifest, string version)
+    {
+        if (!manifest.TryGetProperty("schemaVersion", out var schemaVersion)
+            || schemaVersion.ValueKind != JsonValueKind.Number
+            || !schemaVersion.TryGetInt32(out var schemaVersionValue))
+        {
+            throw new InvalidDataException("The schemaVersion property must be a JSON integer.");
+        }
+
+        if (schemaVersionValue != 1)
+        {
+            throw new InvalidDataException($"Unsupported Tailwind release manifest schema '{schemaVersionValue}'.");
+        }
+
+        if (!IsCanonicalTailwindVersion(version))
+        {
+            throw new InvalidDataException("The Tailwind release manifest version is not canonical stable major.minor.patch.");
+        }
+
+        var baseUrl = GetRequiredManifestString(manifest, "baseUrl");
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri)
+            || !string.Equals(baseUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("The Tailwind release manifest baseUrl must be an absolute HTTPS URL.");
+        }
+
+        if (!manifest.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidDataException("The Tailwind release manifest assets property must be a JSON array.");
+        }
+
+        var assetRids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var asset in assets.EnumerateArray())
+        {
+            if (asset.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidDataException("Every Tailwind release manifest asset must be a JSON object.");
+            }
+
+            var rid = GetRequiredManifestString(asset, "rid");
+            if (!TailwindRuntimeBinaryNames.Keys.Contains(rid, StringComparer.Ordinal)
+                || !assetRids.Add(rid))
+            {
+                throw new InvalidDataException("The Tailwind release manifest has an unsupported or duplicate asset RID.");
+            }
+
+            var binaryName = GetRequiredManifestString(asset, "binaryName");
+            var sha256 = GetRequiredManifestString(asset, "sha256");
+            if (!string.Equals(binaryName, TailwindRuntimeBinaryNames[rid], StringComparison.Ordinal)
+                || !IsLowercaseSha256(sha256))
+            {
+                throw new InvalidDataException($"The Tailwind release manifest asset '{rid}' is invalid.");
+            }
+        }
+
+        if (assetRids.Count != TailwindRuntimeBinaryNames.Count
+            || TailwindRuntimeBinaryNames.Keys.Any(rid => !assetRids.Contains(rid)))
+        {
+            throw new InvalidDataException("The Tailwind release manifest must contain exactly the five supported Tailwind assets.");
+        }
+    }
+
+    private static string GetRequiredManifestString(JsonElement source, string propertyName)
+    {
+        if (!source.TryGetProperty(propertyName, out var property)
+            || property.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(property.GetString()))
+        {
+            throw new InvalidDataException($"The {propertyName} property must be a non-empty JSON string.");
+        }
+
+        return property.GetString()!;
+    }
+
+    private static bool IsCanonicalTailwindVersion(string version)
+    {
+        var parts = version.Split('.');
+        return parts.Length == 3
+            && parts.All(static part => part.Length is > 0 and <= 9
+                && (part.Length == 1 || part[0] != '0')
+                && part.All(static character => character is >= '0' and <= '9'));
+    }
+
+    private static bool IsLowercaseSha256(string value)
+    {
+        return value.Length == 64
+            && value.All(static character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+    }
+
+    /// <summary>
+    /// Reads the bytes of a required package archive entry.
+    /// </summary>
+    /// <param name="packagePath">Path to the package archive.</param>
+    /// <param name="entryPath">Repository-style path of the required archive entry.</param>
+    /// <param name="packageId">Package identifier used in a validation failure message.</param>
+    /// <returns>The archive entry bytes.</returns>
+    /// <exception cref="PackageIndexException">Thrown when the archive does not contain the required entry or its uncompressed contents exceed the validation limit.</exception>
+    internal static byte[] ReadPackageEntryBytes(string packagePath, string entryPath, string packageId)
+    {
+        using var archive = ZipFile.OpenRead(packagePath);
+        var entry = archive.Entries.SingleOrDefault(
+            candidate => string.Equals(candidate.FullName, entryPath, StringComparison.OrdinalIgnoreCase));
+        if (entry is null)
+        {
+            throw new PackageIndexException($"Package '{packageId}' is missing required entry '{entryPath}'.");
+        }
+
+        if (entry.Length > MaxRequiredPackageEntryBytes)
+        {
+            throw new PackageIndexException(
+                $"Package '{packageId}' required entry '{entryPath}' exceeds the {MaxRequiredPackageEntryBytes}-byte validation limit.");
+        }
+
+        using var stream = entry.Open();
+        using var buffer = new MemoryStream();
+        var readBuffer = new byte[81920];
+        int bytesRead;
+        while ((bytesRead = stream.Read(readBuffer, 0, readBuffer.Length)) != 0)
+        {
+            if (buffer.Length > MaxRequiredPackageEntryBytes - bytesRead)
+            {
+                throw new PackageIndexException(
+                    $"Package '{packageId}' required entry '{entryPath}' exceeds the {MaxRequiredPackageEntryBytes}-byte validation limit.");
+            }
+
+            buffer.Write(readBuffer, 0, bytesRead);
+        }
+
+        return buffer.ToArray();
     }
 
     private static string NormalizePackagePath(string entryPath)

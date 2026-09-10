@@ -25,9 +25,6 @@ jobs:
   package-artifacts:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      TailwindRuntimeBinaryResolutionEnabled: "true"
-
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -77,6 +74,7 @@ jobs:
           name: appsurface-package-validation-diagnostics-${{ github.event_name == 'workflow_dispatch' && inputs['package-version'] || format('0.0.0-ci.{0}', github.run_number) }}
           path: |
             ${{ runner.temp }}/package-artifacts/package-validation-report.md
+            ${{ runner.temp }}/package-artifacts/tailwind-package-consumer-proof.md
             ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof.md
             ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof.evidence.json
             ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof/NuGet.tool.config

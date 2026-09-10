@@ -10,20 +10,20 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 /// </remarks>
 internal interface IDurableRuntimeExecutionBoundary
 {
-    /// <summary>Invokes one prepared provider operation and returns its registered encoded terminal payload.</summary>
+    /// <summary>Invokes one prepared provider operation and returns its encoded exit fact.</summary>
     /// <remarks>Forwards cancellation to provider execution and owns no claim, permit, completion, or tracing state.</remarks>
-    ValueTask<DurableEncodedPayload> InvokeAsync(
+    ValueTask<DurableEncodedWorkExit> InvokeExitAsync(
         DurablePreparedWorkInvocation invocation,
         CancellationToken cancellationToken);
 }
 
 internal sealed class UninstrumentedDurableRuntimeExecutionBoundary : IDurableRuntimeExecutionBoundary
 {
-    public ValueTask<DurableEncodedPayload> InvokeAsync(
+    public ValueTask<DurableEncodedWorkExit> InvokeExitAsync(
         DurablePreparedWorkInvocation invocation,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(invocation);
-        return invocation.InvokeAsync(cancellationToken);
+        return invocation.InvokeExitAsync(cancellationToken);
     }
 }

@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Web.Tailwind.Tests;
 
+[Collection(nameof(TailwindCliManagerStaticStateCollection))]
 public class TailwindWatchServiceTests : IDisposable
 {
     private readonly string _testContentRoot = Path.GetFullPath(
@@ -35,7 +36,7 @@ public class TailwindWatchServiceTests : IDisposable
 
         A.CallTo(() => _environment.EnvironmentName).Returns(Environments.Development);
         A.CallTo(() => _environment.ContentRootPath).Returns(_testContentRoot);
-        A.CallTo(() => _cliManager.GetTailwindPath()).Returns("/path/to/tailwind");
+        A.CallTo(() => _cliManager.GetTailwindPathAsync(A<CancellationToken>._)).Returns(Task.FromResult("/path/to/tailwind"));
     }
 
     public void Dispose()
@@ -113,7 +114,7 @@ public class TailwindWatchServiceTests : IDisposable
 
         Assert.True(service.ProcessExecuted);
         Assert.Equal(cliPath, service.ExecutedFileName);
-        A.CallTo(() => _cliManager.GetTailwindPath()).MustNotHaveHappened();
+        A.CallTo(() => _cliManager.GetTailwindPathAsync(A<CancellationToken>._)).MustNotHaveHappened();
     }
 
     [Fact]
@@ -126,7 +127,7 @@ public class TailwindWatchServiceTests : IDisposable
 
         Assert.False(service.ProcessExecuted);
         AssertWarningLogged();
-        A.CallTo(() => _cliManager.GetTailwindPath()).MustNotHaveHappened();
+        A.CallTo(() => _cliManager.GetTailwindPathAsync(A<CancellationToken>._)).MustNotHaveHappened();
     }
 
     [Fact]
@@ -189,7 +190,7 @@ public class TailwindWatchServiceTests : IDisposable
 
         Assert.False(service.ProcessExecuted);
         AssertErrorLogged();
-        A.CallTo(() => _cliManager.GetTailwindPath()).MustNotHaveHappened();
+        A.CallTo(() => _cliManager.GetTailwindPathAsync(A<CancellationToken>._)).MustNotHaveHappened();
     }
 
     [Fact]
@@ -206,7 +207,7 @@ public class TailwindWatchServiceTests : IDisposable
 
         Assert.False(service.ProcessExecuted);
         AssertErrorLogged();
-        A.CallTo(() => _cliManager.GetTailwindPath()).MustNotHaveHappened();
+        A.CallTo(() => _cliManager.GetTailwindPathAsync(A<CancellationToken>._)).MustNotHaveHappened();
     }
 
     [Fact]
@@ -223,7 +224,7 @@ public class TailwindWatchServiceTests : IDisposable
 
         Assert.True(service.ProcessExecuted);
         AssertErrorNotLogged();
-        A.CallTo(() => _cliManager.GetTailwindPath()).MustHaveHappenedOnceExactly();
+        A.CallTo(() => _cliManager.GetTailwindPathAsync(A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
     [Fact]
@@ -237,6 +238,21 @@ public class TailwindWatchServiceTests : IDisposable
         await service.ExecuteAsyncPublic(CancellationToken.None);
 
         Assert.True(service.ProcessExecuted);
+        AssertErrorNotLogged();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DoesNotLogError_WhenCliResolutionIsCanceled()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        A.CallTo(() => _cliManager.GetTailwindPathAsync(A<CancellationToken>._))
+            .Returns(Task.FromCanceled<string>(cancellation.Token));
+        var service = new TestTailwindWatchService(_cliManager, _options, _logger, _environment);
+
+        await service.ExecuteAsyncPublic(cancellation.Token);
+
+        Assert.False(service.ProcessExecuted);
         AssertErrorNotLogged();
     }
 
@@ -260,7 +276,7 @@ public class TailwindWatchServiceTests : IDisposable
     [Fact]
     public async Task ExecuteAsync_LogsError_WhenTailwindPathResolutionThrows()
     {
-        A.CallTo(() => _cliManager.GetTailwindPath()).Throws(new InvalidOperationException("boom"));
+        A.CallTo(() => _cliManager.GetTailwindPathAsync(A<CancellationToken>._)).Returns(Task.FromException<string>(new InvalidOperationException("boom")));
         var service = new TestTailwindWatchService(_cliManager, _options, _logger, _environment);
 
         await service.ExecuteAsyncPublic(CancellationToken.None);
@@ -272,7 +288,7 @@ public class TailwindWatchServiceTests : IDisposable
     [Fact]
     public async Task ExecuteAsync_LogsWarning_WhenTailwindCliIsMissing()
     {
-        A.CallTo(() => _cliManager.GetTailwindPath()).Throws(new FileNotFoundException("missing tailwind"));
+        A.CallTo(() => _cliManager.GetTailwindPathAsync(A<CancellationToken>._)).Returns(Task.FromException<string>(new FileNotFoundException("missing tailwind")));
         var service = new TestTailwindWatchService(_cliManager, _options, _logger, _environment);
 
         await service.ExecuteAsyncPublic(CancellationToken.None);
@@ -301,7 +317,7 @@ public class TailwindWatchServiceTests : IDisposable
     public async Task ExecuteAsync_UsesCmdLauncher_ForWindowsCmdShim()
     {
         TailwindCliManager.IsOSPlatformOverride = platform => platform == OSPlatform.Windows;
-        A.CallTo(() => _cliManager.GetTailwindPath()).Returns(@"C:\tools\tailwindcss.cmd");
+        A.CallTo(() => _cliManager.GetTailwindPathAsync(A<CancellationToken>._)).Returns(Task.FromResult(@"C:\tools\tailwindcss.cmd"));
         var service = new TestTailwindWatchService(_cliManager, _options, _logger, _environment);
 
         await service.ExecuteAsyncPublic(CancellationToken.None);
@@ -317,7 +333,7 @@ public class TailwindWatchServiceTests : IDisposable
     public async Task ExecuteAsync_UsesPowerShellLauncher_ForWindowsPowerShellShim()
     {
         TailwindCliManager.IsOSPlatformOverride = platform => platform == OSPlatform.Windows;
-        A.CallTo(() => _cliManager.GetTailwindPath()).Returns(@"C:\tools\tailwindcss.ps1");
+        A.CallTo(() => _cliManager.GetTailwindPathAsync(A<CancellationToken>._)).Returns(Task.FromResult(@"C:\tools\tailwindcss.ps1"));
         var service = new TestTailwindWatchService(_cliManager, _options, _logger, _environment);
 
         await service.ExecuteAsyncPublic(CancellationToken.None);
@@ -342,6 +358,13 @@ public class TailwindWatchServiceTests : IDisposable
         var result = service.GetPathComparison();
 
         Assert.Equal(expectedComparison, result);
+    }
+
+    [Fact]
+    public void HostPathsAreCaseInsensitive_DefaultImplementation_MatchesOperatingSystem()
+    {
+        var service = new TailwindWatchService(_cliManager, _options, _logger, _environment);
+        Assert.Equal(OperatingSystem.IsWindows(), service.HostPathsAreCaseInsensitive());
     }
 
     [Fact]
@@ -490,4 +513,9 @@ public class TailwindWatchServiceTests : IDisposable
     }
 
     private sealed record LogEntry(LogLevel LogLevel, string Message);
+}
+
+[CollectionDefinition(nameof(TailwindCliManagerStaticStateCollection), DisableParallelization = true)]
+public sealed class TailwindCliManagerStaticStateCollection
+{
 }

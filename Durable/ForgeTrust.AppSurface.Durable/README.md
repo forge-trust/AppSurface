@@ -88,6 +88,57 @@ dotnet test Durable/ForgeTrust.AppSurface.Durable.Tests/ForgeTrust.AppSurface.Du
 Expected result: the named proof passes; no runtime, network call, DDL, poller, or hosted service starts.
 The proof emits `contracts registered; no runtime installed`.
 
+## Exit-aware Work for a proven pre-effect retry
+
+Use `IDurableWorkExitExecutor<TWork,TResult>` only when an executor can state a fact about its own provider I/O.
+It is additive: [`IDurableWorkerExecutor<TWork,TResult>`](../../Workers/ForgeTrust.AppSurface.Workers/IDurableWorkerExecutor.cs)
+remains the right contract for ordinary success-or-exception Work. V1 is deliberately limited to the PostgreSQL
+provider and `ProviderKeyed` Work; `AddDurableWorkExit` fixes that safety class so a caller cannot accidentally apply
+the contract to an idempotent, reconciliation, or manual-resolution registration.
+
+This five-line registration is compiled from the packed adopter proof in
+[`GmailBackfillExitExample.cs`](../packed-consumers/Adopter/GmailBackfillExitExample.cs):
+
+<!-- appsurface:snippet id="durable-work-exit-gmail" file="Durable/packed-consumers/Adopter/GmailBackfillExitExample.cs" marker="durable-work-exit-gmail" lang="csharp" -->
+```csharp
+internal static void Register(IServiceCollection services) =>
+    services.AddDurableWorkExit<GmailBackfillRequest, GmailBackfillResult, GmailBackfillExecutor>(
+        "gmail.sender-list-backfill",
+        "v2",
+        new SystemTextJsonDurablePayloadCodec<GmailBackfillRequest>(
+            "consumer.gmail-backfill.request",
+            "v1",
+            DurableDataClassification.ApprovedApplication,
+            GmailBackfillJsonContext.Default.GmailBackfillRequest,
+            static _ => true),
+        new SystemTextJsonDurablePayloadCodec<GmailBackfillResult>(
+            "consumer.gmail-backfill.result",
+            "v1",
+            DurableDataClassification.ApprovedApplication,
+            GmailBackfillJsonContext.Default.GmailBackfillResult,
+            static _ => true));
+```
+<!-- /appsurface:snippet -->
+
+The executor returns one of four closed facts: `Succeeded(result)`, `RetryBeforeEffect(code)`,
+`FailedTerminal(code)`, or `AmbiguousExternalOutcome(code)`. `RetryBeforeEffect` means the executor can prove it did
+not begin an external provider mutation; read-only provider I/O is allowed. It does not mean that no Durable permit
+was committed. The provider still owns permit,
+claim, cancellation, retry-delay, deadline, and fencing decisions; an exit has no direct state API, custom retry
+delay, hook, metadata envelope, or exception classifier.
+
+Use application-owned, privacy-safe codes such as `app.gmail.sender_list_transient`. Codes use the normal Durable
+identifier alphabet and a 120-character maximum. The reserved `ASDUR` prefix is rejected case-insensitively, so do
+not reuse any provider diagnostic code: those explain provider/runtime facts, while an application exit code explains
+the executor fact. See the [Work protocol's typed
+exit rules](../work-protocol-v1.md#typed-executor-exits) and the [diagnostics catalog](../../troubleshooting/durable-diagnostics.md#exit-aware-work-codes).
+
+Before registering the new immutable Work version, deploy exit-capable Provider/PostgreSQL binaries, confirm every
+worker that can discover the contract has restarted with that capability, then accept the new version. Never convert
+an accepted version in place. A legacy provider that reaches an exit-aware Work through `InvokeAsync` fails safely
+with `DurableWorkExitCompatibilityException`; keep exit-capable workers running until all accepted new-version Work is
+terminal or intentionally suspended before rolling back.
+
 ## Slice 7 discovery boundary
 
 This package is a public preview. Registration is intentionally passive: it installs contract registries, not storage
@@ -116,7 +167,7 @@ source families inherit the audience and compatibility policy shown here.
 |---|---|---|
 | All adopters | `DurableScopeId`, `DurableWorkId`, `DurableCommandId`, `DurableProblem`, `DurableOperationResult<T>`, `DurableProblemCodes` | Opaque identity and safe diagnostics |
 | Serialization authors | `DurableDataClassification`, `DurableEncodedPayload`, `IDurablePayloadCodec`, `IDurablePayloadCodec<T>`, `SystemTextJsonDurablePayloadCodec<T>`, registry types | Explicit, versioned, policy-approved payload bytes |
-| Work authors | `DurableProviderSafety`, retry/state/request/acceptance types, `IDurableWorkClient`, execution/prepared-work/registration/registry types, `DurableServiceCollectionExtensions` | Declare, enqueue, and execute typed Work through a provider adapter |
+| Work authors | `DurableProviderSafety`, retry/state/request/acceptance types, `IDurableWorkClient`, execution/prepared-work/registration/registry types, `DurableWorkExitKind`, `DurableWorkExit<T>`, `DurableEncodedWorkExit`, `IDurableWorkExitExecutor<TWork,TResult>`, `DurableWorkExitCompatibilityException`, and `DurableServiceCollectionExtensions` | Declare, enqueue, and execute typed Work through a provider adapter |
 | Flow authors | Flow identifiers, state/request/result/snapshot/client types; evaluation, activity, event, registration, registry, and determinism-verifier types | Persist one explicit Flow transition at a time |
 | Schedule authors | Schedule shapes/policies/targets, schedule request/result/snapshot/list/explain types, `IDurableScheduleClient`, `DurableScheduleProblemCodes` | Author and inspect versioned schedule intent |
 | Retry-aware clients and providers | `DurableCommandFingerprint`, `DurableCommandFingerprintMatch` | Compare canonical semantic command bytes without treating unknown schemas as equal |

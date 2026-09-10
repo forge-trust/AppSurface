@@ -152,6 +152,26 @@ of silently extending the write outage. Keep writers stopped, inspect the cause,
 Apply schema is forward-only; rolling application code back does not authorize destructive schema rollback. Execute
 generated SQL with a client that stops on the first error; `psql` callers must pass `-v ON_ERROR_STOP=1`.
 
+## Typed Work-exit rollout
+
+PostgreSQL is the V1 provider for the opt-in [typed executor exit contract](../ForgeTrust.AppSurface.Durable/README.md#exit-aware-work-for-a-proven-pre-effect-retry). It calls the Provider SPI's `InvokeExitAsync` only after
+recording the existing effect permit, then translates the fact once through the existing completion path—no schema,
+migration, SQL function, or retry-delay surface is added.
+
+| Executor exit | PostgreSQL completion fact | Resulting provider-owned behavior |
+|---|---|---|
+| `Succeeded(result)` | `Succeeded` | Existing success or cancel-requested-success rules. |
+| `RetryBeforeEffect(code)` | `ProvenNoEffect` | Marks the permit `proven_no_effect` and applies existing retry delay, attempt, deadline, cancellation, history, dispatch, Flow, and Schedule rules. |
+| `FailedTerminal(code)` | `FailedTerminal` | Preserves the post-permit safety matrix; `ProviderKeyed` is suspended because the effect may have occurred. |
+| `AmbiguousExternalOutcome(code)` | `AmbiguousExternalOutcome` | Preserves the existing ambiguity/recovery path and never retries blindly. |
+| Uncaught exception, cancellation, lease loss, codec failure, or legacy-boundary mismatch | `AmbiguousExternalOutcome` / `ASDUR106` | Existing failure behavior; only an explicit retry-before-effect fact can use `ProvenNoEffect`. |
+
+Roll out an exit-aware Work in this order: deploy Provider/PostgreSQL binaries that invoke exits; confirm every
+eligible worker has restarted and captured a capable registry snapshot; register a **new immutable Work version** with
+`AddDurableWorkExit`; then accept that version. Old registries must not discover it. For rollback, stop accepting the
+new version but keep capable workers until its accepted Work is terminal or deliberately suspended. See the
+[protocol's typed-exit rules](../work-protocol-v1.md#typed-executor-exits) and [exit-aware diagnostics](../../troubleshooting/durable-diagnostics.md#exit-aware-work-codes).
+
 Create host principals outside migrations. Use [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) to
 grant the migration-owner, payload-free dispatcher, scoped-runtime, and scoped-retention-operator capabilities. Service roles must not receive
 ownership or `BYPASSRLS`. Transaction-local scope context is defense in depth, not a replacement for application

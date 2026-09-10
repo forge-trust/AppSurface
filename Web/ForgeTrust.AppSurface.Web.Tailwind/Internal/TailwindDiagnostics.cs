@@ -9,15 +9,15 @@ internal static class TailwindDiagnostics
     /// Documentation anchor included in emitted build diagnostics.
     /// </summary>
     public const string HelpUrl =
-        "https://github.com/forge-trust/AppSurface/tree/main/Web/ForgeTrust.AppSurface.Web.Tailwind#tailwind-diagnostics";
+        "https://github.com/forge-trust/AppSurface/tree/main/Web/ForgeTrust.AppSurface.Web.Tailwind#diagnostics";
 
     /// <summary>
-    /// Diagnostic emitted when the build host operating system or architecture has no packaged Tailwind runtime.
+    /// Diagnostic emitted when the build host operating system or architecture has no supported Tailwind release asset.
     /// </summary>
     public const string UnsupportedRid = "ASTW001";
 
     /// <summary>
-    /// Diagnostic emitted when <c>TailwindVersion</c> is missing while build mode is resolving a packaged runtime.
+    /// Diagnostic emitted when <c>TailwindVersion</c> is missing while build mode is resolving the verified host CLI.
     /// </summary>
     public const string MissingVersion = "ASTW002";
 
@@ -25,11 +25,6 @@ internal static class TailwindDiagnostics
     /// Diagnostic emitted when an explicit <c>TailwindCliPath</c> points to a file that does not exist.
     /// </summary>
     public const string InvalidCliPath = "ASTW003";
-
-    /// <summary>
-    /// Diagnostic emitted when no explicit, packaged, project-local, or source-tree Tailwind executable exists.
-    /// </summary>
-    public const string MissingCli = "ASTW004";
 
     /// <summary>
     /// Diagnostic emitted when the resolved Tailwind executable exists but the operating system cannot start it.
@@ -50,6 +45,33 @@ internal static class TailwindDiagnostics
     /// Diagnostic emitted when Tailwind input and output paths resolve to the same file.
     /// </summary>
     public const string SameInputOutput = "ASTW008";
+
+    /// <summary>
+    /// Diagnostic emitted when verified Tailwind CLI acquisition cannot complete.
+    /// </summary>
+    public const string AcquisitionFailed = "ASTW012";
+
+    /// <summary>
+    /// Gets the documented stable, kebab-case classification for an acquisition failure.
+    /// </summary>
+    /// <param name="failure">The resolver failure to render.</param>
+    /// <returns>The finite classification documented for <see cref="AcquisitionFailed"/>.</returns>
+    public static string GetAcquisitionFailureClassification(TailwindCliResolutionFailure failure)
+    {
+        return failure switch
+        {
+            TailwindCliResolutionFailure.InvalidVersion => "invalid-version",
+            TailwindCliResolutionFailure.NoCacheRoot => "no-cache-root",
+            TailwindCliResolutionFailure.InvalidCache => "invalid-cache",
+            TailwindCliResolutionFailure.ChecksumFailure => "checksum-failure",
+            TailwindCliResolutionFailure.NonWritableRoot => "non-writable-root",
+            TailwindCliResolutionFailure.NetworkFailure => "network-failure",
+            TailwindCliResolutionFailure.DownloadSizeLimit => "download-size-limit",
+            TailwindCliResolutionFailure.RetryExhausted => "retry-exhausted",
+            TailwindCliResolutionFailure.LockTimeout => "lock-timeout",
+            _ => throw new ArgumentOutOfRangeException(nameof(failure), failure, "The failure has no ASTW012 classification.")
+        };
+    }
 
     /// <summary>
     /// Formats a stable Tailwind diagnostic message.

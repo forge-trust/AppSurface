@@ -1,0 +1,3 @@
+<!-- appsurface:unreleased-entry section="included" -->
+- [ForgeTrust.AppSurface.Web.Tailwind](../../Web/ForgeTrust.AppSurface.Web.Tailwind/README.md) now resolves its standalone CLI from a verified cache for the machine running the build, so normal consumers no longer restore a native runtime companion into application output. Direct runtime packages remain available for explicit compatibility workflows.
+- Build automation that previously matched the missing-runtime `ASTW004` diagnostic must handle the classified `ASTW012` acquisition diagnostic instead; use the [Tailwind diagnostic guide](../../Web/ForgeTrust.AppSurface.Web.Tailwind/README.md#diagnostics) to distinguish cache, manifest, checksum, and offline recovery actions.

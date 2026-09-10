@@ -136,8 +136,9 @@ public sealed class CoverageSolutionScriptTests
             workflow,
             StringComparison.Ordinal);
         Assert.Matches(
-            "(?s)--no-restore\\s+/p:TailwindRuntimeBinaryResolutionEnabled=false\\s+/p:TailwindEnabled=false\\s+--filter",
+            "(?s)--no-restore\\s+/p:TailwindEnabled=false\\s+--filter",
             workflow);
+        Assert.DoesNotContain("TailwindRuntimeBinaryResolutionEnabled", workflow, StringComparison.Ordinal);
     }
 
     [Fact]

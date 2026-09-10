@@ -14,7 +14,7 @@ context.
 |---|---|---|---|
 | `ASDUR100` | Request validation failed | Default/missing id, unregistered contract, unsafe payload, limit violation, or invalid policy | Correct the caller contract before retrying |
 | `ASDUR102` | Command conflict | A command identity was reused with a different known-schema fingerprint | Reuse the original semantic request or allocate a new command id |
-| `ASDUR106` | Ambiguous external outcome | Provider response was lost after an effect permit | Follow declared provider safety; reconcile or resolve rather than guessing |
+| `ASDUR106` | Ambiguous external outcome | Provider response was lost after an effect permit, or a post-permit executor/runtime failure occurred | Follow declared provider safety; reconcile or resolve rather than guessing |
 | `ASDUR109` | Work contract unavailable | Historical codec/executor registration is absent | Restore that immutable registration or perform an explicit migration |
 | `ASDUR119` | Work discovery contract selection unavailable | PostgreSQL worker activation could not snapshot the complete, exact custom registry contracts | Implement stable `RegisteredContracts`, correct default/duplicate/oversized values, then restart the host |
 | `ASDUR110` | Already terminal | A retry or operator request targets terminal Work | Return terminal truth; never repeat the executor |
@@ -78,6 +78,26 @@ contain default or duplicate pairs, or contain more than 10,000 contracts. An em
 passes quiescent. The provider deliberately snapshots that list
 once, so registry mutation after activation does not change what the host may discover. Correct the registry and restart
 the host. Migration, role, schema, or epoch failures use their own schema/runtime diagnostics instead.
+
+### Exit-aware Work codes
+
+An `IDurableWorkExitExecutor<TWork,TResult>` returns an application-owned code only with a non-success exit. Codes are
+bounded to 120 characters and use Durable's identifier alphabet; a safe example is
+`app.gmail.sender_list_transient`. They must never contain provider responses, payload values, credentials, URLs,
+exception messages, or a code beginning with the reserved `ASDUR` prefix, case-insensitively.
+
+`RetryBeforeEffect` is the sole exit that can enter PostgreSQL's existing `proven_no_effect` retry path. It means the
+executor can prove it did not begin an external provider mutation; read-only provider I/O is allowed. It does not mean
+that Durable did not issue an effect permit. The provider still evaluates cancellation, retry limits, deadline,
+lease/scope/epoch/revision fences, and dispatch state. A
+`FailedTerminal` exit after a permit is not evidence that no external effect occurred; V1's `ProviderKeyed` contract
+therefore preserves ambiguity safety. `AmbiguousExternalOutcome` explicitly preserves the same safety path.
+
+After the effect permit, executor exceptions, cancellation, lease loss, result-serialization failures, and a
+non-success exit invoked through a legacy success-only provider boundary use `ASDUR106`, not an application retry
+code. Registration or codec resolution failures before the permit use `ASDUR109`. Operators should use the
+[typed-exit protocol](../Durable/work-protocol-v1.md#typed-executor-exits) to distinguish a user-returned fact from a
+provider-owned diagnostic.
 
 ### ASDUR210
 

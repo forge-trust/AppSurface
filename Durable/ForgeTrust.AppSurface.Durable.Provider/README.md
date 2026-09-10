@@ -99,7 +99,22 @@ the Durable package's canonical [identifier alphabet and bounds](../ForgeTrust.A
 
 A provider constructs `DurableClaimedWork` only after it owns a validated claim. `Prepare` maps that claim to the
 adopter-facing `DurableWorkExecutionContext` and resolves the registered executor. The resulting
-`DurablePreparedWorkInvocation` owns encoded input and exposes only the public invocation boundary.
+`DurablePreparedWorkInvocation` owns encoded input and exposes the legacy `InvokeAsync` boundary plus
+`InvokeExitAsync` for an opt-in typed Work exit. A provider that implements exits must call `InvokeExitAsync` after its
+effect permit commits. The default `DurablePreparedWork.InvokeExitAsync` implementation wraps a legacy
+`InvokeAsync` success result, so existing registrations remain compatible.
+
+Exit-aware registrations are supported only when the provider explicitly calls `InvokeExitAsync`. Calling the legacy
+success-only method for a non-success exit throws `DurableWorkExitCompatibilityException` with no raw application code
+or payload. After a permit, treat that exception exactly like every other invocation failure: preserve ambiguity rather
+than treating the exit as success or blindly retrying it. The portable [typed-exit contract](../ForgeTrust.AppSurface.Durable/README.md#exit-aware-work-for-a-proven-pre-effect-retry)
+does not grant a provider an arbitrary exit factory, direct Work-state access, or an exception classifier.
+
+| Registration | Provider invocation | Required behavior |
+|---|---|---|
+| Legacy `IDurableWorkerExecutor<TWork,TResult>` | `InvokeAsync` or `InvokeExitAsync` | Existing success/exception behavior; `InvokeExitAsync` wraps success. |
+| Exit-aware `IDurableWorkExitExecutor<TWork,TResult>` | `InvokeExitAsync` | Forward the exact encoded fact to the provider's one authoritative completion translator. |
+| Exit-aware `IDurableWorkExitExecutor<TWork,TResult>` | Legacy `InvokeAsync` | Success is returned; a non-success exit throws the safe compatibility exception. |
 
 The execution identity transition is enforceable: create the first identity from an activity id and current fences,
 then call `Advance` for a later attempt/lease/scope/runtime epoch. The provider key remains exactly the activity id so

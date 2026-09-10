@@ -502,6 +502,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     private readonly TimeSpan _artifactCommitTimeout;
     private readonly TimeSpan _artifactWriteTimeout;
     private readonly Action? _artifactStaged;
+    private readonly Action? _artifactCommitWaitStarted;
     private readonly Action? _artifactIncidentQueued;
     private readonly Action? _artifactResourcesDisposed;
     private readonly Action<string> _bootstrapDirectoryDelete;
@@ -540,6 +541,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     /// <param name="bootstrapDirectoryDelete">Optional test seam used to delete the private bootstrap artifact directory during disposal.</param>
     /// <param name="stagedArtifactDelete">Optional test seam used to delete a failed artifact staging file.</param>
     /// <param name="processCleanupStarted">Optional test seam invoked after terminal cleanup captures its process-lease snapshot.</param>
+    /// <param name="artifactCommitWaitStarted">Optional test seam invoked immediately before output binding attempts to take the artifact-commit gate.</param>
     /// <param name="processKiller">
     /// Optional test-only root-process termination callback. A <see langword="null"/> value uses the default
     /// process-tree cleanup path; callbacks run outside lease locks after one terminal path owns termination, and
@@ -561,7 +563,8 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         Action<string>? bootstrapDirectoryDelete = null,
         Action<string>? stagedArtifactDelete = null,
         Action? processCleanupStarted = null,
-        Action<Process>? processKiller = null)
+        Action<Process>? processKiller = null,
+        Action? artifactCommitWaitStarted = null)
     {
         _mode = mode;
         _heartbeatInterval = heartbeatInterval;
@@ -569,6 +572,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         _console = new CoverageRunConsoleSink(console);
         _timeProvider = timeProvider;
         _artifactStaged = artifactStaged;
+        _artifactCommitWaitStarted = artifactCommitWaitStarted;
         _artifactCommitTimeout = artifactCommitTimeout ?? TimeSpan.FromSeconds(2);
         _artifactWriteTimeout = artifactWriteTimeout ?? TimeSpan.FromSeconds(2);
         _artifactIncidentQueued = artifactIncidentQueued;
@@ -601,6 +605,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     public void BindOutputDirectory(string outputDirectory)
     {
         var destination = Path.Join(outputDirectory, ArtifactName);
+        _artifactCommitWaitStarted?.Invoke();
         if (!_artifactCommitGate.Wait(_artifactCommitTimeout))
         {
             lock (_sync)

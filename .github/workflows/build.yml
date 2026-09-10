@@ -60,7 +60,6 @@ jobs:
           dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
           --configuration Release
           --no-restore
-          /p:TailwindRuntimeBinaryResolutionEnabled=false
           /p:TailwindEnabled=false
           --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests"
           --logger "console;verbosity=detailed"

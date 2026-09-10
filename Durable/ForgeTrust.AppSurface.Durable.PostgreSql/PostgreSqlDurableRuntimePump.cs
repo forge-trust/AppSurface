@@ -479,7 +479,7 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
                 cancellationToken).ConfigureAwait(false);
         }
 
-        DurableEncodedPayload? result = null;
+        DurableEncodedWorkExit? exit = null;
         Exception? failure = null;
         var currentClaim = claim;
         await using (var scope = _scopeFactory.CreateAsyncScope())
@@ -533,7 +533,7 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
             currentClaim = permit.Claim;
             try
             {
-                (result, currentClaim) = await InvokeWithLeaseAndHeartbeatAsync(invocation, currentClaim, cancellationToken)
+                (exit, currentClaim) = await InvokeWithLeaseAndHeartbeatAsync(invocation, currentClaim, cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is not StackOverflowException and not OutOfMemoryException)
@@ -543,7 +543,7 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
         }
 
         var completion = failure is null
-            ? new PostgreSqlWorkCompletion(PostgreSqlWorkCompletionKind.Succeeded, "completed", "{}", result)
+            ? TranslateExit(exit!)
             : new PostgreSqlWorkCompletion(
                 PostgreSqlWorkCompletionKind.AmbiguousExternalOutcome,
                 DurableProblemCodes.AmbiguousExternalOutcome,
@@ -553,13 +553,13 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
         return await CompleteAsync(currentClaim, completion, counts, CancellationToken.None).ConfigureAwait(false);
     }
 
-    private async ValueTask<(DurableEncodedPayload Result, PostgreSqlDurableWorkClaim Claim)> InvokeWithLeaseAndHeartbeatAsync(
+    private async ValueTask<(DurableEncodedWorkExit Exit, PostgreSqlDurableWorkClaim Claim)> InvokeWithLeaseAndHeartbeatAsync(
         DurablePreparedWorkInvocation invocation,
         PostgreSqlDurableWorkClaim claim,
         CancellationToken cancellationToken)
     {
         using var executorStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var running = _executionBoundary.InvokeAsync(invocation, executorStop.Token).AsTask();
+        var running = _executionBoundary.InvokeExitAsync(invocation, executorStop.Token).AsTask();
         var current = claim;
         var heartbeatInterval = _registration.Options.HeartbeatStaleAfter / 3;
         var nextHeartbeat = DateTimeOffset.UtcNow + heartbeatInterval;
@@ -658,6 +658,32 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
             default:
                 throw new InvalidDataException($"Unknown PostgreSQL Work observation outcome '{result.Outcome}'.");
         }
+    }
+
+    private static PostgreSqlWorkCompletion TranslateExit(DurableEncodedWorkExit exit)
+    {
+        ArgumentNullException.ThrowIfNull(exit);
+        return exit.Kind switch
+        {
+            DurableWorkExitKind.Succeeded => new PostgreSqlWorkCompletion(
+                PostgreSqlWorkCompletionKind.Succeeded,
+                "completed",
+                "{}",
+                exit.Result!),
+            DurableWorkExitKind.RetryBeforeEffect => new PostgreSqlWorkCompletion(
+                PostgreSqlWorkCompletionKind.ProvenNoEffect,
+                exit.Code!,
+                "{}"),
+            DurableWorkExitKind.FailedTerminal => new PostgreSqlWorkCompletion(
+                PostgreSqlWorkCompletionKind.FailedTerminal,
+                exit.Code!,
+                "{}"),
+            // Encoded exits use private constructors and validated factories; unknown values remain conservative.
+            _ => new PostgreSqlWorkCompletion(
+                PostgreSqlWorkCompletionKind.AmbiguousExternalOutcome,
+                exit.Code!,
+                "{}"),
+        };
     }
 
     private async ValueTask<TurnOutcome> ProcessFlowTurnAsync(Counts counts, CancellationToken cancellationToken)

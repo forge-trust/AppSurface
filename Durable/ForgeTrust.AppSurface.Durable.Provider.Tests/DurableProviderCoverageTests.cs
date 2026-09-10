@@ -500,6 +500,60 @@ public sealed class DurableProviderCoverageTests
     }
 
     [Fact]
+    public async Task Provider_adapter_invokes_an_explicit_work_exit()
+    {
+        var inputCodec = new StringCodec<TestInput>("test.exit.input", value => value.Value, value => new TestInput(value));
+        var resultCodec = new StringCodec<TestResult>("test.exit.result", value => value.Value, value => new TestResult(value));
+        var registration = new DurableWorkExitRegistration<TestInput, TestResult, RetryExitExecutor>(
+            "test.exit.work",
+            "v2",
+            inputCodec,
+            resultCodec);
+        await using var services = new ServiceCollection().AddSingleton<RetryExitExecutor>().BuildServiceProvider();
+        var claim = new DurableClaimedWork(
+            Scope,
+            Work,
+            "activity",
+            "test.exit.work",
+            "v2",
+            inputCodec.Encode(new TestInput("input")),
+            DurableProviderSafety.ProviderKeyed,
+            2,
+            3,
+            4,
+            "epoch");
+
+        var exit = await DurableProviderWorkAdapter.Prepare(registration, services, claim).InvokeExitAsync();
+
+        Assert.Equal(DurableWorkExitKind.RetryBeforeEffect, exit.Kind);
+        Assert.Equal("app.gmail.sender_list_transient", exit.Code);
+        Assert.Null(exit.Result);
+    }
+
+    [Fact]
+    public async Task Provider_adapter_adapts_legacy_work_to_a_success_exit()
+    {
+        var inputCodec = new StringCodec<TestInput>("test.input", value => value.Value, value => new TestInput(value));
+        var resultCodec = new StringCodec<TestResult>("test.result", value => value.Value, value => new TestResult(value));
+        var registration = new DurableWorkRegistration<TestInput, TestResult, TestExecutor>(
+            "test.work",
+            "v1",
+            DurableProviderSafety.ProviderKeyed,
+            inputCodec,
+            resultCodec);
+        await using var services = new ServiceCollection().AddSingleton<TestExecutor>().BuildServiceProvider();
+
+        var exit = await DurableProviderWorkAdapter.Prepare(
+            registration,
+            services,
+            CreateClaim(inputCodec.Encode(new TestInput("input")))).InvokeExitAsync();
+
+        Assert.Equal(DurableWorkExitKind.Succeeded, exit.Kind);
+        Assert.Null(exit.Code);
+        Assert.Equal(new TestResult("executed:input"), resultCodec.Decode(exit.Result!));
+    }
+
+    [Fact]
     public void Claimed_work_preserves_fences_and_rejects_invalid_values()
     {
         var claim = CreateClaim(Payload);
@@ -746,6 +800,14 @@ public sealed class DurableProviderCoverageTests
             CancellationToken cancellationToken = default) =>
             ValueTask.FromResult(DurableEffectReconciliation<TestResult>.Applied(
                 new TestResult($"reconciled:{work.Payload!.Value}")));
+    }
+
+    private sealed class RetryExitExecutor : IDurableWorkExitExecutor<TestInput, TestResult>
+    {
+        public ValueTask<DurableWorkExit<TestResult>> ExecuteAsync(
+            DurableWorkerEnvelope<TestInput> work,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(DurableWorkExit<TestResult>.RetryBeforeEffect("app.gmail.sender_list_transient"));
     }
 
     private sealed class StringCodec<T>(

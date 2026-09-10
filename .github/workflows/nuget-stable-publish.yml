@@ -115,6 +115,15 @@ jobs:
             exit 1
           fi
 
+  native-host-evidence:
+    needs:
+      - validate-tag
+      - validate-source-ci
+    uses: ./.github/workflows/tailwind-native-host-evidence.yml
+    with:
+      package_version: ${{ needs.validate-tag.outputs.package-version }}
+      source_commit: ${{ needs.validate-tag.outputs.tag-commit }}
+
   validate-source-ci:
     needs: validate-tag
     runs-on: ubuntu-latest
@@ -206,6 +215,7 @@ jobs:
           name: appsurface-stable-validation-diagnostics-${{ needs.validate-tag.outputs.package-version }}
           path: |
             ${{ runner.temp }}/package-artifacts/package-validation-report.md
+            ${{ runner.temp }}/package-artifacts/tailwind-package-consumer-proof.md
             ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof.md
             ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof.evidence.json
             ${{ runner.temp }}/package-artifacts/coverage-cli-consumer-proof/NuGet.tool.config
@@ -348,6 +358,7 @@ jobs:
     needs:
       - validate-tag
       - validate-release-environment
+      - native-host-evidence
       - pack-and-verify
       - prove-docs-archive
     runs-on: ubuntu-latest

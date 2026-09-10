@@ -43,7 +43,7 @@ internal sealed record PostgreSqlTestWorkContract(
 internal sealed class PostgreSqlOpaqueTestCodec(
     string contractName,
     string contractVersion,
-    DurableDataClassification classification = DurableDataClassification.ApprovedApplication) : IDurablePayloadCodec
+    DurableDataClassification classification = DurableDataClassification.ApprovedApplication) : IDurablePayloadCodec<byte[]>
 {
     public Type PayloadType => typeof(byte[]);
 
@@ -55,18 +55,14 @@ internal sealed class PostgreSqlOpaqueTestCodec(
 
     public string RetentionPolicyId => DurableEncodedPayload.DefaultRetentionPolicyId;
 
-    public DurableEncodedPayload EncodeObject(object value)
-    {
-        var bytes = Assert.IsType<byte[]>(value);
-        return new DurableEncodedPayload(
-            ContractName,
-            ContractVersion,
-            Classification,
-            bytes,
-            RetentionPolicyId);
-    }
+    public DurableEncodedPayload Encode(byte[] value) => new(
+        ContractName,
+        ContractVersion,
+        Classification,
+        value,
+        RetentionPolicyId);
 
-    public object DecodeObject(DurableEncodedPayload payload)
+    public byte[] Decode(DurableEncodedPayload payload)
     {
         ArgumentNullException.ThrowIfNull(payload);
         if (!string.Equals(payload.ContractName, ContractName, StringComparison.Ordinal)
@@ -79,6 +75,10 @@ internal sealed class PostgreSqlOpaqueTestCodec(
 
         return payload.Content.ToArray();
     }
+
+    public DurableEncodedPayload EncodeObject(object value) => Encode(Assert.IsType<byte[]>(value));
+
+    public object DecodeObject(DurableEncodedPayload payload) => Decode(payload);
 }
 
 internal sealed class PostgreSqlOpaqueTestWorkRegistration(
