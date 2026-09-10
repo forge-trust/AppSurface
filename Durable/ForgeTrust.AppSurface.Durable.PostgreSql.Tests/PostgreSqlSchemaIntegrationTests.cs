@@ -58,6 +58,24 @@ public sealed class PostgreSqlSchemaIntegrationTests
     }
 
     [Fact]
+    public async Task TransactionBoundSchemaValidation_RejectsAForeignConnection()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await using var firstConnection = await database.DataSource.OpenConnectionAsync();
+        await using var secondConnection = await database.DataSource.OpenConnectionAsync();
+        await using var foreignTransaction = await secondConnection.BeginTransactionAsync();
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
+            async () => await manager.ValidateConnectionAsync(
+                firstConnection,
+                foreignTransaction,
+                CancellationToken.None));
+
+        Assert.Equal("transaction", exception.ParamName);
+    }
+
+    [Fact]
     public async Task ScheduleHistoryPartitionMaintenance_RestoresTheUpcomingPartitionWithForcedRls()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();

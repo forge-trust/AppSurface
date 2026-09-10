@@ -1908,6 +1908,71 @@ public sealed class PostgreSqlDurableRuntimePumpTests
     }
 
     [Fact]
+    public async Task TryRunOnceAsync_RevalidatesSchemaInsideStoreAdmissionAfterPrecheckRace()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "schema-admission-race");
+        var status = await schema.GetStatusAsync();
+        var services = new ServiceCollection();
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.CreateDataSource(),
+            new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-schema-admission-race-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+        var mutatedAfterPrecheck = 0;
+        var racingSchema = new StubSchemaManager(async cancellationToken =>
+        {
+            await schema.ValidateAsync(cancellationToken);
+            if (Interlocked.Exchange(ref mutatedAfterPrecheck, 1) == 0)
+            {
+                await using var makeUnsupported = database.DataSource.CreateCommand(
+                    """
+                    UPDATE appsurface_durable.store_metadata
+                    SET minimum_reader_version = 1,
+                        maximum_reader_version = 1,
+                        minimum_writer_version = 1,
+                        maximum_writer_version = 1
+                    WHERE singleton;
+                    """);
+                Assert.Equal(1, await makeUnsupported.ExecuteNonQueryAsync(cancellationToken));
+            }
+        });
+        var executorCalls = 0;
+        var pump = CreatePump(
+            provider,
+            provider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+            schemaManager: racingSchema,
+            passExecutor: (_, _) =>
+            {
+                Interlocked.Increment(ref executorCalls);
+                return ValueTask.FromResult(
+                    new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
+            });
+
+        var attempt = await pump.TryRunOnceAsync(
+            new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All));
+
+        Assert.Equal(DurableRuntimePumpAttemptKind.Incompatible, attempt.Kind);
+        Assert.Equal(DurableProblemCodes.SchemaVersionUnsupported, attempt.ProblemCode);
+        Assert.Null(attempt.Result);
+        Assert.Equal(1, mutatedAfterPrecheck);
+        Assert.Equal(0, executorCalls);
+        await using var heartbeatCount = database.DataSource.CreateCommand(
+            "SELECT count(*) FROM appsurface_durable.runtime_heartbeat WHERE worker_id = @worker_id;");
+        heartbeatCount.Parameters.AddWithValue("worker_id", "runtime-pump-schema-admission-race-worker");
+        Assert.Equal(0, (long)(await heartbeatCount.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
     public async Task PumpProjections_RefuseDrainingWorkerWithoutEnteringExecution()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();

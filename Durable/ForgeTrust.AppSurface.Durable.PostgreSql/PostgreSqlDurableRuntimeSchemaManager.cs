@@ -235,9 +235,38 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         }
     }
 
-    private async ValueTask ValidateConnectionAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    private ValueTask ValidateConnectionAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken) =>
+        ValidateConnectionCoreAsync(connection, transaction: null, cancellationToken);
+
+    /// <summary>
+    /// Validates schema compatibility on the connection and transaction that already hold runtime admission's
+    /// migration fence.
+    /// </summary>
+    internal ValueTask ValidateConnectionAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        CancellationToken cancellationToken)
     {
-        var status = await ReadStatusAsync(connection, cancellationToken).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(transaction);
+        if (!ReferenceEquals(transaction.Connection, connection))
+        {
+            throw new ArgumentException(
+                "The schema-validation transaction must belong to the supplied connection.",
+                nameof(transaction));
+        }
+
+        return ValidateConnectionCoreAsync(connection, transaction, cancellationToken);
+    }
+
+    private async ValueTask ValidateConnectionCoreAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        var status = await ReadStatusAsync(connection, cancellationToken, transaction).ConfigureAwait(false);
         if (!status.IsCompatible)
         {
             throw new DurableRuntimeSchemaException(status);
@@ -273,7 +302,10 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         return (reader.GetGuid(0), reader.GetFieldValue<DateTimeOffset>(1));
     }
 
-    private async ValueTask<DurableRuntimeSchemaStatus> ReadStatusAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    private async ValueTask<DurableRuntimeSchemaStatus> ReadStatusAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken,
+        NpgsqlTransaction? transaction = null)
     {
         await using var existence = new NpgsqlCommand(
             """
@@ -281,7 +313,8 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
                    to_regclass('appsurface_durable.schema_migration') IS NOT NULL,
                    to_regclass('appsurface_durable.store_metadata') IS NOT NULL;
             """,
-            connection);
+            connection,
+            transaction);
         var (schemaExists, historyExists, metadataExists) =
             await PostgreSqlDurableControlPlaneCommand.ExecuteReaderAsync(
                 existence,
@@ -314,7 +347,8 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         var applied = new List<AppliedMigration>();
         await using (var command = new NpgsqlCommand(
             "SELECT version, name, sha256 FROM appsurface_durable.schema_migration ORDER BY version;",
-            connection))
+            connection,
+            transaction))
         {
             _ = await PostgreSqlDurableControlPlaneCommand.ExecuteReaderAsync(
                 command,
@@ -343,7 +377,7 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
                    minimum_writer_version, maximum_writer_version
             FROM appsurface_durable.store_metadata WHERE singleton;
             """;
-        await using var metadata = new NpgsqlCommand(metadataSql, connection);
+        await using var metadata = new NpgsqlCommand(metadataSql, connection, transaction);
         var metadataObservation = await PostgreSqlDurableControlPlaneCommand.ExecuteReaderAsync(
             metadata,
             static async (reader, effectiveToken) =>

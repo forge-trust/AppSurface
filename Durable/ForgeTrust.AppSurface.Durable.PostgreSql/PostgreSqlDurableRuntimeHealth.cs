@@ -11,6 +11,7 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
 {
     private readonly PostgreSqlDurableRuntimeRegistration _registration;
     private readonly IDurableRuntimeSchemaManager _schemaManager;
+    private readonly PostgreSqlDurableRuntimeSchemaManager _admissionSchemaManager;
     private readonly ILogger<PostgreSqlDurableRuntimeHealth> _logger;
     private readonly Func<CancellationToken, ValueTask<DateTimeOffset>> _readDatabaseTimestamp;
 
@@ -39,6 +40,7 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
     {
         _registration = registration ?? throw new ArgumentNullException(nameof(registration));
         _schemaManager = schemaManager ?? throw new ArgumentNullException(nameof(schemaManager));
+        _admissionSchemaManager = new PostgreSqlDurableRuntimeSchemaManager(_registration.RuntimeDataSource);
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _readDatabaseTimestamp = readDatabaseTimestamp ?? ReadDatabaseTimestampAsync;
     }
@@ -188,6 +190,13 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
                 transaction,
                 cancellationToken,
                 captureAdmissionOutcome: true).ConfigureAwait(false);
+            // The shared migration fence acquired by EnsureCurrentEpochAsync remains held by this transaction.
+            // Revalidate on the same connection so a migration cannot commit between compatibility proof and
+            // the transition to pass_active.
+            await _admissionSchemaManager.ValidateConnectionAsync(
+                connection,
+                transaction,
+                cancellationToken).ConfigureAwait(false);
             if (await EnsureSessionAsync(
                 connection,
                 transaction,
