@@ -77,9 +77,10 @@ Prior learning applied: `durable-adoption-decision-rule` (confidence 10/10, 2026
 - Implement `IDurableRuntimePump` and `IDurableRuntimePumpAdmission` on the same PostgreSQL singleton.
 - Use one explicit private attempt machine with phase-aware, operation-aware classification.
 - Preserve original pre-execution exceptions internally so the legacy projection can rethrow them without message parsing.
-- Represent epoch incompatibility as a typed internal outcome at its origin while preserving the legacy exception type and message.
+- Represent epoch incompatibility and each refusal reason as typed internal outcomes at their origins while preserving every legacy exception type and message.
 - Replace the two health reads with one PostgreSQL command and one result row.
-- Add `0010_runtime_health_observation.sql`, increasing the required schema version from 9 to 10. It replaces, rather than edits, the shipped due-health function. The function becomes `STABLE` and uses `statement_timestamp()` so its filtering and the returned observation time share one timestamp and statement snapshot.
+- Add `0010_runtime_health_observation.sql`, increasing the required schema version from 9 to 10. It replaces, rather than edits, the shipped due-health function. The function becomes `STABLE`, uses `statement_timestamp()` so its filtering and the returned observation time share one timestamp and statement snapshot, and corrects Schedule due health to count only claimable or reclaimable dispatches.
+- Budget hosted shutdown against the worst-case `TimeBudgetPerPass + (2 * ShutdownReserve)` and cancel an active pass no later than `shutdownStart + ShutdownTimeout - (2 * ShutdownReserve)`.
 
 ## Public Contract
 
@@ -248,7 +249,13 @@ The core can return only:
 
 Unexpected exceptions do not become internal outcomes. They propagate.
 
-The internal refusal reason distinguishes local overlap from other refusals only so the legacy projection can preserve behavior. It is not exposed publicly.
+The internal refusal reason is a closed, typed set: `LocalPassOverlap`, `ProcessAdmissionClosed`, `Draining`, `StorePassActive`, and `LostWorkerGeneration`. `EpochMismatch` is a distinct typed incompatibility. The carrier may hold `ExceptionDispatchInfo` where the legacy projection must preserve an original exception and stack. These reasons are not exposed publicly and no projection inspects exception text.
+
+### Process-admission linearization
+
+`DurableRuntimeAdmissionGate.TryEnter()` returning `true` while holding its existing lock is the process-admission linearization point. If `TryEnter()` wins the lock before `Close()`, that one already-serialized invocation is admitted and may continue; `Close()` rejects only attempts whose `TryEnter()` linearization occurs afterward. Closing the gate does not revoke an admitted pass or cancel it directly. Hosted shutdown owns cancellation through its active-pass token and the shutdown budget.
+
+Tests pause both sides of the lock and prove both legal orders: close-first yields `Refused` with zero executor calls, while enter-first permits exactly that invocation and rejects the next one. No separate reservation handle or second gate is introduced.
 
 ### Execution-boundary test seam
 
@@ -332,7 +339,9 @@ Create one internal classifier shared by health observation and the pre-executio
 
 Do not call the classifier around application execution, failed-pass cleanup, or successful-sweep finalization.
 
-An internal control-plane operation wrapper produces `PostgreSqlDurableTimeoutEvidence` with only `None` or `ProviderDeadlineElapsed`. For each command, it reads the positive inherited `NpgsqlCommand.CommandTimeout`, creates a deadline token for that duration, and links it only with the caller token for the command invocation. If command timeout is disabled with zero, it creates no package deadline evidence and relies on provider exception evidence. Connection opening retains the runtime data source’s configured connection timeout and is classified only from its exception shape.
+An internal control-plane command helper produces `PostgreSqlDurableTimeoutEvidence` with only `None` or `ProviderDeadlineElapsed`. It receives an already-created `NpgsqlCommand`, reads its positive inherited `CommandTimeout`, creates a sidecar deadline token for that duration, and links it only with the caller token for the command invocation. It does not assign `CommandTimeout`, add another package timeout option, or alter connection-string settings. If command timeout is disabled with zero, it creates no package deadline evidence and relies on provider exception evidence. Connection opening retains the runtime data source’s configured connection timeout and is classified only from its exception shape.
+
+The helper is used by every command in schema-status validation, health observation, and pre-execution runtime admission, including the schema manager’s internally created status commands. A wrapper around `ValidateAsync` alone is insufficient because those commands are otherwise opaque to the caller. Add an internal schema-manager execution seam without changing `IDurableRuntimeSchemaManager`. The helper is never used by application execution, failed-pass cleanup, or successful-sweep finalization; only Npgsql enforces the command timeout.
 
 Evidence is `ProviderDeadlineElapsed` only when that package-owned deadline fired, or the exception chain contains a provider-generated `TimeoutException`. The wrapper records caller and provider deadline signals separately before disposing the linked token. It never accepts application-supplied evidence and is not used inside `RunPassAsync`.
 
@@ -362,7 +371,7 @@ Exceptions escaping `RunPassAsync` occur after the transition to `Executing` and
 
 The existing epoch check must stop requiring downstream message parsing. It should produce a typed internal mismatch at the admission origin while allowing the legacy projection to throw the same `InvalidOperationException` type and message as today.
 
-The classifier also returns an internal, fixed cause of `Transport`, `ProviderDeadline`, or `PermissionDenied` whenever it produces public `Unavailable` / `ASDUR103`. Health and pump call sites emit one structured warning through `ILogger` with a stable event id, the fixed operation and phase, that cause, `ASDUR103`, and the canonical troubleshooting anchor. The event must not include SQL text, exception messages, connection strings, role names, payload identifiers, scope identifiers, or aggregate identifiers. Documentation maps transport to connectivity/retry checks, provider deadline to query/pool/backlog investigation, and permission denial to the runtime-role recipe. The coarse provider-neutral public contract does not grow a PostgreSQL cause field.
+The classifier also returns an internal, fixed cause of `Transport`, `ProviderDeadline`, or `PermissionDenied` whenever it produces public `Unavailable` / `ASDUR103`. Health and pump call sites emit one structured warning through `ILogger` with a stable event id, the fixed operation and phase, that cause, `ASDUR103`, and the canonical troubleshooting anchor. Refusals use a separate stable event and the fixed internal cause `LocalPassOverlap`, `ProcessAdmissionClosed`, `Draining`, `StorePassActive`, or `LostWorkerGeneration`; expected local/store contention is Debug-level, while lost worker generation is Warning-level. The event must not include SQL text, exception messages, connection strings, role names, payload identifiers, scope identifiers, or aggregate identifiers. Documentation maps transport to connectivity/retry checks, provider deadline to query/pool/backlog investigation, permission denial to the runtime-role recipe, and each refusal to whether waiting, shutdown completion, or worker replacement is appropriate. The coarse provider-neutral public contract does not grow a PostgreSQL cause field.
 
 ## Atomic PostgreSQL Health Observation
 
@@ -426,10 +435,15 @@ Add `0010_runtime_health_observation.sql`, raising `RequiredSchemaVersion` to 10
 - do not edit migration `0005_runtime_heartbeat.sql`;
 - declare the read-only function `STABLE`, ensuring its internal reads use the calling statement snapshot under PostgreSQL function-volatility rules;
 - replace each due comparison against `clock_timestamp()` with `statement_timestamp()`;
-- preserve the function signature, owner, security-definer boundary, search path, and grants.
+- define “due” as claimable or reclaimable at that statement timestamp: Work and Flow continue using their dispatch `due_at`, which is advanced to the lease expiry when claimed; Schedule uses `due_at` only while `available` and `lease_expires_at` while `leased`, so an active Schedule lease is not counted as due;
+- add a selective partial Schedule lease-expiry index if the exact nested plan cannot use an existing index for the reclaimable predicate;
+- preserve the function signature, owner, security-definer boundary, and fixed search path;
+- explicitly `REVOKE ALL ... FROM PUBLIC` after replacement, add the same reconciliation to `configure-postgresql-roles.sql`, and verify that only the runtime role can execute the function;
 - preserve reader compatibility for the last supported schema-9 package, then rerun the canonical role recipe after applying migration `0010` to reconcile and verify runtime-role grants.
 
-The compatibility fixture pins `v0.2.0-preview.8` as the named schema-9 rollback artifact. That package must report a schema-10 store compatible because migration metadata permits readers 1 through 10 and the function signature is unchanged. The #794 package must report schema 9 as upgrade-required and schema 10 as compatible. No pre-`0009` package is a supported rollback target after the role recipe has removed broad dispatcher access.
+The compatibility fixture pins `v0.2.0-preview.8` as the named schema-9 rollback artifact. Release verification must build or restore that actual tagged package artifact rather than simulate it with a truncated current migration catalog. Against schema 10 and the reconciled restricted runtime role, it must validate startup/schema status, execute the legacy health call, maintain its heartbeat, and complete a real bounded Work pass. That package must report a schema-10 store compatible because migration metadata permits readers 1 through 10 and the function signature is unchanged. The #794 package must report schema 9 as upgrade-required and schema 10 as compatible. No pre-`0009` package is a supported rollback target after the role recipe has removed broad dispatcher access.
+
+Before applying `0010`, the migration runbook checks that `runtime_due_dispatch_health(integer)` is still owned by the configured migration owner; ownership drift fails the preflight with a corrective role-recipe action instead of failing partway through deployment. Contract tests inspect owner, `prosecdef`, volatility, `proconfig`, and ACLs before and after replacement, including hostile `PUBLIC EXECUTE` drift and a temporary-object/search-path adversary.
 
 The outer health statement returns that same `statement_timestamp()` as `ObservedAtUtc`. A partial or malformed row never produces a snapshot.
 
@@ -447,7 +461,11 @@ Cancellation ownership changes at one explicit boundary:
 - If the finalization deadline expires, propagate its `OperationCanceledException` as a pump-level finalization failure. Do not return `Unavailable`, `Incompatible`, or caller cancellation because application work may already have executed.
 - Attempt failed-pass cleanup with a separate fresh `ShutdownReserve` token, without the caller token and without replacing the original execution or finalization exception.
 
-This is the only intentional legacy behavior correction. It requires a release note and an exact regression test. `TimeBudgetPerPass` bounds discovery and beginning additional work; it is not a total method timeout. After execution returns, successful finalization may consume one `ShutdownReserve`. If finalization fails, cleanup may consume one additional, fresh `ShutdownReserve`, so the worst-case post-return wait is two reserves plus any scheduling overhead. Hosted-service shutdown validation and documentation must account for that exact budget and explain that an outer host deadline can still terminate the process before best-effort cleanup finishes.
+This is the only intentional legacy behavior correction. It requires a release note and an exact regression test. Let `H = HostOptions.ShutdownTimeout`, `T = TimeBudgetPerPass`, and `R = ShutdownReserve`. Hosted registration requires `T + (2 * R) <= H`; reject non-positive effective pass time and compute the doubled reserve without overflow. On shutdown, cancel the active pass no later than `shutdownStart + H - (2 * R)`. `TimeBudgetPerPass` bounds discovery and beginning additional work; it is not a total method timeout. After execution returns, successful finalization may consume one `R`. If finalization fails, cleanup may consume one additional fresh `R`, so the worst-case provider-owned post-return wait is two reserves plus scheduling overhead. An outer host deadline can still terminate the process before best-effort cleanup finishes.
+
+The hosted-service cancellation catch must identify the cancellation token/phase that ended application execution; it must not swallow a finalization `OperationCanceledException` merely because the earlier pass token is also canceled. A race test first cancels the pass token, then expires finalization, and proves that the finalization failure escapes.
+
+If the store-admission update or commit was sent but its acknowledgement is lost, the invocation still has not entered `RunPassAsync`, but `pass_active` may have committed. The core records this as an internal indeterminate-admission phase and attempts one ownership-scoped failed-pass cleanup with a fresh reserve before projecting the classified pre-execution result. Cleanup failure is logged and suppressed, never changes the public outcome or legacy original exception, and a later stale-worker takeover remains the durable fallback.
 
 ## Approaches Considered
 
@@ -506,6 +524,7 @@ Tests call an intentional internal seam; they do not use reflection.
 - Npgsql diagnostics or an intentional internal observation seam proves one runtime connection and one command after the schema precheck.
 - Migration contract tests prove the due-health function is `STABLE`, uses `statement_timestamp()`, preserves its security boundary, and contains no due comparison using `clock_timestamp()`.
 - PostgreSQL integration tests prove worker and due facts share one observation time and no partial snapshot escapes.
+- Due-health tests distinguish available, actively leased, and expired-lease rows for Work, Flow, and Schedule. In particular, an active Schedule lease is excluded, its expiry becomes the oldest due time only after it is reclaimable, and every selected-surface mask is covered.
 
 ### Pump projection matrix
 
@@ -537,10 +556,15 @@ Use PostgreSQL row locks and the existing blocking work registration to pause pr
 
 For cancellation accounting, assert one reserve after provider return on successful finalization and at most a second fresh reserve after a finalization failure. Cover hosted shutdown and an abandoned external request; distinguish the caller token, finalization token, cleanup token, and outer host deadline in the deterministic seam.
 
+Pin process-admission linearization with close-first and enter-first interleavings. Pin store-admission acknowledgement loss before execution: executor calls remain zero, owned cleanup is attempted once, cleanup failure cannot replace the original exception/outcome, and a subsequent attempt is either admitted after cleanup or safely refused until stale takeover.
+
 ### Regression and repository verification
 
 - Run Provider and PostgreSQL unit and integration test projects.
 - Run public API and schema contract tests.
+- Run the actual packed `v0.2.0-preview.8` artifact against schema 10 under the restricted runtime role; do not satisfy the release gate with `Take(2)` or another current-code simulation.
+- Run the exact full `IDurableRuntimeHealth.GetAsync` path under concurrent health readers, claimers, heartbeats, and one admitted pump. Record pool wait, CPU, allocations, locks, plans, buffers, and p50/p95/p99.
+- Exercise two data distributions: 100,000 total rows with sparse due work, where selective due indexes must be used, and 100,000 due rows per surface, where PostgreSQL may choose a planner-optimal sequential scan but the exact-count path must stay within the one-second warm p95 gate.
 - Run formatting and `git diff --check`.
 - Run `./scripts/coverage-solution.sh` when practical and inspect changed-code branch coverage.
 - Introduce no compiler, analyzer, XML documentation, or public API baseline warnings.
@@ -551,7 +575,7 @@ Update:
 
 - a task-oriented `Durable/operational-assessments.md` adoption guide, linked directly from the repository and Durable landing pages and from both package READMEs;
 - the Provider README with the normative truth table, copyable predicate usage, and IntelliSense-level distinctions among precheck, authoritative admission, completed pass, and work-item success;
-- the PostgreSQL README with the attempt matrix, classifier boundary, structured diagnostic event, two-interface custom composition, and exact migration-10 rollout;
+- the PostgreSQL README with the attempt matrix, classifier boundary, structured diagnostic event, two-interface custom composition, exact migration-10 rollout, and trusted unscoped runtime-role health boundary: the function exposes only aggregate selected-surface facts, application authorization remains host-owned, and restricted-role integration verifies that callers cannot read arbitrary dispatcher state;
 - the durable PostgreSQL example so it stops hand-writing compatibility/readiness expressions;
 - troubleshooting guidance for `ASDUR103`, emphasizing “could not observe” rather than “incompatible”;
 - release notes or changelog for the additive enum member and post-pass cancellation correction;
@@ -754,7 +778,7 @@ Both voices agree on all six strategic dimensions. Their agreement does not sile
 Four issues were found and addressed in the plan:
 
 1. The proof boundary was broader in prose than in code. It is now explicitly the sole transition into `RunPassAsync`.
-2. The parent activation service can erase execution certainty by mapping admission `Unavailable` and `Incompatible` to generic `PumpFailed`. #801 must preserve the distinction.
+2. The parent activation service can erase execution certainty by mapping admission `Unavailable` and `Incompatible` to generic `PumpFailed`. #804 must preserve the distinction.
 3. Partial DI overrides can create two pump instances with independent local slots. They remain backward-resolvable only; docs and tests must identify the shared-singleton composition as the supported path.
 4. The plan lacked an operational rollback sequence. Migration-first deployment and old-binary compatibility are now release gates.
 
@@ -934,7 +958,7 @@ No row is both silent and untested.
 
 ### Stale Diagram Audit
 
-The parent rail’s provider/host dependency and activation sequence diagrams remain directionally correct. Its activation result mapping is now flagged for #801 because collapsing admission `Unavailable` or `Incompatible` into generic `PumpFailed` would discard execution certainty. The state-machine diagram in this document remains normative after narrowing the proof language.
+The parent rail’s provider/host dependency and activation sequence diagrams remain directionally correct. Its activation result mapping is now flagged for #804 because collapsing admission `Unavailable` or `Incompatible` into generic `PumpFailed` would discard execution certainty. The state-machine diagram in this document remains normative after narrowing the proof language.
 
 ### CEO Implementation Tasks
 
@@ -1022,7 +1046,7 @@ Initial DX completeness is **5.0/10**. The repository has unusually strong opera
 | 5. Assess | Read raw health fields | Meanings of activation and readiness were easy to overgeneralize | Use the three named predicates with runtime-control-plane wording |
 | 6. Attempt | Call legacy `RunOnceAsync` and infer admission | Empty completion and refusal were indistinguishable | Resolve admission API and exhaustively handle four outcomes |
 | 7. Debug | Use exception type and `ASDUR103` docs | Permission, transport, and deadline remedies were conflated | Stable structured cause event links to one problem/cause/fix entry |
-| 8. Operate | Host owns endpoint and shutdown policy | Post-return cancellation wait and retry certainty were surprising | Docs state one- or two-reserve budget and exact execution certainty |
+| 8. Operate | Host owns endpoint and shutdown policy | Post-return cancellation wait and retry certainty were surprising | Docs state the exact two-reserve worst-case budget and execution certainty |
 | 9. Upgrade/rollback | Forward migrations and general rollback guidance | No named schema-9 rollback artifact | Compatibility matrix pins `v0.2.0-preview.8` and forbids pre-`0009` rollback |
 
 ### Step 0.5 — Dual Voices
@@ -1286,7 +1310,7 @@ TypeScript types, a paid/free tier, deprecation codemods, and a hosted playgroun
   - Surfaced by: Passes 2 and 6.
   - Files: PostgreSQL service registration, DI tests, adoption guide.
   - Verify: default services are reference-equal; legacy-only override still works until admission resolution, which fails before invocation with a fix.
-- [ ] **DX-T6 (P1, human: ~2h / CC: ~20min)** — Lifecycle — Document and test the one- or two-reserve post-return cancellation budget.
+- [ ] **DX-T6 (P1, human: ~2h / CC: ~20min)** — Lifecycle — Document and test the exact two-reserve worst-case post-return cancellation budget.
   - Surfaced by: Pass 2 and Codex concern 4.
   - Files: pump/hosted-service tests, options XML docs, adoption and troubleshooting docs.
   - Verify: deterministic tests distinguish caller, finalization, cleanup, and outer host deadlines.
@@ -1300,3 +1324,355 @@ TypeScript types, a paid/free tier, deprecation codemods, and a hosted playgroun
 No new DX-only decision remains. The previously surfaced `ObservedAtUtc` provenance choice still affects how the guide explains unavailable snapshots and remains at the final approval gate.
 
 **Phase 2.5 complete.** DX overall: 8.9/10. TTHW: 10 min cold / unmeasured prepared -> under 5 min cold and under 2 min prepared. Codex: 7 concerns. Claude subagent: 9 issues. Consensus: 6/6 confirmed, 0 disagreements. Passing to Phase 3 (Eng Review — the required gate reviews the final amended plan).
+
+## Autoplan Phase 3 — Engineering Review
+
+Reviewed on 2026-09-10 against the approved #794 boundary and the current implementation on `main`. This phase reviewed feasibility and failure behavior; it did not implement production code.
+
+### Step 0 — Scope and complexity
+
+Implementation touches:
+
+- Provider health and pump contracts, XML documentation, and public API baselines.
+- `PostgreSqlDurableRuntimePump`, `PostgreSqlDurableRuntimeHealth`, `PostgreSqlDurableHostedService`, and `DurableRuntimeAdmissionGate`.
+- PostgreSQL registration and custom-override validation.
+- Schema-status command execution, migration catalog/version 10, the due-health function, and the canonical role recipe.
+- Provider, unit, Testcontainers, schema-contract, mixed-version, packed-consumer, scale, and shutdown-race tests.
+- The runnable PostgreSQL example, package/repository documentation, troubleshooting, and release notes.
+
+Complexity is **high** despite the additive public API. The risk is concentrated in four coupled boundaries: preserving legacy behavior while adding a second projection, proving no execution on returned non-completed outcomes, handing cancellation ownership across an async continuation, and evolving a `SECURITY DEFINER` function without breaking an older package or widening privileges.
+
+No application endpoint, Skoolit route, host policy, or downstream case implementation is required.
+
+### What already exists
+
+| Need | Reusable implementation | Required change |
+| --- | --- | --- |
+| Process-local serialization | `_passGate` in `PostgreSqlDurableRuntimePump` | Keep one slot behind both interfaces; expose one internal execution seam for proof |
+| Shutdown admission | `DurableRuntimeAdmissionGate` | Pin its existing lock order as the linearization contract |
+| Durable admission/fencing | `TryBeginPassAsync`, epoch and worker checks | Return typed internal outcomes instead of requiring projection-time message inference |
+| Legacy execution | `RunPassAsync` and existing per-surface durable outcomes | Keep untouched behind the sole `Executing` transition |
+| Runtime health facts | `PostgreSqlDurableRuntimeHealth` and `runtime_due_dispatch_health(integer)` | Collapse runtime reads into one validated row and correct Schedule lease semantics |
+| Schema compatibility | `PostgreSqlDurableRuntimeSchemaManager` | Reuse its range model; add an internal command-execution seam, not a public API |
+| Migration safety | Numbered migration catalog and Testcontainers rollback/concurrency tests | Add migration 0010 and old-artifact compatibility evidence |
+| Least-privilege recipe | `Durable/configure-postgresql-roles.sql` | Reconcile `PUBLIC` function execution and verify exact effective privileges |
+| Scale harness | `PostgreSqlScaleIntegrationTests` | Measure full health, all three surfaces, dense and sparse distributions |
+| Consumer proof | Durable PostgreSQL example and packed-consumer scripts | Add one-command assessment proof and mandatory v0.2.0-preview.8 rollback run |
+
+### Independent engineering voices
+
+The approved `combo/sub` reviewer independently produced ten findings: six release-blocking correctness/compatibility concerns and four medium-priority DX or specification concerns. The main engineering audit verified each concern against the current source. An additional external Codex CLI review could not be run under the repository’s subagent policy and sandbox data boundary; it is recorded as unavailable rather than relabeled as an independent voice.
+
+| Concern | Independent subagent | Main audit | Resolution |
+| --- | --- | --- | --- |
+| Hosted catch may swallow finalization cancellation | Found | Confirmed at the broad `passCancellation.IsCancellationRequested` filter | Phase/token-aware catch and deterministic race test |
+| Shutdown validates only one reserve | Found | Confirmed | Exact `T + 2R <= H` invariant and `H - 2R` active-pass deadline |
+| Timeout evidence cannot reach schema-manager commands | Found | Confirmed | Internal command helper and schema-manager seam; public interface unchanged |
+| Active leases may be reported due | Found broadly | Confirmed for Schedule only; Work and Flow advance dispatch `due_at` to lease expiry | State-specific Schedule due expression and plan/index proof |
+| Old-binary proof is simulated/optional | Found | Confirmed | Actual v0.2.0-preview.8 package is a mandatory release gate |
+| Runtime-role observation boundary needs proof | Found | Confirmed | Restricted-role end-to-end test and explicit trust-boundary documentation |
+| Partial DI override can split process slots | Found | Confirmed | Resolution-time identity guard plus registration-time checks where provable |
+| Admission close ordering is underspecified | Found | Confirmed | Existing `TryEnter()` lock result is the linearization point |
+| Observation-time provenance is hard to consume | Found | Confirmed | Final-gate recommendation to add computed `WasStoreObserved` |
+| Performance proof measures the wrong path | Found | Confirmed | Full public health path, concurrency, resources, dense/sparse distributions |
+| `PUBLIC EXECUTE` drift survives function replacement/role rerun | Not separately raised | Confirmed by migration/role sidecar | Explicit revoke, ACL audit, hostile-principal test |
+| Store-admission commit acknowledgement can be lost | Not separately raised | Confirmed from transaction boundary | Pre-execution ownership-scoped cleanup with original outcome preserved |
+
+The two in-host voices converge on the technical corrections above. They disagree on packaging: the independent reviewer prefers separate shippable cases, while the main audit recommends one case with hard stage gates because the public promise spans all four boundaries and the user already approved that boundary. The missing external voice is **N/A**; this phase does not claim false multi-model consensus.
+
+### Architecture review
+
+```text
+Provider public contract
+  DurableRuntimeHealthSnapshot predicates
+  IDurableRuntimePump (legacy) ─────────────┐
+  IDurableRuntimePumpAdmission ─────────────┼──▶ one PostgreSqlDurableRuntimePump singleton
+                                            │          │
+                                            │          ├─ local slot
+                                            │          ├─ process admission linearization
+                                            │          ├─ schema + epoch + worker admission
+                                            │          ├─ sole Executing transition
+                                            │          ├─ ProviderReturned handoff
+                                            │          └─ bounded finalization / cleanup
+                                            │
+                                            └──▶ projection only; never a second preflight
+
+PostgreSQL control plane
+  schema-status commands ─┐
+  health command ─────────┼──▶ internal command helper ──▶ typed timeout evidence/classifier
+  admission commands ─────┘
+
+  schema 9 ── migration 0010 ──▶ schema 10
+       runtime_due_dispatch_health(integer)
+         ├─ Work: dispatch.due_at
+         ├─ Flow: flow_dispatch.due_at
+         └─ Schedule: available.due_at OR leased.lease_expires_at
+
+  migration owner: owns/replaces function
+  runtime role: EXECUTE only + documented aggregate trust boundary
+  dispatcher/retention/PUBLIC/unrelated login: no EXECUTE
+```
+
+Architecture findings:
+
+1. **P1 / high confidence — Finalization cancellation can be swallowed by the hosted loop.** The current catch checks only whether the earlier pass CTS is canceled. Once finalization uses a separate token, that condition may still be true and incorrectly turn a finalization failure into a clean loop exit. Require phase/token identity and a race test.
+2. **P1 / high confidence — Shutdown accounting was internally inconsistent.** Two sequential post-return reserves require `T + 2R <= H`, not `T + R <= H`. Active execution must be canceled at `H - 2R`.
+3. **P1 / high confidence — A caller-level timeout wrapper misses schema-manager commands.** The helper must sit at command execution inside schema status, health, and admission. It observes inherited `CommandTimeout`; it does not configure a competing timeout.
+4. **P1 / high confidence — Schedule due health is currently false for active leases.** Unlike Work and Flow, Schedule keeps the original `due_at` while leased. Migration 0010 must use `lease_expires_at` for leased Schedule rows and prove an eligible plan.
+5. **P1 / high confidence — Compatibility cannot be inferred from the schema range alone.** An actual v0.2.0-preview.8 binary must run against schema 10 with reconciled roles and exercise status, health, heartbeat, and real work.
+6. **P1 / high confidence — Function replacement does not repair privilege drift.** Migration 0010 and the role recipe explicitly revoke `PUBLIC`; preflight checks ownership before replacement.
+7. **P1 / medium-high confidence — Lost store-admission acknowledgement can strand `pass_active`.** The no-execution proof remains true, but the machine needs a bounded, ownership-scoped cleanup attempt and durable stale-takeover fallback.
+8. **P2 / high confidence — DI compatibility needs a runtime identity assertion.** Existing `TryAdd` behavior must remain, but unsupported partial composition must fail before admission invocation.
+9. **P2 / high confidence — Closing admission does not revoke a winner.** This is safe once documented: `TryEnter()` true is the winner, `Close()` rejects later attempts, and hosted cancellation handles the admitted pass.
+10. **P2 / high confidence — Public provenance remains the one API-shape ambiguity.** A computed `WasStoreObserved` removes state-dependent timestamp interpretation without changing constructor compatibility; it remains at the final gate.
+
+No new public PostgreSQL type, second pump, transport abstraction, or host service is needed.
+
+### Code-quality review
+
+- Keep the attempt machine, phase enum, refusal causes, classifier, and timeout evidence internal to the PostgreSQL package.
+- Use one typed outcome carrier and `ExceptionDispatchInfo` for exact legacy rethrows. Do not duplicate projection control flow or parse exception messages.
+- Keep Npgsql timeout enforcement single-source: read `CommandTimeout`; do not set a second value.
+- Give every phase transition and cancellation token one owner. Avoid a large catch around the entire pump.
+- Keep `RunPassAsync` and existing per-surface durable exception handling intact; the new proof seam wraps only its invocation.
+- Resolve the concrete pump through one factory. Composition checks should state the conflicting registrations and the supported same-singleton fix without leaking implementation details.
+- Make migration 0010 additive and idempotent through the existing migration framework; never edit migration 0005 or roll back migration history.
+- Fully document internal seams because repository guidance treats internal APIs as part of the maintainability contract.
+
+### Test review
+
+The QA artifact is `/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20260910-073337.md`.
+
+```text
+PUBLIC CONTRACT
+├─ health enum values
+│  ├─ existing 0..4 unchanged
+│  └─ Unavailable = 5
+├─ predicates
+│  ├─ every state × schema compatible true/false × epoch compatible true/false
+│  ├─ contradictory synthetic Healthy fails closed
+│  └─ optional WasStoreObserved provenance if approved
+└─ pump-attempt algebra
+   ├─ every legal tuple
+   └─ undefined kind / result / problem-code invalid tuples
+
+PUMP CORE — both public projections
+├─ LocalSlotPending
+│  ├─ caller canceled → propagates; executor 0
+│  └─ overlap → legacy exact ASDUR405 / admission Refused; executor 0
+├─ ProcessAdmission
+│  ├─ close wins → legacy empty / admission Refused; executor 0
+│  └─ enter wins → this pass proceeds; next pass refused
+├─ StoreAdmission
+│  ├─ schema status incompatible → exact legacy exception / Incompatible; executor 0
+│  ├─ epoch mismatch → exact legacy ASDUR108 / Incompatible; executor 0
+│  ├─ draining → legacy empty / Refused; executor 0
+│  ├─ active pass → legacy empty / Refused; executor 0
+│  ├─ lost worker generation → original legacy exception / Refused; executor 0
+│  ├─ classified outage → original legacy exception / Unavailable; executor 0
+│  ├─ malformed or unlisted failure → propagates; executor 0
+│  └─ commit acknowledgement lost
+│     ├─ cleanup succeeds → original projection; executor 0
+│     └─ cleanup fails → original projection + safe log; executor 0
+├─ Executing
+│  ├─ empty result → Completed with non-null zero result; executor 1
+│  ├─ success → Completed; executor 1
+│  ├─ existing durable item-level ambiguous outcome → Completed counts; executor 1
+│  ├─ caller cancellation → propagates; executor 1
+│  └─ escaped exception → original exception + bounded cleanup; executor 1
+├─ ProviderReturned
+│  ├─ caller cancels → ignored for finalization
+│  └─ provider result fixed; no phase rollback
+└─ Finalizing
+   ├─ success within reserve → Completed
+   ├─ provider/finalization failure → propagates
+   ├─ reserve expires after pass token already canceled → propagates, host does not swallow
+   └─ cleanup
+      ├─ separate fresh reserve
+      └─ failure suppressed behind original
+
+CONTROL-PLANE CLASSIFIER
+├─ caller token cancellation → propagate
+├─ package deadline evidence → Unavailable
+├─ typed provider timeout / allowlisted SQLSTATE → Unavailable
+├─ permission 42501 at health/admission → Unavailable
+├─ bare 57014 / admin cancellation → propagate
+├─ undefined object / malformed data / invalid enum → propagate
+├─ schema-manager internal commands → classified through helper
+└─ RunPass / finalization / cleanup → classifier unreachable
+
+HEALTH + MIGRATION
+├─ schema 9 + new binary → UpgradeRequired
+├─ schema 10 + new binary → one validated row
+├─ schema 10 + actual v0.2.0-preview.8
+│  ├─ status/startup
+│  ├─ legacy health
+│  ├─ heartbeat
+│  └─ real bounded Work pass
+├─ due semantics
+│  ├─ Work available / active lease / expired lease
+│  ├─ Flow available / active lease / expired lease
+│  └─ Schedule available / active lease / expired lease
+├─ function contract
+│  ├─ signature / STABLE / SECURITY DEFINER / fixed search path
+│  ├─ owner and ACL
+│  ├─ hostile PUBLIC execute drift
+│  └─ hostile temporary object
+└─ migration lifecycle
+   ├─ failed transaction rollback
+   ├─ concurrent apply once
+   ├─ role reconciliation
+   ├─ old-binary rollback
+   └─ corrective forward migration
+
+SHUTDOWN + DI
+├─ T + 2R < H / == H accepted
+├─ T + 2R > H / overflow rejected
+├─ active pass canceled at H - 2R
+├─ one finalization reserve + optional second cleanup reserve
+├─ default interfaces reference-equal
+├─ same custom singleton under both succeeds
+├─ legacy-only remains usable through legacy API
+├─ partial composition fails before admission invocation
+└─ different instances cannot bypass local serialization
+```
+
+Existing tests provide strong building blocks for schema rollback, concurrent migration application, gate behavior, pump behavior, and Work/Flow scale. The release gaps are the exact new branches above, Schedule health semantics, actual old-package execution, and end-to-end resource measurements.
+
+### Performance review
+
+The due function performs exact `count(*)` and `min(...)`; its cost is proportional to qualifying due rows. “An index exists” is not equivalent to “the full health operation is bounded.”
+
+The release evidence therefore uses two distributions:
+
+1. **Sparse due:** 100,000 total rows per selected surface with few due rows. Require the eligible due or lease-expiry index and investigate any base-table sequential scan.
+2. **Dense due:** 100,000 due rows per selected surface. Permit PostgreSQL’s planner-optimal sequential scan; require five warm full-health runs with p95 below one second.
+
+For masks `1`, `2`, `4`, and supported combinations, capture `EXPLAIN (ANALYZE, BUFFERS, VERBOSE, SETTINGS, FORMAT JSON)` and nested function plans. Measure the public `GetAsync`, not only the SQL fragment, under concurrent readers, claimers, heartbeat updates, and a pump. Record p50/p95/p99, pool wait, CPU, allocations, locks, plans, and buffers; add pool-exhaustion/starvation and forced-deadline cases. If the exact count misses the gate after query/index tuning, changing the public metric requires a separate contract decision rather than silently approximating it.
+
+### Security and deployment review
+
+- The runtime role is deliberately trusted and unscoped for heartbeat maintenance, but the new function exposes only aggregate facts for the configured surface mask. Applications still own authorization around any endpoint or operator workflow.
+- Migration 0010 explicitly revokes `PUBLIC EXECUTE`; the role recipe repeats that reconciliation and tests effective access as runtime, dispatcher, retention, unrelated login, and `PUBLIC`.
+- The migration preflight validates function ownership before `CREATE OR REPLACE`; unsafe drift fails before deployment mutation.
+- The function retains `SECURITY DEFINER`, a fixed safe search path, fully qualified application tables, and a hostile temporary-object test.
+- Deploy migration 0010 first, rerun roles, run old/new compatibility smoke tests, then deploy the new binary. Rollback changes the binary to v0.2.0-preview.8 without deleting schema history.
+- Schema 10 defects are corrected through a new forward migration. Migration 0010 remains immutable after publication.
+
+### Failure and rescue registry
+
+| Boundary | Failure | Detected | Public/legacy behavior | Recovery | Silent critical gap |
+| --- | --- | ---: | --- | --- | ---: |
+| Health schema status | Transport/deadline/permission | Yes | Unavailable / ASDUR103 | Cause-specific docs; retry only by host policy | No |
+| Health schema status | Missing/old/new/inconsistent | Yes | Incompatible / exact code | Migrate or correct store | No |
+| Atomic health row | Classified pre-row outage | Yes | Unavailable | Retry by policy | No |
+| Atomic health row | Malformed or partial data | Yes | Exception | Repair schema/data/provider defect | No |
+| Due health | Active Schedule lease | Yes after 0010 | Excluded | Becomes due at lease expiry | No |
+| Local slot | Overlap | Yes | Exact legacy ASDUR405 / Refused | Wait for current pass | No |
+| Process gate | Shutdown close wins | Yes | Legacy empty / Refused | Wait for restart/reopen | No |
+| Process gate | Admission wins close race | Yes | That pass continues | Hosted cancellation owns stop | No |
+| Store admission | Draining or active pass | Yes | Legacy empty / Refused | Wait/inspect worker | No |
+| Store admission | Lost worker generation | Yes | Original legacy exception / Refused | Replace/restart stale worker | No |
+| Store admission | Commit response lost | Yes by phase | Original classified projection | Owned cleanup; stale takeover fallback | No |
+| Application execution | Caller cancellation | Yes | Propagates | Inspect durable item state before policy retry | No |
+| Application execution | Existing item-level ambiguity | Yes | Existing completed result/counts | Existing durable reconciliation | No |
+| Application execution | Escaped failure | Yes | Propagates | Bounded failed-pass cleanup | No |
+| Finalization | Caller canceled after return | Yes | Ignored for bounded finalization | None if finalization succeeds | No |
+| Finalization | Deadline/provider failure | Yes | Propagates | Separate cleanup reserve; inspect heartbeat | No |
+| Cleanup | Failure | Yes/logged | Suppressed behind original | Stale takeover/operator diagnosis | No |
+| Hosted loop | Pass-token cancellation | Yes | Ends active pass/loop | Drain within reserved budget | No |
+| Hosted loop | Finalization cancellation | Yes | Propagates; never swallowed as pass cancellation | Operator sees hosted failure | No |
+| Migration | Owner/ACL drift | Yes in preflight/audit | Fail closed | Reconcile roles, retry migration | No |
+| Migration | Partial failure/concurrent apply | Yes | Transaction rollback/one winner | Retry from version 9 | No |
+| Rollback | Old binary incompatible | Mandatory pre-release proof | Blocks release | Correct forward or restore package plan | No |
+| Scale | Query exceeds deadline/pool starves | Yes | Bounded Unavailable before execution | Tune plan/pool or revisit exact metric | No |
+
+All critical failure paths have a detector, a test, and an explicit recovery. No “should never happen” row remains unowned.
+
+### NOT in scope
+
+- HTTP routes, authentication/authorization middleware, status-code mapping, deployment controllers, retry scheduling, or application liveness.
+- The host-facing activation service (#804), ASP.NET Core adapter (#805), first-party deterministic fakes (#802), or runtime doctor (#801).
+- Provider-neutral wake delivery, broker activation, automatic migrations, a new package split, or another provider.
+- Domain retry, reconciliation, continuation, or ambiguous external-effect policy.
+- A fifth attempt kind, public SQLSTATE/provider exceptions, public refusal reasons, or detailed public outage causes.
+- Dashboard, metrics backend, alerts, pricing/tiering, or a hosted playground.
+
+No new `TODOS.md` entry is needed: the package-split and heartbeat-principal ideas already exist there, while #801, #802, #804, and #805 already own the deferred implementation work.
+
+### Implementation sequencing and parallelization
+
+Keep #794 as one case but land it in reviewable internal stages:
+
+```text
+Stage 1: Provider contracts + tests + API baseline
+    │
+Stage 2: one pump singleton + typed attempt machine + exact projections
+    ├───────────────┬─────────────────┐
+    │               │                 │
+Stage 3A         Stage 3B          Stage 3C
+classifier      cancellation      migration 0010
++ command seam  + hosted budget   + atomic health/security
+    │               │                 │
+    └───────────────┴─────────────────┘
+                    │
+Stage 4: mixed-version + scale + restricted-role + runnable-consumer proof
+                    │
+Stage 5: docs, TTHW evidence, full coverage/release verification
+```
+
+If worktrees/subagents are used for implementation, give Stage 3A ownership of schema-manager/classifier files, Stage 3B ownership of pump/hosted-service lifecycle files, and Stage 3C ownership of migration/health SQL/role-recipe files. Their test files must be disjoint or integrated serially. Stage 4 starts only after all three are merged because it is the cross-boundary release proof.
+
+### Engineering implementation tasks
+
+- [ ] **ENG-T1 (P1, human: ~3h / CC: ~30min)** — Provider contract — Add `Unavailable`, the three predicates, the attempt algebra/interface, complete XML docs, constructor truth-table tests, and public API baseline. If final approval accepts provenance, add computed `WasStoreObserved` here.
+  - Depends on: final approval of the public shape.
+  - Verify: all state/fact combinations and legal/illegal attempt tuples.
+- [ ] **ENG-T2 (P1, human: ~6h / CC: ~50min)** — Pump architecture — Register one concrete singleton, add typed phases/refusal outcomes, pin gate linearization, build exact legacy/admission projections, and add the execution-boundary seam.
+  - Depends on: ENG-T1.
+  - Verify: complete two-API matrix, zero executor calls on every returned non-completed outcome, DI override matrix, and admission races.
+- [ ] **ENG-T3 (P1, human: ~5h / CC: ~45min)** — Control-plane classification — Add the command helper and internal schema-manager seam, typed timeout evidence, allowlist classifier, refusal/outage structured diagnostics, and acknowledgement-loss cleanup.
+  - Depends on: ENG-T2 outcome model.
+  - Verify: caller/provider races, every SQLSTATE branch, schema/health/admission reachability, original exception preservation, and classifier exclusion after execution.
+- [ ] **ENG-T4 (P1, human: ~4h / CC: ~35min)** — Lifecycle — Move cancellation ownership at `ProviderReturned`, enforce `T + 2R <= H`, cancel at `H - 2R`, and make the hosted cancellation catch phase/token-aware.
+  - Depends on: ENG-T2 phases.
+  - Verify: caller, pass, finalization, cleanup, and host-deadline races; finalization OCE is never swallowed.
+- [ ] **ENG-T5 (P1, human: ~6h / CC: ~50min)** — Health and migration — Add 0010, one-row health, Schedule claimable/reclaimable semantics and any required index, explicit `PUBLIC` revoke, owner preflight, role reconciliation, and adversarial security tests.
+  - Depends on: ENG-T1 health contract.
+  - Verify: migration contract, one-row validation, all surface masks/lease states, exact ACL/owner/search-path properties.
+- [ ] **ENG-T6 (P1, human: ~6h / CC: ~45min plus test runtime)** — Release evidence — Run actual v0.2.0-preview.8 compatibility, rollback/forward-fix matrix, full-path dense/sparse scale evidence, concurrency, and resource measurements.
+  - Depends on: ENG-T3, ENG-T4, and ENG-T5.
+  - Verify: mandatory old/new package matrix, warm p95 gate, no execution on bounded unavailable outcomes.
+- [ ] **ENG-T7 (P1, human: ~5h / CC: ~40min)** — Champion-tier adoption — Add the task guide, one-command local proof, complete existing-host and custom-composition examples, diagnostics matrix, release notes, cross-links, and timing evidence.
+  - Depends on: stable ENG-T1–ENG-T5 behavior.
+  - Verify: compiled snippets, five cold and five prepared journeys, two-minute findability.
+- [ ] **ENG-T8 (P1, human: ~3h / CC: ~25min plus CI runtime)** — Integration gate — Format, build, run focused and solution coverage, inspect changed branches, run public API/schema checks, and perform final docs/release audit.
+  - Depends on: ENG-T1–ENG-T7.
+  - Verify: no introduced compiler/analyzer/XML-doc/baseline warnings and no unexplained coverage gaps.
+
+### Engineering completion summary
+
+| Review area | Result |
+| --- | --- |
+| Scope | One provider correctness case; no downstream host feature pulled in |
+| Complexity | High: concurrency, compatibility, migration, security, and DX release gates |
+| Architecture | 10 findings; 7 P1 and 3 P2 |
+| Additional sidecar findings | `PUBLIC` drift and admission-acknowledgement recovery added |
+| Code quality | One internal machine, one classifier, one command helper, no message parsing |
+| Tests | Full branch/path diagram and external QA artifact created |
+| Performance | Full public path, dense/sparse distributions, concurrency, p50/p95/p99 |
+| Security | Explicit ACL reconciliation, owner preflight, hostile-principal/temp-object tests |
+| Deployment | Migration-first; actual old package mandatory; forward-fix rollback model |
+| Existing reuse | Gate, slot, schema manager, health, migration harness, role recipe, scale harness |
+| Deferred work | Already owned by #801/#802/#804/#805 or existing `TODOS.md`; 0 new TODOs |
+| Independent voices | combo/sub + main audit; external Codex unavailable/N/A |
+| Critical silent gaps | 0 after plan amendments |
+| New structural decisions | 0; the same 3 CEO final-gate choices remain |
+
+**Phase 3 complete.** The implementation is feasible without broadening the approved product boundary. Engineering release safety now depends on the exact two-reserve shutdown invariant, Schedule lease-aware due semantics, internal command-level timeout evidence, mandatory old-binary/restricted-role proof, and full-path scale evidence.
+
+### Final-gate recommendations
+
+1. **Keep #794 as one staged case.** Splitting release units would allow a consumer to observe only half of the execution-certainty contract; the staged sequence above provides reviewability without making intermediate combinations supported.
+2. **Add computed `WasStoreObserved`.** It is additive, requires no constructor change, and removes a recurring state-dependent interpretation from diagnostics and future adapters.
+3. **Keep provider-first sequencing, but require a runnable consumer exercise before API freeze.** This proves the admission switch and execution-certainty language in a real composition without pulling #804’s host service into #794.
