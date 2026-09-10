@@ -678,6 +678,134 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
     }
 
     [Fact]
+    public async Task GetAsync_RejectsEmptyAndMultipleDueHealthObservations()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                CreateOptions("runtime-health-row-shape-worker"),
+                Guid.NewGuid()),
+            schema);
+
+        await using (var replace = database.DataSource.CreateCommand(
+            """
+            CREATE OR REPLACE FUNCTION appsurface_durable.runtime_due_dispatch_health(p_surfaces integer)
+            RETURNS TABLE
+            (
+                due_count bigint,
+                oldest_due_at timestamp with time zone
+            )
+            LANGUAGE sql
+            STABLE
+            SECURITY DEFINER
+            SET search_path = pg_catalog, appsurface_durable, pg_temp
+            AS $test$
+                SELECT 0::bigint, NULL::timestamp with time zone WHERE false;
+            $test$;
+            """))
+        {
+            await replace.ExecuteNonQueryAsync();
+        }
+
+        var empty = await Assert.ThrowsAsync<InvalidDataException>(async () => await health.GetAsync());
+        Assert.Contains("returned no row", empty.Message, StringComparison.Ordinal);
+
+        await using (var replace = database.DataSource.CreateCommand(
+            """
+            CREATE OR REPLACE FUNCTION appsurface_durable.runtime_due_dispatch_health(p_surfaces integer)
+            RETURNS TABLE
+            (
+                due_count bigint,
+                oldest_due_at timestamp with time zone
+            )
+            LANGUAGE sql
+            STABLE
+            SECURITY DEFINER
+            SET search_path = pg_catalog, appsurface_durable, pg_temp
+            AS $test$
+                SELECT 0::bigint, NULL::timestamp with time zone
+                UNION ALL
+                SELECT 0::bigint, NULL::timestamp with time zone;
+            $test$;
+            """))
+        {
+            await replace.ExecuteNonQueryAsync();
+        }
+
+        var multiple = await Assert.ThrowsAsync<InvalidDataException>(async () => await health.GetAsync());
+        Assert.Contains("more than one row", multiple.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TryBeginPassWithOutcomeAsync_PreservesTypedAndLegacyEpochMismatchSemantics()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var configuredEpoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(configuredEpoch, "runtime-health-tests", "typed-epoch-mismatch");
+        var status = await schema.GetStatusAsync();
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(configuredEpoch, status.StoreId),
+                CreateOptions("runtime-health-typed-epoch-worker"),
+                Guid.NewGuid()),
+            schema);
+
+        await using (var clearEpoch = database.DataSource.CreateCommand(
+            "UPDATE appsurface_durable.store_metadata SET active_runtime_epoch = NULL WHERE singleton;"))
+        {
+            Assert.Equal(1, await clearEpoch.ExecuteNonQueryAsync());
+        }
+
+        var typed = await health.TryBeginPassWithOutcomeAsync(CancellationToken.None);
+        Assert.Equal(PostgreSqlDurableStoreAdmissionKind.EpochMismatch, typed.Kind);
+        Assert.NotNull(typed.LegacyException);
+        Assert.StartsWith(
+            DurableProblemCodes.RecoveryEpochRequired,
+            typed.LegacyException!.SourceException.Message,
+            StringComparison.Ordinal);
+
+        var legacy = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await health.TryBeginPassAsync(CancellationToken.None));
+        Assert.StartsWith(DurableProblemCodes.RecoveryEpochRequired, legacy.Message, StringComparison.Ordinal);
+
+        var differentEpoch = Guid.NewGuid();
+        await using (var changeEpoch = database.DataSource.CreateCommand(
+            "UPDATE appsurface_durable.store_metadata SET active_runtime_epoch = @epoch WHERE singleton;"))
+        {
+            changeEpoch.Parameters.AddWithValue("epoch", differentEpoch);
+            Assert.Equal(1, await changeEpoch.ExecuteNonQueryAsync());
+        }
+
+        var mismatched = await health.TryBeginPassWithOutcomeAsync(CancellationToken.None);
+        Assert.Equal(PostgreSqlDurableStoreAdmissionKind.EpochMismatch, mismatched.Kind);
+        Assert.NotNull(mismatched.LegacyException);
+    }
+
+    [Fact]
+    public void StoreAdmissionFactories_RejectInvalidKindsAndNullLegacyExceptions()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            PostgreSqlDurableStoreAdmission.Refused(PostgreSqlDurableStoreAdmissionKind.Admitted));
+        Assert.Throws<ArgumentNullException>(() =>
+            PostgreSqlDurableStoreAdmission.WithLegacyException(
+                PostgreSqlDurableStoreAdmissionKind.EpochMismatch,
+                null!));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            PostgreSqlDurableStoreAdmission.WithLegacyException(
+                PostgreSqlDurableStoreAdmissionKind.Draining,
+                new InvalidOperationException("legacy")));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableEpochMismatchSignal(null!));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableWorkerGenerationSignal(null!));
+    }
+
+    [Fact]
     public async Task TryBeginPassAsync_TakesOverOnlyWhenEpochDrainOrStalenessAllowsIt()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();

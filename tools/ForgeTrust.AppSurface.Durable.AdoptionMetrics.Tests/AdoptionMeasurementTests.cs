@@ -19,6 +19,37 @@ public sealed class AdoptionMeasurementTests : IDisposable
     }
 
     [Fact]
+    public async Task MainRoutesHelpAndCommandFailuresThroughTheConsoleBoundary()
+    {
+        var originalOut = Console.Out;
+        var originalError = Console.Error;
+        using var standardOut = new StringWriter();
+        using var standardError = new StringWriter();
+        try
+        {
+            Console.SetOut(standardOut);
+            Console.SetError(standardError);
+
+            Assert.Equal(0, await Program.Main(["--help"]));
+            Assert.Equal(1, await Program.Main(["--unknown"]));
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            Console.SetError(originalError);
+        }
+
+        Assert.Contains(
+            "ForgeTrust.AppSurface.Durable.AdoptionMetrics",
+            standardOut.ToString(),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Adoption measurement failed: Unknown option '--unknown'.",
+            standardError.ToString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task MeasureAsyncCountsPhysicalLinesAndOrdersResultsDeterministically()
     {
         var fixture = await CreateValidFixtureAsync(reverseRegions: true);
@@ -166,6 +197,58 @@ public sealed class AdoptionMeasurementTests : IDisposable
         Assert.Contains("must not contain symbolic links", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task MeasureAsyncRejectsAnUnsupportedSourceRoot()
+    {
+        var fixture = await CreateValidFixtureAsync();
+        await RewriteSpecAsync(
+            fixture.SpecPath,
+            root => GetRegions(root)[5]!["sourceRoot"] = 999);
+
+        var exception = await Assert.ThrowsAsync<AdoptionMeasurementException>(
+            () => AdoptionMeasurementEngine.MeasureAsync(
+                fixture.SpecPath,
+                fixture.ConsumerRoot,
+                fixture.RepositoryRoot,
+                new RecordingRevisionVerifier(),
+                CancellationToken.None));
+
+        Assert.Contains("unsupported source root '999'", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MeasureAsyncRejectsASymbolicLinkUsedAsTheSourceRoot()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "Symbolic-link path validation runs only on Unix hosts.");
+        }
+
+        var fixture = await CreateValidFixtureAsync();
+        var linkedRoot = fixture.ConsumerRoot;
+        var targetRoot = linkedRoot + "-target";
+        Directory.Move(linkedRoot, targetRoot);
+        Directory.CreateSymbolicLink(linkedRoot, targetRoot);
+        try
+        {
+            var exception = await Assert.ThrowsAsync<AdoptionMeasurementException>(
+                () => AdoptionMeasurementEngine.MeasureAsync(
+                    fixture.SpecPath,
+                    linkedRoot,
+                    fixture.RepositoryRoot,
+                    new RecordingRevisionVerifier(),
+                    CancellationToken.None));
+
+            Assert.Contains("source path must not contain symbolic links", exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(linkedRoot);
+            Directory.Move(targetRoot, linkedRoot);
+        }
+    }
+
     [Theory]
     [InlineData("line-count", "expected 3 nonblank lines but measured 2")]
     [InlineData("region-passed", "expected passed=false but measured passed=true")]
@@ -304,6 +387,54 @@ public sealed class AdoptionMeasurementTests : IDisposable
     }
 
     [Fact]
+    public async Task MeasureAsyncReportsAnUnreadableRegionFile()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "Unix file permissions provide the deterministic unreadable-file fixture.");
+        }
+
+        var fixture = await CreateValidFixtureAsync();
+        var path = Path.Combine(fixture.RepositoryRoot, "repository-registration.cs");
+        var originalMode = File.GetUnixFileMode(path);
+        File.SetUnixFileMode(path, UnixFileMode.UserWrite);
+        try
+        {
+            Exception? readException = null;
+            try
+            {
+                await File.ReadAllTextAsync(path, CancellationToken.None);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                readException = exception;
+            }
+
+            if (readException is null)
+            {
+                throw Xunit.Sdk.SkipException.ForSkip(
+                    "The test process can read permission-restricted files on this host.");
+            }
+
+            var measurementException = await Assert.ThrowsAsync<AdoptionMeasurementException>(
+                () => AdoptionMeasurementEngine.MeasureAsync(
+                    fixture.SpecPath,
+                    fixture.ConsumerRoot,
+                    fixture.RepositoryRoot,
+                    new RecordingRevisionVerifier(),
+                    CancellationToken.None));
+
+            Assert.Contains("Could not read region 'registration' source file", measurementException.Message, StringComparison.Ordinal);
+            Assert.Same(readException.GetType(), measurementException.InnerException?.GetType());
+        }
+        finally
+        {
+            File.SetUnixFileMode(path, originalMode);
+        }
+    }
+
+    [Fact]
     public async Task MeasureAsyncPropagatesRevisionVerificationFailure()
     {
         var fixture = await CreateValidFixtureAsync();
@@ -438,6 +569,124 @@ public sealed class AdoptionMeasurementTests : IDisposable
             () => new GitConsumerRevisionVerifier(" ", TimeSpan.FromSeconds(1)));
         Assert.Throws<ArgumentOutOfRangeException>(
             () => new GitConsumerRevisionVerifier("git", TimeSpan.Zero));
+    }
+
+    [Fact]
+    public async Task GitVerifierReportsWhenGitCannotStart()
+    {
+        var verifier = new GitConsumerRevisionVerifier(
+            Path.Combine(_root, "missing-git"),
+            TimeSpan.FromSeconds(1));
+
+        var exception = await Assert.ThrowsAsync<AdoptionMeasurementException>(
+            () => verifier.VerifyAsync(
+                _root,
+                Commit,
+                [],
+                CancellationToken.None));
+
+        Assert.Equal("Could not start Git to verify the consumer checkout.", exception.Message);
+        Assert.IsType<System.ComponentModel.Win32Exception>(exception.InnerException);
+    }
+
+    [Fact]
+    public async Task GitVerifierReportsGitFailureOutput()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "The deterministic Git-process fixture uses a Unix shell script.");
+        }
+
+        var executable = await CreateUnixExecutableAsync(
+            Path.Combine(_root, "failing-git"),
+            "#!/bin/sh\nprintf 'fatal: fixture failure\\n' >&2\nexit 1\n");
+        var verifier = new GitConsumerRevisionVerifier(executable, TimeSpan.FromSeconds(1));
+
+        var exception = await Assert.ThrowsAsync<AdoptionMeasurementException>(
+            () => verifier.VerifyAsync(
+                _root,
+                Commit,
+                [],
+                CancellationToken.None));
+
+        Assert.Contains("Git could not verify the consumer checkout: fatal: fixture failure", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GitVerifierBoundsSourceVerificationAndPreservesCallerCancellation()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "The deterministic Git-process deadline seam uses a Unix shell fixture.");
+        }
+
+        var executable = await CreateUnixExecutableAsync(
+            Path.Combine(_root, "blocking-source-git"),
+            $"#!/bin/sh\nif [ \"$1\" = \"rev-parse\" ]; then\n  printf '%s\\n' '{Commit}'\nelse\n  sleep 30\nfi\n");
+
+        var timeoutVerifier = new GitConsumerRevisionVerifier(
+            executable,
+            TimeSpan.FromMilliseconds(250));
+        var timeout = await Assert.ThrowsAsync<AdoptionMeasurementException>(
+            () => timeoutVerifier.VerifyAsync(
+                _root,
+                Commit,
+                ["selected.cs"],
+                CancellationToken.None));
+        Assert.Contains("consumer source verification within 0.25 seconds", timeout.Message, StringComparison.Ordinal);
+
+        var cancellationVerifier = new GitConsumerRevisionVerifier(
+            executable,
+            TimeSpan.FromSeconds(30));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        var canceled = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => cancellationVerifier.VerifyAsync(
+                _root,
+                Commit,
+                ["selected.cs"],
+                cancellation.Token));
+        Assert.Equal(cancellation.Token, canceled.CancellationToken);
+    }
+
+    [Fact]
+    public async Task GitVerifierReportsWhenSourceVerificationCannotStart()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "The disappearing-working-directory fixture uses Unix process semantics.");
+        }
+
+        var consumerRoot = Path.Combine(_root, "disappearing-consumer");
+        Directory.CreateDirectory(consumerRoot);
+        var executable = await CreateUnixExecutableAsync(
+            Path.Combine(_root, "disappearing-git"),
+            $"#!/bin/sh\nif [ \"$1\" = \"rev-parse\" ]; then\n  rmdir \"$PWD\"\n  printf '%s\\n' '{Commit}'\nfi\n");
+
+        var verifier = new GitConsumerRevisionVerifier(executable, TimeSpan.FromSeconds(1));
+        var exception = await Assert.ThrowsAsync<AdoptionMeasurementException>(
+            () => verifier.VerifyAsync(
+                consumerRoot,
+                Commit,
+                ["selected.cs"],
+                CancellationToken.None));
+
+        Assert.Equal("Could not start Git to verify consumer source files.", exception.Message);
+        Assert.IsType<System.ComponentModel.Win32Exception>(exception.InnerException);
+    }
+
+    [Fact]
+    public void ToJsonValueRejectsUnsupportedVariants()
+    {
+        Assert.Equal("baseline", AdoptionMeasurementEngine.ToJsonValue(AdoptionVariant.Baseline));
+        Assert.Equal("proposed", AdoptionMeasurementEngine.ToJsonValue(AdoptionVariant.Proposed));
+
+        var exception = Assert.Throws<AdoptionMeasurementException>(
+            () => AdoptionMeasurementEngine.ToJsonValue((AdoptionVariant)999));
+
+        Assert.Contains("Unsupported variant '999'", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -766,6 +1015,21 @@ public sealed class AdoptionMeasurementTests : IDisposable
         await Task.WhenAll(output, error);
         Assert.True(process.ExitCode == 0, error.Result);
         return output.Result;
+    }
+
+    private static async Task<string> CreateUnixExecutableAsync(string path, string content)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "The executable fixture runs only on Unix hosts.");
+        }
+
+        await File.WriteAllTextAsync(path, content, CancellationToken.None);
+        File.SetUnixFileMode(
+            path,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return path;
     }
 
     private static async Task<string> InitializeConsumerRepositoryAsync(string consumerRoot)

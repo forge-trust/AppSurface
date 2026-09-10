@@ -125,6 +125,33 @@ public sealed class PostgreSqlDurableFailureClassifierTests
             Classify(new InvalidOperationException("programming failure")).Disposition);
     }
 
+    [Fact]
+    public void Classify_PropagatesPermissionFailureOutsideTheControlPlane()
+    {
+        var classification = Classify(
+            Postgres(PostgresErrorCodes.InsufficientPrivilege),
+            (PostgreSqlDurableControlPlaneOperation)999);
+
+        Assert.Equal(PostgreSqlDurableFailureDisposition.Propagate, classification.Disposition);
+        Assert.Null(classification.ProblemCode);
+        Assert.Null(classification.UnavailableCause);
+    }
+
+    [Fact]
+    public void Classify_RequiresMatchingProviderEvidenceForQueryCancellation()
+    {
+        var withoutEvidence = Classify(Postgres(PostgresErrorCodes.QueryCanceled));
+        Assert.Equal(PostgreSqlDurableFailureDisposition.Propagate, withoutEvidence.Disposition);
+
+        var withEvidence = Postgres(PostgresErrorCodes.QueryCanceled);
+        PostgreSqlDurableControlPlaneCommand.RecordTimeoutEvidence(
+            withEvidence,
+            PostgreSqlDurableTimeoutEvidence.ProviderDeadlineElapsed);
+        var classified = Classify(withEvidence);
+        Assert.Equal(PostgreSqlDurableFailureDisposition.Unavailable, classified.Disposition);
+        Assert.Equal(PostgreSqlDurableUnavailableCause.ProviderDeadline, classified.UnavailableCause);
+    }
+
     [Theory]
     [InlineData(DurableRuntimeSchemaCompatibility.Missing, DurableProblemCodes.SchemaMissing)]
     [InlineData(DurableRuntimeSchemaCompatibility.UpgradeRequired, DurableProblemCodes.SchemaUpgradeRequired)]

@@ -1952,6 +1952,52 @@ public sealed class PostgreSqlDurableRuntimePumpTests
     }
 
     [Fact]
+    public async Task TryRunOnceAsync_PropagatesUnclassifiedSchemaPrecheckFailuresAndReleasesLocalSlot()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "schema-precheck-propagation");
+        var status = await schema.GetStatusAsync();
+        var services = new ServiceCollection();
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.CreateDataSource(),
+            new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-schema-precheck-propagation-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+        var precheckFailure = new InvalidOperationException("unclassified schema precheck failure");
+        var schemaPrecheck = new StubSchemaManager(_ => ValueTask.FromException(precheckFailure));
+        var executorCalls = 0;
+        var pump = CreatePump(
+            provider,
+            provider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+            schemaManager: schemaPrecheck,
+            passExecutor: (_, _) =>
+            {
+                Interlocked.Increment(ref executorCalls);
+                return ValueTask.FromResult(new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
+            });
+        var request = new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All);
+
+        var first = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await pump.TryRunOnceAsync(request));
+        var second = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await pump.TryRunOnceAsync(request));
+
+        Assert.Same(precheckFailure, first);
+        Assert.Same(precheckFailure, second);
+        Assert.DoesNotContain("already has an active Pass", second.Message, StringComparison.Ordinal);
+        Assert.Equal(0, executorCalls);
+    }
+
+    [Fact]
     public async Task TryRunOnceAsync_RevalidatesSchemaInsideStoreAdmissionAfterPrecheckRace()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
