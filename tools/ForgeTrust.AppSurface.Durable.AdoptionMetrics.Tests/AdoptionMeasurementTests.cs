@@ -677,19 +677,47 @@ public sealed class AdoptionMeasurementTests : IDisposable
                 "The deterministic inherited-pipe fixture uses a Unix shell script.");
         }
 
+        var childProcessIdsPath = Path.Combine(_root, "inherited-pipe-child-pids");
         var executable = await CreateUnixExecutableAsync(
             Path.Combine(_root, "inherited-pipe-source-git"),
-            $"#!/bin/sh\nif [ \"$1\" = \"rev-parse\" ]; then\n  printf '%s\\n' '{Commit}'\nelse\n  (sleep 5) &\n  exit 0\nfi\n");
+            $"#!/bin/sh\nif [ \"$1\" = \"rev-parse\" ]; then\n  printf '%s\\n' '{Commit}'\nelse\n  (sleep 30) &\n  printf '%s\\n' \"$!\" >> \"$PWD/inherited-pipe-child-pids\"\n  exit 0\nfi\n");
         var verifier = new GitConsumerRevisionVerifier(
             executable,
             TimeSpan.FromSeconds(30));
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
 
-        await verifier.VerifyAsync(
-            _root,
-            Commit,
-            ["selected.cs"],
-            cancellation.Token);
+        try
+        {
+            await verifier.VerifyAsync(
+                _root,
+                Commit,
+                ["selected.cs"],
+                cancellation.Token);
+        }
+        finally
+        {
+            if (File.Exists(childProcessIdsPath))
+            {
+                foreach (var value in await File.ReadAllLinesAsync(childProcessIdsPath))
+                {
+                    if (!int.TryParse(value, out var processId))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        using var child = Process.GetProcessById(processId);
+                        child.Kill(entireProcessTree: true);
+                        await child.WaitForExitAsync();
+                    }
+                    catch (ArgumentException)
+                    {
+                        // The bounded fixture child already exited.
+                    }
+                }
+            }
+        }
     }
 
     [Fact]
