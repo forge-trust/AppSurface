@@ -669,7 +669,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
     }
 
     [Fact]
-    public async Task GitVerifierDoesNotWaitForInheritedSourceProbePipes()
+    public async Task GitVerifierCleansDescendantsThatInheritSourceProbePipes()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -680,43 +680,23 @@ public sealed class AdoptionMeasurementTests : IDisposable
         var childProcessIdsPath = Path.Combine(_root, "inherited-pipe-child-pids");
         var executable = await CreateUnixExecutableAsync(
             Path.Combine(_root, "inherited-pipe-source-git"),
-            $"#!/bin/sh\nif [ \"$1\" = \"rev-parse\" ]; then\n  printf '%s\\n' '{Commit}'\nelse\n  (sleep 30) &\n  printf '%s\\n' \"$!\" >> \"$PWD/inherited-pipe-child-pids\"\n  exit 0\nfi\n");
+            $"#!/bin/sh\nif [ \"$1\" = \"rev-parse\" ]; then\n  printf '%s\\n' '{Commit}'\nelse\n  (sleep 3) &\n  printf '%s\\n' \"$!\" >> \"$PWD/inherited-pipe-child-pids\"\n  exit 0\nfi\n");
         var verifier = new GitConsumerRevisionVerifier(
             executable,
             TimeSpan.FromSeconds(30));
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        await verifier.VerifyAsync(
+            _root,
+            Commit,
+            ["selected.cs"],
+            CancellationToken.None);
 
-        try
+        var childProcessIds = await WaitForProcessIdsFileAsync(childProcessIdsPath);
+        Assert.NotEmpty(childProcessIds);
+        foreach (var processId in childProcessIds)
         {
-            await verifier.VerifyAsync(
-                _root,
-                Commit,
-                ["selected.cs"],
-                cancellation.Token);
-        }
-        finally
-        {
-            if (File.Exists(childProcessIdsPath))
-            {
-                foreach (var value in await File.ReadAllLinesAsync(childProcessIdsPath))
-                {
-                    if (!int.TryParse(value, out var processId))
-                    {
-                        continue;
-                    }
-
-                    try
-                    {
-                        using var child = Process.GetProcessById(processId);
-                        child.Kill(entireProcessTree: true);
-                        await child.WaitForExitAsync();
-                    }
-                    catch (ArgumentException)
-                    {
-                        // The bounded fixture child already exited.
-                    }
-                }
-            }
+            Assert.True(
+                await WaitForProcessExitAsync(processId),
+                $"The inherited probe descendant {processId} remained alive after production cleanup.");
         }
     }
 
@@ -1133,6 +1113,57 @@ public sealed class AdoptionMeasurementTests : IDisposable
             path,
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         return path;
+    }
+
+    private static async Task<IReadOnlyList<int>> WaitForProcessIdsFileAsync(string path)
+    {
+        var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 2;
+        while (!File.Exists(path) && Stopwatch.GetTimestamp() < deadline)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(10));
+        }
+
+        if (!File.Exists(path))
+        {
+            return [];
+        }
+
+        return (await File.ReadAllLinesAsync(path))
+            .Select(static value => int.TryParse(value, out var processId) ? processId : 0)
+            .Where(static processId => processId > 0)
+            .ToArray();
+    }
+
+    private static async Task<bool> WaitForProcessExitAsync(int processId)
+    {
+        var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 2;
+        while (Stopwatch.GetTimestamp() < deadline)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(processId);
+                if (process.HasExited)
+                {
+                    return true;
+                }
+            }
+            catch (ArgumentException)
+            {
+                return true;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(10));
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return true;
+        }
     }
 
     private static async Task<string> InitializeConsumerRepositoryAsync(string consumerRoot)

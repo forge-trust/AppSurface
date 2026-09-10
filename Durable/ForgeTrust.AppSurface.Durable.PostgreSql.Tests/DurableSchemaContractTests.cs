@@ -285,7 +285,8 @@ public sealed class DurableSchemaContractTests
         Assert.True(
             script.IndexOf("0009_work_contract_discovery", StringComparison.Ordinal)
             < script.IndexOf("0010_runtime_health_observation", StringComparison.Ordinal));
-        Assert.Contains("pg_advisory_lock", script, StringComparison.Ordinal);
+        Assert.Contains("BEGIN;\nSET LOCAL lock_timeout = '30s';\nSET LOCAL statement_timeout = '30s';\nSELECT pg_advisory_lock(4707181168775217740);\nCOMMIT;", script, StringComparison.Ordinal);
+        Assert.Contains("closing that session after an error releases the session lock", script, StringComparison.Ordinal);
         var tenthMarker = script.IndexOf("-- Migration 0010_runtime_health_observation", StringComparison.Ordinal);
         var tenthTransaction = script.IndexOf("BEGIN;", tenthMarker, StringComparison.Ordinal);
         var tenthDeadline = script.IndexOf("SET LOCAL statement_timeout = '5min'", tenthMarker, StringComparison.Ordinal);
@@ -294,6 +295,7 @@ public sealed class DurableSchemaContractTests
         Assert.True(tenthTransaction > tenthMarker);
         Assert.True(tenthDeadline > tenthTransaction);
         Assert.True(tenthCommit > tenthDeadline);
+        Assert.True(script.LastIndexOf("SELECT pg_advisory_unlock(4707181168775217740);", StringComparison.Ordinal) > tenthCommit);
         Assert.DoesNotContain("0001_work_shared", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0002_forced_rls", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0003_flow_protocol", pendingOnly, StringComparison.Ordinal);
@@ -307,6 +309,23 @@ public sealed class DurableSchemaContractTests
         Assert.DoesNotContain("-- Migration", current, StringComparison.Ordinal);
         Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(-1));
         Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(11));
+    }
+
+    [Fact]
+    public async Task SchemaManager_RejectsUnboundedOrInvalidLockTimingSeams()
+    {
+        await using var dataSource = NpgsqlDataSource.Create(
+            "Host=localhost;Database=not-opened;Username=not-opened;Password=not-opened");
+        var migrations = DurablePostgreSqlMigrationCatalog.Load();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableRuntimeSchemaManager(
+            dataSource,
+            migrations,
+            migrationLockAcquireTimeout: TimeSpan.Zero));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableRuntimeSchemaManager(
+            dataSource,
+            migrations,
+            migrationLockRetryDelay: TimeSpan.Zero));
     }
 
     [Theory]

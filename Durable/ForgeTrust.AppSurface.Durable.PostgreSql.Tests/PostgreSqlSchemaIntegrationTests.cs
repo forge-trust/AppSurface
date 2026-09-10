@@ -2410,6 +2410,38 @@ public sealed class PostgreSqlSchemaIntegrationTests
     }
 
     [Fact]
+    public async Task ApplyLockContentionTimesOutWithActionableDiagnosticsAndCanRetry()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await using var blocker = await database.DataSource.OpenConnectionAsync();
+        await using (var acquire = new NpgsqlCommand("SELECT pg_advisory_lock(@lock_id);", blocker))
+        {
+            acquire.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            await acquire.ExecuteNonQueryAsync();
+        }
+
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(
+            database.DataSource,
+            DurablePostgreSqlMigrationCatalog.Load(),
+            migrationLockAcquireTimeout: TimeSpan.FromMilliseconds(250),
+            migrationLockRetryDelay: TimeSpan.FromMilliseconds(25));
+        var exception = await Assert.ThrowsAsync<TimeoutException>(async () => await manager.ApplyAsync());
+
+        Assert.Contains("Timed out after 0.25 seconds", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("migration advisory lock", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("pg_stat_activity", exception.Message, StringComparison.Ordinal);
+
+        await using (var release = new NpgsqlCommand("SELECT pg_advisory_unlock(@lock_id);", blocker))
+        {
+            release.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            Assert.True((bool)(await release.ExecuteScalarAsync())!);
+        }
+
+        var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], applied.AppliedVersions);
+    }
+
+    [Fact]
     public async Task EpochActivation_WaitsForTheSchemaAdvisoryLock()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -2437,7 +2469,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
     }
 
     [Fact]
-    public async Task ApplyConnectionLossWhileWaitingForLock_CanRecoverOnANewSession()
+    public async Task ApplyConnectionLossDuringBoundedLockPolling_CanRecoverOnANewSession()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         await using var blocker = await database.DataSource.OpenConnectionAsync();
@@ -2455,7 +2487,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await using var managerDataSource = NpgsqlDataSource.Create(managerConnection.ConnectionString);
         var manager = new PostgreSqlDurableRuntimeSchemaManager(managerDataSource);
         var apply = manager.ApplyAsync().AsTask();
-        var backendPid = await WaitForBackendAsync(database.DataSource, applicationName);
+        var backendPid = await WaitForBackendByApplicationNameAsync(database.DataSource, applicationName);
         await using (var terminate = database.DataSource.CreateCommand("SELECT pg_terminate_backend(@pid);"))
         {
             terminate.Parameters.AddWithValue("pid", backendPid);
@@ -2549,6 +2581,26 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
     private static ValueTask<int> WaitForBackendAsync(NpgsqlDataSource dataSource, string applicationName)
         => WaitForBackendAsync(dataSource, applicationName, "advisory");
+
+    private static async ValueTask<int> WaitForBackendByApplicationNameAsync(
+        NpgsqlDataSource dataSource,
+        string applicationName)
+    {
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            await using var command = dataSource.CreateCommand(
+                "SELECT pid FROM pg_catalog.pg_stat_activity WHERE application_name = @application_name LIMIT 1;");
+            command.Parameters.AddWithValue("application_name", applicationName);
+            if (await command.ExecuteScalarAsync() is int backendPid)
+            {
+                return backendPid;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
+        }
+
+        throw new TimeoutException("The migration session did not become visible while polling for the advisory lock.");
+    }
 
     private static async ValueTask AssertDueDispatchHealthAsync(
         NpgsqlConnection connection,

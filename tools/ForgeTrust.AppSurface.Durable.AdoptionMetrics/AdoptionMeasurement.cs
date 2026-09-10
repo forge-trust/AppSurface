@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -585,10 +586,11 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
     {
         // These fixed probes are quiet and only consume the exit code. Keep diagnostics out of the
         // caller's console without allowing inherited pipe handles to extend the command deadline.
-        using var process = CreateGitProcess(workingDirectory, arguments, redirectOutput: true);
+        using var process = CreateGitProbeProcess(workingDirectory, arguments);
         try
         {
             process.Start();
+            using var ownership = ProcessOwnership.Attach(process);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(_commandTimeout);
             using var drainCancellation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
@@ -626,6 +628,7 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
+            TryKillProcessTree(process);
             throw new AdoptionMeasurementException("Could not start Git to verify consumer source files.", exception);
         }
     }
@@ -678,6 +681,185 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
         }
 
         return new Process { StartInfo = startInfo };
+    }
+
+    private Process CreateGitProbeProcess(
+        string workingDirectory,
+        IReadOnlyList<string> arguments)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return CreateGitProcess(workingDirectory, arguments, redirectOutput: true);
+        }
+
+        // A POSIX child can outlive Git while retaining its stdout/stderr descriptors. Give the
+        // bootstrap process a short window for the parent to assign its process group, then exec
+        // Git so its exit code remains unchanged. ProcessOwnership kills the group after Git exits.
+        // /bin/sh is commonly dash on Linux, where set -m is disabled without a TTY. Bash is
+        // required here because its non-interactive job control gives the Git child a private
+        // process group. macOS and mainstream Linux images provide /bin/bash; minimal images
+        // without Bash cannot provide this descendant-ownership guarantee with POSIX sh alone.
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "/bin/bash",
+            WorkingDirectory = workingDirectory,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add(
+            "set -m; \"$0\" \"$@\" & child=$!; wait \"$child\"; status=$?; kill -KILL \"-$child\" 2>/dev/null; exit \"$status\"");
+        startInfo.ArgumentList.Add(_gitExecutable);
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        return new Process { StartInfo = startInfo };
+    }
+
+    private static class ProcessOwnership
+    {
+        internal static IDisposable Attach(Process process)
+        {
+            return OperatingSystem.IsWindows()
+                ? WindowsJob.Attach(process)
+                : Noop.Instance;
+        }
+
+        private sealed class Noop : IDisposable
+        {
+            internal static Noop Instance { get; } = new();
+
+            public void Dispose()
+            {
+            }
+        }
+
+        private sealed class WindowsJob : IDisposable
+        {
+            private const uint JobObjectLimitKillOnJobClose = 0x00002000;
+            private const int JobObjectExtendedLimitInformationClass = 9;
+            private IntPtr _handle;
+
+            private WindowsJob(IntPtr handle)
+            {
+                _handle = handle;
+            }
+
+            internal static WindowsJob Attach(Process process)
+            {
+                // Windows 8+ permits this job to nest under the host/test job when that job allows
+                // nesting. If the host forbids nesting (or is an older Windows version), fail
+                // closed: retaining an unowned descendant is worse than rejecting the probe.
+                var handle = CreateJobObject(IntPtr.Zero, null);
+                if (handle == IntPtr.Zero)
+                {
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                }
+
+                try
+                {
+                    var limits = new JobObjectExtendedLimitInformation
+                    {
+                        BasicLimitInformation = new JobObjectBasicLimitInformation
+                        {
+                            LimitFlags = JobObjectLimitKillOnJobClose,
+                        },
+                    };
+                    if (!SetInformationJobObject(
+                            handle,
+                            JobObjectExtendedLimitInformationClass,
+                            ref limits,
+                            (uint)Marshal.SizeOf<JobObjectExtendedLimitInformation>()))
+                    {
+                        throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                    }
+
+                    if (!AssignProcessToJobObject(handle, process.Handle))
+                    {
+                        throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                    }
+
+                    return new WindowsJob(handle);
+                }
+                catch
+                {
+                    TerminateJobObject(handle, 1);
+                    CloseHandle(handle);
+                    throw;
+                }
+            }
+
+            public void Dispose()
+            {
+                var handle = _handle;
+                _handle = IntPtr.Zero;
+                if (handle == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                TerminateJobObject(handle, 1);
+                CloseHandle(handle);
+            }
+
+            [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+            private static extern IntPtr CreateJobObject(IntPtr jobAttributes, string? name);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            private static extern bool SetInformationJobObject(
+                IntPtr job,
+                int informationClass,
+                ref JobObjectExtendedLimitInformation information,
+                uint informationLength);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            private static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            private static extern bool CloseHandle(IntPtr handle);
+
+            [StructLayout(LayoutKind.Sequential)]
+            private struct JobObjectBasicLimitInformation
+            {
+                internal long PerProcessUserTimeLimit;
+                internal long PerJobUserTimeLimit;
+                internal uint LimitFlags;
+                internal nuint MinimumWorkingSetSize;
+                internal nuint MaximumWorkingSetSize;
+                internal uint ActiveProcessLimit;
+                internal nuint Affinity;
+                internal uint PriorityClass;
+                internal uint SchedulingClass;
+            }
+
+            [StructLayout(LayoutKind.Sequential)]
+            private struct IoCounters
+            {
+                internal ulong ReadOperationCount;
+                internal ulong WriteOperationCount;
+                internal ulong OtherOperationCount;
+                internal ulong ReadTransferCount;
+                internal ulong WriteTransferCount;
+                internal ulong OtherTransferCount;
+            }
+
+            [StructLayout(LayoutKind.Sequential)]
+            private struct JobObjectExtendedLimitInformation
+            {
+                internal JobObjectBasicLimitInformation BasicLimitInformation;
+                internal IoCounters IoInfo;
+                internal nuint ProcessMemoryLimit;
+                internal nuint JobMemoryLimit;
+                internal nuint PeakProcessMemoryUsed;
+                internal nuint PeakJobMemoryUsed;
+            }
+        }
     }
 }
 
