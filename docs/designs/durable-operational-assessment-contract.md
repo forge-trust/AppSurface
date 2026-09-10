@@ -1676,3 +1676,23 @@ If worktrees/subagents are used for implementation, give Stage 3A ownership of s
 1. **Keep #794 as one staged case.** Splitting release units would allow a consumer to observe only half of the execution-certainty contract; the staged sequence above provides reviewability without making intermediate combinations supported.
 2. **Add computed `WasStoreObserved`.** It is additive, requires no constructor change, and removes a recurring state-dependent interpretation from diagnostics and future adapters.
 3. **Keep provider-first sequencing, but require a runnable consumer exercise before API freeze.** This proves the admission switch and execution-certainty language in a real composition without pulling #804’s host service into #794.
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | ISSUES OPEN | 12 proposals: 7 accepted, 5 deferred; 3 structural choices at final gate |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | UNAVAILABLE | External Eng voice could not run under the repository/sandbox data boundary |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | ISSUES OPEN | 16 findings, 0 critical silent gaps after amendments |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | SKIPPED | No UI surface |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 1 | CLEAR | Score 5.0/10 → 8.9/10; TTHW 10 min cold/unmeasured prepared → under 5 min cold/under 2 min prepared |
+
+**CROSS-MODEL:** CEO and DX external voices converged on the product and adoption risks; Eng used an approved independent `combo/sub` reviewer plus the main source audit, with the unavailable external Codex voice recorded as N/A.
+
+**VERDICT:** DX CLEARED; CEO and ENG are technically complete with 0 critical silent gaps but await the three final product-shape decisions before implementation.
+
+**UNRESOLVED DECISIONS:**
+
+- Keep #794 as one staged case, or split health, admission, cancellation, and atomic observation into separate release units.
+- Preserve state-defined `ObservedAtUtc` provenance, or add the recommended computed public `WasStoreObserved`.
+- Keep provider-first sequencing with a mandatory runnable consumer exercise before API freeze, or require #804-style host-first proof before freezing the SPI.
