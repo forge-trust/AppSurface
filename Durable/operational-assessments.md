@@ -78,6 +78,8 @@ policy. Add `Unavailable = 5` to exhaustive enum/serialization handling.
 
 ## Existing-host recipe
 
+### Authoritative admission
+
 Update `ForgeTrust.AppSurface.Durable`, `ForgeTrust.AppSurface.Durable.Provider`, and
 `ForgeTrust.AppSurface.Durable.PostgreSql` to the same #794 package version. Keep the existing PostgreSQL registration,
 separate dispatcher/runtime data sources, and explicit `AddWorkerHost()` choice. The new consumer resolves the

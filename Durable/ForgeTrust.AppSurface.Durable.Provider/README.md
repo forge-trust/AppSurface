@@ -82,7 +82,7 @@ Every public type in this package belongs to one of these provider-facing famili
 
 | Audience | Public types | Contract role |
 |---|---|---|
-| Runtime implementers | `DurableRuntimeSurface`, `DurableRuntimePumpRequest`, `DurableRuntimePumpResult`, `DurableRuntimePumpAttemptKind`, `DurableRuntimePumpAttempt`, `IDurableRuntimePump`, `IDurableRuntimePumpAdmission` | Run one bounded pass through the legacy exception/result projection or the [admission-aware operational assessment](https://github.com/forge-trust/AppSurface/blob/main/Durable/operational-assessments.md#activation-and-pump-admission) |
+| Runtime implementers | `DurableRuntimeSurface`, `DurableRuntimePumpRequest`, `DurableRuntimePumpResult`, `DurableRuntimePumpAttemptKind`, `DurableRuntimePumpAttempt`, `IDurableRuntimePump`, `IDurableRuntimePumpAdmission` | Run one bounded pass through the legacy exception/result projection or the [admission-aware operational assessment](https://github.com/forge-trust/AppSurface/blob/main/Durable/operational-assessments.md#authoritative-admission) |
 | Health and host implementers | `DurableRuntimeHealthState`, `DurableRuntimeHealthSnapshot`, `IDurableRuntimeHealth`, `IDurableRuntimeDrainControl` | Report low-cardinality health and coordinate graceful drain |
 | Work-store implementers | `DurableClaimedWork`, `DurablePreparedWorkInvocation`, `DurableProviderWorkAdapter` | Validate a claim, derive immutable execution identity, and invoke the adopter registry |
 | Application-authorized control implementers | Work get/cancel/list/snapshot types and `IDurableWorkControlClient`; scope disable types and `IDurableScopeControlClient` | Expose bounded, scoped, payload-free operational control |
