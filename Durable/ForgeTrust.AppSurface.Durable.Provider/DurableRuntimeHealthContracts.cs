@@ -269,8 +269,9 @@ public sealed record DurableRuntimeHealthSnapshot
 /// </summary>
 /// <remarks>
 /// This API is safe to expose through an application-owned health endpoint. It contains no payloads or scope and
-/// aggregate identifiers. Applications should alert on <see cref="DurableRuntimeHealthState.Stale"/>, an incompatible
-/// schema or epoch, and oldest-due age outside their own service objective.
+/// aggregate identifiers. Applications should alert on <see cref="DurableRuntimeHealthState.Unavailable"/>,
+/// <see cref="DurableRuntimeHealthState.Stale"/>, an incompatible schema or epoch, and oldest-due age outside their
+/// own service objective.
 /// </remarks>
 public interface IDurableRuntimeHealth
 {
