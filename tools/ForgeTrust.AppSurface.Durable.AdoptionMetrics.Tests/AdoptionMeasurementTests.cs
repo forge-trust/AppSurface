@@ -619,7 +619,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
 
         var executable = await CreateUnixExecutableAsync(
             Path.Combine(_root, "blocking-source-git"),
-            $"#!/bin/sh\nif [ \"$1\" = \"rev-parse\" ]; then\n  printf '%s\\n' '{Commit}'\nelse\n  sleep 30\nfi\n");
+            $"#!/bin/sh\nif [ \"$1\" = \"rev-parse\" ]; then\n  printf '%s\\n' '{Commit}'\nelse\n  (sleep 3) &\n  exit 0\nfi\n");
 
         var timeoutVerifier = new GitConsumerRevisionVerifier(
             executable,

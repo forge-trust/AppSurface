@@ -594,6 +594,7 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
             try
             {
                 await process.WaitForExitAsync(timeout.Token);
+                await Task.WhenAll(standardOutput, standardError);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
@@ -608,7 +609,6 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
                 throw;
             }
 
-            await Task.WhenAll(standardOutput, standardError);
             return process.ExitCode;
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
