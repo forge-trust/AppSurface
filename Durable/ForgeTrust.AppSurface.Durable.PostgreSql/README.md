@@ -128,7 +128,9 @@ Construct `PostgreSqlDurableRuntimeSchemaManager` with a migration-owner `Npgsql
 - `GetStatusAsync` reports StoreId, nullable active epoch, migration state, and reader/writer compatibility;
 - `GenerateScript` produces deterministic forward-only SQL from an exact reviewed installed version; generated SQL is
   not safe to rerun after a selected migration commits;
-- `ApplyAsync` applies pending known migrations under one session advisory lock;
+- `ApplyAsync` applies pending known migrations under one session advisory lock. Migration SQL receives a 330-second
+  client allowance so migration 0010's five-minute server-side index-build deadline remains authoritative even when
+  the migration-owner data source has a shorter default command timeout;
 - `InitializeRuntimeEpochAsync` activates the first epoch exactly once; and
 - `RotateRuntimeEpochAsync` compare-and-swaps the active epoch after restore or an authorized recovery event.
 

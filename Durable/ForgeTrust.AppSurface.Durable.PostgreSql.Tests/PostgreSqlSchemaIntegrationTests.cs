@@ -259,6 +259,63 @@ public sealed class PostgreSqlSchemaIntegrationTests
     }
 
     [Fact]
+    public async Task Apply_UsesAMigrationClientDeadlineLongerThanTheConfiguredDataSourceDefault()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var connectionString = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            CommandTimeout = 1,
+            Pooling = false,
+        }.ConnectionString;
+        await using var shortTimeoutDataSource = NpgsqlDataSource.Create(connectionString);
+        var storeId = Guid.NewGuid();
+        var delayedMigration = new DurablePostgreSqlMigration(
+            1,
+            "delayed_test_migration",
+            $"""
+            SET LOCAL statement_timeout = '5s';
+            SELECT pg_sleep(2);
+            CREATE SCHEMA appsurface_durable;
+            CREATE TABLE appsurface_durable.schema_migration
+            (
+                version integer PRIMARY KEY,
+                name text NOT NULL,
+                sha256 text NOT NULL
+            );
+            CREATE TABLE appsurface_durable.store_metadata
+            (
+                singleton boolean PRIMARY KEY,
+                store_id uuid NOT NULL,
+                active_runtime_epoch uuid NULL,
+                schema_version integer NOT NULL,
+                minimum_reader_version integer NOT NULL,
+                maximum_reader_version integer NOT NULL,
+                minimum_writer_version integer NOT NULL,
+                maximum_writer_version integer NOT NULL,
+                updated_at timestamp with time zone NOT NULL
+            );
+            INSERT INTO appsurface_durable.store_metadata
+                (singleton, store_id, active_runtime_epoch, schema_version,
+                 minimum_reader_version, maximum_reader_version,
+                 minimum_writer_version, maximum_writer_version, updated_at)
+            VALUES
+                (true, '{storeId:D}', NULL, 0, 1, 1, 1, 1, clock_timestamp());
+            """,
+            "delayed-test-sha256");
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(
+            shortTimeoutDataSource,
+            [delayedMigration]);
+
+        var result = await manager.ApplyAsync();
+        var status = await manager.GetStatusAsync();
+
+        Assert.Equal([1], result.AppliedVersions);
+        Assert.True(status.IsCompatible);
+        Assert.Equal(storeId, status.StoreId);
+        Assert.Equal(330, PostgreSqlDurableRuntimeSchemaManager.MigrationCommandTimeoutSeconds);
+    }
+
+    [Fact]
     public async Task RuntimeHealthMigration_OwnerDriftFailsBeforeDdlAndRetriesAfterRoleRepair()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();

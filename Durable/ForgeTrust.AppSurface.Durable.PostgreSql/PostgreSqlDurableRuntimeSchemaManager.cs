@@ -9,6 +9,11 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchemaManager
 {
     internal const long MigrationAdvisoryLock = 0x415344555241424C;
+
+    /// <summary>
+    /// Keeps the client alive beyond migration 0010's five-minute server-side statement deadline.
+    /// </summary>
+    internal const int MigrationCommandTimeoutSeconds = 330;
     private readonly NpgsqlDataSource _dataSource;
     private readonly IReadOnlyList<DurablePostgreSqlMigration> _migrations;
 
@@ -494,7 +499,13 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await using (var command = new NpgsqlCommand(migration.Sql, connection, transaction))
+            await using (var command = new NpgsqlCommand(migration.Sql, connection, transaction)
+            {
+                // Migration 0010 owns a five-minute server-side statement deadline for its bounded index build.
+                // Keep the client deadline longer so PostgreSQL reports the authoritative failure and leaves time
+                // for the response to cross the wire. Explicit caller cancellation still wins.
+                CommandTimeout = MigrationCommandTimeoutSeconds,
+            })
             {
                 await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
