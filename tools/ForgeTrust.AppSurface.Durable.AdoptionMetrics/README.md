@@ -24,4 +24,6 @@ The specification contains one baseline and one proposed entry for each of the
 three fixed regions. Baselines are observations rather than size gates.
 Proposed regions pass only when their count is at or below `limit`. Expected
 counts and pass values are checked before the deterministic result is written,
-so source drift fails instead of silently refreshing the evidence.
+so source drift fails instead of silently refreshing the evidence. Git
+verification is bounded to 30 seconds per command and Ctrl-C cancels the active
+measurement; a canceled or timed-out child process is terminated best-effort.

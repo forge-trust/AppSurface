@@ -41,6 +41,40 @@ reference against authoritative scope, revision, lease, runtime-epoch, and provi
 Slice 2 leaves that adapter shape open until a concrete broker topology proves the required routing and acknowledgement
 contract.
 
+## Operational assessment and admission
+
+The [operational-assessment adoption guide](../operational-assessments.md) is the copyable consumer path for this SPI.
+Use `DurableRuntimeHealthSnapshot.WasStoreObserved`, `CanEnableActivation`, `CanAttemptPump`, and `IsReady` for their
+distinct meanings; do not reconstruct readiness from component fields or timestamps. `CanAttemptPump` is advisory and
+must not be a check-then-act gate.
+
+```csharp
+var health = await healthClient.GetAsync(cancellationToken);
+if (!health.WasStoreObserved)
+{
+    logger.LogWarning("The Durable store could not be observed; code={ProblemCode}.", health.ProblemCode);
+}
+
+activationEnabled = health.CanEnableActivation;
+runtimeControlPlaneReady = health.IsReady;
+// health.CanAttemptPump may inform display/backoff, but admission remains the authority.
+```
+
+External activators should resolve `IDurableRuntimePumpAdmission` and call `TryRunOnceAsync` directly. Handle every
+`DurableRuntimePumpAttemptKind` in an exhaustive switch:
+
+| Kind | Result | Execution certainty |
+| --- | --- | --- |
+| `Completed` | Non-null `DurableRuntimePumpResult`, including an empty result | This invocation entered execution and terminal bookkeeping completed; inspect counts for item success |
+| `Refused` | Null | This invocation did not enter `RunPassAsync` |
+| `Unavailable` | Null and `ASDUR103` | This invocation did not enter `RunPassAsync`; the store could not be observed |
+| `Incompatible` | Null and `ASDUR108` or `ASDUR400`–`ASDUR403` | This invocation did not enter `RunPassAsync`; the observed store rejected this runtime |
+
+Caller cancellation, application execution failures, malformed provider state, and finalization failures propagate;
+`Try` does not mean “never throws.” A new retry is host policy and certifies only a new invocation. See the
+[PostgreSQL diagnostics matrix](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md#operational-assessment) for
+cause-specific remedies without provider-specific public exception types.
+
 ## Public API by audience
 
 Every public type in this package belongs to one of these provider-facing families. The
@@ -48,7 +82,7 @@ Every public type in this package belongs to one of these provider-facing famili
 
 | Audience | Public types | Contract role |
 |---|---|---|
-| Runtime implementers | `DurableRuntimeSurface`, `DurableRuntimePumpRequest`, `DurableRuntimePumpResult`, `IDurableRuntimePump` | Run one bounded, externally activated pass |
+| Runtime implementers | `DurableRuntimeSurface`, `DurableRuntimePumpRequest`, `DurableRuntimePumpResult`, `DurableRuntimePumpAttemptKind`, `DurableRuntimePumpAttempt`, `IDurableRuntimePump`, `IDurableRuntimePumpAdmission` | Run one bounded pass through the legacy exception/result projection or the [admission-aware operational assessment](https://github.com/forge-trust/AppSurface/blob/main/Durable/operational-assessments.md#activation-and-pump-admission) |
 | Health and host implementers | `DurableRuntimeHealthState`, `DurableRuntimeHealthSnapshot`, `IDurableRuntimeHealth`, `IDurableRuntimeDrainControl` | Report low-cardinality health and coordinate graceful drain |
 | Work-store implementers | `DurableClaimedWork`, `DurablePreparedWorkInvocation`, `DurableProviderWorkAdapter` | Validate a claim, derive immutable execution identity, and invoke the adopter registry |
 | Application-authorized control implementers | Work get/cancel/list/snapshot types and `IDurableWorkControlClient`; scope disable types and `IDurableScopeControlClient` | Expose bounded, scoped, payload-free operational control |

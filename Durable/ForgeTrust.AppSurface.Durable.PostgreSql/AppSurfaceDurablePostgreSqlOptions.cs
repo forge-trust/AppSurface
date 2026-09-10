@@ -47,10 +47,12 @@ public sealed class AppSurfaceDurablePostgreSqlOptions
     /// <summary>Gets or sets how old a heartbeat may become before health reports the worker as stale.</summary>
     public TimeSpan HeartbeatStaleAfter { get; set; } = TimeSpan.FromSeconds(15);
 
-    /// <summary>Gets or sets host shutdown time reserved for drain persistence and runtime cleanup.</summary>
+    /// <summary>Gets or sets one bounded host-shutdown reserve window for durable finalization or cleanup.</summary>
     /// <remarks>
-    /// Hosted startup validates this reserve against <c>HostOptions.ShutdownTimeout</c>. A pass admitted by the host
-    /// receives only the remaining time, while an externally activated pass retains its own caller-supplied budget.
+    /// Hosted startup requires <c>TimeBudgetPerPass + (2 * ShutdownReserve) &lt;= HostOptions.ShutdownTimeout</c>.
+    /// One fresh reserve protects terminal pass finalization and a second fresh reserve protects ownership-scoped
+    /// cleanup when finalization fails. An externally activated pass retains its caller-supplied execution budget,
+    /// then uses the same provider-owned finalization and cleanup reserves.
     /// </remarks>
     public TimeSpan ShutdownReserve { get; set; } = TimeSpan.FromSeconds(5);
 

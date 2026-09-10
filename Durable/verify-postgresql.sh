@@ -16,7 +16,8 @@ test_log="$work_dir/test-output.log"
 recovery_list_log="$work_dir/recovery-list-tests.log"
 recovery_test_log="$work_dir/recovery-test-output.log"
 recovery_evidence_file=""
-v2_worktree=""
+v2_package_version="0.2.0-preview.8"
+v2_package_sha256="62a48f6b7ec299ad608f3714a49a39f18c5cb1fe45293d53915e5549422d311e"
 
 usage() {
   echo "Usage: $0 --quick|--ci [--flow|--schedule] [--evidence-mode cold|warm --evidence-output DIR [--replace-evidence]]" >&2
@@ -25,9 +26,6 @@ usage() {
 cleanup() {
   if [[ -n "$recovery_evidence_file" && -f "$recovery_evidence_file" ]]; then
     rm -f -- "$recovery_evidence_file"
-  fi
-  if [[ -n "$v2_worktree" && -d "$v2_worktree" ]]; then
-    git -C "$repo_root" worktree remove --force "$v2_worktree" >/dev/null 2>&1 || true
   fi
   if [[ -d "$work_dir" && "$work_dir" == "${TMPDIR:-/tmp}"/appsurface-durable-postgresql.* ]]; then
     rm -rf -- "$work_dir"
@@ -41,6 +39,19 @@ fail() {
   echo "Use APPSURFACE_POSTGRES_TEST_CONNECTION for an external PostgreSQL 16.0+ database," >&2
   echo "or start Docker so the pinned Testcontainers path can run." >&2
   exit 1
+}
+
+verify_test_summary() {
+  local log_file="$1"
+  local expected_count="$2"
+  local description="$3"
+  grep -Eq "^Total tests:[[:space:]]+$expected_count$" "$log_file" \
+    || fail "$description did not execute exactly $expected_count tests"
+  grep -Eq "^[[:space:]]+Passed:[[:space:]]+$expected_count$" "$log_file" \
+    || fail "$description did not report exactly $expected_count passing tests"
+  if grep -Eq '^[[:space:]]+Skipped:[[:space:]]+[1-9][0-9]*$' "$log_file"; then
+    fail "$description skipped one or more required PostgreSQL tests"
+  fi
 }
 
 [[ -f "$project" ]] || fail "the PostgreSQL test project is missing"
@@ -204,19 +215,29 @@ fi
 case "$mode" in
   --quick)
     dotnet test "$project" --list-tests \
+      -m:1 -p:UseSharedCompilation=false \
       --filter "$target_test_filter" >"$list_log" \
       || fail "test discovery failed"
     grep -Fq "$target_test_class" "$list_log" \
       || fail "the named reference workload selected zero tests"
+    quick_expected_test_count="$(
+      grep -Ec '^[[:space:]]+ForgeTrust\.AppSurface\.Durable\.PostgreSql\.Tests\.' "$list_log" \
+        | tr -d ' '
+    )"
+    [[ "$quick_expected_test_count" -gt 0 ]] \
+      || fail "the named reference workload selected zero tests"
     if [[ -n "$evidence_output" ]]; then
       dotnet test "$project" \
+        -m:1 -p:UseSharedCompilation=false \
         --filter "$target_test_filter" \
         --logger 'console;verbosity=normal' | tee "$test_log"
+      verify_test_summary "$test_log" "$quick_expected_test_count" "the focused reference workload"
       recovery_test_class="ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlSchemaIntegrationTests"
       recovery_test_method="FailedMigration_RollsBackPartialDdlAndRetriesFromLastCommittedVersion"
       recovery_test_name="$recovery_test_class.$recovery_test_method"
       recovery_test_filter="FullyQualifiedName~$recovery_test_method"
       dotnet test "$project" --list-tests \
+        -m:1 -p:UseSharedCompilation=false \
         --filter "$recovery_test_filter" >"$recovery_list_log" \
         || fail "forward-only migration recovery test discovery failed"
       grep -Fq "$recovery_test_method" "$recovery_list_log" \
@@ -224,12 +245,10 @@ case "$mode" in
       recovery_started_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       recovery_started_epoch="$(date +%s)"
       dotnet test "$project" \
+        -m:1 -p:UseSharedCompilation=false \
         --filter "$recovery_test_filter" \
         --logger 'console;verbosity=normal' | tee "$recovery_test_log"
-      grep -Eq '^Total tests:[[:space:]]+1$' "$recovery_test_log" \
-        || fail "the evidence run did not execute exactly one forward-only migration recovery test"
-      grep -Eq '^[[:space:]]+Passed:[[:space:]]+1$' "$recovery_test_log" \
-        || fail "the evidence run did not pass the forward-only migration recovery test"
+      verify_test_summary "$recovery_test_log" 1 "the forward-only migration recovery proof"
       recovery_elapsed_milliseconds=$(( ($(date +%s) - recovery_started_epoch) * 1000 ))
       printf '%s\n' \
         '{' \
@@ -268,71 +287,67 @@ case "$mode" in
       recovery_evidence_file=""
     elif [[ "$use_schedule" == "true" ]]; then
       dotnet test "$project" \
+        -m:1 -p:UseSharedCompilation=false \
         --filter "$target_test_filter" \
-        --logger 'console;verbosity=normal'
+        --logger 'console;verbosity=normal' | tee "$test_log"
+      verify_test_summary "$test_log" "$quick_expected_test_count" "the focused Schedule workload"
     else
       dotnet test "$project" \
+        -m:1 -p:UseSharedCompilation=false \
         --filter "$target_test_filter" \
-        --logger 'console;verbosity=normal'
+        --logger 'console;verbosity=normal' | tee "$test_log"
+      verify_test_summary "$test_log" "$quick_expected_test_count" "the focused reference workload"
     fi
     ;;
   --ci)
-    if [[ "$use_flow" == "true" ]]; then
-      v2_commit="0e57477bab00b1951192c82ca28fdda977da2092"
-      git -C "$repo_root" cat-file -e "$v2_commit^{commit}" \
-        || fail "the pinned v2 compatibility commit $v2_commit is unavailable"
-      v2_worktree="$work_dir/v2-source"
-      git -C "$repo_root" worktree add --detach "$v2_worktree" "$v2_commit" >/dev/null \
-        || fail "the pinned v2 source worktree could not be created"
-      v2_package_version="0.0.0-v2-compat-${started_epoch}"
-      v2_packages="$work_dir/v2-packages"
-      mkdir -p "$v2_packages"
-      v2_provider_project="$v2_worktree/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj"
-      # Preserve the pinned SQL bytes while making their intended manifest names deterministic outside the original checkout.
-      sed -i.bak \
-        's#<EmbeddedResource Include="Migrations/[*].sql" />#<EmbeddedResource Include="$(MSBuildProjectDirectory)/Migrations/*.sql" LogicalName="ForgeTrust.AppSurface.Durable.PostgreSql.Migrations.%(Filename)%(Extension)" />#' \
-        "$v2_provider_project"
-      grep -Fq 'LogicalName="ForgeTrust.AppSurface.Durable.PostgreSql.Migrations.%(Filename)%(Extension)"' \
-        "$v2_provider_project" \
-        || fail "the pinned v2 migration resource normalization did not apply"
-      v2_restore_root="$v2_worktree/Durable/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost.csproj"
-      dotnet restore "$v2_restore_root" \
-        || fail "the pinned v2 dependency graph did not restore"
-      v2_pack_projects=(
-        "$v2_worktree/ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"
-        "$v2_worktree/Workers/ForgeTrust.AppSurface.Workers/ForgeTrust.AppSurface.Workers.csproj"
-        "$v2_worktree/Flow/ForgeTrust.AppSurface.Flow/ForgeTrust.AppSurface.Flow.csproj"
-        "$v2_worktree/Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj"
-        "$v2_worktree/Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj"
-        "$v2_provider_project"
-      )
-      for v2_pack_project in "${v2_pack_projects[@]}"; do
-        dotnet pack "$v2_pack_project" --configuration Release --output "$v2_packages" --no-restore \
-          -p:PackageVersion="$v2_package_version" -p:Version="$v2_package_version" \
-          || fail "a pinned v2 compatibility package did not pack: $v2_pack_project"
-      done
-      v2_harness_project="$repo_root/Durable/compatibility/V2WorkHarness/V2WorkHarness.csproj"
-      v2_harness_bin="$work_dir/v2-harness-bin"
-      # The pinned packages are timestamped for this isolated compatibility build, so keep its generated lock file
-      # in the temporary work directory rather than rewriting the repository lock file.
-      dotnet build "$v2_harness_project" --configuration Release \
-        -p:V2PackageVersion="$v2_package_version" \
-        -p:RestoreAdditionalProjectSources="$v2_packages" \
-        -p:NuGetLockFilePath="$work_dir/v2-harness-packages.lock.json" \
-        -p:RestoreLockedMode=false \
-        -p:BaseOutputPath="$v2_harness_bin/" \
-        -p:BaseIntermediateOutputPath="$work_dir/v2-harness-obj/" \
-        || fail "the tiny harness could not build against the pinned v2 packages"
-      export APPSURFACE_DURABLE_V2_TESTHOST_PATH="$v2_harness_bin/Release/net10.0/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost.dll"
-      export APPSURFACE_REQUIRE_V2_BINARY=true
+    command -v shasum >/dev/null 2>&1 \
+      || fail "shasum is required to verify the exact $v2_package_version release artifact"
+    v2_harness_project="$repo_root/Durable/compatibility/V2WorkHarness/V2WorkHarness.csproj"
+    v2_harness_bin="$work_dir/v2-harness-bin"
+    v2_harness_obj="$work_dir/v2-harness-obj"
+    dotnet restore "$v2_harness_project" --locked-mode \
+      -m:1 -p:UseSharedCompilation=false \
+      -p:BaseIntermediateOutputPath="$v2_harness_obj/" \
+      || fail "the locked exact $v2_package_version compatibility graph did not restore"
+    global_packages="$(dotnet nuget locals global-packages --list --force-english-output | sed -n 's/^global-packages: //p')"
+    [[ -n "$global_packages" ]] \
+      || fail "the NuGet global-packages directory could not be resolved"
+    v2_package_path="$global_packages/forgetrust.appsurface.durable.postgresql/$v2_package_version/forgetrust.appsurface.durable.postgresql.$v2_package_version.nupkg"
+    [[ -f "$v2_package_path" ]] \
+      || fail "the restored ForgeTrust.AppSurface.Durable.PostgreSql $v2_package_version artifact is missing"
+    actual_v2_package_sha256="$(shasum -a 256 "$v2_package_path" | awk '{print $1}')"
+    [[ "$actual_v2_package_sha256" == "$v2_package_sha256" ]] \
+      || fail "the $v2_package_version artifact SHA-256 was $actual_v2_package_sha256, expected $v2_package_sha256"
+    dotnet build "$v2_harness_project" --configuration Release --no-restore \
+      -m:1 -p:UseSharedCompilation=false \
+      -p:BaseOutputPath="$v2_harness_bin/" \
+      -p:BaseIntermediateOutputPath="$v2_harness_obj/" \
+      || fail "the compatibility harness could not build against exact package $v2_package_version"
+    v2_harness_path="$v2_harness_bin/Release/net10.0/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost.dll"
+    [[ -f "$v2_harness_path" ]] \
+      || fail "the exact $v2_package_version compatibility harness output is missing"
+    v2_release_test="ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlMixedVersionCompatibilityTests.ExactV020Preview8Package_OperatesAfterSchema10AndSupportsBinaryRollback"
+    dotnet test "$project" --list-tests \
+      -m:1 -p:UseSharedCompilation=false \
+      --filter "FullyQualifiedName=$v2_release_test" >"$work_dir/v2-release-list-tests.log" \
+      || fail "exact $v2_package_version release-proof discovery failed"
+    grep -Fq "$v2_release_test" "$work_dir/v2-release-list-tests.log" \
+      || fail "the exact $v2_package_version release proof selected zero tests"
+    APPSURFACE_REQUIRE_V020_RELEASE_PROOF=true \
+    APPSURFACE_DURABLE_V020_HARNESS_PATH="$v2_harness_path" \
+    APPSURFACE_DURABLE_V020_PACKAGE_PATH="$v2_package_path" \
       dotnet test "$project" \
-        --filter "FullyQualifiedName~PostgreSqlMixedVersionCompatibilityTests" \
-        --logger 'console;verbosity=normal' \
-        || fail "the pinned v2/current v3 compatibility preflight failed"
-      dotnet test "$project" --logger 'console;verbosity=normal'
-    else
-      dotnet test "$project" --logger 'console;verbosity=normal'
-    fi
+        -m:1 -p:UseSharedCompilation=false \
+        --filter "FullyQualifiedName=$v2_release_test" \
+        --logger 'console;verbosity=normal' | tee "$work_dir/v2-release-test-output.log" \
+        || fail "the exact $v2_package_version/current schema-10 release proof failed"
+    verify_test_summary \
+      "$work_dir/v2-release-test-output.log" \
+      1 \
+      "the exact $v2_package_version release proof"
+    dotnet test "$project" \
+      -m:1 -p:UseSharedCompilation=false \
+      --logger 'console;verbosity=normal'
     ;;
   *)
     usage
@@ -357,10 +372,7 @@ if [[ -n "$evidence_output" ]]; then
   primary_test_count="$(grep -c "$target_test_class" "$list_log" | tr -d ' ')"
   [[ "$primary_test_count" == "$primary_expected_test_count" ]] \
     || fail "expected exactly $primary_expected_test_count discovered reference workload cases, found $primary_test_count"
-  grep -Eq "^Total tests:[[:space:]]+$primary_expected_test_count$" "$test_log" \
-    || fail "the evidence run did not execute exactly $primary_expected_test_count reference workload tests"
-  grep -Eq "^[[:space:]]+Passed:[[:space:]]+$primary_expected_test_count$" "$test_log" \
-    || fail "the evidence run did not pass exactly $primary_expected_test_count reference workload tests"
+  verify_test_summary "$test_log" "$primary_expected_test_count" "the evidence reference workload"
   test_count="$primary_test_count"
   if [[ "$use_flow" == "false" ]]; then
     recovery_test_count="$(grep -c "$recovery_test_method" "$recovery_list_log" | tr -d ' ')"

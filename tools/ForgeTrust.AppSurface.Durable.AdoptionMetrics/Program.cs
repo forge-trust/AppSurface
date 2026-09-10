@@ -21,12 +21,26 @@ internal static class Program
 
     internal static async Task<int> Main(string[] args)
     {
-        return await RunAsync(
-            args,
-            Console.Out,
-            Console.Error,
-            Directory.GetCurrentDirectory(),
-            CancellationToken.None);
+        using var cancellation = new CancellationTokenSource();
+        ConsoleCancelEventHandler cancel = (_, eventArgs) =>
+        {
+            eventArgs.Cancel = true;
+            cancellation.Cancel();
+        };
+        Console.CancelKeyPress += cancel;
+        try
+        {
+            return await RunAsync(
+                args,
+                Console.Out,
+                Console.Error,
+                Directory.GetCurrentDirectory(),
+                cancellation.Token);
+        }
+        finally
+        {
+            Console.CancelKeyPress -= cancel;
+        }
     }
 
     internal static async Task<int> RunAsync(
@@ -72,6 +86,11 @@ internal static class Program
         {
             await standardError.WriteLineAsync($"Adoption measurement failed: {exception.Message}");
             return 1;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await standardError.WriteLineAsync("Adoption measurement canceled.");
+            return 130;
         }
     }
 

@@ -26,7 +26,8 @@ applies DDL or advances migration history.
 
 The production migration order is `0001_work_shared.sql`, `0002_forced_rls.sql`, `0003_flow_protocol.sql`,
 `0004_schedule_protocol.sql`, `0005_runtime_heartbeat.sql`, `0006_flow_trace_context.sql`,
-`0007_flow_retention.sql`, `0008_flow_repair.sql`, and `0009_work_contract_discovery.sql`, followed by the
+`0007_flow_retention.sql`, `0008_flow_repair.sql`, `0009_work_contract_discovery.sql`, and
+`0010_runtime_health_observation.sql`, followed by the
 canonical [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
 role recipe. Prefer generating the Durable schema script offline, reviewing it, applying the forward-only migrations,
 running the role recipe, and completing schema status/preflight before enabling the worker host. The
@@ -38,6 +39,76 @@ strings. Its explicit `apply --apply` path resolves only a named migration-owner
 For reconciliation, check status first, create a corrected and reviewed forward-only script, and retry. Never delete
 or rewrite migration history. The [`durable-postgresql` example](../../examples/durable-postgresql/README.md) is a
 local proof of these boundaries, not production operations guidance.
+
+## Operational assessment
+
+The [operational-assessment adoption guide](../operational-assessments.md) is the complete existing-host and
+external-activator recipe. PostgreSQL health exposes the provider-neutral `WasStoreObserved`, `CanEnableActivation`,
+`CanAttemptPump`, and `IsReady` predicates. Use `CanAttemptPump` only as context; call
+`IDurableRuntimePumpAdmission.TryRunOnceAsync` directly so health and admission cannot become a check-then-act pair.
+
+| Attempt | Public fields | Meaning and remedy |
+| --- | --- | --- |
+| `Completed` | Result required, no problem code | Application execution returned and terminal bookkeeping completed. Inspect counts; completion is not item-level success. |
+| `Refused` | No result, no problem code | Local overlap, closed process gate, drain, active store pass, or worker-generation refusal. Wait or reconcile as appropriate. |
+| `Unavailable` | No result, `ASDUR103` | The store was not observed. Transport/pool, provider-deadline, and permission (`42501`) causes have different remedies. |
+| `Incompatible` | No result, `ASDUR108` or `ASDUR400`–`ASDUR403` | The store was observed and rejected the runtime. Follow schema or authorized epoch recovery. |
+
+The returned non-completed outcomes certify that this invocation did not enter `RunPassAsync`; they do not certify
+the status of another process or a lost response. Exceptions before or after execution retain their original semantics.
+After `RunPassAsync` returns, caller cancellation no longer controls bounded successful-sweep finalization.
+
+### Composition requirement
+
+The legacy `IDurableRuntimePump` and admission-aware `IDurableRuntimePumpAdmission` must resolve to one concrete
+singleton when a provider implements both. A custom replacement must register the same instance under both interfaces
+before provider registration. Replacing only one interface can create independent process-local slots and is unsupported
+for concurrent activation. Use an in-process fake only to compile and exercise the public algebra; it is not evidence
+of PostgreSQL admission or store health.
+
+```csharp
+var customPump = new MyDurablePump(/* custom provider dependencies */);
+services.AddSingleton<IDurableRuntimePump>(customPump);
+services.AddSingleton<IDurableRuntimePumpAdmission>(customPump);
+services.AddAppSurfaceDurablePostgreSql(
+    dispatcherDataSource,
+    runtimeDataSource,
+    workOptions,
+    scheduleOptions);
+```
+
+Resolve both interfaces after building the provider and assert `ReferenceEquals` before concurrent use. The complete
+[custom-composition recipe](../operational-assessments.md#custom-composition) includes that assertion, and the
+[packed consumer](../packed-consumers/PostgreSqlProvider/Program.cs) compiles and runs the public four-kind contract.
+
+### Diagnostics matrix
+
+| Cause | Stable evidence | Safe operator action |
+| --- | --- | --- |
+| Transport or pool | `Unavailable` / `ASDUR103`, cause `Transport` | Check connectivity, pool capacity, and database availability; retry by host policy |
+| Provider deadline | `Unavailable` / `ASDUR103`, cause `ProviderDeadline` | Inspect exact due aggregation, query plan, backlog, pool wait, and command bounds |
+| Permission | `Unavailable` / `ASDUR103`, cause `PermissionDenied` / SQLSTATE `42501` | Rerun and verify the canonical [role recipe](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql); do not retry blindly |
+| Schema incompatibility | `Incompatible` / `ASDUR400`–`ASDUR403` | Generate/review/apply forward migrations as migration owner, then rerun roles and preflight |
+| Epoch mismatch | `Incompatible` / `ASDUR108` | Follow the authorized epoch rotation or restore procedure |
+
+Structured events `4110` (health unavailable), `4111` (admission unavailable), `4112`/`4113` (refusal), and `4114`
+(failed-pass cleanup) contain only operation, phase, cause, code, and documentation anchor as applicable. They do not
+expose SQL, exception text, credentials, role names, payload identifiers, scope identifiers, or aggregate identifiers.
+
+### Migration 9 -> 10 and rollback
+
+For the #794 provider release, drain and stop every durable worker and Schedule writer, keep pre-`0009` workers
+stopped, generate and review the exact script, and verify that the configured migration owner owns the schema-9
+`runtime_due_dispatch_health(integer)` function. Repair owner drift with the canonical role recipe before migration
+if needed. Then apply `0010_runtime_health_observation.sql` from schema 9 to 10 with that owner, rerun the role recipe
+for post-migration reconciliation, run status and preflight, smoke-test `v0.2.0-preview.8`, and deploy the new binary.
+Registration never applies the migration.
+
+Migration history is immutable. A schema-10 defect is repaired by a reviewed corrective forward migration. Binary
+rollback to `v0.2.0-preview.8` keeps schema 10 in place and requires status, health, heartbeat, and real Work smoke
+tests under the reconciled roles. A pre-`0009` binary is not a supported rollback target after the role recipe removes
+broad dispatcher access. See the [adoption guide](../operational-assessments.md#migration-and-role-reconciliation)
+for the complete rollout boundary and local-proof behavior.
 
 ## First proof
 
@@ -68,15 +139,18 @@ epoch from committing new durable state after rotation.
 Runtime roles never own schema or apply DDL. Apply the ordered migrations in numeric order:
 `0001_work_shared.sql`, `0002_forced_rls.sql`, `0003_flow_protocol.sql`, `0004_schedule_protocol.sql`,
 `0005_runtime_heartbeat.sql`, `0006_flow_trace_context.sql`, `0007_flow_retention.sql`,
-`0008_flow_repair.sql`, and `0009_work_contract_discovery.sql`.
+`0008_flow_repair.sql`, `0009_work_contract_discovery.sql`, and `0010_runtime_health_observation.sql`.
 
 `0009_work_contract_discovery.sql` introduces registry-scoped Work discovery and the payload-free
-discovery function `appsurface_durable.discover_work_dispatch(text[], text[], integer)`. Its contract-lookup index uses
-transactional `CREATE INDEX`, which blocks concurrent Work writes. Schedule migration `0009` in a reviewed maintenance window
-after draining runtime and Work-writer hosts; the package's checksum-bound transactional migration protocol cannot use
-`CREATE INDEX CONCURRENTLY`. Apply schema is forward-only; rolling application code back does not authorize destructive
-schema rollback. Execute generated SQL with a client that stops on the first error; `psql` callers must pass
-`-v ON_ERROR_STOP=1`.
+discovery function `appsurface_durable.discover_work_dispatch(text[], text[], integer)`. Its contract-lookup index and
+`0010_runtime_health_observation.sql`'s partial Schedule lease-expiry index use transactional `CREATE INDEX`, which can
+block concurrent writes to their respective tables. Schedule each migration in a reviewed maintenance window after
+draining every affected runtime and writer host; the package's checksum-bound transactional migration protocol cannot
+use `CREATE INDEX CONCURRENTLY`. Migration `0010` takes its Schedule table lock with `NOWAIT` and bounds the index
+statement at five minutes, so an active writer or unexpectedly long build fails and rolls the migration back instead
+of silently extending the write outage. Keep writers stopped, inspect the cause, and retry the same forward migration.
+Apply schema is forward-only; rolling application code back does not authorize destructive schema rollback. Execute
+generated SQL with a client that stops on the first error; `psql` callers must pass `-v ON_ERROR_STOP=1`.
 
 Create host principals outside migrations. Use [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) to
 grant the migration-owner, payload-free dispatcher, scoped-runtime, and scoped-retention-operator capabilities. Service roles must not receive
@@ -90,9 +164,11 @@ deliberately fully trusted for the unscoped `runtime_heartbeat` table: the healt
 worker-generation fence through its row lock and compare-and-swap predicates, so applications must not expose that
 credential to untrusted callers.
 
-Apply schema migrations before rerunning the role recipe. A migration can add package relations, but the recipe owns
-the reviewed grants for existing service roles; running it second is required before Flow runtime or dispatcher
-connections can use the new relations.
+Apply schema migrations before the normal post-migration role-recipe run. A migration can add package relations, but
+the recipe owns the reviewed grants for existing service roles; running it second is required before Flow runtime or
+dispatcher connections can use the new relations. Migration 0010 also verifies that its schema-9 function is already
+owned by the configured migration principal. If that preflight exposes historical owner drift, run the canonical
+recipe once as a repair before retrying migration 0010, then run it again after the migration for normal reconciliation.
 
 ## Run a worker host
 
@@ -137,7 +213,7 @@ services.AddAppSurfaceDurablePostgreSql(
 `IFlowRepairOperatorClient` services but installs no `IHostedService`, opens no connection, and applies no migration.
 `AddWorkerHost()` is the standard continuous activation path. On startup it validates schema compatibility and the
 active epoch, but never applies DDL or advances migration history. It also validates that `TimeBudgetPerPass +
-ShutdownReserve` fits inside `HostOptions.ShutdownTimeout`; an invalid store or host configuration fails closed.
+(2 * ShutdownReserve)` fits inside `HostOptions.ShutdownTimeout`; an invalid store or host configuration fails closed.
 
 The host calls the same [`IDurableRuntimePump`](../ForgeTrust.AppSurface.Durable.Provider/README.md#activation-and-broker-evolution)
 used by an external activator. A Pass runs at most `MaximumItemsPerPass` committed Turns and rotates Work, Flow, and
@@ -151,13 +227,13 @@ metadata-only notification payloads; polling remains the recovery path for lost,
 hints. A receipt never authorizes a claim.
 
 Resolve [`IDurableRuntimeHealth`](../ForgeTrust.AppSurface.Durable.Provider/README.md#public-api-by-audience) through
-an application-owned authorized health endpoint. `Healthy` is the only ready state; `NotStarted`, `Stale`, `Draining`,
-and `Incompatible` are intentionally not ready. Snapshots contain aggregate counts and fixed codes only—never payload,
+an application-owned authorized health endpoint. `Healthy` is the only ready state; every other state is intentionally
+not ready, including `NotStarted`, `Stale`, `Draining`, `Incompatible`, and `Unavailable`. Snapshots contain aggregate counts and fixed codes only—never payload,
 scope, aggregate, connection, or trace values. At shutdown, local admission closes synchronously before the host
 persists drain; already-permitted Work follows its ordinary cancellation/recovery path rather than inventing a result.
 
 For a cold path, first drain and stop every pre-`0009` worker because the role recipe intentionally removes its raw
-`dispatch` access. Apply every pending forward-only migration through `0009_work_contract_discovery.sql` with the migration owner, rerun
+`dispatch` access. Apply every pending forward-only migration through `0010_runtime_health_observation.sql` with the migration owner, rerun
 the role recipe, verify the active epoch and StoreId, deploy with `AddWorkerHost()` disabled, then enable it. Never destructively roll
 back a migration. After the role recipe runs, a pre-`0009` worker is not a compatible application rollback target because its dispatcher
 credential no longer has raw `dispatch` access; keep that worker stopped and roll forward to a `0009`-compatible binary instead. Do not

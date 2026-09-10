@@ -320,6 +320,34 @@ jobs:
           path: ${{ runner.temp }}/keycloak-theme-evidence
           if-no-files-found: warn
 
+  durable-postgresql-compatibility:
+    name: Durable PostgreSQL release compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: |
+            Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/packages.lock.json
+            Durable/compatibility/V2WorkHarness/packages.lock.json
+
+      - name: Restore PostgreSQL compatibility tests
+        run: dotnet restore Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj --locked-mode
+
+      - name: Verify the current provider and exact v0.2.0-preview.8 package
+        run: ./Durable/verify-postgresql.sh --ci
+
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45

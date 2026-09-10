@@ -282,12 +282,25 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
                    to_regclass('appsurface_durable.store_metadata') IS NOT NULL;
             """,
             connection);
-        await using var existenceReader = await existence.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        await existenceReader.ReadAsync(cancellationToken).ConfigureAwait(false);
-        var schemaExists = existenceReader.GetBoolean(0);
-        var historyExists = existenceReader.GetBoolean(1);
-        var metadataExists = existenceReader.GetBoolean(2);
-        await existenceReader.CloseAsync().ConfigureAwait(false);
+        var (schemaExists, historyExists, metadataExists) =
+            await PostgreSqlDurableControlPlaneCommand.ExecuteReaderAsync(
+                existence,
+                static async (reader, effectiveToken) =>
+                {
+                    if (!await reader.ReadAsync(effectiveToken).ConfigureAwait(false))
+                    {
+                        throw new InvalidDataException("The durable schema existence query returned no row.");
+                    }
+
+                    var result = (reader.GetBoolean(0), reader.GetBoolean(1), reader.GetBoolean(2));
+                    if (await reader.ReadAsync(effectiveToken).ConfigureAwait(false))
+                    {
+                        throw new InvalidDataException("The durable schema existence query returned more than one row.");
+                    }
+
+                    return result;
+                },
+                cancellationToken).ConfigureAwait(false);
         if (!schemaExists && !historyExists && !metadataExists)
         {
             return CreateStatus(DurableRuntimeSchemaCompatibility.Missing, 0, [], "The durable schema is not installed.");
@@ -302,12 +315,19 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         await using (var command = new NpgsqlCommand(
             "SELECT version, name, sha256 FROM appsurface_durable.schema_migration ORDER BY version;",
             connection))
-        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
         {
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                applied.Add(new AppliedMigration(reader.GetInt32(0), reader.GetString(1), reader.GetString(2)));
-            }
+            _ = await PostgreSqlDurableControlPlaneCommand.ExecuteReaderAsync(
+                command,
+                async (reader, effectiveToken) =>
+                {
+                    while (await reader.ReadAsync(effectiveToken).ConfigureAwait(false))
+                    {
+                        applied.Add(new AppliedMigration(reader.GetInt32(0), reader.GetString(1), reader.GetString(2)));
+                    }
+
+                    return true;
+                },
+                cancellationToken).ConfigureAwait(false);
         }
 
         var installed = applied.Count == 0 ? 0 : applied[^1].Version;
@@ -324,17 +344,40 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
             FROM appsurface_durable.store_metadata WHERE singleton;
             """;
         await using var metadata = new NpgsqlCommand(metadataSql, connection);
-        await using var metadataReader = await metadata.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        if (!await metadataReader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        var metadataObservation = await PostgreSqlDurableControlPlaneCommand.ExecuteReaderAsync(
+            metadata,
+            static async (reader, effectiveToken) =>
+            {
+                if (!await reader.ReadAsync(effectiveToken).ConfigureAwait(false))
+                {
+                    return null;
+                }
+
+                var result = new MetadataObservation(
+                    reader.GetGuid(0),
+                    reader.IsDBNull(1) ? null : reader.GetGuid(1),
+                    new StoreCompatibilityRange(
+                        reader.GetInt32(2),
+                        reader.GetInt32(3),
+                        reader.GetInt32(4),
+                        reader.GetInt32(5),
+                        reader.GetInt32(6)));
+                if (await reader.ReadAsync(effectiveToken).ConfigureAwait(false))
+                {
+                    throw new InvalidDataException("The durable store metadata query returned more than one row.");
+                }
+
+                return result;
+            },
+            cancellationToken).ConfigureAwait(false);
+        if (metadataObservation is null)
         {
             return CreateStatus(DurableRuntimeSchemaCompatibility.Inconsistent, installed, applied.Select(item => item.Version).ToArray(), "Store metadata is missing.");
         }
 
-        var storeId = metadataReader.GetGuid(0);
-        var activeEpoch = metadataReader.IsDBNull(1) ? (Guid?)null : metadataReader.GetGuid(1);
-        var range = new StoreCompatibilityRange(
-            metadataReader.GetInt32(2), metadataReader.GetInt32(3), metadataReader.GetInt32(4),
-            metadataReader.GetInt32(5), metadataReader.GetInt32(6));
+        var storeId = metadataObservation.StoreId;
+        var activeEpoch = metadataObservation.ActiveRuntimeEpoch;
+        var range = metadataObservation.Range;
         if (storeId == Guid.Empty || range.SchemaVersion != installed || !range.IsValid)
         {
             return CreateStatus(DurableRuntimeSchemaCompatibility.Inconsistent, installed, applied.Select(item => item.Version).ToArray(), "Store identity or compatibility metadata is invalid.", storeId, activeEpoch, range);
@@ -496,6 +539,11 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
     private static string EscapeSqlLiteral(string value) => value.Replace("'", "''", StringComparison.Ordinal);
 
     private sealed record AppliedMigration(int Version, string Name, string Sha256);
+
+    private sealed record MetadataObservation(
+        Guid StoreId,
+        Guid? ActiveRuntimeEpoch,
+        StoreCompatibilityRange Range);
 
     private sealed record StoreCompatibilityRange(
         int SchemaVersion,

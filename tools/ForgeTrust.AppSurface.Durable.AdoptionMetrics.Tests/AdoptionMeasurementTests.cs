@@ -139,6 +139,33 @@ public sealed class AdoptionMeasurementTests : IDisposable
         Assert.Contains(expected, exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task MeasureAsyncRejectsSymbolicLinksInsideADeclaredSourceRoot()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "Symbolic-link path validation runs only on Unix hosts.");
+        }
+
+        var fixture = await CreateValidFixtureAsync();
+        var selectedPath = Path.Combine(fixture.RepositoryRoot, "repository-registration.cs");
+        var outsidePath = Path.Combine(_root, "outside.cs");
+        await File.WriteAllTextAsync(outsidePath, "start\none\ntwo\nend\n", CancellationToken.None);
+        File.Delete(selectedPath);
+        File.CreateSymbolicLink(selectedPath, outsidePath);
+
+        var exception = await Assert.ThrowsAsync<AdoptionMeasurementException>(
+            () => AdoptionMeasurementEngine.MeasureAsync(
+                fixture.SpecPath,
+                fixture.ConsumerRoot,
+                fixture.RepositoryRoot,
+                new RecordingRevisionVerifier(),
+                CancellationToken.None));
+
+        Assert.Contains("must not contain symbolic links", exception.Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("line-count", "expected 3 nonblank lines but measured 2")]
     [InlineData("region-passed", "expected passed=false but measured passed=true")]
@@ -363,6 +390,57 @@ public sealed class AdoptionMeasurementTests : IDisposable
     }
 
     [Fact]
+    public async Task GitVerifierBoundsCommandsAndPreservesCallerCancellation()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "The deterministic Git-process deadline seam uses a Unix shell fixture.");
+        }
+
+        var executable = Path.Combine(_root, "blocking-git");
+        await File.WriteAllTextAsync(
+            executable,
+            "#!/bin/sh\nsleep 30\n",
+            CancellationToken.None);
+        File.SetUnixFileMode(
+            executable,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+        var timeoutVerifier = new GitConsumerRevisionVerifier(
+            executable,
+            TimeSpan.FromMilliseconds(50));
+        var timeout = await Assert.ThrowsAsync<AdoptionMeasurementException>(
+            () => timeoutVerifier.VerifyAsync(
+                _root,
+                Commit,
+                [],
+                CancellationToken.None));
+        Assert.Contains("within 0.05 seconds", timeout.Message, StringComparison.Ordinal);
+
+        var cancellationVerifier = new GitConsumerRevisionVerifier(
+            executable,
+            TimeSpan.FromSeconds(30));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        var canceled = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => cancellationVerifier.VerifyAsync(
+                _root,
+                Commit,
+                [],
+                cancellation.Token));
+        Assert.Equal(cancellation.Token, canceled.CancellationToken);
+    }
+
+    [Fact]
+    public void GitVerifierRejectsInvalidProcessConfiguration()
+    {
+        Assert.Throws<ArgumentException>(
+            () => new GitConsumerRevisionVerifier(" ", TimeSpan.FromSeconds(1)));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new GitConsumerRevisionVerifier("git", TimeSpan.Zero));
+    }
+
+    [Fact]
     public void CommandOptionsRejectIncompleteOrUnknownArguments()
     {
         var cases = new (string[] Arguments, string Expected)[]
@@ -424,6 +502,34 @@ public sealed class AdoptionMeasurementTests : IDisposable
         Assert.Equal(1, exitCode);
         Assert.Empty(standardOut.ToString());
         Assert.Contains("Adoption measurement failed: Unknown option", standardError.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProgramReportsCallerCancellationWithoutAStackTrace()
+    {
+        var fixture = await CreateValidFixtureAsync();
+        using var standardOut = new StringWriter();
+        using var standardError = new StringWriter();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var exitCode = await Program.RunAsync(
+            [
+                "--spec",
+                fixture.SpecPath,
+                "--consumer-root",
+                fixture.ConsumerRoot,
+                "--output",
+                Path.Combine(_root, "result.json"),
+            ],
+            standardOut,
+            standardError,
+            _root,
+            cancellation.Token);
+
+        Assert.Equal(130, exitCode);
+        Assert.Empty(standardOut.ToString());
+        Assert.Equal($"Adoption measurement canceled.{Environment.NewLine}", standardError.ToString());
     }
 
     [Fact]
@@ -497,6 +603,34 @@ public sealed class AdoptionMeasurementTests : IDisposable
         Assert.True(File.Exists(output));
         Assert.Contains("overallPassed=false", standardOut.ToString(), StringComparison.Ordinal);
         Assert.Empty(standardError.ToString());
+    }
+
+    [Fact]
+    public async Task WriterRejectsASymbolicLinkWithoutChangingItsTarget()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "Symbolic-link output validation runs only on Unix hosts.");
+        }
+
+        var fixture = await CreateValidFixtureAsync();
+        var result = await AdoptionMeasurementEngine.MeasureAsync(
+            fixture.SpecPath,
+            fixture.ConsumerRoot,
+            fixture.RepositoryRoot,
+            new RecordingRevisionVerifier(),
+            CancellationToken.None);
+        var target = Path.Combine(_root, "writer-target.json");
+        var output = Path.Combine(_root, "writer-output.json");
+        await File.WriteAllTextAsync(target, "sentinel", CancellationToken.None);
+        File.CreateSymbolicLink(output, target);
+
+        var exception = await Assert.ThrowsAsync<AdoptionMeasurementException>(
+            () => AdoptionMeasurementWriter.WriteAsync(output, result, CancellationToken.None));
+
+        Assert.Contains("output file must not be a symbolic link", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("sentinel", await File.ReadAllTextAsync(target, CancellationToken.None));
     }
 
     public void Dispose()
@@ -625,11 +759,13 @@ public sealed class AdoptionMeasurementTests : IDisposable
         }
 
         using var process = Process.Start(startInfo)!;
-        var output = await process.StandardOutput.ReadToEndAsync(CancellationToken.None);
-        var error = await process.StandardError.ReadToEndAsync(CancellationToken.None);
-        await process.WaitForExitAsync(CancellationToken.None);
-        Assert.True(process.ExitCode == 0, error);
-        return output;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
+        var error = process.StandardError.ReadToEndAsync(timeout.Token);
+        await process.WaitForExitAsync(timeout.Token);
+        await Task.WhenAll(output, error);
+        Assert.True(process.ExitCode == 0, error.Result);
+        return output.Result;
     }
 
     private static async Task<string> InitializeConsumerRepositoryAsync(string consumerRoot)

@@ -233,7 +233,45 @@ internal static class AdoptionMeasurementEngine
                 $"Region '{regionName}' source file '{NormalizeRelativePath(relativePath)}' does not exist.");
         }
 
+        RejectSymbolicLinks(root, path, regionName);
         return path;
+    }
+
+    private static void RejectSymbolicLinks(string root, string path, string regionName)
+    {
+        var relative = Path.GetRelativePath(root, path);
+        var current = root;
+        try
+        {
+            if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new AdoptionMeasurementException(
+                    $"Region '{regionName}' source path must not contain symbolic links or reparse points.");
+            }
+
+            foreach (var segment in relative.Split(
+                         [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                         StringSplitOptions.RemoveEmptyEntries))
+            {
+                current = Path.Combine(current, segment);
+                var attributes = File.GetAttributes(current);
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    throw new AdoptionMeasurementException(
+                        $"Region '{regionName}' source path must not contain symbolic links or reparse points.");
+                }
+            }
+        }
+        catch (AdoptionMeasurementException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new AdoptionMeasurementException(
+                $"Could not validate region '{regionName}' source path '{path}'.",
+                exception);
+        }
     }
 
     private static async Task<int> CountRegionLinesAsync(
@@ -336,14 +374,54 @@ internal static class AdoptionMeasurementWriter
         if (outputDirectory is not null)
         {
             Directory.CreateDirectory(outputDirectory);
+            RejectSymbolicLink(outputDirectory, "output directory");
         }
 
+        RejectSymbolicLink(normalizedOutputPath, "output file");
         var json = JsonSerializer.Serialize(result, SerializerOptions).ReplaceLineEndings("\n") + "\n";
-        await File.WriteAllTextAsync(
-            normalizedOutputPath,
-            json,
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-            cancellationToken);
+        var temporaryPath = Path.Combine(
+            outputDirectory ?? Directory.GetCurrentDirectory(),
+            $".{Path.GetFileName(normalizedOutputPath)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await File.WriteAllTextAsync(
+                temporaryPath,
+                json,
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                cancellationToken);
+            File.Move(temporaryPath, normalizedOutputPath, overwrite: true);
+        }
+        finally
+        {
+            File.Delete(temporaryPath);
+        }
+    }
+
+    private static void RejectSymbolicLink(string path, string description)
+    {
+        if (!File.Exists(path) && !Directory.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new AdoptionMeasurementException(
+                    $"The {description} must not be a symbolic link or reparse point.");
+            }
+        }
+        catch (AdoptionMeasurementException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new AdoptionMeasurementException(
+                $"Could not validate the {description} '{path}'.",
+                exception);
+        }
     }
 }
 
@@ -358,10 +436,28 @@ internal interface IConsumerRevisionVerifier
 
 internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
 {
-    internal static GitConsumerRevisionVerifier Instance { get; } = new();
+    private readonly string _gitExecutable;
+    private readonly TimeSpan _commandTimeout;
 
-    private GitConsumerRevisionVerifier()
+    internal static GitConsumerRevisionVerifier Instance { get; } = new(
+        "git",
+        TimeSpan.FromSeconds(30));
+
+    /// <summary>Initializes a verifier with an explicit executable and per-command deadline.</summary>
+    /// <remarks>The configurable seam keeps timeout and cancellation behavior deterministic in tests.</remarks>
+    internal GitConsumerRevisionVerifier(string gitExecutable, TimeSpan commandTimeout)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(gitExecutable);
+        if (commandTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(commandTimeout),
+                commandTimeout,
+                "The Git command timeout must be positive.");
+        }
+
+        _gitExecutable = gitExecutable;
+        _commandTimeout = commandTimeout;
     }
 
     public async Task VerifyAsync(
@@ -412,7 +508,7 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
         }
     }
 
-    private static async Task<string> RunGitAsync(
+    private async Task<string> RunGitAsync(
         string workingDirectory,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)
@@ -427,19 +523,37 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
             throw new AdoptionMeasurementException("Could not start Git to verify the consumer checkout.", exception);
         }
 
-        var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var error = await process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(_commandTimeout);
+        var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
+        var error = process.StandardError.ReadToEndAsync(timeout.Token);
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+            await Task.WhenAll(output, error);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            TryKillProcessTree(process);
+            throw new AdoptionMeasurementException(
+                $"Git did not complete consumer checkout verification within {_commandTimeout.TotalSeconds:0.###} seconds.");
+        }
+        catch (OperationCanceledException)
+        {
+            TryKillProcessTree(process);
+            cancellationToken.ThrowIfCancellationRequested();
+            throw;
+        }
         if (process.ExitCode != 0)
         {
             throw new AdoptionMeasurementException(
-                $"Git could not verify the consumer checkout: {error.Trim()}");
+                $"Git could not verify the consumer checkout: {error.Result.Trim()}");
         }
 
-        return output;
+        return output.Result;
     }
 
-    private static async Task<int> RunGitExitCodeAsync(
+    private async Task<int> RunGitExitCodeAsync(
         string workingDirectory,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)
@@ -448,9 +562,27 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
         try
         {
             process.Start();
-            var standardOutput = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            var standardError = process.StandardError.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(_commandTimeout);
+            var standardOutput = process.StandardOutput.ReadToEndAsync(timeout.Token);
+            var standardError = process.StandardError.ReadToEndAsync(timeout.Token);
+            try
+            {
+                await process.WaitForExitAsync(timeout.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                TryKillProcessTree(process);
+                throw new AdoptionMeasurementException(
+                    $"Git did not complete consumer source verification within {_commandTimeout.TotalSeconds:0.###} seconds.");
+            }
+            catch (OperationCanceledException)
+            {
+                TryKillProcessTree(process);
+                cancellationToken.ThrowIfCancellationRequested();
+                throw;
+            }
+
             await Task.WhenAll(standardOutput, standardError);
             return process.ExitCode;
         }
@@ -460,14 +592,33 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
         }
     }
 
-    private static Process CreateGitProcess(
+    private static void TryKillProcessTree(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // The process raced to completion after cancellation.
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // Best effort: preserve cancellation/timeout as the caller-visible outcome.
+        }
+    }
+
+    private Process CreateGitProcess(
         string workingDirectory,
         IReadOnlyList<string> arguments,
         bool redirectOutput)
     {
         var startInfo = new ProcessStartInfo
         {
-            FileName = "git",
+            FileName = _gitExecutable,
             WorkingDirectory = workingDirectory,
             RedirectStandardError = redirectOutput,
             RedirectStandardOutput = redirectOutput,

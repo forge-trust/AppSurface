@@ -30,12 +30,17 @@ projects=(
 )
 
 for project in "${projects[@]}"; do
-  dotnet restore "$ROOT_DIR/$project" --locked-mode
+  dotnet restore "$ROOT_DIR/$project" \
+    --locked-mode \
+    -m:1 \
+    -p:UseSharedCompilation=false
   dotnet pack "$ROOT_DIR/$project" \
     --configuration Release \
     --no-restore \
     --output "$FEED_DIR" \
-    -p:PackageVersion="$PACKAGE_VERSION"
+    -m:1 \
+    -p:PackageVersion="$PACKAGE_VERSION" \
+    -p:UseSharedCompilation=false
 done
 
 sed "s|__LOCAL_FEED__|$FEED_DIR|g" > "$CONFIG_FILE" <<'EOF'
@@ -67,11 +72,19 @@ for consumer in Adopter Provider PostgreSqlProvider; do
   mv "$consumer_dir/$consumer.csproj.template" "$consumer_dir/$consumer.csproj"
   dotnet restore "$consumer_dir/$consumer.csproj" \
     --configfile "$CONFIG_FILE" \
-    -p:AppSurfacePackageVersion="$PACKAGE_VERSION"
-  dotnet run --project "$consumer_dir/$consumer.csproj" \
+    -m:1 \
+    -p:AppSurfacePackageVersion="$PACKAGE_VERSION" \
+    -p:UseSharedCompilation=false
+  dotnet build "$consumer_dir/$consumer.csproj" \
     --configuration Release \
     --no-restore \
-    -p:AppSurfacePackageVersion="$PACKAGE_VERSION"
+    -m:1 \
+    -p:AppSurfacePackageVersion="$PACKAGE_VERSION" \
+    -p:UseSharedCompilation=false
+  dotnet run --project "$consumer_dir/$consumer.csproj" \
+    --configuration Release \
+    --no-build \
+    --no-restore
 done
 
-echo "Packed Durable adopter and provider consumers compiled and ran successfully."
+echo "Packed Durable adopter and provider consumers compiled and ran successfully, including the four-kind admission contract."

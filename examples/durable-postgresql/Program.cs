@@ -166,7 +166,7 @@ internal static class DurablePostgreSqlLocalExample
         using var host = hostBuilder.Build();
         var services = host.Services;
         var scope = new DurableScopeId("durable-local-proof");
-        _ = RequireSuccess(await services.GetRequiredService<IDurableWorkClient>().EnqueueAsync(
+        var workAcceptance = RequireSuccess(await services.GetRequiredService<IDurableWorkClient>().EnqueueAsync(
             new DurableWorkRequest(
                 scope,
                 new DurableCommandId("verify-local-work"),
@@ -178,12 +178,13 @@ internal static class DurablePostgreSqlLocalExample
         Console.WriteLine("[verify-local] Work accepted");
 
         using var flowTrace = new System.Diagnostics.Activity("durable-example.verify-local-flow").Start();
+        var flowInstanceId = new DurableFlowInstanceId("verify-local-flow");
         _ = RequireSuccess(await services.GetRequiredService<IDurableFlowClient>().StartAsync(
             new DurableFlowStartRequest(
                 scope,
                 new DurableCommandId("verify-local-flow"),
                 "verify-local-flow",
-                new DurableFlowInstanceId("verify-local-flow"),
+                flowInstanceId,
                 DurableExampleContracts.FlowId,
                 DurableExampleContracts.FlowVersion,
                 flowCodec.Encode(new LocalProofFlowContext("local-proof"))), cancellationToken));
@@ -204,12 +205,34 @@ internal static class DurablePostgreSqlLocalExample
                 "Local proof schedule"), cancellationToken));
         Console.WriteLine("[verify-local] Schedule accepted");
 
-        var pump = await services.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
-            new DurableRuntimePumpRequest(maximumItems: 32, timeBudget: TimeSpan.FromSeconds(10), surfaces: DurableRuntimeSurface.All),
+        var pumpRequest = new DurableRuntimePumpRequest(
+            maximumItems: 32,
+            timeBudget: TimeSpan.FromSeconds(10),
+            surfaces: DurableRuntimeSurface.All);
+        var legacyPump = services.GetRequiredService<IDurableRuntimePump>();
+        var admission = services.GetRequiredService<IDurableRuntimePumpAdmission>();
+        if (!ReferenceEquals(legacyPump, admission))
+        {
+            throw new InvalidOperationException(
+                "The PostgreSQL legacy and admission-aware pump interfaces must resolve to the same singleton.");
+        }
+
+        // Admission is authoritative. Do not turn the health observation below into a check-then-act gate.
+        var attempt = await admission.TryRunOnceAsync(pumpRequest, cancellationToken);
+        EnsureDirectProofPassSucceeded(attempt);
+        Console.WriteLine($"[verify-local] admission-aware pass: {DescribeAttempt(attempt)}");
+        await VerifyDirectProofStateAsync(
+            services,
+            scope,
+            workAcceptance.WorkId,
+            flowInstanceId,
             cancellationToken);
-        Console.WriteLine($"[verify-local] bounded host pass completed: processed={pump.Processed}");
+        Console.WriteLine("[verify-local] direct pass completed Work and Flow with zero failures");
         var health = await services.GetRequiredService<IDurableRuntimeHealth>().GetAsync(cancellationToken);
         EnsureRuntimeHealthIsCompatible(health);
+        Console.WriteLine(
+            $"[verify-local] runtime assessment: {health.State}; observed={health.WasStoreObserved}; " +
+            $"can-enable={health.CanEnableActivation}; can-attempt={health.CanAttemptPump}; ready={health.IsReady}");
 
         var drain = services.GetRequiredService<IDurableRuntimeDrainControl>();
         await drain.BeginDrainAsync(cancellationToken);
@@ -243,6 +266,48 @@ internal static class DurablePostgreSqlLocalExample
         return 0;
     }
 
+    /// <summary>Requires the direct admission proof to have entered and completed useful provider work.</summary>
+    /// <exception cref="InvalidOperationException">Thrown when admission was refused or the pass did not succeed.</exception>
+    internal static void EnsureDirectProofPassSucceeded(DurableRuntimePumpAttempt attempt)
+    {
+        ArgumentNullException.ThrowIfNull(attempt);
+        if (attempt.Kind != DurableRuntimePumpAttemptKind.Completed
+            || attempt.Result is null
+            || attempt.Result.Processed < 2
+            || attempt.Result.Failed != 0)
+        {
+            throw new InvalidOperationException(
+                $"The direct admission proof must complete at least the accepted Work and Flow with zero failures; observed {DescribeAttempt(attempt)}.");
+        }
+    }
+
+    /// <summary>Reads authoritative terminal state for the Work and Flow accepted by the direct proof.</summary>
+    private static async Task VerifyDirectProofStateAsync(
+        IServiceProvider services,
+        DurableScopeId scope,
+        DurableWorkId workId,
+        DurableFlowInstanceId flowInstanceId,
+        CancellationToken cancellationToken)
+    {
+        var work = RequireSuccess(await services.GetRequiredService<IDurableWorkControlClient>().GetAsync(
+            new DurableWorkGetRequest(scope, workId),
+            cancellationToken));
+        if (work.State != DurableWorkState.Succeeded)
+        {
+            throw new InvalidOperationException(
+                $"The direct admission proof Work ended in '{work.State}' instead of '{DurableWorkState.Succeeded}'.");
+        }
+
+        var flow = RequireSuccess(await services.GetRequiredService<IDurableFlowClient>().GetAsync(
+            new DurableFlowGetRequest(scope, flowInstanceId),
+            cancellationToken));
+        if (flow.State != DurableFlowState.Completed)
+        {
+            throw new InvalidOperationException(
+                $"The direct admission proof Flow ended in '{flow.State}' instead of '{DurableFlowState.Completed}'.");
+        }
+    }
+
     /// <summary>Confirms that worker-host startup left the durable schema metadata and catalog unchanged.</summary>
     /// <exception cref="InvalidOperationException">Thrown when startup changes durable schema identity or catalog metadata.</exception>
     internal static void EnsureWorkerHostDidNotChangeSchema(
@@ -267,10 +332,58 @@ internal static class DurablePostgreSqlLocalExample
     internal static void EnsureRuntimeHealthIsCompatible(DurableRuntimeHealthSnapshot health)
     {
         ArgumentNullException.ThrowIfNull(health);
-        if (!health.SchemaCompatible || !health.EpochCompatible)
+        if (!health.CanEnableActivation)
         {
-            throw new InvalidOperationException("The durable runtime health checkpoint is incompatible.");
+            throw new InvalidOperationException(
+                "The durable runtime health checkpoint does not authorize activation. " +
+                "Unavailable means the store was not observed; Incompatible means the observed store rejected this runtime.");
         }
+    }
+
+    /// <summary>
+    /// Consumes one public admission result without reproducing provider readiness or gate logic.
+    /// </summary>
+    /// <remarks>
+    /// The switch is intentionally exhaustive. Returned non-completed outcomes certify only that this invocation did
+    /// not enter <c>RunPassAsync</c>; a completed result means terminal pass bookkeeping completed, not that every
+    /// business item succeeded. Exceptions and cancellation are deliberately not converted into an attempt kind.
+    /// </remarks>
+    internal static string DescribeAttempt(DurableRuntimePumpAttempt attempt)
+    {
+        ArgumentNullException.ThrowIfNull(attempt);
+        switch (attempt.Kind)
+        {
+            case DurableRuntimePumpAttemptKind.Completed:
+                if (attempt.Result is null || attempt.ProblemCode is not null)
+                {
+                    throw new InvalidOperationException("A completed attempt must carry only its pump result.");
+                }
+
+                return $"Completed (discovered={attempt.Result.Discovered}, processed={attempt.Result.Processed}, failed={attempt.Result.Failed})";
+            case DurableRuntimePumpAttemptKind.Refused:
+                if (attempt.Result is not null || attempt.ProblemCode is not null)
+                {
+                    throw new InvalidOperationException("A refused attempt must carry no result or problem code.");
+                }
+
+                return "Refused (RunPassAsync was not entered)";
+            case DurableRuntimePumpAttemptKind.Unavailable:
+                if (attempt.Result is not null || attempt.ProblemCode != DurableProblemCodes.StoreUnavailable)
+                {
+                    throw new InvalidOperationException("An unavailable attempt must carry ASDUR103 and no result.");
+                }
+
+                return $"Unavailable ({attempt.ProblemCode}; RunPassAsync was not entered)";
+            case DurableRuntimePumpAttemptKind.Incompatible:
+                if (attempt.Result is not null || attempt.ProblemCode is null)
+                {
+                    throw new InvalidOperationException("An incompatible attempt must carry a problem code and no result.");
+                }
+
+                return $"Incompatible ({attempt.ProblemCode}; RunPassAsync was not entered)";
+        }
+
+        throw new ArgumentOutOfRangeException(nameof(attempt.Kind), attempt.Kind, "Unknown durable pump attempt kind.");
     }
 
     /// <summary>Waits for a hosted worker pass that is newer than the supplied baseline.</summary>
