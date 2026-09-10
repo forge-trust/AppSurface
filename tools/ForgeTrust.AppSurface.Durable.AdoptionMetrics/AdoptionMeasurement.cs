@@ -583,18 +583,17 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)
     {
+        // These fixed probes are quiet and only consume the exit code. Keep diagnostics out of the
+        // caller's console, but do not await pipe drainage because descendants can inherit pipe handles.
         using var process = CreateGitProcess(workingDirectory, arguments, redirectOutput: true);
         try
         {
             process.Start();
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(_commandTimeout);
-            var standardOutput = process.StandardOutput.ReadToEndAsync(timeout.Token);
-            var standardError = process.StandardError.ReadToEndAsync(timeout.Token);
             try
             {
                 await process.WaitForExitAsync(timeout.Token);
-                await Task.WhenAll(standardOutput, standardError);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
