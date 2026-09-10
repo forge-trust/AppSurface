@@ -237,7 +237,8 @@ public sealed class PostgreSqlDurableWorkStoreTests
             "tests",
             "recovery").AsTask();
 
-        await WaitForDatabaseLockAsync(database.DataSource, rotationApplicationName);
+        await WaitForDatabaseSessionAsync(database.DataSource, rotationApplicationName);
+        await Task.Delay(TimeSpan.FromMilliseconds(250));
         Assert.False(rotation.IsCompleted);
         await acceptanceTransaction.CommitAsync();
         var rotated = await rotation.WaitAsync(TimeSpan.FromSeconds(30));
@@ -3153,7 +3154,7 @@ public sealed class PostgreSqlDurableWorkStoreTests
         await scope.ExecuteNonQueryAsync();
     }
 
-    private static async ValueTask WaitForDatabaseLockAsync(
+    private static async ValueTask WaitForDatabaseSessionAsync(
         NpgsqlDataSource dataSource,
         string applicationName)
     {
@@ -3166,7 +3167,6 @@ public sealed class PostgreSqlDurableWorkStoreTests
                     SELECT 1
                     FROM pg_catalog.pg_stat_activity
                     WHERE application_name = @application_name
-                      AND wait_event_type = 'Lock'
                 );
                 """);
             command.Parameters.AddWithValue("application_name", applicationName);
@@ -3178,7 +3178,7 @@ public sealed class PostgreSqlDurableWorkStoreTests
             await Task.Delay(TimeSpan.FromMilliseconds(100));
         }
 
-        throw new TimeoutException("Runtime epoch rotation did not wait for the in-flight acceptance transaction.");
+        throw new TimeoutException("Runtime epoch rotation did not open its bounded lock-acquisition session.");
     }
 
     private static async ValueTask<int> WaitForBackendAsync(
