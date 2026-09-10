@@ -1865,6 +1865,50 @@ public sealed class PostgreSqlDurableRuntimePumpTests
     }
 
     [Fact]
+    public async Task TryRunOnceAsync_PropagatesCancellationBeforeExecutionAndLeavesNoActivePass()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "pre-execution-cancellation");
+        var services = new ServiceCollection();
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.CreateDataSource(),
+            new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-pre-execution-cancellation-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+        var executorCalls = 0;
+        var pump = CreatePump(
+            provider,
+            provider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+            passExecutor: (_, _) =>
+            {
+                Interlocked.Increment(ref executorCalls);
+                return ValueTask.FromResult(
+                    new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
+            });
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await pump.TryRunOnceAsync(
+                new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All),
+                cancellation.Token));
+
+        Assert.Equal(0, executorCalls);
+        var health = await provider.GetRequiredService<IDurableRuntimeHealth>().GetAsync();
+        Assert.False(health.IsPassActive);
+        Assert.Equal(DurableRuntimeHealthState.NotStarted, health.State);
+    }
+
+    [Fact]
     public async Task TryRunOnceAsync_ProjectsSchemaIncompatibilityWithoutEnteringExecution()
     {
         using var dispatcher = NpgsqlDataSource.Create(

@@ -11,9 +11,14 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
     internal const long MigrationAdvisoryLock = 0x415344555241424C;
 
     /// <summary>
+    /// Identifies the bounded index-build migration that requires an extended client deadline.
+    /// </summary>
+    internal const int ExtendedDeadlineMigrationVersion = 10;
+
+    /// <summary>
     /// Keeps the client alive beyond migration 0010's five-minute server-side statement deadline.
     /// </summary>
-    internal const int MigrationCommandTimeoutSeconds = 330;
+    internal const int ExtendedMigrationCommandTimeoutSeconds = 330;
     private readonly NpgsqlDataSource _dataSource;
     private readonly IReadOnlyList<DurablePostgreSqlMigration> _migrations;
 
@@ -499,14 +504,16 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await using (var command = new NpgsqlCommand(migration.Sql, connection, transaction)
+            await using (var command = new NpgsqlCommand(migration.Sql, connection, transaction))
             {
-                // Migration 0010 owns a five-minute server-side statement deadline for its bounded index build.
-                // Keep the client deadline longer so PostgreSQL reports the authoritative failure and leaves time
-                // for the response to cross the wire. Explicit caller cancellation still wins.
-                CommandTimeout = MigrationCommandTimeoutSeconds,
-            })
-            {
+                if (migration.Version == ExtendedDeadlineMigrationVersion)
+                {
+                    // Migration 0010 owns a five-minute server-side statement deadline for its bounded index build.
+                    // Keep the client deadline longer so PostgreSQL reports the authoritative failure and leaves time
+                    // for the response to cross the wire. Explicit caller cancellation still wins.
+                    command.CommandTimeout = ExtendedMigrationCommandTimeoutSeconds;
+                }
+
                 await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
 
