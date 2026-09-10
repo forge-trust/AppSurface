@@ -38,7 +38,19 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
     public async ValueTask<DurableRuntimeSchemaStatus> GetStatusAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        return await ReadStatusAsync(connection, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await AcquireStatusFenceAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+            var status = await ReadStatusAsync(connection, cancellationToken, transaction).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return status;
+        }
+        catch
+        {
+            await TryRollbackAsync(transaction).ConfigureAwait(false);
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -538,6 +550,21 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         await using var command = new NpgsqlCommand("SELECT pg_advisory_lock(@lock_id);", connection);
         command.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask AcquireStatusFenceAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            "SELECT pg_advisory_xact_lock_shared(@lock_id);",
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+        _ = await PostgreSqlDurableControlPlaneCommand.ExecuteNonQueryAsync(
+            command,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static async ValueTask ReleaseMigrationLockAsync(NpgsqlConnection connection)

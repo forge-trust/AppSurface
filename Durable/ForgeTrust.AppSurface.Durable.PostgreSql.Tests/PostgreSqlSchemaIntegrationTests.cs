@@ -2229,6 +2229,42 @@ public sealed class PostgreSqlSchemaIntegrationTests
     }
 
     [Fact]
+    public async Task SchemaStatus_WaitsForTheMigrationFenceBeforeReadingAConsistentGeneration()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var initialManager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await initialManager.ApplyAsync();
+        await using var blocker = await database.DataSource.OpenConnectionAsync();
+        await using (var acquire = new NpgsqlCommand("SELECT pg_advisory_lock(@lock_id);", blocker))
+        {
+            acquire.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            await acquire.ExecuteNonQueryAsync();
+        }
+
+        var applicationName = $"schema-status-fence-{Guid.NewGuid():N}";
+        var statusConnection = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            ApplicationName = applicationName,
+        };
+        await using var statusDataSource = NpgsqlDataSource.Create(statusConnection.ConnectionString);
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(statusDataSource);
+        var statusTask = manager.GetStatusAsync().AsTask();
+        _ = await WaitForBackendAsync(database.DataSource, applicationName);
+        Assert.False(statusTask.IsCompleted);
+
+        await using (var release = new NpgsqlCommand("SELECT pg_advisory_unlock(@lock_id);", blocker))
+        {
+            release.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            await release.ExecuteNonQueryAsync();
+        }
+
+        var status = await statusTask.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.True(status.IsCompatible);
+        Assert.Equal(10, status.InstalledVersion);
+        Assert.Equal(10, status.RequiredVersion);
+    }
+
+    [Fact]
     public async Task ApplyCancellationWhileWaitingForLock_DoesNotLeakLockAndCanRetry()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();

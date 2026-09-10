@@ -30,6 +30,7 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
     private readonly DurableRuntimeAdmissionGate _admission;
     private readonly ILogger<PostgreSqlDurableRuntimePump> _logger;
     private readonly PostgreSqlDurablePassExecutor _passExecutor;
+    private readonly bool _requiresExternalSchemaPrecheck;
     private readonly DurableRuntimeTurnScheduler _turnScheduler = new();
     private readonly SemaphoreSlim _passGate = new(1, 1);
 
@@ -93,6 +94,7 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
         _admission = admission ?? throw new ArgumentNullException(nameof(admission));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _passExecutor = passExecutor ?? RunPassAsync;
+        _requiresExternalSchemaPrecheck = schemaManager is not PostgreSqlDurableRuntimeSchemaManager;
     }
 
     public async ValueTask<DurableRuntimePumpResult> RunOnceAsync(
@@ -181,23 +183,26 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
             }
 
             phase = PostgreSqlDurablePumpPhase.StoreAdmission;
-            try
+            if (_requiresExternalSchemaPrecheck)
             {
-                await _schemaManager.ValidateAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (exception is not StackOverflowException and not OutOfMemoryException)
-            {
-                var classified = ClassifyPreExecutionFailure(
-                    PostgreSqlDurableControlPlaneOperation.SchemaAdmission,
-                    phase,
-                    exception,
-                    cancellationToken);
-                if (classified is { } outcome)
+                try
                 {
-                    return outcome;
+                    await _schemaManager.ValidateAsync(cancellationToken).ConfigureAwait(false);
                 }
+                catch (Exception exception) when (exception is not StackOverflowException and not OutOfMemoryException)
+                {
+                    var classified = ClassifyPreExecutionFailure(
+                        PostgreSqlDurableControlPlaneOperation.SchemaAdmission,
+                        phase,
+                        exception,
+                        cancellationToken);
+                    if (classified is { } outcome)
+                    {
+                        return outcome;
+                    }
 
-                throw;
+                    throw;
+                }
             }
 
             PostgreSqlDurableStoreAdmission storeAdmission;
