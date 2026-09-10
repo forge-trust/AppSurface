@@ -31,9 +31,9 @@ There is also a cancellation race after application execution returns: caller ca
 The new pump attempt is proof-carrying:
 
 - `Completed` certifies that execution returned and terminal heartbeat bookkeeping completed.
-- `Refused`, `Unavailable`, and `Incompatible` certify that application execution never began.
+- `Refused`, `Unavailable`, and `Incompatible` certify that this invocation did not enter `RunPassAsync`.
 
-This is stronger than adding convenience booleans or friendly error categories. A host can make a safe retry and readiness decision without guessing from zero counts, exception messages, or PostgreSQL details.
+This is stronger than adding convenience booleans or friendly error categories. A host can make a new, policy-controlled admission attempt after a returned pre-execution outcome without guessing from zero counts, exception messages, or PostgreSQL details. It does not prove the status of an earlier invocation whose response was lost, another process, or item-level effects.
 
 ## Evidence
 
@@ -79,7 +79,7 @@ Prior learning applied: `durable-adoption-decision-rule` (confidence 10/10, 2026
 - Preserve original pre-execution exceptions internally so the legacy projection can rethrow them without message parsing.
 - Represent epoch incompatibility as a typed internal outcome at its origin while preserving the legacy exception type and message.
 - Replace the two health reads with one PostgreSQL command and one result row.
-- Add a new migration that replaces, rather than edits, the shipped due-health function. The function becomes `STABLE` and uses `statement_timestamp()` so its filtering and the returned observation time share one timestamp and statement snapshot.
+- Add `0010_runtime_health_observation.sql`, increasing the required schema version from 9 to 10. It replaces, rather than edits, the shipped due-health function. The function becomes `STABLE` and uses `statement_timestamp()` so its filtering and the returned observation time share one timestamp and statement snapshot.
 
 ## Public Contract
 
@@ -119,9 +119,9 @@ public bool IsReady =>
 
 Their meanings are deliberately distinct:
 
-- `CanEnableActivation` is a deployment or configuration gate.
+- `CanEnableActivation` says the current assessment authorizes activation; it is not a permanent deployment toggle.
 - `CanAttemptPump` is a host precheck. PostgreSQL admission remains authoritative.
-- `IsReady` is the package’s traffic-readiness decision.
+- `IsReady` is provider runtime-control-plane readiness. It does not prove application traffic readiness, dependency liveness beyond the observation, or successful business work.
 
 `NotStarted` may enable activation and attempt a pump so a scale-to-zero worker can establish its first heartbeat. `Stale` may attempt a pump so PostgreSQL can apply guarded takeover. `Draining` may remain activation-compatible while refusing new pump attempts.
 
@@ -170,6 +170,8 @@ The constructor validates the closed algebra:
 Undefined enum values, invalid combinations, and invalid problem codes throw argument exceptions. A completed empty pass contains a non-null, zero-valued `DurableRuntimePumpResult`; it is never represented as `Refused`.
 
 No static factory API, fifth outcome, transport type, or host policy is added in this case.
+
+`IDurableRuntimePumpAdmission.TryRunOnceAsync` both attempts authoritative admission and, when admitted, executes one bounded pass. The `Try` prefix applies only to expected pre-execution admission outcomes: caller cancellation, application execution failures, finalization failures, malformed provider state, and unclassified exceptions still propagate. `Completed` means the bounded pass and terminal bookkeeping completed; inspect its result counts to determine whether individual work succeeded. The first example must call this API directly rather than gating it on a prior rich health read.
 
 ## Normative Health Truth Table
 
@@ -252,7 +254,7 @@ The internal refusal reason distinguishes local overlap from other refusals only
 
 Add an internal-only pass-executor delegate or interface used at the sole transition into `Executing`. The production constructor binds it directly to `RunPassAsync`; an internal constructor used through the existing test assembly friendship can inject a counting or blocking executor. The seam is not registered publicly and cannot change provider authority.
 
-Every non-completed-outcome test asserts that the executor invocation count remains zero. Completed-path tests assert exactly one invocation. Tests use this intentional internal seam and `InternalsVisibleTo`; reflection is prohibited.
+Every returned non-completed admission-outcome test asserts that the executor invocation count remains zero. Completed-path tests assert exactly one invocation. Pump-level cancellation or exception tests distinguish phase explicitly: failures before `Executing` assert zero invocations, while failures after the transition assert exactly one. Tests use this intentional internal seam and `InternalsVisibleTo`; reflection is prohibited.
 
 ### Legacy projection
 
@@ -317,7 +319,7 @@ This is required so both interfaces share the same process-local pass slot and c
 
 Preserve the package’s existing `TryAdd` override convention. The default registration guarantees that the concrete service and both public interfaces are reference-equal. A consumer replacing pump behavior must pre-register the same singleton under both public interfaces before calling `AddAppSurfaceDurablePostgreSql`; partial pump overrides are unsupported for concurrent use and are documented as such. Package registration does not overwrite a pre-registered interface, preserving existing override behavior.
 
-Tests cover the default reference identity, a complete two-interface custom override, and each partial override. A partial override remains resolvable for backward compatibility but receives no shared-slot guarantee and must not be presented in documentation as a supported activation composition.
+Tests cover the default reference identity, a complete two-interface custom override, and each partial override. A legacy-only override remains usable through `IDurableRuntimePump`, preserving existing behavior. When a consumer with that override first resolves the package-default `IDurableRuntimePumpAdmission`, its factory must fail with an actionable composition error before any pump invocation because the two interfaces would not share a process-local slot. The adoption guide supplies a complete two-interface replacement example and a provider-resolution assertion for custom composition. A pre-registered admission-only override is also documented and tested as unsupported with the default legacy pump; because it is new surface with no existing compatibility obligation, release verification may reject that composition during registration if it can do so without constructing the provider.
 
 ## Phase-Aware PostgreSQL Failure Classification
 
@@ -359,6 +361,8 @@ Cancellation precedence is deterministic:
 Exceptions escaping `RunPassAsync` occur after the transition to `Executing` and always propagate. Exceptions thrown by an already-permitted application invocation that existing per-surface code captures continue through the current durable `AmbiguousExternalOutcome` or other established completion path; the classifier never sees them.
 
 The existing epoch check must stop requiring downstream message parsing. It should produce a typed internal mismatch at the admission origin while allowing the legacy projection to throw the same `InvalidOperationException` type and message as today.
+
+The classifier also returns an internal, fixed cause of `Transport`, `ProviderDeadline`, or `PermissionDenied` whenever it produces public `Unavailable` / `ASDUR103`. Health and pump call sites emit one structured warning through `ILogger` with a stable event id, the fixed operation and phase, that cause, `ASDUR103`, and the canonical troubleshooting anchor. The event must not include SQL text, exception messages, connection strings, role names, payload identifiers, scope identifiers, or aggregate identifiers. Documentation maps transport to connectivity/retry checks, provider deadline to query/pool/backlog investigation, and permission denial to the runtime-role recipe. The coarse provider-neutral public contract does not grow a PostgreSQL cause field.
 
 ## Atomic PostgreSQL Health Observation
 
@@ -417,12 +421,15 @@ Column requirements are:
 | Due count | `bigint` | Required and nonnegative |
 | Oldest due time | `timestamp with time zone` | Nullable exactly when due count is zero |
 
-Add a new migration that uses `CREATE OR REPLACE FUNCTION` for `runtime_due_dispatch_health(integer)`:
+Add `0010_runtime_health_observation.sql`, raising `RequiredSchemaVersion` to 10, and use `CREATE OR REPLACE FUNCTION` for `runtime_due_dispatch_health(integer)`:
 
 - do not edit migration `0005_runtime_heartbeat.sql`;
 - declare the read-only function `STABLE`, ensuring its internal reads use the calling statement snapshot under PostgreSQL function-volatility rules;
 - replace each due comparison against `clock_timestamp()` with `statement_timestamp()`;
 - preserve the function signature, owner, security-definer boundary, search path, and grants.
+- preserve reader compatibility for the last supported schema-9 package, then rerun the canonical role recipe after applying migration `0010` to reconcile and verify runtime-role grants.
+
+The compatibility fixture pins `v0.2.0-preview.8` as the named schema-9 rollback artifact. That package must report a schema-10 store compatible because migration metadata permits readers 1 through 10 and the function signature is unchanged. The #794 package must report schema 9 as upgrade-required and schema 10 as compatible. No pre-`0009` package is a supported rollback target after the role recipe has removed broad dispatcher access.
 
 The outer health statement returns that same `statement_timestamp()` as `ObservedAtUtc`. A partial or malformed row never produces a snapshot.
 
@@ -440,7 +447,7 @@ Cancellation ownership changes at one explicit boundary:
 - If the finalization deadline expires, propagate its `OperationCanceledException` as a pump-level finalization failure. Do not return `Unavailable`, `Incompatible`, or caller cancellation because application work may already have executed.
 - Attempt failed-pass cleanup with a separate fresh `ShutdownReserve` token, without the caller token and without replacing the original execution or finalization exception.
 
-This is the only intentional legacy behavior correction. It requires a release note and an exact regression test.
+This is the only intentional legacy behavior correction. It requires a release note and an exact regression test. `TimeBudgetPerPass` bounds discovery and beginning additional work; it is not a total method timeout. After execution returns, successful finalization may consume one `ShutdownReserve`. If finalization fails, cleanup may consume one additional, fresh `ShutdownReserve`, so the worst-case post-return wait is two reserves plus any scheduling overhead. Hosted-service shutdown validation and documentation must account for that exact budget and explain that an outer host deadline can still terminate the process before best-effort cleanup finishes.
 
 ## Approaches Considered
 
@@ -454,7 +461,7 @@ Implement the explicit internal attempt machine. Keep all phases and internal ou
 
 This is the smallest architecture that makes the central promise mechanically difficult to violate:
 
-> Every non-completed attempt proves application execution never began.
+> Every returned non-completed attempt proves that this invocation did not enter `RunPassAsync`.
 
 ## Verification Plan
 
@@ -528,6 +535,8 @@ Resolve both pump interfaces from the service provider and prove reference equal
 
 Use PostgreSQL row locks and the existing blocking work registration to pause precisely between execution return and heartbeat finalization. Rotate the epoch or otherwise invalidate finalization after execution to prove post-start failures propagate instead of becoming `Incompatible`.
 
+For cancellation accounting, assert one reserve after provider return on successful finalization and at most a second fresh reserve after a finalization failure. Cover hosted shutdown and an abandoned external request; distinguish the caller token, finalization token, cleanup token, and outer host deadline in the deterministic seam.
+
 ### Regression and repository verification
 
 - Run Provider and PostgreSQL unit and integration test projects.
@@ -540,12 +549,15 @@ Use PostgreSQL row locks and the existing blocking work registration to pause pr
 
 Update:
 
-- the Provider README with the normative truth table and copyable predicate usage;
-- the PostgreSQL README with the attempt matrix, classifier boundary, and DI usage;
+- a task-oriented `Durable/operational-assessments.md` adoption guide, linked directly from the repository and Durable landing pages and from both package READMEs;
+- the Provider README with the normative truth table, copyable predicate usage, and IntelliSense-level distinctions among precheck, authoritative admission, completed pass, and work-item success;
+- the PostgreSQL README with the attempt matrix, classifier boundary, structured diagnostic event, two-interface custom composition, and exact migration-10 rollout;
 - the durable PostgreSQL example so it stops hand-writing compatibility/readiness expressions;
 - troubleshooting guidance for `ASDUR103`, emphasizing “could not observe” rather than “incompatible”;
 - release notes or changelog for the additive enum member and post-pass cancellation correction;
 - all affected XML documentation, including the mixed provenance of `ObservedAtUtc`.
+
+The adoption guide starts with an audience table for an existing worker host, external activator, diagnostics-only health consumer, schema owner, custom pump implementer, and rollback operator. Its existing-host upgrade recipe includes the old and new readiness expressions, package update, `9 -> 10` migration/status/apply transcript, role-recipe rerun, new DI resolution, an exhaustive four-kind attempt switch, exception and cancellation behavior, expected output, a compatibility matrix, and a complete replacement example. Every error path links to one problem/cause/safe-fix/retry-safety/execution-certainty entry.
 
 Distribution uses the existing versioned AppSurface NuGet package family and release pipeline. This case creates no new package. The enum addition and new interface are additive but require release notes for exhaustive enum switches and JSON consumers. The migration ships through the existing PostgreSQL package and remains explicitly applied by the migration owner; registration performs no DDL.
 
@@ -560,6 +572,8 @@ Distribution uses the existing versioned AppSurface NuGet package family and rel
 7. Caller cancellation after provider return cannot rewrite completed provider work.
 8. Legacy pump callers retain their existing API and all behavior except the documented cancellation correction.
 9. Later testing, activation, adapter, and doctor cases can consume the public contract without maintaining their own readiness or PostgreSQL exception classifiers.
+10. In five clean, prepared checkouts with dependencies restored and schema 10 already applied, the median existing-host code upgrade takes under two minutes and no run exceeds three minutes; package-plus-migration upgrade takes under five minutes once migration-owner credentials and the role recipe are available.
+11. An unfamiliar developer can find the first-run command and the distinct connectivity, deadline, and permission remedies for `ASDUR103` within two minutes.
 
 ## Dependencies and Non-Goals
 
@@ -586,8 +600,8 @@ Implement the public attempt algebra and the explicit private pump machine first
 3. Extract the explicit internal attempt machine and pin the two projections before changing behavior.
 4. Add the phase-aware failure classifier at health and pre-execution admission boundaries.
 5. Correct cancellation ownership and verify finalization races.
-6. Add the new function migration and one-row health observation.
-7. Update examples, package documentation, diagnostics, changelog, formatting, and full verification.
+6. Add `0010_runtime_health_observation.sql`, the one-row health observation, migration-first compatibility proof, and the post-migration role-recipe verification.
+7. Add the task-oriented adoption guide, update examples/package docs/diagnostics/changelog, measure the prepared and migration-inclusive upgrade journeys, then run formatting and full verification.
 
 ## What I Noticed About How You Think
 
@@ -597,3 +611,692 @@ This section is a non-normative office-hours reflection and contains no implemen
 - “I just don't want to miss and forget to create these later cases” pushed back on sequencing being mistaken for permission to discard scope; that is why the complete rail now exists before execution begins.
 - Choosing the explicit state machine over the smaller inline refactor favors a contract future maintainers can verify over merely minimizing the first diff.
 - You repeatedly protected the same boundary: genericise truthful provider mechanics, but do not absorb host routes, authorization, deployment, or domain policy upstream.
+
+## Autoplan Phase 1 — CEO Review
+
+Reviewed on 2026-09-10 in selective-expansion mode. This section amends the approved design where a concern can be resolved without changing its product boundary. Structural challenges that would change the approved case or public shape are held for the final approval gate.
+
+### Step 0A — Premise Challenge
+
+| Premise | Assessment | Decision |
+| --- | --- | --- |
+| The current behavior is a correctness problem | Confirmed. `GetAsync` currently turns inability to observe PostgreSQL into schema incompatibility, and the legacy pump cannot distinguish an empty completed pass from several refusals. | Keep as the reason to implement #794. |
+| Health interpretation and pump admission are one operational-truth boundary | Directionally correct, but both outside reviewers challenged whether all implementation changes must ship as one indivisible case. | Preserve the approved boundary provisionally; surface the split-versus-staged-delivery choice at the final gate. |
+| The public change is additive | Source shape is additive, but enum exhaustiveness, timestamp provenance, DI overrides, and the database migration create operational upgrade obligations. | Add explicit mixed-version, migration-first, rollback, and consumer-upgrade proof. |
+| Health classification, atomic observation, pump outcomes, and cancellation belong in one case | Plausible because the later testing and activation cases need a truthful end-to-end boundary, but it is not the only viable sequencing. | User challenge at the final gate. |
+| Non-completed attempts prove execution never began | Too broad as originally worded. They prove that this invocation did not cross the sole `RunPassAsync` entry boundary; they do not prove anything about a previous lost response or item-level effects from another attempt. | Narrow all proof and retry language and add a retry-safety table. |
+| Post-execution exceptions remain provider/durable-state concerns | Confirmed. The classifier must never relabel exceptions after `Executing`. | Keep and test at the exact phase boundary. |
+| Caller cancellation stops owning finalization after provider return | Correct for durable bookkeeping, provided the provider reserve remains a hard wall-clock bound and the host lifecycle trade-off is explicit. | Keep; add hosted-shutdown and abandoned-request verification. |
+| Host liveness remains host-owned | Confirmed. A store observation cannot prove process or endpoint liveness. | Keep; clarify that `IsReady` is runtime-control-plane readiness, not application-traffic or workload-success readiness. |
+
+### Step 0B — What Already Exists
+
+| Sub-problem | Existing authority | Reuse decision |
+| --- | --- | --- |
+| Public bounded pump | `IDurableRuntimePump`, `DurableRuntimePumpRequest`, and `DurableRuntimePumpResult` | Preserve unchanged and project the new internal attempt machine back to it. |
+| Process-local single-pass exclusion | `PostgreSqlDurableRuntimePump._passGate` | Keep as the first admission boundary; do not add a second preflight gate. |
+| Hosted shutdown admission | `DurableRuntimeAdmissionGate` and `PostgreSqlDurableHostedService` | Reuse the existing close/drain sequence and its validated shutdown reserve. |
+| Schema compatibility | `IDurableRuntimeSchemaManager.ValidateAsync` and `DurableRuntimeSchemaStatus` | Preserve exact typed incompatibility and legacy exceptions. |
+| Epoch, worker, drain, and active-pass fencing | `PostgreSqlDurableRuntimeHealth.TryBeginPassAsync` | Keep PostgreSQL authoritative and adapt its pre-execution outcomes without parsing messages. |
+| Pump execution | `PostgreSqlDurableRuntimePump.RunPassAsync` | Bind the internal execution seam directly to this one method in production. |
+| Final heartbeat bookkeeping | `RecordSuccessfulSweepAsync` and `RecordFailedPassAsync` | Retain behavior while correcting cancellation ownership and bounding cleanup. |
+| Due-work aggregation | `runtime_due_dispatch_health(integer)` | Replace through a new numbered migration; preserve signature, owner, grants, and security boundary. |
+| Migration compatibility | Contiguous embedded migrations and reader/writer compatibility ranges | Use the existing migration-first and old-reader-compatible rollout mechanism. |
+| Scale proof | `PostgreSqlScaleIntegrationTests` and shared PostgreSQL test infrastructure | Extend with a due-health plan/backlog case instead of creating a second performance harness. |
+| Public compatibility proof | Provider public API baseline and packed-consumer workflow | Extend for the enum/interface and legacy/new consumer upgrade paths. |
+| Later host-facing abstraction | Case #804 in the parent adoption rail | Do not create a second host service here; require #804 to preserve the no-execution distinction. |
+| Later testing and diagnostics | Cases #802 and #801 | Do not pull those packages into #794; leave intentional seams and actionable docs they can consume. |
+| Later transport adapter | Case #805 | Keep ASP.NET Core mapping experimental and downstream of the provider and host-service contracts. |
+
+### Step 0C — Dream State
+
+```text
+CURRENT
+  host reads component facts
+       ├── guesses readiness
+       └── calls ambiguous legacy pump
+                ├── empty completed pass ─┐
+                └── several refusals ─────┴── same zero result
+
+THIS PLAN
+  canonical health assessment
+       ├── current activation authorization
+       ├── pump-attempt authorization
+       └── runtime-control-plane readiness
+  one PostgreSQL pump attempt machine
+       ├── did not enter application execution
+       └── entered execution / completed bounded provider finalization
+
+12-MONTH IDEAL
+  one supported external-activation journey
+       ├── provider-neutral host result preserves execution certainty
+       ├── first-party test scenario proves the lifecycle
+       ├── doctor gives problem + cause + fix + docs
+       └── generated host reaches one real completion in <2 minutes primed
+```
+
+Dream-state delta: #794 supplies the truthful provider foundation but not the host-facing experience. Cases #802, #804, #805, and #801 must consume this contract without reconstructing its classifier or hiding the distinction between “this attempt did not execute” and “execution may have started.”
+
+### Step 0C-bis — Implementation Alternatives
+
+| Approach | Completeness | Effort | Risk | Advantages | Disadvantages |
+| --- | ---: | ---: | ---: | --- | --- |
+| Narrow outage and cancellation fixes only | 6/10 | Small | Medium | Ships two demonstrated bugs quickly | Leaves ambiguous admission and repeated host interpretation in place |
+| One #794 contract with ordered, independently verified implementation stages | 10/10 | Medium | Medium | Completes the provider boundary required by downstream cases while preserving one authority | Larger review surface and needs explicit rollback/mixed-version proof |
+| Host-first vertical slice, then extract provider SPI | 9/10 | Large | Medium | Tests the developer promise against a real activator first | Reverses the approved dependency graph and risks duplicating provider semantics inside the host layer |
+| Four separate correctness cases | 9/10 | Medium | Low per change | Smaller individual diffs and rollback units | More coordination, temporary semantic combinations, and delayed downstream contract stability |
+
+Provisional recommendation: retain one #794 case but implement it in reviewable stages, with a green legacy matrix after every stage. Because both outside voices preferred a structural split or host-first order, this remains a final-gate user challenge rather than an automatic decision.
+
+### Step 0D — Selective Expansion Decisions
+
+Accepted into #794:
+
+- Narrow “proof-carrying” and retry language to this invocation’s execution boundary.
+- Define `CanEnableActivation` as authorization from the current assessment, never as a permanent deployment toggle.
+- Define `IsReady` as provider runtime-control-plane readiness, not application traffic, dependency, or workload-success readiness.
+- Add a backlog-scale query-plan and bounded-latency evidence case for the exact due aggregation.
+- Add explicit migration-first rollout, mixed-version proof, rollback, and legacy-to-admission-aware adoption guidance.
+- Require diagnostics documentation to distinguish retryable transport/deadline causes from operator-action permission failures even when the public state stays coarse.
+- Require the future #804 mapping to preserve execution certainty rather than collapsing every post-health provider outcome into one undifferentiated failure.
+
+Deferred:
+
+- Host-facing activation orchestration remains owned by #804.
+- First-party fake/scenario ergonomics remain owned by #802.
+- Interactive diagnosis and complete problem/cause/fix/docs rendering remain owned by #801.
+- The experimental ASP.NET Core mapping remains owned by #805.
+- Activities, metrics, dashboards, and alert policy stay with the existing observability rail; #794 documents stable low-cardinality fields only.
+- HTTP routes, authentication, deployment controllers, retry schedules, and domain recovery remain application-owned.
+
+Rejected:
+
+- A fifth public indeterminate attempt kind; post-execution uncertainty already belongs to exceptions and durable item state.
+- Public PostgreSQL exception or SQLSTATE types in the Provider package.
+- A provider-neutral wake dispatcher or automatic migration at registration.
+- A second pump implementation path or preflight-then-enter sequence.
+
+Open user challenges for the final gate:
+
+1. Keep #794 as one staged correctness case or split it into independently shipped health, admission, cancellation, and atomic-observation cases.
+2. Preserve the current `ObservedAtUtc` shape with state-defined provenance or add an explicit computed/public provenance member such as `WasStoreObserved`.
+3. Keep provider-first sequencing or require a real host-first external-activation proof before freezing `IDurableRuntimePumpAdmission`.
+
+### Step 0E — Temporal Interrogation
+
+The hour labels below describe the order in which implementation risk becomes visible during a focused first pass; they are not a completion estimate. PostgreSQL integration, scale evidence, packed-consumer validation, and release verification each keep their own test-runtime and environment prerequisites.
+
+| Time | Expected implementation state | Review checkpoint |
+| --- | --- | --- |
+| Hour 1 | Public enum, predicates, attempt algebra, XML docs, constructor matrix, API baseline | No PostgreSQL behavior changed; compile-time public shape is reviewable. |
+| Hours 2–3 | One concrete singleton and internal attempt state machine with legacy/admission projections | All non-completed paths prove zero executor entries; legacy matrix stays green. |
+| Hours 3–4 | Typed classifier and cancellation handoff | Caller/provider timeout races, original exceptions, cleanup suppression, and finalization reserve are pinned. |
+| Hours 4–6 | New migration and atomic health row | Cardinality/type/cross-field validation, permission/transport failures, and statement timestamp semantics are pinned. |
+| Hour 6+ | Scale, mixed-version, packed-consumer, docs, and full solution verification | No release until migration-first deploy and old-binary rollback are demonstrated. |
+
+Mode confirmed: **Selective expansion**. Every accepted addition is in the existing blast radius and expected to take less than one CC day; structural changes stay at the final approval gate.
+
+### CEO Dual Voices — Consensus
+
+| Dimension | Claude subagent | Codex | Consensus |
+| --- | --- | --- | --- |
+| Premises valid? | Partially; correctness is real, breadth is under-evidenced | Partially; internal guarantee is real, host value is under-proved | Confirmed concern |
+| Right problem to solve? | Provider truth is necessary, host workflow is the larger promise | Provider truth is necessary, downstream mapping may erase value | Confirmed concern |
+| Scope calibration correct? | Prefer split slices or host-first proof | Scope bundles independent value | Confirmed concern; final-gate challenge |
+| Alternatives sufficiently explored? | No; add host-first and narrow-fix alternatives | No; alternatives varied implementation, not sequencing | Confirmed concern; alternatives added |
+| Competitive/market risks covered? | Complete ecosystems can beat a precise low-level SPI | Adoption may remain hard despite cleaner outcomes | Confirmed concern |
+| Six-month trajectory sound? | Risk of an unused public SPI | Risk of dual APIs and hidden upgrade cost | Confirmed concern |
+
+Both voices agree on all six strategic dimensions. Their agreement does not silently override the previously approved boundary; the three structural consequences are surfaced once at the final gate.
+
+### Section 1 — Architecture Review
+
+Four issues were found and addressed in the plan:
+
+1. The proof boundary was broader in prose than in code. It is now explicitly the sole transition into `RunPassAsync`.
+2. The parent activation service can erase execution certainty by mapping admission `Unavailable` and `Incompatible` to generic `PumpFailed`. #801 must preserve the distinction.
+3. Partial DI overrides can create two pump instances with independent local slots. They remain backward-resolvable only; docs and tests must identify the shared-singleton composition as the supported path.
+4. The plan lacked an operational rollback sequence. Migration-first deployment and old-binary compatibility are now release gates.
+
+```text
+application host
+   ├── IDurableRuntimeHealth ───────────────┐
+   ├── IDurableRuntimePumpAdmission ────────┼── one PostgreSqlDurableRuntimePump singleton
+   └── IDurableRuntimePump (legacy) ────────┘          │
+                                                       ├── local pass slot
+                                                       ├── process admission gate
+                                                       ├── schema manager
+                                                       ├── runtime health/admission
+                                                       │      └── one-row health SQL
+                                                       ├── phase-aware classifier
+                                                       ├── RunPassAsync
+                                                       └── bounded finalization
+
+migration owner ── explicit numbered migration ──▶ runtime_due_dispatch_health()
+runtime role  ─── read/admission grants ─────────▶ PostgreSQL authoritative state
+```
+
+At 10x load, exact due aggregation and connection-pool contention fail first. At 100x, repeated rich health prechecks can delay the pump that would reduce backlog. The plan therefore adds a scale proof and keeps direct admission authoritative. No new endpoint, credential, or mutation authority is introduced.
+
+The scale gate uses the repository’s pinned PostgreSQL 16.5 container with 100,000 due rows on each selected surface. CI must show an eligible due index for every dispatch table and no unbounded sequential scan. A release benchmark records five warm runs, container digest, runner profile, plans, buffers, and p50/p95; warm p95 must remain below one second. A forced provider deadline must return `Unavailable` without entering the executor, so a slow diagnostic observation cannot become a false incompatibility or an executed pass.
+
+### Section 2 — Error & Rescue Registry
+
+| Method or codepath | Failure | Exception or outcome | Rescued? | Rescue action | Caller/operator sees |
+| --- | --- | --- | ---: | --- | --- |
+| `DurableRuntimeHealthSnapshot` constructor | Undefined enum, invalid id, version, surface, count, or age | Argument exception | No | Reject invalid synthetic/provider state | Exact invalid parameter |
+| `DurableRuntimePumpAttempt` constructor | Contradictory closed-algebra fields | Argument exception | No | Reject at construction | Exact invalid field combination |
+| `IDurableRuntimeHealth.GetAsync` schema read | Transport, pool, connection, permission, or provider deadline failure | `Unavailable` / `ASDUR103` | Yes | Fail closed; no partial facts | Store could not be observed; docs distinguish likely remedy |
+| `IDurableRuntimeHealth.GetAsync` schema read | Observed missing, old, too-new, or inconsistent schema | `Incompatible` / exact schema code | Yes | Return observed incompatibility | Exact migration/compatibility code |
+| Atomic runtime observation | Classified pre-row provider failure | `Unavailable` / `ASDUR103` | Yes | Discard partial row | Store could not be observed |
+| Atomic runtime observation | Zero/multiple row, invalid type/nullability/value, undefined function | Provider or `InvalidDataException` | No | Propagate defect; never relabel | Actionable exception and failing operation |
+| Pump before `Executing` | Caller canceled | `OperationCanceledException` | No | Preserve token and stack | Caller cancellation |
+| Pump before `Executing` | Local/process/store refusal | Internal refusal; public `Refused`; legacy exact behavior | Yes | Do not enter executor | Admission did not run |
+| Pump before `Executing` | Classified provider outage/deadline | Public `Unavailable`; legacy original exception | Yes | Do not enter executor | `ASDUR103` or original legacy exception |
+| Pump before `Executing` | Schema/epoch incompatibility | Public `Incompatible`; legacy original exception | Yes | Do not enter executor | Exact compatibility code/status |
+| `RunPassAsync` | Application/provider exception escapes | Original exception | No | Attempt bounded failed-pass cleanup without masking | Original failure; execution may have begun |
+| Successful finalization | Provider reserve expires or store fails | Original finalization exception | No | Attempt separate bounded failed-pass cleanup | Pump failure; execution may have begun |
+| Failed-pass cleanup | Cleanup also fails | Suppressed secondary exception | Yes | Preserve original execution/finalization failure | Original failure remains authoritative |
+| Migration apply | SQL or transaction failure | Original provider exception | Yes | Transaction rollback; migration history not advanced | Apply failure with existing schema unchanged |
+| DI override | Only one pump interface replaced | Resolvable but unsupported composition | Documentation/test guard | Warn and require both interfaces to share one singleton | Explicit unsupported-concurrency warning |
+
+No catch-all converts unknown failures into a safe result. The only swallowed errors are best-effort cleanup failures that would otherwise mask the authoritative exception.
+
+### Section 3 — Security & Threat Model
+
+One medium-likelihood, high-impact issue was found: SQLSTATE `42501` is correctly evidence that the store was not observed, but treating it like a retryable network outage can create noisy retries and hide a role misconfiguration. The public provider-neutral state remains `Unavailable`; PostgreSQL documentation and safe diagnostics must identify permission configuration as an operator-action cause without exposing SQL, connection strings, role names supplied by users, payloads, scope ids, or aggregate ids.
+
+No new endpoint, secret, untrusted string interpolation, application assembly loading, or authorization boundary is added. The migration retains the existing `SECURITY DEFINER`, fixed `search_path`, owner, revoke, and explicit-grant posture.
+
+### Section 4 — Data Flow and Edge Cases
+
+Three issues were found: retry language did not cover lost responses, the unavailable snapshot reused a timestamp with different provenance, and rich health cost was not tested under backlog. Retry language and scale evidence are accepted; explicit provenance remains a final-gate decision.
+
+```text
+request
+  │ null/invalid ──▶ reject before slot
+  ▼
+local slot
+  │ overlap ───────▶ Refused / legacy ASDUR405
+  ▼
+process + store admission
+  │ closed/busy ───▶ Refused
+  │ unobserved ────▶ Unavailable / ASDUR103
+  │ incompatible ─▶ Incompatible / exact code
+  ▼
+RunPassAsync
+  │ throws ────────▶ original exception + bounded cleanup
+  │ empty result ──▶ Completed with non-null zero result
+  ▼
+provider-bounded finalization
+  │ fails ─────────▶ original finalization exception + bounded cleanup
+  ▼
+Completed
+```
+
+Safe retry means only that the caller may make a new admission attempt after a returned pre-execution outcome according to host policy. It does not prove the status of an earlier invocation whose response was lost, another concurrent process, or item-level external effects.
+
+### Section 5 — Code Quality Review
+
+Three issues were found and resolved:
+
+- Keep one private state machine and one classifier; do not duplicate catch filters in health and pump methods.
+- Name phases for authority boundaries, not incidental methods, and make invalid transitions impossible through one internal result carrier.
+- Keep `RunPassAsync` as the single execution seam so tests can count entry without reflection.
+
+The anticipated branch count belongs in small transition/classification helpers rather than one deeply nested method. The public algebra remains small; provider-specific evidence and legacy exception carriers stay internal.
+
+### Section 6 — Test Review
+
+Four missing proofs were added:
+
+- 100,000-row-per-surface or equivalent backlog evidence for the due-health query plan and bounded execution.
+- Migration-first mixed-version compatibility plus old-binary rollback.
+- Lost-response/retry wording and outcome-matrix contract tests.
+- Hosted shutdown and abandoned external-request races around `ProviderReturned` and the finalization reserve.
+
+The hostile test cancels the caller at each await boundary while independently blocking the executor and finalizer. The chaos test terminates or breaks PostgreSQL during schema read, store admission, execution, and finalization and verifies that only pre-execution allowlisted failures become safe outcomes.
+
+### Section 7 — Performance Review
+
+One high-priority issue was found. `count(*)` plus `min(due_at)` is exact work over all due rows even with partial due indexes; a one-statement snapshot improves consistency but does not make this cost constant. Extend `PostgreSqlScaleIntegrationTests` to prove index use and record bounded latency at production-shaped backlog. Do not add a cache: readiness and admission require current state, and stale cached compatibility would be more dangerous than a bounded failure.
+
+### Section 8 — Observability and Debuggability Review
+
+Two gaps were found. First, the plan named only the coarse public state, not the operator action for distinct PostgreSQL causes. Package docs and safe diagnostics must map transport/deadline failures to retry/check connectivity and `42501` to check runtime-role grants. Second, the future activation service must preserve whether execution began. Rich metrics, traces, dashboards, and alert policy remain outside #794; this case exposes stable low-cardinality state/kind/code fields they can consume.
+
+### Section 9 — Deployment and Rollout Review
+
+Two risks were found and accepted into the release proof:
+
+```text
+1. Build and pack Provider + PostgreSQL packages.
+2. Apply the new numbered migration with the migration owner.
+3. Verify function signature, owner, grants, volatility, and statement-time behavior.
+4. Run old package binary against the upgraded store.
+5. Deploy the new package binary.
+6. Smoke-test health states and both pump interfaces.
+```
+
+Rollback:
+
+```text
+new binary unhealthy?
+  ├── public/API regression ──▶ redeploy old binary; additive migration remains compatible
+  ├── function semantic defect ▶ CREATE OR REPLACE with a reviewed corrective forward migration
+  └── store integrity concern ─▶ stop activators, retain evidence, restore/repair under migration-owner procedure
+```
+
+Do not delete migration history or edit migration `0005`. Database rollback is forward-fix because numbered migration history is immutable; binary rollback is supported by the compatibility range and unchanged function signature.
+
+### Section 10 — Long-Term Trajectory Review
+
+Two debt risks remain. The legacy and admission-aware APIs can coexist indefinitely unless docs make the new interface the default for external activators, and a later host service can accidentally collapse the certainty this case adds. The implementation therefore documents audience boundaries and adds an explicit #804 handoff requirement. Reversibility is **4/5** before publication and **3/5** after consumers compile against the new enum/interface; the migration is operationally reversible by forward correction, not history deletion.
+
+Section 11 was skipped because this plan has no UI scope.
+
+### NOT in Scope
+
+- HTTP mapping, authentication, and response policy — application-owned now; case #804 adds only a transport-neutral service and #805 owns the experimental ASP.NET Core adapter.
+- Host retry intervals or deployment automation — policy depends on the host and outage cause.
+- First-party testing package — case #802.
+- Runtime doctor and interactive remediation — case #801.
+- Metrics, tracing, dashboards, and alerts — consume #794’s low-cardinality fields in the observability case.
+- Provider-neutral wake transport — database remains authoritative and no second consumer justifies it.
+- A persisted PostgreSQL admission protocol — no benefit to the intentionally collapsed public refusal.
+- Automatic migration or destructive rollback — violates passive registration and immutable migration history.
+- Work-item outcome redesign — issues #783 and #765 own typed exits and retry plans.
+
+### Failure Modes Registry
+
+| Codepath | Failure mode | Rescued? | Test? | Caller sees | Logged or documented? |
+| --- | --- | ---: | ---: | --- | ---: |
+| Health schema read | Store unavailable | Yes | Yes | `Unavailable` / `ASDUR103` | Yes |
+| Health schema read | Schema incompatible | Yes | Yes | `Incompatible` / exact code | Yes |
+| Health row | Partial/malformed provider state | No, propagate | Yes | Exact provider/data exception | Yes |
+| Health row | Backlog makes exact aggregation exceed provider deadline | Yes | Yes | `Unavailable` / `ASDUR103` | Yes |
+| Pump local slot | Overlap | Yes | Yes | `Refused` or exact legacy exception | Yes |
+| Pump process gate | Shutdown admission closed | Yes | Yes | `Refused` or legacy empty result | Yes |
+| Pump store admission | Drain/active pass | Yes | Yes | `Refused` or legacy empty result | Yes |
+| Pump store admission | Worker identity changed | Yes | Yes | `Refused` or original legacy exception | Yes |
+| Pump pre-execution | Transport/deadline/permission failure | Yes | Yes | `Unavailable` or original legacy exception | Yes |
+| Pump pre-execution | Schema/epoch mismatch | Yes | Yes | `Incompatible` or original legacy exception | Yes |
+| Pump execution | Escaping exception after executor entry | No, propagate | Yes | Original exception | Yes |
+| Pump finalization | Caller cancels after provider return | Yes | Yes | Completed if bounded finalization succeeds | Yes |
+| Pump finalization | Reserve expires/provider fails | No, propagate | Yes | Original finalization failure | Yes |
+| Pump cleanup | Secondary cleanup failure | Yes, suppress | Yes | Original failure | Yes |
+| Migration | Apply fails mid-transaction | Yes, rollback | Yes | Apply failure, old schema intact | Yes |
+| DI composition | Partial override creates independent slots | Documentation guard | Yes | Unsupported-composition warning | Yes |
+| Consumer upgrade | Exhaustive enum switch/JSON policy rejects new member | Migration guidance | Yes | Compile/test/release guidance | Yes |
+| Deployment | New binary before migration | Fail closed | Yes | Exact upgrade-required status | Yes |
+
+No row is both silent and untested.
+
+### Stale Diagram Audit
+
+The parent rail’s provider/host dependency and activation sequence diagrams remain directionally correct. Its activation result mapping is now flagged for #801 because collapsing admission `Unavailable` or `Incompatible` into generic `PumpFailed` would discard execution certainty. The state-machine diagram in this document remains normative after narrowing the proof language.
+
+### CEO Implementation Tasks
+
+- [ ] **CEO-T1 (P1, human: ~2h / CC: ~20min)** — Public contract — Narrow proof, retry, readiness, and activation-authorization semantics.
+  - Surfaced by: premise challenge and Sections 4/10.
+  - Files: Provider contracts, Provider README, PostgreSQL README, release notes.
+  - Verify: public contract tests and documentation examples agree on every state/outcome.
+- [ ] **CEO-T2 (P1, human: ~4h / CC: ~35min)** — PostgreSQL health — Add backlog-scale plan and latency evidence for exact due aggregation.
+  - Surfaced by: Section 7.
+  - Files: `PostgreSqlScaleIntegrationTests.cs`, health SQL/migration tests.
+  - Verify: selected indexes appear in `EXPLAIN`; bounded call either succeeds or returns the classified provider deadline.
+- [ ] **CEO-T3 (P1, human: ~4h / CC: ~40min)** — Release proof — Add migration-first, mixed-version, old-binary rollback, and packed-consumer coverage.
+  - Surfaced by: Sections 1 and 9.
+  - Files: PostgreSQL schema/mixed-version tests, packed-consumer fixtures, release docs.
+  - Verify: old and new packages both operate after the additive migration; new package fails closed before it.
+- [ ] **CEO-T4 (P1, human: ~3h / CC: ~30min)** — Cancellation — Prove hosted shutdown and abandoned-request behavior at the `ProviderReturned` boundary.
+  - Surfaced by: Premise 7 and Section 6.
+  - Files: runtime pump and hosted-service tests.
+  - Verify: deterministic boundary-controlled tests preserve the original exception and respect the finalization reserve.
+- [ ] **CEO-T5 (P2, human: ~2h / CC: ~20min)** — Diagnostics — Document cause-specific operator action behind coarse `Unavailable`.
+  - Surfaced by: Sections 3 and 8.
+  - Files: PostgreSQL README, problem-code guidance, tests for any structured diagnostics added.
+  - Verify: transport/deadline and permission failures each explain problem, likely cause, safe fix, and canonical docs destination.
+- [ ] **CEO-T6 (P2, human: ~1h / CC: ~10min)** — Adoption — Mark the admission-aware interface as the external-activator default and preserve legacy behavior for existing hosts.
+  - Surfaced by: Section 10.
+  - Files: Provider/PostgreSQL READMEs and release notes.
+  - Verify: a new consumer can select the right interface from one audience table and one complete example.
+
+### CEO Completion Summary
+
+| Review area | Result |
+| --- | --- |
+| Mode | Selective expansion |
+| System audit | Existing provider authority is reusable; false incompatibility, ambiguous admission, and post-return cancellation are confirmed |
+| Step 0 | 7 bounded additions accepted; 3 structural choices held for final approval |
+| Architecture | 4 issues found |
+| Error and rescue | 15 paths mapped; 0 critical silent gaps |
+| Security | 1 issue found; 0 high-likelihood threats |
+| Data/edge cases | 3 issues found |
+| Code quality | 3 issues found |
+| Tests | 4 proof gaps added |
+| Performance | 1 high-priority issue found |
+| Observability | 2 bounded gaps found |
+| Deployment | 2 risks addressed |
+| Long-term | Reversibility 3/5 after publication; 2 debt items |
+| Design | Skipped; no UI |
+| Scope proposals | 7 accepted, 5 deferred to existing cases/rails, 4 rejected |
+| Outside voices | Claude: 10 findings; Codex: 7 findings; 6/6 dimensions confirmed |
+| Diagrams | Dream state, architecture, data/error flow, deployment, rollback, state machine |
+| Unresolved | 3 final-gate structural decisions |
+
+**Phase 1 complete.** Codex: 7 concerns. Claude subagent: 10 issues. Consensus: 6/6 confirmed, 0 disagreements, with 3 agreed structural challenges surfaced at the final gate. Passing to Phase 2.5.
+
+## Autoplan Phase 2.5 — DX Review
+
+### Developer Persona Card
+
+| Field | Definition |
+| --- | --- |
+| Primary persona | Experienced .NET platform/backend engineer upgrading an existing AppSurface Durable PostgreSQL host |
+| Existing knowledge | C#, dependency injection, ASP.NET Core hosting, PostgreSQL operations, migrations, cancellation, and structured logging |
+| Missing knowledge | AppSurface’s distinction among health assessment, precheck, authoritative admission, pass completion, and item-level success |
+| Job to be done | Adopt truthful readiness and admission outcomes without reproducing provider logic or weakening the single-pass authority boundary |
+| Trust threshold | Exact migration/rollback instructions, exhaustive result handling, actionable diagnostics, and deterministic proof of cancellation/concurrency behavior |
+| Likely comparison set | A simple job runner, a full workflow engine, or a managed orchestration service |
+
+Product type is a public-preview .NET SDK/provider with CLI-managed PostgreSQL schema and a runnable local example. Review mode is **DX POLISH**: keep the approved upstream boundary and make its consumption obvious, diagnosable, and safe.
+
+### Developer Empathy Narrative
+
+I already run AppSurface Durable in a .NET service, so I do not need another tour of dependency injection or PostgreSQL. I need to know exactly what changes when I take this package update. Today I can find registration examples, but I still have to infer whether health should gate a pump, whether a zero result means nothing ran, and whether `TryRunOnceAsync` can throw. If the store is unavailable, `ASDUR103` alone does not tell me whether to retry connectivity, inspect a saturated pool, or repair grants. Then I discover a new migration without a filename or a named rollback binary, and I pause the rollout because the safe sequence is not copyable.
+
+The ideal path starts from one “upgrade an existing host” page. It shows the old expression beside the replacement, gives me the exact `9 -> 10` migration and role-recipe commands, and lets me paste one exhaustive attempt switch into my host. IntelliSense repeats the execution-certainty and cancellation boundaries. A stable structured event points from the coarse public result to the right remedy without leaking SQL or credentials. Finally, a test proves my two pump interfaces resolve to the same singleton. At that point I can ship the upgrade because the package explains both the happy path and the dangerous edges before I meet them in production.
+
+### Step 0 — Developer Journey and Initial Assessment
+
+Initial DX completeness is **5.0/10**. The repository has unusually strong operational reference material, but the primary journey is split across package READMEs, CLI docs, a role recipe, troubleshooting, and a ten-minute local transcript. The existing-host #794 upgrade time is unmeasured.
+
+| Stage | Current journey | Friction | Required post-review journey |
+| --- | --- | --- | --- |
+| 1. Discover | Root README lists Durable packages | No task-level operational-assessment entry point | Root and Durable landing pages link “Adopt Durable operational assessments” |
+| 2. Install/upgrade | Update existing NuGet packages | No #794 before/after recipe | One guide names packages, source changes, enum/JSON impact, and compatibility floor |
+| 3. Configure | Reuse existing data sources and `AddAppSurfaceDurablePostgreSql` | Two pump interfaces create a custom-DI trap | Default resolution is one singleton; guide and guard cover full replacement |
+| 4. Migrate | Generate/review/apply with the CLI, then rerun roles | Migration identity and expected output were unspecified | Apply `0010_runtime_health_observation.sql`; show `9 -> 10` and `0 -> 10` output |
+| 5. Assess | Read raw health fields | Meanings of activation and readiness were easy to overgeneralize | Use the three named predicates with runtime-control-plane wording |
+| 6. Attempt | Call legacy `RunOnceAsync` and infer admission | Empty completion and refusal were indistinguishable | Resolve admission API and exhaustively handle four outcomes |
+| 7. Debug | Use exception type and `ASDUR103` docs | Permission, transport, and deadline remedies were conflated | Stable structured cause event links to one problem/cause/fix entry |
+| 8. Operate | Host owns endpoint and shutdown policy | Post-return cancellation wait and retry certainty were surprising | Docs state one- or two-reserve budget and exact execution certainty |
+| 9. Upgrade/rollback | Forward migrations and general rollback guidance | No named schema-9 rollback artifact | Compatibility matrix pins `v0.2.0-preview.8` and forbids pre-`0009` rollback |
+
+### Step 0.5 — Dual Voices
+
+#### CODEX SAYS (DX — developer experience challenge)
+
+Codex found seven concerns: no measured sub-five-minute path; coarse outcomes without retrievable cause; conflicting readiness vocabulary; surprising post-return cancellation duration; unnamed rollback floor; package-centric documentation; and unsafe partial DI overrides. It recommended provider-first implementation with a runnable consumer exercise before API freeze and did not require splitting #794.
+
+#### CLAUDE SUBAGENT (DX — independent review)
+
+The independent reviewer found nine issues. It independently confirmed the missing existing-host recipe, unnamed migration, partial-override hazard, inaccessible `Unavailable` cause, ambiguous `TryRunOnceAsync` expectations, incomplete error registry, implicit extension policy, and package-centric information architecture. Its concern that `ASDUR` codes are PostgreSQL-specific was rejected: the codes are public Durable-domain constants owned by `ForgeTrust.AppSurface.Durable`, and the semantics intentionally apply to every implementation of this AppSurface provider contract.
+
+DX DUAL VOICES — CONSENSUS TABLE:
+
+| Dimension | Claude | Codex | Consensus |
+| --- | --- | --- | --- |
+| 1. Getting started under five minutes? | No | No | Confirmed gap |
+| 2. API/CLI naming guessable? | Mixed | Mixed | Confirmed gap |
+| 3. Error messages actionable? | No | No | Confirmed gap |
+| 4. Docs findable and complete? | No | No | Confirmed gap |
+| 5. Upgrade path safe? | Conditional | Conditional | Confirmed gap |
+| 6. Dev environment friction-free? | No | No | Confirmed gap |
+
+Consensus is **6/6 confirmed, 0 disagreements**. One single-voice provider-neutrality concern was examined and rejected on repository evidence rather than silently discarded.
+
+### Competitive DX Benchmark
+
+| Product pattern | Useful benchmark | AppSurface response |
+| --- | --- | --- |
+| [Hangfire for ASP.NET Core](https://docs.hangfire.io/en/latest/getting-started/aspnet-core-applications.html) | One linear package/register/enqueue/run guide with immediately visible execution | Match the single-session flow while retaining explicit migration ownership |
+| [Azure Durable Task Scheduler](https://learn.microsoft.com/en-us/azure/azure-functions/durable/durable-task-scheduler/quickstart-portable-durable-task-sdks) | Local emulator, client/worker walkthrough, visible output, and a dashboard | Provide one local proof command and named checkpoints; a dashboard is not required for #794 |
+| [MassTransit](https://masstransit.io/documentation/configuration/transports/rabbitmq) | Fluent registration, searchable task/reference docs, testing and observability paths | Keep idiomatic DI and create a task-oriented operational-assessment guide |
+| AppSurface before this review | Ten-minute explicit PostgreSQL transcript; no measured #794 upgrade | Target under five minutes cold local proof and under two minutes for a prepared existing host |
+
+The target is **champion-tier for an existing-host correctness upgrade**, not “fewest possible PostgreSQL concepts.” Security boundaries, separate roles, explicit migration review, and passive startup remain visible.
+
+### Magical Moment Specification
+
+The lowest-effort delivery vehicle is a repository-owned, local-only wrapper around the existing proof:
+
+```console
+bash examples/durable-postgresql/run-local-proof.sh
+[ok] durable schema: 0 -> 10
+[ok] pump attempt: Completed (discovered=3, processed=3, failed=0)
+[ok] runtime assessment: Healthy; can-enable=True; can-attempt=True; ready=True
+```
+
+The wrapper checks .NET 10 and Docker, creates a loopback disposable PostgreSQL 16.5 container, generates ephemeral credentials without printing them, invokes the existing CLI’s explicit migration apply, reruns the canonical role recipe, initializes the development-only epoch, runs `verify-local`, and cleans up. It must not move DDL into application startup, weaken the four-role proof, reuse production credentials, or hide the exact commands it invokes. The transcript remains available for operators who need each step.
+
+The magical moment is the first `Completed` result beside a successful runtime assessment: the developer can see that “the pass completed” and “the runtime is ready” are related but different facts.
+
+### First-Time Developer Confusion Report
+
+| Time | First interpretation | Risk | Resolution |
+| ---: | --- | --- | --- |
+| 00:00 | “The root README should tell me where operational readiness starts.” | Reader chooses a package reference at random | Add direct task-guide links |
+| 02:00 | “The host snippet assumes variables and migration state I do not have.” | Copy-paste fails before the API is exercised | Add one local wrapper plus expected output |
+| 04:00 | “`IsReady` probably gates every pump attempt.” | Cold start can never establish its first heartbeat | Lead with direct authoritative admission; document health as a separate observation |
+| 05:00 | “`TryRunOnceAsync` probably never throws.” | Caller retries a post-execution failure unsafely | Put propagation and execution-certainty rules in XML docs and the first switch |
+| 06:00 | “`Completed` means all business work succeeded.” | Failed/suspended counts are ignored | Explain that completion is pass bookkeeping, then inspect the result |
+| 07:00 | “`ASDUR103` means retry.” | Permission failure becomes a retry loop | Emit fixed cause diagnostics with distinct remedies |
+| 08:00 | “A custom legacy pump and the new default admission service should compose.” | Independent local slots admit concurrent passes | Fail the supported new path before invocation and show full replacement |
+| 09:00 | “The old binary should be safe after any additive migration.” | An unsupported pre-`0009` binary is redeployed | Pin and test the exact rollback artifact |
+
+All eight confusion points are addressed by this amended plan. `ObservedAtUtc` fallback provenance remains one of the final-gate API choices.
+
+### Pass 1 — Getting Started Experience
+
+**Score: 4/10 -> 9/10.**
+
+The existing ten-minute transcript is complete but not a champion-tier evaluation path. Add the local proof wrapper above, retain the transparent long-form transcript, and measure from command invocation through the three named checkpoints. This is a local development convenience only; production keeps reviewed migrations and externally managed credentials. Acceptance is p50 under five minutes over five clean runs on the documented runner profile, with no run above seven minutes.
+
+### Pass 2 — API/CLI/SDK Design
+
+**Score: 6/10 -> 9/10.**
+
+The three predicates and closed four-kind attempt are appropriately small. The first example must teach:
+
+1. `CanAttemptPump` is advisory and must not become a check-then-act gate.
+2. `TryRunOnceAsync` performs authoritative admission and executes the pass when admitted.
+3. `Completed` is not a claim that every item succeeded.
+4. Returned non-completed outcomes prove only that this invocation did not enter `RunPassAsync`.
+5. Once execution starts, escaping failures propagate and are not safe-result projections.
+
+**TASTE DECISION:** retain `TryRunOnceAsync`. `TryProcessAsync`, `TryClaimAsync`, and `TryBeginPassAsync` already use `Try` for an expected non-success outcome while still allowing exceptional failures to propagate. Consistency beats a clever one-off rename; IntelliSense and the complete example carry the distinction.
+
+The `ASDUR103`/`ASDUR108`/`ASDUR400`–`ASDUR403` validation also remains. These are provider-neutral AppSurface Durable problem codes declared in the base Durable package, not PostgreSQL-owned codes.
+
+### Pass 3 — Error Messages and Debugging
+
+**Score: 4/10 -> 9/10.**
+
+| Path | Current developer evidence | Required evidence |
+| --- | --- | --- |
+| Transport or pool failure | `Unavailable` / `ASDUR103` | Structured warning: operation, phase, cause=`Transport`, code, docs anchor; fix connectivity/pool and retry by host policy |
+| Provider deadline | `Unavailable` / `ASDUR103` | Same schema with cause=`ProviderDeadline`; inspect query plan, backlog, pool wait, and configured command bounds |
+| Permission denied (`42501`) | `Unavailable` / `ASDUR103` | Same schema with cause=`PermissionDenied`; rerun and verify the runtime-role recipe rather than retrying blindly |
+
+Malformed rows, undefined functions, unclassified SQLSTATEs, execution failures, and finalization failures remain exceptions because converting them to a safe result would erase evidence. Their troubleshooting entries state the failing operation, likely cause, safe fix, retry safety, and whether `RunPassAsync` may already have begun.
+
+The fixed cause is internal diagnostic data, not a new public outcome dimension. Logger events exclude SQL, exception text, credentials, configured role names, and durable identifiers.
+
+### Pass 4 — Documentation and Learning
+
+**Score: 5/10 -> 9/10.**
+
+Create `Durable/operational-assessments.md` as the canonical task guide and link its first meaningful mention from the root README, Durable landing page, Provider README, PostgreSQL README, example, troubleshooting catalog, and release notes. Package READMEs remain reference documentation; the guide teaches the journey.
+
+The guide includes copy-paste-complete imports, registration, direct admission, an exhaustive switch, exception handling, expected output, predicates, migration commands, custom DI composition, rollback, and links to every problem remedy. Compile snippets in the existing documentation/example verification path. A live hosted playground or video would add maintenance and security cost without improving this provider-first upgrade; the local proof is the interactive element.
+
+### Pass 5 — Upgrade and Migration Path
+
+**Score: 4/10 -> 9/10.**
+
+Publish and verify this matrix:
+
+| Package/runtime | Schema 9 | Schema 10 | Role recipe after `0010` |
+| --- | --- | --- | --- |
+| `v0.2.0-preview.8` rollback artifact | Compatible/current | Compatible reader and writer under range 1–10; old health semantics remain | Required before rollback smoke test |
+| #794 package | Upgrade required | Compatible/current | Required before activation |
+| Pre-`0009` package | Not a supported post-role-recipe rollback | Not supported | Must remain stopped |
+
+The guide shows exact `status`, `script --from-version 9`, `apply --apply`, role-recipe, preflight, old-binary smoke, new-binary smoke, and forward-fix commands with expected `9 -> 10` output. It includes exhaustive-switch and serialized-enum release notes. No deprecation warning is added to the legacy pump because it remains supported; docs recommend the new interface for external activators.
+
+### Pass 6 — Developer Environment and Tooling
+
+**Score: 7/10 -> 9/10.**
+
+The repository already supplies a pinned PostgreSQL image, locked .NET dependencies, a prerequisite check, CLI schema management, integration fixtures, and a local proof. The wrapper composes those assets rather than inventing another environment. It must work non-interactively in CI with injected ephemeral values and interactively on macOS/Linux; Windows developers use the documented WSL or existing manual transcript until a first-party PowerShell proof is justified.
+
+IntelliSense receives complete XML documentation. Custom-pump users get a reference-equality assertion and an unsupported-composition diagnostic. Case #802 owns reusable host fakes, so #794 adds only the internal execution seam and its tests.
+
+### Pass 7 — Community and Ecosystem
+
+**Score: 7/10 -> 8/10.**
+
+The open repository, package READMEs, runnable example, changelog, issue tracker, and contribution conventions already provide the ecosystem surface needed for this preview. The task guide links to the canonical issue/discussion route and identifies which concerns belong to #801, #802, #804, and #805. A plugin marketplace, new support channel, pricing/free-tier work, or another provider is not justified by this case.
+
+### Pass 8 — DX Measurement and Feedback Loops
+
+**Score: 3/10 -> 9/10.**
+
+Record three measurements as release evidence:
+
+- cold local proof: five clean runs, p50 under five minutes, no run above seven minutes;
+- prepared existing-host code adoption: five clean checkouts with schema 10 and restored packages, median under two minutes and no run above three minutes;
+- migration-inclusive existing-host upgrade: under five minutes once migration-owner credentials and role recipe are available.
+
+Also run a two-minute findability test: an unfamiliar engineer must locate the first proof, direct admission example, and distinct `ASDUR103` permission remedy. Record runner profile, start/stop boundaries, commands, expected output, observed time, and friction notes in checked-in Durable evidence. Run `/devex-review` after implementation to compare observed results with these targets.
+
+### Override and Extension Points
+
+| Concern | Policy | How to use or extend |
+| --- | --- | --- |
+| Maximum items, time budget, surfaces | Configurable, validated bounds | `DurableRuntimePumpRequest` |
+| Worker id, polling, heartbeat staleness, shutdown reserve | Configurable PostgreSQL defaults | `AppSurfaceDurablePostgreSqlOptions` |
+| Wake notifications | Configurable hint only | PostgreSQL notification options; polling/store remain authoritative |
+| Host readiness composition | Host-owned | Combine `IsReady` with application traffic/dependency policy outside the provider |
+| Pump implementation | Replaceable as one unit | Register the same singleton under both public pump interfaces |
+| Health classifier allowlist | Fixed correctness policy | Not overrideable; unknown evidence propagates |
+| Four attempt kinds | Fixed closed algebra | Layer transport/HTTP policy outside the Provider contract |
+| Post-return finalization token | Fixed correctness policy | Configure reserve; caller cancellation cannot rewrite completed provider work |
+| Schema application | Explicit operator action | Use CLI/migration owner; provider registration never applies DDL |
+
+### What Already Exists
+
+- Root, Durable, Provider, and PostgreSQL package READMEs with strong authority-boundary content.
+- A ten-minute local PostgreSQL proof, prerequisite checker, and measured post-build execution evidence.
+- Offline script generation, guarded apply, status, and preflight through the Durable CLI.
+- A canonical four-role recipe and passive provider registration.
+- Stable `ASDUR` problem codes and a central troubleshooting catalog.
+- Source-generated `LoggerMessage` patterns with stable event ids.
+- Public API baselines, packed-consumer fixtures, schema contract tests, PostgreSQL integration tests, and 100,000-row scale fixtures.
+
+The plan reuses these assets; it does not create a second onboarding system.
+
+### NOT in Scope
+
+- A hosted browser sandbox or managed PostgreSQL trial — disproportionate infrastructure and secret-handling burden for this provider case.
+- Automatic production migration — violates passive registration and explicit migration ownership.
+- A UI dashboard — case #801 owns runtime doctor diagnostics; applications own authorized health endpoints.
+- Reusable host fakes — case #802.
+- External activation service or transport adapter — cases #804 and #805.
+- Metrics, tracing, alert policy, and high-cardinality diagnostics — later observability work consumes this case’s low-cardinality fields/events.
+- PowerShell parity for the local wrapper — reconsider after measured Windows demand.
+- Renaming the admission method — rejected in favor of existing Durable `Try*Async` consistency.
+- A PostgreSQL-specific public cause enum — internal structured diagnostics preserve the provider-neutral API.
+
+### DX Scorecard
+
+| Dimension | Score | Prior | Trend |
+| --- | ---: | ---: | --- |
+| Getting Started | 9/10 | 4/10 | +5 |
+| API/CLI/SDK | 9/10 | 6/10 | +3 |
+| Error Messages | 9/10 | 4/10 | +5 |
+| Documentation | 9/10 | 5/10 | +4 |
+| Upgrade Path | 9/10 | 4/10 | +5 |
+| Dev Environment | 9/10 | 7/10 | +2 |
+| Community | 8/10 | 7/10 | +1 |
+| DX Measurement | 9/10 | 3/10 | +6 |
+| **Overall DX** | **8.9/10** | **5.0/10** | **+3.9** |
+
+| Outcome | Assessment |
+| --- | --- |
+| TTHW | Cold local proof: documented 10 minutes -> target p50 under 5; prepared existing-host upgrade: unmeasured -> median under 2 |
+| Competitive rank | Champion target, evidence-gated until implementation measurement |
+| Magical moment | Designed via one local proof wrapper and explicit `Completed` + health output |
+| Product type | Public-preview .NET SDK/provider with PostgreSQL and CLI |
+| Mode | DX POLISH |
+
+DX principle coverage:
+
+| Principle | Coverage |
+| --- | --- |
+| Zero friction | Covered for evaluation and prepared upgrade without hiding production boundaries |
+| Learn by doing | Covered by one wrapper plus transparent transcript |
+| Fight uncertainty | Covered by execution certainty, fixed-cause diagnostics, and linked remedies |
+| Opinionated + escape hatches | Covered by the explicit policy table |
+| Code in context | Covered by an existing-host before/after recipe |
+| Magical moments | Covered by visible pass and assessment checkpoints |
+
+### DX Implementation Checklist
+
+- [ ] Cold local proof p50 is under five minutes on the documented profile.
+- [ ] Local proof begins with one repository-owned command and prints meaningful checkpoints.
+- [ ] Application startup remains passive; the wrapper invokes explicit CLI migration.
+- [ ] Every returned/exception path has problem, cause, safe fix, retry safety, execution certainty, and a docs link.
+- [ ] API names and IntelliSense make precheck, authoritative admission, pass completion, and item success distinct.
+- [ ] Every new parameter retains a sensible bounded default.
+- [ ] The task guide’s examples compile and run without omitted imports or hidden setup.
+- [ ] The existing-host recipe includes a real exhaustive switch and custom-DI replacement.
+- [ ] Migration `0010`, role rerun, mixed-version behavior, and named rollback artifact are documented and tested.
+- [ ] Exhaustive enum switches and serialized health consumers receive release guidance.
+- [ ] CLI/local proof works non-interactively in CI with ephemeral credentials.
+- [ ] Changelog and public API baselines are updated.
+- [ ] Root and Durable docs link the task guide; two-minute findability is measured.
+- [ ] Existing issue/contribution routes are linked.
+- [ ] `/devex-review` is run after implementation to compare measured TTHW with the plan.
+
+TypeScript types, a paid/free tier, deprecation codemods, and a hosted playground are not applicable to this repository-owned .NET provider change.
+
+### DX Implementation Tasks
+
+- [ ] **DX-T1 (P1, human: ~3h / CC: ~30min)** — Local proof — Add the one-command local-only operational-assessment proof and expected checkpoints.
+  - Surfaced by: Pass 1 and both outside voices.
+  - Files: `examples/durable-postgresql/run-local-proof.sh`, example README/program, timing evidence.
+  - Verify: five clean cold runs satisfy the p50/max target without application-startup DDL or secret output.
+- [ ] **DX-T2 (P1, human: ~3h / CC: ~25min)** — Adoption — Write the task-oriented existing-host guide and compile its complete examples.
+  - Surfaced by: Passes 2 and 4.
+  - Files: `Durable/operational-assessments.md`, root/Durable/package READMEs, snippet/example verification.
+  - Verify: five prepared checkouts satisfy the median/max adoption target and exhaustive switch compiles.
+- [ ] **DX-T3 (P1, human: ~3h / CC: ~25min)** — Diagnostics — Emit safe structured cause events and complete the problem/cause/fix matrix.
+  - Surfaced by: Pass 3 and both outside voices.
+  - Files: PostgreSQL classifier/call sites, diagnostics catalog, logging tests.
+  - Verify: transport, provider deadline, and permission denial produce distinct low-cardinality guidance with no sensitive fields.
+- [ ] **DX-T4 (P1, human: ~3h / CC: ~30min)** — Upgrade — Pin migration 10, the compatibility matrix, role reconciliation, and `v0.2.0-preview.8` rollback proof.
+  - Surfaced by: Pass 5.
+  - Files: migration/schema tests, compatibility fixture, CLI/example docs, changelog.
+  - Verify: package/schema matrix and exact `9 -> 10` transcript pass from packed artifacts.
+- [ ] **DX-T5 (P1, human: ~2h / CC: ~20min)** — Composition — Detect the common partial-pump override before admission and document complete replacement.
+  - Surfaced by: Passes 2 and 6.
+  - Files: PostgreSQL service registration, DI tests, adoption guide.
+  - Verify: default services are reference-equal; legacy-only override still works until admission resolution, which fails before invocation with a fix.
+- [ ] **DX-T6 (P1, human: ~2h / CC: ~20min)** — Lifecycle — Document and test the one- or two-reserve post-return cancellation budget.
+  - Surfaced by: Pass 2 and Codex concern 4.
+  - Files: pump/hosted-service tests, options XML docs, adoption and troubleshooting docs.
+  - Verify: deterministic tests distinguish caller, finalization, cleanup, and outer host deadlines.
+- [ ] **DX-T7 (P2, human: ~2h / CC: ~15min)** — Measurement — Record TTHW and two-minute documentation-findability evidence.
+  - Surfaced by: Pass 8.
+  - Files: `Durable/evidence/`, adoption guide.
+  - Verify: checked-in evidence states profile, boundaries, five timings, friction, and pass/fail result.
+
+### DX Unresolved Decisions
+
+No new DX-only decision remains. The previously surfaced `ObservedAtUtc` provenance choice still affects how the guide explains unavailable snapshots and remains at the final approval gate.
+
+**Phase 2.5 complete.** DX overall: 8.9/10. TTHW: 10 min cold / unmeasured prepared -> under 5 min cold and under 2 min prepared. Codex: 7 concerns. Claude subagent: 9 issues. Consensus: 6/6 confirmed, 0 disagreements. Passing to Phase 3 (Eng Review — the required gate reviews the final amended plan).
