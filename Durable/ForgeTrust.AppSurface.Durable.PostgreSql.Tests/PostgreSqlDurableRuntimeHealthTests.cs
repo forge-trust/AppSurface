@@ -161,10 +161,16 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
         var transient = new PostgreSqlDurableRuntimeHealth(
             CreateRegistration(dataSource, workOptions, options, Guid.NewGuid()),
             new StubSchemaManager(_ => ValueTask.FromException<DurableRuntimeSchemaStatus>(new TimeoutException())));
+        var beforeTransientAssessment = DateTimeOffset.UtcNow;
         var transientSnapshot = await transient.GetAsync();
+        var afterTransientAssessment = DateTimeOffset.UtcNow;
         Assert.Equal(DurableRuntimeHealthState.Unavailable, transientSnapshot.State);
         Assert.Equal(DurableProblemCodes.StoreUnavailable, transientSnapshot.ProblemCode);
         Assert.False(transientSnapshot.WasStoreObserved);
+        Assert.InRange(
+            transientSnapshot.ObservedAtUtc,
+            beforeTransientAssessment,
+            afterTransientAssessment);
     }
 
     [Fact]
@@ -183,12 +189,15 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
             Microsoft.Extensions.Logging.Abstractions.NullLogger<PostgreSqlDurableRuntimeHealth>.Instance,
             _ => ValueTask.FromException<DateTimeOffset>(new TimeoutException()));
 
+        var beforeAssessment = DateTimeOffset.UtcNow;
         var snapshot = await health.GetAsync();
+        var afterAssessment = DateTimeOffset.UtcNow;
 
         Assert.Equal(DurableRuntimeHealthState.Unavailable, snapshot.State);
         Assert.Equal(DurableProblemCodes.StoreUnavailable, snapshot.ProblemCode);
         Assert.False(snapshot.WasStoreObserved);
         Assert.Equal(schemaStatus.InstalledVersion, snapshot.InstalledSchemaVersion);
+        Assert.InRange(snapshot.ObservedAtUtc, beforeAssessment, afterAssessment);
     }
 
     [Fact]
@@ -269,17 +278,20 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
             CreateRegistration(
                 dataSource,
                 new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
-                CreateOptions("runtime-health-transient-worker"),
-                Guid.NewGuid()),
+            CreateOptions("runtime-health-transient-worker"),
+            Guid.NewGuid()),
             new StubSchemaManager(_ => ValueTask.FromResult(schemaStatus)));
 
+        var beforeAssessment = DateTimeOffset.UtcNow;
         var snapshot = await health.GetAsync();
+        var afterAssessment = DateTimeOffset.UtcNow;
 
         Assert.Equal(DurableRuntimeHealthState.Unavailable, snapshot.State);
         Assert.Equal(DurableProblemCodes.StoreUnavailable, snapshot.ProblemCode);
         Assert.False(snapshot.WasStoreObserved);
         Assert.False(snapshot.SchemaCompatible);
         Assert.Equal(schemaStatus.InstalledVersion, snapshot.InstalledSchemaVersion);
+        Assert.InRange(snapshot.ObservedAtUtc, beforeAssessment, afterAssessment);
     }
 
     [Fact]

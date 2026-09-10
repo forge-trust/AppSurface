@@ -646,6 +646,53 @@ public sealed class AdoptionMeasurementTests : IDisposable
     }
 
     [Fact]
+    public async Task GitVerifierDrainsAndDiscardsSourceProbeOutput()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "The deterministic Git-process output fixture uses a Unix shell script.");
+        }
+
+        var executable = await CreateUnixExecutableAsync(
+            Path.Combine(_root, "noisy-source-git"),
+            $"#!/bin/sh\nif [ \"$1\" = \"rev-parse\" ]; then\n  printf '%s\\n' '{Commit}'\nelse\n  i=0\n  while [ \"$i\" -lt 10000 ]; do\n    printf 'discarded source probe output\\n'\n    printf 'discarded source probe error\\n' >&2\n    i=$((i + 1))\n  done\nfi\n");
+        var verifier = new GitConsumerRevisionVerifier(
+            executable,
+            TimeSpan.FromSeconds(10));
+
+        await verifier.VerifyAsync(
+            _root,
+            Commit,
+            ["selected.cs"],
+            CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task GitVerifierDoesNotWaitForInheritedSourceProbePipes()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "The deterministic inherited-pipe fixture uses a Unix shell script.");
+        }
+
+        var executable = await CreateUnixExecutableAsync(
+            Path.Combine(_root, "inherited-pipe-source-git"),
+            $"#!/bin/sh\nif [ \"$1\" = \"rev-parse\" ]; then\n  printf '%s\\n' '{Commit}'\nelse\n  (sleep 5) &\n  exit 0\nfi\n");
+        var verifier = new GitConsumerRevisionVerifier(
+            executable,
+            TimeSpan.FromSeconds(30));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
+        await verifier.VerifyAsync(
+            _root,
+            Commit,
+            ["selected.cs"],
+            cancellation.Token);
+    }
+
+    [Fact]
     public async Task GitVerifierReportsWhenSourceVerificationCannotStart()
     {
         if (OperatingSystem.IsWindows())

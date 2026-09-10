@@ -584,13 +584,20 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
         CancellationToken cancellationToken)
     {
         // These fixed probes are quiet and only consume the exit code. Keep diagnostics out of the
-        // caller's console, but do not await pipe drainage because descendants can inherit pipe handles.
+        // caller's console without allowing inherited pipe handles to extend the command deadline.
         using var process = CreateGitProcess(workingDirectory, arguments, redirectOutput: true);
         try
         {
             process.Start();
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(_commandTimeout);
+            using var drainCancellation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+            var standardOutputDrain = process.StandardOutput.BaseStream.CopyToAsync(
+                Stream.Null,
+                drainCancellation.Token);
+            var standardErrorDrain = process.StandardError.BaseStream.CopyToAsync(
+                Stream.Null,
+                drainCancellation.Token);
             try
             {
                 await process.WaitForExitAsync(timeout.Token);
@@ -607,6 +614,13 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
                 cancellationToken.ThrowIfCancellationRequested();
                 throw;
             }
+            finally
+            {
+                drainCancellation.Cancel();
+                process.StandardOutput.BaseStream.Dispose();
+                process.StandardError.BaseStream.Dispose();
+                ObserveDrainCompletion(standardOutputDrain, standardErrorDrain);
+            }
 
             return process.ExitCode;
         }
@@ -614,6 +628,16 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
         {
             throw new AdoptionMeasurementException("Could not start Git to verify consumer source files.", exception);
         }
+    }
+
+    private static void ObserveDrainCompletion(Task standardOutputDrain, Task standardErrorDrain)
+    {
+        var completion = Task.WhenAll(standardOutputDrain, standardErrorDrain);
+        _ = completion.ContinueWith(
+            static completed => _ = completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously | TaskContinuationOptions.OnlyOnFaulted,
+            TaskScheduler.Default);
     }
 
     private static void TryKillProcessTree(Process process)

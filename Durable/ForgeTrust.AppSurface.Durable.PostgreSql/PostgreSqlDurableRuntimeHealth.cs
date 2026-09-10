@@ -58,6 +58,7 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
             cancellationToken,
             out var unavailableCause))
         {
+            var unavailableObservedAtUtc = DateTimeOffset.UtcNow;
             LogUnavailable(
                 PostgreSqlDurableControlPlaneOperation.HealthObservation,
                 "SchemaStatus",
@@ -66,7 +67,8 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
                 PostgreSqlDurableDiagnostics.OperationalAssessmentTroubleshooting);
             return CreateUnavailableSnapshot(
                 installedVersion: 0,
-                requiredVersion: PostgreSqlDurableRuntimeSchemaManager.RequiredVersion);
+                requiredVersion: PostgreSqlDurableRuntimeSchemaManager.RequiredVersion,
+                unavailableObservedAtUtc);
         }
 
         if (!schema.IsCompatible)
@@ -82,6 +84,7 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
                 cancellationToken,
                 out var unavailableCause))
             {
+                var unavailableObservedAtUtc = DateTimeOffset.UtcNow;
                 LogUnavailable(
                     PostgreSqlDurableControlPlaneOperation.HealthObservation,
                     "SchemaObservationTimestamp",
@@ -90,7 +93,8 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
                     PostgreSqlDurableDiagnostics.OperationalAssessmentTroubleshooting);
                 return CreateUnavailableSnapshot(
                     schema.InstalledVersion,
-                    schema.RequiredVersion);
+                    schema.RequiredVersion,
+                    unavailableObservedAtUtc);
             }
 
             return CreateIncompatibleSnapshot(
@@ -135,6 +139,7 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
             cancellationToken,
             out var unavailableCause))
         {
+            var unavailableObservedAtUtc = DateTimeOffset.UtcNow;
             LogUnavailable(
                 PostgreSqlDurableControlPlaneOperation.HealthObservation,
                 "RuntimeObservation",
@@ -143,7 +148,8 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
                 PostgreSqlDurableDiagnostics.OperationalAssessmentTroubleshooting);
             return CreateUnavailableSnapshot(
                 schema.InstalledVersion,
-                schema.RequiredVersion);
+                schema.RequiredVersion,
+                unavailableObservedAtUtc);
         }
     }
 
@@ -817,7 +823,10 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
             oldestDueAtUtc: null,
             oldestDueAge: null);
 
-    private DurableRuntimeHealthSnapshot CreateUnavailableSnapshot(int installedVersion, int requiredVersion) =>
+    private DurableRuntimeHealthSnapshot CreateUnavailableSnapshot(
+        int installedVersion,
+        int requiredVersion,
+        DateTimeOffset observedAtUtc) =>
         new(
             DurableRuntimeHealthState.Unavailable,
             DurableProblemCodes.StoreUnavailable,
@@ -830,7 +839,7 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
             _registration.Options.WorkerId,
             workerInstanceId: null,
             _registration.Options.HostedSurfaces,
-            DateTimeOffset.UtcNow,
+            observedAtUtc,
             startedAtUtc: null,
             lastHeartbeatAtUtc: null,
             lastSuccessfulSweepAtUtc: null,

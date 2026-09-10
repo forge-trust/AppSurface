@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using AngleSharp.Html.Parser;
 using ForgeTrust.AppSurface.Docs;
 using ForgeTrust.AppSurface.Docs.Standalone;
 using Microsoft.AspNetCore.Hosting;
@@ -45,16 +46,16 @@ public sealed class DurableOperationalAssessmentDocumentationRegressionTests
             Path.GetTempPath(),
             "AppSurfaceDocsDurableRegressionTests",
             Guid.NewGuid().ToString("N"));
-        CopySourceDocument(repoRoot, sourceRoot, "README.md");
-        CopySourceDocument(repoRoot, sourceRoot, "Durable/operational-assessments.md");
-        CopySourceDocument(repoRoot, sourceRoot, "releases/unreleased.md");
-        CopySourceDocument(
-            repoRoot,
-            sourceRoot,
-            "releases/unreleased.entries/2026-09-10-durable-operational-assessments.md");
-
         try
         {
+            CopySourceDocument(repoRoot, sourceRoot, "README.md");
+            CopySourceDocument(repoRoot, sourceRoot, "Durable/operational-assessments.md");
+            CopySourceDocument(repoRoot, sourceRoot, "releases/unreleased.md");
+            CopySourceDocument(
+                repoRoot,
+                sourceRoot,
+                "releases/unreleased.entries/2026-09-10-durable-operational-assessments.md");
+
             var builder = AppSurfaceDocsStandaloneHost.CreateBuilder([]);
             builder.ConfigureAppConfiguration(
                 (_, configuration) =>
@@ -67,7 +68,8 @@ public sealed class DurableOperationalAssessmentDocumentationRegressionTests
             builder.ConfigureWebHost(webHost => webHost.UseUrls("http://127.0.0.1:0"));
 
             using var host = builder.Build();
-            await host.StartAsync();
+            using var startup = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await host.StartAsync(startup.Token);
             try
             {
                 var server = host.Services.GetRequiredService<IServer>();
@@ -75,26 +77,51 @@ public sealed class DurableOperationalAssessmentDocumentationRegressionTests
                 using var client = new HttpClient
                 {
                     BaseAddress = new Uri(Assert.Single(addresses!.Addresses)),
+                    Timeout = TimeSpan.FromSeconds(5),
                 };
+                using var requests = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
-                using var releaseResponse = await client.GetAsync("/docs/releases/unreleased");
-                var releaseHtml = await releaseResponse.Content.ReadAsStringAsync();
-                using var guideResponse = await client.GetAsync("/docs/durable/operational-assessments");
-                var guideHtml = await guideResponse.Content.ReadAsStringAsync();
+                using var releaseResponse = await client.GetAsync("/docs/releases/unreleased", requests.Token);
+                var releaseHtml = await releaseResponse.Content.ReadAsStringAsync(requests.Token);
+                using var guideResponse = await client.GetAsync(
+                    "/docs/durable/operational-assessments",
+                    requests.Token);
+                var guideHtml = await guideResponse.Content.ReadAsStringAsync(requests.Token);
 
                 Assert.Equal(HttpStatusCode.OK, releaseResponse.StatusCode);
-                Assert.Contains("href=\"/docs/durable/operational-assessments\"", releaseHtml, StringComparison.Ordinal);
                 Assert.Equal(HttpStatusCode.OK, guideResponse.StatusCode);
-                Assert.Contains("Adopt Durable operational assessments", guideHtml, StringComparison.Ordinal);
+
+                var parser = new HtmlParser();
+                var releaseContent = parser.ParseDocument(releaseHtml).QuerySelector(".docs-content");
+                Assert.NotNull(releaseContent);
+                Assert.NotNull(
+                    releaseContent.QuerySelector(
+                        "a[href='/docs/durable/operational-assessments']"));
+                var guideDocument = parser.ParseDocument(guideHtml);
+                var guideTitle = guideDocument.QuerySelector("main h1");
+                Assert.NotNull(guideTitle);
+                Assert.Equal(
+                    "Adopt Durable operational assessments",
+                    guideTitle.TextContent.Trim());
+                var guideContent = guideDocument.QuerySelector(".docs-content");
+                Assert.NotNull(guideContent);
+                Assert.Contains(
+                    "This is the task guide for upgrading an existing PostgreSQL worker",
+                    guideContent.TextContent,
+                    StringComparison.Ordinal);
             }
             finally
             {
-                await host.StopAsync();
+                using var shutdown = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                await host.StopAsync(shutdown.Token);
             }
         }
         finally
         {
-            Directory.Delete(sourceRoot, recursive: true);
+            if (Directory.Exists(sourceRoot))
+            {
+                Directory.Delete(sourceRoot, recursive: true);
+            }
         }
     }
 
