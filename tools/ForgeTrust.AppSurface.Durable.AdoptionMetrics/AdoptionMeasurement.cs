@@ -9,6 +9,10 @@ namespace ForgeTrust.AppSurface.Durable.AdoptionMetrics;
 
 internal static class AdoptionMeasurementEngine
 {
+    // Region files are source files, not arbitrary repository blobs. Keeping the bound well above
+    // normal source-file sizes prevents a measurement run from being used to allocate unbounded
+    // memory while still allowing unusually large generated source files to be inspected.
+    internal const long MaxRegionSourceFileBytes = 10 * 1024 * 1024;
     private const int SupportedSchemaVersion = 1;
     private const int ExpectedRegionCount = 6;
     private static readonly string[] ExpectedNames =
@@ -275,15 +279,105 @@ internal static class AdoptionMeasurementEngine
         }
     }
 
-    private static async Task<int> CountRegionLinesAsync(
+    /// <summary>Scans one source file without materializing the entire file in memory.</summary>
+    /// <remarks>
+    /// <para>StreamReader removes the physical line terminator while preserving the old CR, LF,
+    /// and CRLF behavior. Matching remains ordinal after trimming each physical line. The scan
+    /// records every token occurrence so duplicate-token and ordering diagnostics are unchanged.
+    /// </para>
+    /// <para>The source file has a byte-size limit and the caller token is checked for every line;
+    /// cancellation is intentionally not converted into an adoption-measurement failure.</para>
+    /// </remarks>
+    internal static async Task<int> CountRegionLinesAsync(
         string path,
         AdoptionMeasurementRegion region,
         CancellationToken cancellationToken)
     {
-        string content;
+        cancellationToken.ThrowIfCancellationRequested();
+        FileInfo fileInfo;
         try
         {
-            content = await File.ReadAllTextAsync(path, cancellationToken);
+            fileInfo = new FileInfo(path);
+            if (fileInfo.Length > MaxRegionSourceFileBytes)
+            {
+                throw new AdoptionMeasurementException(
+                    $"Region '{region.Name}' source file '{path}' exceeds the maximum supported size of {MaxRegionSourceFileBytes} bytes.");
+            }
+
+            await using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 64 * 1024,
+                useAsync: true);
+            if (stream.Length > MaxRegionSourceFileBytes)
+            {
+                throw new AdoptionMeasurementException(
+                    $"Region '{region.Name}' source file '{path}' exceeds the maximum supported size of {MaxRegionSourceFileBytes} bytes.");
+            }
+            using var reader = new StreamReader(
+                stream,
+                Encoding.UTF8,
+                detectEncodingFromByteOrderMarks: true,
+                bufferSize: 64 * 1024,
+                leaveOpen: false);
+
+            var lineIndex = 0;
+            var startMatchCount = 0;
+            var endMatchCount = 0;
+            var startIndex = -1;
+            var endIndex = -1;
+            var nonblankLineCount = 0;
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var line = await reader.ReadLineAsync(cancellationToken);
+                if (line is null)
+                {
+                    break;
+                }
+
+                if (string.Equals(line.Trim(), region.StartToken, StringComparison.Ordinal))
+                {
+                    startMatchCount++;
+                    startIndex = startIndex < 0 ? lineIndex : startIndex;
+                }
+
+                if (string.Equals(line.Trim(), region.EndToken, StringComparison.Ordinal))
+                {
+                    endMatchCount++;
+                    endIndex = endIndex < 0 ? lineIndex : endIndex;
+                }
+
+                if (startIndex >= 0 && endIndex < 0 && lineIndex > startIndex
+                    && !string.IsNullOrWhiteSpace(line))
+                {
+                    nonblankLineCount++;
+                }
+
+                lineIndex++;
+            }
+
+            if (startMatchCount != 1)
+            {
+                throw new AdoptionMeasurementException(
+                    $"Region '{region.Name}' startToken matched {startMatchCount} lines; expected exactly one.");
+            }
+
+            if (endMatchCount != 1)
+            {
+                throw new AdoptionMeasurementException(
+                    $"Region '{region.Name}' endToken matched {endMatchCount} lines; expected exactly one.");
+            }
+
+            if (startIndex >= endIndex)
+            {
+                throw new AdoptionMeasurementException(
+                    $"Region '{region.Name}' startToken must occur before endToken.");
+            }
+
+            return nonblankLineCount;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -292,48 +386,6 @@ internal static class AdoptionMeasurementEngine
                 exception);
         }
 
-        var lines = content
-            .Replace("\r\n", "\n", StringComparison.Ordinal)
-            .Replace('\r', '\n')
-            .Split('\n');
-        var startMatches = FindTokenMatches(lines, region.StartToken);
-        var endMatches = FindTokenMatches(lines, region.EndToken);
-
-        if (startMatches.Count != 1)
-        {
-            throw new AdoptionMeasurementException(
-                $"Region '{region.Name}' startToken matched {startMatches.Count} lines; expected exactly one.");
-        }
-
-        if (endMatches.Count != 1)
-        {
-            throw new AdoptionMeasurementException(
-                $"Region '{region.Name}' endToken matched {endMatches.Count} lines; expected exactly one.");
-        }
-
-        var start = startMatches[0];
-        var end = endMatches[0];
-        if (start >= end)
-        {
-            throw new AdoptionMeasurementException(
-                $"Region '{region.Name}' startToken must occur before endToken.");
-        }
-
-        return lines[(start + 1)..end].Count(static line => !string.IsNullOrWhiteSpace(line));
-    }
-
-    private static List<int> FindTokenMatches(string[] lines, string token)
-    {
-        var matches = new List<int>();
-        for (var index = 0; index < lines.Length; index++)
-        {
-            if (string.Equals(lines[index].Trim(), token, StringComparison.Ordinal))
-            {
-                matches.Add(index);
-            }
-        }
-
-        return matches;
     }
 
     internal static string NormalizeRelativePath(string path)
@@ -462,6 +514,7 @@ internal interface IConsumerRevisionVerifier
 
 internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
 {
+    private static readonly TimeSpan ProcessCleanupBudget = TimeSpan.FromSeconds(2);
     private readonly string _gitExecutable;
     private readonly TimeSpan _commandTimeout;
 
@@ -551,8 +604,8 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(_commandTimeout);
-        var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
-        var error = process.StandardError.ReadToEndAsync(timeout.Token);
+        var output = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
+        var error = process.StandardError.ReadToEndAsync(CancellationToken.None);
         try
         {
             await process.WaitForExitAsync(timeout.Token);
@@ -560,13 +613,13 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            TryKillProcessTree(process);
+            await CleanupProcessAsync(process, output, error);
             throw new AdoptionMeasurementException(
                 $"Git did not complete consumer checkout verification within {_commandTimeout.TotalSeconds:0.###} seconds.");
         }
         catch (OperationCanceledException)
         {
-            TryKillProcessTree(process);
+            await CleanupProcessAsync(process, output, error);
             cancellationToken.ThrowIfCancellationRequested();
             throw;
         }
@@ -593,43 +646,73 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
             using var ownership = ProcessOwnership.Attach(process);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(_commandTimeout);
-            using var drainCancellation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
             var standardOutputDrain = process.StandardOutput.BaseStream.CopyToAsync(
                 Stream.Null,
-                drainCancellation.Token);
+                CancellationToken.None);
             var standardErrorDrain = process.StandardError.BaseStream.CopyToAsync(
                 Stream.Null,
-                drainCancellation.Token);
+                CancellationToken.None);
             try
             {
                 await process.WaitForExitAsync(timeout.Token);
+                await Task.WhenAll(standardOutputDrain, standardErrorDrain);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                TryKillProcessTree(process);
+                await CleanupProcessAsync(process, standardOutputDrain, standardErrorDrain);
                 throw new AdoptionMeasurementException(
                     $"Git did not complete consumer source verification within {_commandTimeout.TotalSeconds:0.###} seconds.");
             }
             catch (OperationCanceledException)
             {
-                TryKillProcessTree(process);
+                await CleanupProcessAsync(process, standardOutputDrain, standardErrorDrain);
                 cancellationToken.ThrowIfCancellationRequested();
                 throw;
             }
-            finally
-            {
-                drainCancellation.Cancel();
-                process.StandardOutput.BaseStream.Dispose();
-                process.StandardError.BaseStream.Dispose();
-                ObserveDrainCompletion(standardOutputDrain, standardErrorDrain);
-            }
-
             return process.ExitCode;
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             TryKillProcessTree(process);
             throw new AdoptionMeasurementException("Could not start Git to verify consumer source files.", exception);
+        }
+    }
+
+    /// <summary>Stops a canceled process and bounds both process and redirected-pipe cleanup.</summary>
+    /// <remarks>
+    /// The cleanup token is provider-owned so caller cancellation cannot interrupt termination or
+    /// pipe-drain observation. A drain may still be abandoned after the fixed budget; its fault is
+    /// observed so it cannot become an unobserved task exception.
+    /// </remarks>
+    private static async Task CleanupProcessAsync(
+        Process process,
+        Task standardOutput,
+        Task standardError)
+    {
+        TryKillProcessTree(process);
+        using var cleanup = new CancellationTokenSource(ProcessCleanupBudget);
+        try
+        {
+            await process.WaitForExitAsync(cleanup.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        try
+        {
+            await Task.WhenAll(standardOutput, standardError).WaitAsync(cleanup.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            ObserveDrainCompletion(standardOutput, standardError);
+        }
+        catch (Exception)
+        {
+            ObserveDrainCompletion(standardOutput, standardError);
         }
     }
 

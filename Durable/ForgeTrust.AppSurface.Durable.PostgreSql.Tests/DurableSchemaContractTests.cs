@@ -285,7 +285,27 @@ public sealed class DurableSchemaContractTests
         Assert.True(
             script.IndexOf("0009_work_contract_discovery", StringComparison.Ordinal)
             < script.IndexOf("0010_runtime_health_observation", StringComparison.Ordinal));
-        Assert.Contains("BEGIN;\nSET LOCAL lock_timeout = '30s';\nSET LOCAL statement_timeout = '30s';\nSELECT pg_advisory_lock(4707181168775217740);\nCOMMIT;", script, StringComparison.Ordinal);
+        Assert.Contains(
+            """
+            DO $appsurface_durable$
+            DECLARE
+                lock_deadline timestamp with time zone := pg_catalog.clock_timestamp() + interval '30 seconds';
+            BEGIN
+                LOOP
+                    EXIT WHEN pg_catalog.pg_try_advisory_lock(4707181168775217740);
+                    IF pg_catalog.clock_timestamp() >= lock_deadline THEN
+                        RAISE EXCEPTION USING
+                            ERRCODE = '55P03',
+                            MESSAGE = 'Timed out after 30 seconds waiting for AppSurface Durable migration advisory lock 4707181168775217740. Retry after the active migration owner completes.';
+                    END IF;
+                    PERFORM pg_catalog.pg_sleep(0.1);
+                END LOOP;
+            END
+            $appsurface_durable$;
+            """,
+            script,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("SELECT pg_advisory_lock(", script, StringComparison.Ordinal);
         Assert.Contains("closing that session after an error releases the session lock", script, StringComparison.Ordinal);
         var tenthMarker = script.IndexOf("-- Migration 0010_runtime_health_observation", StringComparison.Ordinal);
         var tenthTransaction = script.IndexOf("BEGIN;", tenthMarker, StringComparison.Ordinal);

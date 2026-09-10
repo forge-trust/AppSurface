@@ -21,7 +21,9 @@ bash Durable/evidence/measure-issue-794-adoption.sh LABEL RUNS -- COMMAND [ARG .
 
 The harness emits Markdown rows and the command output; it does not mutate this file. Copy only rows from completed
 runs and record the exact runner profile. Human adoption and findability journeys must be timed by a participant and
-must not be replaced with build duration.
+must not be replaced with build duration. Each command run has a 420-second deadline; set
+`APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS` to another positive whole-second bound when the documented journey
+has a different target. A timed-out command and its process group are terminated and recorded as `timeout`.
 
 ## Runner profile
 

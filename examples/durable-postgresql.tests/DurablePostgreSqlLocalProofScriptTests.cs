@@ -224,6 +224,127 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
         Assert.True(process.ExitCode == 0, error);
     }
 
+    [Fact]
+    public async Task Adoption_measurement_deadline_terminates_each_hung_process_group_and_records_timeouts()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "The adoption measurement script is a Unix Bash entry point.");
+        }
+
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var scriptPath = TestPathUtils.PathUnder(
+            repositoryRoot,
+            "Durable",
+            "evidence",
+            "measure-issue-794-adoption.sh");
+        var temporaryRoot = Directory.CreateTempSubdirectory("appsurface-durable-measurement-watchdog-").FullName;
+        var heartbeatFile = Path.Combine(temporaryRoot, "heartbeat");
+        try
+        {
+            var startInfo = new ProcessStartInfo("/bin/bash")
+            {
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                WorkingDirectory = repositoryRoot,
+            };
+            startInfo.ArgumentList.Add(scriptPath);
+            startInfo.ArgumentList.Add("hung-journey");
+            startInfo.ArgumentList.Add("2");
+            startInfo.ArgumentList.Add("--");
+            startInfo.ArgumentList.Add("/bin/bash");
+            startInfo.ArgumentList.Add("-c");
+            startInfo.ArgumentList.Add(
+                "while :; do printf x >> \"$APPSURFACE_TEST_HEARTBEAT_FILE\"; sleep 0.05; done");
+            startInfo.Environment["APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS"] = "1";
+            startInfo.Environment["APPSURFACE_TEST_HEARTBEAT_FILE"] = heartbeatFile;
+
+            using var process = Process.Start(startInfo)!;
+            try
+            {
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(8));
+            }
+            catch
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync();
+                }
+
+                throw;
+            }
+
+            var standardOutput = await process.StandardOutput.ReadToEndAsync();
+            var standardError = await process.StandardError.ReadToEndAsync();
+            Assert.Equal(1, process.ExitCode);
+            Assert.Equal(2, CountOccurrences(standardOutput, "| timeout |"));
+            Assert.Equal(2, CountOccurrences(standardError, "exceeded its 1-second deadline"));
+            var heartbeatLength = new FileInfo(heartbeatFile).Length;
+            await Task.Delay(TimeSpan.FromMilliseconds(300));
+            Assert.Equal(heartbeatLength, new FileInfo(heartbeatFile).Length);
+        }
+        finally
+        {
+            Directory.Delete(temporaryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Adoption_measurement_rejects_an_invalid_deadline()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "The adoption measurement script is a Unix Bash entry point.");
+        }
+
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var scriptPath = TestPathUtils.PathUnder(
+            repositoryRoot,
+            "Durable",
+            "evidence",
+            "measure-issue-794-adoption.sh");
+        var startInfo = new ProcessStartInfo("/bin/bash")
+        {
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            WorkingDirectory = repositoryRoot,
+        };
+        startInfo.ArgumentList.Add(scriptPath);
+        startInfo.ArgumentList.Add("invalid-deadline");
+        startInfo.ArgumentList.Add("1");
+        startInfo.ArgumentList.Add("--");
+        startInfo.ArgumentList.Add("/usr/bin/true");
+        startInfo.Environment["APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS"] = "0";
+
+        using var process = Process.Start(startInfo)!;
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        var standardError = await process.StandardError.ReadToEndAsync();
+
+        Assert.Equal(2, process.ExitCode);
+        Assert.Contains(
+            "APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS must be a positive integer.",
+            standardError,
+            StringComparison.Ordinal);
+    }
+
+    private static int CountOccurrences(string value, string expected)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = value.IndexOf(expected, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += expected.Length;
+        }
+
+        return count;
+    }
+
     private static void WriteExecutable(string directory, string name, string contents)
     {
         var path = Path.Combine(directory, name);

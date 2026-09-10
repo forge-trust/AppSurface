@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using ForgeTrust.AppSurface.Durable.Provider;
 using Microsoft.Extensions.Logging;
@@ -14,6 +15,7 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
     private readonly PostgreSqlDurableRuntimeSchemaManager _admissionSchemaManager;
     private readonly ILogger<PostgreSqlDurableRuntimeHealth> _logger;
     private readonly Func<CancellationToken, ValueTask<DateTimeOffset>> _readDatabaseTimestamp;
+    private readonly Action<TimeSpan>? _observeRuntimeConnectionAcquisition;
 
     internal PostgreSqlDurableRuntimeHealth(
         PostgreSqlDurableRuntimeRegistration registration,
@@ -31,18 +33,31 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
     {
     }
 
-    /// <summary>Initializes runtime health with an explicit database-time seam for deterministic tests.</summary>
+    /// <summary>Initializes runtime health with explicit database-time and connection-observation seams for tests.</summary>
+    /// <param name="registration">Validated PostgreSQL runtime configuration.</param>
+    /// <param name="schemaManager">Schema-status reader used before the one-statement runtime observation.</param>
+    /// <param name="logger">Low-cardinality operational diagnostics sink.</param>
+    /// <param name="readDatabaseTimestamp">
+    /// Optional database-time reader used only for incompatible-schema observations.
+    /// </param>
+    /// <param name="observeRuntimeConnectionAcquisition">
+    /// Optional observer invoked with the successful runtime-observation connection acquisition inside
+    /// <see cref="GetAsync(CancellationToken)"/>. Production composition leaves this null; scale evidence uses it to
+    /// measure the actual pool acquisition rather than a neighboring probe.
+    /// </param>
     internal PostgreSqlDurableRuntimeHealth(
         PostgreSqlDurableRuntimeRegistration registration,
         IDurableRuntimeSchemaManager schemaManager,
         ILogger<PostgreSqlDurableRuntimeHealth> logger,
-        Func<CancellationToken, ValueTask<DateTimeOffset>>? readDatabaseTimestamp)
+        Func<CancellationToken, ValueTask<DateTimeOffset>>? readDatabaseTimestamp,
+        Action<TimeSpan>? observeRuntimeConnectionAcquisition = null)
     {
         _registration = registration ?? throw new ArgumentNullException(nameof(registration));
         _schemaManager = schemaManager ?? throw new ArgumentNullException(nameof(schemaManager));
         _admissionSchemaManager = new PostgreSqlDurableRuntimeSchemaManager(_registration.RuntimeDataSource);
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _readDatabaseTimestamp = readDatabaseTimestamp ?? ReadDatabaseTimestampAsync;
+        _observeRuntimeConnectionAcquisition = observeRuntimeConnectionAcquisition;
     }
 
     public async ValueTask<DurableRuntimeHealthSnapshot> GetAsync(CancellationToken cancellationToken = default)
@@ -610,7 +625,15 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
     /// </summary>
     private async ValueTask<RuntimeObservation> ReadObservationAsync(CancellationToken cancellationToken)
     {
+        var connectionStarted = _observeRuntimeConnectionAcquisition is null
+            ? 0
+            : Stopwatch.GetTimestamp();
         await using var connection = await _registration.RuntimeDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        if (_observeRuntimeConnectionAcquisition is { } observer)
+        {
+            observer(Stopwatch.GetElapsedTime(connectionStarted));
+        }
+
         const string sql = """
             WITH observed AS
             (

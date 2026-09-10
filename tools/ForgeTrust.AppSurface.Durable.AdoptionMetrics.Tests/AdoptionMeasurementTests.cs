@@ -84,6 +84,85 @@ public sealed class AdoptionMeasurementTests : IDisposable
     }
 
     [Fact]
+    public async Task CountRegionLinesAsyncPreservesLoneCrCrLfTokensAndCountsOnlyBetweenTokens()
+    {
+        var path = Path.Combine(_root, "mixed-line-endings.cs");
+        await File.WriteAllTextAsync(path, " start \rone\r\n\r\ntwo \r end\r", CancellationToken.None);
+        var region = new AdoptionMeasurementRegion(
+            AdoptionVariant.Proposed,
+            "registration",
+            AdoptionSourceRoot.Repository,
+            "mixed-line-endings.cs",
+            "start",
+            "end",
+            2,
+            2,
+            true);
+
+        var count = await AdoptionMeasurementEngine.CountRegionLinesAsync(
+            path,
+            region,
+            CancellationToken.None);
+
+        Assert.Equal(2, count);
+    }
+
+    [Fact]
+    public async Task CountRegionLinesAsyncRejectsFilesOverTheMaximumSourceSize()
+    {
+        var path = Path.Combine(_root, "oversized.cs");
+        await using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write))
+        {
+            stream.SetLength(AdoptionMeasurementEngine.MaxRegionSourceFileBytes + 1);
+        }
+
+        var region = new AdoptionMeasurementRegion(
+            AdoptionVariant.Proposed,
+            "registration",
+            AdoptionSourceRoot.Repository,
+            "oversized.cs",
+            "start",
+            "end",
+            0,
+            1,
+            true);
+
+        var exception = await Assert.ThrowsAsync<AdoptionMeasurementException>(
+            () => AdoptionMeasurementEngine.CountRegionLinesAsync(
+                path,
+                region,
+                CancellationToken.None));
+
+        Assert.Contains("maximum supported size", exception.Message, StringComparison.Ordinal);
+        Assert.Contains(AdoptionMeasurementEngine.MaxRegionSourceFileBytes.ToString(), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CountRegionLinesAsyncHonorsCancellationBeforeScanning()
+    {
+        var path = Path.Combine(_root, "canceled.cs");
+        await File.WriteAllTextAsync(path, "start\none\nend\n", CancellationToken.None);
+        var region = new AdoptionMeasurementRegion(
+            AdoptionVariant.Proposed,
+            "registration",
+            AdoptionSourceRoot.Repository,
+            "canceled.cs",
+            "start",
+            "end",
+            1,
+            1,
+            true);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => AdoptionMeasurementEngine.CountRegionLinesAsync(
+                path,
+                region,
+                cancellation.Token));
+    }
+
+    [Fact]
     public async Task WriterProducesStableCamelCaseJsonWithoutBom()
     {
         var fixture = await CreateValidFixtureAsync();
@@ -555,6 +634,62 @@ public sealed class AdoptionMeasurementTests : IDisposable
                 [],
                 cancellation.Token));
         Assert.Equal(cancellation.Token, canceled.CancellationToken);
+    }
+
+    [Fact]
+    public async Task GitVerifierTimeoutAndCancellationCleanUpHeartbeatChildren()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "The deterministic process-group fixture uses Unix shell semantics.");
+        }
+
+        var childProcessIdsPath = Path.Combine(_root, "cleanup-child-pids");
+        var executable = await CreateUnixExecutableAsync(
+            Path.Combine(_root, "cleanup-git"),
+            $"#!/bin/sh\n(sleep 30) &\nprintf '%s\\n' \"$!\" >> \"$PWD/cleanup-child-pids\"\nsleep 30\n");
+
+        var timeoutVerifier = new GitConsumerRevisionVerifier(
+            executable,
+            TimeSpan.FromMilliseconds(250));
+        await Assert.ThrowsAsync<AdoptionMeasurementException>(
+            () => timeoutVerifier.VerifyAsync(
+                _root,
+                Commit,
+                [],
+                CancellationToken.None));
+
+        var timeoutChildProcessIds = await WaitForProcessIdsFileAsync(childProcessIdsPath);
+        Assert.NotEmpty(timeoutChildProcessIds);
+        foreach (var processId in timeoutChildProcessIds)
+        {
+            Assert.True(
+                await WaitForProcessExitAsync(processId),
+                $"The timeout heartbeat child {processId} remained alive after cleanup.");
+        }
+
+        File.Delete(childProcessIdsPath);
+        var cancellationVerifier = new GitConsumerRevisionVerifier(
+            executable,
+            TimeSpan.FromSeconds(30));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+        var canceled = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => cancellationVerifier.VerifyAsync(
+                _root,
+                Commit,
+                [],
+                cancellation.Token));
+        Assert.Equal(cancellation.Token, canceled.CancellationToken);
+
+        var cancellationChildProcessIds = await WaitForProcessIdsFileAsync(childProcessIdsPath);
+        Assert.NotEmpty(cancellationChildProcessIds);
+        foreach (var processId in cancellationChildProcessIds)
+        {
+            Assert.True(
+                await WaitForProcessExitAsync(processId),
+                $"The cancellation heartbeat child {processId} remained alive after cleanup.");
+        }
     }
 
     [Fact]
