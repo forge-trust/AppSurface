@@ -185,18 +185,20 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await EnsureCurrentEpochAsync(
+            await AcquireMigrationFenceAsync(
                 connection,
                 transaction,
                 cancellationToken,
                 captureAdmissionOutcome: true).ConfigureAwait(false);
-            // The shared migration fence acquired by EnsureCurrentEpochAsync remains held by this transaction.
-            // Revalidate on the same connection so a migration cannot commit between compatibility proof and
-            // the transition to pass_active.
             await _admissionSchemaManager.ValidateConnectionAsync(
                 connection,
                 transaction,
                 cancellationToken).ConfigureAwait(false);
+            await EnsureCurrentEpochUnderFenceAsync(
+                connection,
+                transaction,
+                cancellationToken,
+                captureAdmissionOutcome: true).ConfigureAwait(false);
             if (await EnsureSessionAsync(
                 connection,
                 transaction,
@@ -541,18 +543,41 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
         CancellationToken cancellationToken,
         bool captureAdmissionOutcome = false)
     {
-        await using (var fence = new NpgsqlCommand(
+        await AcquireMigrationFenceAsync(
+            connection,
+            transaction,
+            cancellationToken,
+            captureAdmissionOutcome).ConfigureAwait(false);
+        await EnsureCurrentEpochUnderFenceAsync(
+            connection,
+            transaction,
+            cancellationToken,
+            captureAdmissionOutcome).ConfigureAwait(false);
+    }
+
+    private static async ValueTask AcquireMigrationFenceAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        CancellationToken cancellationToken,
+        bool captureAdmissionOutcome)
+    {
+        await using var fence = new NpgsqlCommand(
             "SELECT pg_advisory_xact_lock_shared(@lock_id);",
             connection,
-            transaction))
-        {
-            fence.Parameters.AddWithValue("lock_id", PostgreSqlDurableRuntimeSchemaManager.MigrationAdvisoryLock);
-            _ = await ExecuteNonQueryAsync(
-                fence,
-                cancellationToken,
-                captureAdmissionOutcome).ConfigureAwait(false);
-        }
+            transaction);
+        fence.Parameters.AddWithValue("lock_id", PostgreSqlDurableRuntimeSchemaManager.MigrationAdvisoryLock);
+        _ = await ExecuteNonQueryAsync(
+            fence,
+            cancellationToken,
+            captureAdmissionOutcome).ConfigureAwait(false);
+    }
 
+    private async ValueTask EnsureCurrentEpochUnderFenceAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        CancellationToken cancellationToken,
+        bool captureAdmissionOutcome)
+    {
         await using var epoch = new NpgsqlCommand(
             "SELECT active_runtime_epoch FROM appsurface_durable.store_metadata WHERE singleton;",
             connection,

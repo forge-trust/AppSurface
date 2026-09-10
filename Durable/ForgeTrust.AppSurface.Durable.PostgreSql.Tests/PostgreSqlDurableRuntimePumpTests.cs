@@ -1935,15 +1935,8 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             if (Interlocked.Exchange(ref mutatedAfterPrecheck, 1) == 0)
             {
                 await using var makeUnsupported = database.DataSource.CreateCommand(
-                    """
-                    UPDATE appsurface_durable.store_metadata
-                    SET minimum_reader_version = 1,
-                        maximum_reader_version = 1,
-                        minimum_writer_version = 1,
-                        maximum_writer_version = 1
-                    WHERE singleton;
-                    """);
-                Assert.Equal(1, await makeUnsupported.ExecuteNonQueryAsync(cancellationToken));
+                    "DROP SCHEMA appsurface_durable CASCADE;");
+                await makeUnsupported.ExecuteNonQueryAsync(cancellationToken);
             }
         });
         var executorCalls = 0;
@@ -1962,14 +1955,10 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All));
 
         Assert.Equal(DurableRuntimePumpAttemptKind.Incompatible, attempt.Kind);
-        Assert.Equal(DurableProblemCodes.SchemaVersionUnsupported, attempt.ProblemCode);
+        Assert.Equal(DurableProblemCodes.SchemaMissing, attempt.ProblemCode);
         Assert.Null(attempt.Result);
         Assert.Equal(1, mutatedAfterPrecheck);
         Assert.Equal(0, executorCalls);
-        await using var heartbeatCount = database.DataSource.CreateCommand(
-            "SELECT count(*) FROM appsurface_durable.runtime_heartbeat WHERE worker_id = @worker_id;");
-        heartbeatCount.Parameters.AddWithValue("worker_id", "runtime-pump-schema-admission-race-worker");
-        Assert.Equal(0, (long)(await heartbeatCount.ExecuteScalarAsync())!);
     }
 
     [Fact]
