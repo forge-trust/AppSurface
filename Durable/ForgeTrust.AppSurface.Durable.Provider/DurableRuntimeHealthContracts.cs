@@ -19,6 +19,9 @@ public enum DurableRuntimeHealthState
 
     /// <summary>The schema or store-wide recovery epoch does not authorize this runtime.</summary>
     Incompatible = 4,
+
+    /// <summary>The authoritative store could not be observed, so compatibility and readiness are unknown.</summary>
+    Unavailable = 5,
 }
 
 /// <summary>
@@ -144,10 +147,31 @@ public sealed record DurableRuntimeHealthSnapshot
     /// <summary>Gets the stable diagnostic code, limited to 120 durable-identifier characters, for a non-healthy verdict.</summary>
     public string? ProblemCode { get; }
 
-    /// <summary>Gets whether installed reader and writer ranges include this package.</summary>
+    /// <summary>
+    /// Gets whether the provider completed an authoritative-store observation for this assessment.
+    /// </summary>
+    /// <remarks>
+    /// This is false only for <see cref="DurableRuntimeHealthState.Unavailable"/>. Manually constructed snapshots
+    /// declare their provenance through <see cref="State"/>.
+    /// </remarks>
+    public bool WasStoreObserved => State != DurableRuntimeHealthState.Unavailable;
+
+    /// <summary>
+    /// Gets whether installed reader and writer ranges include this package.
+    /// </summary>
+    /// <remarks>
+    /// A false value on an <see cref="DurableRuntimeHealthState.Unavailable"/> snapshot means compatibility was not
+    /// established; it does not mean the store was observed to be incompatible.
+    /// </remarks>
     public bool SchemaCompatible { get; }
 
-    /// <summary>Gets whether the configured out-of-band runtime epoch matches the store.</summary>
+    /// <summary>
+    /// Gets whether the configured out-of-band runtime epoch matches the store.
+    /// </summary>
+    /// <remarks>
+    /// A false value on an <see cref="DurableRuntimeHealthState.Unavailable"/> snapshot means compatibility was not
+    /// established; it does not mean the store was observed to have a different epoch.
+    /// </remarks>
     public bool EpochCompatible { get; }
 
     /// <summary>Gets the highest installed schema migration.</summary>
@@ -171,7 +195,13 @@ public sealed record DurableRuntimeHealthSnapshot
     /// <summary>Gets the surfaces this worker is configured to pump.</summary>
     public DurableRuntimeSurface HostedSurfaces { get; }
 
-    /// <summary>Gets the authoritative store observation time.</summary>
+    /// <summary>
+    /// Gets the time of this assessment.
+    /// </summary>
+    /// <remarks>
+    /// This is database statement time when <see cref="WasStoreObserved"/> is true and process time when an
+    /// <see cref="DurableRuntimeHealthState.Unavailable"/> assessment could not observe the store.
+    /// </remarks>
     public DateTimeOffset ObservedAtUtc { get; }
 
     /// <summary>Gets when the current worker instance first registered.</summary>
@@ -197,6 +227,41 @@ public sealed record DurableRuntimeHealthSnapshot
 
     /// <summary>Gets the authoritative-store-observed age of the oldest overdue dispatch.</summary>
     public TimeSpan? OldestDueAge { get; }
+
+    /// <summary>
+    /// Gets whether the current complete assessment authorizes enabling an activation path.
+    /// </summary>
+    /// <remarks>
+    /// This is an authorization from the current assessment, not a permanent deployment toggle. Host liveness and
+    /// application-traffic policy remain application-owned.
+    /// </remarks>
+    public bool CanEnableActivation =>
+        State != DurableRuntimeHealthState.Unavailable
+        && State != DurableRuntimeHealthState.Incompatible
+        && SchemaCompatible
+        && EpochCompatible;
+
+    /// <summary>
+    /// Gets whether the current assessment permits an authoritative provider pump attempt.
+    /// </summary>
+    /// <remarks>
+    /// This is an advisory host precheck. Provider admission remains authoritative, so callers should avoid a
+    /// check-then-act dependency and handle the result from the admission-aware pump directly.
+    /// </remarks>
+    public bool CanAttemptPump =>
+        CanEnableActivation
+        && State != DurableRuntimeHealthState.Draining;
+
+    /// <summary>
+    /// Gets whether the durable runtime control plane is currently ready.
+    /// </summary>
+    /// <remarks>
+    /// This does not prove application-traffic readiness, dependency liveness beyond this assessment, or successful
+    /// business work.
+    /// </remarks>
+    public bool IsReady =>
+        State == DurableRuntimeHealthState.Healthy
+        && CanEnableActivation;
 }
 
 /// <summary>
