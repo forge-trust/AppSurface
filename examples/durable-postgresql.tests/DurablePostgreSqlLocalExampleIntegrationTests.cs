@@ -105,6 +105,131 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
             DurablePostgreSqlLocalExample.EnsureRuntimeHealthIsCompatible(CreateHealthSnapshot(schemaCompatible: true, epochCompatible: false)));
     }
 
+    [Theory]
+    [InlineData("work")]
+    [InlineData("flow")]
+    public async Task VerifyLocal_reports_when_direct_proof_state_is_not_terminal(string corruptedAggregate)
+    {
+        await using var container = new PostgreSqlBuilder(PostgreSqlImage)
+            .WithDatabase(DatabaseName)
+            .WithUsername(AdministratorUser)
+            .WithPassword(AdministratorPassword)
+            .WithResourceMapping(
+                File.ReadAllBytes(
+                    TestPathUtils.PathUnder(
+                        TestPathUtils.FindRepoRoot(AppContext.BaseDirectory),
+                        "Durable",
+                        "configure-postgresql-roles.sql")),
+                RoleRecipeContainerPath)
+            .Build();
+        await container.StartAsync();
+
+        await using var administratorDataSource = NpgsqlDataSource.Create(container.GetConnectionString());
+        await CreateTutorialRolesAsync(administratorDataSource);
+        await new PostgreSqlDurableRuntimeSchemaManager(administratorDataSource).ApplyAsync();
+
+        var roleRecipe = await container.ExecAsync(
+            [
+                "env",
+                "PGAPPNAME=durable-local-example-invalid-state",
+                "psql",
+                "-U", AdministratorUser,
+                "-d", DatabaseName,
+                "-v", $"migration_owner_role={MigrationOwnerRole}",
+                "-v", $"dispatcher_role={DispatcherRole}",
+                "-v", $"runtime_role={RuntimeRole}",
+                "-v", $"retention_operator_role={RetentionOperatorRole}",
+                "-f", RoleRecipeContainerPath,
+            ]);
+        Assert.True(
+            roleRecipe.ExitCode == 0,
+            $"Role recipe failed with exit {roleRecipe.ExitCode}. stdout: {roleRecipe.Stdout} stderr: {roleRecipe.Stderr}");
+
+        var runtimeEpoch = Guid.NewGuid().ToString("D");
+        using var development = new EnvironmentVariableScope("DOTNET_ENVIRONMENT", "Development");
+        using var confirmation = new EnvironmentVariableScope("APPSURFACE_DURABLE_LOCAL_PROOF", "1");
+        using var migrationConnection = new EnvironmentVariableScope(
+            "APPSURFACE_DURABLE_MIGRATION_CONNECTION",
+            ConnectionStringForRole(container.GetConnectionString(), MigrationOwnerRole, MigrationOwnerPassword));
+        using var dispatcherConnection = new EnvironmentVariableScope(
+            "APPSURFACE_DURABLE_DISPATCHER_CONNECTION",
+            ConnectionStringForRole(container.GetConnectionString(), DispatcherRole, DispatcherPassword));
+        using var runtimeConnection = new EnvironmentVariableScope(
+            "APPSURFACE_DURABLE_RUNTIME_CONNECTION",
+            ConnectionStringForRole(container.GetConnectionString(), RuntimeRole, RuntimePassword));
+        using var epoch = new EnvironmentVariableScope("APPSURFACE_DURABLE_RUNTIME_EPOCH", runtimeEpoch);
+
+        Assert.Equal(0, await DurablePostgreSqlLocalExample.RunAsync(["schema-bootstrap-dev"], CancellationToken.None));
+        await ExecuteSqlAsync(
+            administratorDataSource,
+            corruptedAggregate == "work"
+                ? """
+                  CREATE FUNCTION appsurface_durable.test_local_proof_corrupt_work()
+                  RETURNS trigger
+                  LANGUAGE plpgsql
+                  SECURITY DEFINER
+                  SET search_path = appsurface_durable, pg_catalog
+                  AS $function$
+                  BEGIN
+                      IF NEW.state = 'succeeded' THEN
+                          UPDATE appsurface_durable.work
+                          SET state = 'pending', terminal_at = NULL, terminal_code = NULL
+                          WHERE scope_id = NEW.scope_id AND work_id = NEW.work_id;
+                      END IF;
+                      RETURN NEW;
+                  END;
+                  $function$;
+                  CREATE TRIGGER test_local_proof_corrupt_work
+                      AFTER UPDATE OF state ON appsurface_durable.work
+                      FOR EACH ROW EXECUTE FUNCTION appsurface_durable.test_local_proof_corrupt_work();
+                  """
+                : """
+                  CREATE FUNCTION appsurface_durable.test_local_proof_corrupt_flow()
+                  RETURNS trigger
+                  LANGUAGE plpgsql
+                  SECURITY DEFINER
+                  SET search_path = appsurface_durable, pg_catalog
+                  AS $function$
+                  BEGIN
+                      IF NEW.state = 'completed' THEN
+                          UPDATE appsurface_durable.flow_instance
+                          SET state = 'waiting_event', terminal_at = NULL, terminal_code = NULL
+                          WHERE scope_id = NEW.scope_id AND flow_instance_id = NEW.flow_instance_id;
+                      END IF;
+                      RETURN NEW;
+                  END;
+                  $function$;
+                  CREATE TRIGGER test_local_proof_corrupt_flow
+                      AFTER UPDATE OF state ON appsurface_durable.flow_instance
+                      FOR EACH ROW EXECUTE FUNCTION appsurface_durable.test_local_proof_corrupt_flow();
+                  """);
+
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        var previousOutput = Console.Out;
+        var previousError = Console.Error;
+        Console.SetOut(output);
+        Console.SetError(error);
+        int exitCode;
+        try
+        {
+            exitCode = await DurablePostgreSqlLocalExample.RunAsync(["verify-local"], CancellationToken.None);
+        }
+        finally
+        {
+            Console.SetOut(previousOutput);
+            Console.SetError(previousError);
+        }
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("[verify-local] admission-aware pass: Completed", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "[verify-local] direct pass completed Work and Flow with zero failures",
+            output.ToString(),
+            StringComparison.Ordinal);
+        Assert.Contains("Command failed with InvalidOperationException.", error.ToString(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task WorkerSweep_reports_a_timeout_when_no_hosted_pass_completes()
     {
@@ -384,18 +509,33 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
             """
             SELECT
                 (SELECT count(*) FROM appsurface_durable.work) AS work_count,
+                (SELECT count(*) FROM appsurface_durable.work WHERE state = 'succeeded') AS succeeded_work_count,
+                (SELECT count(*) FROM appsurface_durable.work WHERE state IN
+                    ('failed', 'suspended_ambiguous_external_outcome',
+                     'suspended_reconciliation_required', 'suspended_manual_resolution',
+                     'suspended_contract_unavailable')) AS failed_work_count,
                 (SELECT count(*) FROM appsurface_durable.flow_instance) AS flow_count,
+                (SELECT count(*) FROM appsurface_durable.flow_instance WHERE state = 'completed') AS completed_flow_count,
+                (SELECT count(*) FROM appsurface_durable.flow_instance WHERE state IN
+                    ('faulted', 'suspended')) AS failed_flow_count,
                 (SELECT count(*) FROM appsurface_durable.schedule_definition) AS schedule_count,
                 (SELECT count(*) FROM appsurface_durable.flow_trace_context) AS trace_context_count,
-                (SELECT count(*) FROM appsurface_durable.runtime_heartbeat) AS heartbeat_count;
+                (SELECT count(*) FROM appsurface_durable.runtime_heartbeat) AS heartbeat_count,
+                (SELECT count(*) FROM appsurface_durable.runtime_heartbeat
+                    WHERE last_failed = 0 AND last_successful_sweep_at IS NOT NULL) AS successful_heartbeat_count;
             """);
         await using var reader = await command.ExecuteReaderAsync();
         Assert.True(await reader.ReadAsync());
-        Assert.True(reader.GetInt64(0) > 0, "The local proof should persist its accepted Work.");
-        Assert.True(reader.GetInt64(1) > 0, "The local proof should persist its Flow instance.");
-        Assert.True(reader.GetInt64(2) > 0, "The local proof should persist its Schedule definition.");
-        Assert.True(reader.GetInt64(3) > 0, "The local proof should persist W3C Flow trace context.");
-        Assert.True(reader.GetInt64(4) > 0, "The hosted worker should persist a heartbeat after its bounded sweep.");
+        Assert.Equal(1, reader.GetInt64(0));
+        Assert.Equal(1, reader.GetInt64(1));
+        Assert.Equal(0, reader.GetInt64(2));
+        Assert.Equal(1, reader.GetInt64(3));
+        Assert.Equal(1, reader.GetInt64(4));
+        Assert.Equal(0, reader.GetInt64(5));
+        Assert.Equal(1, reader.GetInt64(6));
+        Assert.True(reader.GetInt64(7) > 0, "The local proof should persist W3C Flow trace context.");
+        Assert.Equal(1, reader.GetInt64(8));
+        Assert.Equal(1, reader.GetInt64(9));
         Assert.False(await reader.ReadAsync());
     }
 }

@@ -145,6 +145,136 @@ public sealed record DurableRuntimePumpResult
 }
 
 /// <summary>
+/// Identifies the outcome of one admission-aware durable runtime pump attempt.
+/// </summary>
+public enum DurableRuntimePumpAttemptKind
+{
+    /// <summary>Application execution returned and terminal provider bookkeeping completed.</summary>
+    Completed = 0,
+
+    /// <summary>The provider refused admission before application execution began.</summary>
+    Refused = 1,
+
+    /// <summary>The provider could not observe the authoritative store before application execution began.</summary>
+    Unavailable = 2,
+
+    /// <summary>The observed schema or runtime epoch did not authorize application execution.</summary>
+    Incompatible = 3,
+}
+
+/// <summary>
+/// Reports whether one admission-aware pump invocation completed or stopped before application execution.
+/// </summary>
+/// <remarks>
+/// <see cref="DurableRuntimePumpAttemptKind.Refused"/>, <see cref="DurableRuntimePumpAttemptKind.Unavailable"/>, and
+/// <see cref="DurableRuntimePumpAttemptKind.Incompatible"/> certify only that this invocation did not enter
+/// application execution. They do not establish the status of an earlier invocation whose response was lost,
+/// another process, or item-level external effects.
+/// </remarks>
+public sealed record DurableRuntimePumpAttempt
+{
+    /// <summary>Initializes a closed pump-attempt outcome.</summary>
+    /// <param name="kind">Defined attempt outcome.</param>
+    /// <param name="result">Completed pump result; required only for <see cref="DurableRuntimePumpAttemptKind.Completed"/>.</param>
+    /// <param name="problemCode">
+    /// Provider-neutral problem code; required for unavailable and incompatible outcomes and absent otherwise.
+    /// </param>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="kind"/> is undefined.</exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the result or problem code contradicts <paramref name="kind"/>.
+    /// </exception>
+    public DurableRuntimePumpAttempt(
+        DurableRuntimePumpAttemptKind kind,
+        DurableRuntimePumpResult? result,
+        string? problemCode)
+    {
+        if (!Enum.IsDefined(kind))
+        {
+            throw new ArgumentOutOfRangeException(nameof(kind));
+        }
+
+        switch (kind)
+        {
+            case DurableRuntimePumpAttemptKind.Completed:
+                if (result is null)
+                {
+                    throw new ArgumentException("A completed pump attempt requires a result.", nameof(result));
+                }
+
+                if (problemCode is not null)
+                {
+                    throw new ArgumentException("A completed pump attempt cannot have a problem code.", nameof(problemCode));
+                }
+
+                break;
+
+            case DurableRuntimePumpAttemptKind.Refused:
+                if (result is not null)
+                {
+                    throw new ArgumentException("A refused pump attempt cannot have a result.", nameof(result));
+                }
+
+                if (problemCode is not null)
+                {
+                    throw new ArgumentException("A refused pump attempt cannot have a problem code.", nameof(problemCode));
+                }
+
+                break;
+
+            case DurableRuntimePumpAttemptKind.Unavailable:
+                RequireNoResult(result, kind);
+                if (!string.Equals(problemCode, DurableProblemCodes.StoreUnavailable, StringComparison.Ordinal))
+                {
+                    throw new ArgumentException(
+                        $"An unavailable pump attempt requires {DurableProblemCodes.StoreUnavailable}.",
+                        nameof(problemCode));
+                }
+
+                break;
+
+            case DurableRuntimePumpAttemptKind.Incompatible:
+                RequireNoResult(result, kind);
+                if (!IsCompatibilityProblemCode(problemCode))
+                {
+                    throw new ArgumentException(
+                        "An incompatible pump attempt requires ASDUR108 or a code from ASDUR400 through ASDUR403.",
+                        nameof(problemCode));
+                }
+
+                break;
+        }
+
+        Kind = kind;
+        Result = result;
+        ProblemCode = problemCode;
+    }
+
+    /// <summary>Gets the closed attempt outcome.</summary>
+    public DurableRuntimePumpAttemptKind Kind { get; }
+
+    /// <summary>Gets the completed pump result, or null when execution did not begin.</summary>
+    public DurableRuntimePumpResult? Result { get; }
+
+    /// <summary>Gets the provider-neutral incompatibility or unavailability code, when applicable.</summary>
+    public string? ProblemCode { get; }
+
+    private static void RequireNoResult(DurableRuntimePumpResult? result, DurableRuntimePumpAttemptKind kind)
+    {
+        if (result is not null)
+        {
+            throw new ArgumentException($"A {kind} pump attempt cannot have a result.", nameof(result));
+        }
+    }
+
+    private static bool IsCompatibilityProblemCode(string? problemCode) =>
+        string.Equals(problemCode, DurableProblemCodes.RecoveryEpochRequired, StringComparison.Ordinal)
+        || string.Equals(problemCode, DurableProblemCodes.SchemaMissing, StringComparison.Ordinal)
+        || string.Equals(problemCode, DurableProblemCodes.SchemaUpgradeRequired, StringComparison.Ordinal)
+        || string.Equals(problemCode, DurableProblemCodes.SchemaVersionUnsupported, StringComparison.Ordinal)
+        || string.Equals(problemCode, DurableProblemCodes.SchemaInconsistent, StringComparison.Ordinal);
+}
+
+/// <summary>
 /// Executes one bounded pass of the authoritative durable runtime.
 /// </summary>
 /// <remarks>
@@ -157,6 +287,35 @@ public interface IDurableRuntimePump
     /// Executes one bounded processing pass.
     /// </summary>
     ValueTask<DurableRuntimePumpResult> RunOnceAsync(
+        DurableRuntimePumpRequest request,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Attempts authoritative admission and, when admitted, executes one bounded durable runtime pump pass.
+/// </summary>
+/// <remarks>
+/// The <c>Try</c> contract applies only to expected pre-execution admission outcomes. Caller cancellation,
+/// application-execution failures, terminal-bookkeeping failures, malformed provider state, and unclassified
+/// exceptions propagate. A caller may make a new policy-controlled attempt after a returned pre-execution outcome,
+/// but a returned outcome does not prove the status of an earlier invocation whose response was lost.
+/// </remarks>
+public interface IDurableRuntimePumpAdmission
+{
+    /// <summary>Attempts authoritative admission and executes one bounded pass when admitted.</summary>
+    /// <param name="request">Bounded pump-pass limits and selected durable surfaces.</param>
+    /// <param name="cancellationToken">
+    /// Caller cancellation for admission and application execution. After application execution returns, terminal
+    /// bookkeeping uses an independent provider-owned bound and is not canceled by this token.
+    /// </param>
+    /// <returns>
+    /// A closed attempt that distinguishes completion, refusal, provider unavailability, and incompatibility.
+    /// </returns>
+    /// <exception cref="OperationCanceledException">Thrown when the caller cancels the attempt.</exception>
+    /// <exception cref="Exception">
+    /// Propagates application-execution, finalization, malformed-provider-state, and unclassified failures unchanged.
+    /// </exception>
+    ValueTask<DurableRuntimePumpAttempt> TryRunOnceAsync(
         DurableRuntimePumpRequest request,
         CancellationToken cancellationToken = default);
 }

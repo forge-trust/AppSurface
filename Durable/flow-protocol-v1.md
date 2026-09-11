@@ -55,8 +55,8 @@ Schema management and epoch rotation take the same exclusive session advisory lo
 
 | Operation | Transaction and locks | Required validation | Result and durable effects |
 | --- | --- | --- | --- |
-| **Get schema status** | Read-only deployment connection | Migration hashes for the current forward catalog (`0001` through `0009`) | Reports compatibility (compatible, missing, inconsistent, old/new); includes `StoreId` and active epoch. |
-| **Apply migrations** | Migration owner; session advisory lock | Pre/post migration hashes for the current forward catalog, including `0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`, `0007_flow_retention`, `0008_flow_repair`, and `0009_work_contract_discovery` | Applies pending known migrations in sequence under lock; fails closed on SHA-256 mismatch. |
+| **Get schema status** | Read-only deployment connection | Migration hashes for the current forward catalog (`0001` through `0010`) | Reports compatibility (compatible, missing, inconsistent, old/new); includes `StoreId` and active epoch. |
+| **Apply migrations** | Migration owner; session advisory lock | Pre/post migration hashes for the current forward catalog, including `0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`, `0007_flow_retention`, `0008_flow_repair`, `0009_work_contract_discovery`, and `0010_runtime_health_observation` | Applies pending known migrations in sequence under lock; fails closed on SHA-256 mismatch. |
 | **Start Flow** | Client-owned short transaction; scope -> flow_instance -> flow_command -> flow_dispatch -> flow_history | Target, StoreId, active epoch, registry, definition fingerprint, `start_idempotency_key` | Atomically creates `flow_instance` (state `ready`), records `flow_command`, appends `flow_history` event, or returns exact duplicate. |
 | **Deliver External Event** | Scoped transaction; scope -> flow_instance -> flow_command -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | Target, StoreId, active epoch, unique `event_id`, matching active `waiting_event` | Records command, resolves active wait (`event_won`), supersedes timer if scheduled, updates `flow_instance` to `ready`, appends history. Exact re-delivery returns the original duplicate-stable outcome. |
 | **Fire Timer** | Payload-free discovery claim, then scoped transition; scope -> flow_instance -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | StoreId, active epoch, `state = 'scheduled'`, `due_at <= clock_timestamp()` | Updates timer to `fired`, resolves event wait (`timer_won`), updates `flow_instance` to `ready`, appends history. |
@@ -122,6 +122,8 @@ PostgreSQL Flow schema requires applying migrations strictly in order:
    repair command/collision ledgers, and `resolution_kind` evidence for manual Work resolution.
 9. `0009_work_contract_discovery.sql`: Adds the payload-free, registry-scoped Work-discovery capability. Drain every
    pre-`0009` worker before rerunning the role recipe because it removes that worker's raw `dispatch` access.
+10. `0010_runtime_health_observation.sql`: Corrects due Schedule lease observation, adds the supporting partial index,
+    and preserves the schema-9 health-function signature for mixed-version readers.
 
 After applying any migration that adds package relations, run [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) again: migrations must run first, then the role recipe grants the reviewed Flow privileges to existing dispatcher and scoped-runtime roles.
 
@@ -180,7 +182,7 @@ Flow operations emit append-only `ASDURxxx` codes. Safe error reporting excludes
 | `ASDUR218` | Repair descriptor upgrade required | The suspension lacks the complete V1 child-effect descriptor digest; upgrade compatible writers and obtain a fresh assessment. |
 | `ASDUR219` | Repair evidence mismatch | Locked Work, wait, result, history, or manual-resolution proof differs from the request; reload the assessment. |
 | `ASDUR220` | Repair action unsupported | The retained state is outside the two-action repair matrix; preserve evidence and use another documented recovery path. |
-| `ASDUR400`-`ASDUR403` | Schema manager errors | Apply every pending forward-only migration through `0009` using migration-owner credentials, then rerun the role recipe before enabling a worker host. |
+| `ASDUR400`-`ASDUR403` | Schema manager errors | Apply every pending forward-only migration through `0010` using migration-owner credentials, then rerun the role recipe before enabling a worker host. |
 
 See the [diagnostics catalog](../troubleshooting/durable-diagnostics.md) for full error details.
 

@@ -1,6 +1,9 @@
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using ForgeTrust.AppSurface.Durable.Provider;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 
@@ -10,8 +13,10 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 /// lease, permit, completion, schedule, scope, and epoch decisions. The internal execution boundary is intentionally
 /// uninstrumented so #685 can attach Activity and ActivityLink behavior without taking ownership of this lifecycle.
 /// </remarks>
-internal sealed class PostgreSqlDurableRuntimePump : IDurableRuntimePump
+internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump, IDurableRuntimePumpAdmission
 {
+    private const string LocalOverlapMessage =
+        "ASDUR405: This runtime instance already has an active Pass.";
     private readonly PostgreSqlDurableRuntimeRegistration _registration;
     private readonly IDurableRuntimeSchemaManager _schemaManager;
     private readonly PostgreSqlDurableRuntimeHealth _runtimeHealth;
@@ -23,6 +28,9 @@ internal sealed class PostgreSqlDurableRuntimePump : IDurableRuntimePump
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IDurableRuntimeExecutionBoundary _executionBoundary;
     private readonly DurableRuntimeAdmissionGate _admission;
+    private readonly ILogger<PostgreSqlDurableRuntimePump> _logger;
+    private readonly PostgreSqlDurablePassExecutor _passExecutor;
+    private readonly bool _requiresExternalSchemaPrecheck;
     private readonly DurableRuntimeTurnScheduler _turnScheduler = new();
     private readonly SemaphoreSlim _passGate = new(1, 1);
 
@@ -38,6 +46,40 @@ internal sealed class PostgreSqlDurableRuntimePump : IDurableRuntimePump
         IServiceScopeFactory scopeFactory,
         IDurableRuntimeExecutionBoundary executionBoundary,
         DurableRuntimeAdmissionGate admission)
+        : this(
+            registration,
+            schemaManager,
+            runtimeHealth,
+            workStore,
+            flowProcessor,
+            scheduleProcessor,
+            workRegistry,
+            workContractSelection,
+            scopeFactory,
+            executionBoundary,
+            admission,
+            NullLogger<PostgreSqlDurableRuntimePump>.Instance,
+            passExecutor: null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes the one pump implementation and its internal sole execution-boundary seam.
+    /// </summary>
+    internal PostgreSqlDurableRuntimePump(
+        PostgreSqlDurableRuntimeRegistration registration,
+        IDurableRuntimeSchemaManager schemaManager,
+        PostgreSqlDurableRuntimeHealth runtimeHealth,
+        PostgreSqlDurableWorkStore workStore,
+        PostgreSqlDurableFlowProcessor flowProcessor,
+        PostgreSqlDurableScheduleProcessor scheduleProcessor,
+        IDurableWorkRegistry workRegistry,
+        PostgreSqlDurableWorkContractSelection workContractSelection,
+        IServiceScopeFactory scopeFactory,
+        IDurableRuntimeExecutionBoundary executionBoundary,
+        DurableRuntimeAdmissionGate admission,
+        ILogger<PostgreSqlDurableRuntimePump> logger,
+        PostgreSqlDurablePassExecutor? passExecutor)
     {
         _registration = registration ?? throw new ArgumentNullException(nameof(registration));
         _schemaManager = schemaManager ?? throw new ArgumentNullException(nameof(schemaManager));
@@ -50,57 +92,268 @@ internal sealed class PostgreSqlDurableRuntimePump : IDurableRuntimePump
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _executionBoundary = executionBoundary ?? throw new ArgumentNullException(nameof(executionBoundary));
         _admission = admission ?? throw new ArgumentNullException(nameof(admission));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _passExecutor = passExecutor ?? RunPassAsync;
+        _requiresExternalSchemaPrecheck = schemaManager is not PostgreSqlDurableRuntimeSchemaManager;
     }
 
     public async ValueTask<DurableRuntimePumpResult> RunOnceAsync(
         DurableRuntimePumpRequest request,
         CancellationToken cancellationToken = default)
     {
+        var outcome = await RunAttemptAsync(request, cancellationToken).ConfigureAwait(false);
+        switch (outcome.Kind)
+        {
+            case PostgreSqlDurablePumpOutcomeKind.Completed:
+                return outcome.Result!;
+            case PostgreSqlDurablePumpOutcomeKind.Refused:
+                if (outcome.Refusal is PostgreSqlDurablePumpRefusal.LocalPassOverlap
+                    or PostgreSqlDurablePumpRefusal.LostWorkerGeneration)
+                {
+                    outcome.LegacyException!.Throw();
+                }
+
+                return EmptyResult();
+            case PostgreSqlDurablePumpOutcomeKind.Unavailable:
+            case PostgreSqlDurablePumpOutcomeKind.Incompatible:
+                outcome.LegacyException!.Throw();
+                break;
+        }
+
+        throw new InvalidDataException($"Unknown durable pump outcome '{outcome.Kind}'.");
+    }
+
+    public async ValueTask<DurableRuntimePumpAttempt> TryRunOnceAsync(
+        DurableRuntimePumpRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var outcome = await RunAttemptAsync(request, cancellationToken).ConfigureAwait(false);
+        return outcome.Kind switch
+        {
+            PostgreSqlDurablePumpOutcomeKind.Completed => new DurableRuntimePumpAttempt(
+                DurableRuntimePumpAttemptKind.Completed,
+                outcome.Result,
+                problemCode: null),
+            PostgreSqlDurablePumpOutcomeKind.Refused => new DurableRuntimePumpAttempt(
+                DurableRuntimePumpAttemptKind.Refused,
+                result: null,
+                problemCode: null),
+            PostgreSqlDurablePumpOutcomeKind.Unavailable => new DurableRuntimePumpAttempt(
+                DurableRuntimePumpAttemptKind.Unavailable,
+                result: null,
+                outcome.ProblemCode),
+            PostgreSqlDurablePumpOutcomeKind.Incompatible => new DurableRuntimePumpAttempt(
+                DurableRuntimePumpAttemptKind.Incompatible,
+                result: null,
+                outcome.ProblemCode),
+            _ => throw new InvalidDataException($"Unknown durable pump outcome '{outcome.Kind}'."),
+        };
+    }
+
+    /// <summary>Runs the sole private admission and execution state machine shared by both public projections.</summary>
+    private async ValueTask<PostgreSqlDurablePumpOutcome> RunAttemptAsync(
+        DurableRuntimePumpRequest request,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(request);
+        var phase = PostgreSqlDurablePumpPhase.LocalSlotPending;
         if (!await _passGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
         {
-            throw new InvalidOperationException(
-                $"{DurableProblemCodes.WorkerIdentityConflict}: This runtime instance already has an active Pass.");
+            var legacyException = new InvalidOperationException(LocalOverlapMessage);
+            LogRefusalDebug(
+                PostgreSqlDurablePumpRefusal.LocalPassOverlap,
+                phase,
+                PostgreSqlDurableDiagnostics.OperationalAssessmentTroubleshooting);
+            return PostgreSqlDurablePumpOutcome.Refused(
+                PostgreSqlDurablePumpRefusal.LocalPassOverlap,
+                ExceptionDispatchInfo.Capture(legacyException));
         }
 
         try
         {
-            // Check admission only after this instance owns its one pass slot. A caller that was waiting while
-            // ApplicationStopping closed the gate cannot start a late Pass once the earlier one returns.
+            phase = PostgreSqlDurablePumpPhase.ProcessAdmission;
             if (!_admission.TryEnter())
             {
-                return EmptyResult();
+                LogRefusalDebug(
+                    PostgreSqlDurablePumpRefusal.ProcessAdmissionClosed,
+                    phase,
+                    PostgreSqlDurableDiagnostics.OperationalAssessmentTroubleshooting);
+                return PostgreSqlDurablePumpOutcome.Refused(
+                    PostgreSqlDurablePumpRefusal.ProcessAdmissionClosed);
             }
 
-            await _schemaManager.ValidateAsync(cancellationToken).ConfigureAwait(false);
-            if (!await _runtimeHealth.TryBeginPassAsync(cancellationToken).ConfigureAwait(false))
-            {
-                return EmptyResult();
-            }
-
-            try
-            {
-                var result = await RunPassAsync(request, cancellationToken).ConfigureAwait(false);
-                await _runtimeHealth.RecordSuccessfulSweepAsync(result, cancellationToken).ConfigureAwait(false);
-                return result;
-            }
-            catch
+            phase = PostgreSqlDurablePumpPhase.StoreAdmission;
+            if (_requiresExternalSchemaPrecheck)
             {
                 try
                 {
-                    await _runtimeHealth.RecordFailedPassAsync(CancellationToken.None).ConfigureAwait(false);
+                    await _schemaManager.ValidateAsync(cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception exception) when (exception is not StackOverflowException and not OutOfMemoryException)
                 {
-                    // The original pump failure remains authoritative; a later worker observes a stale heartbeat.
+                    var classified = ClassifyPreExecutionFailure(
+                        PostgreSqlDurableControlPlaneOperation.SchemaAdmission,
+                        phase,
+                        exception,
+                        cancellationToken);
+                    if (classified is { } outcome)
+                    {
+                        return outcome;
+                    }
+
+                    throw;
+                }
+            }
+
+            PostgreSqlDurableStoreAdmission storeAdmission;
+            try
+            {
+                storeAdmission = await _runtimeHealth.TryBeginPassWithOutcomeAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not StackOverflowException and not OutOfMemoryException)
+            {
+                if (PostgreSqlDurableAdmissionFailureContext.TakeIndeterminate(exception))
+                {
+                    await TryRecordFailedPassAsync(phase).ConfigureAwait(false);
+                }
+
+                var classified = ClassifyPreExecutionFailure(
+                    PostgreSqlDurableControlPlaneOperation.RuntimeAdmission,
+                    phase,
+                    exception,
+                    cancellationToken);
+                if (classified is { } outcome)
+                {
+                    return outcome;
                 }
 
                 throw;
             }
+
+            switch (storeAdmission.Kind)
+            {
+                case PostgreSqlDurableStoreAdmissionKind.Admitted:
+                    break;
+                case PostgreSqlDurableStoreAdmissionKind.Draining:
+                    LogRefusalDebug(
+                        PostgreSqlDurablePumpRefusal.Draining,
+                        phase,
+                        PostgreSqlDurableDiagnostics.OperationalAssessmentTroubleshooting);
+                    return PostgreSqlDurablePumpOutcome.Refused(
+                        PostgreSqlDurablePumpRefusal.Draining);
+                case PostgreSqlDurableStoreAdmissionKind.StorePassActive:
+                    LogRefusalDebug(
+                        PostgreSqlDurablePumpRefusal.StorePassActive,
+                        phase,
+                        PostgreSqlDurableDiagnostics.OperationalAssessmentTroubleshooting);
+                    return PostgreSqlDurablePumpOutcome.Refused(
+                        PostgreSqlDurablePumpRefusal.StorePassActive);
+                case PostgreSqlDurableStoreAdmissionKind.LostWorkerGeneration:
+                    LogRefusalWarning(
+                        PostgreSqlDurablePumpRefusal.LostWorkerGeneration,
+                        phase,
+                        PostgreSqlDurableDiagnostics.OperationalAssessmentTroubleshooting);
+                    return PostgreSqlDurablePumpOutcome.Refused(
+                        PostgreSqlDurablePumpRefusal.LostWorkerGeneration,
+                        storeAdmission.LegacyException);
+                case PostgreSqlDurableStoreAdmissionKind.EpochMismatch:
+                    return PostgreSqlDurablePumpOutcome.Incompatible(
+                        DurableProblemCodes.RecoveryEpochRequired,
+                        storeAdmission.LegacyException!);
+                default:
+                    throw new InvalidDataException(
+                        $"Unknown durable store admission result '{storeAdmission.Kind}'.");
+            }
+
+            DurableRuntimePumpResult result;
+            phase = PostgreSqlDurablePumpPhase.Executing;
+            try
+            {
+                result = await _passExecutor(request, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not StackOverflowException and not OutOfMemoryException)
+            {
+                PostgreSqlDurablePumpFailureContext.Mark(exception, phase);
+                await TryRecordFailedPassAsync(phase).ConfigureAwait(false);
+                throw;
+            }
+
+            phase = PostgreSqlDurablePumpPhase.ProviderReturned;
+            using var finalizationCancellation = new CancellationTokenSource(
+                _registration.Options.ShutdownReserve);
+            phase = PostgreSqlDurablePumpPhase.Finalizing;
+            try
+            {
+                await _runtimeHealth.RecordSuccessfulSweepAsync(
+                    result,
+                    finalizationCancellation.Token).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not StackOverflowException and not OutOfMemoryException)
+            {
+                PostgreSqlDurablePumpFailureContext.Mark(exception, phase);
+                await TryRecordFailedPassAsync(phase).ConfigureAwait(false);
+                throw;
+            }
+
+            phase = PostgreSqlDurablePumpPhase.Completed;
+            return PostgreSqlDurablePumpOutcome.Completed(result);
         }
         finally
         {
             _passGate.Release();
+        }
+    }
+
+    /// <summary>Classifies only a failure that occurred before the execution boundary.</summary>
+    private PostgreSqlDurablePumpOutcome? ClassifyPreExecutionFailure(
+        PostgreSqlDurableControlPlaneOperation operation,
+        PostgreSqlDurablePumpPhase phase,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        var classification = PostgreSqlDurableFailureClassifier.Classify(
+            operation,
+            exception,
+            cancellationToken);
+        switch (classification.Disposition)
+        {
+            case PostgreSqlDurableFailureDisposition.Propagate:
+                return null;
+            case PostgreSqlDurableFailureDisposition.Unavailable:
+                LogUnavailable(
+                    operation,
+                    phase,
+                    classification.UnavailableCause!.Value,
+                    DurableProblemCodes.StoreUnavailable,
+                    PostgreSqlDurableDiagnostics.OperationalAssessmentTroubleshooting);
+                return PostgreSqlDurablePumpOutcome.Unavailable(exception);
+            case PostgreSqlDurableFailureDisposition.Incompatible:
+                return PostgreSqlDurablePumpOutcome.Incompatible(
+                    classification.ProblemCode!,
+                    ExceptionDispatchInfo.Capture(exception));
+            default:
+                throw new InvalidDataException(
+                    $"Unknown durable failure classification '{classification.Disposition}'.");
+        }
+    }
+
+    /// <summary>
+    /// Makes one fresh, bounded ownership-scoped cleanup attempt without replacing the original outcome.
+    /// </summary>
+    private async ValueTask TryRecordFailedPassAsync(PostgreSqlDurablePumpPhase originalPhase)
+    {
+        using var cleanupCancellation = new CancellationTokenSource(
+            _registration.Options.ShutdownReserve);
+        try
+        {
+            await _runtimeHealth.RecordFailedPassAsync(cleanupCancellation.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not StackOverflowException and not OutOfMemoryException)
+        {
+            LogCleanupFailure(
+                originalPhase,
+                PostgreSqlDurableDiagnostics.OperationalAssessmentTroubleshooting);
         }
     }
 
@@ -329,10 +582,15 @@ internal sealed class PostgreSqlDurableRuntimePump : IDurableRuntimePump
 
                 var next = Min(current.LeaseExpiresAtUtc, Min(nextHeartbeat, nextRenewal));
                 var delay = next - now;
-                if (delay > TimeSpan.Zero
-                    && await Task.WhenAny(running, Task.Delay(delay, cancellationToken)).ConfigureAwait(false) == running)
+                if (delay > TimeSpan.Zero)
                 {
-                    break;
+                    using var waitCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    var delayTask = Task.Delay(delay, waitCancellation.Token);
+                    if (await Task.WhenAny(running, delayTask).ConfigureAwait(false) == running)
+                    {
+                        await waitCancellation.CancelAsync().ConfigureAwait(false);
+                        break;
+                    }
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
@@ -490,6 +748,43 @@ internal sealed class PostgreSqlDurableRuntimePump : IDurableRuntimePump
             ? TurnOutcome.Deferred
             : TurnOutcome.Committed;
     }
+
+    [LoggerMessage(
+        EventId = 4111,
+        Level = LogLevel.Warning,
+        Message = "{ProblemCode} durable PostgreSQL control-plane operation {Operation} at phase {Phase} was unavailable due to {Cause}. See {TroubleshootingAnchor}.")]
+    private partial void LogUnavailable(
+        PostgreSqlDurableControlPlaneOperation operation,
+        PostgreSqlDurablePumpPhase phase,
+        PostgreSqlDurableUnavailableCause cause,
+        string problemCode,
+        string troubleshootingAnchor);
+
+    [LoggerMessage(
+        EventId = 4112,
+        Level = LogLevel.Debug,
+        Message = "Durable PostgreSQL pump admission was refused due to {Cause} at phase {Phase}. See {TroubleshootingAnchor}.")]
+    private partial void LogRefusalDebug(
+        PostgreSqlDurablePumpRefusal cause,
+        PostgreSqlDurablePumpPhase phase,
+        string troubleshootingAnchor);
+
+    [LoggerMessage(
+        EventId = 4113,
+        Level = LogLevel.Warning,
+        Message = "Durable PostgreSQL pump admission was refused due to {Cause} at phase {Phase}. See {TroubleshootingAnchor}.")]
+    private partial void LogRefusalWarning(
+        PostgreSqlDurablePumpRefusal cause,
+        PostgreSqlDurablePumpPhase phase,
+        string troubleshootingAnchor);
+
+    [LoggerMessage(
+        EventId = 4114,
+        Level = LogLevel.Warning,
+        Message = "Durable PostgreSQL failed-pass cleanup did not complete after phase {OriginalPhase}; stale takeover remains authoritative. See {TroubleshootingAnchor}.")]
+    private partial void LogCleanupFailure(
+        PostgreSqlDurablePumpPhase originalPhase,
+        string troubleshootingAnchor);
 
     private static int CountSelectedSurfaces(DurableRuntimeSurface selected) =>
         ((selected & DurableRuntimeSurface.Work) != 0 ? 1 : 0)

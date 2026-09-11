@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "consumerRepository": "https://github.com/forge-trust/skoolit",
+  "baselineCommit": "8177fb438c1c11b04248d320ee46390c3cb2791b",
+  "regions": [
+    {
+      "variant": "baseline",
+      "name": "registration",
+      "sourceRoot": "consumer",
+      "relativePath": "src/Skoolit.DurableWorker/BillingLifecycleDurableWorkerHost.cs",
+      "startToken": "builder.Services.AddSingleton<IBillingLifecycleDurableProjectionReconciler>(provider => provider.GetRequiredService<BillingLifecycleDurableProjectionReconciler>());",
+      "endToken": "var dispatcher = NpgsqlDataSource.Create(dispatcherConnectionString);",
+      "lineCount": 6,
+      "limit": 25,
+      "passed": true
+    },
+    {
+      "variant": "proposed",
+      "name": "registration",
+      "sourceRoot": "repository",
+      "relativePath": "Durable/evidence/executable-contract-adoption.sketch.cs",
+      "startToken": "// appsurface-adoption:registration:start",
+      "endToken": "// appsurface-adoption:registration:end",
+      "lineCount": 10,
+      "limit": 25,
+      "passed": true
+    },
+    {
+      "variant": "baseline",
+      "name": "external-activation-mapping",
+      "sourceRoot": "consumer",
+      "relativePath": "src/Skoolit.DurableWorker/BillingLifecycleDurableWorkerHost.cs",
+      "startToken": "app.MapGet(healthPath, async (IDurableRuntimeHealth health, CancellationToken cancellationToken) =>",
+      "endToken": "app.MapPost(recoverPath, async (IDurableRuntimePump pump, IBillingLifecycleActivationDispatcher activation, IBillingLifecycleDurableProjectionReconciler reconciler, ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>",
+      "lineCount": 15,
+      "limit": 25,
+      "passed": true
+    },
+    {
+      "variant": "proposed",
+      "name": "external-activation-mapping",
+      "sourceRoot": "repository",
+      "relativePath": "Durable/evidence/executable-contract-adoption.sketch.cs",
+      "startToken": "// appsurface-adoption:external-activation-mapping:start",
+      "endToken": "// appsurface-adoption:external-activation-mapping:end",
+      "lineCount": 24,
+      "limit": 25,
+      "passed": true
+    },
+    {
+      "variant": "baseline",
+      "name": "primary-lifecycle-test",
+      "sourceRoot": "consumer",
+      "relativePath": "tests/Skoolit.Web.Tests/BillingLifecycleDurableWorkerHostEndpointTests.cs",
+      "startToken": "var health = new StubHealth(Health(DurableRuntimeHealthState.Healthy, schemaCompatible: true, epochCompatible: true));",
+      "endToken": "Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(BillingLifecyclePrivateEndpoints.DefaultHealthPath)).StatusCode);",
+      "lineCount": 25,
+      "limit": 25,
+      "passed": true
+    },
+    {
+      "variant": "proposed",
+      "name": "primary-lifecycle-test",
+      "sourceRoot": "repository",
+      "relativePath": "Durable/evidence/executable-contract-adoption.sketch.cs",
+      "startToken": "// appsurface-adoption:primary-lifecycle-test:start",
+      "endToken": "// appsurface-adoption:primary-lifecycle-test:end",
+      "lineCount": 15,
+      "limit": 25,
+      "passed": true
+    }
+  ],
+  "overallPassed": true
+}

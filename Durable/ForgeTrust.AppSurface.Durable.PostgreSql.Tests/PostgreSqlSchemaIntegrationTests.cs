@@ -7,6 +7,7 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 public sealed class PostgreSqlSchemaIntegrationTests
 {
     private const long MigrationAdvisoryLock = 4_707_181_168_775_217_740;
+    private const string LockNotAvailableSqlState = "55P03";
     private const string RoleRecipeDatabase = "appsurface_durable";
     private const string RoleRecipeUsername = "appsurface";
     private const string RoleRecipePassword = "appsurface-test-password";
@@ -41,7 +42,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missing.Compatibility);
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missingEpoch.Status.Compatibility);
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9], first.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], first.AppliedVersions);
         Assert.Empty(second.AppliedVersions);
         Assert.True(compatible.IsCompatible);
         Assert.NotEqual(Guid.Empty, compatible.StoreId);
@@ -54,6 +55,50 @@ public sealed class PostgreSqlSchemaIntegrationTests
         Assert.Equal(nextEpoch, afterStaleRotation.ActiveRuntimeEpoch);
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await manager.InitializeRuntimeEpochAsync(Guid.NewGuid(), "tests", "duplicate"));
+    }
+
+    [Fact]
+    public async Task TransactionBoundSchemaValidation_RejectsAForeignConnection()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await using var firstConnection = await database.DataSource.OpenConnectionAsync();
+        await using var secondConnection = await database.DataSource.OpenConnectionAsync();
+        await using var foreignTransaction = await secondConnection.BeginTransactionAsync();
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
+            async () => await manager.ValidateConnectionAsync(
+                firstConnection,
+                foreignTransaction,
+                CancellationToken.None));
+
+        Assert.Equal("transaction", exception.ParamName);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_RejectsMultipleStoreMetadataRows()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await manager.ApplyAsync();
+
+        await ExecuteNonQueryAsync(
+            database.DataSource,
+            """
+            ALTER TABLE appsurface_durable.store_metadata DROP CONSTRAINT store_metadata_pkey;
+            INSERT INTO appsurface_durable.store_metadata
+                (singleton, store_id, active_runtime_epoch, schema_version,
+                 minimum_reader_version, maximum_reader_version,
+                 minimum_writer_version, maximum_writer_version)
+            SELECT singleton, store_id, active_runtime_epoch, schema_version,
+                   minimum_reader_version, maximum_reader_version,
+                   minimum_writer_version, maximum_writer_version
+            FROM appsurface_durable.store_metadata
+            WHERE singleton;
+            """);
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(async () => await manager.GetStatusAsync());
+        Assert.Contains("metadata query returned more than one row", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -152,9 +197,9 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         var retry = await retryManager.ApplyAsync();
         var compatible = await retryManager.GetStatusAsync();
-        Assert.Equal([3, 4, 5, 6, 7, 8, 9], retry.AppliedVersions);
+        Assert.Equal([3, 4, 5, 6, 7, 8, 9, 10], retry.AppliedVersions);
         Assert.True(compatible.IsCompatible);
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9], compatible.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], compatible.AppliedVersions);
     }
 
     [Fact]
@@ -197,7 +242,477 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var retry = await new PostgreSqlDurableRuntimeSchemaManager(database.DataSource).ApplyAsync();
-        Assert.Equal([9], retry.AppliedVersions);
+        Assert.Equal([9, 10], retry.AppliedVersions);
+    }
+
+    [Fact]
+    public async Task RuntimeHealthMigration_FailsFastWhenAScheduleWriterStillOwnsTheTable()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var embedded = DurablePostgreSqlMigrationCatalog.Load();
+        var schemaNine = new PostgreSqlDurableRuntimeSchemaManager(
+            database.DataSource,
+            embedded.Take(9).ToArray());
+        await schemaNine.ApplyAsync();
+
+        await using var writerConnection = await database.DataSource.OpenConnectionAsync();
+        await using var writerTransaction = await writerConnection.BeginTransactionAsync();
+        await using (var writerLock = new NpgsqlCommand(
+            "LOCK TABLE appsurface_durable.schedule_dispatch IN ROW EXCLUSIVE MODE;",
+            writerConnection,
+            writerTransaction))
+        {
+            await writerLock.ExecuteNonQueryAsync();
+        }
+
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        var exception = await Assert.ThrowsAsync<PostgresException>(
+            async () => await manager.ApplyAsync());
+
+        Assert.Equal(LockNotAvailableSqlState, exception.SqlState);
+        var status = await manager.GetStatusAsync();
+        Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, status.Compatibility);
+        Assert.Equal(9, status.InstalledVersion);
+        await using (var unchanged = database.DataSource.CreateCommand(
+            "SELECT to_regclass('appsurface_durable.ix_schedule_dispatch_lease_expiry_due') IS NULL;"))
+        {
+            Assert.True((bool)(await unchanged.ExecuteScalarAsync())!);
+        }
+
+        await writerTransaction.RollbackAsync();
+        var applied = await manager.ApplyAsync();
+        Assert.Equal([10], applied.AppliedVersions);
+    }
+
+    [Fact]
+    public async Task Apply_PreservesTheConfiguredClientDeadlineBeforeMigrationTen()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var connectionString = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            CommandTimeout = 1,
+            Pooling = false,
+        }.ConnectionString;
+        await using var shortTimeoutDataSource = NpgsqlDataSource.Create(connectionString);
+        var delayedMigration = new DurablePostgreSqlMigration(
+            1,
+            "delayed_test_migration",
+            """
+            SET LOCAL statement_timeout = '5s';
+            SELECT pg_sleep(2);
+            """,
+            "delayed-test-sha256");
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(
+            shortTimeoutDataSource,
+            [delayedMigration]);
+
+        var exception = await Assert.ThrowsAsync<NpgsqlException>(async () => await manager.ApplyAsync());
+
+        Assert.IsType<TimeoutException>(exception.InnerException);
+    }
+
+    [Fact]
+    public async Task Apply_UsesAnExtendedClientDeadlineForMigrationTen()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var embedded = DurablePostgreSqlMigrationCatalog.Load();
+        var schemaNine = new PostgreSqlDurableRuntimeSchemaManager(
+            database.DataSource,
+            embedded.Take(9).ToArray());
+        await schemaNine.ApplyAsync();
+        var connectionString = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            CommandTimeout = 1,
+            Pooling = false,
+        }.ConnectionString;
+        await using var shortTimeoutDataSource = NpgsqlDataSource.Create(connectionString);
+        var delayedTenth = embedded[9] with
+        {
+            Sql =
+                """
+                SET LOCAL statement_timeout = '5s';
+                SELECT pg_sleep(2);
+                """,
+            Sha256 = new string('0', 64),
+        };
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(
+            shortTimeoutDataSource,
+            [.. embedded.Take(9), delayedTenth]);
+
+        var result = await manager.ApplyAsync();
+        var status = await manager.GetStatusAsync();
+
+        Assert.Equal([10], result.AppliedVersions);
+        Assert.True(status.IsCompatible);
+        var extended = Assert.Single(
+            embedded,
+            migration => migration.CommandTimeoutSeconds is not null);
+        Assert.Equal(10, extended.Version);
+        Assert.Equal(330, extended.CommandTimeoutSeconds);
+    }
+
+    [Fact]
+    public async Task Apply_UsesMigrationOwnedClientDeadlineBeforeMigrationTen()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var embedded = DurablePostgreSqlMigrationCatalog.Load();
+        var connectionString = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            CommandTimeout = 1,
+            Pooling = false,
+        }.ConnectionString;
+        await using var shortTimeoutDataSource = NpgsqlDataSource.Create(connectionString);
+        var delayedFirstWithOverride = embedded[0] with
+        {
+            Sql = embedded[0].Sql +
+                """
+
+                SET LOCAL statement_timeout = '5s';
+                SELECT pg_sleep(2);
+                """,
+            Sha256 = new string('0', 64),
+            CommandTimeoutSeconds = 5,
+        };
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(
+            shortTimeoutDataSource,
+            [delayedFirstWithOverride]);
+
+        var result = await manager.ApplyAsync();
+
+        Assert.Equal([1], result.AppliedVersions);
+        Assert.True((await manager.GetStatusAsync()).IsCompatible);
+    }
+
+    [Fact]
+    public async Task RuntimeHealthMigration_OwnerDriftFailsBeforeDdlAndRetriesAfterRoleRepair()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var embedded = DurablePostgreSqlMigrationCatalog.Load();
+        var schemaNine = new PostgreSqlDurableRuntimeSchemaManager(
+            database.DataSource,
+            embedded.Take(9).ToArray());
+        await schemaNine.ApplyAsync();
+        var driftOwner = $"migration_10_drift_{Guid.NewGuid():N}";
+
+        await ExecuteNonQueryAsync(
+            database.DataSource,
+            $"""
+            CREATE ROLE {driftOwner} NOLOGIN;
+            ALTER FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) OWNER TO {driftOwner};
+            """);
+
+        try
+        {
+            var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+            var exception = await Assert.ThrowsAsync<PostgresException>(async () => await manager.ApplyAsync());
+
+            Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, exception.SqlState);
+            Assert.Contains("ownership preflight failed", exception.MessageText, StringComparison.Ordinal);
+            Assert.Contains("configure-postgresql-roles.sql", exception.Hint, StringComparison.Ordinal);
+            await using (var unchanged = database.DataSource.CreateCommand(
+                """
+                SELECT (SELECT max(version) FROM appsurface_durable.schema_migration) = 9,
+                       to_regclass('appsurface_durable.ix_schedule_dispatch_lease_expiry_due') IS NULL,
+                       (
+                           SELECT routine.provolatile = 'v'
+                           FROM pg_catalog.pg_proc AS routine
+                           WHERE routine.oid =
+                               'appsurface_durable.runtime_due_dispatch_health(integer)'::pg_catalog.regprocedure
+                       );
+                """))
+            {
+                await using var reader = await unchanged.ExecuteReaderAsync();
+                Assert.True(await reader.ReadAsync());
+                Assert.True(reader.GetBoolean(0));
+                Assert.True(reader.GetBoolean(1));
+                Assert.True(reader.GetBoolean(2));
+            }
+
+            await ExecuteNonQueryAsync(
+                database.DataSource,
+                "ALTER FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) OWNER TO CURRENT_USER;");
+            var repaired = await manager.ApplyAsync();
+            Assert.Equal([10], repaired.AppliedVersions);
+        }
+        finally
+        {
+            await ExecuteNonQueryAsync(
+                database.DataSource,
+                "ALTER FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) OWNER TO CURRENT_USER;");
+            await ExecuteNonQueryAsync(database.DataSource, $"DROP ROLE IF EXISTS {driftOwner};");
+        }
+    }
+
+    [Fact]
+    public async Task RuntimeHealthMigration_MissingSchemaNineFunctionFailsBeforeDdl()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var embedded = DurablePostgreSqlMigrationCatalog.Load();
+        var schemaNine = new PostgreSqlDurableRuntimeSchemaManager(
+            database.DataSource,
+            embedded.Take(9).ToArray());
+        await schemaNine.ApplyAsync();
+        await ExecuteNonQueryAsync(
+            database.DataSource,
+            "DROP FUNCTION appsurface_durable.runtime_due_dispatch_health(integer);");
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+
+        var exception = await Assert.ThrowsAsync<PostgresException>(async () => await manager.ApplyAsync());
+
+        Assert.Equal("42704", exception.SqlState);
+        Assert.Contains("schema-9 function is missing", exception.MessageText, StringComparison.Ordinal);
+        var status = await manager.GetStatusAsync();
+        Assert.Equal(9, status.InstalledVersion);
+        await using var unchanged = database.DataSource.CreateCommand(
+            "SELECT to_regclass('appsurface_durable.ix_schedule_dispatch_lease_expiry_due') IS NULL;");
+        Assert.True((bool)(await unchanged.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public async Task RuntimeHealthMigration_PreservesOwnerAndSecurityBoundaryWhileReconcilingPublicExecute()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var embedded = DurablePostgreSqlMigrationCatalog.Load();
+        var schemaNine = new PostgreSqlDurableRuntimeSchemaManager(
+            database.DataSource,
+            embedded.Take(9).ToArray());
+        await schemaNine.ApplyAsync();
+        await ExecuteNonQueryAsync(
+            database.DataSource,
+            "GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO PUBLIC;");
+
+        await using (var before = database.DataSource.CreateCommand(
+            """
+            SELECT owner_role.rolname = current_user,
+                   routine.prosecdef,
+                   routine.provolatile::text,
+                   routine.proconfig,
+                   has_function_privilege(
+                       'public',
+                       'appsurface_durable.runtime_due_dispatch_health(integer)',
+                       'EXECUTE')
+            FROM pg_catalog.pg_proc AS routine
+            JOIN pg_catalog.pg_roles AS owner_role ON owner_role.oid = routine.proowner
+            WHERE routine.oid =
+                'appsurface_durable.runtime_due_dispatch_health(integer)'::pg_catalog.regprocedure;
+            """))
+        {
+            await using var reader = await before.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.True(reader.GetBoolean(0));
+            Assert.True(reader.GetBoolean(1));
+            Assert.Equal("v", reader.GetString(2));
+            Assert.Equal(
+                ["search_path=pg_catalog, appsurface_durable"],
+                reader.GetFieldValue<string[]>(3));
+            Assert.True(reader.GetBoolean(4));
+            Assert.False(await reader.ReadAsync());
+        }
+
+        var applied = await new PostgreSqlDurableRuntimeSchemaManager(database.DataSource).ApplyAsync();
+        Assert.Equal([10], applied.AppliedVersions);
+        await using (var after = database.DataSource.CreateCommand(
+            """
+            SELECT owner_role.rolname = current_user,
+                   routine.prosecdef,
+                   routine.provolatile::text,
+                   routine.proconfig,
+                   NOT has_function_privilege(
+                       'public',
+                       'appsurface_durable.runtime_due_dispatch_health(integer)',
+                       'EXECUTE'),
+                   routine.proacl IS NOT NULL
+                   AND NOT EXISTS
+                   (
+                       SELECT 1
+                       FROM pg_catalog.aclexplode(routine.proacl) AS privilege
+                       WHERE privilege.grantee = 0
+                         AND privilege.privilege_type = 'EXECUTE'
+                   )
+            FROM pg_catalog.pg_proc AS routine
+            JOIN pg_catalog.pg_roles AS owner_role ON owner_role.oid = routine.proowner
+            WHERE routine.oid =
+                'appsurface_durable.runtime_due_dispatch_health(integer)'::pg_catalog.regprocedure;
+            """))
+        {
+            await using var reader = await after.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.True(reader.GetBoolean(0));
+            Assert.True(reader.GetBoolean(1));
+            Assert.Equal("s", reader.GetString(2));
+            Assert.Equal(
+                ["search_path=pg_catalog, appsurface_durable, pg_temp"],
+                reader.GetFieldValue<string[]>(3));
+            Assert.True(reader.GetBoolean(4));
+            Assert.True(reader.GetBoolean(5));
+            Assert.False(await reader.ReadAsync());
+        }
+
+        await using var hostileConnection = await database.DataSource.OpenConnectionAsync();
+        await using (var hostileObjects = hostileConnection.CreateCommand())
+        {
+            hostileObjects.CommandText =
+                """
+                CREATE TEMP TABLE dispatch
+                    (aggregate_kind text, state text, due_at timestamp with time zone);
+                CREATE TEMP TABLE flow_dispatch
+                    (state text, due_at timestamp with time zone);
+                CREATE TEMP TABLE schedule_dispatch
+                    (state text, due_at timestamp with time zone, lease_expires_at timestamp with time zone);
+                INSERT INTO dispatch VALUES ('work', 'available', '-infinity');
+                INSERT INTO flow_dispatch VALUES ('available', '-infinity');
+                INSERT INTO schedule_dispatch VALUES ('available', '-infinity', NULL);
+                SET search_path = pg_temp, public;
+                """;
+            await hostileObjects.ExecuteNonQueryAsync();
+        }
+
+        await using (var invoke = hostileConnection.CreateCommand())
+        {
+            invoke.CommandText =
+                """
+                SELECT due_count, oldest_due_at
+                FROM appsurface_durable.runtime_due_dispatch_health(7);
+                """;
+            await using var reader = await invoke.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(0L, reader.GetInt64(0));
+            Assert.True(reader.IsDBNull(1));
+            Assert.False(await reader.ReadAsync());
+        }
+    }
+
+    [Fact]
+    public async Task RuntimeDueDispatchHealth_UsesClaimableOrReclaimableTimeForEverySurfaceMask()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await new PostgreSqlDurableRuntimeSchemaManager(database.DataSource).ApplyAsync();
+        await using (var seed = database.DataSource.CreateCommand(
+            """
+            INSERT INTO appsurface_durable.scope (scope_id)
+            VALUES ('health-work'), ('health-flow'), ('health-schedule');
+
+            INSERT INTO appsurface_durable.work
+            (
+                scope_id, work_id, activity_id, command_id, idempotency_key,
+                work_name, work_version, contract_id, payload_schema_version, codec_id,
+                payload, payload_sha256, payload_classification, payload_retention,
+                request_fingerprint_schema, request_fingerprint_sha256,
+                state, provider_safety, due_at, scope_generation, runtime_epoch,
+                maximum_attempts, maximum_elapsed, backoff_algorithm,
+                initial_retry_delay, maximum_retry_delay,
+                lease_duration, lease_renewal_cadence, maximum_lease_lifetime
+            )
+            SELECT
+                'health-work', 'work-' || value, 'activity-' || value, 'command-' || value, 'key-' || value,
+                'health-work', 'v1', 'health-contract', 'v1', 'application/json',
+                decode('00', 'hex'), decode(repeat('00', 32), 'hex'), 'internal', 'default',
+                'health-request-v1', repeat('0', 64),
+                'pending', 'idempotent',
+                CASE value
+                    WHEN 1 THEN timestamp with time zone '2000-01-01 00:00:00+00'
+                    WHEN 2 THEN timestamp with time zone '2000-01-02 00:00:00+00'
+                    ELSE timestamp with time zone '2100-01-01 00:00:00+00'
+                END,
+                1, gen_random_uuid(), 3, interval '1 hour', 'exponential-v1',
+                interval '1 second', interval '1 minute',
+                interval '30 seconds', interval '10 seconds', interval '5 minutes'
+            FROM generate_series(1, 3) AS value;
+
+            INSERT INTO appsurface_durable.dispatch
+                (dispatch_id, scope_id, aggregate_kind, aggregate_id, due_at, state, expected_revision)
+            SELECT
+                md5('health-work-dispatch-' || value)::uuid,
+                'health-work',
+                'work',
+                'work-' || value,
+                CASE value
+                    WHEN 1 THEN timestamp with time zone '2000-01-01 00:00:00+00'
+                    WHEN 2 THEN timestamp with time zone '2000-01-02 00:00:00+00'
+                    ELSE timestamp with time zone '2100-01-01 00:00:00+00'
+                END,
+                CASE value WHEN 1 THEN 'available' ELSE 'leased' END,
+                1
+            FROM generate_series(1, 3) AS value;
+
+            INSERT INTO appsurface_durable.flow_instance
+            (
+                scope_id, flow_instance_id, flow_id, flow_version, manifest_id, authoring_model,
+                definition_fingerprint_schema, definition_fingerprint_sha256, current_node_id,
+                state, revision, scope_generation, runtime_epoch
+            )
+            SELECT
+                'health-flow', 'flow-' || value, 'health-flow', 'v1', 'health-manifest', 'tests',
+                'health-definition-v1', repeat('0', 64), 'start', 'ready', 1, 1, gen_random_uuid()
+            FROM generate_series(1, 3) AS value;
+
+            INSERT INTO appsurface_durable.flow_dispatch
+                (dispatch_id, scope_id, kind, flow_instance_id, due_at, state, expected_revision)
+            SELECT
+                md5('health-flow-dispatch-' || value)::uuid,
+                'health-flow',
+                'flow',
+                'flow-' || value,
+                CASE value
+                    WHEN 1 THEN timestamp with time zone '2001-01-01 00:00:00+00'
+                    WHEN 2 THEN timestamp with time zone '2001-01-02 00:00:00+00'
+                    ELSE timestamp with time zone '2100-01-01 00:00:00+00'
+                END,
+                CASE value WHEN 1 THEN 'available' ELSE 'leased' END,
+                1
+            FROM generate_series(1, 3) AS value;
+
+            INSERT INTO appsurface_durable.schedule_definition
+            (
+                scope_id, schedule_id, state, active_generation, revision, accepted_at_utc,
+                cursor_utc, next_due_utc, scope_generation, runtime_epoch
+            )
+            SELECT
+                'health-schedule', 'schedule-' || value, 'active', 1, 1,
+                timestamp with time zone '2000-01-01 00:00:00+00',
+                timestamp with time zone '2000-01-01 00:00:00+00',
+                timestamp with time zone '2100-01-01 00:00:00+00',
+                1, gen_random_uuid()
+            FROM generate_series(1, 3) AS value;
+
+            INSERT INTO appsurface_durable.schedule_dispatch
+                (scope_id, schedule_id, dispatch_revision, due_at, state, lease_owner, lease_generation, lease_expires_at)
+            VALUES
+                ('health-schedule', 'schedule-1', 1, timestamp with time zone '2002-01-03 00:00:00+00',
+                 'available', NULL, 0, NULL),
+                ('health-schedule', 'schedule-2', 2, timestamp with time zone '1990-01-01 00:00:00+00',
+                 'leased', 'expired-worker', 1, timestamp with time zone '2002-01-02 00:00:00+00'),
+                ('health-schedule', 'schedule-3', 3, timestamp with time zone '1980-01-01 00:00:00+00',
+                 'leased', 'active-worker', 1, timestamp with time zone '2100-01-01 00:00:00+00');
+            """))
+        {
+            await seed.ExecuteNonQueryAsync();
+        }
+
+        var expected = new[]
+        {
+            (Mask: 1, Count: 2L, Oldest: new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero)),
+            (Mask: 2, Count: 2L, Oldest: new DateTimeOffset(2001, 1, 1, 0, 0, 0, TimeSpan.Zero)),
+            (Mask: 3, Count: 4L, Oldest: new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero)),
+            (Mask: 4, Count: 2L, Oldest: new DateTimeOffset(2002, 1, 2, 0, 0, 0, TimeSpan.Zero)),
+            (Mask: 5, Count: 4L, Oldest: new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero)),
+            (Mask: 6, Count: 4L, Oldest: new DateTimeOffset(2001, 1, 1, 0, 0, 0, TimeSpan.Zero)),
+            (Mask: 7, Count: 6L, Oldest: new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero)),
+        };
+        foreach (var item in expected)
+        {
+            await using var command = database.DataSource.CreateCommand(
+                """
+                SELECT due_count, oldest_due_at
+                FROM appsurface_durable.runtime_due_dispatch_health(@surfaces);
+                """);
+            command.Parameters.AddWithValue("surfaces", item.Mask);
+            await using var reader = await command.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(item.Count, reader.GetInt64(0));
+            Assert.Equal(item.Oldest, reader.GetFieldValue<DateTimeOffset>(1));
+            Assert.False(await reader.ReadAsync());
+        }
     }
 
     [Fact]
@@ -533,6 +1048,31 @@ public sealed class PostgreSqlSchemaIntegrationTests
             Assert.True(reader.GetBoolean(2));
         }
 
+        await ExecuteNonQueryAsync(
+            dataSource,
+            """
+            GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO PUBLIC;
+            GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO durable_dispatcher;
+            GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer)
+                TO durable_runtime WITH GRANT OPTION;
+            GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO durable_retention;
+            GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO unrelated_login;
+            """);
+        var unrelatedRuntimeGrant = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            "durable_dispatcher",
+            "durable_runtime");
+        Assert.NotEqual(0, unrelatedRuntimeGrant.ExitCode);
+        Assert.Contains(
+            "runtime_due_dispatch_health(integer) must be executable only by the scoped runtime role",
+            $"{unrelatedRuntimeGrant.Stdout}\n{unrelatedRuntimeGrant.Stderr}",
+            StringComparison.Ordinal);
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM unrelated_login;");
+
         await using var lockConnection = await dataSource.OpenConnectionAsync();
         await using var lockTransaction = await lockConnection.BeginTransactionAsync();
         await using (var holdRuntimeFence = new NpgsqlCommand(
@@ -585,6 +1125,52 @@ public sealed class PostgreSqlSchemaIntegrationTests
             Assert.True((bool)(await discoveryFunctionPrivileges.ExecuteScalarAsync())!);
         }
 
+        await using (var runtimeHealthFunction = dataSource.CreateCommand(
+            """
+            SELECT owner_role.rolname = 'durable_owner',
+                   routine.prosecdef,
+                   routine.provolatile = 's',
+                   routine.proconfig = ARRAY['search_path=pg_catalog, appsurface_durable, pg_temp'],
+                   has_function_privilege(
+                       'durable_runtime',
+                       'appsurface_durable.runtime_due_dispatch_health(integer)',
+                       'EXECUTE'),
+                   NOT has_function_privilege(
+                       'durable_runtime',
+                       'appsurface_durable.runtime_due_dispatch_health(integer)',
+                       'EXECUTE WITH GRANT OPTION'),
+                   NOT has_function_privilege(
+                       'public',
+                       'appsurface_durable.runtime_due_dispatch_health(integer)',
+                       'EXECUTE'),
+                   NOT has_function_privilege(
+                       'durable_dispatcher',
+                       'appsurface_durable.runtime_due_dispatch_health(integer)',
+                       'EXECUTE'),
+                   NOT has_function_privilege(
+                       'durable_retention',
+                       'appsurface_durable.runtime_due_dispatch_health(integer)',
+                       'EXECUTE'),
+                   NOT has_function_privilege(
+                       'unrelated_login',
+                       'appsurface_durable.runtime_due_dispatch_health(integer)',
+                       'EXECUTE')
+            FROM pg_catalog.pg_proc AS routine
+            JOIN pg_catalog.pg_roles AS owner_role ON owner_role.oid = routine.proowner
+            WHERE routine.oid =
+                'appsurface_durable.runtime_due_dispatch_health(integer)'::pg_catalog.regprocedure;
+            """))
+        {
+            await using var reader = await runtimeHealthFunction.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            for (var ordinal = 0; ordinal < reader.FieldCount; ordinal++)
+            {
+                Assert.True(reader.GetBoolean(ordinal));
+            }
+
+            Assert.False(await reader.ReadAsync());
+        }
+
         var unrelatedConnectionString = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
         {
             Username = "unrelated_login",
@@ -598,6 +1184,13 @@ public sealed class PostgreSqlSchemaIntegrationTests
             await command.ExecuteNonQueryAsync();
         });
         Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, unrelatedInvocation.SqlState);
+        var unrelatedRuntimeHealth = await Assert.ThrowsAsync<PostgresException>(async () =>
+        {
+            await using var command = unrelatedDataSource.CreateCommand(
+                "SELECT * FROM appsurface_durable.runtime_due_dispatch_health(7);");
+            await command.ExecuteNonQueryAsync();
+        });
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, unrelatedRuntimeHealth.SqlState);
         await using (var tracePointerPrivileges = dataSource.CreateCommand(
             """
             SELECT has_column_privilege('durable_runtime', 'appsurface_durable.flow_command', 'trace_context_id', 'UPDATE')
@@ -1127,6 +1720,13 @@ public sealed class PostgreSqlSchemaIntegrationTests
             await read.ExecuteNonQueryAsync();
         });
         Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, dueAtDisclosure.SqlState);
+        var dispatcherRuntimeHealth = await Assert.ThrowsAsync<PostgresException>(async () =>
+        {
+            await using var read = dispatcherConnection.CreateCommand();
+            read.CommandText = "SELECT * FROM appsurface_durable.runtime_due_dispatch_health(7);";
+            await read.ExecuteNonQueryAsync();
+        });
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, dispatcherRuntimeHealth.SqlState);
         var invalidOwner = await Assert.ThrowsAsync<PostgresException>(async () =>
         {
             await using var claim = dispatcherConnection.CreateCommand();
@@ -1154,7 +1754,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await using (var claim = dispatcherConnection.CreateCommand())
         {
             claim.CommandText =
-                "SELECT scope_id, schedule_id, dispatch_revision FROM appsurface_durable.claim_schedule_dispatch('role-test-dispatcher', interval '1 second');";
+                "SELECT scope_id, schedule_id, dispatch_revision FROM appsurface_durable.claim_schedule_dispatch('role-test-dispatcher', interval '10 minutes');";
             await using var reader = await claim.ExecuteReaderAsync();
             Assert.True(await reader.ReadAsync());
             Assert.Equal("flow-rls-scope-a", reader.GetString(0));
@@ -1193,11 +1793,51 @@ public sealed class PostgreSqlSchemaIntegrationTests
             Assert.True((bool)(await allowedRead.ExecuteScalarAsync())!);
         }
 
-        await AssertDueDispatchHealthAsync(runtimeConnection, 1, 1);
-        await AssertDueDispatchHealthAsync(runtimeConnection, 2, 2);
-        await AssertDueDispatchHealthAsync(runtimeConnection, 4, 1);
+        foreach (var (surfaces, expectedDueCount) in new[]
+                 {
+                     (1, 1L), (2, 2L), (3, 3L), (4, 0L), (5, 1L), (6, 2L), (7, 3L),
+                 })
+        {
+            await AssertDueDispatchHealthAsync(runtimeConnection, surfaces, expectedDueCount);
+        }
+
+        await ExecuteNonQueryAsync(
+            dataSource,
+            """
+            UPDATE appsurface_durable.schedule_dispatch
+            SET lease_expires_at = statement_timestamp() - interval '1 second'
+            WHERE scope_id = 'flow-rls-scope-a'
+              AND schedule_id = 'role-claim-schedule'
+              AND state = 'leased';
+            """);
+        foreach (var (surfaces, expectedDueCount) in new[]
+                 {
+                     (1, 1L), (2, 2L), (3, 3L), (4, 1L), (5, 2L), (6, 3L), (7, 4L),
+                 })
+        {
+            await AssertDueDispatchHealthAsync(runtimeConnection, surfaces, expectedDueCount);
+        }
+
+        await using (var hostileObjects = runtimeConnection.CreateCommand())
+        {
+            hostileObjects.CommandText =
+                """
+                CREATE TEMP TABLE dispatch
+                    (aggregate_kind text, state text, due_at timestamp with time zone);
+                CREATE TEMP TABLE flow_dispatch
+                    (state text, due_at timestamp with time zone);
+                CREATE TEMP TABLE schedule_dispatch
+                    (state text, due_at timestamp with time zone, lease_expires_at timestamp with time zone);
+                INSERT INTO dispatch VALUES ('work', 'available', '-infinity');
+                INSERT INTO flow_dispatch VALUES ('available', '-infinity');
+                INSERT INTO schedule_dispatch VALUES ('available', '-infinity', NULL);
+                SET search_path = pg_temp, public;
+                """;
+            await hostileObjects.ExecuteNonQueryAsync();
+        }
+
         await AssertDueDispatchHealthAsync(runtimeConnection, 7, 4);
-        foreach (var invalidSurfaces in new[] { 0, 8 })
+        foreach (var invalidSurfaces in new[] { -1, 0, 8 })
         {
             var invalidMask = await Assert.ThrowsAsync<PostgresException>(async () =>
             {
@@ -1208,6 +1848,14 @@ public sealed class PostgreSqlSchemaIntegrationTests
             });
             Assert.Equal(PostgresErrorCodes.InvalidParameterValue, invalidMask.SqlState);
         }
+        var nullMask = await Assert.ThrowsAsync<PostgresException>(async () =>
+        {
+            await using var dueHealth = runtimeConnection.CreateCommand();
+            dueHealth.CommandText =
+                "SELECT * FROM appsurface_durable.runtime_due_dispatch_health(NULL);";
+            await dueHealth.ExecuteNonQueryAsync();
+        });
+        Assert.Equal(PostgresErrorCodes.InvalidParameterValue, nullMask.SqlState);
 
         await using (var unscopedRead = runtimeConnection.CreateCommand())
         {
@@ -1668,7 +2316,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             database.DataSource,
             """
            UPDATE appsurface_durable.store_metadata
-           SET schema_version = 9,
+           SET schema_version = 10,
                minimum_reader_version = 1,
                maximum_reader_version = 1,
                minimum_writer_version = 1,
@@ -1689,7 +2337,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await ExecuteNonQueryAsync(
             database.DataSource,
             """
-           DELETE FROM appsurface_durable.schema_migration WHERE version IN (3, 4, 5, 6, 7, 8, 9);
+           DELETE FROM appsurface_durable.schema_migration WHERE version IN (3, 4, 5, 6, 7, 8, 9, 10);
            UPDATE appsurface_durable.store_metadata
            SET schema_version = 2,
                minimum_reader_version = 1,
@@ -1701,7 +2349,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var upgrade = await manager.GetStatusAsync();
         Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgrade.Compatibility);
         Assert.Equal([1, 2], upgrade.AppliedVersions);
-        Assert.Equal([3, 4, 5, 6, 7, 8, 9], upgrade.PendingVersions);
+        Assert.Equal([3, 4, 5, 6, 7, 8, 9, 10], upgrade.PendingVersions);
         var upgradeValidation = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
             async () => await manager.ValidateAsync());
         Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgradeValidation.Status.Compatibility);
@@ -1722,12 +2370,48 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var results = await Task.WhenAll(first.ApplyAsync().AsTask(), second.ApplyAsync().AsTask())
             .WaitAsync(TimeSpan.FromSeconds(30));
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9], results.SelectMany(result => result.AppliedVersions).Order().ToArray());
-        Assert.Contains(results, result => result.AppliedVersions.SequenceEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]));
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], results.SelectMany(result => result.AppliedVersions).Order().ToArray());
+        Assert.Contains(results, result => result.AppliedVersions.SequenceEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
         Assert.Contains(results, result => result.AppliedVersions.Count == 0);
         await using var count = database.DataSource.CreateCommand(
             "SELECT count(*) FROM appsurface_durable.schema_migration;");
-        Assert.Equal(9, (long)(await count.ExecuteScalarAsync())!);
+        Assert.Equal(10, (long)(await count.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public async Task SchemaStatus_WaitsForTheMigrationFenceBeforeReadingAConsistentGeneration()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var initialManager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await initialManager.ApplyAsync();
+        await using var blocker = await database.DataSource.OpenConnectionAsync();
+        await using (var acquire = new NpgsqlCommand("SELECT pg_advisory_lock(@lock_id);", blocker))
+        {
+            acquire.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            await acquire.ExecuteNonQueryAsync();
+        }
+
+        var applicationName = $"schema-status-fence-{Guid.NewGuid():N}";
+        var statusConnection = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            ApplicationName = applicationName,
+        };
+        await using var statusDataSource = NpgsqlDataSource.Create(statusConnection.ConnectionString);
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(statusDataSource);
+        var statusTask = manager.GetStatusAsync().AsTask();
+        _ = await WaitForBackendAsync(database.DataSource, applicationName);
+        Assert.False(statusTask.IsCompleted);
+
+        await using (var release = new NpgsqlCommand("SELECT pg_advisory_unlock(@lock_id);", blocker))
+        {
+            release.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            await release.ExecuteNonQueryAsync();
+        }
+
+        var status = await statusTask.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.True(status.IsCompatible);
+        Assert.Equal(10, status.InstalledVersion);
+        Assert.Equal(10, status.RequiredVersion);
     }
 
     [Fact]
@@ -1753,7 +2437,90 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], applied.AppliedVersions);
+    }
+
+    [Fact]
+    public async Task ApplyLockContentionTimesOutWithActionableDiagnosticsAndCanRetry()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await using var blocker = await database.DataSource.OpenConnectionAsync();
+        await using (var acquire = new NpgsqlCommand("SELECT pg_advisory_lock(@lock_id);", blocker))
+        {
+            acquire.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            await acquire.ExecuteNonQueryAsync();
+        }
+
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(
+            database.DataSource,
+            DurablePostgreSqlMigrationCatalog.Load(),
+            migrationLockAcquireTimeout: TimeSpan.FromMilliseconds(250),
+            migrationLockRetryDelay: TimeSpan.FromMilliseconds(25));
+        var exception = await Assert.ThrowsAsync<TimeoutException>(async () => await manager.ApplyAsync());
+
+        Assert.Contains("Timed out after 0.25 seconds", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("migration advisory lock", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("pg_stat_activity", exception.Message, StringComparison.Ordinal);
+
+        await using (var release = new NpgsqlCommand("SELECT pg_advisory_unlock(@lock_id);", blocker))
+        {
+            release.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            Assert.True((bool)(await release.ExecuteScalarAsync())!);
+        }
+
+        var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], applied.AppliedVersions);
+    }
+
+    [Fact]
+    public async Task GeneratedScriptLockContentionTimesOutBeforeMigrationAndCanRetry()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await using var blocker = await database.DataSource.OpenConnectionAsync();
+        await using (var acquire = new NpgsqlCommand("SELECT pg_advisory_lock(@lock_id);", blocker))
+        {
+            acquire.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            await acquire.ExecuteNonQueryAsync();
+        }
+
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(
+            database.DataSource,
+            DurablePostgreSqlMigrationCatalog.Load(),
+            migrationLockAcquireTimeout: TimeSpan.FromMilliseconds(250),
+            migrationLockRetryDelay: TimeSpan.FromMilliseconds(25));
+        var script = manager.GenerateScript();
+        Assert.Contains("interval '0.25 seconds'", script, StringComparison.Ordinal);
+        Assert.Contains("pg_sleep(0.025)", script, StringComparison.Ordinal);
+
+        await using (var blockedConnection = await database.DataSource.OpenConnectionAsync())
+        await using (var blockedCommand = new NpgsqlCommand(script, blockedConnection))
+        {
+            var exception = await Assert.ThrowsAsync<PostgresException>(
+                async () => await blockedCommand.ExecuteNonQueryAsync());
+            Assert.Equal(LockNotAvailableSqlState, exception.SqlState);
+            Assert.Contains("Timed out after 0.25 seconds", exception.MessageText, StringComparison.Ordinal);
+            Assert.Contains("migration advisory lock", exception.MessageText, StringComparison.Ordinal);
+        }
+
+        await using (var schemaCheck = database.DataSource.CreateCommand(
+            "SELECT to_regnamespace('appsurface_durable') IS NULL;"))
+        {
+            Assert.True((bool)(await schemaCheck.ExecuteScalarAsync())!);
+        }
+
+        await using (var release = new NpgsqlCommand("SELECT pg_advisory_unlock(@lock_id);", blocker))
+        {
+            release.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            Assert.True((bool)(await release.ExecuteScalarAsync())!);
+        }
+
+        await using var retryConnection = await database.DataSource.OpenConnectionAsync();
+        await using var retryCommand = new NpgsqlCommand(script, retryConnection);
+        await retryCommand.ExecuteNonQueryAsync();
+
+        var status = await manager.GetStatusAsync();
+        Assert.True(status.IsCompatible);
+        Assert.Equal(10, status.InstalledVersion);
     }
 
     [Fact]
@@ -1784,7 +2551,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
     }
 
     [Fact]
-    public async Task ApplyConnectionLossWhileWaitingForLock_CanRecoverOnANewSession()
+    public async Task ApplyConnectionLossDuringBoundedLockPolling_CanRecoverOnANewSession()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         await using var blocker = await database.DataSource.OpenConnectionAsync();
@@ -1802,7 +2569,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await using var managerDataSource = NpgsqlDataSource.Create(managerConnection.ConnectionString);
         var manager = new PostgreSqlDurableRuntimeSchemaManager(managerDataSource);
         var apply = manager.ApplyAsync().AsTask();
-        var backendPid = await WaitForBackendAsync(database.DataSource, applicationName);
+        var backendPid = await WaitForBackendByApplicationNameAsync(database.DataSource, applicationName);
         await using (var terminate = database.DataSource.CreateCommand("SELECT pg_terminate_backend(@pid);"))
         {
             terminate.Parameters.AddWithValue("pid", backendPid);
@@ -1818,7 +2585,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], applied.AppliedVersions);
     }
 
     [Fact]
@@ -1896,6 +2663,26 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
     private static ValueTask<int> WaitForBackendAsync(NpgsqlDataSource dataSource, string applicationName)
         => WaitForBackendAsync(dataSource, applicationName, "advisory");
+
+    private static async ValueTask<int> WaitForBackendByApplicationNameAsync(
+        NpgsqlDataSource dataSource,
+        string applicationName)
+    {
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            await using var command = dataSource.CreateCommand(
+                "SELECT pid FROM pg_catalog.pg_stat_activity WHERE application_name = @application_name LIMIT 1;");
+            command.Parameters.AddWithValue("application_name", applicationName);
+            if (await command.ExecuteScalarAsync() is int backendPid)
+            {
+                return backendPid;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
+        }
+
+        throw new TimeoutException("The migration session did not become visible while polling for the advisory lock.");
+    }
 
     private static async ValueTask AssertDueDispatchHealthAsync(
         NpgsqlConnection connection,

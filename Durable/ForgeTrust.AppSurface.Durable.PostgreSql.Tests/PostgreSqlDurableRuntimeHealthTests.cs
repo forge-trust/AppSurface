@@ -128,6 +128,55 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
     }
 
     [Fact]
+    public async Task GetAsync_ReportsMissingSchemaWithoutSelfStarvingASingleConnectionPool()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var connectionString = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            ApplicationName = "runtime-health-single-connection",
+            MaxPoolSize = 1,
+        }.ConnectionString;
+        await using var runtimeDataSource = NpgsqlDataSource.Create(connectionString);
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(runtimeDataSource);
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                runtimeDataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                CreateOptions("runtime-health-single-connection-worker"),
+                Guid.NewGuid()),
+            schema);
+
+        var snapshot = await health.GetAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(DurableRuntimeHealthState.Incompatible, snapshot.State);
+        Assert.Equal(DurableProblemCodes.SchemaMissing, snapshot.ProblemCode);
+        Assert.True(snapshot.WasStoreObserved);
+    }
+
+    [Fact]
+    public async Task GetAsync_MapsSharedSchemaConnectionFailureToUnavailable()
+    {
+        await using var dataSource = NpgsqlDataSource.Create(
+            "Host=127.0.0.1;Port=1;Database=durable_health;Username=durable;Password=not-opened;Timeout=1");
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(dataSource);
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                dataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                CreateOptions("runtime-health-shared-schema-unavailable-worker"),
+                Guid.NewGuid()),
+            schema);
+
+        var snapshot = await health.GetAsync();
+
+        Assert.Equal(DurableRuntimeHealthState.Unavailable, snapshot.State);
+        Assert.Equal(DurableProblemCodes.StoreUnavailable, snapshot.ProblemCode);
+        Assert.False(snapshot.WasStoreObserved);
+        Assert.Equal(0, snapshot.InstalledSchemaVersion);
+        Assert.Equal(PostgreSqlDurableRuntimeSchemaManager.RequiredVersion, snapshot.RequiredSchemaVersion);
+    }
+
+    [Fact]
     public async Task GetAsync_ReportsSchemaCompatibilityAndTransientReadFailuresWithoutOpeningTheRuntimeStore()
     {
         using var dataSource = NpgsqlDataSource.Create(
@@ -141,50 +190,218 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
             [DurableRuntimeSchemaCompatibility.StoreTooNew] = DurableProblemCodes.SchemaVersionUnsupported,
             [DurableRuntimeSchemaCompatibility.Inconsistent] = DurableProblemCodes.SchemaInconsistent,
         };
+        var databaseObservedAtUtc = new DateTimeOffset(2026, 9, 10, 12, 34, 56, TimeSpan.Zero);
         foreach (var (compatibility, problemCode) in expected)
         {
             var health = new PostgreSqlDurableRuntimeHealth(
                 CreateRegistration(dataSource, workOptions, options, Guid.NewGuid()),
-                new StubSchemaManager(_ => ValueTask.FromResult(CreateStatus(compatibility))));
+                new StubSchemaManager(_ => ValueTask.FromResult(CreateStatus(compatibility))),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<PostgreSqlDurableRuntimeHealth>.Instance,
+                _ => ValueTask.FromResult(databaseObservedAtUtc));
 
             var snapshot = await health.GetAsync();
 
             Assert.Equal(DurableRuntimeHealthState.Incompatible, snapshot.State);
             Assert.Equal(problemCode, snapshot.ProblemCode);
+            Assert.Equal(databaseObservedAtUtc, snapshot.ObservedAtUtc);
+            Assert.True(snapshot.WasStoreObserved);
         }
 
         var transient = new PostgreSqlDurableRuntimeHealth(
             CreateRegistration(dataSource, workOptions, options, Guid.NewGuid()),
             new StubSchemaManager(_ => ValueTask.FromException<DurableRuntimeSchemaStatus>(new TimeoutException())));
+        var beforeTransientAssessment = DateTimeOffset.UtcNow;
         var transientSnapshot = await transient.GetAsync();
-        Assert.Equal(DurableRuntimeHealthState.Incompatible, transientSnapshot.State);
-        Assert.Equal(DurableProblemCodes.SchemaInconsistent, transientSnapshot.ProblemCode);
+        var afterTransientAssessment = DateTimeOffset.UtcNow;
+        Assert.Equal(DurableRuntimeHealthState.Unavailable, transientSnapshot.State);
+        Assert.Equal(DurableProblemCodes.StoreUnavailable, transientSnapshot.ProblemCode);
+        Assert.False(transientSnapshot.WasStoreObserved);
+        Assert.InRange(
+            transientSnapshot.ObservedAtUtc,
+            beforeTransientAssessment,
+            afterTransientAssessment);
     }
 
     [Fact]
-    public async Task GetAsync_MapsTransientWorkerReadToSchemaInconsistent()
+    public async Task GetAsync_ReportsUnavailableWhenSchemaWasObservedButItsDatabaseTimestampWasNot()
     {
         using var dataSource = NpgsqlDataSource.Create(
             "Host=localhost;Port=5432;Database=durable_health;Username=durable;Password=not-opened");
+        var schemaStatus = CreateStatus(DurableRuntimeSchemaCompatibility.UpgradeRequired);
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                dataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                CreateOptions("runtime-health-schema-timestamp-worker"),
+                Guid.NewGuid()),
+            new StubSchemaManager(_ => ValueTask.FromResult(schemaStatus)),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<PostgreSqlDurableRuntimeHealth>.Instance,
+            _ => ValueTask.FromException<DateTimeOffset>(new TimeoutException()));
+
+        var beforeAssessment = DateTimeOffset.UtcNow;
+        var snapshot = await health.GetAsync();
+        var afterAssessment = DateTimeOffset.UtcNow;
+
+        Assert.Equal(DurableRuntimeHealthState.Unavailable, snapshot.State);
+        Assert.Equal(DurableProblemCodes.StoreUnavailable, snapshot.ProblemCode);
+        Assert.False(snapshot.WasStoreObserved);
+        Assert.Equal(schemaStatus.InstalledVersion, snapshot.InstalledSchemaVersion);
+        Assert.InRange(snapshot.ObservedAtUtc, beforeAssessment, afterAssessment);
+    }
+
+    [Fact]
+    public async Task GetAsync_PropagatesCallerCancellationFromSchemaStatus()
+    {
+        using var dataSource = NpgsqlDataSource.Create(
+            "Host=localhost;Port=5432;Database=durable_health;Username=durable;Password=not-opened");
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                dataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                CreateOptions("runtime-health-schema-cancellation-worker"),
+                Guid.NewGuid()),
+            new StubSchemaManager(
+                token => ValueTask.FromCanceled<DurableRuntimeSchemaStatus>(token)));
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await health.GetAsync(cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+    }
+
+    [Fact]
+    public async Task GetAsync_PropagatesCallerCancellationFromSchemaObservationTimestamp()
+    {
+        using var dataSource = NpgsqlDataSource.Create(
+            "Host=localhost;Port=5432;Database=durable_health;Username=durable;Password=not-opened");
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                dataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                CreateOptions("runtime-health-schema-timestamp-cancellation-worker"),
+                Guid.NewGuid()),
+            new StubSchemaManager(
+                _ => ValueTask.FromResult(CreateStatus(DurableRuntimeSchemaCompatibility.UpgradeRequired))),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<PostgreSqlDurableRuntimeHealth>.Instance,
+            token => ValueTask.FromCanceled<DateTimeOffset>(token));
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await health.GetAsync(cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+    }
+
+    [Fact]
+    public async Task GetAsync_PropagatesCallerCancellationFromRuntimeObservation()
+    {
+        using var dataSource = NpgsqlDataSource.Create(
+            "Host=localhost;Port=5432;Database=durable_health;Username=durable;Password=not-opened");
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                dataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                CreateOptions("runtime-health-observation-cancellation-worker"),
+                Guid.NewGuid()),
+            new StubSchemaManager(
+                _ => ValueTask.FromResult(CreateStatus(DurableRuntimeSchemaCompatibility.Compatible))));
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await health.GetAsync(cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+    }
+
+    [Fact]
+    public async Task GetAsync_MapsTransientRuntimeObservationToUnavailable()
+    {
+        using var dataSource = NpgsqlDataSource.Create(
+            "Host=127.0.0.1;Port=1;Database=durable_health;Username=durable;Password=not-opened;Timeout=1");
         var schemaStatus = CreateStatus(DurableRuntimeSchemaCompatibility.Compatible);
         var health = new PostgreSqlDurableRuntimeHealth(
             CreateRegistration(
                 dataSource,
                 new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
-                CreateOptions("runtime-health-transient-worker"),
-                Guid.NewGuid()),
+            CreateOptions("runtime-health-transient-worker"),
+            Guid.NewGuid()),
             new StubSchemaManager(_ => ValueTask.FromResult(schemaStatus)));
 
+        var beforeAssessment = DateTimeOffset.UtcNow;
         var snapshot = await health.GetAsync();
+        var afterAssessment = DateTimeOffset.UtcNow;
 
-        Assert.Equal(DurableRuntimeHealthState.Incompatible, snapshot.State);
-        Assert.Equal(DurableProblemCodes.SchemaInconsistent, snapshot.ProblemCode);
+        Assert.Equal(DurableRuntimeHealthState.Unavailable, snapshot.State);
+        Assert.Equal(DurableProblemCodes.StoreUnavailable, snapshot.ProblemCode);
+        Assert.False(snapshot.WasStoreObserved);
         Assert.False(snapshot.SchemaCompatible);
         Assert.Equal(schemaStatus.InstalledVersion, snapshot.InstalledSchemaVersion);
+        Assert.InRange(snapshot.ObservedAtUtc, beforeAssessment, afterAssessment);
     }
 
     [Fact]
-    public async Task GetAsync_MapsTransientDueReadToSchemaInconsistent()
+    public async Task GetAsync_MapsRuntimeHealthPermissionFailureToUnavailable()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-health-tests", "permission-failure");
+        var status = await schema.GetStatusAsync();
+        var role = $"runtime_health_denied_{Guid.NewGuid():N}";
+        const string password = "runtime-health-test-password";
+        await using (var createRole = database.DataSource.CreateCommand(
+            $"""
+            CREATE ROLE {role}
+                LOGIN PASSWORD '{password}'
+                NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            GRANT USAGE ON SCHEMA appsurface_durable TO {role};
+            GRANT SELECT ON TABLE
+                appsurface_durable.store_metadata,
+                appsurface_durable.runtime_heartbeat
+                TO {role};
+            """))
+        {
+            await createRole.ExecuteNonQueryAsync();
+        }
+
+        var connectionString = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            Username = role,
+            Password = password,
+            Pooling = false,
+        }.ConnectionString;
+        try
+        {
+            await using var runtimeDataSource = NpgsqlDataSource.Create(connectionString);
+            var health = new PostgreSqlDurableRuntimeHealth(
+                CreateRegistration(
+                    runtimeDataSource,
+                    new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+                    CreateOptions("runtime-health-permission-worker"),
+                    Guid.NewGuid()),
+                new StubSchemaManager(_ => ValueTask.FromResult(status)));
+
+            var snapshot = await health.GetAsync();
+
+            Assert.Equal(DurableRuntimeHealthState.Unavailable, snapshot.State);
+            Assert.Equal(DurableProblemCodes.StoreUnavailable, snapshot.ProblemCode);
+            Assert.False(snapshot.WasStoreObserved);
+        }
+        finally
+        {
+            await using var dropRole = database.DataSource.CreateCommand(
+                $"DROP OWNED BY {role}; DROP ROLE {role};");
+            await dropRole.ExecuteNonQueryAsync();
+        }
+    }
+
+    [Fact]
+    public async Task GetAsync_PropagatesAnUndefinedDueHealthFunction()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
@@ -206,12 +423,10 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
                 Guid.NewGuid()),
             new StubSchemaManager(_ => ValueTask.FromResult(schemaStatus)));
 
-        var snapshot = await health.GetAsync();
+        var exception = await Assert.ThrowsAsync<PostgresException>(
+            async () => await health.GetAsync());
 
-        Assert.Equal(DurableRuntimeHealthState.Incompatible, snapshot.State);
-        Assert.Equal(DurableProblemCodes.SchemaInconsistent, snapshot.ProblemCode);
-        Assert.False(snapshot.SchemaCompatible);
-        Assert.Equal(schemaStatus.InstalledVersion, snapshot.InstalledSchemaVersion);
+        Assert.Equal(PostgresErrorCodes.UndefinedFunction, exception.SqlState);
     }
 
     [Fact]
@@ -292,9 +507,8 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
             Assert.Equal(1, await nullHeartbeat.ExecuteNonQueryAsync());
         }
 
-        var notStarted = await health.GetAsync();
-        Assert.Equal(DurableRuntimeHealthState.NotStarted, notStarted.State);
-        Assert.Equal(DurableProblemCodes.ActivatorStale, notStarted.ProblemCode);
+        await Assert.ThrowsAsync<InvalidDataException>(
+            async () => await health.GetAsync());
 
         await using (var staleHeartbeat = database.DataSource.CreateCommand(
             """
@@ -325,6 +539,330 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
         var healthy = await health.GetAsync();
         Assert.Equal(DurableRuntimeHealthState.Healthy, healthy.State);
         Assert.Null(healthy.ProblemCode);
+    }
+
+    [Fact]
+    public async Task GetAsync_RejectsAPartialWorkerRow()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-health-tests", "partial-worker-row");
+        var status = await schema.GetStatusAsync();
+        const string workerId = "runtime-health-partial-worker-row";
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+                CreateOptions(workerId),
+                Guid.NewGuid()),
+            schema);
+        Assert.True(await health.TryBeginPassAsync(CancellationToken.None));
+
+        await using (var corrupt = database.DataSource.CreateCommand(
+            """
+            ALTER TABLE appsurface_durable.runtime_heartbeat
+                ALTER COLUMN worker_instance_id DROP NOT NULL;
+            UPDATE appsurface_durable.runtime_heartbeat
+            SET worker_instance_id = NULL
+            WHERE worker_id = @worker_id;
+            """))
+        {
+            corrupt.Parameters.AddWithValue("worker_id", workerId);
+            await corrupt.ExecuteNonQueryAsync();
+        }
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(
+            async () => await health.GetAsync());
+        Assert.Contains("partial worker row", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetAsync_RejectsNullWorkerLifecycleFlags()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-health-tests", "null-lifecycle-flags");
+        var status = await schema.GetStatusAsync();
+        const string workerId = "runtime-health-null-lifecycle-flags";
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+                CreateOptions(workerId),
+                Guid.NewGuid()),
+            schema);
+        Assert.True(await health.TryBeginPassAsync(CancellationToken.None));
+
+        await using (var relax = database.DataSource.CreateCommand(
+            """
+            ALTER TABLE appsurface_durable.runtime_heartbeat
+                ALTER COLUMN draining DROP NOT NULL,
+                ALTER COLUMN pass_active DROP NOT NULL;
+            """))
+        {
+            await relax.ExecuteNonQueryAsync();
+        }
+
+        await using (var nullDraining = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.runtime_heartbeat
+            SET draining = NULL
+            WHERE worker_id = @worker_id;
+            """))
+        {
+            nullDraining.Parameters.AddWithValue("worker_id", workerId);
+            Assert.Equal(1, await nullDraining.ExecuteNonQueryAsync());
+        }
+
+        var drainingException = await Assert.ThrowsAsync<InvalidDataException>(
+            async () => await health.GetAsync());
+        Assert.Contains("null lifecycle flag", drainingException.Message, StringComparison.Ordinal);
+
+        await using (var nullPassActive = database.DataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.runtime_heartbeat
+            SET draining = false, pass_active = NULL
+            WHERE worker_id = @worker_id;
+            """))
+        {
+            nullPassActive.Parameters.AddWithValue("worker_id", workerId);
+            Assert.Equal(1, await nullPassActive.ExecuteNonQueryAsync());
+        }
+
+        var passActiveException = await Assert.ThrowsAsync<InvalidDataException>(
+            async () => await health.GetAsync());
+        Assert.Contains("null lifecycle flag", passActiveException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetAsync_RejectsEveryInvalidHostedSurfaceMask()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-health-tests", "invalid-hosted-surfaces");
+        var status = await schema.GetStatusAsync();
+        const string workerId = "runtime-health-invalid-hosted-surfaces";
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+                CreateOptions(workerId),
+                Guid.NewGuid()),
+            schema);
+        Assert.True(await health.TryBeginPassAsync(CancellationToken.None));
+
+        await using (var relax = database.DataSource.CreateCommand(
+            """
+            ALTER TABLE appsurface_durable.runtime_heartbeat
+                DROP CONSTRAINT runtime_heartbeat_hosted_surfaces_check;
+            """))
+        {
+            await relax.ExecuteNonQueryAsync();
+        }
+
+        foreach (var invalidMask in new short[] { 0, 8 })
+        {
+            await using (var corrupt = database.DataSource.CreateCommand(
+                """
+                UPDATE appsurface_durable.runtime_heartbeat
+                SET hosted_surfaces = @hosted_surfaces
+                WHERE worker_id = @worker_id;
+                """))
+            {
+                corrupt.Parameters.AddWithValue("hosted_surfaces", invalidMask);
+                corrupt.Parameters.AddWithValue("worker_id", workerId);
+                Assert.Equal(1, await corrupt.ExecuteNonQueryAsync());
+            }
+
+            var exception = await Assert.ThrowsAsync<InvalidDataException>(
+                async () => await health.GetAsync());
+            Assert.Contains("invalid hosted-surface mask", exception.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task GetAsync_RejectsEveryContradictoryDueFactShape()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-health-tests", "contradictory-due-facts");
+        var status = await schema.GetStatusAsync();
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+                CreateOptions("runtime-health-contradictory-due-facts"),
+                Guid.NewGuid()),
+            schema);
+
+        foreach (var (dueCount, oldestDueSql) in new (long DueCount, string OldestDueSql)[]
+                 {
+                     (-1, "NULL"),
+                     (0, "statement_timestamp()"),
+                     (1, "NULL"),
+                     (1, "statement_timestamp() + interval '1 minute'"),
+                 })
+        {
+            await using (var replace = database.DataSource.CreateCommand(
+                $"""
+                CREATE OR REPLACE FUNCTION appsurface_durable.runtime_due_dispatch_health(p_surfaces integer)
+                RETURNS TABLE
+                (
+                    due_count bigint,
+                    oldest_due_at timestamp with time zone
+                )
+                LANGUAGE sql
+                STABLE
+                SECURITY DEFINER
+                SET search_path = pg_catalog, appsurface_durable, pg_temp
+                AS $test$
+                    SELECT {dueCount}::bigint, CAST({oldestDueSql} AS timestamp with time zone);
+                $test$;
+                """))
+            {
+                await replace.ExecuteNonQueryAsync();
+            }
+
+            var exception = await Assert.ThrowsAsync<InvalidDataException>(
+                async () => await health.GetAsync());
+            Assert.Contains("contradictory due-dispatch facts", exception.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task GetAsync_RejectsEmptyAndMultipleDueHealthObservations()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                CreateOptions("runtime-health-row-shape-worker"),
+                Guid.NewGuid()),
+            schema);
+
+        await using (var replace = database.DataSource.CreateCommand(
+            """
+            CREATE OR REPLACE FUNCTION appsurface_durable.runtime_due_dispatch_health(p_surfaces integer)
+            RETURNS TABLE
+            (
+                due_count bigint,
+                oldest_due_at timestamp with time zone
+            )
+            LANGUAGE sql
+            STABLE
+            SECURITY DEFINER
+            SET search_path = pg_catalog, appsurface_durable, pg_temp
+            AS $test$
+                SELECT 0::bigint, NULL::timestamp with time zone WHERE false;
+            $test$;
+            """))
+        {
+            await replace.ExecuteNonQueryAsync();
+        }
+
+        var empty = await Assert.ThrowsAsync<InvalidDataException>(async () => await health.GetAsync());
+        Assert.Contains("returned no row", empty.Message, StringComparison.Ordinal);
+
+        await using (var replace = database.DataSource.CreateCommand(
+            """
+            CREATE OR REPLACE FUNCTION appsurface_durable.runtime_due_dispatch_health(p_surfaces integer)
+            RETURNS TABLE
+            (
+                due_count bigint,
+                oldest_due_at timestamp with time zone
+            )
+            LANGUAGE sql
+            STABLE
+            SECURITY DEFINER
+            SET search_path = pg_catalog, appsurface_durable, pg_temp
+            AS $test$
+                SELECT 0::bigint, NULL::timestamp with time zone
+                UNION ALL
+                SELECT 0::bigint, NULL::timestamp with time zone;
+            $test$;
+            """))
+        {
+            await replace.ExecuteNonQueryAsync();
+        }
+
+        var multiple = await Assert.ThrowsAsync<InvalidDataException>(async () => await health.GetAsync());
+        Assert.Contains("more than one row", multiple.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TryBeginPassWithOutcomeAsync_PreservesTypedAndLegacyEpochMismatchSemantics()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var configuredEpoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(configuredEpoch, "runtime-health-tests", "typed-epoch-mismatch");
+        var status = await schema.GetStatusAsync();
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                database.DataSource,
+                new PostgreSqlDurableWorkOptions(configuredEpoch, status.StoreId),
+                CreateOptions("runtime-health-typed-epoch-worker"),
+                Guid.NewGuid()),
+            schema);
+
+        await using (var clearEpoch = database.DataSource.CreateCommand(
+            "UPDATE appsurface_durable.store_metadata SET active_runtime_epoch = NULL WHERE singleton;"))
+        {
+            Assert.Equal(1, await clearEpoch.ExecuteNonQueryAsync());
+        }
+
+        var typed = await health.TryBeginPassWithOutcomeAsync(CancellationToken.None);
+        Assert.Equal(PostgreSqlDurableStoreAdmissionKind.EpochMismatch, typed.Kind);
+        Assert.NotNull(typed.LegacyException);
+        Assert.StartsWith(
+            DurableProblemCodes.RecoveryEpochRequired,
+            typed.LegacyException!.SourceException.Message,
+            StringComparison.Ordinal);
+
+        var legacy = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await health.TryBeginPassAsync(CancellationToken.None));
+        Assert.StartsWith(DurableProblemCodes.RecoveryEpochRequired, legacy.Message, StringComparison.Ordinal);
+
+        var differentEpoch = Guid.NewGuid();
+        await using (var changeEpoch = database.DataSource.CreateCommand(
+            "UPDATE appsurface_durable.store_metadata SET active_runtime_epoch = @epoch WHERE singleton;"))
+        {
+            changeEpoch.Parameters.AddWithValue("epoch", differentEpoch);
+            Assert.Equal(1, await changeEpoch.ExecuteNonQueryAsync());
+        }
+
+        var mismatched = await health.TryBeginPassWithOutcomeAsync(CancellationToken.None);
+        Assert.Equal(PostgreSqlDurableStoreAdmissionKind.EpochMismatch, mismatched.Kind);
+        Assert.NotNull(mismatched.LegacyException);
+    }
+
+    [Fact]
+    public void StoreAdmissionFactories_RejectInvalidKindsAndNullLegacyExceptions()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            PostgreSqlDurableStoreAdmission.Refused(PostgreSqlDurableStoreAdmissionKind.Admitted));
+        Assert.Throws<ArgumentNullException>(() =>
+            PostgreSqlDurableStoreAdmission.WithLegacyException(
+                PostgreSqlDurableStoreAdmissionKind.EpochMismatch,
+                null!));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            PostgreSqlDurableStoreAdmission.WithLegacyException(
+                PostgreSqlDurableStoreAdmissionKind.Draining,
+                new InvalidOperationException("legacy")));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableEpochMismatchSignal(null!));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableWorkerGenerationSignal(null!));
     }
 
     [Fact]

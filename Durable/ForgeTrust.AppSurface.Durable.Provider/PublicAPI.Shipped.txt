@@ -393,10 +393,14 @@ type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHe
   method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot? left, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot? right)
   property public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthState State { get: public; }
   property public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface HostedSurfaces { get: public; }
+  property public System.Boolean CanAttemptPump { get: public; }
+  property public System.Boolean CanEnableActivation { get: public; }
   property public System.Boolean EpochCompatible { get: public; }
   property public System.Boolean IsDraining { get: public; }
   property public System.Boolean IsPassActive { get: public; }
+  property public System.Boolean IsReady { get: public; }
   property public System.Boolean SchemaCompatible { get: public; }
+  property public System.Boolean WasStoreObserved { get: public; }
   property public System.DateTimeOffset ObservedAtUtc { get: public; }
   property public System.Guid ConfiguredRuntimeEpoch { get: public; }
   property public System.Int32 InstalledSchemaVersion { get: public; }
@@ -417,6 +421,24 @@ type public enum ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthStat
   enum-member Incompatible = 4
   enum-member NotStarted = 1
   enum-member Stale = 2
+  enum-member Unavailable = 5
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttempt : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttempt>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttempt(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttemptKind kind, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult? result, System.String? problemCode)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttempt <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttempt? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttempt? left, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttempt? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttempt? left, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttempt? right)
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttemptKind Kind { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult? Result { get: public; }
+  property public System.String? ProblemCode { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttemptKind : System.Int32
+  enum-member Completed = 0
+  enum-member Incompatible = 3
+  enum-member Refused = 1
+  enum-member Unavailable = 2
 type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest>
   constructor public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest(System.Int32 maximumItems = 32, System.Nullable<System.TimeSpan> timeBudget = null, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface surfaces = ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface.All)
   method public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest <Clone>$()
@@ -695,6 +717,8 @@ type public interface ForgeTrust.AppSurface.Durable.Provider.IDurableRuntimeHeal
   method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot> GetAsync(System.Threading.CancellationToken cancellationToken = default)
 type public interface ForgeTrust.AppSurface.Durable.Provider.IDurableRuntimePump
   method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult> RunOnceAsync(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest request, System.Threading.CancellationToken cancellationToken = default)
+type public interface ForgeTrust.AppSurface.Durable.Provider.IDurableRuntimePumpAdmission
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttempt> TryRunOnceAsync(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest request, System.Threading.CancellationToken cancellationToken = default)
 type public interface ForgeTrust.AppSurface.Durable.Provider.IDurableScopeControlClient
   method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableResult>> DisableAsync(ForgeTrust.AppSurface.Durable.Provider.DurableScopeDisableRequest request, System.Threading.CancellationToken cancellationToken = default)
 type public interface ForgeTrust.AppSurface.Durable.Provider.IDurableWorkControlClient

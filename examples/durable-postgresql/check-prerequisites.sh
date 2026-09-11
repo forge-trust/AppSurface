@@ -2,6 +2,7 @@
 set -euo pipefail
 
 port="${APPSURFACE_DURABLE_PREREQUISITE_PORT:-54329}"
+skip_port_check="${APPSURFACE_DURABLE_PREREQUISITE_SKIP_PORT_CHECK:-false}"
 missing=0
 
 require_command() {
@@ -38,7 +39,9 @@ else
   missing=1
 fi
 
-if [[ ! "$port" =~ ^[0-9]{1,5}$ ]] || (( 10#$port < 1 || 10#$port > 65535 )); then
+if [[ "$skip_port_check" == "true" ]]; then
+  printf '[ok] Docker will allocate a free loopback port\n'
+elif [[ ! "$port" =~ ^[0-9]{1,5}$ ]] || (( 10#$port < 1 || 10#$port > 65535 )); then
   printf '[missing] local TCP port %s must be an integer from 1 through 65535\n' "$port" >&2
   missing=1
 elif (: >/dev/tcp/127.0.0.1/"$port") >/dev/null 2>&1; then
