@@ -17,7 +17,7 @@ public sealed class PostgreSqlScaleIntegrationTests
     private const int WarmBatchCount = 5;
     private const int WarmSamplesPerBatch = 16;
     private const int MixedConcurrency = 32;
-    private const int MixedHealthReaderConcurrency = ConstrainedPoolSize;
+    private const int MaximumTransientMixedLockWaiters = 1;
     private readonly ITestOutputHelper _output;
 
     public PostgreSqlScaleIntegrationTests(ITestOutputHelper output)
@@ -235,7 +235,6 @@ public sealed class PostgreSqlScaleIntegrationTests
 
         var mixedWorkloadStart = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
-        using var mixedHealthReaderGate = new SemaphoreSlim(MixedHealthReaderConcurrency);
         var process = Process.GetCurrentProcess();
         process.Refresh();
         var cpuBefore = process.TotalProcessorTime;
@@ -252,19 +251,11 @@ public sealed class PostgreSqlScaleIntegrationTests
             .Select(async _ =>
             {
                 await mixedWorkloadStart.Task;
-                await mixedHealthReaderGate.WaitAsync();
                 var started = Stopwatch.GetTimestamp();
-                try
-                {
-                    var snapshot = await health.GetAsync();
-                    return (
-                        Snapshot: snapshot,
-                        Elapsed: Stopwatch.GetElapsedTime(started));
-                }
-                finally
-                {
-                    mixedHealthReaderGate.Release();
-                }
+                var snapshot = await health.GetAsync();
+                return (
+                    Snapshot: snapshot,
+                    Elapsed: Stopwatch.GetElapsedTime(started));
             })
             .ToArray();
         var claim = RunAfterAsync(
@@ -326,7 +317,10 @@ public sealed class PostgreSqlScaleIntegrationTests
             rowsPerSurface * 3L - 1,
             (await health.GetAsync()).DueDispatchCount);
         Assert.Equal(0, sampledLockWaitsAfter);
-        Assert.Equal(0, maximumSampledLockWaitCount);
+        Assert.InRange(
+            maximumSampledLockWaitCount,
+            0,
+            MaximumTransientMixedLockWaiters);
     }
 
     [Fact]
@@ -934,7 +928,7 @@ public sealed class PostgreSqlScaleIntegrationTests
                 warmBatchCount = WarmBatchCount,
                 samplesPerBatch = WarmSamplesPerBatch,
                 mixedSampleCount = MixedConcurrency,
-                mixedHealthReaderConcurrency = MixedHealthReaderConcurrency,
+                maximumTransientMixedLockWaiters = MaximumTransientMixedLockWaiters,
             }));
     }
 

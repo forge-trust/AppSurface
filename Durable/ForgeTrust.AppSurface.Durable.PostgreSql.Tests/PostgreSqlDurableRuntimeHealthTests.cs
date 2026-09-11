@@ -128,6 +128,55 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
     }
 
     [Fact]
+    public async Task GetAsync_ReportsMissingSchemaWithoutSelfStarvingASingleConnectionPool()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var connectionString = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            ApplicationName = "runtime-health-single-connection",
+            MaxPoolSize = 1,
+        }.ConnectionString;
+        await using var runtimeDataSource = NpgsqlDataSource.Create(connectionString);
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(runtimeDataSource);
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                runtimeDataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                CreateOptions("runtime-health-single-connection-worker"),
+                Guid.NewGuid()),
+            schema);
+
+        var snapshot = await health.GetAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(DurableRuntimeHealthState.Incompatible, snapshot.State);
+        Assert.Equal(DurableProblemCodes.SchemaMissing, snapshot.ProblemCode);
+        Assert.True(snapshot.WasStoreObserved);
+    }
+
+    [Fact]
+    public async Task GetAsync_MapsSharedSchemaConnectionFailureToUnavailable()
+    {
+        await using var dataSource = NpgsqlDataSource.Create(
+            "Host=127.0.0.1;Port=1;Database=durable_health;Username=durable;Password=not-opened;Timeout=1");
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(dataSource);
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                dataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                CreateOptions("runtime-health-shared-schema-unavailable-worker"),
+                Guid.NewGuid()),
+            schema);
+
+        var snapshot = await health.GetAsync();
+
+        Assert.Equal(DurableRuntimeHealthState.Unavailable, snapshot.State);
+        Assert.Equal(DurableProblemCodes.StoreUnavailable, snapshot.ProblemCode);
+        Assert.False(snapshot.WasStoreObserved);
+        Assert.Equal(0, snapshot.InstalledSchemaVersion);
+        Assert.Equal(PostgreSqlDurableRuntimeSchemaManager.RequiredVersion, snapshot.RequiredSchemaVersion);
+    }
+
+    [Fact]
     public async Task GetAsync_ReportsSchemaCompatibilityAndTransientReadFailuresWithoutOpeningTheRuntimeStore()
     {
         using var dataSource = NpgsqlDataSource.Create(

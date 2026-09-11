@@ -9,6 +9,19 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 public sealed class DurableSchemaContractTests
 {
     [Fact]
+    public void SchemaStatusConnectionSharing_RequiresTheSameDataSourceInstance()
+    {
+        using var runtimeDataSource = NpgsqlDataSource.Create(
+            "Host=localhost;Database=appsurface;Username=appsurface;Password=unused");
+        using var otherDataSource = NpgsqlDataSource.Create(
+            "Host=localhost;Database=appsurface;Username=appsurface;Password=unused");
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(runtimeDataSource);
+
+        Assert.True(manager.CanShareStatusConnectionWith(runtimeDataSource));
+        Assert.False(manager.CanShareStatusConnectionWith(otherDataSource));
+    }
+
+    [Fact]
     public void MigrationCatalog_IsExactlyTenOrderedChecksummedResources()
     {
         var migrations = DurablePostgreSqlMigrationCatalog.Load();

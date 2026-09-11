@@ -93,17 +93,63 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
     /// <inheritdoc />
     public async ValueTask<DurableRuntimeSchemaStatus> GetStatusAsync(CancellationToken cancellationToken = default)
     {
+        await using var connection = await OpenStatusConnectionAsync(cancellationToken).ConfigureAwait(false);
+        return await GetStatusAsync(connection, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Returns whether a runtime operation may safely reuse this manager's status connection.
+    /// </summary>
+    /// <param name="dataSource">The runtime data source that would reuse the connection.</param>
+    /// <returns>
+    /// <see langword="true"/> only when both operations use the same data-source instance and therefore the same
+    /// credentials, pool, and connection policy.
+    /// </returns>
+    internal bool CanShareStatusConnectionWith(NpgsqlDataSource dataSource) =>
+        ReferenceEquals(_dataSource, dataSource);
+
+    /// <summary>
+    /// Opens a schema-status connection while preserving the status-acquisition observation seams.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the pending pool or connection acquisition.</param>
+    /// <returns>An open connection owned by the caller.</returns>
+    internal async ValueTask<NpgsqlConnection> OpenStatusConnectionAsync(
+        CancellationToken cancellationToken)
+    {
         var connectionStarted = _observeStatusConnectionAcquisition is null
             ? 0
             : Stopwatch.GetTimestamp();
         var connectionOpen = _dataSource.OpenConnectionAsync(cancellationToken);
         _observeStatusConnectionOpenStarted?.Invoke();
-        await using var connection = await connectionOpen.ConfigureAwait(false);
-        if (_observeStatusConnectionAcquisition is { } observer)
+        var connection = await connectionOpen.ConfigureAwait(false);
+        try
         {
-            observer(Stopwatch.GetElapsedTime(connectionStarted));
-        }
+            if (_observeStatusConnectionAcquisition is { } observer)
+            {
+                observer(Stopwatch.GetElapsedTime(connectionStarted));
+            }
 
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Reads schema status through an existing connection so a compatible runtime observation can reuse one pool
+    /// acquisition without changing the migration-fence transaction boundary.
+    /// </summary>
+    /// <param name="connection">An open connection whose credentials are valid for schema status.</param>
+    /// <param name="cancellationToken">Cancels the status transaction and commands.</param>
+    /// <returns>The installed schema compatibility status.</returns>
+    internal async ValueTask<DurableRuntimeSchemaStatus> GetStatusAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try
         {

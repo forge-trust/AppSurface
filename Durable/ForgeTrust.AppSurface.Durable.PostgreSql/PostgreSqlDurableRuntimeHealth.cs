@@ -15,6 +15,7 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
     private readonly PostgreSqlDurableRuntimeSchemaManager _admissionSchemaManager;
     private readonly ILogger<PostgreSqlDurableRuntimeHealth> _logger;
     private readonly Func<CancellationToken, ValueTask<DateTimeOffset>> _readDatabaseTimestamp;
+    private readonly bool _usesDefaultDatabaseTimestampReader;
     private readonly Action<TimeSpan>? _observeRuntimeConnectionAcquisition;
 
     internal PostgreSqlDurableRuntimeHealth(
@@ -56,16 +57,87 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
         _schemaManager = schemaManager ?? throw new ArgumentNullException(nameof(schemaManager));
         _admissionSchemaManager = new PostgreSqlDurableRuntimeSchemaManager(_registration.RuntimeDataSource);
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _usesDefaultDatabaseTimestampReader = readDatabaseTimestamp is null;
         _readDatabaseTimestamp = readDatabaseTimestamp ?? ReadDatabaseTimestampAsync;
         _observeRuntimeConnectionAcquisition = observeRuntimeConnectionAcquisition;
     }
 
-    public async ValueTask<DurableRuntimeHealthSnapshot> GetAsync(CancellationToken cancellationToken = default)
+    public ValueTask<DurableRuntimeHealthSnapshot> GetAsync(CancellationToken cancellationToken = default)
+    {
+        if (_schemaManager is PostgreSqlDurableRuntimeSchemaManager schemaManager
+            && schemaManager.CanShareStatusConnectionWith(_registration.RuntimeDataSource))
+        {
+            return GetWithSharedConnectionAsync(schemaManager, cancellationToken);
+        }
+
+        return GetCoreAsync(
+            sharedConnection: null,
+            sharedSchemaManager: null,
+            sharedConnectionAcquisition: null,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Reuses the default schema manager's connection for the compatible runtime observation, halving pool
+    /// acquisitions on the full health path while preserving custom-manager composition.
+    /// </summary>
+    private async ValueTask<DurableRuntimeHealthSnapshot> GetWithSharedConnectionAsync(
+        PostgreSqlDurableRuntimeSchemaManager schemaManager,
+        CancellationToken cancellationToken)
+    {
+        var connectionStarted = _observeRuntimeConnectionAcquisition is null
+            ? 0
+            : Stopwatch.GetTimestamp();
+        NpgsqlConnection connection;
+        TimeSpan? connectionAcquisition;
+        try
+        {
+            connection = await schemaManager.OpenStatusConnectionAsync(cancellationToken).ConfigureAwait(false);
+            connectionAcquisition = _observeRuntimeConnectionAcquisition is null
+                ? null
+                : Stopwatch.GetElapsedTime(connectionStarted);
+        }
+        catch (Exception exception) when (TryClassifyUnavailable(
+            PostgreSqlDurableControlPlaneOperation.HealthObservation,
+            exception,
+            cancellationToken,
+            out var unavailableCause))
+        {
+            var unavailableObservedAtUtc = DateTimeOffset.UtcNow;
+            LogUnavailable(
+                PostgreSqlDurableControlPlaneOperation.HealthObservation,
+                "SchemaStatus",
+                unavailableCause,
+                DurableProblemCodes.StoreUnavailable,
+                PostgreSqlDurableDiagnostics.OperationalAssessmentTroubleshooting);
+            return CreateUnavailableSnapshot(
+                installedVersion: 0,
+                requiredVersion: PostgreSqlDurableRuntimeSchemaManager.RequiredVersion,
+                unavailableObservedAtUtc);
+        }
+
+        await using (connection.ConfigureAwait(false))
+        {
+            return await GetCoreAsync(
+                connection,
+                schemaManager,
+                connectionAcquisition,
+                cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async ValueTask<DurableRuntimeHealthSnapshot> GetCoreAsync(
+        NpgsqlConnection? sharedConnection,
+        PostgreSqlDurableRuntimeSchemaManager? sharedSchemaManager,
+        TimeSpan? sharedConnectionAcquisition,
+        CancellationToken cancellationToken)
     {
         DurableRuntimeSchemaStatus schema;
         try
         {
-            schema = await _schemaManager.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+            schema = sharedSchemaManager is null
+                ? await _schemaManager.GetStatusAsync(cancellationToken).ConfigureAwait(false)
+                : await sharedSchemaManager.GetStatusAsync(sharedConnection!, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (TryClassifyUnavailable(
             PostgreSqlDurableControlPlaneOperation.HealthObservation,
@@ -91,7 +163,9 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
             DateTimeOffset observedAtUtc;
             try
             {
-                observedAtUtc = await _readDatabaseTimestamp(cancellationToken).ConfigureAwait(false);
+                observedAtUtc = sharedConnection is not null && _usesDefaultDatabaseTimestampReader
+                    ? await ReadDatabaseTimestampAsync(sharedConnection, cancellationToken).ConfigureAwait(false)
+                    : await _readDatabaseTimestamp(cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception) when (TryClassifyUnavailable(
                 PostgreSqlDurableControlPlaneOperation.HealthObservation,
@@ -121,7 +195,15 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
 
         try
         {
-            var observation = await ReadObservationAsync(cancellationToken).ConfigureAwait(false);
+            if (sharedConnectionAcquisition is { } connectionAcquisition
+                && _observeRuntimeConnectionAcquisition is { } observer)
+            {
+                observer(connectionAcquisition);
+            }
+
+            var observation = sharedConnection is null
+                ? await ReadObservationAsync(cancellationToken).ConfigureAwait(false)
+                : await ReadObservationAsync(sharedConnection, cancellationToken).ConfigureAwait(false);
             var epochCompatible = observation.ActiveEpoch == _registration.WorkOptions.RuntimeEpoch;
             var (state, problemCode) = ResolveState(observation, epochCompatible);
             return new DurableRuntimeHealthSnapshot(
@@ -634,6 +716,14 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
             observer(Stopwatch.GetElapsedTime(connectionStarted));
         }
 
+        return await ReadObservationAsync(connection, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Reads the one-row runtime observation through an existing compatible status connection.</summary>
+    private async ValueTask<RuntimeObservation> ReadObservationAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken)
+    {
         const string sql = """
             WITH observed AS
             (
@@ -797,6 +887,14 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
     private async ValueTask<DateTimeOffset> ReadDatabaseTimestampAsync(CancellationToken cancellationToken)
     {
         await using var connection = await _registration.RuntimeDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        return await ReadDatabaseTimestampAsync(connection, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Reads authoritative database time through an existing compatible status connection.</summary>
+    private static async ValueTask<DateTimeOffset> ReadDatabaseTimestampAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken)
+    {
         await using var command = new NpgsqlCommand("SELECT statement_timestamp();", connection);
         return await PostgreSqlDurableControlPlaneCommand.ExecuteReaderAsync(
             command,

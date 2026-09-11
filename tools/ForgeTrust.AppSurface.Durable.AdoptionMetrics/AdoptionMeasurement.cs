@@ -215,8 +215,20 @@ internal static class AdoptionMeasurementEngine
                 $"Region '{regionName}' relativePath must not be rooted.");
         }
 
-        var path = Path.GetFullPath(relativePath, root);
-        var relative = Path.GetRelativePath(root, path);
+        string path;
+        string relative;
+        try
+        {
+            path = Path.GetFullPath(relativePath, root);
+            relative = Path.GetRelativePath(root, path);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+        {
+            throw new AdoptionMeasurementException(
+                $"Could not resolve region '{regionName}' source path.",
+                exception);
+        }
+
         if (relative == ".."
             || relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
             || Path.IsPathRooted(relative))

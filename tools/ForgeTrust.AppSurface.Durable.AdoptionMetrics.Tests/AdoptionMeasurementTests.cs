@@ -220,6 +220,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
     [Theory]
     [InlineData("absolute", "relativePath must not be rooted")]
     [InlineData("escape", "relativePath escapes its declared source root")]
+    [InlineData("invalid", "Could not resolve region 'registration' source path")]
     [InlineData("missing", "does not exist")]
     public async Task MeasureAsyncRejectsUnsafeOrMissingPaths(string mutation, string expected)
     {
@@ -233,6 +234,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
                 {
                     "absolute" => Path.Combine(_root, "outside.cs"),
                     "escape" => "../outside.cs",
+                    "invalid" => "invalid\0path.cs",
                     "missing" => "missing.cs",
                     _ => throw new InvalidOperationException("Unexpected test mutation."),
                 };
