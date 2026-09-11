@@ -71,9 +71,9 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
             "run-local-proof.sh");
         var temporaryRoot = Directory.CreateTempSubdirectory("appsurface-durable-proof-watchdog-").FullName;
         var fakeBin = Directory.CreateDirectory(Path.Join(temporaryRoot, "bin")).FullName;
-        var childPidFile = Path.Combine(temporaryRoot, "child.pid");
-        var heartbeatFile = Path.Combine(temporaryRoot, "heartbeat");
-        var cleanupHeartbeatFile = Path.Combine(temporaryRoot, "cleanup-heartbeat");
+        var childPidFile = Path.Join(temporaryRoot, "child.pid");
+        var heartbeatFile = Path.Join(temporaryRoot, "heartbeat");
+        var cleanupHeartbeatFile = Path.Join(temporaryRoot, "cleanup-heartbeat");
         await File.WriteAllTextAsync(cleanupHeartbeatFile, string.Empty);
 
         try
@@ -264,7 +264,7 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
             "evidence",
             "measure-issue-794-adoption.sh");
         var temporaryRoot = Directory.CreateTempSubdirectory("appsurface-durable-measurement-watchdog-").FullName;
-        var heartbeatFile = Path.Combine(temporaryRoot, "heartbeat");
+        var heartbeatFile = Path.Join(temporaryRoot, "heartbeat");
         try
         {
             var startInfo = new ProcessStartInfo("/bin/bash")
@@ -517,7 +517,7 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
 
     private static void WriteExecutable(string directory, string name, string contents)
     {
-        var path = Path.Combine(directory, name);
+        var path = Path.Join(directory, name);
         File.WriteAllText(path, contents);
         if (OperatingSystem.IsWindows())
         {
