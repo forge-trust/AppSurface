@@ -356,39 +356,35 @@ public sealed class PostgreSqlSchemaIntegrationTests
     }
 
     [Fact]
-    public async Task Apply_PreservesTheConfiguredClientDeadlineWhenMigrationMetadataHasNoOverride()
+    public async Task Apply_UsesMigrationOwnedClientDeadlineBeforeMigrationTen()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         var embedded = DurablePostgreSqlMigrationCatalog.Load();
-        var schemaNine = new PostgreSqlDurableRuntimeSchemaManager(
-            database.DataSource,
-            embedded.Take(9).ToArray());
-        await schemaNine.ApplyAsync();
         var connectionString = new NpgsqlConnectionStringBuilder(database.ConnectionString)
         {
             CommandTimeout = 1,
             Pooling = false,
         }.ConnectionString;
         await using var shortTimeoutDataSource = NpgsqlDataSource.Create(connectionString);
-        var delayedTenthWithoutOverride = embedded[9] with
+        var delayedFirstWithOverride = embedded[0] with
         {
-            Sql =
+            Sql = embedded[0].Sql +
                 """
+
                 SET LOCAL statement_timeout = '5s';
                 SELECT pg_sleep(2);
                 """,
             Sha256 = new string('0', 64),
-            CommandTimeoutSeconds = null,
+            CommandTimeoutSeconds = 5,
         };
         var manager = new PostgreSqlDurableRuntimeSchemaManager(
             shortTimeoutDataSource,
-            [.. embedded.Take(9), delayedTenthWithoutOverride]);
+            [delayedFirstWithOverride]);
 
-        var exception = await Assert.ThrowsAsync<NpgsqlException>(
-            async () => await manager.ApplyAsync());
+        var result = await manager.ApplyAsync();
 
-        Assert.IsType<TimeoutException>(exception.InnerException);
-        Assert.Equal(9, (await manager.GetStatusAsync()).InstalledVersion);
+        Assert.Equal([1], result.AppliedVersions);
+        Assert.True((await manager.GetStatusAsync()).IsCompatible);
     }
 
     [Fact]
