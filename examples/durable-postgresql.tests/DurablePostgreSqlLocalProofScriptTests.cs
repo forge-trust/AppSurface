@@ -38,11 +38,16 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
         Assert.Contains("unset ROLE_SQL", script, StringComparison.Ordinal);
         Assert.DoesNotContain("-c \"$ROLE_SQL\"", script, StringComparison.Ordinal);
         Assert.Contains("APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS=420", script, StringComparison.Ordinal);
+        Assert.Contains("MAX_TIMEOUT_SECONDS=86400", script, StringComparison.Ordinal);
         Assert.Contains("set -m", script, StringComparison.Ordinal);
         Assert.Contains("FOREGROUND_PID_FILE", script, StringComparison.Ordinal);
         Assert.Contains("run_foreground", script, StringComparison.Ordinal);
         Assert.Contains("kill -TERM \"$$\"", script, StringComparison.Ordinal);
         Assert.Contains("signal_process_group -KILL \"$pid\"", script, StringComparison.Ordinal);
+        Assert.Contains("cleanup_container", script, StringComparison.Ordinal);
+        Assert.Contains("127.0.0.1::5432", script, StringComparison.Ordinal);
+        Assert.Contains("docker port \"$CONTAINER_NAME\" 5432/tcp", script, StringComparison.Ordinal);
+        Assert.Contains("APPSURFACE_DURABLE_PREREQUISITE_SKIP_PORT_CHECK=true", script, StringComparison.Ordinal);
         Assert.Contains("trap cleanup EXIT", script, StringComparison.Ordinal);
         Assert.Contains("trap interrupt INT TERM", script, StringComparison.Ordinal);
         Assert.DoesNotContain("POSTGRES_HOST_AUTH_METHOD=trust", script, StringComparison.Ordinal);
@@ -68,6 +73,7 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
         var fakeBin = Directory.CreateDirectory(Path.Combine(temporaryRoot, "bin")).FullName;
         var childPidFile = Path.Combine(temporaryRoot, "child.pid");
         var heartbeatFile = Path.Combine(temporaryRoot, "heartbeat");
+        var cleanupHeartbeatFile = Path.Combine(temporaryRoot, "cleanup-heartbeat");
 
         try
         {
@@ -89,8 +95,14 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
                 """
                 #!/bin/sh
                 case "${1:-}" in
-                  info|run|rm)
+                  info|run)
                     exit 0
+                    ;;
+                  rm)
+                    while :; do
+                      printf x >> "$APPSURFACE_TEST_CLEANUP_HEARTBEAT_FILE"
+                      sleep 0.05
+                    done
                     ;;
                   exec)
                     case "$*" in
@@ -144,6 +156,7 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
             startInfo.Environment["APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS"] = "2";
             startInfo.Environment["APPSURFACE_TEST_CHILD_PID_FILE"] = childPidFile;
             startInfo.Environment["APPSURFACE_TEST_HEARTBEAT_FILE"] = heartbeatFile;
+            startInfo.Environment["APPSURFACE_TEST_CLEANUP_HEARTBEAT_FILE"] = cleanupHeartbeatFile;
 
             var stopwatch = Stopwatch.StartNew();
             using var process = Process.Start(startInfo)!;
@@ -171,8 +184,10 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
             var childPid = await File.ReadAllTextAsync(childPidFile);
             Assert.Matches("^[0-9]+\\n?$", childPid);
             var heartbeatLength = new FileInfo(heartbeatFile).Length;
+            var cleanupHeartbeatLength = new FileInfo(cleanupHeartbeatFile).Length;
             await Task.Delay(TimeSpan.FromMilliseconds(300));
             Assert.Equal(heartbeatLength, new FileInfo(heartbeatFile).Length);
+            Assert.Equal(cleanupHeartbeatLength, new FileInfo(cleanupHeartbeatFile).Length);
             Assert.True(
                 await WaitForProcessExitAsync(int.Parse(childPid, CultureInfo.InvariantCulture)),
                 $"The local-proof command child {childPid.Trim()} remained alive after cleanup.");
@@ -331,7 +346,49 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
 
         Assert.Equal(2, process.ExitCode);
         Assert.Contains(
-            "APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS must be a positive integer.",
+            "APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS must be an integer from 1 through 86400.",
+            standardError,
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("86401")]
+    [InlineData("999999999999999999999")]
+    public async Task Adoption_measurement_rejects_deadlines_above_the_portable_sleep_bound(string deadline)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "The adoption measurement script is a Unix Bash entry point.");
+        }
+
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var scriptPath = TestPathUtils.PathUnder(
+            repositoryRoot,
+            "Durable",
+            "evidence",
+            "measure-issue-794-adoption.sh");
+        var startInfo = new ProcessStartInfo("/bin/bash")
+        {
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            WorkingDirectory = repositoryRoot,
+        };
+        startInfo.ArgumentList.Add(scriptPath);
+        startInfo.ArgumentList.Add("invalid-deadline");
+        startInfo.ArgumentList.Add("1");
+        startInfo.ArgumentList.Add("--");
+        startInfo.ArgumentList.Add("/usr/bin/true");
+        startInfo.Environment["APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS"] = deadline;
+
+        using var process = Process.Start(startInfo)!;
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        var standardError = await process.StandardError.ReadToEndAsync();
+
+        Assert.Equal(2, process.ExitCode);
+        Assert.Contains(
+            "APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS must be an integer from 1 through 86400.",
             standardError,
             StringComparison.Ordinal);
     }

@@ -36,6 +36,8 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
     private readonly IReadOnlyList<DurablePostgreSqlMigration> _migrations;
     private readonly TimeSpan _migrationLockAcquireTimeout;
     private readonly TimeSpan _migrationLockRetryDelay;
+    private readonly Action<bool>? _observeMigrationLockAttempt;
+    private readonly Action? _observeStatusConnectionOpenStarted;
     private readonly Action<TimeSpan>? _observeStatusConnectionAcquisition;
 
     /// <summary>Initializes a schema manager using a migration-owner data source.</summary>
@@ -49,6 +51,14 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
     /// <param name="migrations">Ordered, contiguous migration definitions.</param>
     /// <param name="migrationLockAcquireTimeout">Maximum time to wait for the session migration lock; <see langword="null"/> uses the 30-second production default.</param>
     /// <param name="migrationLockRetryDelay">Delay between non-blocking lock attempts; <see langword="null"/> uses the 100-millisecond production default.</param>
+    /// <param name="observeMigrationLockAttempt">
+    /// Optional observer invoked with each non-blocking migration-lock result.
+    /// Production composition leaves this null; concurrency tests use it instead of timing guesses.
+    /// </param>
+    /// <param name="observeStatusConnectionOpenStarted">
+    /// Optional observer invoked after the schema-status connection acquisition has started.
+    /// Production composition leaves this null; constrained-pool evidence uses it as a synchronization seam.
+    /// </param>
     /// <param name="observeStatusConnectionAcquisition">
     /// Optional observer for the schema-status connection acquisition inside <see cref="GetStatusAsync(CancellationToken)"/>.
     /// Production composition leaves this null; scale evidence uses it to measure the public health path.
@@ -59,6 +69,8 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         IReadOnlyList<DurablePostgreSqlMigration> migrations,
         TimeSpan? migrationLockAcquireTimeout = null,
         TimeSpan? migrationLockRetryDelay = null,
+        Action<bool>? observeMigrationLockAttempt = null,
+        Action? observeStatusConnectionOpenStarted = null,
         Action<TimeSpan>? observeStatusConnectionAcquisition = null)
     {
         _dataSource = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
@@ -70,6 +82,8 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         _migrationLockRetryDelay = RequirePositiveDuration(
             migrationLockRetryDelay ?? TimeSpan.FromMilliseconds(MigrationLockRetryDelayMilliseconds),
             nameof(migrationLockRetryDelay));
+        _observeMigrationLockAttempt = observeMigrationLockAttempt;
+        _observeStatusConnectionOpenStarted = observeStatusConnectionOpenStarted;
         _observeStatusConnectionAcquisition = observeStatusConnectionAcquisition;
     }
 
@@ -82,7 +96,9 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         var connectionStarted = _observeStatusConnectionAcquisition is null
             ? 0
             : Stopwatch.GetTimestamp();
-        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        var connectionOpen = _dataSource.OpenConnectionAsync(cancellationToken);
+        _observeStatusConnectionOpenStarted?.Invoke();
+        await using var connection = await connectionOpen.ConfigureAwait(false);
         if (_observeStatusConnectionAcquisition is { } observer)
         {
             observer(Stopwatch.GetElapsedTime(connectionStarted));
@@ -657,7 +673,9 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         {
             while (true)
             {
-                if (await command.ExecuteScalarAsync(lockCancellationToken).ConfigureAwait(false) is true)
+                var acquired = await command.ExecuteScalarAsync(lockCancellationToken).ConfigureAwait(false) is true;
+                _observeMigrationLockAttempt?.Invoke(acquired);
+                if (acquired)
                 {
                     return;
                 }

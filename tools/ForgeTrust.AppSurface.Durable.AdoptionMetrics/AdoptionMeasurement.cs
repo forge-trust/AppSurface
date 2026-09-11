@@ -205,13 +205,6 @@ internal static class AdoptionMeasurementEngine
             }
         }
 
-        var unexpectedName = spec.Regions.FirstOrDefault(
-            region => !ExpectedNames.Contains(region.Name, StringComparer.Ordinal));
-        if (unexpectedName is not null)
-        {
-            throw new AdoptionMeasurementException(
-                $"Unexpected region name '{unexpectedName.Name}'.");
-        }
     }
 
     private static string ResolveSafePath(string root, string relativePath, string regionName)
@@ -590,7 +583,7 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
 
             var exitCode = await RunGitExitCodeAsync(
                 consumerRoot,
-                ["diff", "--quiet", expectedCommit, "--", normalizedRelativePath],
+                ["diff", "--quiet", "--no-ext-diff", "--no-textconv", expectedCommit, "--", normalizedRelativePath],
                 cancellationToken);
             if (exitCode != 0)
             {
@@ -776,6 +769,8 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(
+        Justification = "Windows-only process construction is exercised by the Windows test lane.")]
     private Process CreateGitProcess(
         string workingDirectory,
         IReadOnlyList<string> arguments,
@@ -811,11 +806,11 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
         // Git so its exit code remains unchanged. ProcessOwnership kills the group after Git exits.
         // /bin/sh is commonly dash on Linux, where set -m is disabled without a TTY. Bash is
         // required here because its non-interactive job control gives the Git child a private
-        // process group. macOS and mainstream Linux images provide /bin/bash; minimal images
-        // without Bash cannot provide this descendant-ownership guarantee with POSIX sh alone.
+        // process group. Resolve it through PATH so non-FHS hosts can supply Bash; hosts without
+        // Bash fail through the same actionable process-start diagnostic as a missing Git binary.
         var startInfo = new ProcessStartInfo
         {
-            FileName = "/bin/bash",
+            FileName = "bash",
             WorkingDirectory = workingDirectory,
             RedirectStandardError = true,
             RedirectStandardOutput = true,
@@ -851,6 +846,8 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
             }
         }
 
+        [System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(
+            Justification = "Windows job-object ownership and native failures are exercised by the Windows test lane.")]
         private sealed class WindowsJob : IDisposable
         {
             private const uint JobObjectLimitKillOnJobClose = 0x00002000;

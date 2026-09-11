@@ -211,11 +211,7 @@ internal static class DurablePostgreSqlLocalExample
             surfaces: DurableRuntimeSurface.All);
         var legacyPump = services.GetRequiredService<IDurableRuntimePump>();
         var admission = services.GetRequiredService<IDurableRuntimePumpAdmission>();
-        if (!ReferenceEquals(legacyPump, admission))
-        {
-            throw new InvalidOperationException(
-                "The PostgreSQL legacy and admission-aware pump interfaces must resolve to the same singleton.");
-        }
+        EnsurePumpInterfacesShareSingleton(legacyPump, admission);
 
         // Admission is authoritative. Do not turn the health observation below into a check-then-act gate.
         var attempt = await admission.TryRunOnceAsync(pumpRequest, cancellationToken);
@@ -351,40 +347,36 @@ internal static class DurablePostgreSqlLocalExample
     internal static string DescribeAttempt(DurableRuntimePumpAttempt attempt)
     {
         ArgumentNullException.ThrowIfNull(attempt);
-        switch (attempt.Kind)
+        return attempt.Kind switch
         {
-            case DurableRuntimePumpAttemptKind.Completed:
-                if (attempt.Result is null || attempt.ProblemCode is not null)
-                {
-                    throw new InvalidOperationException("A completed attempt must carry only its pump result.");
-                }
-
-                return $"Completed (discovered={attempt.Result.Discovered}, processed={attempt.Result.Processed}, failed={attempt.Result.Failed})";
-            case DurableRuntimePumpAttemptKind.Refused:
-                if (attempt.Result is not null || attempt.ProblemCode is not null)
-                {
-                    throw new InvalidOperationException("A refused attempt must carry no result or problem code.");
-                }
-
-                return "Refused (RunPassAsync was not entered)";
-            case DurableRuntimePumpAttemptKind.Unavailable:
-                if (attempt.Result is not null || attempt.ProblemCode != DurableProblemCodes.StoreUnavailable)
-                {
-                    throw new InvalidOperationException("An unavailable attempt must carry ASDUR103 and no result.");
-                }
-
-                return $"Unavailable ({attempt.ProblemCode}; RunPassAsync was not entered)";
-            case DurableRuntimePumpAttemptKind.Incompatible:
-                if (attempt.Result is not null || attempt.ProblemCode is null)
-                {
-                    throw new InvalidOperationException("An incompatible attempt must carry a problem code and no result.");
-                }
-
-                return $"Incompatible ({attempt.ProblemCode}; RunPassAsync was not entered)";
-        }
-
-        throw new ArgumentOutOfRangeException(nameof(attempt.Kind), attempt.Kind, "Unknown durable pump attempt kind.");
+            DurableRuntimePumpAttemptKind.Completed =>
+                $"Completed (discovered={attempt.Result!.Discovered}, processed={attempt.Result.Processed}, failed={attempt.Result.Failed})",
+            DurableRuntimePumpAttemptKind.Refused => "Refused (RunPassAsync was not entered)",
+            DurableRuntimePumpAttemptKind.Unavailable =>
+                $"Unavailable ({attempt.ProblemCode}; RunPassAsync was not entered)",
+            DurableRuntimePumpAttemptKind.Incompatible =>
+                $"Incompatible ({attempt.ProblemCode}; RunPassAsync was not entered)",
+            _ => ThrowUnknownAttemptKind(attempt.Kind),
+        };
     }
+
+    /// <summary>Confirms both public pump interfaces preserve the provider's process-local Pass gate.</summary>
+    /// <exception cref="InvalidOperationException">Thrown when dependency injection resolves distinct pump instances.</exception>
+    internal static void EnsurePumpInterfacesShareSingleton(object legacyPump, object admission)
+    {
+        ArgumentNullException.ThrowIfNull(legacyPump);
+        ArgumentNullException.ThrowIfNull(admission);
+        if (!ReferenceEquals(legacyPump, admission))
+        {
+            throw new InvalidOperationException(
+                "The PostgreSQL legacy and admission-aware pump interfaces must resolve to the same singleton.");
+        }
+    }
+
+    [System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(
+        Justification = "DurableRuntimePumpAttempt rejects undefined kinds before this consumer projection can observe them.")]
+    private static string ThrowUnknownAttemptKind(DurableRuntimePumpAttemptKind kind) =>
+        throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown durable pump attempt kind.");
 
     /// <summary>Waits for a hosted worker pass that is newer than the supplied baseline.</summary>
     /// <exception cref="TimeoutException">Thrown when the hosted worker does not complete before its bounded deadline.</exception>

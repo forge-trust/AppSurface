@@ -28,7 +28,7 @@ public sealed class DurableVerificationScriptContractTests
     }
 
     [Fact]
-    public void Script_fingerprints_root_build_restore_inputs_without_generated_outputs_and_uses_portable_sha256()
+    public void Script_fingerprints_transitive_source_and_root_build_inputs_without_generated_outputs()
     {
         var script = ReadScript();
 
@@ -41,11 +41,21 @@ public sealed class DurableVerificationScriptContractTests
         Assert.Contains("global*.json", script, StringComparison.Ordinal);
         Assert.Contains("*nuget*.config", script, StringComparison.Ordinal);
         Assert.Contains("packages.lock.json", script, StringComparison.Ordinal);
+        Assert.Contains("ForgeTrust.AppSurface.Core", script, StringComparison.Ordinal);
+        Assert.Contains("Flow/ForgeTrust.AppSurface.Flow", script, StringComparison.Ordinal);
+        Assert.Contains("Flow/ForgeTrust.AppSurface.Flow.Generators", script, StringComparison.Ordinal);
+        Assert.Contains("Workers/ForgeTrust.AppSurface.Workers", script, StringComparison.Ordinal);
+        Assert.Contains("tests/ForgeTrust.AppSurface.Testing", script, StringComparison.Ordinal);
         Assert.Contains("Durable/compatibility/V2WorkHarness", script, StringComparison.Ordinal);
+        Assert.Contains("Durable/packed-consumers", script, StringComparison.Ordinal);
+        Assert.Contains("Durable/verify-packed-consumers.sh", script, StringComparison.Ordinal);
         Assert.Contains("ForgeTrust.AppSurface.slnx", script, StringComparison.Ordinal);
         Assert.Contains("NuGet.package-gate.config", script, StringComparison.Ordinal);
-        Assert.Contains("! -path '*/bin/*'", script, StringComparison.Ordinal);
-        Assert.Contains("! -path '*/obj/*'", script, StringComparison.Ordinal);
+        Assert.Contains("git -C \"$repo_root\" ls-files", script, StringComparison.Ordinal);
+        Assert.Contains("--cached", script, StringComparison.Ordinal);
+        Assert.Contains("--others", script, StringComparison.Ordinal);
+        Assert.Contains("--exclude-standard", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("find \"$repo_root/examples/durable-postgresql.tests\"", script, StringComparison.Ordinal);
         Assert.Contains("source_fingerprint=\"$(sha256_file", script, StringComparison.Ordinal);
         Assert.DoesNotContain("$(shasum -a 256", script, StringComparison.Ordinal);
         Assert.DoesNotContain("$(sha256sum", script, StringComparison.Ordinal);

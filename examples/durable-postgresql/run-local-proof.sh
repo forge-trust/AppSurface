@@ -20,11 +20,11 @@ FOREGROUND_PID=""
 FOREGROUND_PID_FILE="$(mktemp -t appsurface-durable-proof-pid.XXXXXX)"
 RUNTIME_EPOCH_FILE="$(mktemp -t appsurface-durable-proof-epoch.XXXXXX)"
 ROLE_SQL_FILE="$(mktemp -t appsurface-durable-proof-roles.XXXXXX)"
+LOCAL_PORT_FILE="$(mktemp -t appsurface-durable-proof-port.XXXXXX)"
+INTERRUPT_REQUESTED=0
+LAUNCHING_FOREGROUND=0
+MAX_TIMEOUT_SECONDS=86400
 
-cleanup() {
-  docker rm --force "$CONTAINER_NAME" >/dev/null 2>&1 || true
-  rm -f "$FOREGROUND_PID_FILE" "$RUNTIME_EPOCH_FILE" "$ROLE_SQL_FILE"
-}
 signal_process_group() {
   local signal="$1"
   local pid="$2"
@@ -53,6 +53,26 @@ terminate_process_group() {
   done
   signal_process_group -KILL "$pid"
 }
+cleanup_container() {
+  set -m
+  (docker rm --force "$CONTAINER_NAME" >/dev/null 2>&1) &
+  local cleanup_pid="$!"
+  set +m
+  for _ in {1..40}; do
+    if ! process_group_is_alive "$cleanup_pid"; then
+      wait "$cleanup_pid" 2>/dev/null || true
+      return
+    fi
+    sleep 0.05
+  done
+
+  signal_process_group -KILL "$cleanup_pid"
+  wait "$cleanup_pid" 2>/dev/null || true
+}
+cleanup() {
+  cleanup_container
+  rm -f "$FOREGROUND_PID_FILE" "$RUNTIME_EPOCH_FILE" "$ROLE_SQL_FILE" "$LOCAL_PORT_FILE"
+}
 terminate_foreground() {
   local pid="${FOREGROUND_PID:-}"
   if [[ -z "$pid" && -s "$FOREGROUND_PID_FILE" ]]; then
@@ -61,8 +81,11 @@ terminate_foreground() {
   terminate_process_group "$pid"
 }
 interrupt() {
+  INTERRUPT_REQUESTED=1
+  if [[ "$LAUNCHING_FOREGROUND" == 1 && -z "${FOREGROUND_PID:-}" ]]; then
+    return
+  fi
   terminate_foreground
-  cleanup
   exit 130
 }
 trap cleanup EXIT
@@ -72,8 +95,15 @@ WATCHDOG_PID=""
 if [[ -z "${APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS:-}" ]]; then
   APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS=420
 fi
-if [[ ! "$APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
-  printf 'APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS must be a positive integer.\n' >&2
+if [[ ! "$APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ \
+  || "${#APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS}" -gt 5 ]]; then
+  printf 'APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS must be an integer from 1 through %s.\n' \
+    "$MAX_TIMEOUT_SECONDS" >&2
+  exit 2
+fi
+if (( 10#$APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS > MAX_TIMEOUT_SECONDS )); then
+  printf 'APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS must be an integer from 1 through %s.\n' \
+    "$MAX_TIMEOUT_SECONDS" >&2
   exit 2
 fi
 (
@@ -84,11 +114,16 @@ fi
 ) &
 WATCHDOG_PID="$!"
 run_foreground() {
+  LAUNCHING_FOREGROUND=1
   set -m
   ("$@") &
   FOREGROUND_PID="$!"
   printf '%s' "$FOREGROUND_PID" > "$FOREGROUND_PID_FILE"
   set +m
+  LAUNCHING_FOREGROUND=0
+  if [[ "$INTERRUPT_REQUESTED" == 1 ]]; then
+    interrupt
+  fi
 
   local exit_code=0
   wait "$FOREGROUND_PID" 2>/dev/null || exit_code="$?"
@@ -105,39 +140,33 @@ stop_watchdog() {
 }
 trap 'stop_watchdog; cleanup' EXIT
 
-port_is_free() {
-  ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
-}
+LOCAL_PORT="${APPSURFACE_DURABLE_LOCAL_PORT:-}"
+if [[ -n "$LOCAL_PORT" ]]; then
+  run_foreground env APPSURFACE_DURABLE_PREREQUISITE_PORT="$LOCAL_PORT" \
+    bash "$ROOT_DIR/examples/durable-postgresql/check-prerequisites.sh"
+  PUBLISH_ARGUMENT="127.0.0.1:$LOCAL_PORT:5432"
+else
+  run_foreground env APPSURFACE_DURABLE_PREREQUISITE_SKIP_PORT_CHECK=true \
+    bash "$ROOT_DIR/examples/durable-postgresql/check-prerequisites.sh"
+  PUBLISH_ARGUMENT="127.0.0.1::5432"
+fi
 
-select_port() {
-  if [[ -n "${APPSURFACE_DURABLE_LOCAL_PORT:-}" ]]; then
-    printf '%s' "$APPSURFACE_DURABLE_LOCAL_PORT"
-    return
-  fi
-
-  local candidate
-  for candidate in {54329..54349}; do
-    if port_is_free "$candidate"; then
-      printf '%s' "$candidate"
-      return
-    fi
-  done
-
-  printf 'No free loopback port was found from 54329 through 54349.\n' >&2
-  return 1
-}
-
-LOCAL_PORT="$(select_port)"
-run_foreground env APPSURFACE_DURABLE_PREREQUISITE_PORT="$LOCAL_PORT" \
-  bash "$ROOT_DIR/examples/durable-postgresql/check-prerequisites.sh"
-
-printf '[run-local-proof] starting disposable PostgreSQL 16.5 on 127.0.0.1:%s\n' "$LOCAL_PORT"
+printf '[run-local-proof] starting disposable PostgreSQL 16.5\n'
 run_foreground docker run --detach --rm \
   --name "$CONTAINER_NAME" \
   --env POSTGRES_PASSWORD="$POSTGRES_ADMIN_PASSWORD" \
   --env POSTGRES_DB="$DATABASE_NAME" \
-  --publish "127.0.0.1:$LOCAL_PORT:5432" \
+  --publish "$PUBLISH_ARGUMENT" \
   "$POSTGRES_IMAGE" >/dev/null
+if [[ -z "$LOCAL_PORT" ]]; then
+  run_foreground docker port "$CONTAINER_NAME" 5432/tcp > "$LOCAL_PORT_FILE"
+  LOCAL_PORT="$(sed -n 's/^127\.0\.0\.1:\([0-9][0-9]*\)$/\1/p' "$LOCAL_PORT_FILE")"
+  if [[ ! "$LOCAL_PORT" =~ ^[0-9]{1,5}$ ]]; then
+    printf 'Docker did not report a valid dynamically allocated loopback port.\n' >&2
+    exit 1
+  fi
+fi
+printf '[run-local-proof] PostgreSQL is published on 127.0.0.1:%s\n' "$LOCAL_PORT"
 
 ready=0
 for _ in {1..30}; do

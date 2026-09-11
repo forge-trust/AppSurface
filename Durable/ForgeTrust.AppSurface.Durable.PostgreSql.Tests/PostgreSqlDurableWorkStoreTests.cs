@@ -223,13 +223,18 @@ public sealed class PostgreSqlDurableWorkStoreTests
             CreateRequest("scope-epoch-in-flight", "command-epoch-in-flight"));
         Assert.True(inFlight.IsSuccess);
 
-        var rotationApplicationName = $"slice3-epoch-rotation-{Guid.NewGuid():N}";
-        var rotationConnection = new NpgsqlConnectionStringBuilder(database.ConnectionString)
-        {
-            ApplicationName = rotationApplicationName,
-        };
-        await using var rotationDataSource = NpgsqlDataSource.Create(rotationConnection.ConnectionString);
-        var rotationManager = new PostgreSqlDurableRuntimeSchemaManager(rotationDataSource);
+        var blockedLockAttempt = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var rotationManager = new PostgreSqlDurableRuntimeSchemaManager(
+            database.DataSource,
+            DurablePostgreSqlMigrationCatalog.Load(),
+            observeMigrationLockAttempt: acquired =>
+            {
+                if (!acquired)
+                {
+                    blockedLockAttempt.TrySetResult();
+                }
+            });
         var newEpoch = Guid.NewGuid();
         var rotation = rotationManager.RotateRuntimeEpochAsync(
             oldEpoch,
@@ -237,8 +242,7 @@ public sealed class PostgreSqlDurableWorkStoreTests
             "tests",
             "recovery").AsTask();
 
-        await WaitForDatabaseSessionAsync(database.DataSource, rotationApplicationName);
-        await Task.Delay(TimeSpan.FromMilliseconds(250));
+        await blockedLockAttempt.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.False(rotation.IsCompleted);
         await acceptanceTransaction.CommitAsync();
         var rotated = await rotation.WaitAsync(TimeSpan.FromSeconds(30));
@@ -3152,33 +3156,6 @@ public sealed class PostgreSqlDurableWorkStoreTests
             transaction);
         scope.Parameters.AddWithValue("scope_id", scopeId.Value);
         await scope.ExecuteNonQueryAsync();
-    }
-
-    private static async ValueTask WaitForDatabaseSessionAsync(
-        NpgsqlDataSource dataSource,
-        string applicationName)
-    {
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            await using var command = dataSource.CreateCommand(
-                """
-                SELECT EXISTS
-                (
-                    SELECT 1
-                    FROM pg_catalog.pg_stat_activity
-                    WHERE application_name = @application_name
-                );
-                """);
-            command.Parameters.AddWithValue("application_name", applicationName);
-            if ((bool)(await command.ExecuteScalarAsync())!)
-            {
-                return;
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(100));
-        }
-
-        throw new TimeoutException("Runtime epoch rotation did not open its bounded lock-acquisition session.");
     }
 
     private static async ValueTask<int> WaitForBackendAsync(

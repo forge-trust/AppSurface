@@ -38,6 +38,20 @@ public sealed class DurableRuntimeAdmissionConsumerTests
     }
 
     [Fact]
+    public void PumpInterfaces_must_share_one_process_local_gate()
+    {
+        var pump = new object();
+        DurablePostgreSqlLocalExample.EnsurePumpInterfacesShareSingleton(pump, pump);
+
+        Assert.Throws<ArgumentNullException>(
+            () => DurablePostgreSqlLocalExample.EnsurePumpInterfacesShareSingleton(null!, pump));
+        Assert.Throws<ArgumentNullException>(
+            () => DurablePostgreSqlLocalExample.EnsurePumpInterfacesShareSingleton(pump, null!));
+        Assert.Throws<InvalidOperationException>(
+            () => DurablePostgreSqlLocalExample.EnsurePumpInterfacesShareSingleton(pump, new object()));
+    }
+
+    [Fact]
     public void DirectProof_requires_completed_useful_work_with_zero_failures()
     {
         DurablePostgreSqlLocalExample.EnsureDirectProofPassSucceeded(

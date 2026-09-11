@@ -23,12 +23,15 @@ From the repository root:
 bash examples/durable-postgresql/run-local-proof.sh
 ```
 
-The script checks .NET 10, Docker, and a free loopback port; starts the pinned PostgreSQL 16.5 image with local
-container-only trust authentication; creates the four restricted roles; builds with one MSBuild node and shared
-compilation disabled; explicitly applies schema 10; reruns the canonical role recipe; and runs both example commands.
-Its trap removes the uniquely named container on success, failure, interruption, or termination. It is destructive
-only to that disposable container and database. Use the manual transcript below when you need to review each
-credential or migration step separately.
+The script checks .NET 10 and Docker, asks Docker to atomically allocate a free loopback port, starts the pinned
+PostgreSQL 16.5 image with local container-only trust authentication, creates the four restricted roles, builds with
+one MSBuild node and shared compilation disabled, explicitly applies schema 10, reruns the canonical role recipe, and
+runs both example commands. Set `APPSURFACE_DURABLE_LOCAL_PORT` only when you need a specific reviewed port; the
+preflight then fails closed if it is occupied. The whole proof defaults to a 420-second deadline and accepts an
+`APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS` override from 1 through 86,400 seconds. Its trap bounds Docker
+cleanup independently and removes the uniquely named container on success, failure, interruption, or termination.
+It is destructive only to that disposable container and database. Use the manual transcript below when you need to
+review each credential or migration step separately.
 
 ## Prerequisites
 
@@ -36,7 +39,8 @@ Install all of the following before starting:
 
 - .NET 10 SDK.
 - Docker Engine or Docker Desktop with Linux containers.
-- A free local TCP port. The transcript defaults to `54329` but uses one shell variable so a different free loopback port stays consistent.
+- A free local TCP port for the manual transcript. It defaults to `54329` but uses one shell variable so a different
+  free loopback port stays consistent. The one-command proof asks Docker to allocate its port.
 - A repository checkout. The transcript creates its four separate local PostgreSQL roles: migration owner,
   payload-free dispatcher, scoped runtime, and dedicated retention operator.
 

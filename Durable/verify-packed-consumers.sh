@@ -7,6 +7,9 @@ TMP_ROOT="$(cd "${TMPDIR:-/tmp}" && pwd -P)"
 WORK_DIR="$(mktemp -d "$TMP_ROOT/appsurface-durable-consumers.XXXXXX")"
 FEED_DIR="$WORK_DIR/feed"
 CONFIG_FILE="$WORK_DIR/NuGet.config"
+ARTIFACTS_DIR="$WORK_DIR/artifacts"
+export NUGET_PACKAGES="$WORK_DIR/packages"
+export DOTNET_CLI_HOME="$WORK_DIR/dotnet-home"
 
 cleanup() {
   if [[ -n "${WORK_DIR:-}" \
@@ -18,7 +21,7 @@ cleanup() {
 
 trap cleanup EXIT
 
-mkdir -p "$FEED_DIR"
+mkdir -p "$FEED_DIR" "$ARTIFACTS_DIR" "$NUGET_PACKAGES" "$DOTNET_CLI_HOME"
 
 projects=(
   "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"
@@ -77,11 +80,13 @@ verify_assets_package() {
 for project in "${projects[@]}"; do
   dotnet restore "$ROOT_DIR/$project" \
     --locked-mode \
+    --artifacts-path "$ARTIFACTS_DIR" \
     -m:1 \
     -p:UseSharedCompilation=false
   dotnet pack "$ROOT_DIR/$project" \
     --configuration Release \
     --no-restore \
+    --artifacts-path "$ARTIFACTS_DIR" \
     --output "$FEED_DIR" \
     -m:1 \
     -p:PackageVersion="$PACKAGE_VERSION" \
@@ -110,10 +115,6 @@ sed "s|__LOCAL_FEED__|$FEED_DIR|g" > "$CONFIG_FILE" <<'EOF'
   </packageSourceMapping>
 </configuration>
 EOF
-
-export NUGET_PACKAGES="$WORK_DIR/packages"
-export DOTNET_CLI_HOME="$WORK_DIR/dotnet-home"
-mkdir -p "$NUGET_PACKAGES" "$DOTNET_CLI_HOME"
 
 for consumer in Adopter Provider PostgreSqlProvider; do
   consumer_dir="$WORK_DIR/$consumer"

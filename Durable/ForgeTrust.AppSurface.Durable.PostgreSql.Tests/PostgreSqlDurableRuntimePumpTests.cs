@@ -505,6 +505,39 @@ public sealed class PostgreSqlDurableRuntimePumpTests
     }
 
     [Fact]
+    public async Task DefaultConstructor_UsesTheProductionPassExecutor()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "default-constructor");
+        await using var provider = CreateWorkProvider(
+            database,
+            new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
+            new SuccessfulWorkRegistration(),
+            "runtime-pump-default-constructor-worker");
+
+        var pump = new PostgreSqlDurableRuntimePump(
+            provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>(),
+            provider.GetRequiredService<IDurableRuntimeSchemaManager>(),
+            provider.GetRequiredService<PostgreSqlDurableRuntimeHealth>(),
+            provider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+            provider.GetRequiredService<PostgreSqlDurableFlowProcessor>(),
+            provider.GetRequiredService<PostgreSqlDurableScheduleProcessor>(),
+            provider.GetRequiredService<IDurableWorkRegistry>(),
+            new PostgreSqlDurableWorkContractSelection(provider.GetRequiredService<IDurableWorkRegistry>()),
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            provider.GetRequiredService<IDurableRuntimeExecutionBoundary>(),
+            provider.GetRequiredService<DurableRuntimeAdmissionGate>());
+
+        var result = await pump.RunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
+
+        Assert.Equal(0, result.Processed);
+    }
+
+    [Fact]
     public async Task RunOnceAsync_ProcessesRegisteredFlowThroughTheProviderProcessor()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();

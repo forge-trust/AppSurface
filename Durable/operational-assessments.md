@@ -272,7 +272,7 @@ operators must review actual output and the generated SQL before applying it.
 | Runtime | Schema 9 | Schema 10 with reconciled roles |
 | --- | --- | --- |
 | #794 package | Upgrade required; do not activate | Supported |
-| `v0.2.0-preview.8` | Supported | Supported rollback reader/writer; mandatory smoke test |
+| `v0.2.0-preview.8` | Supported | Supported rollback Work reader/writer; mandatory exact-package smoke test |
 | Pre-`0009` package | Stop before role reconciliation | Unsupported |
 
 ## Rollback to v0.2.0-preview.8
@@ -283,7 +283,7 @@ recipe. The additive migration remains in place; do not delete migration rows or
 | Binary | Schema 9 | Schema 10 | Action |
 | --- | --- | --- | --- |
 | #794 binary | Upgrade required | Current/compatible | Apply migration and roles before activation |
-| `v0.2.0-preview.8` | Current/compatible | Compatible reader/writer: its published range includes 10 and migration 0010 preserves the function signature | Stop activation, deploy this binary, smoke-test status/health/heartbeat/real Work, then decide whether to continue |
+| `v0.2.0-preview.8` | Current/compatible | Compatible Work reader/writer: its published range includes 10 and migration 0010 preserves the Work discovery function signature | Stop activation, deploy this binary, smoke-test status/health/heartbeat/real Work, then decide whether to continue; this exact-package proof makes no Flow or Schedule rollback claim |
 | Pre-`0009` binary | Not a supported post-role-recipe rollback | Not supported | Keep stopped; repair forward or restore the reviewed role posture |
 
 If a schema-10 function defect is found, stop activation and use a reviewed corrective forward migration. Never edit

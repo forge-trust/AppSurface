@@ -1171,7 +1171,7 @@ Publish and verify this matrix:
 
 | Package/runtime | Schema 9 | Schema 10 | Role recipe after `0010` |
 | --- | --- | --- | --- |
-| `v0.2.0-preview.8` rollback artifact | Compatible/current | Compatible reader and writer under range 1–10; old health semantics remain | Required before rollback smoke test |
+| `v0.2.0-preview.8` rollback artifact | Compatible/current | Compatible Work reader and writer under range 1–10; old health semantics remain; no Flow or Schedule rollback claim | Required before rollback smoke test |
 | #794 package | Upgrade required | Compatible/current | Required before activation |
 | Pre-`0009` package | Not a supported post-role-recipe rollback | Not supported | Must remain stopped |
 

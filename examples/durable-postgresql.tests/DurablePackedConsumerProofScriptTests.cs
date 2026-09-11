@@ -12,6 +12,8 @@ public sealed class DurablePackedConsumerProofScriptTests
         var script = File.ReadAllText(scriptPath);
 
         Assert.Contains("export NUGET_PACKAGES=\"$WORK_DIR/packages\"", script, StringComparison.Ordinal);
+        Assert.Contains("ARTIFACTS_DIR=\"$WORK_DIR/artifacts\"", script, StringComparison.Ordinal);
+        Assert.Contains("--artifacts-path \"$ARTIFACTS_DIR\"", script, StringComparison.Ordinal);
         Assert.Contains("--configfile \"$CONFIG_FILE\"", script, StringComparison.Ordinal);
         Assert.Contains("<clear />", script, StringComparison.Ordinal);
         Assert.Contains("<package pattern=\"ForgeTrust.*\" />", script, StringComparison.Ordinal);

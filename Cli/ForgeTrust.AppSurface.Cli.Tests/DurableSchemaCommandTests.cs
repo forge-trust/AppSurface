@@ -306,7 +306,7 @@ public sealed class DurableSchemaCommandTests
         await command.ExecuteAsync(console);
 
         var script = console.ReadOutputString();
-        Assert.Contains("SELECT pg_advisory_lock", script, StringComparison.Ordinal);
+        Assert.Contains("pg_catalog.pg_try_advisory_lock", script, StringComparison.Ordinal);
         Assert.Contains("SELECT pg_advisory_unlock", script, StringComparison.Ordinal);
         Assert.DoesNotContain("Migration 000", script, StringComparison.Ordinal);
     }

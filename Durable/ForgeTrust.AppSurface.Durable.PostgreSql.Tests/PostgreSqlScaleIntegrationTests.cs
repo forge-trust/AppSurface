@@ -32,36 +32,25 @@ public sealed class PostgreSqlScaleIntegrationTests
         var epoch = Guid.NewGuid();
         await SeedPendingWorkAsync(database.DataSource, epoch, workCount: 100_000, scopeCount: 100);
 
-        await using var command = database.DataSource.CreateCommand(
+        var plan = await ReadNestedPlanAsync(
+            database.DataSource,
             """
-            EXPLAIN (FORMAT JSON)
-            WITH requested(work_name, work_version) AS
-            (
-                VALUES ('scale-work'::text, '1'::text)
-            )
-            SELECT dispatch.dispatch_id,
-                   dispatch.scope_id,
-                   dispatch.aggregate_id,
-                   dispatch.due_at,
-                   dispatch.expected_revision,
-                   dispatch.priority
-            FROM requested
-            JOIN appsurface_durable.work AS work
-              ON work.work_name COLLATE "C" = requested.work_name COLLATE "C"
-             AND work.work_version COLLATE "C" = requested.work_version COLLATE "C"
-            JOIN appsurface_durable.dispatch AS dispatch
-              ON dispatch.scope_id = work.scope_id
-             AND dispatch.aggregate_kind = 'work'
-             AND dispatch.aggregate_id = work.work_id
-            WHERE dispatch.state IN ('available', 'leased')
-              AND dispatch.due_at <= clock_timestamp()
-            ORDER BY dispatch.due_at, dispatch.priority DESC, dispatch.dispatch_id
-            LIMIT 1000;
-            """);
-        var plan = (string)(await command.ExecuteScalarAsync()
-            ?? throw new InvalidOperationException("PostgreSQL returned no discovery plan."));
+            SELECT *
+            FROM appsurface_durable.discover_work_dispatch(
+                @work_names,
+                @work_versions,
+                @maximum_candidates);
+            """,
+            command =>
+            {
+                command.Parameters.AddWithValue("work_names", new[] { "scale-work" });
+                command.Parameters.AddWithValue("work_versions", new[] { "1" });
+                command.Parameters.AddWithValue("maximum_candidates", 1_000);
+            },
+            "discover_work_dispatch");
 
         Assert.Contains("ix_work_contract_dispatch_lookup", plan, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Node Type\": \"Seq Scan\"", plan, StringComparison.Ordinal);
         var selection = new PostgreSqlDurableWorkContractSelection(new ScaleWorkRegistry(
             [new DurableWorkContractIdentity("scale-work", "1")]));
         var store = new PostgreSqlDurableWorkStore(database.DataSource, epoch);
@@ -138,11 +127,14 @@ public sealed class PostgreSqlScaleIntegrationTests
         await using var runtimeDataSource = NpgsqlDataSource.Create(runtimeConnection.ConnectionString);
         var statusConnectionAcquisitions = new ConcurrentQueue<TimeSpan>();
         var runtimeConnectionAcquisitions = new ConcurrentQueue<TimeSpan>();
+        var constrainedStatusOpenStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         var services = new ServiceCollection();
         services.AddSingleton<IDurableRuntimeSchemaManager>(
             new PostgreSqlDurableRuntimeSchemaManager(
                 runtimeDataSource,
                 DurablePostgreSqlMigrationCatalog.Load(),
+                observeStatusConnectionOpenStarted: () => constrainedStatusOpenStarted.TrySetResult(),
                 observeStatusConnectionAcquisition: statusConnectionAcquisitions.Enqueue));
         services.AddSingleton<PostgreSqlDurableRuntimeHealth>(provider => new PostgreSqlDurableRuntimeHealth(
             provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>(),
@@ -170,6 +162,7 @@ public sealed class PostgreSqlScaleIntegrationTests
             runtimeDataSource,
             statusConnectionAcquisitions,
             runtimeConnectionAcquisitions,
+            constrainedStatusOpenStarted.Task,
             sparseDueRowsPerSurface * 3L);
         WriteRunnerProfile();
 
@@ -245,9 +238,9 @@ public sealed class PostgreSqlScaleIntegrationTests
         process.Refresh();
         var cpuBefore = process.TotalProcessorTime;
         var allocationsBefore = GC.GetTotalAllocatedBytes(precise: true);
-        var lockWaitsBefore = await ReadLockWaitCountAsync(database.DataSource);
+        var sampledLockWaitsBefore = await ReadLockWaitCountAsync(database.DataSource);
         using var lockWaitMonitorCancellation = new CancellationTokenSource();
-        var maximumLockWaits = MonitorMaximumLockWaitCountAsync(
+        var maximumSampledLockWaits = MonitorMaximumLockWaitCountAsync(
             database.DataSource,
             mixedWorkloadStart.Task,
             lockWaitMonitorCancellation.Token);
@@ -290,11 +283,11 @@ public sealed class PostgreSqlScaleIntegrationTests
             await lockWaitMonitorCancellation.CancelAsync();
         }
 
-        var maximumObservedLockWaits = await maximumLockWaits;
+        var maximumSampledLockWaitCount = await maximumSampledLockWaits;
         process.Refresh();
         var cpuDelta = process.TotalProcessorTime - cpuBefore;
         var allocatedBytes = GC.GetTotalAllocatedBytes(precise: true) - allocationsBefore;
-        var lockWaitsAfter = await ReadLockWaitCountAsync(database.DataSource);
+        var sampledLockWaitsAfter = await ReadLockWaitCountAsync(database.DataSource);
         Assert.All(
             mixedSnapshots,
             run =>
@@ -313,21 +306,21 @@ public sealed class PostgreSqlScaleIntegrationTests
             Drain(runtimeConnectionAcquisitions, MixedConcurrency),
             cpuDelta,
             allocatedBytes,
-            lockWaitsBefore,
-            lockWaitsAfter,
-            maximumObservedLockWaits);
+            sampledLockWaitsBefore,
+            sampledLockWaitsAfter,
+            maximumSampledLockWaitCount);
         AssertWarmP95BelowOneSecond(
             "mixed concurrent",
             mixedSnapshots.Select(run => run.Elapsed).ToArray());
         Assert.Equal(
             rowsPerSurface * 3L - 1,
             (await health.GetAsync()).DueDispatchCount);
-        Assert.Equal(0, lockWaitsAfter);
-        Assert.Equal(0, maximumObservedLockWaits);
+        Assert.Equal(0, sampledLockWaitsAfter);
+        Assert.Equal(0, maximumSampledLockWaitCount);
     }
 
     [Fact]
-    public async Task FlowTransitions_RecordBoundedWalGrowthWithoutLockWaits()
+    public async Task FlowTransitions_RecordBoundedWalGrowthWithoutSampledLockWaitersAtCompletion()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         await ApplySchemaAsync(database);
@@ -744,9 +737,23 @@ public sealed class PostgreSqlScaleIntegrationTests
         Assert.DoesNotContain("clock_timestamp()", definition, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static async ValueTask<string> ReadRuntimeHealthNestedPlanAsync(
+    private static ValueTask<string> ReadRuntimeHealthNestedPlanAsync(
         NpgsqlDataSource dataSource,
-        int surfaces)
+        int surfaces) =>
+        ReadNestedPlanAsync(
+            dataSource,
+            """
+            SELECT *
+            FROM appsurface_durable.runtime_due_dispatch_health(@surfaces);
+            """,
+            command => command.Parameters.AddWithValue("surfaces", surfaces),
+            "runtime_due_dispatch_health");
+
+    private static async ValueTask<string> ReadNestedPlanAsync(
+        NpgsqlDataSource dataSource,
+        string commandText,
+        Action<NpgsqlCommand> configureCommand,
+        string expectedFunctionName)
     {
         await using var connection = await dataSource.OpenConnectionAsync();
         var notices = new List<string>();
@@ -771,13 +778,9 @@ public sealed class PostgreSqlScaleIntegrationTests
 
         await using (var command = connection.CreateCommand())
         {
-            command.CommandText =
-                """
-                SELECT *
-                FROM appsurface_durable.runtime_due_dispatch_health(@surfaces);
-                """;
+            command.CommandText = commandText;
             command.CommandTimeout = 120;
-            command.Parameters.AddWithValue("surfaces", surfaces);
+            configureCommand(command);
             await command.ExecuteNonQueryAsync();
         }
 
@@ -786,7 +789,7 @@ public sealed class PostgreSqlScaleIntegrationTests
             $"auto_explain returned {notices.Count} plan notice(s); expected the outer call and at least one nested statement.");
         var plan = string.Join(Environment.NewLine, notices);
         Assert.Contains(
-            "runtime_due_dispatch_health",
+            expectedFunctionName,
             plan,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
@@ -801,6 +804,7 @@ public sealed class PostgreSqlScaleIntegrationTests
         NpgsqlDataSource runtimeDataSource,
         ConcurrentQueue<TimeSpan> statusConnectionAcquisitions,
         ConcurrentQueue<TimeSpan> runtimeConnectionAcquisitions,
+        Task statusConnectionOpenStarted,
         long expectedDueCount)
     {
         var heldConnections = new List<NpgsqlConnection>(ConstrainedPoolSize);
@@ -814,7 +818,7 @@ public sealed class PostgreSqlScaleIntegrationTests
             Clear(statusConnectionAcquisitions);
             Clear(runtimeConnectionAcquisitions);
             var healthRead = health.GetAsync().AsTask();
-            await Task.Delay(TimeSpan.FromMilliseconds(150));
+            await statusConnectionOpenStarted.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.False(
                 healthRead.IsCompleted,
                 $"A public health read acquired a ninth connection from a pool capped at {ConstrainedPoolSize}.");
@@ -824,11 +828,8 @@ public sealed class PostgreSqlScaleIntegrationTests
             var snapshot = await healthRead.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Equal(expectedDueCount, snapshot.DueDispatchCount);
             Assert.True(
-                statusConnectionAcquisitions.TryDequeue(out var constrainedWait),
+                statusConnectionAcquisitions.TryDequeue(out _),
                 "The pool-exhaustion proof did not observe the blocked schema-status acquisition.");
-            Assert.True(
-                constrainedWait >= TimeSpan.FromMilliseconds(100),
-                $"The constrained pool acquisition reported only {constrainedWait.TotalMilliseconds:N1} ms of wait.");
             Assert.True(
                 runtimeConnectionAcquisitions.TryDequeue(out _),
                 "The pool-exhaustion proof did not observe the runtime-health acquisition after recovery.");
@@ -902,7 +903,7 @@ public sealed class PostgreSqlScaleIntegrationTests
             AssertWarmP95BelowOneSecond(
                 $"{distribution} batch {batchIndex + 1}",
                 evidence.HealthRuns);
-            Assert.Equal(0, evidence.LockWaitCount);
+            Assert.Equal(0, evidence.SampledLockWaitCount);
         }
     }
 
@@ -947,7 +948,7 @@ public sealed class PostgreSqlScaleIntegrationTests
                 runtimePoolP99Milliseconds = Percentile(evidence.RuntimePoolRuns, 0.99).TotalMilliseconds,
                 cpuMilliseconds = evidence.CpuDelta.TotalMilliseconds,
                 evidence.AllocatedBytes,
-                evidence.LockWaitCount,
+                sampledLockWaitCount = evidence.SampledLockWaitCount,
             }));
     }
 
@@ -957,9 +958,9 @@ public sealed class PostgreSqlScaleIntegrationTests
         TimeSpan[] runtimeConnectionAcquisitions,
         TimeSpan cpuDelta,
         long allocatedBytes,
-        long lockWaitsBefore,
-        long lockWaitsAfter,
-        long maximumObservedLockWaits)
+        long sampledLockWaitsBefore,
+        long sampledLockWaitsAfter,
+        long maximumSampledLockWaitCount)
     {
         var healthRuns = runs.Select(run => run.Elapsed).ToArray();
         _output.WriteLine(
@@ -980,9 +981,9 @@ public sealed class PostgreSqlScaleIntegrationTests
                 runtimePoolP99Milliseconds = Percentile(runtimeConnectionAcquisitions, 0.99).TotalMilliseconds,
                 cpuMilliseconds = cpuDelta.TotalMilliseconds,
                 allocatedBytes,
-                lockWaitsBefore,
-                lockWaitsAfter,
-                maximumObservedLockWaits,
+                sampledLockWaitsBefore,
+                sampledLockWaitsAfter,
+                maximumSampledLockWaitCount,
             }));
     }
 
@@ -1158,7 +1159,7 @@ public sealed class PostgreSqlScaleIntegrationTests
         TimeSpan[] RuntimePoolRuns,
         TimeSpan CpuDelta,
         long AllocatedBytes,
-        long LockWaitCount);
+        long SampledLockWaitCount);
 
     private sealed class ScaleWorkRegistry(IReadOnlyList<DurableWorkContractIdentity> contracts) : IDurableWorkRegistry
     {

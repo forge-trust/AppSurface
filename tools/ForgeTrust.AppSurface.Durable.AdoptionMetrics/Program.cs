@@ -19,6 +19,8 @@ internal static class Program
           -h, --help              Show this help.
         """;
 
+    [System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(
+        Justification = "Process entry-point Ctrl+C wiring delegates to RunAsync, which is covered directly.")]
     internal static async Task<int> Main(string[] args)
     {
         using var cancellation = new CancellationTokenSource();

@@ -166,31 +166,32 @@ if [[ -n "$evidence_mode" || -n "$evidence_output" ]]; then
 
   source_file_list="$work_dir/source-files.txt"
   source_hashes="$work_dir/source-hashes.txt"
-  find \
-    "$repo_root/Durable/ForgeTrust.AppSurface.Durable" \
-    "$repo_root/Durable/ForgeTrust.AppSurface.Durable.Provider" \
-    "$repo_root/Durable/ForgeTrust.AppSurface.Durable.PostgreSql" \
-    "$repo_root/Durable/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost" \
-    "$repo_root/Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests" \
-    -type f \
-    ! -path '*/bin/*' \
-    ! -path '*/obj/*' \
-    -print > "$source_file_list"
-  find "$repo_root/examples/durable-postgresql" \
-    -type f \
-    ! -path '*/bin/*' \
-    ! -path '*/obj/*' \
-    -print >> "$source_file_list"
-  find "$repo_root/examples/durable-postgresql.tests" \
-    -type f \
-    ! -path '*/bin/*' \
-    ! -path '*/obj/*' \
-    -print >> "$source_file_list"
-  find "$repo_root/Durable/compatibility/V2WorkHarness" \
-    -type f \
-    ! -path '*/bin/*' \
-    ! -path '*/obj/*' \
-    -print >> "$source_file_list"
+  source_roots=(
+    "ForgeTrust.AppSurface.Core"
+    "Flow/ForgeTrust.AppSurface.Flow"
+    "Flow/ForgeTrust.AppSurface.Flow.Generators"
+    "Workers/ForgeTrust.AppSurface.Workers"
+    "tests/ForgeTrust.AppSurface.Testing"
+    "Durable/ForgeTrust.AppSurface.Durable"
+    "Durable/ForgeTrust.AppSurface.Durable.Provider"
+    "Durable/ForgeTrust.AppSurface.Durable.PostgreSql"
+    "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost"
+    "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests"
+    "examples/durable-postgresql"
+    "examples/durable-postgresql.tests"
+    "Durable/compatibility/V2WorkHarness"
+    "Durable/packed-consumers"
+  )
+  while IFS= read -r source_file; do
+    printf '%s/%s\n' "$repo_root" "$source_file"
+  done < <(
+    git -C "$repo_root" ls-files \
+      --cached \
+      --others \
+      --exclude-standard \
+      -- \
+      "${source_roots[@]}"
+  ) > "$source_file_list"
   find "$repo_root" -maxdepth 1 -type f \
     \( \
       -name 'Directory.Build.props' \
@@ -205,7 +206,7 @@ if [[ -n "$evidence_mode" || -n "$evidence_output" ]]; then
     -print >> "$source_file_list"
   printf '%s\n' \
     "$repo_root/Durable/verify-postgresql.sh" \
-    "$repo_root/Durable/packed-consumers/PostgreSqlProvider/PostgreSqlReadmeProof.cs" \
+    "$repo_root/Durable/verify-packed-consumers.sh" \
     "$repo_root/Durable/configure-postgresql-roles.sql" \
     "$repo_root/Cli/ForgeTrust.AppSurface.Cli/DurableSchemaCommand.cs" \
     "$repo_root/Cli/ForgeTrust.AppSurface.Cli.Tests/DurableSchemaCommandTests.cs" \

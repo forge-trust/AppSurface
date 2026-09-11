@@ -19,24 +19,38 @@ fi
 LABEL="$1"
 RUNS="$2"
 shift 3
+MAX_TIMEOUT_SECONDS=86400
 
 if [[ -z "${APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS:-}" ]]; then
   APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS=420
 fi
-if [[ ! "$APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
-  printf 'APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS must be a positive integer.\n' >&2
+if [[ ! "$APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ \
+  || "${#APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS}" -gt 5 ]]; then
+  printf 'APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS must be an integer from 1 through %s.\n' \
+    "$MAX_TIMEOUT_SECONDS" >&2
+  exit 2
+fi
+if (( 10#$APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS > MAX_TIMEOUT_SECONDS )); then
+  printf 'APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS must be an integer from 1 through %s.\n' \
+    "$MAX_TIMEOUT_SECONDS" >&2
   exit 2
 fi
 
 timeout_marker="$(mktemp -t appsurface-durable-measurement-timeout.XXXXXX)"
 command_pid=""
 watchdog_pid=""
+interrupt_requested=0
+launching_command=0
 cleanup() {
   terminate_process_group "$command_pid"
   terminate_process_group "$watchdog_pid"
   rm -f "$timeout_marker"
 }
 interrupt() {
+  interrupt_requested=1
+  if [[ "$launching_command" == 1 && -z "$command_pid" ]]; then
+    return
+  fi
   cleanup
   exit 130
 }
@@ -79,8 +93,13 @@ for ((run = 1; run <= RUNS; run++)); do
   started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   started_seconds="$(date +%s)"
   : > "$timeout_marker"
+  launching_command=1
   ("$@") >&2 &
   command_pid="$!"
+  launching_command=0
+  if [[ "$interrupt_requested" == 1 ]]; then
+    interrupt
+  fi
   (
     sleep "$APPSURFACE_DURABLE_MEASUREMENT_TIMEOUT_SECONDS"
     printf 'Measurement `%s` run %s exceeded its %s-second deadline.\n' \
