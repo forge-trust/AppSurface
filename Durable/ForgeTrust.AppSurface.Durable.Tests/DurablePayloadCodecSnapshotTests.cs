@@ -146,6 +146,18 @@ public sealed class DurablePayloadCodecSnapshotTests
     }
 
     [Fact]
+    public void Typed_view_rejects_null_decode_output()
+    {
+        var source = new DefinitionTestCodec<string>(decode: _ => null!);
+        var view = Assert.IsAssignableFrom<IDurablePayloadCodec<string>>(
+            DurablePayloadCodecSnapshot.Capture<string>(source).CreateView());
+        var payload = view.Encode("hello");
+
+        Assert.Throws<InvalidOperationException>(() => view.Decode(payload));
+        Assert.Equal(1, source.DecodeCalls);
+    }
+
+    [Fact]
     public void Typed_view_preserves_policy_serializer_and_size_exceptions()
     {
         var policyFailure = new ArgumentException("policy rejected", "value");

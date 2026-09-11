@@ -4,7 +4,7 @@ Invocation 1, cycle budget 4. Cycle 1 started 2026-09-10. Review uses the canoni
 
 Preamble: protocol 1, interactive, artifact sync off, continuous local checkpoints, push disabled. Skill analytics append was denied by sandbox; no uploaded telemetry claim. Native `combo/sub` review transport follows the user policy. Nested Codex CLI and Claude-labelled passes are not run; no model-family independence claimed.
 
-Scope: all changes implement the approved #800 SDK plan. No UI/database schema/runtime authority changes. Existing #800 adoption timing TODO remains deferred per approved T1. Plan artifacts are present; runnable verification is still underway and cannot yet be marked complete.
+Scope: all changes implement the approved #800 SDK plan. No UI/database schema/runtime authority changes. Existing #800 adoption timing TODO remains deferred per approved T1. Plan artifacts are present; executable verification is still underway and cannot yet be marked complete.
 
 Specialists selected: testing, maintainability, security, performance, API contract, simplification; design and data migration skipped (no UI or schema). Fresh independent reviews pending available worker slots. Red-team and adversarial pass follow specialist results.
 

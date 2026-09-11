@@ -70,7 +70,7 @@ var request = Definition.CreateRequest(
     dueAtUtc: null);
 ```
 
-This is an API sketch, not an independently runnable example. The implementation must put equivalent complete, compiled examples in the packed adopter fixture and reference them from documentation.
+This is an API sketch, not an independently executable example. The implementation must put equivalent complete, compiled examples in the packed adopter fixture and reference them from documentation.
 
 Preserve the issue's exact request-factory argument order and defaults:
 
@@ -265,11 +265,11 @@ Tests are requirements for implementation, not checks claimed to have run during
 
 Add focused definition/binding test files rather than further expanding the monolithic contract test class. Use ordinary test doubles and intentional internal seams, not reflection. Keep PostgreSQL tests bounded and reuse the existing disposable database fixture and runtime-role configuration.
 
-Extend [the packed-consumer proof](../../Durable/verify-packed-consumers.sh) using its isolated local NuGet feed and temporary directories. Compile valid terse syntax for all three binding styles, differing codec identities, and unchanged legacy syntax against the produced package. Retain its existing runnable adopter/provider proofs; do not replace them with compile-only checks.
+Extend [the packed-consumer proof](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-packed-consumers.sh) using its isolated local NuGet feed and temporary directories. Compile valid terse syntax for all three binding styles, differing codec identities, and unchanged legacy syntax against the produced package. Retain its existing executable adopter/provider proofs; do not replace them with compile-only checks.
 
 Add compile-negative disposable fixtures for wrong ordinary executor Work/result types, wrong reconciler types, wrong exit executor types, a non-class implementation against the class constraint, and attempting a reconciler on an exit binding. Put `// expected-compiler-error: CS0311` on the deliberately invalid statement for incompatible interface constraints; use `CS0452` for the non-class constraint and `CS1061` for the missing exit-binding member. Keep one intentional invalid statement per fixture. Restore each fixture successfully first, then build with `--no-restore` and capture structured compiler diagnostics. Require a nonzero compile exit, at least one allowed diagnostic at that exact marked source line, and no unexpected error diagnostics anywhere. If a compiler version legitimately emits an additional diagnostic, document a fixture-specific exact allowlist with a positive control; do not broadly accept a diagnostic family or arbitrary failure. Missing packages, restore failure, infrastructure failure, or errors only elsewhere must fail the harness. Compile the corresponding valid statement against the same local package feed as a positive control.
 
-Run formatting, affected analyzer/API-baseline checks, focused Durable and PostgreSQL tests, the packed proof, and [solution coverage](../../scripts/coverage-solution.sh) when practical. Aim for nearly complete changed-branch verification, including guards and failure paths. The packed proof already runs in [build CI](../../.github/workflows/build.yml) and [coverage-efficiency CI](../../.github/workflows/coverage-efficiency.yml); extend that script so these invocations execute the new positive/negative fixtures as well.
+Run formatting, affected analyzer/API-baseline checks, focused Durable and PostgreSQL tests, the packed proof, and [solution coverage](https://github.com/forge-trust/AppSurface/blob/main/scripts/coverage-solution.sh) when practical. Aim for nearly complete changed-branch verification, including guards and failure paths. The packed proof already runs in [build CI](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) and [coverage-efficiency CI](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/coverage-efficiency.yml); extend that script so these invocations execute the new positive/negative fixtures as well.
 
 ### Issue #800 traceability
 
@@ -290,13 +290,13 @@ Run formatting, affected analyzer/API-baseline checks, focused Durable and Postg
 
 Update XML reference/remarks/exception documentation for every affected public and internal API, including snapshot/view/provenance helpers and registry construction. Explain defaults, validation timing, thread safety, codec identity, static reuse, lifetime, and when direct request construction is appropriate.
 
-Update the [package README](../../Durable/ForgeTrust.AppSurface.Durable/README.md), [Durable overview](../../Durable/README.md), [Work protocol](../../Durable/work-protocol-v1.md), [diagnostics catalog](../../troubleshooting/durable-diagnostics.md), [public API baseline](../../Durable/ForgeTrust.AppSurface.Durable/PublicAPI.Shipped.txt), and [API budget](../../Durable/api-budget.md). Add a nearby migration link from the [package chooser](../../packages/README.md) and root Durable entry when useful for adoption.
+Update the [package README](../../Durable/ForgeTrust.AppSurface.Durable/README.md), [Durable overview](../../Durable/README.md), [Work protocol](../../Durable/work-protocol-v1.md), [diagnostics catalog](../../troubleshooting/durable-diagnostics.md), [public API baseline](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable/PublicAPI.Shipped.txt), and [API budget](../../Durable/api-budget.md). Add a nearby migration link from the [package chooser](../../packages/README.md) and root Durable entry when useful for adoption.
 
 Create `Durable/migrations/typed-work-definitions-v1.md` during implementation. It is versioned guidance for the public-preview API rail, not a SQL migration or an invented release number. Show complete old/new registration and request examples for ordinary, reconciled, and exit-aware Work; keep scope, command, duplicate-submission key, payload, due time, and retry choices visible. Explain duplicate/mixed binding errors, same-type versioned codecs, raw versus frozen codec views, and replacing rather than double-registering a migrated contract. Legacy overloads remain available and are not obsolete. No codemod is promised: codec, safety, request identity, and duplicate-submission policy cannot be inferred safely.
 
 Document construction errors separately from provider `ASDURxxx` outcomes; retain existing Work/codec duplicate messages and existing acceptance-conflict semantics. Do not allocate new provider problem codes merely for argument validation. Error text must not include payload bytes, scope/command keys, or arbitrary codec values.
 
-Ship the API in the existing `ForgeTrust.AppSurface.Durable` NuGet package using the repository's [coordinated release process](../../releases/README.md), [package gate](../../.github/workflows/package-gate.yml), and [prerelease publishing workflow](../../.github/workflows/nuget-prerelease-publish.yml). Add a release-note fragment linking #800. There is no new artifact, distribution channel, runtime dependency, or database rollout.
+Ship the API in the existing `ForgeTrust.AppSurface.Durable` NuGet package using the repository's [coordinated release process](../../releases/README.md), [package gate](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/package-gate.yml), and [prerelease publishing workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/nuget-prerelease-publish.yml). Add a release-note fragment linking #800. There is no new artifact, distribution channel, runtime dependency, or database rollout.
 
 ## Implementation sequence and assignment
 

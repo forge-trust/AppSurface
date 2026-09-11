@@ -11,7 +11,7 @@ and request identities remain equivalent, replace the old registration with one 
 
 The examples below build separate before/after service collections so each composition registers its Work identity
 once. Each method accepts the same explicit scope, command, duplicate-submission key, payload, retry policy and due time;
-it compares the resulting requests and resolves both registrations. They execute as part of the [packed proof](../verify-packed-consumers.sh).
+it compares the resulting requests and resolves both registrations. They execute as part of the [packed proof](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-packed-consumers.sh).
 The [complete compiled source](../packed-consumers/Adopter/TypedWorkDefinitionProof.cs) contains all definitions, codecs,
 source-generated JSON metadata and executors. Legacy overloads remain supported and are not obsolete. Use the direct
 request constructor when contract facts are already supplied by validated infrastructure; use a definition to share

@@ -71,8 +71,8 @@ All code evidence below was read at the pinned implementation baseline; relative
 | Registry duplicate behavior | `DurableWorkRegistry` and `DurablePayloadCodecRegistry` | Preserve Work duplicates, same-source coalescing, exact codec identity lookup |
 | Flow codec compatibility | [DurableFlowRegistration.cs](../../Durable/ForgeTrust.AppSurface.Durable/DurableFlowRegistration.cs) | Replace only codec reference checks with package provenance; keep exact Work-registration check |
 | Passive module composition | [AppSurfaceDurableModule.cs](../../Durable/ForgeTrust.AppSurface.Durable/AppSurfaceDurableModule.cs) | One default installation helper and per-provider catalog; no host activation |
-| Package proof | [verify-packed-consumers.sh](../../Durable/verify-packed-consumers.sh) | Retain runnable consumers and add typed/negative fixtures |
-| Database execution and rollout | [Work protocol](../../Durable/work-protocol-v1.md), [PostgreSQL verification](../../Durable/verify-postgresql.sh) | Bounded fixture, same acceptance and runtime authority |
+| Package proof | [verify-packed-consumers.sh](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-packed-consumers.sh) | Retain executable consumers and add typed/negative fixtures |
+| Database execution and rollout | [Work protocol](../../Durable/work-protocol-v1.md), [PostgreSQL verification](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-postgresql.sh) | Bounded fixture, same acceptance and runtime authority |
 
 The payload object and explicit prepared invocation are style references: small immutable values and clear effect boundaries. Repeated `TryAddSingleton` registry setup across module/Work/Flow is the duplication to remove. Growing the already large contract test class or hiding selection in single-service generic DI lookup would make maintenance worse.
 
@@ -306,7 +306,7 @@ When I migrate, my instinct is to add the new registration beside the old one an
 | Tool | Observed authoring choice from primary docs | Measured TTHW in this review |
 | --- | --- | --- |
 | [Temporal .NET](https://github.com/temporalio/sdk-dotnet/blob/main/README.md) | Typed workflow lambdas alongside dynamic calls | Not measured |
-| [MassTransit job consumers](https://masstransit.massient.com/concepts/job-consumers) | Typed job interface, runnable sample, explicit runtime prerequisites | Not measured |
+| [MassTransit job consumers](https://masstransit.massient.com/concepts/job-consumers) | Typed job interface, executable sample, explicit runtime prerequisites | Not measured |
 | [Hangfire](https://docs.hangfire.io/en/latest/background-methods/calling-methods-in-background.html) | Concise enqueue call; docs distinguish queuing from worker execution | Not measured |
 | AppSurface #800 | Explicit definition + typed binding + request, using current passive package | Not measured; target <5 min for a primed contract proof |
 

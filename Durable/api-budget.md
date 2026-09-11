@@ -130,5 +130,5 @@ types from the binding. The request factory retains explicit caller identities, 
 The shared contract/codec snapshots, provenance checks, contribution aggregator and local registration catalog are
 internal. Existing registration constructors and request APIs remain supported; Work and Flow fingerprints and the
 provider execution boundary are unchanged. Flow uses compatible codecs from the same original source without relaxing
-its exact Work-registration reference requirement. The [API snapshot](ForgeTrust.AppSurface.Durable/PublicAPI.Shipped.txt)
+its exact Work-registration reference requirement. The [API snapshot](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable/PublicAPI.Shipped.txt)
 records every member and generic constraint.
