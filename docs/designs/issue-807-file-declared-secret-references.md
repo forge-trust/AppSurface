@@ -2099,7 +2099,7 @@ Required test families:
 8. Skoolit-shaped two-sibling migration tests, clean packed-consumer smoke tests, cross-platform no-network matrices, and artifact rollback rehearsal.
 9. Full legacy regression suites, `dotnet format`, analyzer/doc-warning clean build, and `./scripts/coverage-solution.sh` when practical.
 
-Test plan artifact: `/Users/andrew/.gstack/projects/forge-trust-AppSurface/andrew-main-eng-review-test-plan-20260910-225321.md`.
+Test plan artifact: `/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20260910-225321.md`.
 
 ### Section 4 — Performance Review
 
@@ -2344,3 +2344,24 @@ The detailed phase tables above are canonical. This consolidated trail records e
 | 30 | Eng | Reject secret-containing `ConfigStruct<T>` roots initially | Auto-accept | P5 | Nullable struct activation needs separate semantics | Accidental support |
 | 31 | Eng | Require artifact-level rollback | Auto-accept | P1 | Older packages may not contain `Secret<T>` used by the binary | Package pin only |
 | 32 | Eng | Keep current effective audit entry point by default | Taste recommendation | P2/P5 | Preserves existing behavior; compile-only remains a distinct follow-up | Rename/break current entry point |
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|---|---|---|---:|---|---|
+| CEO Review | `/plan-ceo-review` via `/autoplan` | Scope and strategy | 1 | REVIEWED | 11 proposals: 3 accepted, 6 deferred, 2 rejected; UC1 held |
+| Codex Review | `/autoplan` dual voices | Independent second opinion | 3 | REVIEWED | CEO, DX, and Engineering challenges folded into the plan |
+| Eng Review | `/plan-eng-review` via `/autoplan` | Architecture and tests | 1 | TECHNICALLY CLEAR | 19 review issues, 20 failure modes, 0 critical gaps |
+| Design Review | `/plan-design-review` via `/autoplan` | UI/UX gaps | 0 | SKIPPED | No UI scope |
+| DX Review | `/plan-devex-review` via `/autoplan` | Developer experience | 1 | REVIEWED | 5/10 to projected 8.6/10; TTHW 15–30 minutes to under 5 minutes |
+
+**CODEX:** Five final engineering blockers were corrected: invocation binding lifetime, environment aliases, malformed-file history, recursive graphs, and root-sized migration.
+
+**CROSS-MODEL:** Both outside voices preserved the approved `Secret<T>`, direct descriptor, static disablement, optional-provider uniqueness, and shared-engine direction. They converged on stronger release evidence, path/file determinism, invocation isolation, and artifact rollback.
+
+**VERDICT:** CEO + DX + ENG REVIEWED; engineering is clear to implement after the final user approval gate.
+
+**UNRESOLVED DECISIONS:**
+
+- UC1: whether stable publication must wait for one bounded real Skoolit prerelease migration and rollback rehearsal.
+- TD4: whether to keep the existing effective-audit entry point with prominent side-effect documentation, as recommended, or introduce a separately named effective-resolution request.
