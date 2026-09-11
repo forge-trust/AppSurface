@@ -726,15 +726,10 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
         {
         }
 
-        try
-        {
-            await Task.WhenAll(standardOutput, standardError).WaitAsync(cleanup.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            ObserveDrainCompletion(standardOutput, standardError);
-        }
-        catch (Exception)
+        var drainCompletion = Task.WhenAll(standardOutput, standardError);
+        var cleanupDeadline = Task.Delay(Timeout.InfiniteTimeSpan, cleanup.Token);
+        await Task.WhenAny(drainCompletion, cleanupDeadline);
+        if (!drainCompletion.IsCompletedSuccessfully)
         {
             ObserveDrainCompletion(standardOutput, standardError);
         }

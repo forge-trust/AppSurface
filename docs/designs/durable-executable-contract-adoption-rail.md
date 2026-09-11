@@ -1284,7 +1284,7 @@ These are implementation evidence gates, not reasons to collapse the case bounda
 - Case 3 ships as a separate `ForgeTrust.AppSurface.Durable.Testing` package so production applications do not take test dependencies.
 - Case 4 ships in `ForgeTrust.AppSurface.Durable.PostgreSql` with forward-only migration, role-recipe, and packed-provider evidence.
 - Case 5 produces an internal prototype and API decision first; only a successful two-consumer proof adds a public PostgreSQL package type.
-- Case 6 ships the transport-neutral service/contracts additively in `ForgeTrust.AppSurface.Durable.Provider`, plus a checked-in runnable example and integration-test project.
+- Case 6 ships the transport-neutral service/contracts additively in `ForgeTrust.AppSurface.Durable.Provider`, plus a checked-in executable example and integration-test project.
 - Case 7 begins as an explicitly experimental `ForgeTrust.AppSurface.Durable.AspNetCore` package or namespace and follows the repository's preview publication rules only after security and package review.
 - Case 8 extends the existing AppSurface CLI artifact and release path.
 - Case 9 adds an explicit .NET template pack project and ships it through the existing NuGet/package workflow; the
@@ -2325,7 +2325,7 @@ Twelve grouped gaps were identified and added:
 12. Packaged byte-identical role recipe used without a repository checkout.
 
 Every gap is blocking in its owning case. The QA artifact is:
-`~/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20260906-150224.md`.
+`~/.gstack/projects/forge-trust-AppSurface/andrew-main-eng-review-test-plan-20260906-150224.md`.
 
 #### Section 4 — Performance
 

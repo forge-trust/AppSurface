@@ -17,6 +17,7 @@ public sealed class PostgreSqlScaleIntegrationTests
     private const int WarmBatchCount = 5;
     private const int WarmSamplesPerBatch = 16;
     private const int MixedConcurrency = 32;
+    private const int MixedHealthReaderConcurrency = ConstrainedPoolSize;
     private readonly ITestOutputHelper _output;
 
     public PostgreSqlScaleIntegrationTests(ITestOutputHelper output)
@@ -234,6 +235,7 @@ public sealed class PostgreSqlScaleIntegrationTests
 
         var mixedWorkloadStart = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        using var mixedHealthReaderGate = new SemaphoreSlim(MixedHealthReaderConcurrency);
         var process = Process.GetCurrentProcess();
         process.Refresh();
         var cpuBefore = process.TotalProcessorTime;
@@ -250,11 +252,19 @@ public sealed class PostgreSqlScaleIntegrationTests
             .Select(async _ =>
             {
                 await mixedWorkloadStart.Task;
+                await mixedHealthReaderGate.WaitAsync();
                 var started = Stopwatch.GetTimestamp();
-                var snapshot = await health.GetAsync();
-                return (
-                    Snapshot: snapshot,
-                    Elapsed: Stopwatch.GetElapsedTime(started));
+                try
+                {
+                    var snapshot = await health.GetAsync();
+                    return (
+                        Snapshot: snapshot,
+                        Elapsed: Stopwatch.GetElapsedTime(started));
+                }
+                finally
+                {
+                    mixedHealthReaderGate.Release();
+                }
             })
             .ToArray();
         var claim = RunAfterAsync(
@@ -923,6 +933,8 @@ public sealed class PostgreSqlScaleIntegrationTests
                 constrainedPoolSize = ConstrainedPoolSize,
                 warmBatchCount = WarmBatchCount,
                 samplesPerBatch = WarmSamplesPerBatch,
+                mixedSampleCount = MixedConcurrency,
+                mixedHealthReaderConcurrency = MixedHealthReaderConcurrency,
             }));
     }
 
@@ -991,6 +1003,7 @@ public sealed class PostgreSqlScaleIntegrationTests
     {
         while (samples.TryDequeue(out _))
         {
+            // Drain every sample left by the preceding measurement phase.
         }
     }
 

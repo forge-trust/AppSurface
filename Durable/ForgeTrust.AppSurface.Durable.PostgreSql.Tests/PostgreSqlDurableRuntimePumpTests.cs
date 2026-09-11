@@ -2207,10 +2207,10 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             Password = password,
             Pooling = false,
         }.ConnectionString;
-        var restrictedDispatcherDataSource = NpgsqlDataSource.Create(connectionString);
-        var restrictedRuntimeDataSource = NpgsqlDataSource.Create(connectionString);
         try
         {
+            await using var restrictedDispatcherDataSource = NpgsqlDataSource.Create(connectionString);
+            await using var restrictedRuntimeDataSource = NpgsqlDataSource.Create(connectionString);
             var services = new ServiceCollection();
             services.AddAppSurfaceDurablePostgreSql(
                 restrictedDispatcherDataSource,
@@ -2248,8 +2248,6 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         }
         finally
         {
-            await restrictedDispatcherDataSource.DisposeAsync();
-            await restrictedRuntimeDataSource.DisposeAsync();
             await using var dropRole = database.DataSource.CreateCommand(
                 $"DROP OWNED BY {role}; DROP ROLE {role};");
             await dropRole.ExecuteNonQueryAsync();

@@ -326,9 +326,9 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
             Password = password,
             Pooling = false,
         }.ConnectionString;
-        var runtimeDataSource = NpgsqlDataSource.Create(connectionString);
         try
         {
+            await using var runtimeDataSource = NpgsqlDataSource.Create(connectionString);
             var health = new PostgreSqlDurableRuntimeHealth(
                 CreateRegistration(
                     runtimeDataSource,
@@ -345,7 +345,6 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
         }
         finally
         {
-            await runtimeDataSource.DisposeAsync();
             await using var dropRole = database.DataSource.CreateCommand(
                 $"DROP OWNED BY {role}; DROP ROLE {role};");
             await dropRole.ExecuteNonQueryAsync();
