@@ -1,5 +1,9 @@
 # Deferred work
 
+## Typed Work definition adoption follow-up (#800)
+
+- **What:** Review two independent definition migrations, or review six months after release if fewer migrations exist, before adding more convenience APIs. **Why:** [#800](https://github.com/forge-trust/AppSurface/issues/800) proves contract consistency and preserved runtime behavior; faster onboarding and fewer real-user errors remain unmeasured. **Pros:** Grounds later API work in observed friction and helps the [parent adoption rail](https://github.com/forge-trust/AppSurface/issues/793) compare correct registration, request authoring and actual terminal completion. **Cons:** Requires adopter participation and cannot establish causality from a tiny sample. **Context:** Start with the [approved design](docs/designs/issue-800-typed-work-definitions.md) and [implementation plan](docs/plans/issue-800-typed-work-definitions.md); record duplicated facts removed, decisions retained, authoring mistakes, cached/cold prerequisites and time to first accepted-and-processed Work separately. Line count is secondary; do not turn missing timing into a fabricated speed claim. **Effort:** M (human: 1–2 days / agent assistance: 2–4 hours, excluding adopter availability). **Priority:** P3. **Depends on / blocked by:** #800 release and real adopter evidence; no telemetry collection or scheduled automation is authorized by this TODO.
+
 ## Named-canary snapshot follow-ups (#645)
 
 - Consider POST exact-list batches, host-declared snapshot profiles, asynchronous jobs, or stored snapshots only if adopters show that the bounded synchronous `GET /_appsurface/canaries` contract is insufficient.

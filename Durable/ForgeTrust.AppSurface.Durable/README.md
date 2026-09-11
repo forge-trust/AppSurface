@@ -18,6 +18,289 @@ Runtime-provider and operator APIs live in
 Do not choose it for arbitrary replayable code, exactly-once external effects, child workflows, unbounded fan-out, a
 message bus, storage, or worker hosting.
 
+## Typed Work definitions
+
+Define one static, immutable contract and use it for registration and request creation. The definition captures the Work
+name/version, input and result codec identities, provider safety, and default retry policy once. Callers still choose
+the scope, command, duplicate-submission key, input, explicit retry override, and due time for each request.
+
+The [complete compiled source](../packed-consumers/Adopter/TypedWorkDefinitionProof.cs), including its using directives, is the copyable entry point. The example below includes three distinct Work/input/result identities, ordinary, reconciled, and
+exit-aware bindings, generated JSON metadata, executor implementations, a direct request comparison, and a passive Flow
+composition. Its output proves contract registration and request parity only; it does not accept Work, start a worker, or
+claim terminal processing. The source is linked into the focused test so the documentation and test exercise one body.
+
+<!-- appsurface:snippet id="durable-typed-work-definition" file="Durable/packed-consumers/Adopter/TypedWorkDefinitionProof.cs" marker="durable-typed-work-definition" lang="csharp" -->
+```csharp
+internal static class TypedWorkDefinitionProof
+{
+    internal static readonly DurableWorkDefinition<InvoiceWork, InvoiceResult> OrdinaryDefinition =
+        DurableWork.Define(
+            workName: "examples.invoice.send",
+            workVersion: "v1",
+            workCodec: TypedWorkCodecs.InvoiceWorkCodec,
+            resultCodec: TypedWorkCodecs.InvoiceResultCodec,
+            providerSafety: DurableProviderSafety.Idempotent,
+            defaultRetryPolicy: DurableWorkRetryPolicy.Default);
+
+    internal static readonly DurableWorkDefinition<LedgerWork, LedgerResult> ReconciledDefinition =
+        DurableWork.Define(
+            workName: "examples.ledger.reconcile",
+            workVersion: "v1",
+            workCodec: TypedWorkCodecs.LedgerWorkCodec,
+            resultCodec: TypedWorkCodecs.LedgerResultCodec,
+            providerSafety: DurableProviderSafety.ReconcileBeforeRetry,
+            defaultRetryPolicy: DurableWorkRetryPolicy.Default);
+
+    internal static readonly DurableWorkDefinition<NotificationWork, NotificationResult> ExitDefinition =
+        DurableWork.Define(
+            workName: "examples.notification.send",
+            workVersion: "v1",
+            workCodec: TypedWorkCodecs.NotificationWorkCodec,
+            resultCodec: TypedWorkCodecs.NotificationResultCodec,
+            providerSafety: DurableProviderSafety.ProviderKeyed,
+            defaultRetryPolicy: DurableWorkRetryPolicy.Default);
+
+    private static readonly IDurablePayloadCodec<FlowContext> FlowContextCodec =
+        new SystemTextJsonDurablePayloadCodec<FlowContext>(
+            "examples.flow.context",
+            "v1",
+            DurableDataClassification.ApprovedApplication,
+            TypedWorkJsonContext.Default.FlowContext,
+            static _ => true);
+
+    private static readonly DurableWorkRetryPolicy ExplicitRetry = new(
+        maximumAttempts: 4,
+        maximumElapsedTime: TimeSpan.FromHours(1),
+        initialRetryDelay: TimeSpan.FromSeconds(2),
+        maximumRetryDelay: TimeSpan.FromMinutes(5),
+        leaseDuration: TimeSpan.FromMinutes(1),
+        renewalCadence: TimeSpan.FromSeconds(15),
+        maximumLeaseLifetime: TimeSpan.FromMinutes(5),
+        backoffAlgorithm: "linear-v1");
+
+    internal static void Run()
+    {
+        var services = new ServiceCollection();
+        new AppSurfaceDurableModule().ConfigureServices(
+            new StartupContext([], new PassiveHostModule()),
+            services);
+
+        var ordinaryBinding = OrdinaryDefinition.ExecutedBy<InvoiceExecutor>();
+        var reconciledBinding = ReconciledDefinition.ExecutedBy<LedgerExecutor>()
+            .ReconciledBy<LedgerReconciler>();
+        var exitBinding = ExitDefinition.ExecutedByExit<NotificationExitExecutor>();
+
+        services.AddDurableWork(ordinaryBinding);
+        services.AddDurableWork(reconciledBinding);
+        services.AddDurableWork(exitBinding);
+        services.AddSingleton<IDurablePayloadCodec>(FlowContextCodec);
+        services.AddSingleton<DurableFlowRegistration>(provider =>
+        {
+            var workRegistration = provider.GetRequiredService<IDurableWorkRegistry>()
+                .GetRequired(OrdinaryDefinition.WorkName, OrdinaryDefinition.WorkVersion);
+            var callsite = new FlowActivityCallsite<InvoiceWork, InvoiceResult>("send-invoice", 1, 1);
+            var flowDefinition = FlowGraphBuilder<FlowContext>
+                .Create("examples.invoice-flow", "v1")
+                .AddNode("send", new InvoiceActivityNode(callsite))
+                .StartAt("send")
+                .Build();
+            var activityBinding = new DurableFlowActivityBinding<FlowContext, InvoiceWork, InvoiceResult>(
+                callsite,
+                workRegistration,
+                OrdinaryDefinition.WorkCodec,
+                OrdinaryDefinition.ResultCodec);
+            return new DurableFlowRegistration<FlowContext>(
+                flowDefinition,
+                FlowContextCodec,
+                "typed-work-definition-proof-v1",
+                new FlowTransitionEvaluator<FlowContext>(),
+                [activityBinding]);
+        });
+
+        var scope = new DurableScopeId("typed-proof-scope");
+        var command = new DurableCommandId("typed-proof-command");
+        var due = new DateTimeOffset(2026, 9, 10, 14, 30, 0, TimeSpan.FromHours(-4));
+        var input = new InvoiceWork("invoice-1001");
+        var actual = OrdinaryDefinition.CreateRequest(
+            scope,
+            command,
+            "typed-proof-key",
+            input,
+            retryPolicy: ExplicitRetry,
+            dueAtUtc: due);
+        var expected = new DurableWorkRequest(
+            scope,
+            command,
+            "typed-proof-key",
+            OrdinaryDefinition.WorkName,
+            OrdinaryDefinition.WorkVersion,
+            OrdinaryDefinition.WorkCodec.Encode(input),
+            OrdinaryDefinition.ProviderSafety,
+            ExplicitRetry,
+            due);
+        AssertRequestParity(expected, actual);
+        var defaultRequest = OrdinaryDefinition.CreateRequest(scope, command, "default-key", input);
+        AssertRequestParity(new DurableWorkRequest(scope, command, "default-key", OrdinaryDefinition.WorkName,
+            OrdinaryDefinition.WorkVersion, TypedWorkCodecs.InvoiceWorkCodec.Encode(input), OrdinaryDefinition.ProviderSafety,
+            OrdinaryDefinition.DefaultRetryPolicy), defaultRequest);
+        TypedWorkMigrationSnippets.Ordinary(scope, command, "ordinary-migration", input, ExplicitRetry, due);
+        TypedWorkMigrationSnippets.Reconciled(scope, command, "reconciled-migration", new LedgerWork("entry-1"), ExplicitRetry, due);
+        TypedWorkMigrationSnippets.ExitAware(scope, command, "exit-migration", new NotificationWork("recipient-1"), ExplicitRetry, due);
+
+        using var provider = services.BuildServiceProvider();
+        _ = provider.GetRequiredService<IDurablePayloadCodecRegistry>();
+        var workRegistry = provider.GetRequiredService<IDurableWorkRegistry>();
+        var flow = provider.GetRequiredService<IDurableFlowRegistry>().GetRequired("examples.invoice-flow", "v1");
+        var registeredWork = workRegistry.GetRequired(OrdinaryDefinition.WorkName, OrdinaryDefinition.WorkVersion);
+        if (!ReferenceEquals(flow.ActivityWorkRegistrations.Single(), registeredWork)
+            || !ReferenceEquals(registeredWork.WorkCodec, OrdinaryDefinition.WorkCodec)
+            || !ReferenceEquals(registeredWork.ResultCodec, OrdinaryDefinition.ResultCodec))
+        {
+            throw new InvalidOperationException("Flow composition did not retain the exact defined Work registration and codec views.");
+        }
+        if (provider.GetService<IDurableWorkClient>() is not null
+            || provider.GetService<IDurableFlowClient>() is not null
+            || provider.GetService<IDurableScheduleClient>() is not null
+            || provider.GetServices<IHostedService>().Any())
+        {
+            throw new InvalidOperationException("Typed Work proof unexpectedly installed a runtime.");
+        }
+
+        Console.WriteLine("typed Work contracts registered; request parity verified; no runtime installed");
+    }
+
+    internal static void AssertRequestParity(DurableWorkRequest expected, DurableWorkRequest actual)
+    {
+        if (expected.ScopeId != actual.ScopeId
+            || expected.CommandId != actual.CommandId
+            || expected.IdempotencyKey != actual.IdempotencyKey
+            || expected.WorkName != actual.WorkName
+            || expected.WorkVersion != actual.WorkVersion
+            || expected.Payload != actual.Payload
+            || expected.ProviderSafety != actual.ProviderSafety
+            || expected.RetryPolicy != actual.RetryPolicy
+            || expected.DueAtUtc != actual.DueAtUtc
+            || expected.Fingerprint != actual.Fingerprint)
+        {
+            throw new InvalidOperationException("Typed Work request does not match equivalent direct construction.");
+        }
+    }
+
+    private sealed class InvoiceActivityNode(FlowActivityCallsite<InvoiceWork, InvoiceResult> callsite)
+        : IFlowNode<FlowContext>
+    {
+        public ValueTask<FlowNodeOutcome<FlowContext>> ExecuteAsync(
+            FlowExecutionContext<FlowContext> context,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<FlowNodeOutcome<FlowContext>>(
+                FlowNodeOutcome<FlowContext>.Activity(callsite, new InvoiceWork("invoice-from-flow"), context.State));
+    }
+
+    internal sealed class InvoiceExecutor : IDurableWorkerExecutor<InvoiceWork, InvoiceResult>
+    {
+        public ValueTask<InvoiceResult> ExecuteAsync(
+            DurableWorkerEnvelope<InvoiceWork> work,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(new InvoiceResult(work.Payload!.InvoiceId));
+    }
+
+    internal sealed class LedgerExecutor : IDurableWorkerExecutor<LedgerWork, LedgerResult>
+    {
+        public ValueTask<LedgerResult> ExecuteAsync(
+            DurableWorkerEnvelope<LedgerWork> work,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(new LedgerResult(work.Payload!.EntryId));
+    }
+
+    internal sealed class LedgerReconciler : IDurableEffectReconciler<LedgerWork, LedgerResult>
+    {
+        public ValueTask<DurableEffectReconciliation<LedgerResult>> ReconcileAsync(
+            DurableWorkerEnvelope<LedgerWork> work,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(DurableEffectReconciliation<LedgerResult>.NotApplied());
+    }
+
+    internal sealed class NotificationExitExecutor : IDurableWorkExitExecutor<NotificationWork, NotificationResult>
+    {
+        public ValueTask<DurableWorkExit<NotificationResult>> ExecuteAsync(
+            DurableWorkerEnvelope<NotificationWork> work,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(DurableWorkExit<NotificationResult>.Succeeded(
+                new NotificationResult(work.Payload!.Recipient)));
+    }
+
+    private sealed class PassiveHostModule : IAppSurfaceHostModule
+    {
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder) { }
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder) { }
+        public void ConfigureServices(StartupContext context, IServiceCollection services) { }
+        public void RegisterDependentModules(ModuleDependencyBuilder builder) { }
+    }
+}
+
+internal sealed record InvoiceWork(string InvoiceId);
+internal sealed record InvoiceResult(string InvoiceId);
+internal sealed record LedgerWork(string EntryId);
+internal sealed record LedgerResult(string EntryId);
+internal sealed record NotificationWork(string Recipient);
+internal sealed record NotificationResult(string Recipient);
+internal sealed record FlowContext(string InvoiceId);
+
+internal static class TypedWorkCodecs
+{
+    internal static readonly IDurablePayloadCodec<InvoiceWork> InvoiceWorkCodec =
+        new SystemTextJsonDurablePayloadCodec<InvoiceWork>("examples.invoice.request", "v1",
+            DurableDataClassification.ApprovedApplication, TypedWorkJsonContext.Default.InvoiceWork, static _ => true);
+    internal static readonly IDurablePayloadCodec<InvoiceResult> InvoiceResultCodec =
+        new SystemTextJsonDurablePayloadCodec<InvoiceResult>("examples.invoice.result", "v1",
+            DurableDataClassification.ApprovedApplication, TypedWorkJsonContext.Default.InvoiceResult, static _ => true);
+    internal static readonly IDurablePayloadCodec<LedgerWork> LedgerWorkCodec =
+        new SystemTextJsonDurablePayloadCodec<LedgerWork>("examples.ledger.request", "v1",
+            DurableDataClassification.ApprovedApplication, TypedWorkJsonContext.Default.LedgerWork, static _ => true);
+    internal static readonly IDurablePayloadCodec<LedgerResult> LedgerResultCodec =
+        new SystemTextJsonDurablePayloadCodec<LedgerResult>("examples.ledger.result", "v1",
+            DurableDataClassification.ApprovedApplication, TypedWorkJsonContext.Default.LedgerResult, static _ => true);
+    internal static readonly IDurablePayloadCodec<NotificationWork> NotificationWorkCodec =
+        new SystemTextJsonDurablePayloadCodec<NotificationWork>("examples.notification.request", "v1",
+            DurableDataClassification.ApprovedApplication, TypedWorkJsonContext.Default.NotificationWork, static _ => true);
+    internal static readonly IDurablePayloadCodec<NotificationResult> NotificationResultCodec =
+        new SystemTextJsonDurablePayloadCodec<NotificationResult>("examples.notification.result", "v1",
+            DurableDataClassification.ApprovedApplication, TypedWorkJsonContext.Default.NotificationResult, static _ => true);
+}
+
+[JsonSerializable(typeof(InvoiceWork))]
+[JsonSerializable(typeof(InvoiceResult))]
+[JsonSerializable(typeof(LedgerWork))]
+[JsonSerializable(typeof(LedgerResult))]
+[JsonSerializable(typeof(NotificationWork))]
+[JsonSerializable(typeof(NotificationResult))]
+[JsonSerializable(typeof(FlowContext))]
+internal sealed partial class TypedWorkJsonContext : JsonSerializerContext;
+```
+<!-- /appsurface:snippet -->
+
+Use `ExecutedBy<TExecutor>()` for ordinary `Idempotent`, `ProviderKeyed`, or `ManualResolution` Work. Complete a
+`ReconcileBeforeRetry` binding with `ReconciledBy<TReconciler>()`. Use `ExecutedByExit<TExecutor>()` only for
+`ProviderKeyed` Work when the executor can return an honest typed exit fact. Register one binding per Work identity;
+adding a legacy and definition registration beside each other with the same name/version produces the existing
+duplicate Work error.
+
+The definition is passive and safe to reuse across concurrent request calls when the codec and its captured dependencies
+are safe for concurrent use. Metadata is captured during definition creation. Later mutable codec behavior is not frozen;
+incompatible encoded metadata is rejected at the codec boundary. The caller owns concurrent use of its codec and any
+application state it closes over.
+
+The focused passive proof can be run with:
+
+```bash
+dotnet test Durable/ForgeTrust.AppSurface.Durable.Tests/ForgeTrust.AppSurface.Durable.Tests.csproj \
+  --filter TypedWorkDefinitionProofTests --no-restore
+```
+
+For accepted Work and actual terminal success, use the existing [PostgreSQL reference workload](../slice3-reference-workload.md)
+and its [provider acceptance proof](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md#accept-work).
+The typed proof intentionally reports no terminal outcome.
+
 ## Passive registration proof
 
 `AppSurfaceDurableModule` registers only payload, Work, and Flow registries. This complete source consumer verifies that

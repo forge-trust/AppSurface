@@ -404,21 +404,26 @@ public sealed class DurableFlowActivityBinding<TContext, TWork, TResult> : Durab
         : base(callsite?.CallsiteId ?? throw new ArgumentNullException(nameof(callsite)), workRegistration)
     {
         _callsite = callsite;
-        _workCodec = workCodec ?? throw new ArgumentNullException(nameof(workCodec));
-        _resultCodec = resultCodec ?? throw new ArgumentNullException(nameof(resultCodec));
+        ArgumentNullException.ThrowIfNull(workCodec);
+        ArgumentNullException.ThrowIfNull(resultCodec);
         if (workRegistration.WorkCodec.PayloadType != typeof(TWork)
             || workRegistration.ResultCodec.PayloadType != typeof(TResult))
         {
             throw new ArgumentException("The durable work registration types do not match the Flow activity callsite.", nameof(workRegistration));
         }
 
-        if (!ReferenceEquals(workRegistration.WorkCodec, workCodec) ||
-            !ReferenceEquals(workRegistration.ResultCodec, resultCodec))
+        if (!DurablePayloadCodecSnapshot.AreCompatible(workRegistration.WorkCodec, workCodec) ||
+            !DurablePayloadCodecSnapshot.AreCompatible(workRegistration.ResultCodec, resultCodec))
         {
             throw new ArgumentException(
                 "The Flow activity binding must use the exact work and result codec instances owned by its durable work registration.",
                 nameof(workRegistration));
         }
+
+        _workCodec = workRegistration.WorkCodec as IDurablePayloadCodec<TWork>
+            ?? throw new InvalidOperationException("The durable work registration does not expose a typed work codec.");
+        _resultCodec = workRegistration.ResultCodec as IDurablePayloadCodec<TResult>
+            ?? throw new InvalidOperationException("The durable work registration does not expose a typed result codec.");
     }
 
     /// <inheritdoc />
@@ -520,7 +525,9 @@ public sealed class DurableFlowRegistration<TContext> : DurableFlowRegistration
     /// <param name="eventBindings">Bindings from declared event callsites to exact global payload codecs.</param>
     /// <remarks>
     /// Construct the global <see cref="DurableFlowRegistry"/> with its Work and payload registries before accepting Flow
-    /// commands; that registry verifies every binding uses the same registered object identity.
+    /// commands. Activity bindings retain the exact global Work registration. Payload codecs must be the same source
+    /// or compatible package-owned snapshot views; equal metadata from a different source is rejected. Each evaluation
+    /// uses its selected context codec for both decode and encode and its selected event codec for wait/resume.
     /// </remarks>
     /// <exception cref="ArgumentException">Thrown when durable identifiers or binding declarations are invalid.</exception>
     /// <exception cref="ArgumentNullException">Thrown when a required definition, codec, evaluator, or binding is null.</exception>
@@ -627,15 +634,45 @@ public sealed class DurableFlowRegistration<TContext> : DurableFlowRegistration
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(payloadCodecs);
-        var context = _contextCodec.Decode(input.Context);
+        var contextCodec = ResolveCodec(
+            payloadCodecs,
+            _contextCodec,
+            typeof(TContext),
+            _contextCodec.ContractName,
+            _contextCodec.ContractVersion,
+            "context");
+        var decodedContext = contextCodec.DecodeObject(input.Context);
+        if (decodedContext is not TContext context)
+        {
+            throw new InvalidOperationException(
+                $"Flow '{FlowId}' version '{FlowVersion}' context codec returned an incompatible payload type.");
+        }
+
         FlowResumeEvent? resumeEvent = null;
         if (input.ResumeEventName is not null)
         {
-            var payload = input.ResumeEventPayload is null
-                ? null
-                : payloadCodecs.GetRequired(
-                    input.ResumeEventPayload.ContractName,
-                    input.ResumeEventPayload.ContractVersion).DecodeObject(input.ResumeEventPayload);
+            object? payload = null;
+            if (input.ResumeEventPayload is { } encodedEventPayload)
+            {
+                var eventBinding = GetEventBinding(
+                    input.ResumeEventName,
+                    encodedEventPayload.ContractName,
+                    encodedEventPayload.ContractVersion);
+                var eventCodec = ResolveCodec(
+                    payloadCodecs,
+                    eventBinding.PayloadCodec,
+                    eventBinding.Callsite.PayloadType,
+                    encodedEventPayload.ContractName,
+                    encodedEventPayload.ContractVersion,
+                    $"event '{input.ResumeEventName}'");
+                payload = eventCodec.DecodeObject(encodedEventPayload);
+                if (payload is null || !eventBinding.PayloadCodec.PayloadType.IsInstanceOfType(payload))
+                {
+                    throw new InvalidOperationException(
+                        $"Flow '{FlowId}' version '{FlowVersion}' event '{input.ResumeEventName}' codec returned an incompatible payload type.");
+                }
+            }
+
             resumeEvent = new FlowResumeEvent(input.ResumeEventName, payload, input.IsTimeout);
         }
 
@@ -661,7 +698,9 @@ public sealed class DurableFlowRegistration<TContext> : DurableFlowRegistration
             ValidateFaultCode(fault.Code);
         }
 
-        var encodedContext = transition.Context is null ? null : _contextCodec.Encode(transition.Context);
+        var encodedContext = transition.Context is null
+            ? null
+            : EncodeContext(contextCodec, transition.Context);
         DurableFlowActivityCommand? activity = null;
         DurableFlowEventContract? eventContract = null;
         if (transition.Kind == FlowTransitionKind.Wait)
@@ -669,15 +708,13 @@ public sealed class DurableFlowRegistration<TContext> : DurableFlowRegistration
             if (transition.EventCallsite is { } eventCallsite)
             {
                 var binding = GetEventBinding(eventCallsite);
-                var eventCodec = payloadCodecs.GetRequired(
+                var eventCodec = ResolveCodec(
+                    payloadCodecs,
+                    binding.PayloadCodec,
                     eventCallsite.PayloadType,
                     eventCallsite.ContractName,
-                    eventCallsite.ContractVersion);
-                if (!ReferenceEquals(eventCodec, binding.PayloadCodec))
-                {
-                    throw new InvalidOperationException(
-                        $"Flow '{FlowId}' version '{FlowVersion}' event '{eventCallsite.EventName}' does not use the exact globally registered payload codec.");
-                }
+                    eventCallsite.ContractVersion,
+                    $"event '{eventCallsite.EventName}'");
 
                 eventContract = new DurableFlowEventContract(
                     payloadRequired: true,
@@ -728,6 +765,69 @@ public sealed class DurableFlowRegistration<TContext> : DurableFlowRegistration
             ? binding
             : throw new InvalidOperationException(
                 $"Flow '{FlowId}' version '{FlowVersion}' event callsite '{callsite.EventName}' is not declared in its durable implementation manifest.");
+
+    private DurableFlowEventBinding GetEventBinding(
+        string eventName,
+        string contractName,
+        string contractVersion)
+    {
+        if (_eventBindings.TryGetValue((eventName, contractName, contractVersion), out var binding))
+        {
+            return binding;
+        }
+
+        var eventIsDeclared = _eventBindings.Keys.Any(key =>
+            string.Equals(key.EventName, eventName, StringComparison.Ordinal));
+        throw new InvalidOperationException(eventIsDeclared
+            ? $"Flow '{FlowId}' version '{FlowVersion}' event '{eventName}' does not use the declared durable payload contract."
+            : $"Flow '{FlowId}' version '{FlowVersion}' event '{eventName}' is not declared in its durable implementation manifest.");
+    }
+
+    /// <summary>
+    /// Resolves an exact registry codec and verifies that it is the expected registration-owned source or an
+    /// equivalent package-owned snapshot view. Retains captured guards when a custom registry selects the original
+    /// raw source, so one evaluation uses one guarded codec instance for both decoding and encoding.
+    /// </summary>
+    private IDurablePayloadCodec ResolveCodec(
+        IDurablePayloadCodecRegistry payloadCodecs,
+        IDurablePayloadCodec expected,
+        Type payloadType,
+        string contractName,
+        string contractVersion,
+        string boundary)
+    {
+        var selected = payloadCodecs.GetRequired(payloadType, contractName, contractVersion)
+            ?? throw new InvalidOperationException(
+                $"Flow '{FlowId}' version '{FlowVersion}' {boundary} did not resolve a durable payload codec.");
+        if (selected.PayloadType != payloadType
+            || !string.Equals(selected.ContractName, contractName, StringComparison.Ordinal)
+            || !string.Equals(selected.ContractVersion, contractVersion, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Flow '{FlowId}' version '{FlowVersion}' {boundary} resolved a codec with mismatched payload metadata.");
+        }
+
+        if (!DurablePayloadCodecSnapshot.AreCompatible(expected, selected))
+        {
+            throw new InvalidOperationException(
+                $"Flow '{FlowId}' version '{FlowVersion}' {boundary} does not use a compatible globally registered payload codec.");
+        }
+
+        return DurablePayloadCodecSnapshot.RetainGuardedView(expected, selected);
+    }
+
+    /// <summary>Encodes context through the codec selected for the current evaluation.</summary>
+    private DurableEncodedPayload EncodeContext(IDurablePayloadCodec contextCodec, TContext context)
+    {
+        var encoded = contextCodec.EncodeObject(context!);
+        if (encoded is null)
+        {
+            throw new InvalidOperationException(
+                $"Flow '{FlowId}' version '{FlowVersion}' context codec returned no encoded payload.");
+        }
+
+        return encoded;
+    }
 
     private static void ValidateFaultCode(string code)
     {
@@ -888,8 +988,8 @@ public sealed class DurableFlowRegistry : IDurableFlowRegistry
     }
 
     /// <summary>
-    /// Initializes a registry and also verifies every context and typed event boundary uses the exact globally
-    /// registered payload codec instance.
+    /// Initializes a registry and verifies every context and typed event boundary uses the globally registered source
+    /// or an equivalent package-owned snapshot view.
     /// </summary>
     /// <param name="registrations">Registered Flow definitions.</param>
     /// <param name="workRegistry">Authoritative global durable work registry.</param>
@@ -907,7 +1007,7 @@ public sealed class DurableFlowRegistry : IDurableFlowRegistry
                 registration.ContextCodec.PayloadType,
                 registration.ContextCodec.ContractName,
                 registration.ContextCodec.ContractVersion);
-            if (!ReferenceEquals(contextCodec, registration.ContextCodec))
+            if (!DurablePayloadCodecSnapshot.AreCompatible(registration.ContextCodec, contextCodec))
             {
                 throw new InvalidOperationException(
                     $"Flow '{registration.FlowId}' version '{registration.FlowVersion}' does not use the exact globally registered context codec.");
@@ -919,7 +1019,7 @@ public sealed class DurableFlowRegistry : IDurableFlowRegistry
                     eventBinding.PayloadCodec.PayloadType,
                     eventBinding.PayloadCodec.ContractName,
                     eventBinding.PayloadCodec.ContractVersion);
-                if (!ReferenceEquals(eventCodec, eventBinding.PayloadCodec))
+                if (!DurablePayloadCodecSnapshot.AreCompatible(eventBinding.PayloadCodec, eventCodec))
                 {
                     throw new InvalidOperationException(
                         $"Flow '{registration.FlowId}' version '{registration.FlowVersion}' event '{eventBinding.Callsite.EventName}' does not use the exact globally registered payload codec.");

@@ -20,8 +20,7 @@ public sealed class AppSurfaceDurableModule : IAppSurfaceModule
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(services);
-        services.TryAddSingleton<IDurablePayloadCodecRegistry, DurablePayloadCodecRegistry>();
-        services.TryAddSingleton<IDurableWorkRegistry, DurableWorkRegistry>();
+        DurableRegistryInstallation.AddDefaults(services);
         services.TryAddSingleton<IDurableFlowRegistry, DurableFlowRegistry>();
     }
 

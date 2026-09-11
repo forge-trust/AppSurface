@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <Compile Include="../PublicApiSnapshot.cs" Link="PublicApiSnapshot.cs" />
+    <Compile Include="../packed-consumers/Adopter/TypedWorkDefinitionProof.cs" Link="Examples/TypedWorkDefinitionProof.cs" />
     <Content Include="../ForgeTrust.AppSurface.Durable/PublicAPI.Shipped.txt" Link="Durable.PublicAPI.Shipped.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

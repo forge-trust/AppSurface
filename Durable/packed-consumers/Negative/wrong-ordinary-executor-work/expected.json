@@ -1,0 +1,11 @@
+{
+  "fixture": "wrong-ordinary-executor-work",
+  "invalid": {
+    "file": "Invalid.cs",
+    "line": 5,
+    "allowedDiagnostics": ["CS0311"]
+  },
+  "positive": {
+    "file": "Positive.cs"
+  }
+}

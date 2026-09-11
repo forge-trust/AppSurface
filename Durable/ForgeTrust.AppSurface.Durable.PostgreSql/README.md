@@ -345,6 +345,18 @@ availability check, encryption proof, or compliance determination. Source-corres
 canonical package and compares its SHA-256 and frozen closure digest. Applications must document and operate their own
 archive store, key management, retention policy, legal holds, performance/WAL evidence, and recovery objectives.
 
+## Typed Work codec sharing with Flow
+
+A [typed Work definition](../ForgeTrust.AppSurface.Durable/README.md#typed-work-definitions) can share its input codec
+with a Flow context. Register the Work binding and Flow once per identity. Flow startup accepts the definition-owned
+view and the provider-owned canonical view of the same captured source; matching metadata on an unrelated codec is
+insufficient. `PostgreSqlDurableFlowClient.StartAsync` decodes through the selected allowlisted codec and validates its
+result before writing the start command. Subsequent evaluations use the selected codec for context decode and encode.
+If a custom registry returns the original source of a definition-owned view, Flow retains that view's captured
+payload checks around the same source. Selecting the raw source cannot bypass classification or retention checks.
+See the [migration guide](../migrations/typed-work-definitions-v1.md#reuse-lookup-and-concurrency) for exact lookup,
+static definition reuse and deployment boundaries. This authoring change requires no schema migration.
+
 ## Options reuse across Work and Flow
 
 Create `PostgreSqlDurableWorkOptions` from the non-empty StoreId and explicitly active epoch returned by deployment. The options object is shared across Work and Flow operations:

@@ -351,55 +351,164 @@ public interface IDurablePayloadCodecRegistry
 public sealed class DurablePayloadCodecRegistry : IDurablePayloadCodecRegistry
 {
     private readonly object _gate = new();
-    private readonly Dictionary<Type, List<IDurablePayloadCodec>> _byType = new();
-    private readonly Dictionary<(string Name, string Version), IDurablePayloadCodec> _byContract = new();
+    private readonly Dictionary<Type, List<Entry>> _byType = new();
+    private readonly Dictionary<(string Name, string Version), Entry> _byContract = new();
+    private readonly Dictionary<IDurablePayloadCodec, Entry> _bySource = new(ReferenceEqualityComparer.Instance);
 
-    /// <summary>
-    /// Initializes an empty registry for manual registration.
-    /// </summary>
+    /// <summary>One entry is shared by all indexes; an upgrade publishes its canonical view atomically under the registry lock.</summary>
+    private sealed class Entry(DurablePayloadCodecSnapshot snapshot, bool frozen)
+    {
+        internal DurablePayloadCodecSnapshot Snapshot { get; } = snapshot;
+        internal bool Frozen { get; private set; } = frozen;
+        internal IDurablePayloadCodec Codec { get; private set; } = frozen ? snapshot.CreateView() : snapshot.Source;
+
+        /// <summary>Creates before publishing so a failed upgrade leaves every index unchanged.</summary>
+        internal void Upgrade(DurablePayloadCodecSnapshot incoming)
+        {
+            if (!Frozen)
+            {
+                var view = incoming.CreateView();
+                Codec = view;
+                Frozen = true;
+            }
+        }
+    }
+
+    /// <summary>Initializes an empty registry for manual registration.</summary>
     public DurablePayloadCodecRegistry()
     {
     }
 
-    /// <summary>
-    /// Initializes a registry from codecs contributed through dependency injection.
-    /// </summary>
-    /// <param name="codecs">Registered codec instances.</param>
-    public DurablePayloadCodecRegistry(IEnumerable<IDurablePayloadCodec> codecs)
+    /// <summary>Aggregates explicitly contributed codecs before exposing any lookup result.</summary>
+    /// <param name="codecs">Raw codecs or package-owned snapshot views.</param>
+    /// <remarks>Raw-only entries preserve source references. Frozen entries use a registry-owned guarded view.</remarks>
+    public DurablePayloadCodecRegistry(IEnumerable<IDurablePayloadCodec> codecs) : this([], codecs)
+    {
+    }
+
+    /// <summary>Validates all same-source snapshots before deterministic contract-collision checks and index publication.</summary>
+    internal DurablePayloadCodecRegistry(IEnumerable<DurableCodecContribution> contributions, IEnumerable<IDurablePayloadCodec> codecs)
     {
         ArgumentNullException.ThrowIfNull(codecs);
-        foreach (var codec in codecs)
+        var sources = new Dictionary<IDurablePayloadCodec, (DurablePayloadCodecSnapshot Snapshot, bool Frozen)>(ReferenceEqualityComparer.Instance);
+        var sourceConflict = false;
+        void Include(DurablePayloadCodecSnapshot snapshot, bool frozen)
         {
-            Register(codec);
+            if (sources.TryGetValue(snapshot.Source, out var existing))
+            {
+                sourceConflict |= existing.Snapshot.Facts != snapshot.Facts;
+                sources[snapshot.Source] = (!existing.Frozen && frozen ? snapshot : existing.Snapshot, existing.Frozen || frozen);
+            }
+            else
+            {
+                sources.Add(snapshot.Source, (snapshot, frozen));
+            }
+        }
+
+        foreach (var contribution in contributions)
+        {
+            Include(contribution.Snapshot, contribution.RequiresFrozenView);
+        }
+
+        // Discover every supplied snapshot before considering raw descriptors, regardless of enumeration order.
+        var publicCodecs = codecs.ToArray();
+        foreach (var codec in publicCodecs)
+        {
+            ArgumentNullException.ThrowIfNull(codec);
+            if (DurablePayloadCodecSnapshot.GetSnapshot(codec) is { } view)
+            {
+                Include(view, true);
+            }
+        }
+
+        foreach (var codec in publicCodecs)
+        {
+            if (DurablePayloadCodecSnapshot.GetSnapshot(codec) is null && !sources.ContainsKey(codec))
+            {
+                Include(DurablePayloadCodecSnapshot.Capture(codec), false);
+            }
+        }
+
+        if (sourceConflict)
+        {
+            throw SourceConflict();
+        }
+
+        // Validate contract collisions in a linear pass. Select the ordinal-first conflict so diagnostics
+        // are stable across contribution order without sorting successful registry construction.
+        var contracts = new HashSet<(string Name, string Version)>();
+        (string Name, string Version)? conflict = null;
+        foreach (var item in sources.Values)
+        {
+            var key = (Name: item.Snapshot.Facts.ContractName, Version: item.Snapshot.Facts.ContractVersion);
+            if (!contracts.Add(key) && (conflict is null ||
+                StringComparer.Ordinal.Compare(key.Name, conflict.Value.Name) < 0 ||
+                (key.Name == conflict.Value.Name && StringComparer.Ordinal.Compare(key.Version, conflict.Value.Version) < 0)))
+            {
+                conflict = key;
+            }
+        }
+
+        if (conflict is { } duplicate)
+        {
+            throw ContractConflict(duplicate.Name, duplicate.Version);
+        }
+
+        foreach (var item in sources.Values)
+        {
+            AddEntry(new Entry(item.Snapshot, item.Frozen));
         }
     }
 
     /// <inheritdoc />
+    /// <remarks>Equivalent raw/view registrations are idempotent. A frozen view upgrades a raw entry without downgrades;
+    /// references returned before a manual upgrade remain caller-owned references.</remarks>
     public void Register(IDurablePayloadCodec codec)
     {
         ArgumentNullException.ThrowIfNull(codec);
         lock (_gate)
         {
-            var key = (codec.ContractName, codec.ContractVersion);
-            if (_byContract.TryGetValue(key, out var contractExisting) && !ReferenceEquals(contractExisting, codec))
+            var view = DurablePayloadCodecSnapshot.GetSnapshot(codec);
+            var source = view?.Source ?? codec;
+            if (_bySource.TryGetValue(source, out var existing))
             {
-                throw new InvalidOperationException($"Durable contract '{key.ContractName}' version '{key.ContractVersion}' is already registered.");
-            }
+                if (view is not null)
+                {
+                    if (existing.Snapshot.Facts != view.Facts)
+                    {
+                        throw SourceConflict();
+                    }
 
-            if (ReferenceEquals(contractExisting, codec))
-            {
+                    existing.Upgrade(view);
+                }
+
                 return;
             }
 
-            if (!_byType.TryGetValue(codec.PayloadType, out var codecs))
+            var snapshot = view ?? DurablePayloadCodecSnapshot.Capture(codec);
+            var facts = snapshot.Facts;
+            if (_byContract.ContainsKey((facts.ContractName, facts.ContractVersion)))
             {
-                codecs = [];
-                _byType.Add(codec.PayloadType, codecs);
+                throw ContractConflict(facts.ContractName, facts.ContractVersion);
             }
 
-            codecs.Add(codec);
-            _byContract[key] = codec;
+            AddEntry(new Entry(snapshot, view is not null));
         }
+    }
+
+    /// <summary>Populates both indexes with one validated entry; caller holds the lock or owns an unpublished registry.</summary>
+    private void AddEntry(Entry entry)
+    {
+        var facts = entry.Snapshot.Facts;
+        if (!_byType.TryGetValue(facts.PayloadType, out var entries))
+        {
+            entries = [];
+            _byType.Add(facts.PayloadType, entries);
+        }
+
+        entries.Add(entry);
+        _bySource.Add(entry.Snapshot.Source, entry);
+        _byContract.Add((facts.ContractName, facts.ContractVersion), entry);
     }
 
     /// <inheritdoc />
@@ -408,13 +517,12 @@ public sealed class DurablePayloadCodecRegistry : IDurablePayloadCodecRegistry
         ArgumentNullException.ThrowIfNull(payloadType);
         lock (_gate)
         {
-            if (!_byType.TryGetValue(payloadType, out var codecs))
+            if (!_byType.TryGetValue(payloadType, out var entries))
             {
                 throw new InvalidOperationException($"No durable payload codec is registered for '{payloadType.FullName}'.");
             }
 
-            return codecs.Count == 1
-                ? codecs[0]
+            return entries.Count == 1 ? entries[0].Codec
                 : throw new InvalidOperationException(
                     $"More than one durable payload codec is registered for '{payloadType.FullName}'; select an exact contract name and version.");
         }
@@ -424,23 +532,37 @@ public sealed class DurablePayloadCodecRegistry : IDurablePayloadCodecRegistry
     public IDurablePayloadCodec GetRequired(Type payloadType, string contractName, string contractVersion)
     {
         ArgumentNullException.ThrowIfNull(payloadType);
-        var codec = GetRequired(contractName, contractVersion);
-        return codec.PayloadType == payloadType
-            ? codec
-            : throw new InvalidOperationException(
-                $"Durable contract '{codec.ContractName}' version '{codec.ContractVersion}' is registered for '{codec.PayloadType.FullName}', not '{payloadType.FullName}'.");
+        lock (_gate)
+        {
+            var entry = GetEntry(contractName, contractVersion);
+            var facts = entry.Snapshot.Facts;
+            return facts.PayloadType == payloadType ? entry.Codec
+                : throw new InvalidOperationException(
+                    $"Durable contract '{facts.ContractName}' version '{facts.ContractVersion}' is registered for '{facts.PayloadType.FullName}', not '{payloadType.FullName}'.");
+        }
     }
 
     /// <inheritdoc />
     public IDurablePayloadCodec GetRequired(string contractName, string contractVersion)
     {
-        var name = DurableIdentifier.Require(contractName, nameof(contractName), 200);
-        var version = DurableIdentifier.Require(contractVersion, nameof(contractVersion), 100);
         lock (_gate)
         {
-            return _byContract.TryGetValue((name, version), out var codec)
-                ? codec
-                : throw new InvalidOperationException($"No durable payload codec is registered for '{name}' version '{version}'.");
+            return GetEntry(contractName, contractVersion).Codec;
         }
     }
+
+    /// <summary>Resolves by validated identifiers using captured metadata; caller holds the registry lock.</summary>
+    private Entry GetEntry(string contractName, string contractVersion)
+    {
+        var name = DurableIdentifier.Require(contractName, nameof(contractName), 200);
+        var version = DurableIdentifier.Require(contractVersion, nameof(contractVersion), 100);
+        return _byContract.TryGetValue((name, version), out var entry) ? entry
+            : throw new InvalidOperationException($"No durable payload codec is registered for '{name}' version '{version}'.");
+    }
+
+    private static InvalidOperationException SourceConflict() =>
+        new("A durable payload codec source was contributed with conflicting contract metadata.");
+
+    private static InvalidOperationException ContractConflict(string name, string version) =>
+        new($"Durable contract '{name}' version '{version}' is already registered.");
 }

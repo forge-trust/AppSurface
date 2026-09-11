@@ -325,10 +325,10 @@ packages:
     release_track: coordinated
     order: 46
     use_when: Add this when an AppSurface module needs host-neutral durable Work, resumable Flow, or Schedule authoring without installing a runtime.
-    includes: AppSurfaceDurableModule, registered and versioned payload codecs, Work and Flow client contracts, reflection-free typed registrations, command fingerprints, provider-safety declarations, and At/After/Every/Cron schedule contracts.
+    includes: AppSurfaceDurableModule, registered and versioned payload codecs, immutable typed Work definitions and bindings, Work and Flow client contracts, reflection-free typed registrations, command fingerprints, provider-safety declarations, and At/After/Every/Cron schedule contracts.
     does_not_include: Provider SPI, storage, migrations, hosted polling, health or drain operations, operator recovery, ASP.NET endpoints, telemetry implementation, automated retention, deterministic async/await replay, fan-out, child flows, exactly-once provider effects, or a separate workflow control plane.
     start_here_path: Durable/ForgeTrust.AppSurface.Durable/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Durable` for portable durable authoring and registration; no runtime starts until the host installs a provider explicitly.
+    recipe_summary: Add `ForgeTrust.AppSurface.Durable` for portable durable authoring and registration; use the [typed Work migration guide](../Durable/migrations/typed-work-definitions-v1.md) to define contract facts once. No runtime starts until the host installs a provider explicitly.
     depends_on:
       - ForgeTrust.AppSurface.Flow
       - ForgeTrust.AppSurface.Workers

@@ -116,3 +116,19 @@ bridges, not a general completion-model replacement. The default bridge wraps le
 legacy invocation accepts success only and otherwise raises the public, payload-free
 `DurableWorkExitCompatibilityException`. PostgreSQL keeps its encoded-exit execution boundary and completion
 translator internal, preserving the existing store, SQL, migrations, and provider-owned retry policy.
+
+## Typed Work definitions (#800)
+
+The [typed Work migration guide](migrations/typed-work-definitions-v1.md) introduces five public types in the existing
+adopter package: `DurableWork`, `DurableWorkDefinition<TWork,TResult>`,
+`DurableWorkBinding<TWork,TResult,TExecutor>`,
+`DurableReconciledWorkBinding<TWork,TResult,TExecutor,TReconciler>`, and
+`DurableExitWorkBinding<TWork,TResult,TExecutor>`. The static factory requires an explicit retry default; sealed,
+get-only definitions and bindings have internal constructors. Three `AddDurableWork` overloads infer implementation
+types from the binding. The request factory retains explicit caller identities, retry overrides and eligibility time.
+
+The shared contract/codec snapshots, provenance checks, contribution aggregator and local registration catalog are
+internal. Existing registration constructors and request APIs remain supported; Work and Flow fingerprints and the
+provider execution boundary are unchanged. Flow uses compatible codecs from the same original source without relaxing
+its exact Work-registration reference requirement. The [API snapshot](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable/PublicAPI.Shipped.txt)
+records every member and generic constraint.

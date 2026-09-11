@@ -73,6 +73,10 @@ For recovery, inspect status first, produce a corrected and reviewed forward-onl
 operation. Never delete or rewrite migration history. The [`durable-postgresql` example](../examples/durable-postgresql/README.md)
 is a local proof of the boundaries above, not production operations guidance.
 
+Typed Work authoring is documented in the [typed Work definition migration guide](migrations/typed-work-definitions-v1.md).
+It is a syntax and rollout guide; the existing PostgreSQL workload remains the evidence for acceptance and terminal
+completion.
+
 ## Scale and transport boundary
 
 PostgreSQL is the first planned authoritative provider, not the definition of AppSurface Durable. The adopter contracts
