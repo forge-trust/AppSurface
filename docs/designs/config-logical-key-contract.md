@@ -199,6 +199,8 @@ public sealed class ConfigProviderRequest
     public string Environment { get; }
     public AppSurfaceConfigKey Key { get; }
     internal ConfigResolutionScope Scope { get; }
+    internal ConfigKeyInputOrigin InputOrigin { get; }
+    internal string? OriginalInput { get; }
 }
 
 public sealed class ConfigProviderValueResult<T>
@@ -283,10 +285,9 @@ public sealed record ConfigProviderAuditDiscoveredKey(
     IReadOnlyList<ConfigAuditSourceRecord> Sources,
     IReadOnlyList<ConfigAuditDiagnostic> Diagnostics);
 
-bool IConfigValuePatcher.TryPatch<T>(
+ConfigPatchResult<T> IConfigValuePatcher.Patch<T>(
     ConfigProviderRequest request,
-    T? currentValue,
-    out T? patchedValue);
+    T? currentValue);
 
 ConfigValueResolution IConfigDiagnosticProvider.Resolve(
     ConfigProviderRequest request,
@@ -299,6 +300,14 @@ ConfigPatchDiagnosticResult IConfigDiagnosticPatcher.TracePatch(
     Type valueType);
 ```
 
+`ConfigPatchResult<T>` has exactly three statuses: `NotApplied`, `Applied`, and `Terminal`. `Applied` contains a value
+and means at least one child variable was applied after every present candidate in the patch was converted and
+validated successfully. It intentionally preserves the current any-successful-child rescue behavior; it does not claim
+that every member of `T` is populated. `Terminal` contains one structured diagnostic and no value. Patchers construct
+an isolated candidate object, never mutate the lower-provider or default instance in place, and publish it only after
+all present child candidates pass validation. A conversion, collision, depth, cycle, or binding failure is therefore
+terminal and cannot partially rescue a retained provider failure.
+
 Remove `IConfigProviderTerminalDiagnosticProvider`; `ConfigProviderValueResult<T>.Terminal` replaces its mutable
 two-call protocol. Provider-specific richer audit resolution remains, but its expected failures use the same diagnostic
 codes and terminal meaning.
@@ -308,19 +317,31 @@ codes and terminal meaning.
 cache identities also hold typed keys. Existing public audit report DTOs retain string `Key`/`ConfigPath` properties for
 serialization; those strings are colon-delimited renderings, not normalized casing.
 
-All attributed and manually registered keys enter one declaration layer at deferred module registration. Exact
-colon-delimited duplicates merge through the existing audit-option merge rules. A case-only difference, or a legacy dot
-registration that translates to an already-declared colon key, is `config-key-collision` and fails startup. There is
-therefore at most one declaration spelling. For report spelling, that declaration wins; if no declaration exists, use
-the winning provider's projected spelling. Source records always keep their own spelling. Sorting uses the two-comparer
-rule above, making output deterministic without pretending that lowercase text is canonical.
+All attributed and manually registered keys are captured as raw immutable declaration descriptors during service
+registration. The final `ConfigDeclarationRegistry` is then constructed once by dependency injection after the
+container exists, using the complete descriptor set and finalized key-parser options; registration callbacks never
+resolve options and never build a second container. Exact colon-delimited duplicates merge through the existing
+audit-option merge rules. A case-only difference, or a legacy dot registration that translates to an already-declared
+colon key, is `config-key-collision` and fails startup validation. There is therefore at most one declaration spelling.
+For report spelling, that declaration wins; if no declaration exists, use the winning provider's projected spelling.
+Source records always keep their own spelling. Sorting uses the two-comparer rule above, making output deterministic
+without pretending that lowercase text is canonical.
 
 `DefaultConfigManager` parses once, creates one internal `ConfigResolutionScope`, and passes a key-specific
 `ConfigProviderRequest` backed by that scope through environment lookup, ordered providers, object patching, logging,
-and audit resolution. `ConfigResolutionScope` captures one immutable environment name/value snapshot on first
-environment access and reuses it for direct values, aliases, collections, patches, and diagnostics. A top-level
-`GetValue` owns one scope; an audit report owns one scope for the whole report. Requests and scopes are immutable after
-construction and safe for concurrent reads, but are never cached across top-level operations.
+and audit resolution. The parser-created `AppSurfaceConfigKey` carries internal immutable input metadata—typed,
+strict-string, or translated-dot origin plus the original composed spelling when applicable. This metadata is excluded
+from equality, hashing, public serialization, and `Value`, but survives attribute composition, wrapper initialization,
+request construction, provider alias lookup, notices, and audit reporting. Direct `Parse` and `FromSegments` keys are
+typed/strict and have no compatibility aliases. This avoids changing the public `IConfig.Init` shape merely to pass
+compatibility provenance.
+
+`ConfigResolutionScope` captures one immutable environment name/value snapshot on first environment access and reuses
+it for direct values, aliases, collections, patches, and diagnostics. The snapshot builds an ordinal exact-name map,
+case-insensitive collision groups, and a prefix index once. Collection and object binding enumerate present children
+from that prefix index; they do not issue a fixed number of speculative point lookups. A top-level `GetValue` owns one
+scope; an audit report owns one scope for the whole report. Requests and scopes are immutable after construction and
+safe for concurrent reads, but are never cached across top-level operations.
 
 `ConfigProviderRequest` has an internal constructor/factory; external providers consume requests but do not construct or
 mutate scopes. The conformance harness exercises them through `IConfigManager`. If environment snapshot capture throws,
@@ -365,10 +386,11 @@ For a strict key, the manager:
 2. returns `Found.Value`;
 3. on `Missing`, asks remaining providers by descending priority with the same three-result rules;
 4. retains the first `Terminal` result without asking a lower source, but preserves the existing rescue order by giving
-   the environment patcher one chance to construct a complete value from child variables;
+   the environment patcher one transactional chance to apply one or more valid child variables;
 5. applies environment child patches with the same request/snapshot to a lower-provider value or the default value
    associated with a terminal result;
-6. returns a successful patch, otherwise throws `ConfigurationResolutionException` for the retained terminal result;
+6. returns an `Applied` patch; throws the patch diagnostic for `Terminal`; otherwise throws
+   `ConfigurationResolutionException` for the retained provider result;
 7. returns `default` only when every eligible provider returned `Missing` and no patch resolved.
 
 Invalid application input fails before provider traversal. Provider collision and unrepresentable outcomes are terminal
@@ -397,7 +419,7 @@ value that is never used for equality.
 | `ConfigKeyAttribute.GetKeyPath(Type)` | returns dot-composed string | returns colon-composed rendered string and is obsolete in favor of typed `GetLogicalKey(Type)` |
 | Config wrapper discovery | calls `GetKeyPath` directly | calls internal `GetLogicalKey(Type, IConfigKeyInputParser)` during deferred registration |
 | `IConfig.Init`, `Config<T>.Init`, `ConfigStruct<T>.Init` | string `key` | typed `key` |
-| `IConfigValuePatcher` | environment plus string `key` | `ConfigProviderRequest` |
+| `IConfigValuePatcher` | environment plus string `key` and Boolean/out result | `ConfigProviderRequest` plus transactional `ConfigPatchResult<T>` |
 | `IConfigDiagnosticProvider` | environment plus string `key` | `ConfigProviderRequest` |
 | internal `IConfigAuditKeyEnumerator` and discovered-key record | string `Key` | typed `Key` |
 | `IConfigDiagnosticPatcher` | environment plus string `key` | `ConfigProviderRequest` |
@@ -409,6 +431,13 @@ value that is never used for equality.
 | `MapSecret` / `EnableConventionResolver` | string only | typed primary overloads; strict string conveniences |
 | public audit report/diff DTOs | string `Key`/`ConfigPath` | rendered string remains for JSON compatibility |
 | `IEnvironmentProvider` | exact single-variable lookup | also adds `CaptureEnvironmentVariables()` for one immutable name/value snapshot |
+
+The compatibility gate compiles and runs consumers built against both the previous and candidate package sets. It
+explicitly covers `IConfigProvider`, `IConfigManager` inheritance, `IEnvironmentProvider`, `IConfig.Init`, audit
+extension methods and DTO serialization, concrete-provider string conveniences, and mixed old/new Config,
+LocalSecrets, and Google packages. If the final gate keeps the immediate SPI break, old provider and wrapper binaries
+must fail with a documented package-version error rather than a late `MissingMethodException`; if the gate chooses the
+additive V2 adapter, those same binaries must resolve through the adapter with an obsolescence notice.
 
 The primary registration and compatibility signatures are:
 
@@ -552,13 +581,15 @@ They never include values.
 
 ### File configuration
 
-Replace lookup-time `JsonObject.TryGetPropertyValue` traversal with an immutable flattened snapshot keyed by
-`AppSurfaceConfigKey`.
+Replace lookup-time `JsonObject.TryGetPropertyValue` traversal and the separate source-location parse with one
+immutable, shape-preserving token projection keyed by `AppSurfaceConfigKey`. The existing token/location machinery is
+the starting point, but one `Utf8JsonReader` walk becomes authoritative for property identity, source ranges, value
+binding, and provenance.
 
-- Parse UTF-8 bytes with `Utf8JsonReader` and build the flattened projection before constructing any `JsonObject` or
-  deserializing a selected value. The token walk tracks the current segment stack and per-object property set, so exact
-  duplicate property names and case-only variants remain observable; do not rely on a materialized DOM that may already
-  have discarded one occurrence.
+- Parse UTF-8 bytes with `Utf8JsonReader` and build the projection before deserializing a selected value. The token walk
+  tracks the current segment stack, node shape, raw value range, and per-object property set, so exact duplicate
+  property names and case-only variants remain observable; do not run a second parser or rely on a materialized DOM
+  that may already have discarded one occurrence.
 - Each nested JSON property contributes one segment; `{ "Payments": { "ApiKey": "x" } }` becomes
   `Payments:ApiKey`.
 - `{ "Microsoft.Hosting.Lifetime": "Warning" }` is one segment and retains both dots.
@@ -572,15 +603,24 @@ Replace lookup-time `JsonObject.TryGetPropertyValue` traversal with an immutable
   higher layers for an environment. An exact-spelling key in a later file replaces the earlier value and retains both
   provenance records. A case-only spelling change across files marks only that logical identity as a collision.
 - Two equal flattened paths inside one file are invalid even if later DOM behavior would otherwise retain a last value.
-  Object/scalar replacement and descendant-origin removal happen only after the token-level incoming layer passes
-  collision validation. The accepted token ranges may then be materialized/deserialized for the existing value-binding
-  behavior.
+  A collision marks the exact path and every aggregate ancestor as terminal for reads from that effective file stack,
+  while unrelated siblings remain available. A later file cannot hide that marker. Object/scalar replacement and
+  descendant-origin removal happen only after the incoming layer passes collision validation.
+- Null preserves the current provider's missing-value semantics. An empty object or array is a present aggregate.
+  Arrays replace arrays as a unit across layers; scalars replace objects/arrays and objects/arrays replace scalars,
+  removing superseded descendant origins only after the higher layer is valid.
+- A JSON property containing `:`, a control character, or leading/trailing whitespace is unrepresentable as one logical
+  segment. Mark its affected subtree terminal with `config-key-unrepresentable`; do not silently split or trim it.
 - Keep the winning source file and original JSON path for audit provenance.
 
 ### Environment configuration
 
 The canonical codec uppercases invariantly and replaces each logical `:` boundary with `__`. It does not rewrite `.`,
-`-`, `_`, `/`, or `\`. At the beginning of one top-level manager resolution, the provider obtains one
+`-`, a single interior `_`, `/`, or `\`. A convention-encoded segment must use portable ASCII letters, digits, `.`,
+`-`, `/`, `\`, or single interior underscores; it may not begin or end with `_` or contain `__`. Other logical
+segments remain valid for file, LocalSecrets, and explicit remote mappings, but require `MapKey` for the environment
+provider. These restrictions make segment boundaries injective instead of relying on collision discovery after lossy
+encoding. At the beginning of one top-level manager resolution, the provider obtains one
 `CaptureEnvironmentVariables()` snapshot and uses it for direct lookup, collections, object patches, aliases, and
 diagnostics.
 
@@ -598,8 +638,10 @@ The provider has exactly two ordered canonical layers:
 The scoped layer wins when both are set, preserving current override behavior, and audit provenance shows both. Inside
 either layer there is exactly one native candidate per logical key.
 
-A logical segment containing `__`, or any key that violates the target environment's supported identifier policy, is
-not representable by the convention because it could collide with a hierarchy boundary. Add an explicit
+A logical segment outside that convention grammar, or any key that violates the target environment's supported
+identifier policy, is not representable by the convention because it could collide with a hierarchy boundary. In
+addition, an unscoped encoded key beginning with `<ENVIRONMENT>__` is convention-unrepresentable in that environment:
+otherwise it could equal the scoped form of a shorter logical key. Add an explicit
 logical-key-to-environment-variable mapping API:
 
 ```csharp
@@ -640,6 +682,16 @@ is never a mixed explicit/canonical candidate set for one key. Duplicate explici
 logical keys mapped to native full names equal under `OrdinalIgnoreCase`, or an explicit full name colliding with
 another known key's canonical full name fail options validation. Mappings are frozen into one provider-local
 forward/reverse index before lookup; dynamic mapping mutation is unsupported.
+
+The forward/reverse index validates both scoped and unscoped full names for every known declaration. Ad-hoc requests
+perform the same atomic reverse-claim check before reading a value. Property tests generate segment boundaries,
+underscores, environment prefixes, casing, and scoped/unscoped pairs and assert that unequal logical identities never
+produce one accepted full native name. The counterexamples `A_:B` versus `A:_B`, and scoped
+`Production` + `Payments:ApiKey` versus unscoped `Production:Payments:ApiKey`, are permanent regression cases.
+
+Object and collection patching caches one immutable reflection/binding plan per runtime `Type`. Plans include writable
+members, collection shape, depth accounting, and cycle guards but no environment names or values. The provider walks
+only snapshot entries under the requested prefix, so a sparse collection does not perform 1,024 misses per member.
 
 For each expected full native name, inspect snapshot names equal under `OrdinalIgnoreCase`:
 
@@ -706,10 +758,20 @@ variables as AppSurface keys.
 - The protocol is roll-forward only after destination write; it never deletes the destination as rollback. A crash or
   concurrent retry resumes the durable journal under the namespace lock. Resolution remains fail-closed while both
   identities exist and reports the migration id/state.
-- A backend that cannot provide the namespace mutation lock, atomic durable journal transition, confirmed write/read,
-  and confirmed delete returns `local-secret-migration-unsupported` before creating `Prepared`. Completion may compact
-  the journal to a durable tombstone according to existing backend policy. The command prints identifiers, state, and
-  status, never values.
+- The public migration method delegates the entire state machine to the store capability. Its internal backend seam
+  exposes namespace lease acquisition, journal read/commit, value read/write/delete, and index publication so every
+  transition can be fault-injected without reflection.
+- The current platform backends use an exclusive maintenance lease shared by all package-owned writes and deletes in
+  that namespace; migration never assumes an instance-local mutex coordinates another process. A backend with
+  version-conditioned compare-and-swap may satisfy the same contract instead. If neither guarantee is available, the
+  command may copy and verify the destination but must retain the source and return
+  `local-secret-migration-unsupported`; it must not perform an unconditional delete.
+- Index publication is a journaled transition before source deletion, not a separate best-effort side effect. Lease
+  acquisition and backend calls accept cancellation and have documented finite timeouts.
+- A backend that cannot provide the shared mutation guarantee, atomic durable journal transition, confirmed write/read,
+  confirmed delete, and journaled index publication returns `local-secret-migration-unsupported` before destructive
+  work. Completion may compact the journal to a durable tombstone according to existing backend policy. The command
+  prints identifiers, state, and status, never values.
 
 Application code keeps the same logical key when moving from LocalSecrets to a remote provider, preserving the promise
 from the prior LocalSecrets design.
@@ -761,14 +823,14 @@ Options validation builds one provider-local native-resource index from every ex
 projection for known attributed/audit-registered keys. An explicit mapping and generated mapping may target the same
 resource only for the same logical key; distinct logical keys targeting the same exact resource fail validation.
 Ad-hoc convention keys are checked against the same reverse index before network access and atomically registered for
-subsequent concurrent lookups. The provider does not enumerate Google Secret Manager: unclaimed remote secrets are
-outside its collision domain.
+subsequent concurrent lookups. Ad-hoc claims are bounded; exhausting the configured claim capacity is terminal before
+network access rather than allowing unbounded process growth. The provider does not enumerate Google Secret Manager:
+unclaimed remote secrets are outside its collision domain.
 
-The declaration registry is finalized during deferred module registration before any provider resolves a request.
-Google options validation is split into two explicit stages: ordinary option-shape validation may run during provider
-construction, while declaration-dependent convention projection runs when the registry is sealed. Resolution before
-the registry is sealed is an invalid lifecycle state and returns a value-safe startup diagnostic rather than building
-a partial index.
+The immutable declaration registry is constructed by dependency injection from all raw declaration descriptors and
+finalized parser options. Google validation is split into ordinary option-shape validation and a
+declaration-dependent validator registered with `ValidateOnStart`; both consume the same immutable registry. Providers
+cannot observe a `Building` state, trigger wrapper activation, or construct a partial index on first request.
 
 The native collision key is the complete resolved version resource name
 `projects/{project}/secrets/{secret-id}/versions/{version}`, compared with `StringComparer.Ordinal` because it is an
@@ -786,6 +848,15 @@ identity return terminal `config-key-collision`. A request that completed before
 discovered cannot be revoked, which is why the injective grammar and generated-namespace reservation are required to
 make that branch unreachable for validated options.
 
+Remote payload caching is keyed by the exact full version resource name, not by environment plus logical key. One
+`ConcurrentDictionary<string, Lazy<...>>` coalesces concurrent misses; the `GetOrAdd` factory has no network side
+effects because it may execute more than once. Failed or cancelled fetch entries are removed after completion.
+Successful entries use a size-bounded, expiring cache with a documented default of 1,024 entries and the provider's
+existing TTL default. Payload bytes are copied at client, cache, and result boundaries. Caller cancellation stops that
+waiter; it does not cancel a shared fetch still needed by other waiters. Audits use bounded concurrency plus an
+aggregate default budget of 30 seconds and 256 remote lookups, reporting incomplete coverage explicitly when either
+limit is reached.
+
 ### Audits, discovery, and diagnostics
 
 - Store known and discovered logical keys as typed keys internally.
@@ -799,6 +870,16 @@ make that branch unreachable for validated options.
 - Include legacy and representability diagnostics in structured and text reports.
 - Preserve the exact resolved Google version resource name as a value-safe source locator. It participates in
   provenance and collision diagnosis but never changes logical equality and never includes a secret payload.
+- Build matching, redaction, and grouping from typed logical segments and source records; rendered dotted/bracketed
+  paths are presentation only.
+- Trust structured diagnostics only. Built-in providers select messages from a reviewed template catalog and supply
+  classified value-safe arguments. `DefaultConfigManager` automatically logs stable codes and bounded safe identifiers,
+  not arbitrary `Problem`, `Cause`, or `Fix` text returned by an external provider.
+- Escape control characters and cap rendered logical keys/native identifiers at 256 characters plus a stable digest.
+  Notice suppression retains at most 4,096 identities. Configuration file reads default to 16 MiB per layer and 256
+  files per environment; environment snapshots default to 65,536 entries and 64 MiB of names plus values. Every limit
+  is configurable, documented, validated as positive, and fails with a stable value-safe diagnostic rather than partial
+  data. No diagnostic or metric includes values.
 
 ## Migration and Compatibility
 
@@ -953,9 +1034,12 @@ The following matrix is normative; an implementation is incomplete if any expect
 | Invalid grammar | empty, `:A`, `A:`, `A::B`, controls, edge whitespace | Reject with no partial key | Kernel unit |
 | Segment construction | null/empty array, null/invalid member, caller mutates source array | Defined exceptions; successful `Segments` remains unchanged | Kernel unit |
 | Provider result invariants | missing/found/terminal factories with null and diagnostic combinations | Only the three valid states construct | Core unit |
-| Terminal protocol | high provider returns terminal result | No lower-provider lookup; preserve one existing environment-child patch rescue, then throw if rescue is incomplete | Manager integration |
+| Terminal protocol | high provider returns terminal result | No lower-provider lookup; preserve one transactional any-successful-child environment rescue; throw when no child applies | Manager integration |
+| Patch transaction | multiple children present and one conversion/collision fails | No mutation or partial rescue; terminal patch diagnostic wins | Environment/manager integration |
 | Same-layer duplicate | same spelling twice | Duplicate failure before value selection | File/mapping unit |
 | Raw JSON duplicate | exact/case-varied duplicate properties in UTF-8 tokens | Token parser rejects before DOM materialization | File parser unit |
+| Aggregate JSON collision | colliding descendant plus unrelated sibling | Exact key and ancestors terminal; unrelated sibling remains available | File parser/manager integration |
+| JSON shape layering | null, empty aggregate, array, scalar/object replacement | Normative replacement and missing semantics with correct provenance | File provider unit |
 | Same-layer case collision | `ApiKey` plus `apikey` | Collision terminal/startup failure | Every enumerable provider |
 | Declaration merge | exact wrapper/manual spelling registered twice | Existing metadata merge; one report spelling | Registration + audit unit |
 | Declaration conflict | case-only or legacy/canonical spellings identify same key | Startup collision with both safe spellings | Registration integration |
@@ -967,12 +1051,16 @@ The following matrix is normative; an implementation is incomplete if any expect
 | Native id collision | distinct keys encode/map to same id | Options or pre-network representability failure | Env/Google unit |
 | Prefix boundary | `Payments` with `Payments:Key` and `PaymentsArchive:Key` | Claim first only | Kernel + Google unit |
 | Environment mapping | explicit suffix configured | Replaces canonical suffix in scoped and unscoped layers | Environment integration |
+| Environment codec injectivity | underscore boundaries and environment-prefix counterexamples | Convention rejects or maps explicitly; no two accepted keys share one full name | Property + regression tests |
 | Environment layer | scoped and unscoped expected names both present | Scoped wins; both sources audited | Environment integration |
 | Environment casing | exact, one case-only, and two case-varied native names | Resolve, casing terminal, and collision respectively on Unix/Windows fakes | Environment integration |
 | Environment snapshot | backing variables mutate during direct/collection/patch operations | One top-level resolution stays on captured snapshot; next call sees new state | Environment concurrency integration |
+| Environment bounded traversal | sparse high collection indices and a large object graph | Prefix index visits present candidates only; cached bind plan respects depth/cycle limits | Performance regression |
 | Environment discovery | unrelated native variables beside registered keys | Only forward-known keys are audited; unrelated names omitted | Environment audit integration |
 | Google full-resource collision | explicit/generated mappings across project, id, version, and casing | Exact full-resource equality collides; distinct ordinal resources do not | Google options + concurrent unit |
 | Google concurrent claim | two concurrent keys attempt one resource | Atomic claim is poisoned; triggering and subsequent requests are terminal | Google concurrency unit |
+| Google single-flight | many concurrent waiters, cancellation, failure, and retry | One shared fetch, cancelled waiter isolated, failed entry evicted, payloads immutable | Google concurrency unit |
+| Google limits | cache/claim/audit budget exhausted | Stable terminal or explicit incomplete audit; bounded memory and elapsed time | Google load/integration |
 | Explicit Google mapping | exact mapping under a matching convention | Explicit wins for that key; full identifier retained | Google integration |
 | Legacy translation | dot-only string in compatibility mode | One translated identity plus replacement diagnostic | Manager integration |
 | Legacy declaration conflict | legacy and canonical declarations translate to same identity | Startup collision; no provider traversal | Registration integration |
@@ -981,7 +1069,12 @@ The following matrix is normative; an implementation is incomplete if any expect
 | Terminal precedence | higher source returns collision/unrepresentable | Stop; do not query lower providers | Manager integration |
 | Local migration retry | crash/failure before/after every durable transition and store mutation | Resume roll-forward or stop safely; never expose/overwrite value | Store integration |
 | Local migration capability | backend lacks lock/durable journal/confirmed operations | Unsupported before `Prepared`; no mutation | Store integration |
+| Local migration coordination | second process/write races every journal boundary | Shared lease or CAS prevents stale delete; index and journal recover together | Store concurrency/failure injection |
 | Concurrent projection | same/different keys register concurrently | One deterministic mapping or safe collision | Projection/provider concurrency |
+| Registry lifecycle | late options, manual-only declarations, concurrent first access, and two hosts | One complete immutable registry per host; no wrapper activation or partial seal | DI/startup integration |
+| Input provenance | translated nested attribute reaches wrapper/provider/audit | Original composed spelling and origin survive without affecting equality | Registration/manager integration |
+| Diagnostic trust | external free text plus controls/oversized identifiers | Manager logs only catalogued fields and escaped bounded safe identifiers | Security/golden tests |
+| Resource limits | file, environment, notice, and renderer limits exceeded | Stable value-safe failure; no partial snapshot or unbounded retention | Load/failure tests |
 
 Target 100% branch coverage for `AppSurfaceConfigKey`, `IConfigKeyInputParser`, projection/index logic, and provider
 codecs; target at least 95% branch coverage for changed provider orchestration, with every matrix row exercised. Run
@@ -1760,6 +1853,19 @@ concerns are exactly the five queued User Challenges, so it is intentionally not
 | 18 | DX | Retain `GetValue<T>` instead of adding `TryResolve<T>` in this rail | Taste | Simplest thing | Structured provider outcomes and audit tools cover the migration without another app-facing API | Add an advanced application result API |
 | 19 | DX | Reuse the existing docs feedback issue form instead of adding product telemetry | Mechanical | Pragmatic | CI timing and voluntary friction reports are enough for this pre-1.0 contract | Outbound onboarding analytics |
 | 20 | DX | Reinforce the five CEO challenges without adding duplicate DX questions | User Challenge | User direction wins | Both DX voices found the same compatibility and surprise risks | Auto-change the locked direction |
+| 21 | Engineering | Build the declaration registry once from raw descriptors and finalized DI options | Mechanical | Explicit over clever | Service-registration callbacks cannot resolve parser options or safely seal a partial registry | Mutable Building/Sealed lifecycle |
+| 22 | Engineering | Carry parsed-input origin on the immutable key into wrappers and requests | Mechanical | Completeness | Legacy alias behavior otherwise disappears during attributed wrapper initialization | Reparse rendered key downstream |
+| 23 | Engineering | Make environment convention names injective or explicitly mapped | Mechanical | Correctness | Underscore boundaries and scoped/unscoped prefixes currently admit concrete native-name collisions | Detect all collisions only after reading values |
+| 24 | Engineering | Replace Boolean patching with an isolated three-result transaction | Mechanical | Correctness | The manager must distinguish no patch, safe rescue, and patch failure without publishing partial mutation | Keep Boolean/out protocol |
+| 25 | Engineering | Preserve current any-successful-child rescue semantics | Mechanical | User direction wins | Existing manager behavior is explicit; the new result makes it safe without redefining completeness | Require every object member before rescue |
+| 26 | Engineering | Make the file token projection authoritative for identity, shape, value ranges, and locations | Mechanical | DRY | Two parser walks can disagree about duplicates and provenance | DOM lookup plus separate location map |
+| 27 | Engineering | Poison a file collision's aggregate ancestors while preserving unrelated siblings | Mechanical | Least surprise | Parent reads must not bypass a descendant collision, but one bad subtree should not disable a whole file | Last-write wins or whole-file failure |
+| 28 | Engineering | Key Google cache/single-flight by exact resource and bound cache, claims, and audits | Mechanical | Correctness | Current mutable payload cache and unconstrained remote traversal create races and unbounded work | Environment/logical-key cache and duplicate fetches |
+| 29 | Engineering | Require shared-writer coordination and journaled index publication for LocalSecrets deletion | Mechanical | Safety | An instance-local lock cannot prove an unconditional source delete is still safe | Best-effort delete after value comparison |
+| 30 | Engineering | Prefer one exclusive maintenance lease for current LocalSecrets backends | Taste | Simplest thing | Existing backends lack portable compare-and-swap; one shared lease is easier to prove and recover | Backend-specific CAS in the first implementation |
+| 31 | Engineering | Treat external diagnostic prose as untrusted and bound rendered identifiers/history | Mechanical | Security | A third-party provider can otherwise inject sensitive or hostile text into automatic logs | Auto-log arbitrary provider prose |
+| 32 | Engineering | Add aggregate deadlines, cancellation semantics, and explicit resource limits | Mechanical | Performance | A 1,000-key sequential remote audit at five seconds each can run for roughly 83 minutes | Per-call timeout only |
+| 33 | Engineering | Reinforce the five compatibility/applicability challenges without adding a sixth | User Challenge | User direction wins | Both engineering voices confirmed the same release-direction risks; remaining fixes are mechanical or one taste choice | Silently reverse the locked rail |
 
 ## Autoplan Phase 2: Developer Experience Review
 
@@ -2146,3 +2252,421 @@ Synthesized from the eight passes. Each task derives from a concrete finding.
 | Design phase         | skipped, no UI scope                         |
 +====================================================================+
 ```
+
+## Autoplan Phase 3: Engineering Review
+
+Review scope: the complete logical-key rail, including the public Config API, DI registration lifecycle, built-in
+providers, audit and diagnostics paths, LocalSecrets migration, Google caching, compatibility trains, packaging, and
+verification. No implementation was performed in this phase.
+
+### What already exists
+
+| Existing code | Evidence | Reuse decision |
+| --- | --- | --- |
+| Manager precedence and child rescue | `DefaultConfigManager.cs:47-103` queries environment, ordered providers, terminal side-channel, then `TryPatch` | Preserve precedence and any-successful-child rescue; replace the ambiguous protocols |
+| Public provider SPI | `IConfigProvider.cs:6-36` exposes nullable `GetValue<T>` | Migrate or adapt at the package boundary selected by the final gate |
+| Deferred wrapper registration | `AppSurfaceConfigModule.cs:53-98` records a service-collection callback and later constructs wrappers | Capture raw descriptors here; build the parsed registry only after DI exists |
+| File token/source-location parser | `FileBasedConfigProvider.cs:698+` contains `ConfigFileSourceLocationMap` | Promote it into the one authoritative token projection rather than adding a third representation |
+| Environment object/collection patching | `EnvironmentConfigProvider.cs:151+` and its tests cover fields, properties, collections, cycles, and invalid children | Retain behavioral coverage; compile a per-type plan and make application transactional |
+| LocalSecrets platform coordination | `PlatformAppSurfaceLocalSecretStore.MacOsV2.cs:30,604+` has a five-second named mutex | Generalize to one namespace lease honored by every package mutation and add durable key-migration state |
+| Google provider seams | `GoogleSecretManagerConfigProvider.cs:19-180` has a fakeable client, options validation, cache, and structured internal result | Reuse the client/options tests; replace side-channel diagnostics and unbounded/mutable cache behavior |
+| Audit display/source separation | `ConfigAuditPath.cs` and current model tests distinguish display and source paths | Replace dotted source-string matching with typed segment identity |
+| Existing public documentation and examples | Config, LocalSecrets, and Google package READMEs plus current examples | Update atomically with the contract and add one packed-consumer proof |
+
+The engineering review does not propose a new framework. It turns these partial solutions into one enforceable identity
+contract and removes representations that can disagree.
+
+### Engineering dual voices
+
+#### Subagent says
+
+The independent `combo/sub` reviewer reported 12 issues: nine high severity and three medium severity.
+
+1. The terminal-result state machine contradicts a Boolean patcher that can return a partially mutated object.
+2. LocalSecrets migration requires durable journaling, shared locking, and confirmed or conditional operations at the
+   store boundary.
+3. File identity, value binding, and source locations must come from one authoritative token projection.
+4. Environment resolution needs an immutable full snapshot contract, not mixed point reads.
+5. Reflection plans and child-prefix indexes must be cached; collection binding must not probe a fixed 1,024 indices
+   for every member.
+6. Google needs explicit lifecycle validation, bidirectional native claims, cancellation, bounded caching, and
+   single-flight fetches.
+7. Audit, provenance, diff, and redaction should carry typed identities instead of repeatedly parsing display strings.
+8. `IEnvironmentProvider` adds another public binary break that the release matrix must cover.
+9. Key lengths, logger inputs, notice history, file/environment inputs, and caches require explicit bounds.
+10. Registration order, two-host isolation, concurrent first access, and partial initialization need failure tests.
+11. Migration must test a concurrent writer at every journal transition, not only crash/retry in one process.
+12. The compatibility plan must cover all changed public interfaces and precompiled consumers, not only
+    `IConfigProvider`.
+
+Verdict: architecture concern; tests concern; performance fail; security concern; error paths fail; deployment concern.
+
+#### Codex says
+
+The independent Codex review reported 11 concerns.
+
+1. The proposed environment codec was non-injective: `A_:B` and `A:_B` could both become `A___B`, while scoped
+   `Production` + `Payments:ApiKey` could collide with unscoped `Production:Payments:ApiKey`.
+2. Service-registration callbacks receive `IServiceCollection`, so they cannot safely resolve finalized parser options
+   or seal a complete declaration registry.
+3. Translated wrapper initialization could lose original-input provenance before provider alias generation.
+4. A Boolean patch result could rescue a retained terminal provider after only one child succeeded, without proving
+   that all present children were valid.
+5. File collisions lacked aggregate-subtree and layering semantics, allowing a parent object read to bypass a bad leaf
+   or one bad key to disable unrelated content.
+6. A LocalSecrets namespace lock is insufficient unless every writer observes it, source deletion is conditioned on
+   current state, and index publication participates in recovery.
+7. Provider applicability remains unresolved: an unclaimed provider failure may suppress a lower provider.
+8. The package break also affects manager inheritance, environment snapshots, wrapper initialization, and audit
+   surfaces; mixed-version behavior is under-specified.
+9. Notice history, ad-hoc claims, cache entries, configuration files, environment snapshots, and rendered diagnostics
+   were not bounded.
+10. Remote audit cancellation, aggregate deadline, bounded parallelism, shared-fetch cancellation, and failure eviction
+    were unspecified; 1,000 sequential five-second lookups could take about 83 minutes.
+11. Arbitrary third-party diagnostic prose cannot be assumed value-safe merely because the interface documents it.
+
+Verdict: architecture fail; tests fail; performance concern; security fail; error paths fail; deployment fail.
+
+#### Consensus
+
+| Dimension | Subagent | Codex | Synthesis |
+| --- | --- | --- | --- |
+| Architecture soundness | Concern | Fail | Confirmed: registry, projection, and patch lifecycles needed amendments |
+| Test sufficiency | Concern | Fail | Confirmed: concurrency, compatibility, bounds, and failure injection were incomplete |
+| Performance at scale | Fail | Concern | Confirmed: fixed probing, sequential remote work, and unbounded state were unsafe |
+| Security and trust boundaries | Concern | Fail | Confirmed: migration deletion and diagnostic trust required explicit enforcement |
+| Error and recovery paths | Fail | Fail | Confirmed: partial patching, collision ancestry, and migration recovery were ambiguous |
+| Deployment and compatibility | Concern | Fail | Confirmed: every changed interface and persisted identity needs mixed-version proof |
+
+Consensus is 6/6 confirmed dimensions with zero disagreement about the existence of a problem. The only remaining
+implementation taste choice is the LocalSecrets writer primitive; this plan recommends one exclusive maintenance lease
+for existing backends while allowing version-conditioned compare-and-swap in a backend that can prove equivalent
+safety.
+
+The five CEO User Challenges are reinforced, not duplicated. They remain the only direction-changing questions for the
+final gate.
+
+### Architecture and data flow
+
+```text
+ application string / typed key / attribute fragment
+                       |
+                       v
+          +---------------------------+
+          | parser + input provenance |
+          +-------------+-------------+
+                        |
+              raw declaration descriptors
+                        |
+                        v
+          +---------------------------+
+          | immutable DI registry     |<---- finalized options
+          +-------------+-------------+
+                        |
+               startup validators
+          +-------------+-------------+
+          |                           |
+          v                           v
+ native forward/reverse indexes    wrapper factories
+          |                           |
+          +-------------+-------------+
+                        v
+               ConfigProviderRequest
+                        |
+        +---------------+------------------+------------------+
+        |               |                  |                  |
+        v               v                  v                  v
+ environment       file token         LocalSecrets       Google resource
+ snapshot/index    projection         index/lease        claims/single-flight
+        |               |                  |                  |
+        +---------------+------------------+------------------+
+                        v
+       Missing / Found(+notices) / Terminal diagnostic
+                        |
+               transactional env patch
+                        |
+                        v
+            value OR structured exception
+                        |
+             typed audit/provenance path
+                        |
+         bounded catalogued value-safe rendering
+```
+
+The declaration registry is immutable and host-scoped. Provider indexes depend on it; wrappers do not need to activate
+to construct it. Each top-level resolution owns an immutable environment snapshot. File layers publish a token
+projection only after collision validation. LocalSecrets migration owns a durable operation under a backend-wide writer
+guarantee. Google separates permanent native-resource claims from bounded expiring payload cache entries.
+
+### Architecture findings and amendments
+
+| Severity | Confidence | Finding | Evidence | Plan amendment |
+| --- | --- | --- | --- | --- |
+| P1 | High | Environment native-name convention was not injective | Concrete underscore and scoped/unscoped counterexamples | Restrict convention segment grammar, detect environment-prefix ambiguity, validate complete names, and require explicit mapping |
+| P1 | High | Registry sealing could happen before finalized options/declarations exist | Registration callback accepts `IServiceCollection`; wrapper factory resolves later | Capture raw descriptors and construct one immutable registry through DI; declaration-dependent validation uses `ValidateOnStart` |
+| P1 | High | Compatibility provenance could be lost between parser and wrapper | Existing wrapper initialization receives only a composed key | Carry immutable internal origin/original-input metadata on the key, excluded from public identity |
+| P1 | High | Patch success and terminal rescue were not mechanically distinguishable | Existing `TryPatch` is Boolean/out and manager returns immediately on true | Add `NotApplied`/`Applied`/`Terminal`, validate on an isolated candidate, preserve any-valid-child rescue only when all present candidates pass |
+| P1 | High | One file parser could report a value that the location parser diagnoses differently | DOM/value and lazy location map are separate | Promote one UTF-8 token projection to identity, shape, ranges, values, and provenance |
+| P1 | High | LocalSecrets source deletion was not safe against another writer | Current coordination is backend/operation specific | Require shared lease or CAS, journal index publication, condition deletion on current state, and retain source when unsupported |
+| P1 | High | Google work/state was not bounded or single-flight | Current cache stores mutable payloads; no aggregate audit budget | Exact-resource keys, side-effect-free `Lazy` single-flight, defensive copies, bounded cache/claims, cancellation, and audit budget |
+| P1 | High | Automatic logging trusted provider-owned prose | External provider can construct diagnostic strings | Log catalogued code/classified arguments only; external prose remains explicit report data and is escaped/bounded |
+| P2 | High | Audit identity still depends on dotted string prefixes in several paths | `ConfigAuditReporter.cs:369,735+`; `ConfigAuditValueTraverser.cs:715+` | Carry typed logical/source segments through matching, grouping, diff, and redaction |
+| P2 | High | Compatibility proof omitted several public surfaces | `IEnvironmentProvider`, `IConfig.Init`, manager inheritance, audit extensions all change | Add precompiled previous/candidate package matrix with deterministic startup outcomes |
+| P2 | Medium | Reflection and collection traversal repeat avoidable work | Environment patcher discovers members and probes candidate children per call | Cache immutable bind plans per type and enumerate only present snapshot-prefix entries |
+| P2 | Medium | Large external inputs and histories can retain unbounded memory | File bytes, process environment, notices, ad-hoc claims, rendered ids | Add documented positive configurable defaults and stable limit diagnostics |
+
+The .NET concurrency behavior behind the single-flight requirement is explicit: a
+[`ConcurrentDictionary.GetOrAdd` value factory may run more than once](https://learn.microsoft.com/en-us/dotnet/api/system.collections.concurrent.concurrentdictionary-2.getoradd?view=net-10.0),
+so the factory creates only a `Lazy` holder and performs no network work. Environment capture follows the process-wide
+snapshot exposed by
+[`Environment.GetEnvironmentVariables`](https://learn.microsoft.com/en-us/dotnet/api/system.environment.getenvironmentvariables?view=net-10.0).
+Declaration-dependent validation uses the documented
+[`ValidateOnStart` options lifecycle](https://learn.microsoft.com/en-us/dotnet/core/extensions/options).
+
+### Code quality review
+
+- Keep `AppSurfaceConfigKey` focused on logical identity. Internal input provenance does not participate in equality or
+  public serialization.
+- Replace side-channel terminal dictionaries and Boolean/out patching with discriminated result objects whose factories
+  enforce legal states.
+- Refactor the existing file token map instead of adding another parser or flattening dictionary.
+- Isolate provider-native codecs and reverse indexes behind focused internal types with property-based tests.
+- Cache only immutable reflection plans and immutable/copy-owned provider payloads.
+- Keep migration orchestration inside the store capability so tests can use explicit internal seams, not reflection.
+- Generate diagnostic text from a finite built-in catalog; use stable codes in manager logs and telemetry.
+- Fully document every changed public/internal test API, options default, release behavior, recovery step, and sharp edge
+  in the same change.
+
+### Test coverage map
+
+```text
+ Key grammar/equality ---------------- unit + property tests ---------------- PLANNED
+      |
+      +-> parser origin -> nested attributes -> wrappers -> request -------- PLANNED
+      |
+      +-> immutable registry -> startup options -> two-host isolation ------ PLANNED
+                              |
+                              +-> provider conformance harness -------------- PLANNED
+                                     |
+              +----------------------+----------------------+----------------------+
+              |                      |                      |                      |
+       environment             file projection        LocalSecrets             Google
+       codec/snapshot          duplicate/shape         journal/lease            claim/cache
+       patch transaction       ancestor poison         writer races             cancellation
+              |                      |                      |                      |
+          unit/load              unit/integration       fault/concurrency       fake/load
+              +----------------------+----------------------+----------------------+
+                                     |
+                       manager precedence + rescue --------------------------- PLANNED
+                                     |
+                       typed audit/redaction/rendering ----------------------- PLANNED
+                                     |
+               source example + packed external consumer + mixed versions --- PLANNED
+```
+
+Every prior gap now has a named test requirement in the provider conformance matrix and the engineering test artifact.
+The most important additions are:
+
+- `AppSurfaceConfigKeyTests` and environment codec property tests for casing, separator, underscore, and scoped-prefix
+  injectivity.
+- registration/startup tests for late options, manual-only declarations, nested translated attributes, concurrent
+  first access, and two hosts in one process;
+- manager/environment tests proving an invalid present child cannot mutate or rescue, while one or more wholly valid
+  children preserve current rescue behavior;
+- file tests for exact/case duplicate tokens, aggregate collision ancestry, unrelated siblings, node-shape replacement,
+  and one-pass value/location agreement;
+- LocalSecrets failure-injection and multi-writer tests at every journal, value, delete, and index-publication boundary;
+- Google concurrency/load tests for resource claims, shared fetches, defensive copies, cancellation, failure eviction,
+  cache/claim limits, and aggregate audit budgets;
+- diagnostic security tests with sentinel secret strings, arbitrary third-party prose, controls, and oversized ids;
+- precompiled previous/candidate package tests for every changed interface and persisted provider combination.
+
+Test-plan artifact:
+`~/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20260910-230624.md`.
+
+No LLM or prompt patterns are affected, so no eval suite is required. The quality gate remains focused tests, the
+no-credential example, clean packed consumer, solution build/format, and `./scripts/coverage-solution.sh`.
+
+### Performance review
+
+| Path | Risk before amendment | Enforceable design |
+| --- | --- | --- |
+| Environment direct/child lookup | Repeated process reads and fixed sparse-index probes | One snapshot with exact, folded, and prefix indexes per top-level operation |
+| Reflection patching | Repeated member discovery per object/request | One immutable cached binding plan per runtime type |
+| File loading | DOM plus separate location parse and duplicate allocations | One bounded token projection, selected-range deserialization |
+| Google concurrent misses | Duplicate network calls and mutable shared bytes | Exact-resource `Lazy` single-flight and defensive copies |
+| Google cache/claims | Unbounded keys and stale failures | 1,024-entry expiring payload cache, bounded ad-hoc claims, failure eviction |
+| Audit remote traversal | Up to roughly 83 minutes for 1,000 sequential five-second calls | Bounded concurrency, 30-second aggregate budget, 256 remote lookup default, explicit incomplete result |
+| Notices/rendering | Unbounded process dedup and attacker-sized log fields | 4,096 notice identities and 256-character escaped identifiers plus digest |
+| Source snapshots | Arbitrary file/environment memory pressure | Positive configurable file count/size and snapshot count/size limits |
+
+Load tests measure allocations and wall time at 1x, 10x, and 100x declaration/source counts. They assert bounded growth,
+not machine-specific microbenchmark thresholds. Benchmarks compare cold versus warm registry, bind-plan, file snapshot,
+and Google-cache paths.
+
+### Security and failure behavior
+
+The value boundary is unchanged: configuration values and secret payloads never enter logs, migration journals,
+diagnostics, metrics, cache keys, or test snapshots. New trust boundaries are explicit:
+
+- application and source spellings are escaped and length-bounded before rendering;
+- external-provider prose is untrusted and is not automatically logged;
+- built-in diagnostic templates accept classified safe identifiers only;
+- Google payload buffers are copy-owned at every boundary;
+- LocalSecrets source deletion requires durable proof under shared writer coordination;
+- resource exhaustion returns a stable diagnostic without partial source publication.
+
+Logger failures must not alter resolution results. Cancellation distinguishes a caller who stops waiting from a shared
+operation needed by other callers. Cache and single-flight failures are evicted after completion so a transient failure
+does not poison the process indefinitely. Collision claims, by contrast, remain terminal for that provider instance
+because allowing them to disappear would make behavior time-dependent.
+
+### NOT in scope
+
+- Replatforming Config onto `Microsoft.Extensions.Configuration`.
+- A new application-facing `TryResolve<T>` API; `GetValue<T>` remains the selected baseline unless the final gate
+  changes it.
+- Provider-specific retry/backoff policies unrelated to key identity, cancellation, or bounded aggregate work.
+- Enumerating arbitrary Google secrets or process environment variables for discovery.
+- Automatic secret rename/delete, IAM changes, or value-bearing rollback.
+- A credentialed Google integration in default CI; fake transport remains the baseline and the existing TODO covers a
+  separately trusted live proof.
+- A dotted-key analyzer/codemod before the runtime grammar stabilizes; the existing TODO remains sufficient.
+- Product analytics or outbound configuration telemetry.
+- Visual UI work; this is an SDK/CLI/package contract.
+
+### Failure Modes Registry
+
+| Area | Failure mode | Critical? | Coverage status | User-visible outcome | Recovery |
+| --- | --- | --- | --- | --- | --- |
+| Key parser | malformed or ambiguous application text | Yes | Planned | `config-key-invalid` or one compatibility notice | Correct or explicitly construct segments |
+| Declaration registry | options/declarations observed partially | Yes | Planned | startup validation failure; no provider request | Fix registration/options and restart |
+| Environment codec | two identities map to one native name | Yes | Planned | startup/pre-read `config-key-unrepresentable` or collision | add `MapKey` or rename |
+| Environment snapshot | capture exceeds limit or throws | Yes | Planned | terminal snapshot diagnostic | reduce/fix environment, increase validated limit |
+| Patch transaction | one child converts and another fails | Yes | Planned | no mutation; terminal patch diagnostic | correct invalid child |
+| File projection | duplicate/case collision under aggregate | Yes | Planned | exact key and ancestors terminal; sibling remains available | remove duplicate spelling |
+| File shape | scalar/object/array layer replacement | No | Planned | deterministic higher-layer value/provenance | inspect audit provenance |
+| LocalSecrets migration | another writer changes source before delete | Yes | Planned | source retained or conditional operation fails | retry under lease after inspection |
+| LocalSecrets index | crash between destination and index publication | Yes | Planned | journal resumes and republishes before delete | rerun exact operation id |
+| Google claim | distinct keys claim one exact resource | Yes | Planned | poisoned `config-key-collision` before network | correct mapping and restart |
+| Google fetch | shared fetch fails or one waiter cancels | No | Planned | structured failure/cancelled waiter; retry allowed | retry within operation budget |
+| Google audit | deadline or lookup budget exhausted | No | Planned | explicit incomplete audit, never false-complete | narrow scope or raise validated budget |
+| Diagnostics | external text contains secrets/controls | Yes | Planned | manager logs stable code and bounded identifiers only | inspect explicit provider report securely |
+| Compatibility | old consumer loads candidate package set | Yes | Planned | adapter notice or deterministic package-version startup error | follow migration guide/version matrix |
+| Resource limits | file/env/cache/history exceeds configured bound | Yes | Planned | stable value-safe limit diagnostic; no partial source | reduce input or raise validated limit |
+| Provider applicability | unclaimed provider fails before lower source | Yes | Final-gate challenge | current baseline suppresses lower provider | choose capability/applicability policy |
+
+There are no silent-and-untested critical gaps after the planned tests are implemented. Five release-direction questions
+remain intentionally open at the final gate; they are policy blockers, not missing test cases.
+
+### Worktree parallelization strategy
+
+| Lane | Work | Depends on | Conflict notes |
+| --- | --- | --- | --- |
+| A — foundation | key kernel, input metadata, results, manager state machine, immutable registry | none | Must merge first; shared Config APIs |
+| B — environment | codec/index, immutable snapshot, cached bind plans, transactional patcher | A | Touches Config core; coordinate manager seam |
+| C — file and audit | token projection, typed audit paths, rendering/trust bounds | A | File and audit files overlap only inside this lane |
+| D — LocalSecrets | index, shared lease, journaled migration/index, CLI | A | Separate package; low merge conflict |
+| E — Google | registry projection, claims, single-flight/cache, cancellation/audit budget | A | Separate package; depends on final request/result API |
+| F — adoption | conformance package, packed consumer, compatibility matrix, docs/release evidence | B+C+D+E | Runs after provider APIs stabilize |
+
+Execution order: merge A; launch B, C, D, and E in parallel worktrees; merge and run provider/solution tests; then run F.
+Lanes B and C both touch `ForgeTrust.AppSurface.Config`, so assign ownership of manager/request files to B and
+audit/file files to C. Compatibility tests begin as fixtures in A but are finalized in F.
+
+### Engineering implementation tasks
+
+Synthesized from this review's findings. Each task derives from a specific finding above.
+
+- [ ] **ENG1 (P1, human: ~2d / CC: ~3h)** — Config foundation — Implement the immutable key, input provenance,
+  provider result, patch result, request, manager, and declaration registry contracts.
+  - Surfaced by: Architecture — nullable/side-channel results, partial sealing, and lost input origin.
+  - Files: `Config/ForgeTrust.AppSurface.Config/**`, wrapper registration, core API tests.
+  - Verify: focused kernel/result/manager/registration tests, two-host and concurrent-first-access cases.
+- [ ] **ENG2 (P1, human: ~2d / CC: ~3h)** — Environment — Implement the injective codec, complete-name reverse index,
+  immutable snapshot indexes, and explicit mapping validation.
+  - Surfaced by: Architecture/Performance — native counterexamples and mixed point reads.
+  - Files: environment provider/options/interfaces and tests.
+  - Verify: property tests plus scoped/unscoped, casing, alias, mutation, and capacity regressions.
+- [ ] **ENG3 (P1, human: ~1d / CC: ~2h)** — Environment patching — Make child binding transactional and cache immutable
+  per-type plans.
+  - Surfaced by: Error paths/Performance — Boolean partial success and repeated reflection/probing.
+  - Files: `EnvironmentConfigProvider`, `IConfigValuePatcher`, manager and patch tests.
+  - Verify: all current patch tests plus invalid-sibling/no-mutation, terminal precedence, sparse-index load cases.
+- [ ] **ENG4 (P1, human: ~2d / CC: ~3h)** — File provider — Replace DOM plus location-map identity with one
+  shape-preserving token projection.
+  - Surfaced by: Architecture/Error paths — duplicate detection and aggregate reads could disagree.
+  - Files: `FileBasedConfigProvider`, token projection, file/audit tests.
+  - Verify: duplicate, ancestor poison, sibling, null/empty/array/replacement, one-pass location/value tests.
+- [ ] **ENG5 (P1, human: ~3d / CC: ~4h)** — LocalSecrets — Implement shared writer coordination and journaled key/index
+  migration through a fault-injectable store seam.
+  - Surfaced by: Security/Error paths — stale unconditional delete and non-transactional index publication.
+  - Files: LocalSecrets contracts/platform/file stores, CLI, migration tests.
+  - Verify: every transition failure plus concurrent writer/process, timeout, unsupported backend, and roll-forward.
+- [ ] **ENG6 (P1, human: ~2d / CC: ~3h)** — Google provider — Implement immutable registry projection, exact claims,
+  bounded single-flight/cache, copy ownership, and cancellation/budget semantics.
+  - Surfaced by: Architecture/Performance — partial lifecycle, duplicate fetches, mutable bytes, unbounded audits.
+  - Files: Google module/options/provider/client seam and tests.
+  - Verify: fake-client concurrency, cancellation, failure eviction, collision, capacity, deadline, and allocation tests.
+- [ ] **ENG7 (P1, human: ~2d / CC: ~3h)** — Audit and diagnostics — Convert source matching to typed segments and
+  enforce catalogued, escaped, bounded, value-safe rendering.
+  - Surfaced by: Security/Code quality — dotted prefix logic and trusted external prose.
+  - Files: audit path/reporter/differ/traverser/redactor/renderers, diagnostic models, tests.
+  - Verify: sentinel-secret, external prose, control/length, segment boundary, diff, redaction, logger-failure tests.
+- [ ] **ENG8 (P1, human: ~2d / CC: ~3h)** — Compatibility — Build the previous/candidate binary and persisted-source
+  compatibility matrix selected by the final gate.
+  - Surfaced by: Deployment — changes extend beyond `IConfigProvider`.
+  - Files: package fixtures, provider harness, LocalSecrets/Google mixed-version fixtures, migration guide.
+  - Verify: deterministic startup/runtime outcome for every interface/package row; no late missing-method failures.
+- [ ] **ENG9 (P2, human: ~1d / CC: ~2h)** — Limits and observability — Add validated resource options, incomplete-audit
+  state, low-cardinality counters, and load/allocation regressions.
+  - Surfaced by: Performance/Security — files, snapshots, histories, claims, caches, and remote work were unbounded.
+  - Files: core/provider options, metrics, renderers, provider load tests and docs.
+  - Verify: boundary/boundary-plus-one, invalid option, recovery, 1x/10x/100x allocation and elapsed-time tests.
+- [ ] **ENG10 (P2, human: ~2d / CC: ~3h)** — Conformance — Implement every normative matrix row with public and built-in
+  provider fixtures.
+  - Surfaced by: Test coverage — concurrency, aggregate collisions, provenance, and resource failures were missing.
+  - Files: Config.Testing or repository harness, provider test projects, coverage script integration.
+  - Verify: focused suites, consumer proof, `dotnet build`, format verification, and solution coverage.
+- [ ] **ENG11 (P2, human: ~1d / CC: ~2h)** — Adoption — Ship source and packed-consumer proofs plus complete reference,
+  migration, provider-author, and release documentation.
+  - Surfaced by: Deployment/DX — repository behavior does not prove package adoption or recovery.
+  - Files: `examples/config-key-contract`, package verifier, Config/provider READMEs, package index, changelog/release.
+  - Verify: clean Linux/Windows consumer, measured TTHW, links/snippets, no-credential output, package version matrix.
+
+### Cross-phase synthesis
+
+The three reviews converge on one product principle: case-insensitive logical identity is the least surprising .NET UX
+only when ambiguity is rejected before value selection and every native spelling remains explicit provenance. The CEO
+phase challenged rollout and compatibility. The DX phase made success, errors, migration, and proof measurable. The
+engineering phase made the kernel enforceable under registration order, concurrency, failure, scale, and hostile input.
+
+The plan remains broader than a local comparer change because current key semantics are distributed across provider
+codecs, wrappers, audits, migration, and external package contracts. If the final gate chooses a narrower release, the
+safe cut line is after migration inventory and consumer proof—not midway through provider identity.
+
+### Engineering completion summary
+
+```text
++====================================================================+
+| AUTOPLAN PHASE 3 - ENGINEERING REVIEW                              |
++====================================================================+
+| Scope                 | full Config key rail                        |
+| Existing code reused  | 9 concrete seams                            |
+| Subagent findings     | 12 (9 high, 3 medium)                       |
+| Codex concerns        | 11                                          |
+| Consensus             | 6/6 confirmed; 0 disagreements              |
+| Architecture          | amended: registry/projection/patch lifecycle|
+| Tests                 | complete planned map + artifact              |
+| Performance           | bounded indexes, caches, histories, audits   |
+| Security              | shared migration proof + diagnostic trust    |
+| Failure registry      | 16 entries; all critical gaps planned        |
+| Implementation tasks  | 11                                          |
+| Parallelization       | foundation, then 4 lanes, then adoption      |
+| New User Challenges   | 0; five existing challenges reinforced       |
+| Taste decisions       | 1: prefer exclusive LocalSecrets lease       |
++====================================================================+
+```
+
+**Phase 3 complete.** Codex: 11 concerns. Independent subagent: 12 issues. Consensus: 6/6 confirmed, zero
+disagreements. Passing to Phase 4 (Final Gate).
