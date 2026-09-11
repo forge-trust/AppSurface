@@ -2259,6 +2259,20 @@ Review scope: the complete logical-key rail, including the public Config API, DI
 providers, audit and diagnostics paths, LocalSecrets migration, Google caching, compatibility trains, packaging, and
 verification. No implementation was performed in this phase.
 
+### Scope challenge
+
+The user-visible request sounds like a comparer change, but the repository does not have one key boundary to patch.
+`DefaultConfigManager` passes raw strings through precedence and rescue; wrapper registration composes paths later;
+file values and locations use different representations; environment and Google each encode native names; LocalSecrets
+persists transformed identities; and audit code still performs dotted string-prefix matching. Changing only dictionary
+comparers would make direct lookup appear fixed while leaving collisions, migration, aggregate binding, and diagnostics
+inconsistent.
+
+The full logical-identity rail is therefore the correct technical blast radius. The challenge is release scope, not
+code reach: both outside voices recommend landing inventory, preflight, and clean-consumer proof before exposing every
+provider/binary change. That sequencing remains a final-gate User Challenge because the user explicitly selected and
+locked the complete rail.
+
 ### What already exists
 
 | Existing code | Evidence | Reuse decision |
@@ -2574,6 +2588,12 @@ Execution order: merge A; launch B, C, D, and E in parallel worktrees; merge and
 Lanes B and C both touch `ForgeTrust.AppSurface.Config`, so assign ownership of manager/request files to B and
 audit/file files to C. Compatibility tests begin as fixtures in A but are finalized in F.
 
+### TODOS.md disposition
+
+No new deferred task was created. `TODOS.md` already contains the two legitimate post-rail follow-ups: a dotted-key
+analyzer/codemod after the grammar stabilizes, and a separately trusted credentialed Google proof after its resource
+contract and CI credential design are approved. Every other review finding is in the implementation rail above.
+
 ### Engineering implementation tasks
 
 Synthesized from this review's findings. Each task derives from a specific finding above.
@@ -2634,7 +2654,7 @@ Synthesized from this review's findings. Each task derives from a specific findi
   - Files: `examples/config-key-contract`, package verifier, Config/provider READMEs, package index, changelog/release.
   - Verify: clean Linux/Windows consumer, measured TTHW, links/snippets, no-credential output, package version matrix.
 
-### Cross-phase synthesis
+### Cross-phase themes
 
 The three reviews converge on one product principle: case-insensitive logical identity is the least surprising .NET UX
 only when ambiguity is rejected before value selection and every native spelling remains explicit provenance. The CEO
@@ -2670,3 +2690,33 @@ safe cut line is after migration inventory and consumer proof—not midway throu
 
 **Phase 3 complete.** Codex: 11 concerns. Independent subagent: 12 issues. Consensus: 6/6 confirmed, zero
 disagreements. Passing to Phase 4 (Final Gate).
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+| --- | --- | --- | --- | --- | --- |
+| CEO Review | `/plan-ceo-review` via `/autoplan` | Scope and strategy | 1 | ISSUES OPEN | 9 tasks; five direction challenges await the final gate |
+| Codex Review | `/autoplan` dual voices | Independent second opinion | 3 | ISSUES OPEN | Engineering voice found 11 concerns; all six dimensions confirmed |
+| Eng Review | `/plan-eng-review` via `/autoplan` | Architecture and tests | 1 | ISSUES OPEN | 12 synthesized engineering findings; all critical gaps have planned tests |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | SKIPPED | No visual UI scope |
+| DX Review | `/plan-devex-review` via `/autoplan` | Developer experience gaps | 1 | ISSUES OPEN | Plan score 4.9/10 → 8.6/10; TTHW target under 2m source / 5m package |
+
+**CODEX:** Across the phases, Codex reinforced the compatibility, migration-first, applicability, injectivity, bounded
+work, and value-safe diagnostic corrections.
+
+**CROSS-MODEL:** CEO, DX, and engineering voices independently converged on the same five direction challenges; the
+engineering voices additionally agreed on all six architecture/test/performance/security/error/deployment dimensions.
+
+**VERDICT:** NOT CLEARED — the reviewed plan is mechanically complete, but the final approval gate must resolve or
+explicitly retain the open direction and taste choices; eng review required.
+
+**UNRESOLVED DECISIONS:**
+
+- Whether release train 1 begins with migration/preflight and consumer proof before the complete provider rail.
+- Whether the provider change is immediate and breaking or additive V2 with a temporary legacy adapter.
+- Whether case-only spelling differences across ordered layers warn/override or remain terminal collisions.
+- Whether dot-only compatibility translation is an automatic default or an explicit application migration mode.
+- Whether provider applicability prevents an unclaimed upper provider failure from suppressing a lower provider.
+- Whether old Google convention identities use explicit inventory-generated mappings or a temporary hidden probe.
+- Whether this rail retains `GetValue<T>` only or adds an application-facing `TryResolve<T>`.
+- Whether current LocalSecrets backends use one exclusive maintenance lease or backend-specific compare-and-swap.
